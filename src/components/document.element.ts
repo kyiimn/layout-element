@@ -59,16 +59,6 @@ export class LayoutDocumentElement extends HTMLElement {
     if (this._model) delete this._model;
   }
 
-  /** ID로 자식 요소 찾기 (재귀) */
-  findById(id: string) {
-    for (let i = 0; i < this._children.length; i++) {
-      const child = this._children[i];
-      const findChild = child.findById(id);
-      if (findChild) return findChild;
-    }
-    return null;
-  }
-
   /** 1단계: 레이아웃 렌더링 (동기) */
   renderLayout() {
     if (!this.isConnected) return null;
@@ -114,6 +104,8 @@ export class LayoutDocumentElement extends HTMLElement {
       this._root.appendChild(colEl);
     }
 
+    this._root.appendChild(document.createElement('slot'));
+
     if (this._data.children) {
       for (let i = 0; i < this._data.children.length; i++) {
         const child = this._data.children[i];
@@ -131,7 +123,7 @@ export class LayoutDocumentElement extends HTMLElement {
           parentWidth: this._model.editableWidth,
         };
         this._children.push(boxEl);
-        this._root.appendChild(boxEl);
+        this.appendChild(boxEl);
       }
     }
     return this;
