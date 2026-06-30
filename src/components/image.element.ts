@@ -18,7 +18,7 @@ export class LayoutImageElement extends HTMLElement {
   private _canvas?: HTMLCanvasElement;
   private _shadowRoot: ShadowRoot;
 
-  private _hostStyleRule?: CSSStyleRule;
+  private _styleRule?: CSSStyleRule;
 
   // Attributes
   private _x: number = 0;
@@ -26,43 +26,49 @@ export class LayoutImageElement extends HTMLElement {
   private _width: number = 0;
   private _height: number = 0;
   private _dpi: number = DEFAULT_IMAGE_DPI;
-  private _url: string = '';
+  private _url: string | undefined;
   private _zIndex: number = 0;
 
-  private _cropImage() {
-    if (!this.isConnected) return;
-    if (!this._canvas) return;
+  private async _cropImage() {
+    if (!this.isConnected || !this.canvas) return;
 
-    this._canvas.width = this._canvas.width;
-    return new Promise<boolean>((r) => {
-      const img = new Image();
-      img.crossOrigin = 'Anonymous';
-      img.onload = () => {
-        const ppm = this.dpi / 25.4;
+    this.canvas.width = this.canvas.width;
+    this.canvas.height = this.canvas.height;
 
-        const sx = Math.round(this.x * ppm);
-        const sy = Math.round(this.y * ppm);
-        const sWidth = Math.round(this.width * ppm);
-        const sHeight = Math.round(this.height * ppm);
+    const ctx = this.canvas.getContext('2d')!;
+    if (this.url) {
+      await (new Promise<boolean>((r) => {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+          const ppm = this.dpi / 25.4;
 
-        this._canvas!.width = sWidth;
-        this._canvas!.height = sHeight;
+          const sx = Math.round(this.x * ppm);
+          const sy = Math.round(this.y * ppm);
+          const sWidth = Math.round(this.width * ppm);
+          const sHeight = Math.round(this.height * ppm);
 
-        const ctx = this._canvas!.getContext('2d')!;
-        try {
-          ctx.drawImage(
-            img,
-            sx, sy, sWidth, sHeight,
-            0, 0, sWidth, sHeight
-          );
-          r(true);
-        } catch (_) {
-          r(false);
-        }
-      };
-      img.onerror = (_) => r(false);
-      img.src = this._url;
-    });
+          this.canvas!.width = sWidth;
+          this.canvas!.height = sHeight;
+
+          try {
+            ctx.drawImage(
+              img,
+              sx, sy, sWidth, sHeight,
+              0, 0, sWidth, sHeight
+            );
+            r(true);
+          } catch (_) {
+            r(false);
+          }
+        };
+        img.onerror = (_) => r(false);
+        img.src = this.url!;
+      }));
+    } else {
+      ctx.fillStyle = 'transparent';
+      ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    }
   }
 
   constructor() {
@@ -73,11 +79,6 @@ export class LayoutImageElement extends HTMLElement {
 
   static get observedAttributes() {
     return ['id', 'x', 'y', 'width', 'height', 'dpi', 'url', 'z-index'];
-  }
-
-  connectedCallback() {
-    if (!this.id) this.id = genUUID();
-    this.render();
   }
 
   set x(value: number) {
@@ -110,7 +111,7 @@ export class LayoutImageElement extends HTMLElement {
     this._cropImage();
   }
 
-  set url(value: string) {
+  set url(value: string | undefined) {
     if (this._url === value) return;
     this._url = value;
     this._cropImage();
@@ -119,7 +120,7 @@ export class LayoutImageElement extends HTMLElement {
   set zIndex(value: number) {
     if (this._zIndex === value) return;
     this._zIndex = value;
-    this.reRender();
+    this.render();
   }
 
   get x() {
@@ -188,69 +189,51 @@ export class LayoutImageElement extends HTMLElement {
     }
   }
 
-  disconnectedCallback() { }
-
-  render() {
-    if (!this.isConnected) return;
-
-    this._shadowRoot.innerHTML = '';
-    if (!this.parentModel || !this._inheritStyle) return;
-
-    const lineHeight = this.parentModel.lineHeight;
-    const paddingTop = this._inheritStyle.paddingTop || 0;
-
-    const styleEl = document.createElement("style");
-    this._shadowRoot.appendChild(styleEl);
-    if (styleEl.sheet) {
-      styleEl.sheet.insertRule(":host {}", 0);
-      this._hostStyleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
-      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
-        this._hostStyleRule.style,
-        {
-          display: 'flex',
-          height: `${this.layoutHeight}mm`,
-          left: `${this.layoutLeft}mm`,
-          position: 'absolute',
-          top: `${Math.ceil(paddingTop / lineHeight) * lineHeight}mm`,
-          width: `${this.layoutWidth}mm`,
-          zIndex: `${this.zIndex + 100}`,
-        }
-      );
-      styleEl.sheet.insertRule(`@media print { :host { visibility: hidden; } }`, 1);
-    }
-    this._canvas = document.createElement('canvas');
-    this._canvas.style.backgroundColor = 'transparent';
-    this._canvas.style.height = "100%";
-    this._canvas.style.width = "100%";
-
-    this._shadowRoot.appendChild(this._canvas);
-
-    this._cropImage();
+  connectedCallback() {
+    if (!this.id) this.id = genUUID();
   }
 
-  reRender() {
-    if (!this.isConnected) return;
-    if (!this.parentModel || !this._inheritStyle) return;
+  disconnectedCallback() { }
 
-    if (this._hostStyleRule) {
-      const lineHeight = this.parentModel.lineHeight;
-      const paddingTop = this._inheritStyle.paddingTop || 0;
+  async render() {
+    if (!this.isConnected) return false;
+    if (!this.parentModel || !this.inheritStyle) return false;
 
-      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
-        this._hostStyleRule.style,
-        {
-          display: 'flex',
-          height: `${this.layoutHeight}mm`,
-          left: `${this.layoutLeft}mm`,
-          position: 'absolute',
-          top: `${Math.ceil(paddingTop / lineHeight) * lineHeight}mm`,
-          width: `${this.layoutWidth}mm`,
-          zIndex: `${this.zIndex + 100}`,
-        }
-      );
-    } else {
-      this.render();
+    if (!this._canvas || !this._styleRule) {
+      const styleEl = document.createElement("style");
+      this._shadowRoot.innerHTML = '';
+      this._shadowRoot.appendChild(styleEl);
+
+      if (!styleEl.sheet) throw new Error("LayoutImageElement.styleSheet not ready");
+      styleEl.sheet.insertRule(`@media print { :host { visibility: hidden; } }`);
+
+      const ruleIdx = styleEl.sheet.insertRule(":host {}");
+      this._styleRule = styleEl.sheet.cssRules[ruleIdx] as CSSStyleRule;
+
+      this._canvas = document.createElement('canvas');
+      this._canvas.style.backgroundColor = 'transparent';
+      this._canvas.style.height = "100%";
+      this._canvas.style.width = "100%";
+
+      this._shadowRoot.appendChild(this._canvas);
     }
+
+    const lineHeight = this.parentModel.lineHeight;
+    const paddingTop = this.inheritStyle.paddingTop || 0;
+
+    Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
+      this._styleRule.style,
+      {
+        display: 'flex',
+        height: `${this.layoutHeight}mm`,
+        left: `${this.layoutLeft}mm`,
+        position: 'absolute',
+        top: `${Math.ceil(paddingTop / lineHeight) * lineHeight}mm`,
+        width: `${this.layoutWidth}mm`,
+        zIndex: `${this.zIndex + 100}`,
+      }
+    );
+    await this._cropImage();
   }
 
   set data(data: ImageData) {

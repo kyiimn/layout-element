@@ -386,7 +386,7 @@ export class LayoutBoxElement extends HTMLElement {
       list.push(...this.parentElement.overlayElements);
     }
 
-    let overlay = this.parentElement.items.filter(i => i.type === 'box' && i !== this && i.zIndex > this.zIndex) as LayoutBoxElement[];
+    let overlay = Array.from(this.parentElement.children).filter(i => i.type === 'box' && i !== this && i.zIndex > this.zIndex) as LayoutBoxElement[];
     overlay = overlay.filter(i => checkOverlap(i, this));
 
     list.push(...overlay);
