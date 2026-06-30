@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Layout Element Demo</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background: #f0f0f0;
+        display: flex;
+        justify-content: center;
+        padding: 40px;
+        min-height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <x-layout-document id="doc"></x-layout-document>
+
+    <script type="module">
+      import "/src/index.ts";
+
+      import { ColorManager } from "/src/model/color.manager";
+      import { FontManager } from "/src/model/font.manager";
+      import { exampleData } from "/src/examples";
+
+      (async () => {
+        await ColorManager.getInstance().init();
+        await FontManager.getInstance().init();
+
+        const doc = document.getElementById("doc");
+
+        doc.data = exampleData;
+      })();
+    </script>
+  </body>
+</html>

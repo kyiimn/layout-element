@@ -1,0 +1,19 @@
+{
+  "name": "layout-element",
+  "version": "1.0.0",
+  "description": "HTML Custom Elements for document layout rendering",
+  "license": "UNLICENSED",
+  "author": "",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.3.0",
+    "vite-plugin-dts": "^4.5.0"
+  }
+}

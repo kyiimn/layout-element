@@ -1,0 +1,14 @@
+[
+  {
+    "family": "Pretendard",
+    "weight": 400,
+    "style": "normal",
+    "ttfFilename": "fonts/PretendardVariable.ttf"
+  },
+  {
+    "family": "Myoungjo",
+    "weight": 400,
+    "style": "normal",
+    "ttfFilename": "fonts/KMIBMyoungjo.ttf"
+  }
+]
