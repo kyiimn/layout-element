@@ -1,5 +1,5 @@
 import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/define";
-import { DocumentData, ParagraphStyle, TextStyle } from "@/types";
+import { ParagraphStyle, TextStyle } from "@/types";
 
 /**
  * 컬럼의 좌표 영역을 나타내는 사각형.
@@ -173,59 +173,6 @@ export class BoxModel {
     this._calcCoordUnit();
   }
 
-  set width(value: number) {
-    if (this._width === value) return;
-    this._width = value;
-    this._calcCoordUnit();
-  }
-
-  set height(value: number) {
-    if (this._height === value) return;
-    this._height = value;
-    this._calcCoordUnit();
-  }
-
-  set paddingTop(value: number) {
-    if (this._paddingTop === value) return;
-    this._paddingTop = value;
-    this._calcCoordUnit();
-  }
-
-  set paddingBottom(value: number) {
-    if (this._paddingBottom === value) return;
-    this._paddingBottom = value;
-    this._calcCoordUnit();
-  }
-
-  set paddingLeft(value: number) {
-    if (this._paddingLeft === value) return;
-    this._paddingLeft = value;
-    this._calcCoordUnit();
-  }
-
-  set paddingRight(value: number) {
-    if (this._paddingRight === value) return;
-    this._paddingRight = value;
-    this._calcCoordUnit();
-  }
-
-  set columns(value: number | number[]) {
-    if (this._inputColumns === value) return;
-    this._inputColumns = value;
-    this._calcCoordUnit();
-  }
-
-  set gap(value: number | number[]) {
-    if (this._inputGap === value) return;
-    this._inputGap = value;
-    this._calcCoordUnit();
-  }
-  get width() { return this._width; }
-  get height() { return this._height; }
-  get paddingTop() { return this._paddingTop; }
-  get paddingBottom() { return this._paddingBottom; }
-  get paddingLeft() { return this._paddingLeft; }
-  get paddingRight() { return this._paddingRight; }
   get textStyle() { return this._textStyle; }
   get paragraphStyle() { return this._paragraphStyle; }
 

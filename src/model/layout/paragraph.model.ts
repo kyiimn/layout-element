@@ -5,15 +5,22 @@ import {
   ParagraphData,
   TextBlockData,
   TextLineData,
-  TextBlockStyle
+  TextBlockStyle,
+  ParagraphStyle,
+  TextStyle
 } from "@/types";
 import { getOverlapSizePX } from "@/utils";
 import { FontManager } from "../font.manager";
 import { ColorManager } from "../color.manager";
 import { BoxModel } from "./box.model";
 
-type CreateParams = {
-  data: ParagraphData;
+type ParagraphModelOptions = {
+  content: string | (string | TextBlockData)[];
+  column: number | number[];
+  gap: number | number[];
+  paragraphStyle: ParagraphStyle;
+  textStyle: TextStyle;
+
   inheritStyle: InheritStyle;
   paragraphEl: LayoutParagraphElement;
   rootNode: Node;
@@ -37,18 +44,19 @@ type CreateParams = {
  */
 export class ParagraphModel {
   private _columnWidths: number[] = [];
-  private _data: ParagraphData = undefined!;
   private _inheritStyle: InheritStyle = undefined!;
+
+  private _inputContent: string | (string | TextBlockData)[] = "";
+
+  private _textStyle: TextStyle = {};
+  private _paragraphStyle: ParagraphStyle = {};
 
   private _columnContents: TextLineData[][] = [];
   private _contents: TextBlockData[] = [];
   private _gaps: number[] = [];
   private _overflow: number = 0;
 
-  private _colorManager: ColorManager;
-  private _fontManager: FontManager;
-
-  private _lineHeight: number;
+  private _lineHeight: number = 0;
 
   private _paragraphElement: LayoutParagraphElement;
   private _rootNode: Node;
@@ -56,26 +64,15 @@ export class ParagraphModel {
   /**
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
    */
-  public static create({ data, inheritStyle, paragraphEl, rootNode }: CreateParams) {
-    return new this(paragraphEl, rootNode, inheritStyle, data);
+  public static create(options: ParagraphModelOptions) {
+    return new this(options);
   }
 
-  private constructor(
-    paragraphEl: LayoutParagraphElement,
-    rootNode: Node,
-    inheritStyle: InheritStyle,
-    data: ParagraphData
-  ) {
-    this._colorManager = ColorManager.getInstance();
-    this._fontManager = FontManager.getInstance();
+  private constructor(options: ParagraphModelOptions) {
+    this._paragraphElement = options.paragraphEl;
+    this._rootNode = options.rootNode;
 
-    this._lineHeight = 0;
-
-    this._paragraphElement = paragraphEl;
-    this._rootNode = rootNode;
-    this._inheritStyle = inheritStyle;
-
-    this.data = data;
+    this.data = options;
   }
 
   /** fontSize, lineGap, lineHeight 초기화 */
@@ -148,9 +145,9 @@ export class ParagraphModel {
    * 4. `_columnContents`에 `TextLineData[]` 저장
    */
   public preTextWrap() {
-    const rawContents = !Array.isArray(this._data.content) ? [{
-      content: this._data.content
-    }] : this._data.content;
+    const rawContents = !Array.isArray(this._inputContent) ? [{
+      content: this._inputContent
+    }] : this._inputContent;
 
     this._contents = [];
     rawContents.forEach(c => {
@@ -305,6 +302,9 @@ export class ParagraphModel {
     const letterSpacing = this.textStyle?.letterSpacing || this.inheritStyle?.letterSpacing;
     const textAlign = this.paragraphStyle?.textAlign || this.inheritStyle?.textAlign || 'justify';
 
+    const fontManager = FontManager.getInstance();
+    const colorManager = ColorManager.getInstance();
+
     let justifyContent: "center" | "flex-start" | "flex-end" | "space-between";
     switch (textAlign) {
       case 'center': justifyContent = 'center'; break;
@@ -315,10 +315,10 @@ export class ParagraphModel {
 
     const blockStyle: Partial<CSSStyleDeclaration> = {};
     if (textBlockStyle) {
-      blockStyle.fontFamily = textBlockStyle.fontFamily ? this._fontManager.getFontFamily(textBlockStyle.fontFamily) : undefined;
+      blockStyle.fontFamily = textBlockStyle.fontFamily ? fontManager.getFontFamily(textBlockStyle.fontFamily) : undefined;
       blockStyle.fontWeight = textBlockStyle.fontWeight !== undefined ? String(textBlockStyle.fontWeight) : undefined;
       blockStyle.fontSize = textBlockStyle.fontSize && `${textBlockStyle.fontSize}mm` || undefined;
-      blockStyle.color = textBlockStyle.color ? this._colorManager.getCSSColor(textBlockStyle.color) : undefined;
+      blockStyle.color = textBlockStyle.color ? colorManager.getCSSColor(textBlockStyle.color) : undefined;
 
       if (textBlockStyle.fontSize && this.lineHeight < (textBlockStyle.fontSize * lineGap)) {
         blockStyle.alignItems = 'center';
@@ -371,21 +371,30 @@ export class ParagraphModel {
     this._initLayout();
   }
 
-  set data(data: ParagraphData) {
-    this._gaps = (() => {
-      const colCount = Array.isArray(data.column) ? data.column.length : (data.column || 1);
+  set data(options: ParagraphModelOptions) {
+    this._lineHeight = 0;
 
-      if (Array.isArray(data.gap)) return data.gap.slice(0, colCount - 1);
-      return Array.from({ length: colCount - 1 }).map(() => data.gap as number);
+    this._paragraphElement = options.paragraphEl;
+    this._rootNode = options.rootNode;
+    this._inheritStyle = options.inheritStyle;
+
+    this._inputContent = options.content;
+
+    this._paragraphStyle = options.paragraphStyle;
+    this._textStyle = options.textStyle;
+
+    this._gaps = (() => {
+      const colCount = Array.isArray(options.column) ? options.column.length : (options.column || 1);
+
+      if (Array.isArray(options.gap)) return options.gap.slice(0, colCount - 1);
+      return Array.from({ length: colCount - 1 }).map(() => options.gap as number);
     })();
 
     this._columnWidths = (() => {
-      if (Array.isArray(data.column)) return data.column;
-      const colCount = data.column as number || 1;
+      if (Array.isArray(options.column)) return options.column;
+      const colCount = options.column as number || 1;
       return Array.from<number>({ length: colCount }).map(() => (this.inheritStyle.parentWidth - this._gaps.reduce((a, b) => a + b, 0)) / colCount);
     })();
-
-    this._data = data;
 
     this._initLayout();
   }
@@ -400,11 +409,11 @@ export class ParagraphModel {
   }
 
   public get textStyle() {
-    return this._data.textStyle;
+    return this._textStyle;
   }
 
   public get paragraphStyle() {
-    return this._data.paragraphStyle;
+    return this._paragraphStyle;
   }
 
   public get columnCount() {

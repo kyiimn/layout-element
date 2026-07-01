@@ -1,5 +1,4 @@
 import { ParagraphModel } from "@/model";
-import { LayoutDocumentElement } from "./document.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 
 /**

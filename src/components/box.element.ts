@@ -1,12 +1,10 @@
-import { DEFAULT_BORDER_STYLE, DEFAULT_PPM } from "@/define";
+import { DEFAULT_BORDER_STYLE } from "@/define";
 import { BoxModel, ColorManager } from "@/model";
 import { InheritStyle, BoxData, ParagraphStyle, TextStyle, PrintPostData, BoxPosition, BoxBorderStyle } from "@/types";
 import { checkOverlap, genUUID } from "@/utils";
 import { LayoutDocumentElement } from "./document.element";
 import { LayoutImageElement } from "./image.element";
 import { LayoutParagraphElement } from "./paragraph.element";
-
-type ChildType = LayoutBoxElement | LayoutParagraphElement | LayoutImageElement;
 
 /**
  * 위치 지정 가능한 컨테이너 요소. `<x-layout-box>` 커스텀 엘리먼트.
@@ -54,15 +52,6 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   disconnectedCallback() { }
-
-  findById(id: string): ChildType | null {
-    if (this.id === id) return this;
-    for (let i = 0; i < this.items.length; i++) {
-      const findChild = this.items[i].findById(id);
-      if (findChild) return findChild;
-    }
-    return null;
-  }
 
   layout() {
     if (!this.isConnected || !this.parentModel) return;

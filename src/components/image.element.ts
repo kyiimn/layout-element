@@ -37,11 +37,6 @@ export class LayoutImageElement extends HTMLElement {
 
   disconnectedCallback() { }
 
-  findById(id: string) {
-    if (this.id === id) return this;
-    return null;
-  }
-
   layout() {
     if (!this.isConnected) return;
 

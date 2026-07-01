@@ -1,6 +1,5 @@
 import { BoxModel } from "@/model";
 import { DocumentData, ParagraphStyle, PrintPostData, TextStyle } from "@/types";
-import { genUUID } from "@/utils";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
@@ -85,20 +84,20 @@ export class LayoutDocumentElement extends HTMLElement {
     if (!this._shadowRoot.querySelector(":scope > style")) {
       const styleEl = document.createElement('style');
       this._shadowRoot.appendChild(styleEl);
-      if (styleEl.sheet) {
-        styleEl.sheet.insertRule(":host {}", 0);
-        const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
-        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
-          rule.style,
-          {
-            backgroundColor: '#ffffff !important',
-            display: 'inline-flex',
-            position: 'relative',
-            height: 'fit-content !important',
-            width: 'fit-content !important',
-          }
-        );
-      }
+      if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
+
+      styleEl.sheet.insertRule(":host {}", 0);
+      const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
+      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
+        rule.style,
+        {
+          backgroundColor: '#ffffff !important',
+          display: 'inline-flex',
+          position: 'relative',
+          height: 'fit-content !important',
+          width: 'fit-content !important',
+        }
+      );
     }
 
     if (!this._root) {

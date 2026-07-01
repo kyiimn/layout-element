@@ -1,6 +1,6 @@
 import { ColorManager, ParagraphModel } from "@/model";
 import { InheritStyle, ParagraphData, ParagraphStyle, TextStyle } from "@/types";
-import { checkOverlap } from "@/utils";
+import { checkOverlap, genUUID } from "@/utils";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutColumnElement } from "./column.element";
 
@@ -14,6 +14,7 @@ import { LayoutColumnElement } from "./column.element";
  */
 export class LayoutParagraphElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
+  private _styleRule?: CSSStyleRule;
 
   private _data?: ParagraphData;
   private _model?: ParagraphModel;
@@ -30,25 +31,15 @@ export class LayoutParagraphElement extends HTMLElement {
   }
 
   connectedCallback() {
-    this.renderLayout();
+    if (!this.id) this.id = genUUID();
+    this.layout();
   }
 
-  disconnectedCallback() {
-    if (this._data) delete this._data;
-    if (this._model) delete this._model;
-  }
+  disconnectedCallback() { }
 
-  findById(id: string) {
-    if (this.id === id) return this;
-    return null;
-  }
-
-  renderLayout() {
+  layout() {
     if (!this.isConnected) return;
 
-    this._columnEl = [];
-    this._shadowRoot.innerHTML = '';
-    if (this._model) delete this._model;
     if (!this._data || !this.parentModel || !this._inheritStyle) return;
 
     const color = this.textStyle.color || this._inheritStyle.color;
@@ -62,11 +53,18 @@ export class LayoutParagraphElement extends HTMLElement {
 
     const styleEl = document.createElement('style');
     this._shadowRoot.appendChild(styleEl);
-    if (styleEl.sheet) {
-      const colorManager = ColorManager.getInstance();
+    if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
+
+    const colorManager = ColorManager.getInstance();
+
+    if (!this._styleRule) {
       styleEl.sheet.insertRule(":host {}", 0);
-      const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
-      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(rule.style, {
+      styleEl.sheet.insertRule(`@media print { :host { overflow: hidden; } }`, 1);
+      this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
+    }
+    Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
+      this._styleRule.style,
+      {
         color: color !== undefined ? colorManager.getCSSColor(color) : undefined,
         display: 'flex',
         flexDirection: 'row',
@@ -74,31 +72,38 @@ export class LayoutParagraphElement extends HTMLElement {
         fontStyle,
         fontWeight: fontWeight ? String(fontWeight) : undefined,
         fontSize: `${fontSize}mm`,
-        height: `${this.height}mm`,
-        left: `${this.left}mm`,
+        height: `${this.absHeight}mm`,
+        left: `${this.relLeft}mm`,
         position: 'absolute',
         top: `${Math.ceil(paddingTop / lineHeight) * lineHeight}mm`,
-        width: `${this.width}mm`,
+        width: `${this.absWidth}mm`,
         zIndex: `${this.zIndex + 100}`,
         overflow: "hidden",
-      });
-      styleEl.sheet.insertRule(`@media print { :host { overflow: hidden; } }`, 1);
-    }
+      }
+    );
 
-    this._model = ParagraphModel.create({
-      data: {
-        ...this._data,
-        column: this._data.column !== undefined && this._data.gap !== undefined ? this._data.column : this.parentModel.columnWidth,
-        gap: this._data.column !== undefined && this._data.gap !== undefined ? this._data.gap : this.parentModel.gaps,
-      },
+    const paragraphData = {
+      column: this._data.column !== undefined && this._data.gap !== undefined ? this._data.column : this.parentModel.columnWidth,
+      gap: this._data.column !== undefined && this._data.gap !== undefined ? this._data.gap : this.parentModel.gaps,
+
+      content: this._data.content,
+      paragraphStyle: this.paragraphStyle,
+      textStyle: this.textStyle,
+
       paragraphEl: this,
       rootNode: this._shadowRoot,
       inheritStyle: {
         ...this._inheritStyle,
-        parentHeight: this.height,
-        parentWidth: this.width,
+        parentHeight: this.absHeight,
+        parentWidth: this.absWidth,
       },
-    });
+    };
+
+    if (!this._model) {
+      this._model = ParagraphModel.create(paragraphData);
+    } else {
+      this._model.data = paragraphData;
+    }
 
     if (this._model.overflow > 0) {
       const event = new CustomEvent('render-error', {
@@ -116,6 +121,7 @@ export class LayoutParagraphElement extends HTMLElement {
     if (!this.isConnected || !this._model) return;
 
     this._model.preTextWrap();
+    this._columnEl = [];
 
     const columnContents = this._model.columnContents;
     for (let i = 0; i < columnContents.length; i++) {
@@ -131,7 +137,7 @@ export class LayoutParagraphElement extends HTMLElement {
 
   set data(data: ParagraphData | undefined) {
     this._data = data;
-    this.renderLayout();
+    this.layout();
   }
 
   get data() {
@@ -148,7 +154,7 @@ export class LayoutParagraphElement extends HTMLElement {
 
   set inheritStyle(style: InheritStyle | undefined) {
     this._inheritStyle = style;
-    this.renderLayout();
+    this.layout();
   }
 
   get inheritStyle() {
@@ -163,29 +169,29 @@ export class LayoutParagraphElement extends HTMLElement {
     return this._data?.paragraphStyle || {};
   }
 
-  get left() {
+  get relLeft() {
     return this._inheritStyle?.paddingLeft || 0;
   }
 
-  get top() {
+  get relTop() {
     if (!this._inheritStyle || !this.parentModel) return 0;
     return Math.ceil((this._inheritStyle.paddingTop || 0) / this.parentModel.lineHeight) * this.parentModel.lineHeight;
   }
 
   get absLeft(): number {
-    return this.parentElement.absLeft + this.left;
+    return this.parentElement.absLeft + this.relLeft;
   }
 
   get absTop(): number {
-    return this.parentElement.absTop + this.top;
+    return this.parentElement.absTop + this.relTop;
   }
 
-  get width() {
+  get absWidth() {
     if (!this._inheritStyle) return 0;
     return this._inheritStyle.parentWidth;
   }
 
-  get height() {
+  get absHeight() {
     if (!this._inheritStyle) return 0;
     return this._inheritStyle.parentHeight;
   }
@@ -206,7 +212,7 @@ export class LayoutParagraphElement extends HTMLElement {
     return [];
   }
 
-  get type(): "paragraph" { return 'paragraph'; }
+  get type() { return 'paragraph' as const; }
 
   get zIndex() { return this._data?.zIndex || 0; }
 }
