@@ -16,8 +16,6 @@ export class LayoutImageElement extends HTMLElement {
 
   private _data?: ImageData;
 
-  private _doc!: LayoutDocumentElement;
-
   private _canvas?: HTMLCanvasElement;
   private _parentElement!: LayoutBoxElement;
   private _shadowRoot: ShadowRoot;
@@ -128,14 +126,6 @@ export class LayoutImageElement extends HTMLElement {
 
   get data() {
     return this._data;
-  }
-
-  set document(doc: LayoutDocumentElement) {
-    this._doc = doc;
-  }
-
-  get document() {
-    return this._doc;
   }
 
   set parentElement(el: LayoutBoxElement) {

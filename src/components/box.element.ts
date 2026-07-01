@@ -1,5 +1,5 @@
 import { DEFAULT_BORDER_STYLE, DEFAULT_PPM } from "@/define";
-import { BoxModel } from "@/model";
+import { BoxModel, ColorManager } from "@/model";
 import { InheritStyle, BoxData, ParagraphStyle, TextStyle, PrintPostData } from "@/types";
 import { checkOverlap, genUUID } from "@/utils";
 import { LayoutDocumentElement } from "./document.element";
@@ -19,7 +19,6 @@ type ChildType = LayoutBoxElement | LayoutParagraphElement | LayoutImageElement;
  * 3단계 렌더링 파이프라인을 따르며, `InheritStyle`을 자식에게 전파한다.
  */
 export class LayoutBoxElement extends HTMLElement {
-  private _parentModel?: BoxModel;
   private _inheritStyle?: InheritStyle;
 
   private _data?: BoxData;
@@ -27,9 +26,8 @@ export class LayoutBoxElement extends HTMLElement {
 
   private _children: ChildType[];
 
-  private _doc!: LayoutDocumentElement;
-  private _parentElement!: LayoutDocumentElement | LayoutBoxElement;
   private _shadowRoot: ShadowRoot;
+  private _styleRule?: CSSStyleRule;
 
   constructor() {
     super();
@@ -39,13 +37,10 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   connectedCallback() {
-    this.renderLayout();
+    this.layout();
   }
 
-  disconnectedCallback() {
-    if (this._data) delete this._data;
-    if (this._model) delete this._model;
-  }
+  disconnectedCallback() { }
 
   findById(id: string): ChildType | null {
     if (this.id === id) return this;
@@ -56,18 +51,18 @@ export class LayoutBoxElement extends HTMLElement {
     return null;
   }
 
-  renderLayout() {
+  layout() {
     if (!this.isConnected) return;
 
-    this._children = [];
-    this._shadowRoot.innerHTML = '';
-    this.removeAttribute('style');
-    if (this._model) delete this._model;
-    if (!this._data || !this._parentModel) return;
+    if (!this._data || !this.parentModel) return;
 
     const { left, width, position, paddingTop, paddingRight, paddingBottom, paddingLeft } = this._data;
-    const { columnWidth, gaps, lineHeight } = this._parentModel;
-    this._model = BoxModel.create({
+    const { columnWidth, gaps, lineHeight } = this.parentModel;
+
+    this._model ??= BoxModel.create({
+      width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}
+    });
+    this._model.data = {
       paddingTop: (this._data.position !== 'absolute' && paddingTop !== undefined) ? Math.ceil(paddingTop / lineHeight) * lineHeight : paddingTop,
       paddingRight,
       paddingBottom: (this._data.position !== 'absolute' && paddingBottom !== undefined) ? Math.ceil(paddingBottom / lineHeight) * lineHeight : paddingBottom,
@@ -80,14 +75,22 @@ export class LayoutBoxElement extends HTMLElement {
       textStyle: this.textStyle,
       height: this.height,
       width: this.width,
-    });
+    };
 
-    const styleEl = document.createElement('style');
-    this._shadowRoot.appendChild(styleEl);
-    if (styleEl.sheet) {
+    if (!this._styleRule) {
+      const styleEl = document.createElement('style');
+      this._shadowRoot.appendChild(styleEl);
+      if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
+
       styleEl.sheet.insertRule(":host {}", 0);
-      const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
-      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(rule.style, {
+      styleEl.sheet.insertRule(`@media print { [data-border] { display: none; } }`, 1);
+      this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
+
+      this._shadowRoot.appendChild(document.createElement('slot'));
+    }
+    Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
+      this._styleRule.style,
+      {
         display: 'inline-block',
         boxSizing: 'border-box',
         height: `${this.height}mm`,
@@ -96,10 +99,11 @@ export class LayoutBoxElement extends HTMLElement {
         top: `${this.top}mm`,
         width: `${this.width}mm`,
         zIndex: `${this.zIndex + 100}`,
-      });
-      styleEl.sheet.insertRule(`@media print { [data-border] { display: none; } }`, 1);
-    }
+      }
+    );
+    this._shadowRoot.querySelectorAll(':scope > :not(slot):not(style)').forEach(node => node.remove());
 
+    const colorManager = ColorManager.getInstance();
     if (this._data.borderColor) {
       const { borderBottomWidth, borderLeftWidth, borderRightWidth, borderTopWidth } = this._data;
       const borderStyle: Partial<CSSStyleDeclaration> = {
@@ -108,7 +112,7 @@ export class LayoutBoxElement extends HTMLElement {
         zIndex: '99999999',
       };
       const borderInsideStyle: Partial<CSSStyleDeclaration> = {
-        borderColor: this._doc.colorManager.getCSSColor(this._data.borderColor),
+        borderColor: colorManager.getCSSColor(this._data.borderColor),
         borderStyle: this._data.borderStyle || DEFAULT_BORDER_STYLE,
         borderWidth: '0',
       };
@@ -118,7 +122,7 @@ export class LayoutBoxElement extends HTMLElement {
         border.setAttribute('data-border', 'top');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
-          height: `${Math.ceil(borderTopWidth * (this._model?.ppm || DEFAULT_PPM))}px`, top: '0', width: '100%',
+          height: `${Math.ceil(borderTopWidth * BoxModel.ppm)}px`, top: '0', width: '100%',
         });
         const borderInside = document.createElement('div');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
@@ -134,7 +138,7 @@ export class LayoutBoxElement extends HTMLElement {
         border.setAttribute('data-border', 'bottom');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
-          height: `${Math.ceil(borderBottomWidth * (this._model?.ppm || DEFAULT_PPM))}px`, bottom: '0', width: '100%',
+          height: `${Math.ceil(borderBottomWidth * BoxModel.ppm)}px`, bottom: '0', width: '100%',
         });
         const borderInside = document.createElement('div');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
@@ -150,7 +154,7 @@ export class LayoutBoxElement extends HTMLElement {
         border.setAttribute('data-border', 'left');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
-          width: `${Math.ceil(borderLeftWidth * (this._model?.ppm || DEFAULT_PPM))}px`, height: '100%', left: '0',
+          width: `${Math.ceil(borderLeftWidth * BoxModel.ppm)}px`, height: '100%', left: '0',
         });
         const borderInside = document.createElement('div');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
@@ -166,7 +170,7 @@ export class LayoutBoxElement extends HTMLElement {
         border.setAttribute('data-border', 'right');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
-          width: `${Math.ceil(borderRightWidth * (this._model?.ppm || DEFAULT_PPM))}px`, height: '100%', right: '0',
+          width: `${Math.ceil(borderRightWidth * BoxModel.ppm)}px`, height: '100%', right: '0',
         });
         const borderInside = document.createElement('div');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
@@ -193,18 +197,14 @@ export class LayoutBoxElement extends HTMLElement {
           const boxEl = document.createElement('x-layout-box');
           boxEl.id = child.id || genUUID();
           boxEl.data = child;
-          boxEl.document = this._doc;
           boxEl.inheritStyle = childInheritStyle;
-          boxEl.parentElement = this;
-          boxEl.parentModel = this._model
 
           this._children.push(boxEl);
-          this._shadowRoot.appendChild(boxEl);
+          this.appendChild(boxEl);
         } else if (child.type === 'paragraph') {
           const paragraphEl = document.createElement('x-layout-paragraph');
           paragraphEl.id = child.id || genUUID();
           paragraphEl.data = child;
-          paragraphEl.document = this._doc;
           paragraphEl.parentElement = this;
           paragraphEl.parentModel = this._model;
           paragraphEl.inheritStyle = {
@@ -213,7 +213,7 @@ export class LayoutBoxElement extends HTMLElement {
           };
 
           this._children.push(paragraphEl);
-          this._shadowRoot.appendChild(paragraphEl);
+          this.appendChild(paragraphEl);
         } else if (child.type === 'text') {
           const paragraphEl = document.createElement('x-layout-paragraph');
           paragraphEl.data = {
@@ -223,7 +223,6 @@ export class LayoutBoxElement extends HTMLElement {
             gap: 0,
           };
           paragraphEl.id = child.id || genUUID();
-          paragraphEl.document = this._doc;
           paragraphEl.parentElement = this;
           paragraphEl.parentModel = this._model;
           paragraphEl.inheritStyle = {
@@ -232,18 +231,17 @@ export class LayoutBoxElement extends HTMLElement {
           };
 
           this._children.push(paragraphEl);
-          this._shadowRoot.appendChild(paragraphEl);
+          this.appendChild(paragraphEl);
         } else if (child.type === 'image') {
           const imageEl = document.createElement('x-layout-image');
           imageEl.id = child.id || genUUID();
           imageEl.data = child;
-          imageEl.document = this._doc;
           imageEl.inheritStyle = childInheritStyle;
           imageEl.parentElement = this;
           imageEl.parentModel = this._model;
 
           this._children.push(imageEl);
-          this._shadowRoot.appendChild(imageEl);
+          this.appendChild(imageEl);
         }
       }
     }
@@ -263,64 +261,51 @@ export class LayoutBoxElement extends HTMLElement {
 
   set data(data: BoxData | undefined) {
     this._data = data;
-    this.renderLayout();
+    this.layout();
   }
 
   get data() {
     return this._data;
   }
 
-  set document(doc: LayoutDocumentElement) {
-    this._doc = doc;
-  }
-
-  get document() {
-    return this._doc;
-  }
-
-  set parentElement(el: LayoutDocumentElement | LayoutBoxElement) {
-    this._parentElement = el;
-  }
-
   get parentElement() {
-    return this._parentElement;
+    return super.parentElement as LayoutDocumentElement | LayoutBoxElement;
   }
 
   get items() {
     return this._children;
   }
 
-  set parentModel(model: BoxModel | undefined) {
-    this._parentModel = model;
-    this.renderLayout();
-  }
-
   get parentModel() {
-    return this._parentModel;
+    return this.parentElement?.model;
   }
 
   set inheritStyle(style: InheritStyle | undefined) {
     this._inheritStyle = style;
-    this.renderLayout();
+    this.layout();
   }
 
   get inheritStyle() {
     return this._inheritStyle;
   }
 
+  get model() {
+    return this._model;
+  }
+
   get textStyle(): TextStyle {
-    return this._parentModel?.textStyle || {};
+    return this.parentModel?.textStyle || {};
   }
 
   get paragraphStyle(): ParagraphStyle {
-    return this._parentModel?.paragraphStyle || {};
+    return this.parentModel?.paragraphStyle || {};
   }
 
   get left() {
     if (!this._data) return 0;
     const { left, position } = this._data;
     if (position !== 'absolute') {
-      return this._parentModel ? this._parentModel.columnCoords[left].x1 : 0;
+      return this.parentModel ? this.parentModel.columnCoords[left].x1 : 0;
     } else {
       return (this._inheritStyle?.paddingLeft || 0) + left;
     }
@@ -330,8 +315,8 @@ export class LayoutBoxElement extends HTMLElement {
     if (!this._data) return 0;
     const { left, top, position } = this._data;
     if (position !== 'absolute') {
-      if (this._parentModel) {
-        const { columnCoords, lineHeight } = this._parentModel;
+      if (this.parentModel) {
+        const { columnCoords, lineHeight } = this.parentModel;
         return columnCoords[left].y1 + (lineHeight * top);
       } else {
         return 0;
@@ -342,21 +327,21 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   get absLeft(): number {
-    if (this._parentElement.type === "document") return this.left;
-    return this._parentElement.absLeft + this.left;
+    if (this.parentElement.type === "document") return this.left;
+    return this.parentElement.absLeft + this.left;
   }
 
   get absTop(): number {
-    if (this._parentElement.type === "document") return this.top;
-    return this._parentElement.absTop + this.top;
+    if (this.parentElement.type === "document") return this.top;
+    return this.parentElement.absTop + this.top;
   }
 
   get width() {
     if (!this._data) return 0;
     const { left, position, width } = this._data;
     if (position !== 'absolute') {
-      if (this._parentModel) {
-        const { columnCoords, columnCount } = this._parentModel;
+      if (this.parentModel) {
+        const { columnCoords, columnCount } = this.parentModel;
         const col = Math.min(columnCount, left + this._data.width) - 1;
         return columnCoords[col].x2 - columnCoords[left].x1;
       } else {
@@ -372,16 +357,16 @@ export class LayoutBoxElement extends HTMLElement {
     const { height, position } = this._data;
     let calcHeight = 0;
     if (position !== 'absolute') {
-      if (this._parentModel) {
-        const { fontSize, lineHeight } = this._parentModel;
+      if (this.parentModel) {
+        const { fontSize, lineHeight } = this.parentModel;
         calcHeight = lineHeight * height - (lineHeight - fontSize);
       }
     } else {
       calcHeight = height;
     }
-    if (this._parentModel?.editableHeight) {
+    if (this.parentModel?.editableHeight) {
       const top = this.parentElement.type !== 'document' ? this.top : 0;
-      calcHeight = Math.min(calcHeight, this._parentModel.editableHeight - (top - (this._inheritStyle?.paddingTop || 0)));
+      calcHeight = Math.min(calcHeight, this.parentModel.editableHeight - (top - (this._inheritStyle?.paddingTop || 0)));
     }
     return calcHeight;
   }
@@ -409,9 +394,10 @@ export class LayoutBoxElement extends HTMLElement {
     this._children.forEach(c => {
       data.push(...c.printPostData)
     });
+    const colorManager = ColorManager.getInstance();
 
     data.push({
-      color: this._data?.borderColor ? this._doc.colorManager.get(this._data.borderColor) : undefined,
+      color: this._data?.borderColor ? colorManager.get(this._data.borderColor) : undefined,
       data: {
         ...this._data,
         borderStyle: this._data.borderStyle || DEFAULT_BORDER_STYLE,

@@ -1,7 +1,9 @@
-import { BoxModel, ColorManager, FontManager } from "@/model";
-import { DocumentData, PrintPostData } from "@/types";
+import { BoxModel } from "@/model";
+import { DocumentData, ParagraphStyle, PrintPostData, TextStyle } from "@/types";
 import { genUUID } from "@/utils";
 import { LayoutBoxElement } from "./box.element";
+import { LayoutParagraphElement } from "./paragraph.element";
+import { LayoutImageElement } from "./image.element";
 
 /**
  * 문서 루트 요소. `<x-layout-document>` 커스텀 엘리먼트.
@@ -19,13 +21,7 @@ import { LayoutBoxElement } from "./box.element";
  * - 컬럼 가이드(`<x-layout-guide-column>`) 렌더링
  */
 export class LayoutDocumentElement extends HTMLElement {
-  private _data?: DocumentData;
   private _model?: BoxModel;
-
-  private _colorManager: ColorManager;
-  private _fontManager: FontManager;
-
-  private _children: LayoutBoxElement[];
 
   private _shadowRoot: ShadowRoot;
   private _root?: HTMLDivElement;
@@ -33,16 +29,25 @@ export class LayoutDocumentElement extends HTMLElement {
   private _visibleGuide: boolean;
   private _isPrint: boolean;
 
+  private _width: number = 0;
+  private _height: number = 0;
+  private _paddingTop: number = 0;
+  private _paddingBottom: number = 0;
+  private _paddingLeft: number = 0;
+  private _paddingRight: number = 0;
+
+  private _columns: number | number[] = 1;
+  private _gap: number | number[] = 0;
+
+  private _paragraphStyle: ParagraphStyle = {};
+  private _textStyle: TextStyle = {};
+
   constructor() {
     super();
 
-    this._children = [];
     this._shadowRoot = this.attachShadow({ mode: "open" });
     this._visibleGuide = true;
     this._isPrint = window.matchMedia("print").matches;
-
-    this._colorManager = ColorManager.getInstance();
-    this._fontManager = FontManager.getInstance();
   }
 
   connectedCallback() {
@@ -56,55 +61,67 @@ export class LayoutDocumentElement extends HTMLElement {
     })();
   }
 
-  disconnectedCallback() {
-    if (this._data) delete this._data;
-    if (this._model) delete this._model;
-  }
+  disconnectedCallback() { }
 
-  /** ID로 자식 요소 찾기 (재귀) */
-  findById(id: string) {
-    for (let i = 0; i < this._children.length; i++) {
-      const child = this._children[i];
-      const findChild = child.findById(id);
-      if (findChild) return findChild;
-    }
-    return null;
-  }
-
-  /** 1단계: 레이아웃 렌더링 (동기) */
   layout() {
     if (!this.isConnected) return null;
 
-    this._children = [];
-    this._shadowRoot.innerHTML = '';
-    if (this._model) delete this._model;
-    if (!this._data) return;
+    this._model ??= BoxModel.create({
+      width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}
+    });
+    this._model.data = {
+      width: this._width,
+      height: this._height,
+      paddingTop: this._paddingTop,
+      paddingBottom: this._paddingBottom,
+      paddingLeft: this._paddingLeft,
+      paddingRight: this._paddingRight,
+      columns: this._columns,
+      gap: this._gap,
+      paragraphStyle: this._paragraphStyle,
+      textStyle: this._textStyle,
+    };
 
-    this._model = BoxModel.create(this._data);
-
-    const styleEl = document.createElement('style');
-    this._shadowRoot.appendChild(styleEl);
-    if (styleEl.sheet) {
-      styleEl.sheet.insertRule(":host {}", 0);
-      const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
-      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(rule.style, {
-        backgroundColor: '#ffffff !important',
-        display: 'inline-flex',
-        position: 'relative',
-        height: 'fit-content !important',
-        width: 'fit-content !important',
-      });
+    if (!this._shadowRoot.querySelector(":scope > style")) {
+      const styleEl = document.createElement('style');
+      this._shadowRoot.appendChild(styleEl);
+      if (styleEl.sheet) {
+        styleEl.sheet.insertRule(":host {}", 0);
+        const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
+        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
+          rule.style,
+          {
+            backgroundColor: '#ffffff !important',
+            display: 'inline-flex',
+            position: 'relative',
+            height: 'fit-content !important',
+            width: 'fit-content !important',
+          }
+        );
+      }
     }
 
-    this._root = document.createElement('div');
-    Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(this._root.style, {
-      boxSizing: 'border-box',
-      display: 'inline-block',
-      position: 'relative',
-      height: `${this._data.height}mm`,
-      width: `${this._data.width}mm`,
+    if (!this._root) {
+      this._root = document.createElement('div');
+      this._shadowRoot.appendChild(this._root);
+
+      this._shadowRoot.appendChild(document.createElement('slot'));
+    }
+    Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
+      this._root.style,
+      {
+        boxSizing: 'border-box',
+        display: 'inline-block',
+        position: 'relative',
+        height: `${this._height}mm`,
+        width: `${this._width}mm`,
+      }
+    );
+
+    Array.from(this._root.children).forEach(e => {
+      if (e.nodeName !== "X-LAYOUT-GUIDE-COLUMN") return;
+      this._root?.removeChild(e);
     });
-    this._shadowRoot.appendChild(this._root);
 
     for (let i = 0; i < this._model.columnCoords.length; i++) {
       const coord = this._model.columnCoords[i];
@@ -117,34 +134,22 @@ export class LayoutDocumentElement extends HTMLElement {
       this._root.appendChild(colEl);
     }
 
-    if (this._data.children) {
-      for (let i = 0; i < this._data.children.length; i++) {
-        const child = this._data.children[i];
-        const boxEl = document.createElement('x-layout-box');
-        boxEl.id = child.id || genUUID();
-        boxEl.data = child;
-        boxEl.document = this;
-        boxEl.parentElement = this;
-        boxEl.parentModel = this._model;
-
-        boxEl.inheritStyle = {
-          ...this.textStyle,
-          ...this.paragraphStyle,
-          parentHeight: this._model.editableHeight,
-          parentWidth: this._model.editableWidth,
-        };
-        this._children.push(boxEl);
-        this._root.appendChild(boxEl);
-      }
-    }
+    this.items.forEach(boxEl => {
+      boxEl.inheritStyle = {
+        ...this.textStyle,
+        ...this.paragraphStyle,
+        parentHeight: this._model!.editableHeight,
+        parentWidth: this._model!.editableWidth,
+      };
+    });
     return this;
   }
 
   /** 2단계: 이미지 렌더링 (비동기) */
   async renderImage() {
     if (!this.isConnected) return null;
-    for (let i = 0; i < this._children.length; i++) {
-      await this._children[i].renderImage()
+    for (let i = 0; i < this.items.length; i++) {
+      await this.items[i].renderImage()
     }
     return this;
   }
@@ -152,27 +157,65 @@ export class LayoutDocumentElement extends HTMLElement {
   /** 3단계: 텍스트 렌더링 (동기) */
   renderText() {
     if (!this.isConnected) return null;
-    this._children.forEach(c => c.renderText());
+    this.items.forEach(c => c.renderText());
     return this;
   }
 
-  set data(data: DocumentData | undefined) {
-    this._data = data;
+  appendChild<T extends Node>(node: T) {
+    if (['x-layout-box', 'x-layout-paragraph', 'x-layout-image'].includes(node.nodeName.toLowerCase())) {
+      const layoutEl = node as unknown as (LayoutBoxElement | LayoutParagraphElement | LayoutImageElement);
+      if (this._model) {
+        layoutEl.inheritStyle = {
+          ...this.textStyle,
+          ...this.paragraphStyle,
+          parentHeight: this._model!.editableHeight,
+          parentWidth: this._model!.editableWidth,
+        };
+      }
+    }
+    return super.appendChild(node);
+  }
 
-    if (this._isPrint) return;
-    (async () => {
-      let self = this.layout();
-      self = await self?.renderImage();
-      self = self?.renderText();
-    })();
+
+  set data(data: DocumentData) {
+    if (data.paddingTop) this._paddingTop = data.paddingTop;
+    if (data.paddingBottom) this._paddingBottom = data.paddingBottom;
+    if (data.paddingLeft) this._paddingLeft = data.paddingLeft;
+    if (data.paddingRight) this._paddingRight = data.paddingRight;
+
+    this._width = data.width;
+    this._height = data.height;
+    this._columns = data.columns;
+    this._gap = data.gap;
+    this._paragraphStyle = data.paragraphStyle;
+    this._textStyle = data.textStyle;
+
+    this.items.forEach(e => this.removeChild(e));
+
+    if (!this._isPrint) this.layout();
+
+    const children = data.children || [];
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      const boxEl = document.createElement('x-layout-box');
+      boxEl.id = child.id || genUUID();
+      boxEl.data = child;
+      this.appendChild(boxEl);
+    }
+    if (!this._isPrint) {
+      (async () => {
+        await this.renderImage();
+        this.renderText();
+      })();
+    }
   }
 
   get textStyle() {
-    return this._data?.textStyle || {};
+    return this._textStyle;
   }
 
   get paragraphStyle() {
-    return this._data?.paragraphStyle || {};
+    return this._paragraphStyle;
   }
 
   get model() {
@@ -192,7 +235,7 @@ export class LayoutDocumentElement extends HTMLElement {
 
   get printPostData() {
     const data: PrintPostData[] = [];
-    this._children.forEach(c => data.push(...c.printPostData));
+    this.items.forEach(c => data.push(...c.printPostData));
     return data;
   }
 
@@ -202,16 +245,8 @@ export class LayoutDocumentElement extends HTMLElement {
     return this._visibleGuide;
   }
 
-  get colorManager() {
-    return this._colorManager;
-  }
-
-  get fontManager() {
-    return this._fontManager;
-  }
-
   get items() {
-    return this._children;
+    return Array.from(this.querySelectorAll<LayoutBoxElement>(":scope > x-layout-box"));
   }
 
   get type(): "document" { return 'document'; }

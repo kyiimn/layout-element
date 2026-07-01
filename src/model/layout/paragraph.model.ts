@@ -10,6 +10,7 @@ import {
 import { getOverlapSizePX } from "@/utils";
 import { FontManager } from "../font.manager";
 import { ColorManager } from "../color.manager";
+import { BoxModel } from "./box.model";
 
 type CreateParams = {
   data: ParagraphData;
@@ -124,8 +125,8 @@ export class ParagraphModel {
           break;
       }
     });
-    const leftMM = left ? Math.ceil(left / this._paragraphElement.document.model!.ppm) : 0;
-    const rightMM = right ? Math.ceil(right / this._paragraphElement.document.model!.ppm) : 0;
+    const leftMM = left ? Math.ceil(left / BoxModel.ppm) : 0;
+    const rightMM = right ? Math.ceil(right / BoxModel.ppm) : 0;
 
     if (cover) {
       lineEl.style.width = `0`;
@@ -172,7 +173,6 @@ export class ParagraphModel {
 
       const vColumnEl = document.createElement('x-layout-vcolumn');
       vColumnEl.index = curColumn;
-      vColumnEl.document = this._paragraphElement.document;
       vColumnEl.model = this;
       vColumnEl.parentElement = this._paragraphElement;
       this._rootNode.appendChild(vColumnEl);

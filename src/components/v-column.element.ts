@@ -12,7 +12,6 @@ export class LayoutVirtualColumnElement extends HTMLElement {
   private _model?: ParagraphModel;
   private _index?: number;
 
-  private _doc!: LayoutDocumentElement;
   private _parentElement!: LayoutParagraphElement;
   private _shadowRoot: ShadowRoot;
 
@@ -56,14 +55,6 @@ export class LayoutVirtualColumnElement extends HTMLElement {
 
   appendChild<T extends Node>(node: T): T {
     return this._shadowRoot.appendChild(node);
-  }
-
-  set document(doc: LayoutDocumentElement) {
-    this._doc = doc;
-  }
-
-  get document() {
-    return this._doc;
   }
 
   set parentElement(el: LayoutParagraphElement) {

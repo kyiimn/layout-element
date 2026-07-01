@@ -1,4 +1,4 @@
-import { BoxModel, ParagraphModel } from "@/model";
+import { BoxModel, ColorManager, ParagraphModel } from "@/model";
 import { InheritStyle, ParagraphData, ParagraphStyle, TextStyle } from "@/types";
 import { checkOverlap } from "@/utils";
 import { LayoutBoxElement } from "./box.element";
@@ -22,7 +22,6 @@ export class LayoutParagraphElement extends HTMLElement {
 
   private _columnEl: LayoutColumnElement[];
 
-  private _doc!: LayoutDocumentElement;
   private _parentElement!: LayoutBoxElement;
   private _shadowRoot: ShadowRoot;
 
@@ -67,10 +66,11 @@ export class LayoutParagraphElement extends HTMLElement {
     const styleEl = document.createElement('style');
     this._shadowRoot.appendChild(styleEl);
     if (styleEl.sheet) {
+      const colorManager = ColorManager.getInstance();
       styleEl.sheet.insertRule(":host {}", 0);
       const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(rule.style, {
-        color: color !== undefined ? this._doc.colorManager.getCSSColor(color) : undefined,
+        color: color !== undefined ? colorManager.getCSSColor(color) : undefined,
         display: 'flex',
         flexDirection: 'row',
         fontFamily,
@@ -124,7 +124,6 @@ export class LayoutParagraphElement extends HTMLElement {
     for (let i = 0; i < columnContents.length; i++) {
       const columnEl = document.createElement('x-layout-column');
       columnEl.index = i;
-      columnEl.document = this._doc;
       columnEl.model = this._model;
       columnEl.parentElement = this;
 
@@ -140,14 +139,6 @@ export class LayoutParagraphElement extends HTMLElement {
 
   get data() {
     return this._data;
-  }
-
-  set document(doc: LayoutDocumentElement) {
-    this._doc = doc;
-  }
-
-  get document() {
-    return this._doc;
   }
 
   set parentElement(el: LayoutBoxElement) {

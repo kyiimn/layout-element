@@ -42,7 +42,7 @@ export class BoxModel {
   private _gaps: number[];
   private _lineHeight: number;
 
-  private _ppm: number;
+  private static _ppm: number | undefined;
 
   private _data!: DocumentData;
 
@@ -59,9 +59,7 @@ export class BoxModel {
     this._columnWidths = [];
     this._gaps = [];
     this._lineHeight = 0;
-    this._ppm = DEFAULT_PPM;
 
-    this._calcPxPerMM();
     this.data = data;
   }
 
@@ -69,21 +67,24 @@ export class BoxModel {
    * 브라우저 DPI를 측정하여 픽셀/mm 변환 비율 계산.
    * 임시 100mm `<div>`를 DOM에 삽입 후 `offsetWidth`를 측정한다.
    */
-  private _calcPxPerMM() {
-    const div = document.createElement('div');
-    div.style.width = '100mm';
-    div.style.height = '1px';
-    div.style.position = 'absolute';
-    div.style.top = '-10000px';
-    div.style.left = '-10000px';
-    div.style.visibility = 'hidden';
+  static get ppm() {
+    if (!this._ppm) {
+      const div = document.createElement('div');
+      div.style.width = '100mm';
+      div.style.height = '1px';
+      div.style.position = 'absolute';
+      div.style.top = '-10000px';
+      div.style.left = '-10000px';
+      div.style.visibility = 'hidden';
 
-    document.body.appendChild(div);
+      document.body.appendChild(div);
 
-    const pxWidth100mm = div.getBoundingClientRect().width;
-    document.body.removeChild(div);
+      const pxWidth100mm = div.getBoundingClientRect().width;
+      document.body.removeChild(div);
 
-    this._ppm = pxWidth100mm / 100;
+      this._ppm = pxWidth100mm / 100;
+    }
+    return this._ppm;
   }
 
   /** 컬럼 좌표 및 행 높이 계산 */
@@ -229,10 +230,5 @@ export class BoxModel {
   /** 편집 가능 텍스트 높이 (mm) - 마지막 줄의 하단 여분 포함 */
   public get editableTextHeight() {
     return this.editableHeight + (this.lineHeight - this.fontSize);
-  }
-
-  /** 픽셀/mm 변환 비율 */
-  public get ppm() {
-    return this._ppm;
   }
 }

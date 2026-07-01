@@ -1,5 +1,4 @@
 import { ParagraphModel } from "@/model";
-import { LayoutDocumentElement } from "./document.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 
 /**
@@ -12,7 +11,6 @@ export class LayoutColumnElement extends HTMLElement {
   private _model?: ParagraphModel;
   private _index?: number;
 
-  private _doc!: LayoutDocumentElement;
   private _parentElement!: LayoutParagraphElement;
   private _shadowRoot: ShadowRoot;
 
@@ -95,14 +93,6 @@ export class LayoutColumnElement extends HTMLElement {
 
   static get observedAttributes() {
     return ['index'];
-  }
-
-  set document(doc: LayoutDocumentElement) {
-    this._doc = doc;
-  }
-
-  get document() {
-    return this._doc;
   }
 
   set parentElement(el: LayoutParagraphElement) {
