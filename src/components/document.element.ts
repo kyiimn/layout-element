@@ -134,8 +134,8 @@ export class LayoutDocumentElement extends HTMLElement {
       this._root.appendChild(colEl);
     }
 
-    this.items.forEach(boxEl => {
-      boxEl.inheritStyle = {
+    this.items.forEach(childEl => {
+      childEl.inheritStyle = {
         ...this.textStyle,
         ...this.paragraphStyle,
         parentHeight: this._model!.editableHeight,
@@ -162,26 +162,23 @@ export class LayoutDocumentElement extends HTMLElement {
   }
 
   appendChild<T extends Node>(node: T) {
-    if (['x-layout-box', 'x-layout-paragraph', 'x-layout-image'].includes(node.nodeName.toLowerCase())) {
-      const layoutEl = node as unknown as (LayoutBoxElement | LayoutParagraphElement | LayoutImageElement);
-      if (this._model) {
-        layoutEl.inheritStyle = {
-          ...this.textStyle,
-          ...this.paragraphStyle,
-          parentHeight: this._model!.editableHeight,
-          parentWidth: this._model!.editableWidth,
-        };
-      }
+    if (this._model && ['X-LAYOUT-BOX', 'X-LAYOUT-PARAGRAPH', 'X-LAYOUT-IMAGE'].includes(node.nodeName)) {
+      const childEl = node as unknown as (LayoutBoxElement | LayoutParagraphElement | LayoutImageElement);
+      childEl.inheritStyle = {
+        ...this.textStyle,
+        ...this.paragraphStyle,
+        parentHeight: this._model!.editableHeight,
+        parentWidth: this._model!.editableWidth,
+      };
     }
     return super.appendChild(node);
   }
 
-
   set data(data: DocumentData) {
-    if (data.paddingTop) this._paddingTop = data.paddingTop;
-    if (data.paddingBottom) this._paddingBottom = data.paddingBottom;
-    if (data.paddingLeft) this._paddingLeft = data.paddingLeft;
-    if (data.paddingRight) this._paddingRight = data.paddingRight;
+    if (data.paddingTop !== undefined) this._paddingTop = data.paddingTop;
+    if (data.paddingBottom !== undefined) this._paddingBottom = data.paddingBottom;
+    if (data.paddingLeft !== undefined) this._paddingLeft = data.paddingLeft;
+    if (data.paddingRight !== undefined) this._paddingRight = data.paddingRight;
 
     this._width = data.width;
     this._height = data.height;
@@ -190,7 +187,7 @@ export class LayoutDocumentElement extends HTMLElement {
     this._paragraphStyle = data.paragraphStyle;
     this._textStyle = data.textStyle;
 
-    this.items.forEach(e => this.removeChild(e));
+    this.items.forEach(e => e.remove());
 
     if (!this._isPrint) this.layout();
 
@@ -198,7 +195,6 @@ export class LayoutDocumentElement extends HTMLElement {
     for (let i = 0; i < children.length; i++) {
       const child = children[i];
       const boxEl = document.createElement('x-layout-box');
-      boxEl.id = child.id || genUUID();
       boxEl.data = child;
       this.appendChild(boxEl);
     }
@@ -210,20 +206,100 @@ export class LayoutDocumentElement extends HTMLElement {
     }
   }
 
-  get textStyle() {
-    return this._textStyle;
+  set width(value: number) {
+    if (this._width === value) return;
+    this._width = value;
+    this.layout();
   }
 
-  get paragraphStyle() {
-    return this._paragraphStyle;
+  set height(value: number) {
+    if (this._height === value) return;
+    this._height = value;
+    this.layout();
   }
 
-  get model() {
-    return this._model;
+  set paddingTop(value: number) {
+    if (this._paddingTop === value) return;
+    this._paddingTop = value;
+    this.layout();
   }
 
-  set guide(guide: boolean) {
-    this._visibleGuide = guide;
+  set paddingBottom(value: number) {
+    if (this._paddingBottom === value) return;
+    this._paddingBottom = value;
+    this.layout();
+  }
+
+  set paddingLeft(value: number) {
+    if (this._paddingLeft === value) return;
+    this._paddingLeft = value;
+    this.layout();
+  }
+
+  set paddingRight(value: number) {
+    if (this._paddingRight === value) return;
+    this._paddingRight = value;
+    this.layout();
+  }
+
+  set columns(value: number | number[]) {
+    if (this._columns === value) return;
+    this._columns = value;
+    this.layout();
+  }
+
+  set gap(value: number | number[]) {
+    if (this._gap === value) return;
+    this._gap = value;
+    this.layout();
+  }
+
+  set paragraphStyle(value: ParagraphStyle) {
+    if (this._paragraphStyle === value) return;
+    this._paragraphStyle = value;
+    this.layout();
+  }
+
+  set textStyle(value: TextStyle) {
+    if (this._textStyle === value) return;
+    this._textStyle = value;
+    this.layout();
+  }
+
+  get data() {
+    return {
+      width: this.width,
+      height: this.height,
+      paddingTop: this.paddingTop,
+      paddingBottom: this.paddingBottom,
+      paddingLeft: this.paddingLeft,
+      paddingRight: this.paddingRight,
+      columns: this.columns,
+      gap: this.gap,
+      paragraphStyle: this.paragraphStyle,
+      textStyle: this.textStyle,
+      children: this.items.map(e => e.data),
+    }
+  }
+
+  get width() { return this._width; }
+  get height() { return this._height; }
+  get paddingTop() { return this._paddingTop; }
+  get paddingBottom() { return this._paddingBottom; }
+  get paddingLeft() { return this._paddingLeft; }
+  get paddingRight() { return this._paddingRight; }
+  get columns() { return this._columns; }
+  get gap() { return this._gap; }
+  get paragraphStyle() { return this._paragraphStyle; }
+  get textStyle() { return this._textStyle; }
+
+  get model() { return this._model; }
+  get visibleGuide() { return this._visibleGuide; }
+  get type() { return 'document' as const; }
+  get zIndex() { return 0; }
+
+  set visibleGuide(value: boolean) {
+    this._visibleGuide = value;
 
     if (!this._root) return;
 
@@ -239,16 +315,8 @@ export class LayoutDocumentElement extends HTMLElement {
     return data;
   }
 
-  get zIndex() { return 0; }
-
-  get guide() {
-    return this._visibleGuide;
-  }
-
   get items() {
     return Array.from(this.querySelectorAll<LayoutBoxElement>(":scope > x-layout-box"));
   }
-
-  get type(): "document" { return 'document'; }
 }
 customElements.define('x-layout-document', LayoutDocumentElement);

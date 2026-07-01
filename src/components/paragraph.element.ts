@@ -1,9 +1,8 @@
-import { BoxModel, ColorManager, ParagraphModel } from "@/model";
+import { ColorManager, ParagraphModel } from "@/model";
 import { InheritStyle, ParagraphData, ParagraphStyle, TextStyle } from "@/types";
 import { checkOverlap } from "@/utils";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutColumnElement } from "./column.element";
-import { LayoutDocumentElement } from "./document.element";
 
 /**
  * 다중 컬럼 텍스트 영역 요소. `<x-layout-paragraph>` 커스텀 엘리먼트.
@@ -14,7 +13,6 @@ import { LayoutDocumentElement } from "./document.element";
  * 오버플로우 발생 시 `render-error` 커스텀 이벤트를 디스패치한다.
  */
 export class LayoutParagraphElement extends HTMLElement {
-  private _parentModel?: BoxModel;
   private _inheritStyle?: InheritStyle;
 
   private _data?: ParagraphData;
@@ -22,7 +20,6 @@ export class LayoutParagraphElement extends HTMLElement {
 
   private _columnEl: LayoutColumnElement[];
 
-  private _parentElement!: LayoutBoxElement;
   private _shadowRoot: ShadowRoot;
 
   constructor() {
@@ -52,7 +49,7 @@ export class LayoutParagraphElement extends HTMLElement {
     this._columnEl = [];
     this._shadowRoot.innerHTML = '';
     if (this._model) delete this._model;
-    if (!this._data || !this._parentModel || !this._inheritStyle) return;
+    if (!this._data || !this.parentModel || !this._inheritStyle) return;
 
     const color = this.textStyle.color || this._inheritStyle.color;
     const fontFamily = this.textStyle.fontFamily || this._inheritStyle.fontFamily;
@@ -60,7 +57,7 @@ export class LayoutParagraphElement extends HTMLElement {
     const fontStyle = this.textStyle.fontStyle || this._inheritStyle.fontStyle;
     const fontSize = this.textStyle.fontSize || this._inheritStyle.fontSize;
 
-    const lineHeight = this._parentModel.lineHeight;
+    const lineHeight = this.parentModel.lineHeight;
     const paddingTop = this._inheritStyle.paddingTop || 0;
 
     const styleEl = document.createElement('style');
@@ -91,8 +88,8 @@ export class LayoutParagraphElement extends HTMLElement {
     this._model = ParagraphModel.create({
       data: {
         ...this._data,
-        column: this._data.column !== undefined && this._data.gap !== undefined ? this._data.column : this._parentModel.columnWidth,
-        gap: this._data.column !== undefined && this._data.gap !== undefined ? this._data.gap : this._parentModel.gaps,
+        column: this._data.column !== undefined && this._data.gap !== undefined ? this._data.column : this.parentModel.columnWidth,
+        gap: this._data.column !== undefined && this._data.gap !== undefined ? this._data.gap : this.parentModel.gaps,
       },
       paragraphEl: this,
       rootNode: this._shadowRoot,
@@ -141,21 +138,12 @@ export class LayoutParagraphElement extends HTMLElement {
     return this._data;
   }
 
-  set parentElement(el: LayoutBoxElement) {
-    this._parentElement = el;
-  }
-
   get parentElement() {
-    return this._parentElement;
-  }
-
-  set parentModel(model: BoxModel | undefined) {
-    this._parentModel = model;
-    this.renderLayout();
+    return super.parentElement as LayoutBoxElement;
   }
 
   get parentModel() {
-    return this._parentModel;
+    return this.parentElement?.model;
   }
 
   set inheritStyle(style: InheritStyle | undefined) {
@@ -180,16 +168,16 @@ export class LayoutParagraphElement extends HTMLElement {
   }
 
   get top() {
-    if (!this._inheritStyle || !this._parentModel) return 0;
-    return Math.ceil((this._inheritStyle.paddingTop || 0) / this._parentModel.lineHeight) * this._parentModel.lineHeight;
+    if (!this._inheritStyle || !this.parentModel) return 0;
+    return Math.ceil((this._inheritStyle.paddingTop || 0) / this.parentModel.lineHeight) * this.parentModel.lineHeight;
   }
 
   get absLeft(): number {
-    return this._parentElement.absLeft + this.left;
+    return this.parentElement.absLeft + this.left;
   }
 
   get absTop(): number {
-    return this._parentElement.absTop + this.top;
+    return this.parentElement.absTop + this.top;
   }
 
   get width() {

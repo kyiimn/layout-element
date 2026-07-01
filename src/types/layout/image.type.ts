@@ -34,9 +34,6 @@ export type ImageData = {
   /** 이미지 URL */
   url: string;
 
-  /** Base64 인코딩된 이미지 데이터 (URL 대신 사용 가능) */
-  base64Data?: string;
-
   /** 렌더링 순서 (z-index) */
   zIndex?: number;
 }

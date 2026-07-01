@@ -1,6 +1,6 @@
 import { DEFAULT_BORDER_STYLE, DEFAULT_PPM } from "@/define";
 import { BoxModel, ColorManager } from "@/model";
-import { InheritStyle, BoxData, ParagraphStyle, TextStyle, PrintPostData } from "@/types";
+import { InheritStyle, BoxData, ParagraphStyle, TextStyle, PrintPostData, BoxPosition, BoxBorderStyle } from "@/types";
 import { checkOverlap, genUUID } from "@/utils";
 import { LayoutDocumentElement } from "./document.element";
 import { LayoutImageElement } from "./image.element";
@@ -20,23 +20,36 @@ type ChildType = LayoutBoxElement | LayoutParagraphElement | LayoutImageElement;
  */
 export class LayoutBoxElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
-
-  private _data?: BoxData;
   private _model?: BoxModel;
-
-  private _children: ChildType[];
 
   private _shadowRoot: ShadowRoot;
   private _styleRule?: CSSStyleRule;
 
+  private _left: number = 0;
+  private _top: number = 0;
+  private _width: number = 0;
+  private _height: number = 0;
+  private _position: BoxPosition = "static";
+  private _backgroundColor?: string;
+  private _borderColor?: string;
+  private _borderStyle: BoxBorderStyle = "solid";
+  private _borderTopWidth: number = 0;
+  private _borderBottomWidth: number = 0;
+  private _borderLeftWidth: number = 0;
+  private _borderRightWidth: number = 0;
+  private _paddingTop: number = 0;
+  private _paddingBottom: number = 0;
+  private _paddingLeft: number = 0;
+  private _paddingRight: number = 0;
+  private _zIndex: number = 0;
+
   constructor() {
     super();
-
-    this._children = [];
     this._shadowRoot = this.attachShadow({ mode: "open" });
   }
 
   connectedCallback() {
+    if (!this.id) this.id = genUUID();
     this.layout();
   }
 
@@ -44,37 +57,34 @@ export class LayoutBoxElement extends HTMLElement {
 
   findById(id: string): ChildType | null {
     if (this.id === id) return this;
-    for (let i = 0; i < this._children.length; i++) {
-      const findChild = this._children[i].findById(id);
+    for (let i = 0; i < this.items.length; i++) {
+      const findChild = this.items[i].findById(id);
       if (findChild) return findChild;
     }
     return null;
   }
 
   layout() {
-    if (!this.isConnected) return;
+    if (!this.isConnected || !this.parentModel) return;
 
-    if (!this._data || !this.parentModel) return;
-
-    const { left, width, position, paddingTop, paddingRight, paddingBottom, paddingLeft } = this._data;
     const { columnWidth, gaps, lineHeight } = this.parentModel;
 
     this._model ??= BoxModel.create({
       width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}
     });
     this._model.data = {
-      paddingTop: (this._data.position !== 'absolute' && paddingTop !== undefined) ? Math.ceil(paddingTop / lineHeight) * lineHeight : paddingTop,
-      paddingRight,
-      paddingBottom: (this._data.position !== 'absolute' && paddingBottom !== undefined) ? Math.ceil(paddingBottom / lineHeight) * lineHeight : paddingBottom,
-      paddingLeft,
+      paddingTop: (this.position !== 'absolute' && this.paddingTop !== undefined) ? Math.ceil(this.paddingTop / lineHeight) * lineHeight : this.paddingTop,
+      paddingRight: this.paddingRight,
+      paddingBottom: (this.position !== 'absolute' && this.paddingBottom !== undefined) ? Math.ceil(this.paddingBottom / lineHeight) * lineHeight : this.paddingBottom,
+      paddingLeft: this.paddingLeft,
 
-      columns: position !== 'absolute' ? columnWidth.slice(left, left + width) : 1,
-      gap: position !== 'absolute' ? gaps.slice(left, left + width - 1) : 0,
+      columns: this.position !== 'absolute' ? columnWidth.slice(this.left, this.left + this.width) : 1,
+      gap: this.position !== 'absolute' ? gaps.slice(this.left, this.left + this.width - 1) : 0,
 
       paragraphStyle: this.paragraphStyle,
       textStyle: this.textStyle,
-      height: this.height,
-      width: this.width,
+      height: this.absHeight,
+      width: this.absWidth,
     };
 
     if (!this._styleRule) {
@@ -93,36 +103,35 @@ export class LayoutBoxElement extends HTMLElement {
       {
         display: 'inline-block',
         boxSizing: 'border-box',
-        height: `${this.height}mm`,
-        left: `${this.left}mm`,
+        height: `${this.absHeight}mm`,
+        left: `${this.relLeft}mm`,
         position: 'absolute',
-        top: `${this.top}mm`,
-        width: `${this.width}mm`,
+        top: `${this.relTop}mm`,
+        width: `${this.absWidth}mm`,
         zIndex: `${this.zIndex + 100}`,
       }
     );
     this._shadowRoot.querySelectorAll(':scope > :not(slot):not(style)').forEach(node => node.remove());
 
     const colorManager = ColorManager.getInstance();
-    if (this._data.borderColor) {
-      const { borderBottomWidth, borderLeftWidth, borderRightWidth, borderTopWidth } = this._data;
+    if (this.borderColor) {
       const borderStyle: Partial<CSSStyleDeclaration> = {
         overflow: 'hidden',
         position: 'absolute',
         zIndex: '99999999',
       };
       const borderInsideStyle: Partial<CSSStyleDeclaration> = {
-        borderColor: colorManager.getCSSColor(this._data.borderColor),
-        borderStyle: this._data.borderStyle || DEFAULT_BORDER_STYLE,
+        borderColor: colorManager.getCSSColor(this.borderColor),
+        borderStyle: this.borderStyle || DEFAULT_BORDER_STYLE,
         borderWidth: '0',
       };
 
-      if (borderTopWidth) {
+      if (this.borderTopWidth) {
         const border = document.createElement('div');
         border.setAttribute('data-border', 'top');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
-          height: `${Math.ceil(borderTopWidth * BoxModel.ppm)}px`, top: '0', width: '100%',
+          height: `${Math.ceil(this.borderTopWidth * BoxModel.ppm)}px`, top: '0', width: '100%',
         });
         const borderInside = document.createElement('div');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
@@ -133,12 +142,12 @@ export class LayoutBoxElement extends HTMLElement {
         this._shadowRoot.appendChild(border);
       }
 
-      if (borderBottomWidth) {
+      if (this.borderBottomWidth) {
         const border = document.createElement('div');
         border.setAttribute('data-border', 'bottom');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
-          height: `${Math.ceil(borderBottomWidth * BoxModel.ppm)}px`, bottom: '0', width: '100%',
+          height: `${Math.ceil(this.borderBottomWidth * BoxModel.ppm)}px`, bottom: '0', width: '100%',
         });
         const borderInside = document.createElement('div');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
@@ -149,12 +158,12 @@ export class LayoutBoxElement extends HTMLElement {
         this._shadowRoot.appendChild(border);
       }
 
-      if (borderLeftWidth) {
+      if (this.borderLeftWidth) {
         const border = document.createElement('div');
         border.setAttribute('data-border', 'left');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
-          width: `${Math.ceil(borderLeftWidth * BoxModel.ppm)}px`, height: '100%', left: '0',
+          width: `${Math.ceil(this.borderLeftWidth * BoxModel.ppm)}px`, height: '100%', left: '0',
         });
         const borderInside = document.createElement('div');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
@@ -165,12 +174,12 @@ export class LayoutBoxElement extends HTMLElement {
         this._shadowRoot.appendChild(border);
       }
 
-      if (borderRightWidth) {
+      if (this.borderRightWidth) {
         const border = document.createElement('div');
         border.setAttribute('data-border', 'right');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
-          width: `${Math.ceil(borderRightWidth * BoxModel.ppm)}px`, height: '100%', right: '0',
+          width: `${Math.ceil(this.borderRightWidth * BoxModel.ppm)}px`, height: '100%', right: '0',
         });
         const borderInside = document.createElement('div');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
@@ -181,103 +190,223 @@ export class LayoutBoxElement extends HTMLElement {
         this._shadowRoot.appendChild(border);
       }
     }
-    if (this._data.children) {
+
+    this.items.forEach(childEl => {
       const childInheritStyle: InheritStyle = {
         ...(this.inheritStyle || {}),
-        paddingTop: paddingTop || 0,
-        paddingRight: paddingRight || 0,
-        paddingBottom: paddingBottom || 0,
-        paddingLeft: paddingLeft || 0,
-        parentWidth: this._model.editableWidth,
-        parentHeight: this._model.editableHeight,
+        paddingTop: this.paddingTop || 0,
+        paddingRight: this.paddingRight || 0,
+        paddingBottom: this.paddingBottom || 0,
+        paddingLeft: this.paddingLeft || 0,
+        parentWidth: this._model!.editableWidth,
+        parentHeight: this._model!.editableHeight,
       };
-      for (let i = 0; i < this._data.children.length; i++) {
-        const child = this._data.children[i];
-        if (child.type === 'box') {
-          const boxEl = document.createElement('x-layout-box');
-          boxEl.id = child.id || genUUID();
-          boxEl.data = child;
-          boxEl.inheritStyle = childInheritStyle;
-
-          this._children.push(boxEl);
-          this.appendChild(boxEl);
-        } else if (child.type === 'paragraph') {
-          const paragraphEl = document.createElement('x-layout-paragraph');
-          paragraphEl.id = child.id || genUUID();
-          paragraphEl.data = child;
-          paragraphEl.parentElement = this;
-          paragraphEl.parentModel = this._model;
-          paragraphEl.inheritStyle = {
-            ...childInheritStyle,
-            parentHeight: this._model.editableTextHeight,
-          };
-
-          this._children.push(paragraphEl);
-          this.appendChild(paragraphEl);
-        } else if (child.type === 'text') {
-          const paragraphEl = document.createElement('x-layout-paragraph');
-          paragraphEl.data = {
-            ...child,
-            type: 'paragraph',
-            column: 1,
-            gap: 0,
-          };
-          paragraphEl.id = child.id || genUUID();
-          paragraphEl.parentElement = this;
-          paragraphEl.parentModel = this._model;
-          paragraphEl.inheritStyle = {
-            ...childInheritStyle,
-            parentHeight: this._model.editableTextHeight,
-          };
-
-          this._children.push(paragraphEl);
-          this.appendChild(paragraphEl);
-        } else if (child.type === 'image') {
-          const imageEl = document.createElement('x-layout-image');
-          imageEl.id = child.id || genUUID();
-          imageEl.data = child;
-          imageEl.inheritStyle = childInheritStyle;
-          imageEl.parentElement = this;
-          imageEl.parentModel = this._model;
-
-          this._children.push(imageEl);
-          this.appendChild(imageEl);
+      if (childEl.type === 'box') {
+        childEl.inheritStyle = childInheritStyle;
+      } else if (childEl.type === 'paragraph') {
+        childEl.inheritStyle = {
+          ...childInheritStyle,
+          parentHeight: this.model!.editableTextHeight,
         }
+      } else if (childEl.type === 'image') {
+        childEl.inheritStyle = childInheritStyle;
       }
-    }
+    });
   }
 
   async renderImage() {
     if (!this.isConnected) return;
-    for (let i = 0; i < this._children.length; i++) {
-      await this._children[i].renderImage();
+    for (let i = 0; i < this.items.length; i++) {
+      await this.items[i].renderImage();
     }
   }
 
   renderText() {
     if (!this.isConnected) return;
-    this._children.forEach(c => c.renderText());
+    this.items.forEach(c => c.renderText());
   }
 
-  set data(data: BoxData | undefined) {
-    this._data = data;
+  appendChild<T extends Node>(node: T) {
+    if (this.model) {
+      const childInheritStyle: InheritStyle = {
+        ...(this.inheritStyle || {}),
+        paddingTop: this.paddingTop || 0,
+        paddingRight: this.paddingRight || 0,
+        paddingBottom: this.paddingBottom || 0,
+        paddingLeft: this.paddingLeft || 0,
+        parentWidth: this.model.editableWidth,
+        parentHeight: this.model.editableHeight,
+      };
+      if (node.nodeName === 'X-LAYOUT-BOX') {
+        const layoutEl = node as unknown as LayoutBoxElement;
+        layoutEl.inheritStyle = childInheritStyle;
+      } else if (node.nodeName === 'X-LAYOUT-PARAGRAPH') {
+        const layoutEl = node as unknown as LayoutParagraphElement;
+        layoutEl.inheritStyle = {
+          ...childInheritStyle,
+          parentHeight: this.model.editableTextHeight,
+        }
+      } else if (node.nodeName === 'X-LAYOUT-IMAGE') {
+        const layoutEl = node as unknown as LayoutImageElement;
+        layoutEl.inheritStyle = childInheritStyle;
+      }
+    }
+    return super.appendChild(node);
+  }
+
+  set data(data: BoxData) {
+    if (data.id !== undefined) this.id = data.id;
+    if (data.position !== undefined) this._position = data.position;
+    if (data.zIndex !== undefined) this._zIndex = data.zIndex;
+    if (data.backgroundColor !== undefined) this._backgroundColor = data.backgroundColor;
+    if (data.borderTopWidth !== undefined) this._borderTopWidth = data.borderTopWidth;
+    if (data.borderBottomWidth !== undefined) this._borderBottomWidth = data.borderBottomWidth;
+    if (data.borderLeftWidth !== undefined) this._borderLeftWidth = data.borderLeftWidth;
+    if (data.borderRightWidth !== undefined) this._borderRightWidth = data.borderRightWidth;
+    if (data.borderStyle !== undefined) this._borderStyle = data.borderStyle;
+    if (data.borderColor !== undefined) this._borderColor = data.borderColor;
+    if (data.paddingTop !== undefined) this._paddingTop = data.paddingTop;
+    if (data.paddingBottom !== undefined) this._paddingBottom = data.paddingBottom;
+    if (data.paddingLeft !== undefined) this._paddingLeft = data.paddingLeft;
+    if (data.paddingRight !== undefined) this._paddingRight = data.paddingRight;
+
+    this._left = data.left;
+    this._top = data.top;
+    this._width = data.width;
+    this._height = data.height;
+
+    this.items.forEach(e => e.remove());
+
+    this.layout();
+
+    const children = data.children || [];
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (child.type === 'box') {
+        const boxEl = document.createElement('x-layout-box');
+        boxEl.data = child;
+        this.appendChild(boxEl);
+      } else if (child.type === 'paragraph') {
+        const paragraphEl = document.createElement('x-layout-paragraph');
+        paragraphEl.data = child;
+        this.appendChild(paragraphEl);
+      } else if (child.type === 'text') {
+        const paragraphEl = document.createElement('x-layout-paragraph');
+        paragraphEl.data = {
+          ...child,
+          type: 'paragraph',
+          column: 1,
+          gap: 0,
+        };
+        this.appendChild(paragraphEl);
+      } else if (child.type === 'image') {
+        const imageEl = document.createElement('x-layout-image');
+        imageEl.data = child;
+        this.appendChild(imageEl);
+      }
+    }
+  }
+
+  set left(value: number) {
+    if (this._left === value) return;
+    this._left = value;
     this.layout();
   }
 
-  get data() {
-    return this._data;
+  set top(value: number) {
+    if (this._top === value) return;
+    this._top = value;
+    this.layout();
   }
 
-  get parentElement() {
-    return super.parentElement as LayoutDocumentElement | LayoutBoxElement;
+  set width(value: number) {
+    if (this._width === value) return;
+    this._width = value;
+    this.layout();
   }
 
-  get items() {
-    return this._children;
+  set height(value: number) {
+    if (this._height === value) return;
+    this._height = value;
+    this.layout();
   }
 
-  get parentModel() {
-    return this.parentElement?.model;
+  set position(value: BoxPosition) {
+    if (this._position === value) return;
+    this._position = value;
+    this.layout();
+  }
+
+  set zIndex(value: number) {
+    if (this._zIndex === value) return;
+    this._zIndex = value;
+    this.layout();
+  }
+
+  set backgroundColor(value: string | undefined) {
+    if (this._backgroundColor === value) return;
+    this._backgroundColor = value;
+    this.layout();
+  }
+
+  set borderTopWidth(value: number) {
+    if (this._borderTopWidth === value) return;
+    this._borderTopWidth = value;
+    this.layout();
+  }
+
+  set borderBottomWidth(value: number) {
+    if (this._borderBottomWidth === value) return;
+    this._borderBottomWidth = value;
+    this.layout();
+  }
+
+  set borderLeftWidth(value: number) {
+    if (this._borderLeftWidth === value) return;
+    this._borderLeftWidth = value;
+    this.layout();
+  }
+
+  set borderRightWidth(value: number) {
+    if (this._borderRightWidth === value) return;
+    this._borderRightWidth = value;
+    this.layout();
+  }
+
+  set borderStyle(value: BoxBorderStyle) {
+    if (this._borderStyle === value) return;
+    this._borderStyle = value;
+    this.layout();
+  }
+
+  set borderColor(value: string | undefined) {
+    if (this._borderColor === value) return;
+    this._borderColor = value;
+    this.layout();
+  }
+
+  set paddingTop(value: number) {
+    if (this._paddingTop === value) return;
+    this._paddingTop = value;
+    this.layout();
+  }
+
+  set paddingRight(value: number) {
+    if (this._paddingRight === value) return;
+    this._paddingRight = value;
+    this.layout();
+  }
+
+  set paddingBottom(value: number) {
+    if (this._paddingBottom === value) return;
+    this._paddingBottom = value;
+    this.layout();
+  }
+
+  set paddingLeft(value: number) {
+    if (this._paddingLeft === value) return;
+    this._paddingLeft = value;
+    this.layout();
   }
 
   set inheritStyle(style: InheritStyle | undefined) {
@@ -285,12 +414,62 @@ export class LayoutBoxElement extends HTMLElement {
     this.layout();
   }
 
-  get inheritStyle() {
-    return this._inheritStyle;
+  get data(): BoxData {
+    return {
+      id: this.id || undefined,
+      type: this.type,
+      left: this.left,
+      top: this.top,
+      width: this.width,
+      height: this.height,
+      position: this.position,
+      zIndex: this.zIndex,
+      backgroundColor: this.backgroundColor,
+      borderTopWidth: this.borderTopWidth,
+      borderBottomWidth: this.borderBottomWidth,
+      borderLeftWidth: this.borderLeftWidth,
+      borderRightWidth: this.borderRightWidth,
+      borderStyle: this.borderStyle,
+      borderColor: this.borderColor,
+      paddingTop: this.paddingTop,
+      paddingRight: this.paddingRight,
+      paddingBottom: this.paddingBottom,
+      paddingLeft: this.paddingLeft,
+      children: this.items.map(e => e.data).filter(e => !!e),
+    };
   }
 
-  get model() {
-    return this._model;
+  get left() { return this._left; }
+  get top() { return this._top; }
+  get width() { return this._width; }
+  get height() { return this._height; }
+  get position() { return this._position; }
+  get zIndex() { return this._zIndex; }
+  get backgroundColor() { return this._backgroundColor; }
+  get borderColor() { return this._borderColor; }
+  get borderStyle() { return this._borderStyle; }
+  get borderTopWidth() { return this._borderTopWidth; }
+  get borderBottomWidth() { return this._borderBottomWidth; }
+  get borderLeftWidth() { return this._borderLeftWidth; }
+  get borderRightWidth() { return this._borderRightWidth; }
+  get paddingTop() { return this._paddingTop; }
+  get paddingRight() { return this._paddingRight; }
+  get paddingBottom() { return this._paddingBottom; }
+  get paddingLeft() { return this._paddingLeft; }
+
+  get inheritStyle() { return this._inheritStyle; }
+  get model() { return this._model; }
+
+  get parentElement() {
+    return super.parentElement as LayoutDocumentElement | LayoutBoxElement;
+  }
+
+  get parentModel() {
+    return this.parentElement?.model;
+  }
+
+  get items() {
+    return Array.from(this.querySelectorAll<LayoutBoxElement | LayoutParagraphElement | LayoutImageElement>(":scope > x-layout-box, :scope > x-layout-paragraph, :scope > x-layout-image"));
   }
 
   get textStyle(): TextStyle {
@@ -301,71 +480,63 @@ export class LayoutBoxElement extends HTMLElement {
     return this.parentModel?.paragraphStyle || {};
   }
 
-  get left() {
-    if (!this._data) return 0;
-    const { left, position } = this._data;
-    if (position !== 'absolute') {
-      return this.parentModel ? this.parentModel.columnCoords[left].x1 : 0;
+  get relLeft() {
+    if (this.position !== 'absolute') {
+      return this.parentModel ? this.parentModel.columnCoords[this.left].x1 : 0;
     } else {
-      return (this._inheritStyle?.paddingLeft || 0) + left;
+      return (this.inheritStyle?.paddingLeft || 0) + this.left;
     }
   }
 
-  get top() {
-    if (!this._data) return 0;
-    const { left, top, position } = this._data;
-    if (position !== 'absolute') {
+  get relTop() {
+    if (this.position !== 'absolute') {
       if (this.parentModel) {
         const { columnCoords, lineHeight } = this.parentModel;
-        return columnCoords[left].y1 + (lineHeight * top);
+        return columnCoords[this.left].y1 + (lineHeight * this.top);
       } else {
         return 0;
       }
     } else {
-      return (this._inheritStyle?.paddingTop || 0) + top;
+      return (this.inheritStyle?.paddingTop || 0) + this.top;
     }
   }
 
   get absLeft(): number {
-    if (this.parentElement.type === "document") return this.left;
-    return this.parentElement.absLeft + this.left;
+    if (this.parentElement.type === "document") return this.relLeft;
+    return this.parentElement.absLeft + this.relLeft;
   }
 
   get absTop(): number {
-    if (this.parentElement.type === "document") return this.top;
-    return this.parentElement.absTop + this.top;
+    if (this.parentElement.type === "document") return this.relTop;
+    return this.parentElement.absTop + this.relTop;
   }
 
-  get width() {
-    if (!this._data) return 0;
-    const { left, position, width } = this._data;
-    if (position !== 'absolute') {
+  get absWidth() {
+    if (this.position !== 'absolute') {
       if (this.parentModel) {
         const { columnCoords, columnCount } = this.parentModel;
-        const col = Math.min(columnCount, left + this._data.width) - 1;
-        return columnCoords[col].x2 - columnCoords[left].x1;
+        const col = Math.min(columnCount, this.left + this.width) - 1;
+        return columnCoords[col].x2 - columnCoords[this.left].x1;
       } else {
         return 0;
       }
     } else {
-      return width;
+      return this.width;
     }
   }
 
-  get height() {
-    if (!this._data) return 0;
-    const { height, position } = this._data;
+  get absHeight() {
     let calcHeight = 0;
-    if (position !== 'absolute') {
+    if (this.position !== 'absolute') {
       if (this.parentModel) {
         const { fontSize, lineHeight } = this.parentModel;
-        calcHeight = lineHeight * height - (lineHeight - fontSize);
+        calcHeight = lineHeight * this.height - (lineHeight - fontSize);
       }
     } else {
-      calcHeight = height;
+      calcHeight = this.height;
     }
     if (this.parentModel?.editableHeight) {
-      const top = this.parentElement.type !== 'document' ? this.top : 0;
+      const top = this.parentElement.type !== 'document' ? this.relTop : 0;
       calcHeight = Math.min(calcHeight, this.parentModel.editableHeight - (top - (this._inheritStyle?.paddingTop || 0)));
     }
     return calcHeight;
@@ -386,21 +557,19 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   get printPostData() {
-    if (!this._data) return [];
-
     const data: PrintPostData[] = [];
     const rect = this.getBoundingClientRect();
 
-    this._children.forEach(c => {
+    this.items.forEach(c => {
       data.push(...c.printPostData)
     });
     const colorManager = ColorManager.getInstance();
 
     data.push({
-      color: this._data?.borderColor ? colorManager.get(this._data.borderColor) : undefined,
+      color: this.borderColor ? colorManager.get(this.borderColor) : undefined,
       data: {
-        ...this._data,
-        borderStyle: this._data.borderStyle || DEFAULT_BORDER_STYLE,
+        ...this.data,
+        borderStyle: this.borderStyle || DEFAULT_BORDER_STYLE,
       },
       rect: {
         x: rect.x + window.scrollX,
@@ -412,14 +581,12 @@ export class LayoutBoxElement extends HTMLElement {
     return data;
   }
 
-  get type(): "box" { return 'box'; }
+  get type() { return 'box' as const; }
 
   get contentType(): 'image' | 'paragraph' | null {
     if (this.items.length !== 1) return null;
     if (this.items[0].type === 'box') return this.items[0].contentType;
     return this.items[0].type;
   }
-
-  get zIndex() { return this._data?.zIndex || 0; }
 }
 customElements.define('x-layout-box', LayoutBoxElement);
