@@ -1,26 +1,5 @@
 import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP, DEFAULT_PPM } from "@/define";
-import { DocumentData, ParagraphStyle, TextStyle } from "@/types";
-
-/**
- * 브라우저 DPI를 측정하여 픽셀/mm 변환 비율 계산.
- * 임시 100mm `<div>`를 DOM에 삽입 후 `offsetWidth`를 측정한다.
- */
-const _calcPxPerMM = () => {
-  const div = document.createElement('div');
-  div.style.width = '100mm';
-  div.style.height = '1px';
-  div.style.position = 'absolute';
-  div.style.top = '-10000px';
-  div.style.left = '-10000px';
-  div.style.visibility = 'hidden';
-
-  document.body.appendChild(div);
-
-  const pxWidth100mm = div.getBoundingClientRect().width;
-  document.body.removeChild(div);
-
-  return pxWidth100mm / 100;
-}
+import { DocumentData } from "@/types";
 
 /**
  * 컬럼의 좌표 영역을 나타내는 사각형.
@@ -57,243 +36,169 @@ export type Rect = {
  * console.log(model.lineHeight);    // number - 행 높이 (mm)
  * console.log(model.editableWidth); // number - 편집 가능 너비 (mm)
  */
-
-export type BoxModelCreateParams = {
-  paddingTop?: number;
-  paddingRight?: number;
-  paddingBottom?: number;
-  paddingLeft?: number;
-
-  columns?: number | number[];
-  gap?: number | number[];
-
-  width: number;
-  height: number;
-
-  paragraphStyle: ParagraphStyle;
-  textStyle: TextStyle;
-}
-
 export class BoxModel {
   private _columnCoords: Rect[];
   private _columnWidths: number[];
   private _gaps: number[];
   private _lineHeight: number;
+
   private _ppm: number;
 
-  private _paddingTop: number = 0;
-  private _paddingRight: number = 0;
-  private _paddingBottom: number = 0;
-  private _paddingLeft: number = 0;
-
-  private _columns: number | number[] = 1;
-  private _gap: number | number[] = 0;
-
-  private _width: number = 0;
-  private _height: number = 0;
-
-  private _paragraphStyle: ParagraphStyle = {};
-  private _textStyle: TextStyle = {};
+  private _data!: DocumentData;
 
   /**
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
    * @param data 문서 데이터
    */
-  public static create(params: BoxModelCreateParams) {
-    return new this(params);
+  public static create(data: DocumentData) {
+    return new this(data);
   }
 
-  private constructor(params: BoxModelCreateParams) {
+  private constructor(data: DocumentData) {
     this._columnCoords = [];
     this._columnWidths = [];
     this._gaps = [];
     this._lineHeight = 0;
     this._ppm = DEFAULT_PPM;
-    this._ppm = _calcPxPerMM();
 
-    this.data = params;
+    this._calcPxPerMM();
+    this.data = data;
+  }
+
+  /**
+   * 브라우저 DPI를 측정하여 픽셀/mm 변환 비율 계산.
+   * 임시 100mm `<div>`를 DOM에 삽입 후 `offsetWidth`를 측정한다.
+   */
+  private _calcPxPerMM() {
+    const div = document.createElement('div');
+    div.style.width = '100mm';
+    div.style.height = '1px';
+    div.style.position = 'absolute';
+    div.style.top = '-10000px';
+    div.style.left = '-10000px';
+    div.style.visibility = 'hidden';
+
+    document.body.appendChild(div);
+
+    const pxWidth100mm = div.getBoundingClientRect().width;
+    document.body.removeChild(div);
+
+    this._ppm = pxWidth100mm / 100;
   }
 
   /** 컬럼 좌표 및 행 높이 계산 */
   private _calcCoordUnit() {
     this._lineHeight = this.fontSize * this.lineGap;
 
+    const paddingTop = this._data.paddingTop || 0;
+    const paddingRight = this._data.paddingRight || 0;
+    const paddingBottom = this._data.paddingBottom || 0;
+    const paddingLeft = this._data.paddingLeft || 0;
+
     this._columnCoords = [];
     this._columnWidths = [];
 
-    if (typeof this._columns === 'number') {
-      const gaps = typeof this._gap === 'number' ? Array.from({ length: this._columns - 1 }).map(() => this._gap as number) : this._gap;
-      const editableWidth = this._width - this.paddingLeft - this.paddingRight - gaps.reduce((a, b) => a + b, 0);
-      const editableHeight = Math.floor((this._height - this.paddingTop - this.paddingBottom) / this.lineHeight) * this.lineHeight;
-      const columnWidth = editableWidth / this._columns;
+    if (typeof this._data.columns === 'number') {
+      const gaps = typeof this._data.gap === 'number' ? Array.from({ length: this._data.columns - 1 }).map(() => this._data.gap as number) : this._data.gap;
+      const editableWidth = this._data.width - paddingLeft - paddingRight - gaps.reduce((a, b) => a + b, 0);
+      const editableHeight = Math.floor((this._data.height - paddingTop - paddingBottom) / this._lineHeight) * this._lineHeight;
+      const columnWidth = editableWidth / this._data.columns;
 
-      for (let i = 0; i < this._columns; i++) {
-        const x1 = this._columnCoords.length > 0 ? this._columnCoords[this._columnCoords.length - 1].x2 + (gaps[i - 1] || 0) : this.paddingLeft;
-        const y1 = this.paddingTop;
+      for (let i = 0; i < this._data.columns; i++) {
+        const x1 = this._columnCoords.length > 0 ? this._columnCoords[this._columnCoords.length - 1].x2 + (gaps[i - 1] || 0) : paddingLeft;
+        const y1 = paddingTop;
         const x2 = x1 + columnWidth;
-        const y2 = this.paddingTop + editableHeight;
+        const y2 = paddingTop + editableHeight;
 
         this._columnCoords.push({ x1, y1, x2, y2 });
         this._columnWidths.push(columnWidth);
         if (i > 0) this._gaps.push(gaps[i - 1]);
       }
     } else {
-      const gaps = typeof this._gap === 'number' ? Array.from({ length: this._columns.length - 1 }).map(() => this._gap as number) : this._gap;
-      const editableHeight = this.height - this.paddingTop - this.paddingBottom;
+      const gaps = typeof this._data.gap === 'number' ? Array.from({ length: this._data.columns.length - 1 }).map(() => this._data.gap as number) : this._data.gap;
+      const editableHeight = this._data.height - paddingTop - paddingBottom;
 
-      this._columnWidths = [...this._columns];
+      this._columnWidths = [...this._data.columns];
       this._gaps = [...gaps];
 
-      this._columnWidths[0] = this._columnWidths[0] - this.paddingLeft;
-      this._columnWidths[this._columnWidths.length - 1] = this._columnWidths[this._columnWidths.length - 1] - this.paddingRight;
+      this._columnWidths[0] = this._columnWidths[0] - paddingLeft;
+      this._columnWidths[this._columnWidths.length - 1] = this._columnWidths[this._columnWidths.length - 1] - paddingRight;
 
       for (let i = 0; i < this._columnWidths.length; i++) {
-        const x1 = i > 0 ? this._columnCoords[this._columnCoords.length - 1].x2 + (gaps[i - 1] || 0) : this.paddingLeft;
-        const y1 = this.paddingTop;
+        const x1 = i > 0 ? this._columnCoords[this._columnCoords.length - 1].x2 + (gaps[i - 1] || 0) : paddingLeft;
+        const y1 = paddingTop;
         const x2 = x1 + this._columnWidths[i];
-        const y2 = this.paddingTop + editableHeight;
+        const y2 = paddingTop + editableHeight;
 
         this._columnCoords.push({ x1, y1, x2, y2 });
       }
     }
   }
 
-  set data(params: BoxModelCreateParams) {
-    if (params.paddingTop) this._paddingTop = params.paddingTop;
-    if (params.paddingRight) this._paddingRight = params.paddingRight;
-    if (params.paddingBottom) this._paddingBottom = params.paddingBottom;
-    if (params.paddingLeft) this._paddingLeft = params.paddingLeft;
+  set data(data: DocumentData) {
+    this._data = data;
 
-    if (params.columns) this._columns = params.columns;
-    if (params.gap) this._gap = params.gap;
-
-    this._width = params.width;
-    this._height = params.height;
-
-    this._paragraphStyle = { ...params.paragraphStyle };
-    this._textStyle = { ...params.textStyle };
-
-    this._calcCoordUnit();
-  }
-
-  set paddingTop(value: number) {
-    if (this._paddingTop === value) return;
-    this._paddingTop = value;
-    this._calcCoordUnit();
-  }
-
-  /** 상단 여백 (mm) */
-  get paddingTop() {
-    return this._paddingTop;
-  }
-
-  set paddingRight(value: number) {
-    if (this._paddingRight === value) return;
-    this._paddingRight = value;
-    this._calcCoordUnit();
-  }
-
-  /** 우측 여백 (mm) */
-  get paddingRight() {
-    return this._paddingRight;
-  }
-
-  set paddingBottom(value: number) {
-    if (this._paddingBottom === value) return;
-    this._paddingBottom = value;
-    this._calcCoordUnit();
-  }
-
-  /** 하단 여백 (mm) */
-  get paddingBottom() {
-    return this._paddingBottom;
-  }
-
-  set paddingLeft(value: number) {
-    if (this._paddingLeft === value) return;
-    this._paddingLeft = value;
-    this._calcCoordUnit();
-  }
-
-  /** 좌측 여백 (mm) */
-  get paddingLeft() {
-    return this._paddingLeft;
-  }
-
-  set width(value: number) {
-    if (this._width === value) return;
-    this._width = value;
-    this._calcCoordUnit();
-  }
-
-  /** 문서 너비 (mm) */
-  get width() {
-    return this._width;
-  }
-
-  set height(value: number) {
-    if (this._height === value) return;
-    this._height = value;
-    this._calcCoordUnit();
-  }
-
-  /** 문서 높이 (mm) */
-  get height() {
-    return this._height;
-  }
-
-  set textStyle(value: TextStyle) {
-    if (this._textStyle === value) return;
-    this._textStyle = { ...value };
     this._calcCoordUnit();
   }
 
   /** 문서의 텍스트 스타일 */
-  get textStyle() {
-    return this._textStyle;
-  }
-
-  set paragraphStyle(value: ParagraphStyle) {
-    if (this._paragraphStyle === value) return;
-    this._paragraphStyle = { ...value };
-    this._calcCoordUnit();
+  public get textStyle() {
+    return this._data.textStyle;
   }
 
   /** 문서의 문단 스타일 */
-  get paragraphStyle() {
-    return this._paragraphStyle;
+  public get paragraphStyle() {
+    return this._data.paragraphStyle;
   }
 
-  set columns(value: number | number[]) {
-    if (this._columns === value) return;
-    this._columns = value;
-    this._calcCoordUnit();
+  /** 문서 너비 (mm) */
+  public get width() {
+    return this._data.width;
   }
 
-  set gap(value: number | number[]) {
-    if (this._gap === value) return;
-    this._gap = value;
-    this._calcCoordUnit();
+  /** 문서 높이 (mm) */
+  public get height() {
+    return this._data.height;
   }
 
   /** 컬럼 개수 */
-  get columnCount() {
+  public get columnCount() {
     return this._columnWidths.length;
   }
 
   /** 각 컬럼의 좌표 영역 */
-  get columnCoords() {
+  public get columnCoords() {
     return this._columnCoords;
   }
 
   /** 각 컬럼의 너비 배열 (mm) */
-  get columnWidth() {
+  public get columnWidth() {
     return this._columnWidths;
   }
 
   /** 컬럼 간격 배열 (mm) */
   public get gaps() {
     return this._gaps;
+  }
+
+  /** 상단 여백 (mm) */
+  public get paddingTop() {
+    return this._data.paddingTop || 0;
+  }
+
+  /** 우측 여백 (mm) */
+  public get paddingRight() {
+    return this._data.paddingRight || 0;
+  }
+
+  /** 하단 여백 (mm) */
+  public get paddingBottom() {
+    return this._data.paddingBottom || 0;
+  }
+
+  /** 좌측 여백 (mm) */
+  public get paddingLeft() {
+    return this._data.paddingLeft || 0;
   }
 
   /** 행 높이 (mm) = fontSize × lineGap */

@@ -47,6 +47,15 @@ export class LayoutBoxElement extends HTMLElement {
     if (this._model) delete this._model;
   }
 
+  findById(id: string): ChildType | null {
+    if (this.id === id) return this;
+    for (let i = 0; i < this._children.length; i++) {
+      const findChild = this._children[i].findById(id);
+      if (findChild) return findChild;
+    }
+    return null;
+  }
+
   renderLayout() {
     if (!this.isConnected) return;
 
@@ -168,8 +177,6 @@ export class LayoutBoxElement extends HTMLElement {
         this._shadowRoot.appendChild(border);
       }
     }
-    this._shadowRoot.appendChild(document.createElement('slot'));
-
     if (this._data.children) {
       const childInheritStyle: InheritStyle = {
         ...(this.inheritStyle || {}),
@@ -192,7 +199,7 @@ export class LayoutBoxElement extends HTMLElement {
           boxEl.parentModel = this._model
 
           this._children.push(boxEl);
-          this.appendChild(boxEl);
+          this._shadowRoot.appendChild(boxEl);
         } else if (child.type === 'paragraph') {
           const paragraphEl = document.createElement('x-layout-paragraph');
           paragraphEl.id = child.id || genUUID();
@@ -206,7 +213,7 @@ export class LayoutBoxElement extends HTMLElement {
           };
 
           this._children.push(paragraphEl);
-          this.appendChild(paragraphEl);
+          this._shadowRoot.appendChild(paragraphEl);
         } else if (child.type === 'text') {
           const paragraphEl = document.createElement('x-layout-paragraph');
           paragraphEl.data = {
@@ -225,15 +232,18 @@ export class LayoutBoxElement extends HTMLElement {
           };
 
           this._children.push(paragraphEl);
-          this.appendChild(paragraphEl);
+          this._shadowRoot.appendChild(paragraphEl);
         } else if (child.type === 'image') {
           const imageEl = document.createElement('x-layout-image');
           imageEl.id = child.id || genUUID();
           imageEl.data = child;
+          imageEl.document = this._doc;
           imageEl.inheritStyle = childInheritStyle;
+          imageEl.parentElement = this;
+          imageEl.parentModel = this._model;
 
           this._children.push(imageEl);
-          this.appendChild(imageEl);
+          this._shadowRoot.appendChild(imageEl);
         }
       }
     }
@@ -242,17 +252,13 @@ export class LayoutBoxElement extends HTMLElement {
   async renderImage() {
     if (!this.isConnected) return;
     for (let i = 0; i < this._children.length; i++) {
-      const child = this._children[i] as any;
-      if (child.renderImage) await child.renderImage();
+      await this._children[i].renderImage();
     }
   }
 
   renderText() {
     if (!this.isConnected) return;
-    for (let i = 0; i < this._children.length; i++) {
-      const child = this._children[i] as any;
-      if (child.renderText) child.renderText();
-    }
+    this._children.forEach(c => c.renderText());
   }
 
   set data(data: BoxData | undefined) {
@@ -386,7 +392,7 @@ export class LayoutBoxElement extends HTMLElement {
       list.push(...this.parentElement.overlayElements);
     }
 
-    let overlay = Array.from(this.parentElement.children).filter(i => i.type === 'box' && i !== this && i.zIndex > this.zIndex) as LayoutBoxElement[];
+    let overlay = this.parentElement.items.filter(i => i.type === 'box' && i !== this && i.zIndex > this.zIndex) as LayoutBoxElement[];
     overlay = overlay.filter(i => checkOverlap(i, this));
 
     list.push(...overlay);
@@ -429,7 +435,5 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   get zIndex() { return this._data?.zIndex || 0; }
-
-  get model() { return this._model; }
 }
 customElements.define('x-layout-box', LayoutBoxElement);

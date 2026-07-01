@@ -2,8 +2,6 @@ import { BoxModel } from "@/model";
 import { InheritStyle, ImageData, PrintPostData } from "@/types";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutDocumentElement } from "./document.element";
-import { DEFAULT_IMAGE_DPI } from "@/define";
-import { genUUID } from "@/utils";
 
 /**
  * 이미지 크롭 렌더링 요소. `<x-layout-image>` 커스텀 엘리먼트.
@@ -13,62 +11,54 @@ import { genUUID } from "@/utils";
  * `dpi`를 기준으로 mm 단위로 변환하여 표시한다.
  */
 export class LayoutImageElement extends HTMLElement {
+  private _parentModel?: BoxModel;
   private _inheritStyle?: InheritStyle;
 
+  private _data?: ImageData;
+
+  private _doc!: LayoutDocumentElement;
+
   private _canvas?: HTMLCanvasElement;
+  private _parentElement!: LayoutBoxElement;
   private _shadowRoot: ShadowRoot;
 
-  private _styleRule?: CSSStyleRule;
+  private _cropImage() {
+    return new Promise<boolean>((r) => {
+      if (!this._data || !this._canvas) r(false);
 
-  // Attributes
-  private _x: number = 0;
-  private _y: number = 0;
-  private _width: number = 0;
-  private _height: number = 0;
-  private _dpi: number = DEFAULT_IMAGE_DPI;
-  private _url: string | undefined;
-  private _zIndex: number = 0;
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      img.onload = () => {
+        const dpi = this._data!.dpi;
+        const ppm = dpi / 25.4;
 
-  private async _cropImage() {
-    if (!this.isConnected || !this.canvas) return;
+        const sx = Math.round(this._data!.x * ppm);
+        const sy = Math.round(this._data!.y * ppm);
+        const sWidth = Math.round(this._data!.width * ppm);
+        const sHeight = Math.round(this._data!.height * ppm);
 
-    this.canvas.width = this.canvas.width;
-    this.canvas.height = this.canvas.height;
+        this._canvas!.width = sWidth;
+        this._canvas!.height = sHeight;
 
-    const ctx = this.canvas.getContext('2d')!;
-    if (this.url) {
-      await (new Promise<boolean>((r) => {
-        const img = new Image();
-        img.crossOrigin = 'Anonymous';
-        img.onload = () => {
-          const ppm = this.dpi / 25.4;
-
-          const sx = Math.round(this.x * ppm);
-          const sy = Math.round(this.y * ppm);
-          const sWidth = Math.round(this.width * ppm);
-          const sHeight = Math.round(this.height * ppm);
-
-          this.canvas!.width = sWidth;
-          this.canvas!.height = sHeight;
-
-          try {
-            ctx.drawImage(
-              img,
-              sx, sy, sWidth, sHeight,
-              0, 0, sWidth, sHeight
-            );
-            r(true);
-          } catch (_) {
-            r(false);
-          }
-        };
-        img.onerror = (_) => r(false);
-        img.src = this.url!;
-      }));
-    } else {
-      ctx.fillStyle = 'transparent';
-      ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    }
+        const ctx = this._canvas!.getContext('2d')!;
+        try {
+          ctx.drawImage(
+            img,
+            sx, sy, sWidth, sHeight,
+            0, 0, sWidth, sHeight
+          );
+          r(true);
+        } catch (_) {
+          r(false);
+        }
+      };
+      img.onerror = (_) => r(false);
+      if (this._data!.base64Data) {
+        img.src = `data:image/png;base64,${this._data!.base64Data}`;
+      } else {
+        img.src = this._data!.url;
+      }
+    });
   }
 
   constructor() {
@@ -77,246 +67,139 @@ export class LayoutImageElement extends HTMLElement {
     this._shadowRoot = this.attachShadow({ mode: "open" });
   }
 
-  static get observedAttributes() {
-    return ['id', 'x', 'y', 'width', 'height', 'dpi', 'url', 'z-index'];
-  }
-
-  set x(value: number) {
-    if (this._x === value) return;
-    this._x = value;
-    this._cropImage();
-  }
-
-  set y(value: number) {
-    if (this._y === value) return;
-    this._y = value;
-    this._cropImage();
-  }
-
-  set width(value: number) {
-    if (this._width === value) return;
-    this._width = value;
-    this._cropImage();
-  }
-
-  set height(value: number) {
-    if (this._height === value) return;
-    this._height = value;
-    this._cropImage();
-  }
-
-  set dpi(value: number) {
-    if (this._dpi === value) return;
-    this._dpi = value;
-    this._cropImage();
-  }
-
-  set url(value: string | undefined) {
-    if (this._url === value) return;
-    this._url = value;
-    this._cropImage();
-  }
-
-  set zIndex(value: number) {
-    if (this._zIndex === value) return;
-    this._zIndex = value;
-    this.render();
-  }
-
-  get x() {
-    return this._x;
-  }
-
-  get y() {
-    return this._y;
-  }
-
-  get width() {
-    return this._width;
-  }
-
-  get height() {
-    return this._height;
-  }
-
-  get dpi() {
-    return this._dpi;
-  }
-
-  get url() {
-    return this._url;
-  }
-
-  get zIndex() {
-    return this._zIndex;
-  }
-
-  get canvas(): HTMLCanvasElement | undefined {
-    return this._canvas;
-  }
-
-  get type() {
-    return 'image' as const;
-  }
-
-  attributeChangedCallback(name: string, oldValue: string, newValue: string) {
-    if (oldValue === newValue) return;
-    switch (name) {
-      case 'id':
-        this.id = newValue;
-        break;
-      case 'x':
-        this.x = Number(newValue);
-        break;
-      case 'y':
-        this.y = Number(newValue);
-        break;
-      case 'width':
-        this.width = Number(newValue);
-        break;
-      case 'height':
-        this.height = Number(newValue);
-        break;
-      case 'dpi':
-        this.dpi = Number(newValue);
-        break;
-      case 'url':
-        this.url = newValue;
-        break;
-      case 'z-index':
-        this.zIndex = Number(newValue);
-        break;
-    }
-  }
-
   connectedCallback() {
-    if (!this.id) this.id = genUUID();
+    this.renderLayout();
   }
 
   disconnectedCallback() { }
 
-  async render() {
-    if (!this.isConnected) return false;
-    if (!this.parentModel || !this.inheritStyle) return false;
+  findById(id: string) {
+    if (this.id === id) return this;
+    return null;
+  }
 
-    if (!this._canvas || !this._styleRule) {
-      const styleEl = document.createElement("style");
-      this._shadowRoot.innerHTML = '';
-      this._shadowRoot.appendChild(styleEl);
+  renderLayout() {
+    if (!this.isConnected) return;
 
-      if (!styleEl.sheet) throw new Error("LayoutImageElement.styleSheet not ready");
-      styleEl.sheet.insertRule(`@media print { :host { visibility: hidden; } }`);
+    this._shadowRoot.innerHTML = '';
+    if (!this._data || !this._parentModel || !this._inheritStyle) return;
 
-      const ruleIdx = styleEl.sheet.insertRule(":host {}");
-      this._styleRule = styleEl.sheet.cssRules[ruleIdx] as CSSStyleRule;
+    const lineHeight = this._parentModel.lineHeight;
+    const paddingTop = this._inheritStyle.paddingTop || 0;
 
-      this._canvas = document.createElement('canvas');
-      this._canvas.style.backgroundColor = 'transparent';
-      this._canvas.style.height = "100%";
-      this._canvas.style.width = "100%";
-
-      this._shadowRoot.appendChild(this._canvas);
-    }
-
-    const lineHeight = this.parentModel.lineHeight;
-    const paddingTop = this.inheritStyle.paddingTop || 0;
-
-    Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
-      this._styleRule.style,
-      {
+    const styleEl = document.createElement("style");
+    this._shadowRoot.appendChild(styleEl);
+    if (styleEl.sheet) {
+      styleEl.sheet.insertRule(":host {}", 0);
+      const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
+      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(rule.style, {
         display: 'flex',
-        height: `${this.layoutHeight}mm`,
-        left: `${this.layoutLeft}mm`,
+        height: `${this.height}mm`,
+        left: `${this.left}mm`,
         position: 'absolute',
         top: `${Math.ceil(paddingTop / lineHeight) * lineHeight}mm`,
-        width: `${this.layoutWidth}mm`,
+        width: `${this.width}mm`,
         zIndex: `${this.zIndex + 100}`,
-      }
-    );
+      });
+      styleEl.sheet.insertRule(`@media print { :host { visibility: hidden; } }`, 1);
+    }
+    this._canvas = document.createElement('canvas');
+    this._canvas.style.backgroundColor = 'transparent';
+    this._canvas.style.height = "100%";
+    this._canvas.style.width = "100%";
+
+    this._shadowRoot.appendChild(this._canvas);
+  }
+
+  async renderImage() {
+    if (!this.isConnected || !this._data || !this._canvas) return;
+    this._canvas.width = this._canvas.width;
     await this._cropImage();
   }
 
-  set data(data: ImageData) {
-    this.setAttribute('x', String(data.x));
-    this.setAttribute('y', String(data.y));
-    this.setAttribute('width', String(data.width));
-    this.setAttribute('height', String(data.height));
-    this.setAttribute('dpi', String(data.dpi));
-    this.setAttribute('url', String(data.url));
-    this.setAttribute('z-index', String(data.zIndex));
+  renderText() {
+    if (!this.isConnected) return;
   }
 
-  get data(): ImageData {
-    return {
-      type: 'image',
-      x: this._x,
-      y: this._y,
-      width: this._width,
-      height: this._height,
-      dpi: this._dpi,
-      url: this._url,
-      zIndex: this._zIndex
-    };
+  set data(data: ImageData | undefined) {
+    this._data = data;
+    this.renderLayout();
   }
 
-  get parentElement(): LayoutBoxElement {
-    if (!this.isConnected || !super.parentElement) throw new Error('Not connected to DOM');
-    if (!(super.parentElement instanceof LayoutBoxElement)) throw new Error('Not connected to LayoutBoxElement');
-    return super.parentElement;
+  get data() {
+    return this._data;
   }
 
-  get parentModel(): BoxModel | undefined {
-    return this.parentElement.model;
+  set document(doc: LayoutDocumentElement) {
+    this._doc = doc;
   }
 
-  get document(): LayoutDocumentElement {
-    return this.parentElement.document;
+  get document() {
+    return this._doc;
+  }
+
+  set parentElement(el: LayoutBoxElement) {
+    this._parentElement = el;
+  }
+
+  get parentElement() {
+    return this._parentElement;
+  }
+
+  set parentModel(model: BoxModel | undefined) {
+    this._parentModel = model;
+    this.renderLayout();
+  }
+
+  get parentModel() {
+    return this._parentModel;
   }
 
   set inheritStyle(style: InheritStyle | undefined) {
     this._inheritStyle = style;
-    this.render();
+    this.renderLayout();
   }
 
   get inheritStyle() {
     return this._inheritStyle;
   }
 
+  get left() {
+    return this._inheritStyle?.paddingLeft || 0;
+  }
+
+  get top() {
+    if (!this._inheritStyle || !this._parentModel) return 0;
+    return Math.ceil((this._inheritStyle.paddingTop || 0) / this._parentModel.lineHeight) * this._parentModel.lineHeight;
+  }
+
   get absLeft(): number {
-    return this.parentElement.absLeft + this.layoutLeft;
+    return this._parentElement.absLeft + this.left;
   }
 
   get absTop(): number {
-    return this.parentElement.absTop + this.layoutTop;
+    return this._parentElement.absTop + this.top;
   }
 
-  get layoutLeft() {
-    return this.inheritStyle?.paddingLeft || 0;
+  get width() {
+    if (!this._inheritStyle) return 0;
+    return this._inheritStyle.parentWidth - (this._inheritStyle.paddingLeft || 0) - (this._inheritStyle.paddingRight || 0);
   }
 
-  get layoutTop() {
-    if (!this.inheritStyle || !this.parentModel) return 0;
-    return Math.ceil((this.inheritStyle.paddingTop || 0) / this.parentModel.lineHeight) * this.parentModel.lineHeight;
-  }
-
-  get layoutWidth() {
-    if (!this.inheritStyle) return 0;
-    return this.inheritStyle.parentWidth - (this.inheritStyle.paddingLeft || 0) - (this.inheritStyle.paddingRight || 0);
-  }
-
-  get layoutHeight() {
-    if (!this.inheritStyle) return 0;
-    return this.inheritStyle.parentHeight - (this.inheritStyle.paddingTop || 0) - (this.inheritStyle.paddingBottom || 0);
+  get height() {
+    if (!this._inheritStyle) return 0;
+    return this._inheritStyle.parentHeight;
   }
 
   get overlayElements() {
-    return this.parentElement.overlayElements;
+    return this._parentElement.overlayElements;
   }
 
   get printPostData(): PrintPostData[] {
+    if (!this._data) return [];
     const rect = this.getBoundingClientRect();
     return [{
-      data: this.data,
+      data: this._data,
       rect: {
         x: rect.left + window.scrollX,
         y: rect.top + window.scrollY,
@@ -325,5 +208,11 @@ export class LayoutImageElement extends HTMLElement {
       }
     }];
   }
+
+  get canvas() { return this._canvas; }
+
+  get type(): "image" { return 'image'; }
+
+  get zIndex() { return this._data?.zIndex || 0; }
 }
 customElements.define("x-layout-image", LayoutImageElement);
