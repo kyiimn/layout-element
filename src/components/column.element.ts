@@ -1,4 +1,3 @@
-import { ParagraphModel } from "@/model";
 import { LayoutParagraphElement } from "./paragraph.element";
 
 /**
@@ -8,10 +7,7 @@ import { LayoutParagraphElement } from "./paragraph.element";
  * `LayoutParagraphElement.renderText()`에서 동적으로 생성된다.
  */
 export class LayoutColumnElement extends HTMLElement {
-  private _model?: ParagraphModel;
   private _index?: number;
-
-  private _parentElement!: LayoutParagraphElement;
   private _shadowRoot: ShadowRoot;
 
   constructor() {
@@ -25,8 +21,7 @@ export class LayoutColumnElement extends HTMLElement {
     this.renderText();
   }
 
-  disconnectedCallback() {
-  }
+  disconnectedCallback() { }
 
   attributeChangedCallback(name: string, oldval: string, newval: string) {
     if (name === 'index' && oldval !== newval) {
@@ -38,10 +33,10 @@ export class LayoutColumnElement extends HTMLElement {
     if (!this.isConnected) return;
 
     this._shadowRoot.innerHTML = '';
-    if (!this._model || this._index === undefined) return;
+    if (!this.model || this._index === undefined) return;
 
-    const lines = this._model.columnContents[this._index] || [];
-    const colStyle = this._model.genColumnStyle(this._index);
+    const lines = this.model.columnContents[this._index] || [];
+    const colStyle = this.model.genColumnStyle(this._index);
 
     const styleEl = document.createElement('style');
     this._shadowRoot.appendChild(styleEl);
@@ -55,7 +50,7 @@ export class LayoutColumnElement extends HTMLElement {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const { endOfBlock, textBlockStyle } = line;
-      const curLineStyle = this._model.genLineStyle(textBlockStyle) || {};
+      const curLineStyle = this.model.genLineStyle(textBlockStyle) || {};
       let { content } = line;
 
       let justifyContent = (curLineStyle?.justifyContent === 'space-between' && endOfBlock) ? 'flex-start' : undefined;
@@ -83,7 +78,7 @@ export class LayoutColumnElement extends HTMLElement {
       for (let j = 0; j < content.length; j++) {
         const char = content[j];
         const charEl = document.createElement('span');
-        const charStyle = this._model.genCharStyle(char);
+        const charStyle = this.model.genCharStyle(char);
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, charStyle);
         charEl.innerText = char;
         lineEl.appendChild(charEl);
@@ -91,20 +86,18 @@ export class LayoutColumnElement extends HTMLElement {
     }
   }
 
-  static get observedAttributes() {
-    return ['index'];
-  }
+  static get observedAttributes() { return ['index']; }
 
-  set parentElement(el: LayoutParagraphElement) {
-    this._parentElement = el;
-  }
+  get index() { return this._index; }
+  get zIndex() { return 0; }
+  get type() { return 'column' as const; }
 
   get parentElement() {
-    return this._parentElement;
+    return super.parentElement as LayoutParagraphElement;
   }
 
   get left() {
-    const width = this._model?.columnWidths.slice(0, this._index).reduce((a, b) => a + b, 0) || 0;
+    const width = this.model?.columnWidths.slice(0, this._index).reduce((a, b) => a + b, 0) || 0;
     const gap = this.model?.gaps.slice(0, this._index).reduce((a, b) => a + b, 0) || 0;
     return gap + width;
   }
@@ -112,35 +105,20 @@ export class LayoutColumnElement extends HTMLElement {
   get top() { return 0; }
 
   get absLeft(): number {
-    return this._parentElement.absLeft + this.left;
+    return this.parentElement.absLeft + this.left;
   }
 
   get absTop(): number {
-    return this._parentElement.absTop;
-  }
-
-  set model(model: ParagraphModel | undefined) {
-    this._model = model;
-    this.renderText();
+    return this.parentElement.absTop;
   }
 
   get model() {
-    return this._model;
+    return this.parentElement.model;
   }
 
   set index(index: number | undefined) {
     this._index = index;
     this.renderText();
   }
-
-  get index() {
-    return this._index;
-  }
-
-  get zIndex() {
-    return 0;
-  }
-
-  get type(): "column" { return 'column'; }
 }
 customElements.define('x-layout-column', LayoutColumnElement);

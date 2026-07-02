@@ -81,7 +81,7 @@ export class LayoutImageElement extends HTMLElement {
     );
   }
 
-  async renderImage() {
+  async render() {
     if (!this.isConnected || !this.canvas) return;
     this.canvas.width = this.canvas.width;
 
@@ -122,10 +122,6 @@ export class LayoutImageElement extends HTMLElement {
     }
   }
 
-  renderText() {
-    if (!this.isConnected) return;
-  }
-
   set data(data: ImageData) {
     if (data.id !== undefined) this.id = data.id;
     if (data.zIndex !== undefined) this._zIndex = data.zIndex;
@@ -143,37 +139,37 @@ export class LayoutImageElement extends HTMLElement {
   set x(value: number) {
     if (this._x === value) return;
     this._x = value;
-    this.renderImage();
+    this.render();
   }
 
   set y(value: number) {
     if (this._y === value) return;
     this._y = value;
-    this.renderImage();
+    this.render();
   }
 
   set width(value: number) {
     if (this._width === value) return;
     this._width = value;
-    this.renderImage();
+    this.render();
   }
 
   set height(value: number) {
     if (this._height === value) return;
     this._height = value;
-    this.renderImage();
+    this.render();
   }
 
   set dpi(value: number) {
     if (this._dpi === value) return;
     this._dpi = value;
-    this.renderImage();
+    this.render();
   }
 
   set url(value: string | undefined) {
     if (this._url === value) return;
     this._url = value;
-    this.renderImage();
+    this.render();
   }
 
   set zIndex(value: number) {

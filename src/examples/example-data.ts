@@ -67,7 +67,7 @@ const block2: BoxData = {
     children: [
       {
         type: 'text',
-        content: '제목제목제목',
+        content: '제목제목제목1',
         textStyle: { fontSize: 12 },
         paragraphStyle: { textAlign: 'center', verticalAlign: 'center' }
       }]

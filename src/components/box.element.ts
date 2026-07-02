@@ -203,16 +203,12 @@ export class LayoutBoxElement extends HTMLElement {
     });
   }
 
-  async renderImage() {
+  async render() {
     if (!this.isConnected) return;
-    for (let i = 0; i < this.items.length; i++) {
-      await this.items[i].renderImage();
+    const sortedItems = [...this.items].sort((a, b) => a.zIndex - b.zIndex).reverse();
+    for (let i = 0; i < sortedItems.length; i++) {
+      await sortedItems[i].render();
     }
-  }
-
-  renderText() {
-    if (!this.isConnected) return;
-    this.items.forEach(c => c.renderText());
   }
 
   appendChild<T extends Node>(node: T) {

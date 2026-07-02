@@ -2,7 +2,6 @@ import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/define";
 import type { LayoutParagraphElement } from "@/components";
 import {
   InheritStyle,
-  ParagraphData,
   TextBlockData,
   TextLineData,
   TextBlockStyle,

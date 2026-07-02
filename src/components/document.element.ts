@@ -53,11 +53,7 @@ export class LayoutDocumentElement extends HTMLElement {
     if (this._isPrint) return;
 
     this.layout();
-
-    (async () => {
-      await this.renderImage();
-      this.renderText();
-    })();
+    this.render();
   }
 
   disconnectedCallback() { }
@@ -144,19 +140,12 @@ export class LayoutDocumentElement extends HTMLElement {
     return this;
   }
 
-  /** 2단계: 이미지 렌더링 (비동기) */
-  async renderImage() {
+  async render() {
     if (!this.isConnected) return null;
-    for (let i = 0; i < this.items.length; i++) {
-      await this.items[i].renderImage()
+    const sortedItems = [...this.items].sort((a, b) => a.zIndex - b.zIndex).reverse();
+    for (let i = 0; i < sortedItems.length; i++) {
+      await sortedItems[i].render()
     }
-    return this;
-  }
-
-  /** 3단계: 텍스트 렌더링 (동기) */
-  renderText() {
-    if (!this.isConnected) return null;
-    this.items.forEach(c => c.renderText());
     return this;
   }
 
@@ -197,12 +186,7 @@ export class LayoutDocumentElement extends HTMLElement {
       boxEl.data = child;
       this.appendChild(boxEl);
     }
-    if (!this._isPrint) {
-      (async () => {
-        await this.renderImage();
-        this.renderText();
-      })();
-    }
+    if (!this._isPrint) this.render();
   }
 
   set width(value: number) {
