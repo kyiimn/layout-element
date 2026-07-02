@@ -242,7 +242,7 @@ export class ParagraphModel {
             const freeRegions = this._computeFreeRegions(lineWidth, overlapParts);
             const parts: TextPartData[] = freeRegions.map((region, i) => ({
               content: [],
-              left: i === 0 ? 0 : (region.start - freeRegions[i - 1].end) / ppm,
+              left: i === 0 ? region.start / ppm : (region.start - freeRegions[i - 1].end) / ppm,
               width: (region.end - region.start) / ppm,
             }));
 
@@ -251,7 +251,8 @@ export class ParagraphModel {
               0,
             ));
             partEls.forEach((partEl, i) => {
-              if (i > 0) partEl.style.marginLeft = `${freeRegions[i].start - freeRegions[i - 1].end}px`;
+              const gapPx = i === 0 ? freeRegions[0].start : freeRegions[i].start - freeRegions[i - 1].end;
+              if (gapPx > 0) partEl.style.marginLeft = `${gapPx}px`;
               lineEl!.appendChild(partEl);
             });
 
@@ -344,7 +345,7 @@ export class ParagraphModel {
                 const freeRegions = this._computeFreeRegions(lineWidth, overlapParts);
                 const parts: TextPartData[] = freeRegions.map((region, i) => ({
                   content: [],
-                  left: i === 0 ? 0 : (region.start - freeRegions[i - 1].end) / ppm,
+                  left: i === 0 ? region.start / ppm : (region.start - freeRegions[i - 1].end) / ppm,
                   width: (region.end - region.start) / ppm,
                 }));
 
@@ -353,7 +354,8 @@ export class ParagraphModel {
                   0,
                 ));
                 partEls.forEach((partEl, i) => {
-                  if (i > 0) partEl.style.marginLeft = `${freeRegions[i].start - freeRegions[i - 1].end}px`;
+                  const gapPx = i === 0 ? freeRegions[0].start : freeRegions[i].start - freeRegions[i - 1].end;
+                  if (gapPx > 0) partEl.style.marginLeft = `${gapPx}px`;
                   lineEl!.appendChild(partEl);
                 });
 

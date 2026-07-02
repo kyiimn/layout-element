@@ -81,7 +81,7 @@ const block2: BoxData = {
     ]
   }, {
     type: 'box',
-    left: 10, top: 29,
+    left: 40, top: 29,
     width: 55,
     height: 35,
     position: 'absolute',
