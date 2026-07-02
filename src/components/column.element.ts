@@ -51,37 +51,50 @@ export class LayoutColumnElement extends HTMLElement {
       const line = lines[i];
       const { endOfBlock, textBlockStyle } = line;
       const curLineStyle = this.model.genLineStyle(textBlockStyle) || {};
-      let { content } = line;
+      const curPartStyle = this.model.genPartStyle(textBlockStyle) || {};
 
-      let justifyContent = (curLineStyle?.justifyContent === 'space-between' && endOfBlock) ? 'flex-start' : undefined;
-      switch (textBlockStyle?.textAlign) {
-        case 'center': justifyContent = 'center'; break;
-        case 'right': justifyContent = 'flex-end'; break;
-        default: break;
-      }
-      while ([' '].includes(content[0])) {
-        content = content.slice(1);
-      }
-      while ([' '].includes(content[content.length - 1])) {
-        content = content.slice(0, content.length - 1);
-      }
       const lineEl = document.createElement('div');
-      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(lineEl.style, {
-        ...curLineStyle,
-        width: `calc(100% - ${line.left + line.right}mm)`,
-        maxWidth: `calc(100% - ${line.left + line.right}mm)`,
-        marginLeft: `${line.left}mm`,
-        justifyContent: justifyContent || curLineStyle.justifyContent
-      });
+      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(lineEl.style, curLineStyle);
       this._shadowRoot.appendChild(lineEl);
 
-      for (let j = 0; j < content.length; j++) {
-        const char = content[j];
-        const charEl = document.createElement('span');
-        const charStyle = this.model.genCharStyle(char);
-        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, charStyle);
-        charEl.innerText = char;
-        lineEl.appendChild(charEl);
+      for (let p = 0; p < line.parts.length; p++) {
+        const part = line.parts[p];
+        let { content } = part;
+
+        let partJustify = curPartStyle.justifyContent;
+        if (p === line.parts.length - 1 && endOfBlock && partJustify === 'space-between') {
+          partJustify = 'flex-start';
+        }
+        switch (textBlockStyle?.textAlign) {
+          case 'center': partJustify = 'center'; break;
+          case 'right': partJustify = 'flex-end'; break;
+          default: break;
+        }
+
+        if (p === 0) {
+          while (content.length > 0 && content[0] === ' ') content = content.slice(1);
+        }
+        if (p === line.parts.length - 1) {
+          while (content.length > 0 && content[content.length - 1] === ' ') content = content.slice(0, content.length - 1);
+        }
+
+        const partEl = document.createElement('div');
+        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(partEl.style, {
+          ...curPartStyle,
+          width: `${part.width}mm`,
+          marginLeft: `${part.left}mm`,
+          justifyContent: partJustify || curPartStyle.justifyContent,
+        });
+        lineEl.appendChild(partEl);
+
+        for (let j = 0; j < content.length; j++) {
+          const char = content[j];
+          const charEl = document.createElement('span');
+          const charStyle = this.model.genCharStyle(char);
+          Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, charStyle);
+          charEl.innerText = char;
+          partEl.appendChild(charEl);
+        }
       }
     }
   }

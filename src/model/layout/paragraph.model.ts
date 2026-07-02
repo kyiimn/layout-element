@@ -3,10 +3,11 @@ import type { LayoutParagraphElement } from "@/components";
 import {
   InheritStyle,
   TextBlockData,
-  TextLineData,
   TextBlockStyle,
   ParagraphStyle,
   TextStyle,
+  TextPartData,
+  TextLineData,
   OverlapParts
 } from "@/types";
 import { getOverlapSizePX, mergeOverlapParts } from "@/utils";
@@ -25,6 +26,8 @@ type ParagraphModelOptions = {
   rootNode: Node;
 };
 
+type FreeRegion = { start: number; end: number };
+
 /**
  * 텍스트 래핑과 다중 컬럼 렌더링을 수행하는 모델.
  *
@@ -34,7 +37,7 @@ type ParagraphModelOptions = {
  * 주요 기능:
  * - 텍스트 래핑 (`preTextWrap()`): 문자 단위로 줄바꿈 처리
  * - 오버랩 회피: 이미지 등 다른 요소와 겹치는 영역 계산
- * - 스타일 적용: `genLineStyle()`, `genCharStyle()`으로 CSS 스타일 생성
+ * - 스타일 적용: `genLineStyle()`, `genPartStyle()`, `genCharStyle()`으로 CSS 스타일 생성
  *
  * 렌더링 파이프라인:
  * 1. `_initLayout()` - fontSize, lineGap, lineHeight 초기화
@@ -92,28 +95,70 @@ export class ParagraphModel {
     const lineStyle = this.genLineStyle(textBlockStyle);
     Object.assign(lineEl.style, {
       ...lineStyle,
-      flexWrap: 'wrap',
-      justifyContent: 'flex-start',
+      flexWrap: 'nowrap',
     });
     return lineEl;
+  }
+
+  /** 파트 요소 생성 (줄 내부 수평 세그먼트) */
+  private _createPartElement(widthPx: number, marginLeftPx: number) {
+    const partEl = document.createElement('div');
+    Object.assign(partEl.style, {
+      display: 'inline-flex',
+      flexDirection: 'row',
+      flexWrap: 'nowrap',
+      overflow: 'hidden',
+      width: `${widthPx}px`,
+      marginLeft: `${marginLeftPx}px`,
+      alignItems: 'baseline',
+    });
+    return partEl;
+  }
+
+  /**
+   * 오버랩 영역의 여집합으로부터 텍스트가 배치될 수 있는 자유 영역을 계산한다.
+   */
+  private _computeFreeRegions(lineWidth: number, overlapParts: OverlapParts[]): FreeRegion[] {
+    if (overlapParts.length === 0) {
+      return [{ start: 0, end: lineWidth }];
+    }
+
+    const freeRegions: FreeRegion[] = [];
+    let prevEnd = 0;
+
+    for (const overlap of overlapParts) {
+      if (overlap.x1 > prevEnd) {
+        freeRegions.push({ start: prevEnd, end: overlap.x1 });
+      }
+      prevEnd = Math.max(prevEnd, overlap.x2);
+    }
+
+    if (prevEnd < lineWidth) {
+      freeRegions.push({ start: prevEnd, end: lineWidth });
+    }
+
+    return freeRegions;
   }
 
   /**
    * 오버랩 요소(이미지 등)와의 겹침 계산.
    * `getBoundingClientRect()`로 실제 렌더링된 크기를 측정한다.
    */
-  private _applyOverlap(lineEl: HTMLElement) {
+  private _applyOverlap(lineEl: HTMLElement): { cover: boolean; overlapParts: OverlapParts[] } {
     const overlapEls = this._paragraphElement.overlayElements;
-    let cover = false, parts: OverlapParts[] = [];
+    let cover = false;
+    let parts: OverlapParts[] = [];
+
     overlapEls.forEach(el => {
       const type = getOverlapSizePX(lineEl, el);
       if (type.direction === 'COVERS') cover = true;
       if (type.direction === 'PART') parts = parts.concat(type.parts);
     });
-    if (cover) lineEl.style.width = `0`;
+
+    if (cover) lineEl.style.width = '0';
     lineEl.style.maxWidth = lineEl.style.width;
 
-    return mergeOverlapParts(parts);
+    return { cover, overlapParts: mergeOverlapParts(parts) };
   }
 
   /**
@@ -145,6 +190,8 @@ export class ParagraphModel {
     for (let curColumn = 0; curColumn < this.columnCount; curColumn++) {
       let columnContent: TextLineData[] = [];
       let lineEl: HTMLDivElement | null = null;
+      let partEls: HTMLDivElement[] = [];
+      let currentPartIdx = 0;
 
       let idxBlock = beforeIdxBlock;
       let idxContentOfBlock = beforeIdxContentOfBlock;
@@ -155,69 +202,196 @@ export class ParagraphModel {
       vColumnEl.parentElement = this._paragraphElement;
       this._rootNode.appendChild(vColumnEl);
 
+      const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColumn];
+
       for (; idxBlock < this.contents.length; idxBlock++) {
         const block = this.contents[idxBlock];
         if (idxBlock !== beforeIdxBlock) idxContentOfBlock = 0;
 
         if (!lineEl || idxContentOfBlock === 0) {
-          lineEl = this._createLineElement(block.textBlockStyle);
-          vColumnEl.appendChild(lineEl);
-          if (vColumnEl.isOverflow) {
-            if (curColumn < this._columnWidths.length - 1) break;
-          }
-          if (columnContent.length > 0) columnContent[columnContent.length - 1].endOfBlock = true;
+          while (true) {
+            lineEl = this._createLineElement(block.textBlockStyle);
+            vColumnEl.appendChild(lineEl);
 
-          const overlapParts = this._applyOverlap(lineEl);
-          columnContent.push({
-            firstOfText: curColumn === 0 && columnContent.length < 1,
-            firstOfBlock: curColumn === 0 && columnContent.length < 1,
-            content: [],
-            textBlockStyle: block.textBlockStyle,
-            left: 0,
-            right: 0,
-            overlapParts,
-          });
+            if (columnContent.length > 0) columnContent[columnContent.length - 1].endOfBlock = true;
+
+            const { cover, overlapParts } = this._applyOverlap(lineEl);
+
+            if (cover) {
+              columnContent.push({
+                firstOfText: curColumn === 0 && columnContent.length < 1,
+                firstOfBlock: curColumn === 0 && columnContent.length < 1,
+                parts: [],
+                textBlockStyle: block.textBlockStyle,
+              });
+              partEls = [];
+              lineEl = null;
+              if (vColumnEl.isOverflow) {
+                break;
+              }
+              continue;
+            }
+
+            if (vColumnEl.isOverflow) {
+              lineEl = null;
+              partEls = [];
+              break;
+            }
+
+            const lineWidth = lineEl.getBoundingClientRect().width;
+            const freeRegions = this._computeFreeRegions(lineWidth, overlapParts);
+            const parts: TextPartData[] = freeRegions.map((region, i) => ({
+              content: [],
+              left: i === 0 ? 0 : (region.start - freeRegions[i - 1].end) / ppm,
+              width: (region.end - region.start) / ppm,
+            }));
+
+            partEls = freeRegions.map(region => this._createPartElement(
+              region.end - region.start,
+              0,
+            ));
+            partEls.forEach((partEl, i) => {
+              if (i > 0) partEl.style.marginLeft = `${freeRegions[i].start - freeRegions[i - 1].end}px`;
+              lineEl!.appendChild(partEl);
+            });
+
+            columnContent.push({
+              firstOfText: curColumn === 0 && columnContent.length < 1,
+              firstOfBlock: curColumn === 0 && columnContent.length < 1,
+              parts,
+              textBlockStyle: block.textBlockStyle,
+            });
+
+            currentPartIdx = 0;
+            break;
+          }
+
+          if (!lineEl) {
+            if (vColumnEl.isOverflow && curColumn < this._columnWidths.length - 1) break;
+          }
+
+          if (!lineEl || partEls.length === 0) {
+            if (vColumnEl.isOverflow) continue;
+            break;
+          }
         }
 
         for (; idxContentOfBlock < block.content.length; idxContentOfBlock++) {
           const char = block.content[idxContentOfBlock];
+
           const charEl = document.createElement('span');
           Object.assign(charEl.style, this.genCharStyle(char));
-
           charEl.innerText = char;
-          lineEl.appendChild(charEl);
 
-          const firstCharRect = (lineEl.children.item(0) as HTMLDivElement).getBoundingClientRect();
-          const charRect = charEl.getBoundingClientRect();
-          const lineRect = lineEl.getBoundingClientRect();
-          if ((lineEl.childNodes.length > 1 && charRect.x === firstCharRect.x) || lineRect.width < charRect.width) {
-            if (['(', ')', '.', ',', '!', '?', '\'', '"'].includes(char) && lineRect.width >= charRect.width) {
-              charEl.remove();
-            } else {
-              lineEl = this._createLineElement(block.textBlockStyle);
-              vColumnEl.appendChild(lineEl);
+          partEls[currentPartIdx].appendChild(charEl);
 
-              const overlapParts = this._applyOverlap(lineEl);
-              columnContent.push({
-                content: [],
-                textBlockStyle: block.textBlockStyle,
-                left: 0,
-                right: 0,
-                overlapParts,
-              });
-              if (lineRect.width < charRect.width) {
-                idxContentOfBlock--;
-                continue;
+          if (partEls[currentPartIdx].scrollWidth > partEls[currentPartIdx].clientWidth) {
+            charEl.remove();
+
+            let placed = false;
+            currentPartIdx++;
+            while (currentPartIdx < partEls.length) {
+              partEls[currentPartIdx].appendChild(charEl);
+              if (partEls[currentPartIdx].scrollWidth <= partEls[currentPartIdx].clientWidth) {
+                placed = true;
+                break;
               }
-              lineEl.appendChild(charEl);
+              charEl.remove();
+              currentPartIdx++;
             }
+
+            if (!placed) {
+              while (true) {
+                lineEl = this._createLineElement(block.textBlockStyle);
+                vColumnEl.appendChild(lineEl);
+
+                const { cover, overlapParts } = this._applyOverlap(lineEl);
+
+                if (cover) {
+                  columnContent.push({
+                    parts: [],
+                    textBlockStyle: block.textBlockStyle,
+                  });
+                  partEls = [];
+                  lineEl = null;
+                  if (vColumnEl.isOverflow) {
+                    if (curColumn < this._columnWidths.length - 1) {
+                      if (idxContentOfBlock < block.content.length - 1 && columnContent[columnContent.length - 1].parts.every(p => p.content.length === 0)) {
+                        columnContent = columnContent.slice(0, columnContent.length - 1);
+                      }
+                      break;
+                    } else {
+                      this._overflow++;
+                    }
+                  }
+                  continue;
+                }
+
+                if (vColumnEl.isOverflow) {
+                  if (curColumn < this._columnWidths.length - 1) {
+                    if (idxContentOfBlock < block.content.length - 1 && columnContent[columnContent.length - 1].parts.every(p => p.content.length === 0)) {
+                      columnContent = columnContent.slice(0, columnContent.length - 1);
+                    }
+                    lineEl = null;
+                    partEls = [];
+                    break;
+                  } else {
+                    this._overflow++;
+                  }
+                }
+
+                const lineWidth = lineEl.getBoundingClientRect().width;
+                const freeRegions = this._computeFreeRegions(lineWidth, overlapParts);
+                const parts: TextPartData[] = freeRegions.map((region, i) => ({
+                  content: [],
+                  left: i === 0 ? 0 : (region.start - freeRegions[i - 1].end) / ppm,
+                  width: (region.end - region.start) / ppm,
+                }));
+
+                partEls = freeRegions.map(region => this._createPartElement(
+                  region.end - region.start,
+                  0,
+                ));
+                partEls.forEach((partEl, i) => {
+                  if (i > 0) partEl.style.marginLeft = `${freeRegions[i].start - freeRegions[i - 1].end}px`;
+                  lineEl!.appendChild(partEl);
+                });
+
+                columnContent.push({
+                  parts,
+                  textBlockStyle: block.textBlockStyle,
+                });
+
+                partEls[0].appendChild(charEl);
+                if (partEls[0].scrollWidth > partEls[0].clientWidth) {
+                  charEl.remove();
+                  idxContentOfBlock--;
+                  currentPartIdx = 0;
+                  continue;
+                }
+
+                currentPartIdx = 0;
+                columnContent[columnContent.length - 1].parts[currentPartIdx].content.push(char);
+                break;
+              }
+
+              if (vColumnEl.isOverflow && curColumn < this._columnWidths.length - 1) {
+                break;
+              }
+            } else {
+              columnContent[columnContent.length - 1].parts[currentPartIdx].content.push(char);
+            }
+          } else {
+            columnContent[columnContent.length - 1].parts[currentPartIdx].content.push(char);
           }
+
           if (idxContentOfBlock >= block.content.length - 1) {
             columnContent[columnContent.length - 1].endOfBlock = true;
           }
+
           if (vColumnEl.isOverflow) {
             if (curColumn < this._columnWidths.length - 1) {
-              if (idxContentOfBlock < block.content.length - 1 && columnContent[columnContent.length - 1].content.length < 1) {
+              if (idxContentOfBlock < block.content.length - 1 && columnContent[columnContent.length - 1].parts.every(p => p.content.length === 0)) {
                 columnContent = columnContent.slice(0, columnContent.length - 1);
               }
               break;
@@ -225,8 +399,8 @@ export class ParagraphModel {
               this._overflow++;
             }
           }
-          columnContent[columnContent.length - 1].content.push(char);
         }
+
         if (vColumnEl.isOverflow) {
           if (curColumn < this._columnWidths.length - 1) break;
         }
@@ -278,12 +452,40 @@ export class ParagraphModel {
    * 줄 스타일 생성.
    *
    * - `lineGap` → `height` 계산
-   * - `letterSpacing` → em 단위 적용
-   * - `textAlign` → `justify-content` 매핑 ('justify' → 'space-between')
-   * - `textBlockStyle` → 폰트, 색상 오버라이드
+   * - `textBlockStyle` → 폰트, 색상, 높이 오버라이드
    */
   public genLineStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> {
     const lineGap = this.paragraphStyle?.lineGap || this.inheritStyle?.lineGap || DEFAULT_LINE_GAP;
+
+    const blockStyle: Partial<CSSStyleDeclaration> = {};
+    if (textBlockStyle) {
+      const fontSize = textBlockStyle.fontSize;
+      if (fontSize && this.lineHeight < (fontSize * lineGap)) {
+        blockStyle.alignItems = 'center';
+        blockStyle.height = `${Math.ceil((fontSize * lineGap) / this.lineHeight) * this.lineHeight}mm`;
+      }
+    }
+
+    return {
+      display: 'flex',
+      flexDirection: 'row',
+      flexWrap: 'nowrap',
+      flexShrink: '0',
+      height: `${this._lineHeight}mm`,
+      maxWidth: '100%',
+      width: '100%',
+      ...blockStyle,
+    };
+  }
+
+  /**
+   * 파트 스타일 생성.
+   *
+   * - `letterSpacing` → em 단위 적용
+   * - `textAlign` → `justify-content` 매핑 ('justify' → 'space-between')
+   * - `textBlockStyle` → 폰트, 색상, 정렬 오버라이드
+   */
+  public genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> {
     const letterSpacing = this.textStyle?.letterSpacing || this.inheritStyle?.letterSpacing;
     const textAlign = this.paragraphStyle?.textAlign || this.inheritStyle?.textAlign || 'justify';
 
@@ -305,27 +507,20 @@ export class ParagraphModel {
       blockStyle.fontSize = textBlockStyle.fontSize && `${textBlockStyle.fontSize}mm` || undefined;
       blockStyle.color = textBlockStyle.color ? colorManager.getCSSColor(textBlockStyle.color) : undefined;
 
-      if (textBlockStyle.fontSize && this.lineHeight < (textBlockStyle.fontSize * lineGap)) {
-        blockStyle.alignItems = 'center';
-        blockStyle.height = `${Math.ceil((textBlockStyle.fontSize * lineGap) / this.lineHeight) * this.lineHeight}mm`;
-      }
       switch (textBlockStyle.textAlign) {
         case 'center': justifyContent = 'center'; break;
         case 'right': justifyContent = 'flex-end'; break;
         default: break;
       }
     }
+
     return {
-      alignItems: 'baseline',
       display: 'inline-flex',
       flexDirection: 'row',
-      flexShrink: '0',
       flexWrap: 'nowrap',
-      height: `${this._lineHeight}mm`,
+      alignItems: 'baseline',
       justifyContent,
       letterSpacing: letterSpacing !== undefined ? `${letterSpacing}em` : undefined,
-      maxWidth: '100%',
-      width: '100%',
       ...blockStyle,
     };
   }

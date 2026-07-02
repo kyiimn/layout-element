@@ -19,6 +19,17 @@ import { TextBlockStyle } from "../../style";
 
 export type OverlapParts = { x1: number; x2: number; };
 
+export type TextPartData = {
+  /** 이 파트(세그먼트)에 포함된 글자 배열 (글자 단위 분리) */
+  content: string[];
+
+  /** 줄 시작점으로부터의 좌측 여백 (mm) - 오버랩 요소 회피용 */
+  left: number;
+
+  /** 파트의 가로 폭 (mm) - 텍스트가 배치될 수 있는 공간 */
+  width: number;
+};
+
 export type TextLineData = {
   /** 이 줄이 블록의 첫 번째 줄인지 */
   firstOfBlock?: boolean;
@@ -32,17 +43,9 @@ export type TextLineData = {
   /** 이 줄이 전체 텍스트의 마지막 줄인지 */
   endOfText?: boolean;
 
-  /** 이 줄에 포함된 글자 배열 (글자 단위 분리) */
-  content: string[];
+  /** 이 줄을 구성하는 수평 파트(오버랩 영역 사이의 세그먼트) 목록 */
+  parts: TextPartData[];
 
   /** 이 줄에 적용되는 블록 스타일 */
   textBlockStyle?: TextBlockStyle;
-
-  /** 이 줄의 우측 경계 (mm) - 오버랩 요소 회피용 */
-  right: number;
-
-  /** 이 줄의 좌측 경계 (mm) - 오버랩 요소 회피용 */
-  left: number;
-
-  overlapParts: OverlapParts[];
 };
