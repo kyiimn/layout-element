@@ -191,7 +191,7 @@ export class ParagraphModel {
           const charRect = charEl.getBoundingClientRect();
           const lineRect = lineEl.getBoundingClientRect();
           if ((lineEl.childNodes.length > 1 && charRect.x === firstCharRect.x) || lineRect.width < charRect.width) {
-            if ([')', '.', ',', '!', '?', '\'', '"'].includes(char) && lineRect.width >= charRect.width) {
+            if (['(', ')', '.', ',', '!', '?', '\'', '"'].includes(char) && lineRect.width >= charRect.width) {
               charEl.remove();
             } else {
               lineEl = this._createLineElement(block.textBlockStyle);
