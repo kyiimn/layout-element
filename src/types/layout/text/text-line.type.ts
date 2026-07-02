@@ -16,6 +16,9 @@ import { TextBlockStyle } from "../../style";
  * | ✓ | | | | 새 블록의 시작 줄 |
  * | | | | ✓ | 전체 텍스트의 마지막 줄 |
  */
+
+export type OverlapParts = { x1: number; x2: number; };
+
 export type TextLineData = {
   /** 이 줄이 블록의 첫 번째 줄인지 */
   firstOfBlock?: boolean;
@@ -40,4 +43,6 @@ export type TextLineData = {
 
   /** 이 줄의 좌측 경계 (mm) - 오버랩 요소 회피용 */
   left: number;
+
+  overlapParts: OverlapParts[];
 };

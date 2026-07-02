@@ -6,12 +6,12 @@ import {
   TextLineData,
   TextBlockStyle,
   ParagraphStyle,
-  TextStyle
+  TextStyle,
+  OverlapParts
 } from "@/types";
-import { getOverlapSizePX } from "@/utils";
+import { getOverlapSizePX, mergeOverlapParts } from "@/utils";
 import { FontManager } from "../font.manager";
 import { ColorManager } from "../color.manager";
-import { BoxModel } from "./box.model";
 
 type ParagraphModelOptions = {
   content: string | (string | TextBlockData)[];
@@ -104,34 +104,16 @@ export class ParagraphModel {
    */
   private _applyOverlap(lineEl: HTMLElement) {
     const overlapEls = this._paragraphElement.overlayElements;
-    let left = 0, right = 0, cover = false;
+    let cover = false, parts: OverlapParts[] = [];
     overlapEls.forEach(el => {
       const type = getOverlapSizePX(lineEl, el);
-      switch (type.direction) {
-        case 'COVERS':
-          cover = true;
-          break;
-        case 'LEFT':
-          left = Math.max(left, type.width);
-          break;
-        case 'RIGHT':
-          right = Math.max(right, type.width);
-          break;
-        default:
-          break;
-      }
+      if (type.direction === 'COVERS') cover = true;
+      if (type.direction === 'PART') parts = parts.concat(type.parts);
     });
-    const leftMM = left ? Math.ceil(left / BoxModel.ppm) : 0;
-    const rightMM = right ? Math.ceil(right / BoxModel.ppm) : 0;
-
-    if (cover) {
-      lineEl.style.width = `0`;
-    } else {
-      lineEl.style.width = `calc(100% - ${leftMM + rightMM}mm)`;
-    }
+    if (cover) lineEl.style.width = `0`;
     lineEl.style.maxWidth = lineEl.style.width;
 
-    return { left: leftMM, right: rightMM };
+    return mergeOverlapParts(parts);
   }
 
   /**
@@ -183,15 +165,17 @@ export class ParagraphModel {
           if (vColumnEl.isOverflow) {
             if (curColumn < this._columnWidths.length - 1) break;
           }
-          const overlapSize = this._applyOverlap(lineEl);
-
           if (columnContent.length > 0) columnContent[columnContent.length - 1].endOfBlock = true;
+
+          const overlapParts = this._applyOverlap(lineEl);
           columnContent.push({
             firstOfText: curColumn === 0 && columnContent.length < 1,
             firstOfBlock: curColumn === 0 && columnContent.length < 1,
             content: [],
             textBlockStyle: block.textBlockStyle,
-            ...overlapSize
+            left: 0,
+            right: 0,
+            overlapParts,
           });
         }
 
@@ -212,12 +196,14 @@ export class ParagraphModel {
             } else {
               lineEl = this._createLineElement(block.textBlockStyle);
               vColumnEl.appendChild(lineEl);
-              const overlapSize = this._applyOverlap(lineEl);
 
+              const overlapParts = this._applyOverlap(lineEl);
               columnContent.push({
                 content: [],
                 textBlockStyle: block.textBlockStyle,
-                ...overlapSize
+                left: 0,
+                right: 0,
+                overlapParts,
               });
               if (lineRect.width < charRect.width) {
                 idxContentOfBlock--;
