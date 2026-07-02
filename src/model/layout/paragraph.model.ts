@@ -257,8 +257,11 @@ export class ParagraphModel {
           const lineWidthMM = this._columnWidths[curColumn];
           let overlapCheckParts = currentLineData.overlapParts;
           let overlapCheckLine = lineEl;
+          let overlapIterations = 0;
+          const MAX_OVERLAP_ITERATIONS = 10;
 
-          while (true) {
+          while (overlapIterations < MAX_OVERLAP_ITERATIONS) {
+            overlapIterations++;
             const checkCharRect = charEl.getBoundingClientRect();
             const checkLineRect = overlapCheckLine.getBoundingClientRect();
             const checkRelX = checkCharRect.x - checkLineRect.left;
@@ -303,8 +306,13 @@ export class ParagraphModel {
 
                   const reCharRect = charEl.getBoundingClientRect();
                   const reLineRect = overlapCheckLine.getBoundingClientRect();
+                  const reRelX = reCharRect.x - reLineRect.left;
+                  const reRelRight = reRelX + reCharRect.width;
                   const reFirstCharRect = (overlapCheckLine.children.item(0) as HTMLDivElement).getBoundingClientRect();
-                  if ((overlapCheckLine.childNodes.length > 1 && reCharRect.x === reFirstCharRect.x) || reLineRect.width < reCharRect.width) {
+                  const lineWrapNeeded = (overlapCheckLine.childNodes.length > 1 && reCharRect.x === reFirstCharRect.x) || reLineRect.width < reCharRect.width;
+                  const stillOverlaps = overlapCheckParts.some(p => reRelX < p.x2 && reRelRight > p.x1);
+
+                  if (lineWrapNeeded || stillOverlaps) {
                     charEl.remove();
                     spacerEl.remove();
                     const lastItem = spacerLineData.content[spacerLineData.content.length - 1];
