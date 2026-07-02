@@ -14,7 +14,8 @@ export const checkOverlap = (baseElement: HTMLElement, targetElement: HTMLElemen
 }
 
 export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: HTMLElement): {
-  direction: "NONE" | "COVERS" | "LEFT" | "RIGHT", width: number;
+  direction: "NONE" | "COVERS" | "LEFT" | "RIGHT",
+  width: number;
 } => {
   const r1 = baseElement.getBoundingClientRect();
   const r2 = targetElement.getBoundingClientRect();

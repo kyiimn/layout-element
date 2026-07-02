@@ -78,24 +78,24 @@ const block2: BoxData = {
     height: 37,
     children: [
       { type: 'paragraph', content: body },
-      {
-        type: 'box',
-        left: 25, top: 30,
-        width: 55,
-        height: 35,
-        position: 'absolute',
-        zIndex: 1,
-        children: [{
-          type: 'image',
-          url: 'test/g10506uf.png',
-          dpi: 72,
-          x: 0, y: 0,
-          width: 80.08,
-          height: 47.98
-        }]
-      }
     ]
-  }]
+  }, {
+    type: 'box',
+    left: 10, top: 29,
+    width: 55,
+    height: 35,
+    position: 'absolute',
+    zIndex: 1,
+    children: [{
+      type: 'image',
+      url: 'test/g10506uf.png',
+      dpi: 72,
+      x: 0, y: 0,
+      width: 80.08,
+      height: 47.98
+    }]
+  }
+  ]
 };
 
 const block3: BoxData = {
