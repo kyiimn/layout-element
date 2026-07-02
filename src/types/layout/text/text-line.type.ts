@@ -19,6 +19,18 @@ import { TextBlockStyle } from "../../style";
 
 export type OverlapParts = { x1: number; x2: number; };
 
+export type TextLineItemChar = {
+  type: 'char';
+  char: string;
+};
+
+export type TextLineItemSpacer = {
+  type: 'spacer';
+  width: number;
+};
+
+export type TextLineItem = TextLineItemChar | TextLineItemSpacer;
+
 export type TextLineData = {
   /** 이 줄이 블록의 첫 번째 줄인지 */
   firstOfBlock?: boolean;
@@ -32,8 +44,8 @@ export type TextLineData = {
   /** 이 줄이 전체 텍스트의 마지막 줄인지 */
   endOfText?: boolean;
 
-  /** 이 줄에 포함된 글자 배열 (글자 단위 분리) */
-  content: string[];
+  /** 이 줄의 항목 배열 (글자 또는 spacer) */
+  content: TextLineItem[];
 
   /** 이 줄에 적용되는 블록 스타일 */
   textBlockStyle?: TextBlockStyle;

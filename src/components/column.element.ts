@@ -59,11 +59,21 @@ export class LayoutColumnElement extends HTMLElement {
         case 'right': justifyContent = 'flex-end'; break;
         default: break;
       }
-      while ([' '].includes(content[0])) {
-        content = content.slice(1);
+      while (content.length > 0) {
+        const firstItem = content[0];
+        if (firstItem.type === 'char' && firstItem.char === ' ') {
+          content = content.slice(1);
+        } else {
+          break;
+        }
       }
-      while ([' '].includes(content[content.length - 1])) {
-        content = content.slice(0, content.length - 1);
+      while (content.length > 0) {
+        const lastItem = content[content.length - 1];
+        if (lastItem.type === 'char' && lastItem.char === ' ') {
+          content = content.slice(0, content.length - 1);
+        } else {
+          break;
+        }
       }
       const lineEl = document.createElement('div');
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(lineEl.style, {
@@ -76,12 +86,21 @@ export class LayoutColumnElement extends HTMLElement {
       this._shadowRoot.appendChild(lineEl);
 
       for (let j = 0; j < content.length; j++) {
-        const char = content[j];
-        const charEl = document.createElement('span');
-        const charStyle = this.model.genCharStyle(char);
-        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, charStyle);
-        charEl.innerText = char;
-        lineEl.appendChild(charEl);
+        const item = content[j];
+        if (item.type === 'spacer') {
+          const spacerEl = document.createElement('span');
+          Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(spacerEl.style, {
+            display: 'inline-block',
+            width: `${item.width}mm`,
+          });
+          lineEl.appendChild(spacerEl);
+        } else {
+          const charEl = document.createElement('span');
+          const charStyle = this.model.genCharStyle(item.char);
+          Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, charStyle);
+          charEl.innerText = item.char;
+          lineEl.appendChild(charEl);
+        }
       }
     }
   }

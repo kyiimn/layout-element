@@ -9,7 +9,9 @@ import {
   TextStyle,
   OverlapParts
 } from "@/types";
+
 import { getOverlapSizePX, mergeOverlapParts } from "@/utils";
+import { BoxModel } from "./box.model";
 import { FontManager } from "../font.manager";
 import { ColorManager } from "../color.manager";
 
@@ -183,17 +185,19 @@ export class ParagraphModel {
           const char = block.content[idxContentOfBlock];
           const charEl = document.createElement('span');
           Object.assign(charEl.style, this.genCharStyle(char));
-
           charEl.innerText = char;
+
           lineEl.appendChild(charEl);
 
           const firstCharRect = (lineEl.children.item(0) as HTMLDivElement).getBoundingClientRect();
           const charRect = charEl.getBoundingClientRect();
           const lineRect = lineEl.getBoundingClientRect();
+
           if ((lineEl.childNodes.length > 1 && charRect.x === firstCharRect.x) || lineRect.width < charRect.width) {
             if ([')', '.', ',', '!', '?', '\'', '"'].includes(char) && lineRect.width >= charRect.width) {
               charEl.remove();
             } else {
+              charEl.remove();
               lineEl = this._createLineElement(block.textBlockStyle);
               vColumnEl.appendChild(lineEl);
 
@@ -205,13 +209,101 @@ export class ParagraphModel {
                 right: 0,
                 overlapParts,
               });
+
               if (lineRect.width < charRect.width) {
                 idxContentOfBlock--;
                 continue;
               }
+
               lineEl.appendChild(charEl);
             }
           }
+
+          const currentLineData = columnContent[columnContent.length - 1];
+          const currentLineOverlapParts = currentLineData.overlapParts;
+          const currentCharRect = charEl.getBoundingClientRect();
+          const currentLineRect = lineEl.getBoundingClientRect();
+          const charRelX = currentCharRect.x - currentLineRect.left;
+          const charRelRight = charRelX + currentCharRect.width;
+
+          let overlapHandled = false;
+          for (const overlapPart of currentLineOverlapParts) {
+            if (charRelX < overlapPart.x2 && charRelRight > overlapPart.x1) {
+              charEl.remove();
+
+              const spacerWidthPx = overlapPart.x2 - charRelX;
+              const spacerMM = Math.max(0, Math.ceil(spacerWidthPx / BoxModel.ppm));
+              const lineWidthMM = this._columnWidths[curColumn];
+
+              const spacerEl = document.createElement('span');
+              Object.assign(spacerEl.style, {
+                display: 'inline-block',
+                width: `${spacerMM}mm`,
+              });
+              lineEl.appendChild(spacerEl);
+
+              const lineWithSpacerRect = lineEl.getBoundingClientRect();
+              if (lineWithSpacerRect.width > lineWidthMM * BoxModel.ppm) {
+                spacerEl.remove();
+                lineEl = this._createLineElement(block.textBlockStyle);
+                vColumnEl.appendChild(lineEl);
+
+                const overlapParts = this._applyOverlap(lineEl);
+                columnContent.push({
+                  content: [],
+                  textBlockStyle: block.textBlockStyle,
+                  left: 0,
+                  right: 0,
+                  overlapParts,
+                });
+                lineEl.appendChild(charEl);
+              } else {
+                currentLineData.content.push({ type: 'spacer', width: spacerMM });
+                lineEl.appendChild(charEl);
+
+                const reCharRect = charEl.getBoundingClientRect();
+                const reLineRect = lineEl.getBoundingClientRect();
+                const reFirstCharRect = (lineEl.children.item(0) as HTMLDivElement).getBoundingClientRect();
+                if ((lineEl.childNodes.length > 1 && reCharRect.x === reFirstCharRect.x) || reLineRect.width < reCharRect.width) {
+                  charEl.remove();
+                  spacerEl.remove();
+                  lineEl = this._createLineElement(block.textBlockStyle);
+                  vColumnEl.appendChild(lineEl);
+
+                  const overlapParts = this._applyOverlap(lineEl);
+                  columnContent.push({
+                    content: [],
+                    textBlockStyle: block.textBlockStyle,
+                    left: 0,
+                    right: 0,
+                    overlapParts,
+                  });
+                  lineEl.appendChild(charEl);
+                }
+              }
+              overlapHandled = true;
+              break;
+            }
+          }
+
+          if (!overlapHandled && !lineEl.contains(charEl)) {
+            columnContent[columnContent.length - 1].content.push({ type: 'char', char });
+            if (idxContentOfBlock >= block.content.length - 1) {
+              columnContent[columnContent.length - 1].endOfBlock = true;
+            }
+            if (vColumnEl.isOverflow) {
+              if (curColumn < this._columnWidths.length - 1) {
+                if (idxContentOfBlock < block.content.length - 1 && columnContent[columnContent.length - 1].content.length < 1) {
+                  columnContent = columnContent.slice(0, columnContent.length - 1);
+                }
+                break;
+              } else {
+                this._overflow++;
+              }
+            }
+            continue;
+          }
+
           if (idxContentOfBlock >= block.content.length - 1) {
             columnContent[columnContent.length - 1].endOfBlock = true;
           }
@@ -225,7 +317,7 @@ export class ParagraphModel {
               this._overflow++;
             }
           }
-          columnContent[columnContent.length - 1].content.push(char);
+          columnContent[columnContent.length - 1].content.push({ type: 'char', char });
         }
         if (vColumnEl.isOverflow) {
           if (curColumn < this._columnWidths.length - 1) break;
