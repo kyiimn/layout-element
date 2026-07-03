@@ -211,8 +211,9 @@ export class EditController {
     textarea.style.resize = "none";
     textarea.style.overflow = "hidden";
     textarea.style.zIndex = "9999";
-    textarea.setAttribute("aria-hidden", "true");
     textarea.setAttribute("tabindex", "-1");
+    textarea.setAttribute("role", "textbox");
+    textarea.setAttribute("aria-label", "텍스트 편집 영역");
     return textarea;
   }
 

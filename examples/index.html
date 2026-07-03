@@ -13,13 +13,45 @@
       body {
         background: #f0f0f0;
         display: flex;
-        justify-content: center;
-        padding: 40px;
+        flex-direction: column;
+        align-items: center;
+        padding: 40px 20px;
         min-height: 100vh;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      #toolbar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      #toolbar button {
+        padding: 8px 18px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        background: #fff;
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.15s ease;
+      }
+      #toolbar button:hover {
+        background: #f5f5f5;
+        border-color: #999;
+      }
+      #toolbar button.active {
+        background: #1a73e8;
+        color: #fff;
+        border-color: #1a73e8;
       }
     </style>
   </head>
   <body>
+    <div id="toolbar">
+      <button id="btn-read" class="active">📄 읽기 모드</button>
+      <button id="btn-edit">✏️ 편집 모드</button>
+    </div>
+
     <x-layout-document id="doc"></x-layout-document>
 
     <script type="module">
@@ -34,8 +66,33 @@
         await FontLoader.getInstance().init();
 
         const doc = document.getElementById("doc");
-
         doc.data = exampleData;
+
+        // 렌더링 완료 대기 후 버튼 활성화
+        await doc.render();
+
+        const btnRead = document.getElementById("btn-read");
+        const btnEdit = document.getElementById("btn-edit");
+
+        let isEditMode = false;
+
+        function setEditMode(enabled) {
+          isEditMode = enabled;
+
+          // document 전체에서 모든 x-layout-paragraph 검색
+          // (light DOM 자식으로 존재함 — box 안에 중첩됨)
+          const paragraphs = document.querySelectorAll("x-layout-paragraph");
+          paragraphs.forEach((p) => {
+            p.editable = enabled;
+          });
+
+          // 버튼 상태 업데이트
+          btnRead.classList.toggle("active", !enabled);
+          btnEdit.classList.toggle("active", enabled);
+        }
+
+        btnRead.addEventListener("click", () => setEditMode(false));
+        btnEdit.addEventListener("click", () => setEditMode(true));
       })();
     </script>
   </body>
