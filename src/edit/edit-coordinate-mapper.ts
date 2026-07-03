@@ -439,9 +439,20 @@ export class EditCoordinateMapper {
     const firstColumn = columns[0];
     const colRect = firstColumn.getBoundingClientRect();
     const paraRect = this._paragraph.getBoundingClientRect();
+
+    const textAlign = this._paragraph.paragraphStyle?.textAlign;
+    let left: number;
+    if (textAlign === 'center') {
+      left = colRect.left - paraRect.left + colRect.width / 2;
+    } else if (textAlign === 'right') {
+      left = colRect.right - paraRect.left;
+    } else {
+      left = colRect.left - paraRect.left;
+    }
+
     return {
       top: colRect.top - paraRect.top,
-      left: colRect.left - paraRect.left,
+      left,
       fontSize: parseFloat(getComputedStyle(firstColumn).fontSize) || 16,
     };
   }
