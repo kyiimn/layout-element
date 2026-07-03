@@ -41,6 +41,11 @@ export class EditCoordinateMapper {
     this._columnRanges = [];
     this._columnStartOffsets = [];
 
+    this._rebuildMappings();
+  }
+
+
+  private _rebuildMappings(): void {
     const model = this._paragraph.model;
     if (!model) return;
 

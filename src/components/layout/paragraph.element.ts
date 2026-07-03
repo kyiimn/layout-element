@@ -4,6 +4,7 @@ import { ColorRegistry } from "@/resource";
 import { InheritStyle, ParagraphData, ParagraphStyle, TextBlockData, TextStyle } from "@/types";
 import { checkOverlap, genUUID } from "@/utils";
 import { LayoutBoxElement } from "./box.element";
+import { LayoutColumnElement } from "./column.element";
 
 /**
  * 다중 컬럼 텍스트 영역 요소. `<x-layout-paragraph>` 커스텀 엘리먼트.
@@ -51,7 +52,10 @@ export class LayoutParagraphElement extends HTMLElement {
     this.layout();
   }
 
-  disconnectedCallback() { }
+  disconnectedCallback() {
+    this._editController?.destroy();
+    this._editController = null;
+  }
 
   layout() {
     if (!this.isConnected || !this.parentModel || !this._inheritStyle) return;
@@ -131,6 +135,10 @@ export class LayoutParagraphElement extends HTMLElement {
   render() {
     if (!this.isConnected || !this._model) return;
 
+    const wasStructureDirty = this._structureDirty;
+    const lineCountBefore = this._model.previousLineCount;
+    const overflowBefore = this._model.previousOverflow;
+
     if (this._structureDirty) {
       this._model.preTextWrap();
       this._structureDirty = false;
@@ -147,18 +155,34 @@ export class LayoutParagraphElement extends HTMLElement {
       this.dispatchEvent(event);
     }
 
-    this.replaceChildren();
+    const lineCountAfter = this._model.columnContents.reduce((sum, col) => sum + col.length, 0);
+    const overflowAfter = this._model.overflow;
 
-    const columnContents = this._model.columnContents;
-    for (let i = 0; i < columnContents.length; i++) {
-      const columnEl = document.createElement('x-layout-column');
-      columnEl.index = i;
+    const needsFullRecreate = wasStructureDirty
+      || lineCountBefore === -1
+      || lineCountBefore !== lineCountAfter
+      || overflowBefore !== overflowAfter;
 
-      this.appendChild(columnEl);
+    if (needsFullRecreate) {
+      this.replaceChildren();
+
+      const columnContents = this._model.columnContents;
+      for (let i = 0; i < columnContents.length; i++) {
+        const columnEl = document.createElement('x-layout-column');
+        columnEl.index = i;
+
+        this.appendChild(columnEl);
+      }
+    } else {
+      const columnEls = this.querySelectorAll('x-layout-column');
+      for (let i = 0; i < columnEls.length; i++) {
+        const columnEl = columnEls[i] as LayoutColumnElement;
+        columnEl.renderText();
+      }
     }
 
     if (this._editController) {
-      this._editController.postRender();
+      this._editController.postRender(needsFullRecreate);
     }
   }
 

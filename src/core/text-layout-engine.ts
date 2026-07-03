@@ -59,6 +59,9 @@ export class TextLayoutEngine {
   private _gaps: number[] = [];
   private _overflow: number = 0;
 
+  private _previousLineCount: number = -1;
+  private _previousOverflow: number = -1;
+
   private _lineHeight: number = 0;
 
   private _columnPpm: number[] = [];
@@ -531,6 +534,9 @@ export class TextLayoutEngine {
 
       this._columnContents.push(columnContent);
     }
+
+    this._previousLineCount = this._columnContents.reduce((sum, col) => sum + col.length, 0);
+    this._previousOverflow = this._overflow;
   }
 
   /**
@@ -561,6 +567,9 @@ export class TextLayoutEngine {
    * @deprecated Use `layoutStructure()` + `layoutText()` for incremental re-layout.
    */
   public preTextWrap() {
+    this._previousLineCount = -1;
+    this._previousOverflow = -1;
+
     this._initStructure();
     this._layoutTextIntoColumns();
   }
@@ -773,6 +782,14 @@ export class TextLayoutEngine {
   /** 오버플로우된 문자 수 (컨테이너를 벗어난 텍스트) */
   public get overflow() {
     return this._overflow;
+  }
+
+  public get previousLineCount() {
+    return this._previousLineCount;
+  }
+
+  public get previousOverflow() {
+    return this._previousOverflow;
   }
 
   /** 장평 비율 */

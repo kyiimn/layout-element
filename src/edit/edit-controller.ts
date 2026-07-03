@@ -208,12 +208,17 @@ export class EditController {
 
   /**
    * 렌더링 이후 좌표 매퍼를 재구축하고 커서/선택 영역을 다시 배치한다.
+   *
+   * @param fullRebuild - DOM이 새로 생성되었으면 true, 기존 컬럼을
+   *   재사용한 경우 false. 매퍼는 항상 전체 재구축을 수행한다.
    */
-  postRender(): void {
+  postRender(_fullRebuild: boolean = true): void {
     this._mapper.rebuild();
     const model = this._paragraph.model;
     if (model && typeof model.inputContent === "string") {
-      this._textarea.value = model.inputContent;
+      if (!this._isComposing) {
+        this._textarea.value = model.inputContent;
+      }
     }
     this._updateCursorPosition();
     this._updateSelection();
@@ -545,6 +550,7 @@ export class EditController {
   private _onBlur(): void {
     const wasComposing = this._isComposing;
     this._isFocused = false;
+    this._wasFocused = false;
     this._resetCompositionState();
 
     if (wasComposing) {
@@ -818,6 +824,7 @@ export class EditController {
 
   private _onPaste(event: ClipboardEvent): void {
     event.preventDefault();
+    if (this._isComposing) return;
 
     const model = this._paragraph.model;
     if (!model) return;
