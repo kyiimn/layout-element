@@ -268,6 +268,7 @@ export class EditController {
             this._cursorModel.offset = 0;
             this._cursorModel.selection = null;
           }
+          this._syncTextareaSelection();
           this.focus();
           this._updateCursorPosition();
           this._updateSelection();
@@ -279,6 +280,7 @@ export class EditController {
     if (!event.shiftKey) {
       this._cursorModel.offset = sourceOffset;
       this._cursorModel.selection = null;
+      this._textarea.setSelectionRange(sourceOffset, sourceOffset);
       this._updateCursorPosition();
       this._updateSelection();
       this.focus();
@@ -286,6 +288,7 @@ export class EditController {
     }
 
     this._extendSelection(sourceOffset);
+    this._syncTextareaSelection();
     this.focus();
     this._updateCursorPosition();
     this._updateSelection();
@@ -349,6 +352,7 @@ export class EditController {
           }
           this._isMouseDown = true;
           this._selectionAnchor = 0;
+          this._syncTextareaSelection();
           this.focus();
           this._updateCursorPosition();
           this._updateSelection();
@@ -362,6 +366,7 @@ export class EditController {
     this._isMouseDown = true;
     if (event.shiftKey) {
       this._extendSelection(sourceOffset);
+      this._syncTextareaSelection();
       this.focus();
       this._updateCursorPosition();
       this._updateSelection();
@@ -371,6 +376,7 @@ export class EditController {
     this._selectionAnchor = sourceOffset;
     this._cursorModel.offset = sourceOffset;
     this._cursorModel.selection = null;
+    this._textarea.setSelectionRange(sourceOffset, sourceOffset);
     this.focus();
     this._updateCursorPosition();
     this._updateSelection();
@@ -392,6 +398,7 @@ export class EditController {
       const anchor = this._selectionAnchor ?? this._cursorModel.offset;
       this._cursorModel.selection = SelectionRange.fromOffsets(anchor, focusOffset);
       this._cursorModel.offset = focusOffset;
+      this._syncTextareaSelection();
       this._updateCursorPosition();
       this._updateSelection();
     });
@@ -422,6 +429,7 @@ export class EditController {
     const { start, end } = this._findWordBoundaries(content, sourceOffset);
     this._cursorModel.selection = SelectionRange.fromOffsets(start, end);
     this._cursorModel.offset = end;
+    this._textarea.setSelectionRange(end, end);
     this.focus();
     this._updateCursorPosition();
     this._updateSelection();
@@ -511,6 +519,7 @@ export class EditController {
           }
           this._cursorModel.selection = null;
         }
+        this._syncTextareaSelection();
         this._updateCursorPosition();
         this._updateSelection();
         break;
@@ -525,6 +534,7 @@ export class EditController {
           }
           this._cursorModel.selection = null;
         }
+        this._syncTextareaSelection();
         this._updateCursorPosition();
         this._updateSelection();
         break;
@@ -541,6 +551,7 @@ export class EditController {
           }
           this._cursorModel.selection = null;
         }
+        this._syncTextareaSelection();
         this._updateCursorPosition();
         this._updateSelection();
         break;
@@ -554,6 +565,7 @@ export class EditController {
           this._cursorModel.offset = lineStart;
           this._cursorModel.selection = null;
         }
+        this._syncTextareaSelection();
         this._updateCursorPosition();
         this._updateSelection();
         break;
@@ -567,6 +579,7 @@ export class EditController {
           this._cursorModel.offset = lineEnd;
           this._cursorModel.selection = null;
         }
+        this._syncTextareaSelection();
         this._updateCursorPosition();
         this._updateSelection();
         break;
@@ -639,6 +652,16 @@ export class EditController {
     const anchor = current.selection?.anchor.textOffset ?? current.offset;
     current.selection = SelectionRange.fromOffsets(anchor, newOffset);
     current.offset = newOffset;
+  }
+
+  private _syncTextareaSelection(): void {
+    const sel = this._cursorModel.selection;
+    if (sel) {
+      const { start, end } = sel.normalized();
+      this._textarea.setSelectionRange(start.textOffset, end.textOffset);
+    } else {
+      this._textarea.setSelectionRange(this._cursorModel.offset, this._cursorModel.offset);
+    }
   }
 
   private _copySelection(): void {
@@ -733,6 +756,7 @@ export class EditController {
     const content = model.inputContent;
     this._cursorModel.selection = SelectionRange.fromOffsets(0, content.length);
     this._cursorModel.offset = content.length;
+    this._textarea.setSelectionRange(0, content.length);
     this._updateCursorPosition();
     this._updateSelection();
   }
@@ -740,6 +764,7 @@ export class EditController {
   private _clearSelection(): void {
     this._cursorModel.selection = null;
     this._selectionEl.setRanges([]);
+    this._textarea.setSelectionRange(this._cursorModel.offset, this._cursorModel.offset);
     this._updateCursorPosition();
   }
 
