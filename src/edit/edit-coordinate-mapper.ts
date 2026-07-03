@@ -208,7 +208,101 @@ export class EditCoordinateMapper {
   }
 
   /**
-   * startOffset부터 endOffset까지(시작 포함, 끝 제외)의 문자 영역을
+   * 뷰포트 좌표(x, y)에서 가장 가까운 텍스트 위치를 반환한다.
+   * 행간 클릭 → 가장 가까운 행, 행의 빈 공간 클릭 → 가장 가까운 글자 위치.
+   * getCharOffsetFromPoint와 달리 정확히 span 위가 아니어도 동작한다.
+   */
+  getNearestOffsetFromPoint(x: number, y: number): CursorPosition | null {
+    // 먼저 정확한 span 위를 클릭했으면 그 결과를 그대로 반환
+    const exact = this.getCharOffsetFromPoint(x, y);
+    if (exact !== null) return exact;
+
+    const columns = this._getAllColumns();
+    if (columns.length === 0) return null;
+
+    // 1. 클릭한 x 좌표가 포함된 컬럼 찾기, 또는 가장 가까운 컬럼
+    let nearestColumn: LayoutColumnElement | null = null;
+    let nearestColumnDist = Infinity;
+    for (const col of columns) {
+      const rect = col.getBoundingClientRect();
+      if (x >= rect.left && x <= rect.right) {
+        nearestColumn = col;
+        break;
+      }
+      const dist = x < rect.left ? rect.left - x : x - rect.right;
+      if (dist < nearestColumnDist) {
+        nearestColumnDist = dist;
+        nearestColumn = col;
+      }
+    }
+    if (!nearestColumn) return null;
+
+    const spans = this._getColumnSpans(nearestColumn);
+    if (spans.length === 0) return null;
+
+    // 2. 클릭한 y 좌표에서 가장 가까운 행(row) 찾기
+    let nearestRowY = Infinity;
+    const rowYs = new Set<number>();
+    for (const s of spans) {
+      const r = s.getBoundingClientRect();
+      rowYs.add(Math.round(r.top));
+    }
+    let bestRowDist = Infinity;
+    for (const rowY of rowYs) {
+      const dist = Math.abs(y - rowY);
+      if (dist < bestRowDist) {
+        bestRowDist = dist;
+        nearestRowY = rowY;
+      }
+    }
+
+    // 3. 해당 행의 span들 중에서 x 좌표와 가장 가까운 span 찾기
+    let bestSpan: HTMLSpanElement | null = null;
+    let bestDist = Infinity;
+    for (const s of spans) {
+      const r = s.getBoundingClientRect();
+      if (Math.round(r.top) !== nearestRowY) continue;
+
+      // 클릭이 span 내부면 거리 0
+      // 클릭이 span 왼쪽이면 span.left - x
+      // 클릭이 span 오른쪽이면 x - span.right
+      let dist: number;
+      if (x >= r.left && x <= r.right) {
+        dist = 0;
+      } else if (x < r.left) {
+        dist = r.left - x;
+      } else {
+        dist = x - r.right;
+      }
+
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestSpan = s;
+      }
+    }
+
+    if (!bestSpan) return null;
+
+    const renderedOffset = parseInt(bestSpan.dataset.offset ?? '', 10);
+    if (Number.isNaN(renderedOffset)) return null;
+
+    const sourceOffset = this.sourceOffset(renderedOffset);
+    if (sourceOffset === null) return null;
+
+    // 클릭이 span의 오른쪽 절반이면 다음 위치로
+    const spanRect = bestSpan.getBoundingClientRect();
+    const midpoint = spanRect.left + spanRect.width / 2;
+    if (x >= midpoint) {
+      const content = this._paragraph.model?.inputContent;
+      if (content !== undefined && sourceOffset < content.length) {
+        return { textOffset: sourceOffset + 1 };
+      }
+    }
+
+    return { textOffset: sourceOffset };
+  }
+
+  /**
    * paragraph 로컬 좌표(픽셀)의 사각형 배열로 반환한다.
    * 같은 줄에 연속된 span은 하나의 사각형으로 합친다.
    */

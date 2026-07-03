@@ -262,10 +262,13 @@ export class EditController {
       ) {
         const content = this._paragraph.model?.inputContent;
         if (content !== undefined) {
+          // 빈 공간 클릭 시 가장 가까운 텍스트 위치 찾기
+          const nearest = this._mapper.getNearestOffsetFromPoint(event.clientX, event.clientY);
+          const targetOffset = nearest ? nearest.textOffset : 0;
           if (event.shiftKey) {
-            this._extendSelection(0);
+            this._extendSelection(targetOffset);
           } else {
-            this._cursorModel.offset = 0;
+            this._cursorModel.offset = targetOffset;
             this._cursorModel.selection = null;
           }
           this._syncTextareaSelection();
@@ -344,14 +347,16 @@ export class EditController {
       ) {
         const content = this._paragraph.model?.inputContent;
         if (content !== undefined) {
+          const nearest = this._mapper.getNearestOffsetFromPoint(event.clientX, event.clientY);
+          const targetOffset = nearest ? nearest.textOffset : 0;
           if (event.shiftKey) {
-            this._extendSelection(0);
+            this._extendSelection(targetOffset);
           } else {
-            this._cursorModel.offset = 0;
+            this._cursorModel.offset = targetOffset;
             this._cursorModel.selection = null;
           }
           this._isMouseDown = true;
-          this._selectionAnchor = 0;
+          this._selectionAnchor = targetOffset;
           this._syncTextareaSelection();
           this.focus();
           this._updateCursorPosition();
