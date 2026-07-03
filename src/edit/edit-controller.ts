@@ -1,5 +1,5 @@
 import { LayoutCursorElement, LayoutSelectionElement } from "@/components";
-import { LayoutParagraphElement } from "@/components/paragraph.element";
+import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { CursorPosition } from "@/types/edit/cursor.type";
 import { SelectionRange } from "@/types/edit/selection.type";
 import { EditCoordinateMapper } from "./edit-coordinate-mapper";

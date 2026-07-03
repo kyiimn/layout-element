@@ -108,7 +108,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 
 ### Batch 1: Types
 
-#### T1. Create CursorPosition type
+#### T1. Create CursorPosition type ✅
 
 - **File**: `src/types/edit/cursor.type.ts` (NEW)
 - **What**: Define `CursorPosition` type with `textOffset: number` (offset in source text string, including `\n` characters)
@@ -119,7 +119,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 - **QA**: `npx tsc --noEmit` passes, type is importable from `@/types`
 - **Commit**: `feat(edit): add CursorPosition type`
 
-#### T2. Create SelectionRange type
+#### T2. Create SelectionRange type ✅
 
 - **File**: `src/types/edit/selection.type.ts` (NEW)
 - **What**: Define `SelectionRange` type with `anchor: CursorPosition` and `focus: CursorPosition`. Add helper `static fromOffsets(anchor: number, focus: number): SelectionRange`. Add `normalized(): { start: CursorPosition, end: CursorPosition }` method that returns anchor/focus in document order (start ≤ end).
@@ -129,7 +129,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 - **QA**: `npx tsc --noEmit` passes. `SelectionRange.fromOffsets(5, 2).normalized()` returns `{ start: { textOffset: 2 }, end: { textOffset: 5 } }`.
 - **Commit**: `feat(edit): add SelectionRange type`
 
-#### T3. Create barrel export
+#### T3. Create barrel export ✅
 
 - **File**: `src/types/edit/index.ts` (NEW)
 - **What**: Barrel export for `CursorPosition` and `SelectionRange`
@@ -139,7 +139,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 
 ### Batch 2: DOM Foundation — Data Attributes, Edit Mode & Render Fix
 
-#### T4. Add data-offset attribute to character spans in column.element.ts
+#### T4. Add data-offset attribute to character spans in column.element.ts ✅
 
 - **File**: `src/components/column.element.ts` (MODIFY — add 1 data attribute + offset counter to span creation loop)
 - **What**: In `renderText()`, add `data-offset` to each character `<span>`. The offset is a **rendered position counter** that starts at 0 for the first span in the first column and increments by 1 for each span. This counter does NOT include `\n` characters (which are not rendered) or stripped spaces (which are removed before rendering).
@@ -155,7 +155,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 - **QA**: `querySelectorAll('[data-offset]')` returns all character spans; offsets are monotonically increasing across columns; first span in first column has offset 0
 - **Commit**: `feat(edit): add data-offset attribute to character spans`
 
-#### T5. Add editable property, edit mode toggle, and render cleanup to paragraph.element.ts
+#### T5. Add editable property, edit mode toggle, and render cleanup to paragraph.element.ts ✅
 
 - **File**: `src/components/paragraph.element.ts` (MODIFY — add 1 property, 1 getter, 1 setter, 1 render fix)
 - **What**: 
@@ -172,7 +172,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 
 ### Batch 3: Coordinate Mapping (depends on T4)
 
-#### T6. Create EditCoordinateMapper class
+#### T6. Create EditCoordinateMapper class ✅
 
 - **File**: `src/edit/edit-coordinate-mapper.ts` (NEW)
 - **What**: Class that maps between text offsets and pixel coordinates. Receives a `LayoutParagraphElement` reference at construction. Methods:
@@ -197,7 +197,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 
 ### Batch 4: Cursor & Selection — Visual Components
 
-#### T7. Create x-layout-cursor custom element
+#### T7. Create x-layout-cursor custom element ✅
 
 - **File**: `src/components/cursor.element.ts` (NEW)
 - **What**: Custom element `<x-layout-cursor>` that renders a blinking vertical line at a given position. Properties: `top: number`, `left: number`, `height: number`, `visible: boolean`. Uses CSS `@keyframes` for blink animation (530ms cycle). Positioned `position: absolute` with `pointer-events: none`. **All coordinates are paragraph-local** (see D2).
@@ -208,7 +208,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 - **QA**: Cursor appears at (10, 20) with height 16px, blinks at ~530ms intervals, `visible=false` hides it
 - **Commit**: `feat(edit): add x-layout-cursor custom element`
 
-#### T8. Create x-layout-selection custom element
+#### T8. Create x-layout-selection custom element ✅
 
 - **File**: `src/components/selection.element.ts` (NEW)
 - **What**: Custom element `<x-layout-selection>` that renders semi-transparent highlight rectangles. Method: `setRanges(ranges: {top: number, left: number, width: number, height: number}[])` — creates/updates highlight divs. Uses `background-color: rgba(0, 100, 200, 0.3)` by default. Positioned `position: absolute` with `pointer-events: none`. **All coordinates are paragraph-local** (see D2).
@@ -221,7 +221,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 
 ### Batch 5: Edit Controller — Skeleton & Cursor Model
 
-#### T9. Create EditController skeleton with CursorModel and hidden textarea
+#### T9. Create EditController skeleton with CursorModel and hidden textarea ✅
 
 - **File**: `src/edit/edit-controller.ts` (NEW)
 - **What**: Class skeleton that manages the editing lifecycle:
@@ -241,7 +241,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 
 ### Batch 6: Edit Controller — Input & Re-render Lifecycle
 
-#### T10. Add optimistic update + debounced re-render to EditController
+#### T10. Add optimistic update + debounced re-render to EditController ✅
 
 - **File**: `src/edit/edit-controller.ts` (MODIFY)
 - **What**: Implements the two-phase update pattern for text editing:
@@ -275,7 +275,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 - **QA**: Type "Hello" → characters appear immediately, cursor moves right. After typing stops, columns reflow if needed. Type Korean 가 → during composition the hangul jambo appears in textarea, on completion the final character replaces it. With selection active, start composing → selection clears.
 - **Commit**: `feat(edit): add optimistic update and debounced re-render to EditController`
 
-#### T11. Add keyboard navigation to EditController
+#### T11. Add keyboard navigation to EditController ✅
 
 - **File**: `src/edit/edit-controller.ts` (MODIFY)
 - **What**: Handle arrow key navigation and basic editing keys:
@@ -293,7 +293,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 - **QA**: Type "Hello", press left arrow 3 times → cursor at offset 2. Press Home → cursor at offset 0. Press End → cursor at offset 5. Press Enter → "Hello\n" with cursor at offset 6 (start of new line).
 - **Commit**: `feat(edit): add keyboard navigation to EditController`
 
-#### T12. Add re-render lifecycle management to EditController
+#### T12. Add re-render lifecycle management to EditController ✅
 
 - **File**: `src/edit/edit-controller.ts` (MODIFY)
 - **What**: Handle the lifecycle of edit overlay elements across paragraph re-renders:
@@ -313,7 +313,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 
 ### Batch 7: EditContext Adapter
 
-#### T13. Create EditContext adapter
+#### T13. Create EditContext adapter ✅
 
 - **File**: `src/edit/edit-context-adapter.ts` (NEW)
 - **What**: Adapter that uses the EditContext API when available (Chromium 122+). Provides:
@@ -340,7 +340,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 
 ### Batch 8: Selection — Mouse & Keyboard
 
-#### T14. Add selection handling to EditController
+#### T14. Add selection handling to EditController ✅
 
 - **File**: `src/edit/edit-controller.ts` (MODIFY)
 - **What**: Add text selection support via keyboard and mouse:
@@ -377,7 +377,7 @@ When pasting text with an active selection: (1) compute `before = inputContent.s
 
 ### Batch 9: Clipboard
 
-#### T15. Add clipboard operations to EditController
+#### T15. Add clipboard operations to EditController ✅
 
 - **File**: `src/edit/edit-controller.ts` (MODIFY)
 - **What**: Add copy, cut, and paste support:

@@ -1,5 +1,5 @@
-import type { LayoutColumnElement } from "@/components/column.element";
-import type { LayoutParagraphElement } from "@/components/paragraph.element";
+import type { LayoutColumnElement } from "@/components/layout/column.element";
+import type { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import type { CursorPosition } from "@/types/edit/cursor.type";
 
 /**

@@ -1,6 +1,6 @@
 import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/constants";
 import type { LayoutParagraphElement } from "@/components";
-import type { LayoutVirtualColumnElement } from "@/components/v-column.element";
+import type { LayoutVirtualColumnElement } from "@/components/layout/v-column.element";
 import {
   InheritStyle,
   TextBlockData,
