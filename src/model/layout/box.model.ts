@@ -105,6 +105,10 @@ export class BoxModel {
       document.body.removeChild(div);
 
       this._ppm = pxWidth100mm / 100;
+
+      if (this._ppm <= 0) {
+        throw new Error(`BoxModel.ppm: 픽셀/mm 변환 비율이 ${this._ppm}입니다. 브라우저 렌더링 컨텍스트를 확인하세요.`);
+      }
     }
     return this._ppm;
   }

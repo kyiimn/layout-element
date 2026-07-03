@@ -5,13 +5,13 @@ export const checkOverlap = (baseElement: HTMLElement, targetElement: HTMLElemen
   const r1 = baseElement.getBoundingClientRect();
   const r2 = targetElement.getBoundingClientRect();
 
-  const isIntersceting = (
+  const isIntersecting = (
     r1.right > r2.left &&
     r1.left < r2.right &&
     r1.bottom > r2.top &&
     r1.top < r2.bottom
   );
-  return isIntersceting;
+  return isIntersecting;
 }
 
 export const mergeOverlapParts = (parts: OverlapParts[]): OverlapParts[] => {
@@ -32,7 +32,15 @@ export const mergeOverlapParts = (parts: OverlapParts[]): OverlapParts[] => {
   return merged;
 };
 
-export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: HTMLElement): {
+/**
+ * 오버랩 크기 계산.
+ *
+ * `targetElement`는 항상 `LayoutBoxElement`이다:
+ * 유일한 호출처인 `_applyOverlap()`이 `overlayElements`에서 요소를 가져오며,
+ * `overlayElements`는 `LayoutBoxElement[]` 타입이므로
+ * `as LayoutBoxElement` 캐스트는 런타임에 결코 실패하지 않는다.
+ */
+export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: LayoutBoxElement): {
   direction: "NONE" | "COVERS" | "PART",
   parts: OverlapParts[],
 } => {
@@ -58,8 +66,8 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: HTMLEl
   }
 
   // 이미지 픽셀 단위 겹침 탐지
-  if ((targetElement as LayoutBoxElement).contentType === 'image') {
-    const imageEl = (targetElement as LayoutBoxElement).items[0] as LayoutImageElement;
+  if (targetElement.contentType === 'image') {
+    const imageEl = targetElement.items[0] as LayoutImageElement;
     if (imageEl.canvas) {
       const canvas = imageEl.canvas;
       const ctx = canvas.getContext("2d", { willReadFrequently: true });

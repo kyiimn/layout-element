@@ -50,28 +50,32 @@ export class FontManager {
     try {
       if (this._isPrint) {
         if (!fonts) throw new Error('not given fonts');
-        fonts.filter(f => f.base64Data).map(async f => {
-          const fontFace = new FontFace(
-            f.family,
-            `url("data:font/ttf;base64,${f.base64Data}") format("truetype")`,
-            { style: f.style, weight: `${f.weight}` }
-          );
-          globalThis.document?.fonts.add(fontFace);
+        this._fontFaces = await Promise.all(
+          fonts.filter(f => f.base64Data).map(async f => {
+            const fontFace = new FontFace(
+              f.family,
+              `url("data:font/ttf;base64,${f.base64Data}") format("truetype")`,
+              { style: f.style, weight: `${f.weight}` }
+            );
+            globalThis.document?.fonts.add(fontFace);
 
-          await fontFace.load();
-        });
+            return await fontFace.load();
+          })
+        );
       } else {
         fonts = await this._loadServer();
-        fonts.filter(f => f.ttfFilename).map(async f => {
-          const fontFace = new FontFace(
-            f.family,
-            `url("${f.ttfFilename}") format("truetype")`,
-            { style: f.style, weight: `${f.weight}` }
-          );
-          globalThis.document?.fonts.add(fontFace);
+        this._fontFaces = await Promise.all(
+          fonts.filter(f => f.ttfFilename).map(async f => {
+            const fontFace = new FontFace(
+              f.family,
+              `url("${f.ttfFilename}") format("truetype")`,
+              { style: f.style, weight: `${f.weight}` }
+            );
+            globalThis.document?.fonts.add(fontFace);
 
-          await fontFace.load();
-        });
+            return await fontFace.load();
+          })
+        );
       }
       this._ready = true;
 

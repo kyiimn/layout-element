@@ -23,7 +23,6 @@ export class ColorManager {
 
   private constructor() {
     this._isPrint = window.matchMedia("print").matches;
-    !this._isPrint && this._loadServer();
   }
 
   /** 서버에서 `color.json` 로드 */
@@ -51,10 +50,10 @@ export class ColorManager {
 
     const { c, m, y, k } = cmyk;
 
-    const c_ = Math.min(1, Math.max(0, c));
-    const m_ = Math.min(1, Math.max(0, m));
-    const y_ = Math.min(1, Math.max(0, y));
-    const k_ = Math.min(1, Math.max(0, k));
+    const c_ = Math.min(1, Math.max(0, c / 100));
+    const m_ = Math.min(1, Math.max(0, m / 100));
+    const y_ = Math.min(1, Math.max(0, y / 100));
+    const k_ = Math.min(1, Math.max(0, k / 100));
 
     const r = Math.round(255 * (1 - Math.min(1, c_ + k_)));
     const g = Math.round(255 * (1 - Math.min(1, m_ + k_)));

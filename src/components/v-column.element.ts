@@ -81,7 +81,9 @@ export class LayoutVirtualColumnElement extends HTMLElement {
   }
 
   get isOverflow() {
-    const height = Array.from(this._shadowRoot.children).reduce<number>((a, b) => a + b.scrollHeight, 0);
+    const height = Array.from(this._shadowRoot.children)
+      .filter((el): el is HTMLElement => el instanceof HTMLElement)
+      .reduce<number>((a, b) => a + b.scrollHeight, 0);
     return height > this.clientHeight;
   }
 

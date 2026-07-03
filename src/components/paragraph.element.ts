@@ -117,6 +117,12 @@ export class LayoutParagraphElement extends HTMLElement {
     } else {
       this._model.data = paragraphData;
     }
+  }
+
+  render() {
+    if (!this.isConnected || !this._model) return;
+
+    this._model.preTextWrap();
 
     if (this._model.overflow > 0) {
       const event = new CustomEvent('render-error', {
@@ -126,12 +132,6 @@ export class LayoutParagraphElement extends HTMLElement {
       });
       this.dispatchEvent(event);
     }
-  }
-
-  render() {
-    if (!this.isConnected || !this._model) return;
-
-    this._model.preTextWrap();
 
     const columnContents = this._model.columnContents;
     for (let i = 0; i < columnContents.length; i++) {

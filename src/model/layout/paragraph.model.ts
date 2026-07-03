@@ -1,5 +1,6 @@
 import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/define";
 import type { LayoutParagraphElement } from "@/components";
+import type { LayoutVirtualColumnElement } from "@/components/v-column.element";
 import {
   InheritStyle,
   TextBlockData,
@@ -140,6 +141,14 @@ export class ParagraphModel {
     return freeRegions;
   }
 
+  /** 마지막 줄이 빈 파트만 있으면 제거 */
+  private _removeEmptyLastLine(columnContent: TextLineData[]): TextLineData[] {
+    if (columnContent.length > 0 && columnContent[columnContent.length - 1].parts.every(p => p.content.length === 0)) {
+      return columnContent.slice(0, columnContent.length - 1);
+    }
+    return columnContent;
+  }
+
   /**
    * 오버랩 요소(이미지 등)와의 겹침 계산.
    * `getBoundingClientRect()`로 실제 렌더링된 크기를 측정한다.
@@ -199,18 +208,20 @@ export class ParagraphModel {
         parts: [],
         textBlockStyle,
       };
-      return { cover: true, overflow: (vColumnEl as any).isOverflow, lineEl: null, partEls: [], lineData };
+      return { cover: true, overflow: (vColumnEl as LayoutVirtualColumnElement).isOverflow, lineEl: null, partEls: [], lineData };
     }
 
     // 오버플로우 시에도 lineEl을 DOM에 유지하고 freeRegions를 계산하여
     // 문자 배치를 시도한다. 원래 코드에서도 오버플로우 시 lineEl을 제거하지 않았다.
     // 오버플로우 플래그는 최종 반환값에 반영한다.
-    const isOverflow = (vColumnEl as any).isOverflow;
+    const isOverflow = (vColumnEl as LayoutVirtualColumnElement).isOverflow;
 
     const lineWidth = lineEl.getBoundingClientRect().width;
     const freeRegions = this._computeFreeRegions(lineWidth, overlapParts);
 
-    // 자유 영역이 없으면 라인 전체가 오버랩으로 덮인 것과 동일
+    // 자유 영역이 없으면 라인 전체가 오버랩으로 덮인 것.
+    // 호출자에서는 이미지가 영역을 덮든 COVER든 freeRegions가 없든 상관없이
+    // 텍스트를 배치할 공간이 없다는 점에서 동일하게 처리된다.
     if (freeRegions.length === 0) {
       const lineData: TextLineData = {
         firstOfText: isFirstInColumn,
@@ -218,7 +229,7 @@ export class ParagraphModel {
         parts: [],
         textBlockStyle,
       };
-      return { cover: true, overflow: (vColumnEl as any).isOverflow, lineEl: null, partEls: [], lineData };
+      return { cover: true, overflow: (vColumnEl as LayoutVirtualColumnElement).isOverflow, lineEl: null, partEls: [], lineData };
     }
 
     const parts: TextPartData[] = freeRegions.map((region, i) => ({
@@ -297,16 +308,21 @@ export class ParagraphModel {
         if (idxBlock !== beforeIdxBlock) idxContentOfBlock = 0;
 
         if (!lineEl || idxContentOfBlock === 0) {
+          let isFirstLineInLoop = true;
           while (true) {
-            const isFirstInColumn = curColumn === 0 && columnContent.length < 1;
+            const isFirstInColumn = curColumn === 0 && columnContent.length < 1 && isFirstLineInLoop;
             const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, isFirstInColumn);
 
-            if (columnContent.length > 0) columnContent[columnContent.length - 1].endOfBlock = true;
+            // M2: COVER 라인은 실제 텍스트가 없으므로 이전 라인에 endOfBlock을 설정하지 않음
+            if (columnContent.length > 0 && !result.cover) {
+              columnContent[columnContent.length - 1].endOfBlock = true;
+            }
 
             if (result.cover) {
               columnContent.push(result.lineData);
               partEls = [];
               lineEl = null;
+              isFirstLineInLoop = false;
               if (result.overflow) {
                 break;
               }
@@ -323,6 +339,7 @@ export class ParagraphModel {
             lineEl = result.lineEl;
             partEls = result.partEls;
             currentPartIdx = 0;
+            isFirstLineInLoop = false;
             break;
           }
 
@@ -370,8 +387,8 @@ export class ParagraphModel {
                   lineEl = null;
                   if (result.overflow) {
                     if (curColumn < this._columnWidths.length - 1) {
-                      if (idxContentOfBlock < block.content.length - 1 && columnContent[columnContent.length - 1].parts.every(p => p.content.length === 0)) {
-                        columnContent = columnContent.slice(0, columnContent.length - 1);
+                      if (idxContentOfBlock < block.content.length - 1) {
+                        columnContent = this._removeEmptyLastLine(columnContent);
                       }
                       break;
                     } else {
@@ -383,8 +400,8 @@ export class ParagraphModel {
 
                 if (result.overflow) {
                   if (curColumn < this._columnWidths.length - 1) {
-                    if (idxContentOfBlock < block.content.length - 1 && columnContent[columnContent.length - 1].parts.every(p => p.content.length === 0)) {
-                      columnContent = columnContent.slice(0, columnContent.length - 1);
+                    if (idxContentOfBlock < block.content.length - 1) {
+                      columnContent = this._removeEmptyLastLine(columnContent);
                     }
                     lineEl = null;
                     partEls = [];
@@ -409,9 +426,7 @@ export class ParagraphModel {
                 }
 
                 if (currentPartIdx >= partEls.length) {
-                  if (columnContent[columnContent.length - 1].parts.every(p => p.content.length === 0)) {
-                    columnContent = columnContent.slice(0, columnContent.length - 1);
-                  }
+                  columnContent = this._removeEmptyLastLine(columnContent);
                   idxContentOfBlock--;
                   currentPartIdx = 0;
                   continue;
@@ -437,8 +452,8 @@ export class ParagraphModel {
 
           if (vColumnEl.isOverflow) {
             if (curColumn < this._columnWidths.length - 1) {
-              if (idxContentOfBlock < block.content.length - 1 && columnContent[columnContent.length - 1].parts.every(p => p.content.length === 0)) {
-                columnContent = columnContent.slice(0, columnContent.length - 1);
+              if (idxContentOfBlock < block.content.length - 1) {
+                columnContent = this._removeEmptyLastLine(columnContent);
               }
               break;
             } else {
@@ -452,11 +467,14 @@ export class ParagraphModel {
         }
       }
 
-      if (idxBlock === this.contents.length &&
-        idxContentOfBlock === this.contents[this.contents.length - 1].content.length &&
-        columnContent.length > 0
-      ) {
-        columnContent[columnContent.length - 1].endOfText = true;
+      // M4: 텍스트가 끝났거나 마지막 컬럼에서 오버플로우 시 endOfText 설정
+      if (columnContent.length > 0) {
+        const isEndOfText = idxBlock === this.contents.length &&
+          idxContentOfBlock >= this.contents[this.contents.length - 1].content.length;
+        const isLastColumnOverflow = curColumn === this._columnWidths.length - 1 && vColumnEl.isOverflow;
+        if (isEndOfText || isLastColumnOverflow) {
+          columnContent[columnContent.length - 1].endOfText = true;
+        }
       }
       beforeIdxContentOfBlock = idxContentOfBlock;
       beforeIdxBlock = idxBlock;
@@ -575,16 +593,21 @@ export class ParagraphModel {
    * 글자 스타일 생성.
    *
    * - `widthRatio` → CSS `scale` 적용 (장평)
-   * - 1바이트 문자/공백 → `minWidth` 차등 적용
+   * - 반각 문자/공백 → `minWidth` 차등 적용
+   *
+   * `isHalfWidth`는 Latin-1 범위(128-255)의 전각 문자를 반각으로 오분류할 수 있다.
+   * 하지만 `preTextWrap()`이 DOM 측정(`scrollWidth > clientWidth`)으로
+   * 실제 렌더링 폭을 보정하므로, `minWidth` 오차는 최종 결과에 영향하지 않는다.
+   * 정밀한 분류가 필요하면 Unicode East Asian Width 범위 기반 판별로 교체해야 한다.
    */
   public genCharStyle = (char: string): Partial<CSSStyleDeclaration> => {
-    const isOneByte = char.length === 1 && char.charCodeAt(0) <= 255;
+    const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
     const isSpace = char === ' ';
 
     return {
       display: 'inline-block',
       maxWidth: `${this.widthRatio}em`,
-      minWidth: isSpace ? '0.15em' : isOneByte ? '0.35em' : '0.15em',
+      minWidth: isSpace ? '0.15em' : isHalfWidth ? '0.35em' : '0.15em',
       scale: `${this.widthRatio} 1`,
       textAlign: 'center',
       transformOrigin: '0',
@@ -667,7 +690,7 @@ export class ParagraphModel {
     return this._lineHeight;
   }
 
-  /** 오버플로우된 줄 수 (컨테이너를 벗어난 텍스트) */
+  /** 오버플로우된 문자 수 (컨테이너를 벗어난 텍스트) */
   public get overflow() {
     return this._overflow;
   }

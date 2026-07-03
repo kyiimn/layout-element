@@ -84,16 +84,16 @@ export class LayoutDocumentElement extends HTMLElement {
 
       styleEl.sheet.insertRule(":host {}", 0);
       const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
+      rule.style.setProperty('background-color', '#ffffff', 'important');
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
         rule.style,
         {
-          backgroundColor: '#ffffff !important',
           display: 'inline-flex',
           position: 'relative',
-          height: 'fit-content !important',
-          width: 'fit-content !important',
         }
       );
+      rule.style.setProperty('height', 'fit-content', 'important');
+      rule.style.setProperty('width', 'fit-content', 'important');
     }
 
     if (!this._root) {
