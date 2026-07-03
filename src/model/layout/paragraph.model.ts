@@ -162,6 +162,92 @@ export class ParagraphModel {
   }
 
   /**
+   * 라인 요소를 생성하고 오버랩을 감지하여 파트를 구성한다.
+   *
+   * `_applyOverlap()`으로 겹침을 감지하고, `_computeFreeRegions()`로
+   * 자유 영역을 계산한 뒤, 각 자유 영역에 대한 파트 요소와 TextPartData를 생성한다.
+   *
+   * @param vColumnEl - 가상 컬럼 요소 (DOM에 삽입되어 있어야 함)
+   * @param textBlockStyle - 이 라인에 적용할 블록 스타일
+   * @param ppm - 픽셀/mm 변환 비율
+   * @param isFirstInColumn - 첫 번째 라인 여부 (firstOfText/firstOfBlock 플래그 설정용)
+   * @returns cover=true면 라인 전체가 덮임 (lineEl=null, partEls=[]),
+   *          overflow=true면 컬럼 높이 초과로 라인을 제거해야 함,
+   *          cover=false && overflow=false면 정상 라인
+   */
+  private _createLineWithParts(
+    vColumnEl: HTMLElement,
+    textBlockStyle: TextBlockStyle | undefined,
+    ppm: number,
+    isFirstInColumn: boolean,
+  ): {
+    cover: boolean;
+    overflow: boolean;
+    lineEl: HTMLDivElement | null;
+    partEls: HTMLDivElement[];
+    lineData: TextLineData;
+  } {
+    const lineEl = this._createLineElement(textBlockStyle);
+    vColumnEl.appendChild(lineEl);
+
+    const { cover, overlapParts } = this._applyOverlap(lineEl);
+
+    if (cover) {
+      const lineData: TextLineData = {
+        firstOfText: isFirstInColumn,
+        firstOfBlock: isFirstInColumn,
+        parts: [],
+        textBlockStyle,
+      };
+      return { cover: true, overflow: (vColumnEl as any).isOverflow, lineEl: null, partEls: [], lineData };
+    }
+
+    if ((vColumnEl as any).isOverflow) {
+      lineEl.remove();
+      return { cover: false, overflow: true, lineEl: null, partEls: [], lineData: { parts: [], textBlockStyle } };
+    }
+
+    const lineWidth = lineEl.getBoundingClientRect().width;
+    const freeRegions = this._computeFreeRegions(lineWidth, overlapParts);
+
+    // 자유 영역이 없으면 라인 전체가 오버랩으로 덮인 것과 동일
+    if (freeRegions.length === 0) {
+      const lineData: TextLineData = {
+        firstOfText: isFirstInColumn,
+        firstOfBlock: isFirstInColumn,
+        parts: [],
+        textBlockStyle,
+      };
+      return { cover: true, overflow: (vColumnEl as any).isOverflow, lineEl: null, partEls: [], lineData };
+    }
+
+    const parts: TextPartData[] = freeRegions.map((region, i) => ({
+      content: [],
+      left: i === 0 ? region.start / ppm : (region.start - freeRegions[i - 1].end) / ppm,
+      width: (region.end - region.start) / ppm,
+    }));
+
+    const partEls = freeRegions.map(region => this._createPartElement(
+      region.end - region.start,
+      0,
+    ));
+    partEls.forEach((partEl, i) => {
+      const gapPx = i === 0 ? freeRegions[0].start : freeRegions[i].start - freeRegions[i - 1].end;
+      if (gapPx > 0) partEl.style.marginLeft = `${gapPx}px`;
+      lineEl.appendChild(partEl);
+    });
+
+    const lineData: TextLineData = {
+      firstOfText: isFirstInColumn,
+      firstOfBlock: isFirstInColumn,
+      parts,
+      textBlockStyle,
+    };
+
+    return { cover: false, overflow: false, lineEl, partEls, lineData };
+  }
+
+  /**
    * 텍스트 래핑 수행. `TextLineData[][]` 생성.
    *
    * 처리 과정:
@@ -171,6 +257,8 @@ export class ParagraphModel {
    * 4. `_columnContents`에 `TextLineData[]` 저장
    */
   public preTextWrap() {
+    if (!this._rootNode) return;
+
     const rawContents = !Array.isArray(this._inputContent) ? [{
       content: this._inputContent
     }] : this._inputContent;
@@ -210,59 +298,30 @@ export class ParagraphModel {
 
         if (!lineEl || idxContentOfBlock === 0) {
           while (true) {
-            lineEl = this._createLineElement(block.textBlockStyle);
-            vColumnEl.appendChild(lineEl);
+            const isFirstInColumn = curColumn === 0 && columnContent.length < 1;
+            const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, isFirstInColumn);
 
             if (columnContent.length > 0) columnContent[columnContent.length - 1].endOfBlock = true;
 
-            const { cover, overlapParts } = this._applyOverlap(lineEl);
-
-            if (cover) {
-              columnContent.push({
-                firstOfText: curColumn === 0 && columnContent.length < 1,
-                firstOfBlock: curColumn === 0 && columnContent.length < 1,
-                parts: [],
-                textBlockStyle: block.textBlockStyle,
-              });
+            if (result.cover) {
+              columnContent.push(result.lineData);
               partEls = [];
               lineEl = null;
-              if (vColumnEl.isOverflow) {
+              if (result.overflow) {
                 break;
               }
               continue;
             }
 
-            if (vColumnEl.isOverflow) {
+            if (result.overflow) {
               lineEl = null;
               partEls = [];
               break;
             }
 
-            const lineWidth = lineEl.getBoundingClientRect().width;
-            const freeRegions = this._computeFreeRegions(lineWidth, overlapParts);
-            const parts: TextPartData[] = freeRegions.map((region, i) => ({
-              content: [],
-              left: i === 0 ? region.start / ppm : (region.start - freeRegions[i - 1].end) / ppm,
-              width: (region.end - region.start) / ppm,
-            }));
-
-            partEls = freeRegions.map(region => this._createPartElement(
-              region.end - region.start,
-              0,
-            ));
-            partEls.forEach((partEl, i) => {
-              const gapPx = i === 0 ? freeRegions[0].start : freeRegions[i].start - freeRegions[i - 1].end;
-              if (gapPx > 0) partEl.style.marginLeft = `${gapPx}px`;
-              lineEl!.appendChild(partEl);
-            });
-
-            columnContent.push({
-              firstOfText: curColumn === 0 && columnContent.length < 1,
-              firstOfBlock: curColumn === 0 && columnContent.length < 1,
-              parts,
-              textBlockStyle: block.textBlockStyle,
-            });
-
+            columnContent.push(result.lineData);
+            lineEl = result.lineEl;
+            partEls = result.partEls;
             currentPartIdx = 0;
             break;
           }
@@ -303,19 +362,13 @@ export class ParagraphModel {
 
             if (!placed) {
               while (true) {
-                lineEl = this._createLineElement(block.textBlockStyle);
-                vColumnEl.appendChild(lineEl);
+                const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, false);
 
-                const { cover, overlapParts } = this._applyOverlap(lineEl);
-
-                if (cover) {
-                  columnContent.push({
-                    parts: [],
-                    textBlockStyle: block.textBlockStyle,
-                  });
+                if (result.cover) {
+                  columnContent.push(result.lineData);
                   partEls = [];
                   lineEl = null;
-                  if (vColumnEl.isOverflow) {
+                  if (result.overflow) {
                     if (curColumn < this._columnWidths.length - 1) {
                       if (idxContentOfBlock < block.content.length - 1 && columnContent[columnContent.length - 1].parts.every(p => p.content.length === 0)) {
                         columnContent = columnContent.slice(0, columnContent.length - 1);
@@ -328,7 +381,7 @@ export class ParagraphModel {
                   continue;
                 }
 
-                if (vColumnEl.isOverflow) {
+                if (result.overflow) {
                   if (curColumn < this._columnWidths.length - 1) {
                     if (idxContentOfBlock < block.content.length - 1 && columnContent[columnContent.length - 1].parts.every(p => p.content.length === 0)) {
                       columnContent = columnContent.slice(0, columnContent.length - 1);
@@ -341,30 +394,15 @@ export class ParagraphModel {
                   }
                 }
 
-                const lineWidth = lineEl.getBoundingClientRect().width;
-                const freeRegions = this._computeFreeRegions(lineWidth, overlapParts);
-                const parts: TextPartData[] = freeRegions.map((region, i) => ({
-                  content: [],
-                  left: i === 0 ? region.start / ppm : (region.start - freeRegions[i - 1].end) / ppm,
-                  width: (region.end - region.start) / ppm,
-                }));
-
-                partEls = freeRegions.map(region => this._createPartElement(
-                  region.end - region.start,
-                  0,
-                ));
-                partEls.forEach((partEl, i) => {
-                  const gapPx = i === 0 ? freeRegions[0].start : freeRegions[i].start - freeRegions[i - 1].end;
-                  if (gapPx > 0) partEl.style.marginLeft = `${gapPx}px`;
-                  lineEl!.appendChild(partEl);
-                });
-
-                columnContent.push({
-                  parts,
-                  textBlockStyle: block.textBlockStyle,
-                });
-
+                columnContent.push(result.lineData);
+                lineEl = result.lineEl;
+                partEls = result.partEls;
                 currentPartIdx = 0;
+
+                if (partEls.length === 0) {
+                  break;
+                }
+
                 partEls[currentPartIdx].appendChild(charEl);
 
                 while (partEls[currentPartIdx].scrollWidth > partEls[currentPartIdx].clientWidth) {
@@ -387,7 +425,7 @@ export class ParagraphModel {
                 break;
               }
 
-              if (vColumnEl.isOverflow && curColumn < this._columnWidths.length - 1) {
+              if (!lineEl || partEls.length === 0 || (vColumnEl.isOverflow && curColumn < this._columnWidths.length - 1)) {
                 break;
               }
             } else {
