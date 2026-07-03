@@ -4,4 +4,6 @@ export * from "./document.element";
 export * from "./guide-column.element";
 export * from "./image.element";
 export * from "./paragraph.element";
+export * from "./cursor.element";
+export * from "./selection.element";
 export * from "./v-column.element";
