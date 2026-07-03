@@ -439,6 +439,7 @@ export class EditCoordinateMapper {
     const firstColumn = columns[0];
     const colRect = firstColumn.getBoundingClientRect();
     const paraRect = this._paragraph.getBoundingClientRect();
+    const fontSize = parseFloat(getComputedStyle(firstColumn).fontSize) || 16;
 
     const textAlign = this._paragraph.paragraphStyle?.textAlign;
     let left: number;
@@ -450,10 +451,20 @@ export class EditCoordinateMapper {
       left = colRect.left - paraRect.left;
     }
 
+    const verticalAlign = this._paragraph.paragraphStyle?.verticalAlign || this._paragraph.inheritStyle?.verticalAlign;
+    let top: number;
+    if (verticalAlign === 'center') {
+      top = colRect.top - paraRect.top + colRect.height / 2 - fontSize / 2;
+    } else if (verticalAlign === 'bottom') {
+      top = colRect.bottom - paraRect.top - fontSize;
+    } else {
+      top = colRect.top - paraRect.top;
+    }
+
     return {
-      top: colRect.top - paraRect.top,
+      top,
       left,
-      fontSize: parseFloat(getComputedStyle(firstColumn).fontSize) || 16,
+      fontSize,
     };
   }
 
