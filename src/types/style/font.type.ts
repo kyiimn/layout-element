@@ -1,7 +1,7 @@
 /**
  * 폰트 정보를 나타내는 타입.
  *
- * `FontManager`가 `fonts.json`에서 이 데이터를 로드하여 `FontFace` API로 브라우저에 등록한다.
+ * `FontLoader`가 `fonts.json`에서 이 데이터를 로드하여 `FontFace` API로 브라우저에 등록한다.
  *
  * 인쇄 모드에서는 `base64Data`를 사용하여 외부 서버 요청 없이 폰트를 로드한다.
  * 화면 모드에서는 `ttfFilename`으로 서버에서 TTF 파일을 가져온다.

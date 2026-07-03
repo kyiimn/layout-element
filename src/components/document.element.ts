@@ -1,4 +1,4 @@
-import { BoxModel } from "@/model";
+import { GridCalculator } from "@/core";
 import { DocumentData, ParagraphStyle, PrintPostData, TextStyle } from "@/types";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
@@ -10,17 +10,17 @@ import { LayoutImageElement } from "./image.element";
  * `DocumentData`를 받아 전체 렌더링 파이프라인을 조율한다.
  *
  * 렌더링 파이프라인:
- * 1. `renderLayout()` - 동기. DOM 트리 구축, 자식 박스 생성, `BoxModel` 생성
+ * 1. `renderLayout()` - 동기. DOM 트리 구축, 자식 박스 생성, `GridCalculator` 생성
  * 2. `renderImage()` - 비동기. 이미지 로딩 및 `<canvas>` 크롭, 재귀 전파
  * 3. `renderText()` - 동기. 텍스트 래핑, 컬럼 엘리먼트 생성
  *
  * 주요 책임:
- * - `ColorManager`, `FontManager` 싱글턴 초기화
+ * - `ColorRegistry`, `FontLoader` 싱글턴 초기화
  * - 최상위 `InheritStyle` 생성 및 자식에게 전파
  * - 컬럼 가이드(`<x-layout-guide-column>`) 렌더링
  */
 export class LayoutDocumentElement extends HTMLElement {
-  private _model?: BoxModel;
+  private _model?: GridCalculator;
 
   private _shadowRoot: ShadowRoot;
   private _root?: HTMLDivElement;
@@ -61,7 +61,7 @@ export class LayoutDocumentElement extends HTMLElement {
   layout() {
     if (!this.isConnected) return null;
 
-    this._model ??= BoxModel.create({
+    this._model ??= GridCalculator.create({
       width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}
     });
     this._model.data = {

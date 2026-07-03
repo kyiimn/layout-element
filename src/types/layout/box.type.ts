@@ -21,7 +21,7 @@ export type BoxBorderStyle = 'solid' | 'dotted' | 'dashed';
  * - `'static'` (기본값): `left`는 컬럼 인덱스, `width`는 차지할 컬럼 개수
  * - `'absolute'`: `left`는 mm 좌표, `width`는 실제 너비(mm)
  *
- * `BoxModel.create()`가 static 모드의 컬럼 기반 좌표를 실제 mm 좌표(`Rect`)로 변환한다.
+ * `GridCalculator.create()`가 static 모드의 컬럼 기반 좌표를 실제 mm 좌표(`Rect`)로 변환한다.
  *
  * @example
  * // static 모드: 부모 그리드의 2번째 컬럼부터 3개 컬럼 차지

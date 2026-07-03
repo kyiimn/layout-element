@@ -3,7 +3,7 @@ import { LayoutParagraphElement } from "./paragraph.element";
 /**
  * 텍스트 컬럼 렌더링 요소. `<x-layout-column>` 커스텀 엘리먼트.
  *
- * `ParagraphModel`에서 생성된 `TextLineData[]`를 받아 각 줄을 렌더링한다.
+ * `TextLayoutEngine`에서 생성된 `TextLineData[]`를 받아 각 줄을 렌더링한다.
  * `LayoutParagraphElement.renderText()`에서 동적으로 생성된다.
  */
 export class LayoutColumnElement extends HTMLElement {

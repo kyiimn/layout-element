@@ -25,13 +25,13 @@
     <script type="module">
       import "/src/index.ts";
 
-      import { ColorManager } from "/src/model/color.manager";
-      import { FontManager } from "/src/model/font.manager";
+      import { ColorRegistry } from "/src/resource/color-registry";
+      import { FontLoader } from "/src/resource/font-loader";
       import { exampleData } from "/src/examples";
 
       (async () => {
-        await ColorManager.getInstance().init();
-        await FontManager.getInstance().init();
+        await ColorRegistry.getInstance().init();
+        await FontLoader.getInstance().init();
 
         const doc = document.getElementById("doc");
 

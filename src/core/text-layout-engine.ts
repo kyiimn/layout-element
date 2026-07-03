@@ -1,4 +1,4 @@
-import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/define";
+import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/constants";
 import type { LayoutParagraphElement } from "@/components";
 import type { LayoutVirtualColumnElement } from "@/components/v-column.element";
 import {
@@ -12,10 +12,10 @@ import {
   OverlapParts
 } from "@/types";
 import { getOverlapSizePX, mergeOverlapParts } from "@/utils";
-import { FontManager } from "../font.manager";
-import { ColorManager } from "../color.manager";
+import { FontLoader } from "@/resource/font-loader";
+import { ColorRegistry } from "@/resource/color-registry";
 
-type ParagraphModelOptions = {
+type TextLayoutEngineOptions = {
   content: string | (string | TextBlockData)[];
   column: number | number[];
   gap: number | number[];
@@ -45,7 +45,7 @@ type FreeRegion = { start: number; end: number };
  * 2. `preTextWrap()` - 텍스트를 줄 단위로 분리, 오버랩 처리, `TextLineData[]` 생성
  * 3. `LayoutColumnElement`가 `columnContents`를 소비하여 렌더링
  */
-export class ParagraphModel {
+export class TextLayoutEngine {
   private _columnWidths: number[] = [];
   private _inheritStyle: InheritStyle = undefined!;
 
@@ -67,11 +67,11 @@ export class ParagraphModel {
   /**
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
    */
-  public static create(options: ParagraphModelOptions) {
+  public static create(options: TextLayoutEngineOptions) {
     return new this(options);
   }
 
-  private constructor(options: ParagraphModelOptions) {
+  private constructor(options: TextLayoutEngineOptions) {
     this._paragraphElement = options.paragraphEl;
     this._rootNode = options.rootNode;
 
@@ -553,8 +553,8 @@ export class ParagraphModel {
     const letterSpacing = this.textStyle?.letterSpacing || this.inheritStyle?.letterSpacing;
     const textAlign = this.paragraphStyle?.textAlign || this.inheritStyle?.textAlign || 'justify';
 
-    const fontManager = FontManager.getInstance();
-    const colorManager = ColorManager.getInstance();
+    const fontLoader = FontLoader.getInstance();
+    const colorRegistry = ColorRegistry.getInstance();
 
     let justifyContent: "center" | "flex-start" | "flex-end" | "space-between";
     switch (textAlign) {
@@ -566,10 +566,10 @@ export class ParagraphModel {
 
     const blockStyle: Partial<CSSStyleDeclaration> = {};
     if (textBlockStyle) {
-      blockStyle.fontFamily = textBlockStyle.fontFamily ? fontManager.getFontFamily(textBlockStyle.fontFamily) : undefined;
+      blockStyle.fontFamily = textBlockStyle.fontFamily ? fontLoader.getFontFamily(textBlockStyle.fontFamily) : undefined;
       blockStyle.fontWeight = textBlockStyle.fontWeight !== undefined ? String(textBlockStyle.fontWeight) : undefined;
       blockStyle.fontSize = textBlockStyle.fontSize && `${textBlockStyle.fontSize}mm` || undefined;
-      blockStyle.color = textBlockStyle.color ? colorManager.getCSSColor(textBlockStyle.color) : undefined;
+      blockStyle.color = textBlockStyle.color ? colorRegistry.getCSSColor(textBlockStyle.color) : undefined;
 
       switch (textBlockStyle.textAlign) {
         case 'center': justifyContent = 'center'; break;
@@ -620,7 +620,7 @@ export class ParagraphModel {
     this._initLayout();
   }
 
-  set data(options: ParagraphModelOptions) {
+  set data(options: TextLayoutEngineOptions) {
     this._lineHeight = 0;
 
     this._paragraphElement = options.paragraphEl;

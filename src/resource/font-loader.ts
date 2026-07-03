@@ -9,8 +9,8 @@ import { Font } from "@/types";
  * 인쇄 모드에서는 `base64Data`를 사용하여 외부 서버 요청 없이 폰트를 로드한다.
  * 화면 모드에서는 `ttfFilename`으로 서버에서 TTF 파일을 가져온다.
  */
-export class FontManager {
-  private static _instance?: FontManager;
+export class FontLoader {
+  private static _instance?: FontLoader;
 
   private _fontFaces: FontFace[] = [];
   private _ready: boolean = false;

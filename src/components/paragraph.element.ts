@@ -1,4 +1,5 @@
-import { ColorManager, ParagraphModel } from "@/model";
+import { TextLayoutEngine } from "@/core";
+import { ColorRegistry } from "@/resource";
 import { InheritStyle, ParagraphData, ParagraphStyle, TextBlockData, TextStyle } from "@/types";
 import { checkOverlap, genUUID } from "@/utils";
 import { LayoutBoxElement } from "./box.element";
@@ -6,7 +7,7 @@ import { LayoutBoxElement } from "./box.element";
 /**
  * 다중 컬럼 텍스트 영역 요소. `<x-layout-paragraph>` 커스텀 엘리먼트.
  *
- * `ParagraphData`를 받아 `ParagraphModel`을 통해 텍스트 래핑을 수행하고,
+ * `ParagraphData`를 받아 `TextLayoutEngine`을 통해 텍스트 래핑을 수행하고,
  * `LayoutColumnElement`를 생성하여 각 컬럼을 렌더링한다.
  *
  * 오버플로우 발생 시 `render-error` 커스텀 이벤트를 디스패치한다.
@@ -15,7 +16,7 @@ export class LayoutParagraphElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
   private _styleRule?: CSSStyleRule;
 
-  private _model?: ParagraphModel;
+  private _model?: TextLayoutEngine;
 
   private _shadowRoot: ShadowRoot;
 
@@ -58,7 +59,7 @@ export class LayoutParagraphElement extends HTMLElement {
     const lineHeight = this.parentModel.lineHeight;
     const paddingTop = this._inheritStyle.paddingTop || 0;
 
-    const colorManager = ColorManager.getInstance();
+    const colorManager = ColorRegistry.getInstance();
     if (!this._styleRule) {
       const styleEl = document.createElement('style');
       this._shadowRoot.appendChild(styleEl);
@@ -113,7 +114,7 @@ export class LayoutParagraphElement extends HTMLElement {
     };
 
     if (!this._model) {
-      this._model = ParagraphModel.create(paragraphData);
+      this._model = TextLayoutEngine.create(paragraphData);
     } else {
       this._model.data = paragraphData;
     }

@@ -29,7 +29,7 @@ No test runner, linter, or formatter is configured.
 ### Custom Element Tree
 
 ```
-<x-layout-document>          ← Root. Owns BoxModel, coordinates rendering pipeline
+<x-layout-document>          ← Root. Owns GridCalculator, coordinates rendering pipeline
   <x-layout-guide-column>    ← Debug grid overlay (hidden in print mode)
   <x-layout-box>             ← Positioned container (static=column-grid | absolute=mm coords)
     <x-layout-paragraph>     ← Multi-column text area with wrapping
@@ -40,15 +40,15 @@ No test runner, linter, or formatter is configured.
 
 ### Rendering Pipeline (3 phases)
 
-1. **`layout()`** — synchronous. Build DOM tree, create BoxModel, calculate column grid coordinates
+1. **`layout()`** — synchronous. Build DOM tree, create GridCalculator, calculate column grid coordinates
 2. **`render()`** — async. Image loading + canvas crop (recursive to children)
-3. **`renderText()`** (inside `render()` via ParagraphModel) — character-by-character text wrapping with overlap avoidance
+3. **`renderText()`** (inside `render()` via TextLayoutEngine) — character-by-character text wrapping with overlap avoidance
 
 **Order matters.** `layout()` must complete before `render()`; image elements must render before adjacent text so overlap detection works.
 
 ### Key Domain Concepts
 
-- **All measurements are in mm** (millimeters). `BoxModel.ppm` (pixels-per-mm) converts to screen pixels at runtime by measuring a 100mm `<div>`.
+- **All measurements are in mm** (millimeters). `GridCalculator.ppm` (pixels-per-mm) converts to screen pixels at runtime by measuring a 100mm `<div>`.
 - **Column grid system**: `columns: number` = equal-width columns; `columns: number[]` = explicit per-column widths. Same for `gap`.
 - **`position: 'static'`** (default): `left` = column index (0-based), `width` = column span count, `height` = line count. **Not mm.**
 - **`position: 'absolute'`**: `left`/`top`/`width`/`height` are actual mm values.
@@ -58,12 +58,12 @@ No test runner, linter, or formatter is configured.
 
 ### Managers (Singletons, must init before rendering)
 
-- **`ColorManager`**: Loads `color.json` → CMYK→RGB conversion → injects CSS variables `--colorman-{name}`. In print mode, receives `CMYKColorSet` via `init()` instead of fetching.
-- **`FontManager`**: Loads `fonts.json` → registers `FontFace` objects. In print mode, uses `base64Data` instead of `ttfFilename`. Hardcoded return value `getFontFamily()` → `'Myoungjo'`.
+- **`ColorRegistry`**: Loads `color.json` → CMYK→RGB conversion → injects CSS variables `--colorman-{name}`. In print mode, receives `CMYKColorSet` via `init()` instead of fetching.
+- **`FontLoader`**: Loads `fonts.json` → registers `FontFace` objects. In print mode, uses `base64Data` instead of `ttfFilename`. Hardcoded return value `getFontFamily()` → `'Myoungjo'`.
 
 ## Important Constraints
 
-- **No `new` on models**: `BoxModel.create()` and `ParagraphModel.create()` are the only way to instantiate. Constructors are `private`.
+- **No `new` on models**: `GridCalculator.create()` and `TextLayoutEngine.create()` are the only way to instantiate. Constructors are `private`.
 - **Shadow DOM**: Every element uses `attachShadow({ mode: "open" })`. Styles are injected programmatically via `styleEl.sheet.insertRule()`, not in HTML templates.
 - **Virtual columns are temporary**: `<x-layout-vcolumn>` is created during `preTextWrap()` for measurement and removed immediately after. Never persist these.
 - **ImageData coordinates are pixels, not mm**: `x`, `y`, `width`, `height` in `ImageData` refer to source image pixels. `dpi` converts them to mm.
@@ -75,15 +75,17 @@ No test runner, linter, or formatter is configured.
 ```
 src/
   components/     # Custom Elements (each file = one element + customElements.define)
-  model/
-    layout/       # BoxModel, ParagraphModel — layout calculation engines
-    color.manager.ts  # CMYK→RGB singleton
-    font.manager.ts   # Font loading singleton
+  core/
+    grid-calculator.ts   # GridCalculator (column grid calculation)
+    text-layout-engine.ts # TextLayoutEngine (text wrapping engine)
+  resource/
+    color-registry.ts    # ColorRegistry (CMYK→RGB singleton)
+    font-loader.ts       # FontLoader (font loading singleton)
   types/
     layout/        # DocumentData, BoxData, ParagraphData, ImageData, TextData
     style/         # TextStyle, ParagraphStyle, InheritStyle, TextBlockStyle
     print/         # PrintPostData (for post-processing)
-  define/          # Constants: DEFAULT_FONT_SIZE, DEFAULT_PPM, etc.
+  constants/       # Constants: DEFAULT_FONT_SIZE, DEFAULT_PPM, etc.
   utils/           # checkOverlap, getOverlapSizePX, genUUID
   examples/        # exampleData (demo content for dev)
   globals.d.ts     # JSX intrinsic elements for React interop
@@ -97,7 +99,7 @@ examples/
 
 ## Dev Workflow Gotchas
 
-- **Managers must init**: `ColorManager.getInstance().init()` and `FontManager.getInstance().init()` must be called and awaited before setting `document.data`. Without this, `getCSSColor()` and `getFontFamily()` throw.
+- **Managers must init**: `ColorRegistry.getInstance().init()` and `FontLoader.getInstance().init()` must be called and awaited before setting `document.data`. Without this, `getCSSColor()` and `getFontFamily()` throw.
 - **`examples/color.json` and `examples/fonts.json`**: Served by Vite dev server. The fetch URLs are relative (`color.json`, `fonts.json`), so they must be co-located with the HTML page.
 - **Print mode**: Detected via `window.matchMedia("print")`. In print mode, both managers skip `fetch()` and expect data injection. The document element's `connectedCallback` returns early — you must call `.layout()` and `.render()` manually after data injection. Images and guide columns are hidden via `@media print` CSS rules (`visibility: hidden` / `display: none`); their rendered positions and sizes are instead collected via `printPostData` getters for post-processing outside the browser.
 - **TypeScript 7 RC**: `typescript: ^7.0.1-rc` is configured. The `noEmit: true` setting means `tsc` is type-check only; actual compilation is handled by Vite.

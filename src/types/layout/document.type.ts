@@ -6,7 +6,7 @@ import { BoxData } from "./box.type";
  *
  * 렌더링 파이프라인:
  * 1. `LayoutDocumentElement`가 `data` setter를 통해 이 데이터를 받음
- * 2. `BoxModel.create(this._data)`로 컬럼 좌표(`Rect[]`) 계산
+ * 2. `GridCalculator.create(this._data)`로 컬럼 좌표(`Rect[]`) 계산
  * 3. `textStyle` + `paragraphStyle`을 합쳐 `InheritStyle` 생성 후 자식에게 전파
  *
  * @example

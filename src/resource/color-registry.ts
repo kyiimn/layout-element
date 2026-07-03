@@ -1,7 +1,7 @@
 import { CMYKColor, CMYKColorSet, ColorMap, RGBColor } from "@/types";
 
 /**
- * CMYK 색상 로드 및 RGB 변환을 관리하는 싱글턴 매니저.
+ * CMYK 색상 로드 및 RGB 변환을 관리하는 싱글턴 레지스트리.
  *
  * `color.json`에서 `CMYKColorSet`을 로드하고, 각 색상을 RGB로 변환하여
  * CSS 변수(`--color-{name}`)로 문서에 주입한다.
@@ -12,8 +12,8 @@ import { CMYKColor, CMYKColorSet, ColorMap, RGBColor } from "@/types";
  * 인쇄 모드(`window.matchMedia("print")`)에서는 서버 로딩을 생략하고
  * `colorSet` setter를 통해 데이터를 주입받는다.
  */
-export class ColorManager {
-  private static _instance?: ColorManager;
+export class ColorRegistry {
+  private static _instance?: ColorRegistry;
 
   private _colorSet: CMYKColorSet = {};
   private _defaultColor: CMYKColor = { c: 0, m: 0, y: 0, k: 0 };

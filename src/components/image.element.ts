@@ -1,7 +1,7 @@
 import { InheritStyle, ImageData, PrintPostData } from "@/types";
 import { LayoutBoxElement } from "./box.element";
 import { genUUID } from "@/utils";
-import { DEFAULT_IMAGE_DPI } from "@/define";
+import { DEFAULT_IMAGE_DPI } from "@/constants";
 
 /**
  * 이미지 크롭 렌더링 요소. `<x-layout-image>` 커스텀 엘리먼트.

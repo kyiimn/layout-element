@@ -1,5 +1,5 @@
-import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/define";
-import { Rect } from "@/model";
+import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/constants";
+import { Rect } from "@/core";
 
 /**
  * 컬럼 가이드 표시 요소. `<x-layout-guide-column>` 커스텀 엘리먼트.

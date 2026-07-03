@@ -4,7 +4,7 @@ import { TextBlockData } from "./text/text-block.type";
 /**
  * 다중 컬럼 텍스트 영역 데이터. 텍스트 래핑, 블록 단위 스타일링을 지원한다.
  *
- * `ParagraphModel.preTextWrap()`이 텍스트를 래핑하여 `TextLineData[]`로 변환하고,
+ * `TextLayoutEngine.preTextWrap()`이 텍스트를 래핑하여 `TextLineData[]`로 변환하고,
  * `LayoutColumnElement`가 이를 렌더링한다.
  *
  * `content` 필드는 세 가지 형태를 지원:

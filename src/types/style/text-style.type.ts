@@ -2,7 +2,7 @@
  * 글자 수준의 시각 속성을 정의.
  *
  * `color` 필드는 CSS 색상값(`#000`, `rgb(...)`)과 CMYK 색상 이름(예: `"black"`) 모두 사용 가능.
- * CMYK 이름 사용 시 `ColorManager`가 등록된 `CMYKColorSet`에서 RGB로 변환하여 CSS 변수(`--color-{name}`)로 주입한다.
+ * CMYK 이름 사용 시 `ColorRegistry`가 등록된 `CMYKColorSet`에서 RGB로 변환하여 CSS 변수(`--color-{name}`)로 주입한다.
  *
  * `widthRatio`는 CSS `transform: scaleX()`로 구현된다.
  * 신문 본문에서 좁은 컬럼에 텍스트를 맞추기 위해 수평 압축할 때 사용한다.

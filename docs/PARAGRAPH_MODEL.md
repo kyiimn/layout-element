@@ -1,24 +1,24 @@
-# ParagraphModel 상세 명세
+# TextLayoutEngine 상세 명세
 
-> 작성 기준: `src/model/layout/paragraph.model.ts` (1196 lines) 및 관련 타입,
+> 작성 기준: `src/core/text-layout-engine.ts` 및 관련 타입,
 > 컴포넌트, 유틸리티 소스 코드
 >
-> 본 문서는 `ParagraphModel`의 렌더링 파이프라인, 스켈레톤 캐싱, 오버랩 회피,
+> 본 문서는 `TextLayoutEngine`의 렌더링 파이프라인, 스켈레톤 캐싱, 오버랩 회피,
 > 데이터 구조, DOM 계층, 스타일 생성, 측정 단위를 상세히 기술한다.
 
 ---
 
 ## 1. 개요 (Overview)
 
-`ParagraphModel`은 신문 레이아웃 엔진의 핵심 텍스트 래핑 모델이다.
+`TextLayoutEngine`은 신문 레이아웃 엔진의 핵심 텍스트 래핑 모델이다.
 입력된 텍스트를 다중 컬럼 구조에 맞게 줄바꿈하고, 이미지 등 다른 요소와의 겹침을 회피하며,
 글자 단위로 DOM에 배치할 수 있는 `TextLineData[][]`를 생성한다.
 
-인스턴스는 `ParagraphModel.create(options)` 팩토리 메서드로만 생성할 수 있다. 직접 `new` 사용은 금지되며,
+인스턴스는 `TextLayoutEngine.create(options)` 팩토리 메서드로만 생성할 수 있다. 직접 `new` 사용은 금지되며,
 생성자가 `private`이기 때문이다.
 
 ```ts
-const model = ParagraphModel.create({
+const model = TextLayoutEngine.create({
   content: "...",
   column: 2,
   gap: 3,
@@ -42,7 +42,7 @@ const model = ParagraphModel.create({
 
 ## 2. 3단계 렌더링 파이프라인
 
-`ParagraphModel`은 다음 3단계 파이프라인으로 동작한다.
+`TextLayoutEngine`은 다음 3단계 파이프라인으로 동작한다.
 
 ```mermaid
 flowchart TD
@@ -123,7 +123,7 @@ flowchart TD
 
 ## 4. 스켈레톤 캐싱과 텍스트 갱신
 
-스켈레톤 캐싱은 `ParagraphModel`의 핵심 성능 최적화 기능이다.
+스켈레톤 캐싱은 `TextLayoutEngine`의 핵심 성능 최적화 기능이다.
 
 ### 4.1 캐시 데이터
 
@@ -218,7 +218,7 @@ flowchart TD
 
 ### 5.1 개념
 
-이미지 등 다른 요소가 텍스트 영역과 겹칠 때, `ParagraphModel`은 두 가지 상황을 구분한다.
+이미지 등 다른 요소가 텍스트 영역과 겹칠 때, `TextLayoutEngine`은 두 가지 상황을 구분한다.
 
 - **COVER**: 라인 전체가 덮여 글자를 배치할 수 없음
 - **PART**: 라인 일부가 덮임
@@ -466,10 +466,10 @@ type TextPlacementResult = {
 
 ## 8. 데이터 구조
 
-### 8.1 `ParagraphModelOptions`
+### 8.1 `TextLayoutEngineOptions`
 
 ```ts
-type ParagraphModelOptions = {
+type TextLayoutEngineOptions = {
   content: string | (string | TextBlockData)[];
   column: number | number[];
   gap: number | number[];
@@ -717,7 +717,7 @@ this._columnWidths[curColumn];
 
 | 메서드 | 설명 |
 |--------|------|
-| `ParagraphModel.create(...)` | 팩토리 메서드. `new` 대신 사용 |
+| `TextLayoutEngine.create(...)` | 팩토리 메서드. `new` 대신 사용 |
 
 ### 12.2 공개 메서드
 
@@ -736,7 +736,7 @@ this._columnWidths[curColumn];
 
 | 세터 | 타입 | 설명 |
 | ------ | ------ | ------ |
-| `data` | `ParagraphModelOptions` | 모델 전체 데이터 설정. 컬럼, 스타일, 콘텐츠 갱신 |
+| `data` | `TextLayoutEngineOptions` | 모델 전체 데이터 설정. 컬럼, 스타일, 콘텐츠 갱신 |
 | `inheritStyle` | `InheritStyle` | 상속 스타일 설정. `_initLayout()` 호출 |
 | `inputContent` | `string \| ...` | 텍스트 콘텐츠 갱신. 스켈레톤 재사용 또는 전체 재계산 |
 
@@ -809,7 +809,7 @@ this._lineHeight = fontSize * lineGap;
 ### 15.1 기본 사용
 
 ```ts
-const model = ParagraphModel.create({
+const model = TextLayoutEngine.create({
   content: "신문 본문 텍스트입니다.\n두 번째 단락입니다.",
   column: 2,
   gap: 3,
@@ -948,7 +948,7 @@ baseElement (line)        targetElement (image box)
 
 ### 19.1 `LayoutParagraphElement`
 
-- `layout()`에서 `ParagraphModel.create()` 또는 `model.data = ...` 호출
+- `layout()`에서 `TextLayoutEngine.create()` 또는 `model.data = ...` 호출
 - `render()`에서 `model.preTextWrap()` 호출
 - `render()`에서 `columnContents` 길이만큼 `<x-layout-column>` 생성
 - `overlayElements` 게터가 `_applyOverlap()`에 사용될 오버랩 요소 제공
@@ -971,7 +971,7 @@ baseElement (line)        targetElement (image box)
 
 ## 20. 주의사항 및 제약
 
-- `ParagraphModel`은 `create()`로만 인스턴스화해야 한다.
+- `TextLayoutEngine`은 `create()`로만 인스턴스화해야 한다.
 - `preTextWrap()`과 `_fillTextContent()`는 가상 컬럼이 실제 DOM에 삽입된 상태에서 호출해야 한다.
 - 이미지 오버랩 탐지는 `LayoutImageElement.canvas`가 존재할 때만 픽셀 수준으로 수행한다.
 - 텍스트 오버플로우는 마지막 컬럼에서 `_overflow`로 집계되며 `render-error` 이벤트로 통지된다.
@@ -1136,4 +1136,4 @@ textAlign = 'justify' (space-between)
 | 시각적 정렬 위치 | 예 | `genPartStyle()`의 `justifyContent` 매핑과 `renderText()`의 오버라이드 |
 | 마지막 줄 처리 | 예 | `justify`일 때만 `flex-start`로 강제 |
 
-결론적으로, ParagraphModel의 핵심 기능인 오버랩 회피와 텍스트 래핑은 어떤 `textAlign` 값이 오든 정확하게 동작한다. 정렬은 최종 렌더링 단계에서 시각적 위치만 바꾼다.
+결론적으로, TextLayoutEngine의 핵심 기능인 오버랩 회피와 텍스트 래핑은 어떤 `textAlign` 값이 오든 정확하게 동작한다. 정렬은 최종 렌더링 단계에서 시각적 위치만 바꾼다.

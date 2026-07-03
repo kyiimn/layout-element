@@ -1,14 +1,14 @@
-import { ParagraphModel } from "@/model";
+import { TextLayoutEngine } from "@/core";
 import { LayoutParagraphElement } from "./paragraph.element";
 
 /**
  * 텍스트 래핑용 가상 컬럼 요소. `<x-layout-vcolumn>` 커스텀 엘리먼트.
  *
- * `ParagraphModel.preTextWrap()`에서 오버플로우 측정을 위해 임시로 생성된다.
+ * `TextLayoutEngine.preTextWrap()`에서 오버플로우 측정을 위해 임시로 생성된다.
  * 실제 렌더링(`LayoutColumnElement`)이 시작되기 전에 제거된다.
  */
 export class LayoutVirtualColumnElement extends HTMLElement {
-  private _model?: ParagraphModel;
+  private _model?: TextLayoutEngine;
   private _index?: number;
 
   private _parentElement!: LayoutParagraphElement;
@@ -87,7 +87,7 @@ export class LayoutVirtualColumnElement extends HTMLElement {
     return height > this.clientHeight;
   }
 
-  set model(model: ParagraphModel | undefined) {
+  set model(model: TextLayoutEngine | undefined) {
     this._model = model;
     this.render();
   }

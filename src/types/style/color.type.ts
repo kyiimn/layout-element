@@ -28,7 +28,7 @@ export type CMYKColor = {
 /**
  * 이름으로 CMYK 색상에 접근하기 위한 딕셔너리.
  *
- * `ColorManager.getInstance()`가 `color.json`에서 이 데이터를 로드한 뒤,
+ * `ColorRegistry.getInstance()`가 `color.json`에서 이 데이터를 로드한 뒤,
  * 각 색상을 RGB로 변환하여 CSS 변수(`--color-{name}`)로 문서에 주입한다.
  *
  * @example

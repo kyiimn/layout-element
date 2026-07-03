@@ -1,5 +1,6 @@
-import { DEFAULT_BORDER_STYLE } from "@/define";
-import { BoxModel, ColorManager } from "@/model";
+import { DEFAULT_BORDER_STYLE } from "@/constants";
+import { GridCalculator } from "@/core";
+import { ColorRegistry } from "@/resource";
 import { InheritStyle, BoxData, ParagraphStyle, TextStyle, PrintPostData, BoxPosition, BoxBorderStyle } from "@/types";
 import { checkOverlap, genUUID } from "@/utils";
 import { LayoutDocumentElement } from "./document.element";
@@ -18,7 +19,7 @@ import { LayoutParagraphElement } from "./paragraph.element";
  */
 export class LayoutBoxElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
-  private _model?: BoxModel;
+  private _model?: GridCalculator;
 
   private _shadowRoot: ShadowRoot;
   private _styleRule?: CSSStyleRule;
@@ -58,7 +59,7 @@ export class LayoutBoxElement extends HTMLElement {
 
     const { columnWidth, gaps, lineHeight } = this.parentModel;
 
-    this._model ??= BoxModel.create({
+    this._model ??= GridCalculator.create({
       width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}
     });
     this._model.data = {
@@ -102,7 +103,7 @@ export class LayoutBoxElement extends HTMLElement {
     );
     this._shadowRoot.querySelectorAll(':scope > :not(slot):not(style)').forEach(node => node.remove());
 
-    const colorManager = ColorManager.getInstance();
+    const colorManager = ColorRegistry.getInstance();
     if (this.borderColor) {
       const borderStyle: Partial<CSSStyleDeclaration> = {
         overflow: 'hidden',
@@ -120,7 +121,7 @@ export class LayoutBoxElement extends HTMLElement {
         border.setAttribute('data-border', 'top');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
-          height: `${Math.ceil(this.borderTopWidth * BoxModel.ppm)}px`, top: '0', width: '100%',
+          height: `${Math.ceil(this.borderTopWidth * GridCalculator.ppm)}px`, top: '0', width: '100%',
         });
         const borderInside = document.createElement('div');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
@@ -136,7 +137,7 @@ export class LayoutBoxElement extends HTMLElement {
         border.setAttribute('data-border', 'bottom');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
-          height: `${Math.ceil(this.borderBottomWidth * BoxModel.ppm)}px`, bottom: '0', width: '100%',
+          height: `${Math.ceil(this.borderBottomWidth * GridCalculator.ppm)}px`, bottom: '0', width: '100%',
         });
         const borderInside = document.createElement('div');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
@@ -152,7 +153,7 @@ export class LayoutBoxElement extends HTMLElement {
         border.setAttribute('data-border', 'left');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
-          width: `${Math.ceil(this.borderLeftWidth * BoxModel.ppm)}px`, height: '100%', left: '0',
+          width: `${Math.ceil(this.borderLeftWidth * GridCalculator.ppm)}px`, height: '100%', left: '0',
         });
         const borderInside = document.createElement('div');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
@@ -168,7 +169,7 @@ export class LayoutBoxElement extends HTMLElement {
         border.setAttribute('data-border', 'right');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
-          width: `${Math.ceil(this.borderRightWidth * BoxModel.ppm)}px`, height: '100%', right: '0',
+          width: `${Math.ceil(this.borderRightWidth * GridCalculator.ppm)}px`, height: '100%', right: '0',
         });
         const borderInside = document.createElement('div');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
@@ -548,7 +549,7 @@ export class LayoutBoxElement extends HTMLElement {
     this.items.forEach(c => {
       data.push(...c.printPostData)
     });
-    const colorManager = ColorManager.getInstance();
+    const colorManager = ColorRegistry.getInstance();
 
     data.push({
       color: this.borderColor ? colorManager.get(this.borderColor) : undefined,

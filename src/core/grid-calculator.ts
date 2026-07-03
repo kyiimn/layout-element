@@ -1,9 +1,9 @@
-import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/define";
+import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/constants";
 import { ParagraphStyle, TextStyle } from "@/types";
 
 /**
  * 컬럼의 좌표 영역을 나타내는 사각형.
- * `BoxModel`이 컬럼 그리드를 계산할 때 각 컬럼의 경계를 이 타입으로 표현한다.
+ * `GridCalculator`이 컬럼 그리드를 계산할 때 각 컬럼의 경계를 이 타입으로 표현한다.
  */
 export type Rect = {
   /** 좌측 경계 (mm) */
@@ -19,7 +19,7 @@ export type Rect = {
   y2: number;
 };
 
-type BoxModelOptions = {
+type GridCalculatorOptions = {
   width: number;
   height: number;
   paddingTop?: number;
@@ -33,7 +33,7 @@ type BoxModelOptions = {
 }
 
 /**
- * 문서 레이아웃의 컬럼 그리드와 스타일을 계산하는 모델.
+ * 문서 레이아웃의 컬럼 그리드와 스타일을 계산하는 계산기.
  *
  * `DocumentData`를 받아 컬럼 좌표(`Rect[]`), 행 높이, 편집 가능 영역 등을 계산한다.
  * 정적 팩토리 메서드 `create()`로만 인스턴스를 생성한다.
@@ -44,12 +44,12 @@ type BoxModelOptions = {
  * - 행 높이(`lineHeight = fontSize × lineGap`) 계산
  *
  * @example
- * const model = BoxModel.create(documentData);
- * console.log(model.columnCoords);  // Rect[] - 각 컬럼의 좌표
- * console.log(model.lineHeight);    // number - 행 높이 (mm)
- * console.log(model.editableWidth); // number - 편집 가능 너비 (mm)
+ * const calculator = GridCalculator.create(documentData);
+ * console.log(calculator.columnCoords);  // Rect[] - 각 컬럼의 좌표
+ * console.log(calculator.lineHeight);    // number - 행 높이 (mm)
+ * console.log(calculator.editableWidth); // number - 편집 가능 너비 (mm)
  */
-export class BoxModel {
+export class GridCalculator {
   private static _ppm: number | undefined;
 
   private _columnCoords: Rect[];
@@ -72,11 +72,11 @@ export class BoxModel {
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
    * @param data 문서 데이터
    */
-  static create(data: BoxModelOptions) {
+  static create(data: GridCalculatorOptions) {
     return new this(data);
   }
 
-  private constructor(data: BoxModelOptions) {
+  private constructor(data: GridCalculatorOptions) {
     this._columnCoords = [];
     this._columnWidths = [];
     this._gaps = [];
@@ -107,7 +107,7 @@ export class BoxModel {
       this._ppm = pxWidth100mm / 100;
 
       if (this._ppm <= 0) {
-        throw new Error(`BoxModel.ppm: 픽셀/mm 변환 비율이 ${this._ppm}입니다. 브라우저 렌더링 컨텍스트를 확인하세요.`);
+        throw new Error(`GridCalculator.ppm: 픽셀/mm 변환 비율이 ${this._ppm}입니다. 브라우저 렌더링 컨텍스트를 확인하세요.`);
       }
     }
     return this._ppm;
@@ -162,7 +162,7 @@ export class BoxModel {
     }
   }
 
-  set data(data: BoxModelOptions) {
+  set data(data: GridCalculatorOptions) {
     this._width = data.width;
     this._height = data.height;
     this._paddingTop = data.paddingTop || 0;
