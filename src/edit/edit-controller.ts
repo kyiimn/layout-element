@@ -49,6 +49,7 @@ export class EditController {
 
   private _selectionAnchor: number | null = null;
   private _isMouseDown: boolean = false;
+  private _wasDragged: boolean = false;
   private _isFocused: boolean = false;
   private _mousemoveRafId: number | null = null;
 
@@ -231,6 +232,11 @@ export class EditController {
   }
 
   private _onClick(event: MouseEvent): void {
+    if (this._wasDragged) {
+      this._wasDragged = false;
+      return;
+    }
+
     this._clickCount++;
     if (this._clickTimer !== null) {
       clearTimeout(this._clickTimer);
@@ -336,6 +342,8 @@ export class EditController {
   private _onMouseDown(event: MouseEvent): void {
     if (event.button !== 0) return;
 
+    this._wasDragged = false;
+
     const sourceOffset = this._getSourceOffsetFromEvent(event);
     if (sourceOffset === null) {
       const rect = this._paragraph.getBoundingClientRect();
@@ -391,6 +399,8 @@ export class EditController {
   private _onMouseMove(event: MouseEvent): void {
     if (!this._isMouseDown) return;
     if (this._mousemoveRafId !== null) return;
+
+    this._wasDragged = true;
 
     this._mousemoveRafId = requestAnimationFrame(() => {
       this._mousemoveRafId = null;
