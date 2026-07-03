@@ -196,6 +196,9 @@ export class EditController {
 
     this._isFocused = false;
     this._resetCompositionState();
+    if (this._optimisticSpan && this._optimisticSpan.parentNode) {
+      this._optimisticSpan.remove();
+    }
     this._optimisticSpan = null;
 
     if (this._textarea.parentNode) {
@@ -1018,6 +1021,8 @@ export class EditController {
       return;
     }
 
+    if (before === after) return;
+
     const change = this._computeTextChange(before, after, this._cursorModel.offset);
 
     model.inputContent = after;
@@ -1071,11 +1076,6 @@ export class EditController {
     this._removeCompositionSpan();
 
     const model = this._paragraph.model;
-    if (model && typeof model.inputContent === "string") {
-      this._compositionBeforeContent = model.inputContent;
-    } else {
-      this._compositionBeforeContent = "";
-    }
 
     const hadSelection = this._cursorModel.selection !== null;
     if (this._cursorModel.selection) {
@@ -1093,6 +1093,15 @@ export class EditController {
     } else {
       this._compositionStartOffset = this._cursorModel.offset;
       this._compositionSelectionLength = 0;
+    }
+
+    // _compositionBeforeContent must be captured AFTER selection deletion
+    // so that composedLength = after.length - beforeContent.length + selectionLength
+    // correctly represents: (new text length) - (base text length) + (deleted selection length)
+    if (model && typeof model.inputContent === "string") {
+      this._compositionBeforeContent = model.inputContent;
+    } else {
+      this._compositionBeforeContent = "";
     }
     this._cursorModel.selection = null;
     this._updateSelection();
