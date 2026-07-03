@@ -28,7 +28,8 @@ const model = ParagraphModel.create({
   paragraphEl: paragraphElement,
   rootNode: shadowRoot,
 });
-```text
+```
+
 핵심 특징:
 
 - 모든 레이아웃 크기는 **mm**(밀리미터) 단위이다.
@@ -49,7 +50,8 @@ flowchart TD
     B -->|_createColumnSkeleton| C[ColumnSkeleton[]<br/>geometry + DOM 요소]
     C -->|_fillTextContent| D[TextLineData[][]<br/>글자 배치 완료]
     D -->|_columnContents| E[LayoutColumnElement.renderText]
-```text
+```
+
 ### 2.1 Phase 1: 파싱 (`_parseContent`)
 
 입력 콘텐츠를 `\n` 단위로 분리하여 `TextBlockData[]`로 변환한다.
@@ -102,7 +104,8 @@ flowchart TD
     Cache --> Push[_columnContents.push]
     Push --> Loop
     Loop -->|완료| End2([end])
-```text
+```
+
 각 컬럼 처리 상세:
 
 1. `x-layout-vcolumn` 생성
@@ -127,7 +130,8 @@ flowchart TD
 ```ts
 private _columnSkeletons: ColumnSkeleton[] = [];
 private _ppmValues: number[] = [];
-```text
+```
+
 - `_columnSkeletons`: 컬럼별 스켈레톤(라인/파트 geometry + DOM 요소 참조)
 - `_ppmValues`: 컬럼별 pixels-per-mm 변환 비율
 
@@ -140,7 +144,8 @@ flowchart LR
     C -->|재사용| D[_recreateColumnDOM]
     D -->|갱신| B
     A -->|data 세터| E[캐시 초기화<br/>새 geometry 필요]
-```text
+```
+
 ### 4.3 텍스트 갱신 흐름 (`_refillTextContent`)
 
 `inputContent` 세터가 호출되면 `_refillTextContent()`가 실행된다.
@@ -160,7 +165,8 @@ flowchart TD
     RemoveVC --> Push[_columnContents.push]
     Push --> Loop
     Loop -->|완료| Rerender[_reRenderColumns]
-```text
+```
+
 `_refillTextContent()`의 핵심 차이점:
 
 - `_createColumnSkeleton()` 대신 `_recreateColumnDOM()` 사용
@@ -195,16 +201,17 @@ flowchart TD
     Cover -->|No| NormalLine[라인 요소 생성]
     NormalLine --> PartLoop{각 파트}
     PartLoop --> Width[widthPx = part.width * ppm]
-    Width --> Margin[marginLeftPx = j===0 ? part.left * ppm : 0]
-    Margin --> PartEl[_createPartElement]
-    PartEl --> Append[라인에 추가]
-    Append --> PartLoop
+    PartLoop --> Margin[marginLeftPx = j===0 ? part.left * ppm : 0]
+    PartLoop --> PartEl[_createPartElement]
+    PartLoop --> Append[라인에 추가]
+    PartLoop --> PartLoop
     PartLoop -->|완료| MaxWidth[maxWidth = width 복원]
     MaxWidth --> VColumn[vColumnEl에 추가]
     CoverLine --> VColumn
     VColumn --> Loop
     Loop -->|완료| InPlace[skeleton.lineEls/partEls<br/>in-place 갱신]
-```text
+```
+
 ---
 
 ## 5. 오버랩 회피 메커니즘
@@ -223,7 +230,8 @@ flowchart TD
 ```ts
 private _applyOverlap(lineEl: HTMLElement): { cover: boolean; overlapParts:
 OverlapParts[] }
-```text
+```
+
 동작:
 
 1. 각 오버랩 요소에 대해 `getOverlapSizePX(lineEl, el)` 호출
@@ -239,10 +247,12 @@ OverlapParts[] }
 ```ts
 private _computeFreeRegions(lineWidth: number, overlapParts: OverlapParts[]):
 FreeRegion[]
-```text
+```
+
 ```ts
 type FreeRegion = { start: number; end: number }; // pixels
-```text
+```
+
 알고리즘:
 
 1. 오버랩이 없으면 `[{ start: 0, end: lineWidth }]` 반환
@@ -281,7 +291,8 @@ CASE C: FREE (오버랩 없음)
     └─────────────────────────────────────┘
               ↓
     parts: [{ left: 0, width: lineWidth }]
-```text
+```
+
 ### 5.5 자유 영역 계산 예시
 
 ```text
@@ -298,7 +309,8 @@ freeRegions = [
   { start: 120, end: 200 },
   { start: 240, end: 300 }
 ]
-```text
+```
+
 ---
 
 ## 6. `_createColumnSkeleton()` 상세
@@ -336,7 +348,8 @@ flowchart TD
     Break1 --> Return[return ColumnSkeleton]
     RemoveLine --> Return
     Continue --> Loop
-```text
+```
+
 ### 6.2 파트 geometry 계산
 
 ```ts
@@ -347,7 +360,8 @@ const parts: TextPartData[] = freeRegions.map((region, i) => ({
     : (region.start - freeRegions[i - 1].end) / ppm,
   width: (region.end - region.start) / ppm,
 }));
-```text
+```
+
 첫 번째 파트의 `left`는 컬럼 시작부터의 거리이다. 이후 파트의 `left`는 이전 자유 영역 끝과의 간격이다.
 
 파트 DOM의 `marginLeft`는 실제 픽셀 간격으로 설정된다.
@@ -357,7 +371,8 @@ const gapPx = i === 0
   ? freeRegions[0].start
   : freeRegions[i].start - freeRegions[i - 1].end;
 if (gapPx > 0) partEl.style.marginLeft = `${gapPx}px`;
-```text
+```
+
 ---
 
 ## 7. `_fillTextContent()` 글자 배치 알고리즘
@@ -395,7 +410,8 @@ flowchart TD
     Overflow --> CharLoop
     CharLoop -->|완료| BlockLoop
     BlockLoop -->|완료| Result[return TextPlacementResult]
-```text
+```
+
 ### 7.2 블록 경계 처리
 
 `\n`으로 분리된 각 블록은 새 라인에서 시작한다.
@@ -413,7 +429,8 @@ if (blockIdx > startBlockIdx) {
   lineIdx++;
   partIdx = 0;
 }
-```text
+```
+
 ### 7.3 오버플로우 처리
 
 - 마지막 컬럼이 아닌 경우: 빈 라인 제거 후 다음 컬럼으로
@@ -433,7 +450,8 @@ if (vColumnEl.isOverflow) {
     this._overflow++;
   }
 }
-```text
+```
+
 ### 7.4 반환 값
 
 ```ts
@@ -442,7 +460,8 @@ type TextPlacementResult = {
   endCharIdx: number;
   endOfText: boolean;
 };
-```text
+```
+
 ---
 
 ## 8. 데이터 구조
@@ -460,7 +479,8 @@ type ParagraphModelOptions = {
   paragraphEl: LayoutParagraphElement;
   rootNode: Node;
 };
-```text
+```
+
 ### 8.2 `ColumnSkeleton`
 
 ```ts
@@ -469,7 +489,8 @@ type ColumnSkeleton = {
   lineEls: (HTMLDivElement | null)[]; // 라인 DOM 요소 (COVER면 null)
   partEls: HTMLDivElement[][];        // 파트 DOM 요소
 };
-```text
+```
+
 ### 8.3 `TextLineData`
 
 ```ts
@@ -481,7 +502,8 @@ export type TextLineData = {
   parts: TextPartData[];
   textBlockStyle?: TextBlockStyle;
 };
-```text
+```
+
 플래그 조합:
 
 | firstOfBlock | endOfBlock | firstOfText | endOfText | 의미 |
@@ -500,19 +522,22 @@ export type TextPartData = {
   left: number;      // mm 단위 좌측 여백
   width: number;     // mm 단위 폭
 };
-```text
+```
+
 ### 8.5 `OverlapParts`
 
 ```ts
 export type OverlapParts = { x1: number; x2: number; };
-```text
+```
+
 픽셀 단위의 겹침 구간이다.
 
 ### 8.6 `FreeRegion`
 
 ```ts
 type FreeRegion = { start: number; end: number };
-```text
+```
+
 `_computeFreeRegions()`의 반환 타입. 픽셀 단위이다.
 
 ---
@@ -541,7 +566,8 @@ type FreeRegion = { start: number; end: number };
               │                 └── <div>     (part)
               │                       └── <span>  (char)
               └── (slot을 통해 박스 자식 접근)
-```text
+```
+
 ### 9.2 ASCII 다이어그램
 
 ```text
@@ -582,7 +608,8 @@ legend:
   line = <div>  (flex row)
   p    = <div>  (part, inline-flex)
   c    = <span> (char, inline-block)
-```text
+```
+
 ---
 
 ## 10. 스타일 생성
@@ -593,7 +620,8 @@ legend:
 
 ```ts
 public genColumnStyle(idx: number): Partial<CSSStyleDeclaration>
-```text
+```
+
 주요 계산:
 
 - `left`: 이전 컬럼들의 너비 + 간격 합
@@ -608,7 +636,8 @@ public genColumnStyle(idx: number): Partial<CSSStyleDeclaration>
 ```ts
 public genLineStyle(textBlockStyle?: TextBlockStyle):
 Partial<CSSStyleDeclaration>
-```text
+```
+
 - `display: 'flex'`, `flexDirection: 'row'`, `flexWrap: 'nowrap'`
 - `height`: `_lineHeight` mm
 - `fontSize` override가 줄 높이보다 크면 `alignItems: 'center'` 및 높이 조정
@@ -620,7 +649,8 @@ Partial<CSSStyleDeclaration>
 ```ts
 public genPartStyle(textBlockStyle?: TextBlockStyle):
 Partial<CSSStyleDeclaration>
-```text
+```
+
 - `display: 'inline-flex'`, `flexDirection: 'row'`, `alignItems: 'baseline'`
 - `letterSpacing`: em 단위
 - `textAlign` → `justify-content` 매핑
@@ -636,7 +666,8 @@ Partial<CSSStyleDeclaration>
 
 ```ts
 public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
-```text
+```
+
 - `display: 'inline-block'`
 - `maxWidth`: `${widthRatio}em`
 - `minWidth`: 공백 `0.15em`, 1바이트 문자 `0.35em`, 그 외 `0.15em`
@@ -659,7 +690,8 @@ public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
 ```ts
 const ppm = vColumnEl.getBoundingClientRect().width /
 this._columnWidths[curColumn];
-```text
+```
+
 가상 컬럼의 실제 렌더링 너비(px)를 컬럼 너비(mm)로 나누어 구한다.
 
 ### 11.3 단위 변환 예시
@@ -768,7 +800,8 @@ const fontSize = this.textStyle?.fontSize || this.inheritStyle?.fontSize ||
 DEFAULT_FONT_SIZE;
 const lineGap = this.paragraphStyle?.lineGap || this.inheritStyle?.lineGap || DEFAULT_LINE_GAP;
 this._lineHeight = fontSize * lineGap;
-```text
+```
+
 ---
 
 ## 15. 코드 예시
@@ -795,13 +828,15 @@ const model = ParagraphModel.create({
 model.preTextWrap();
 console.log(model.columnContents);
 console.log(model.overflow);
-```text
+```
+
 ### 15.2 텍스트 갱신 (스켈레톤 재사용)
 
 ```ts
 model.inputContent = "새로운 텍스트입니다.";
 // 스켈레톤 캐시가 있으면 geometry 재사용, 텍스트만 재배치
-```text
+```
+
 ---
 
 ## 16. 스켈레톤 캐시 라이프사이클 ASCII 다이어그램
@@ -839,7 +874,8 @@ model.inputContent = "새로운 텍스트입니다.";
           ↓
 [data 세터 호출]
    캐시 초기화 → 다음 preTextWrap()에서 새 스켈레톤 생성
-```text
+```
+
 ---
 
 ## 17. 오버랩 회피 상세 다이어그램
@@ -864,7 +900,8 @@ line 1: COVER → parts = [], width=0
 line 2: COVER → parts = [], width=0
 line 3: PART  → parts = [{left:0, width:x1}, {left:x2, width:colWidth-x2}]
 line 4: FREE  → parts = [{ left:0, width:colWidth }]
-```text
+```
+
 ### 17.2 픽셀 단위 겹침 탐지 (`getOverlapSizePX`)
 
 이미지 요소인 경우 캔버스 픽셀 데이터를 사용하여 불투명 픽셀이 있는 열을 탐지한다.
@@ -885,7 +922,8 @@ baseElement (line)        targetElement (image box)
         ↑
    relStart = intersectionStart - r1.left
    relEnd   = intersectionEnd - r1.left
-```text
+```
+
 불투명 픽셀이 있는 열을 연속 구간으로 그룹화하여 `OverlapParts[]`를 생성한다.
 
 ---
@@ -937,4 +975,165 @@ baseElement (line)        targetElement (image box)
 - `preTextWrap()`과 `_fillTextContent()`는 가상 컬럼이 실제 DOM에 삽입된 상태에서 호출해야 한다.
 - 이미지 오버랩 탐지는 `LayoutImageElement.canvas`가 존재할 때만 픽셀 수준으로 수행한다.
 - 텍스트 오버플로우는 마지막 컬럼에서 `_overflow`로 집계되며 `render-error` 이벤트로 통지된다.
-- `getFontFamily()`는 현재 `'Myoungjo'`를 하드코딩하여 반환한다.
+
+---
+
+## 21. 텍스트 정렬별 오버랩 회피 유효성
+
+오버랩 회피와 텍스트 래핑은 `textAlign` 값(정렬 방식)과 무관하게 동일하게 동작한다.
+이 섹션에서는 왜 모든 정렬(`left`, `right`, `center`, `justify`)에서 이미지 회피와 오버플로우 감지가 올바르게 작동하는지 설명한다.
+
+### 21.1 오버랩 회피는 정렬과 무관하다
+
+`_applyOverlap()`과 `_computeFreeRegions()`는 모두 **물리적 픽셀 좌표**를 기준으로 계산된다.
+
+```ts
+private _applyOverlap(lineEl: HTMLElement): { cover: boolean; overlapParts: OverlapParts[] }
+private _computeFreeRegions(lineWidth: number, overlapParts: OverlapParts[]): FreeRegion[]
+```
+
+- `_applyOverlap()`은 `getBoundingClientRect()`로 라인과 이미지의 실제 렌더링 영역을 측정한다.
+- `_computeFreeRegions()`은 겹침 구간의 여집합을 기하학적으로 계산한다.
+- 두 메서드 모두 `textAlign`, `justifyContent`와 같은 정렬 속성을 읽지 않는다.
+
+따라서 동일한 이미지와 동일한 텍스트 내용이라면, `textAlign`이 `left`이든 `right`이든, `center`이든 `justify`이든 생성되는 `TextPartData`의 `left`과 `width` 값은 동일하다.
+
+### 21.2 scrollWidth 기반 오버플로우 감지도 정렬과 무관하다
+
+`_fillTextContent()`에서 글자 하나를 추가한 뒤 다음 조건으로 초과 여부를 판단한다.
+
+```ts
+if (partEls[currentPartIdx].scrollWidth > partEls[currentPartIdx].clientWidth) {
+  charEl.remove();
+  // 다음 파트 시도 ...
+}
+```
+
+`scrollWidth`는 자식 요소들의 **전체 레이아웃 너비 합계**를 반환한다.
+`justifyContent`는 플렉스 컨테이너 내부에서 자식의 시각적 배치만 조정할 뿐, 자식의 총 너비나 `scrollWidth`를 변경하지 않는다.
+
+즉, `space-between`이든 `center`이든 `flex-end`이든 같은 글자들이 들어 있으면 `scrollWidth`는 같다.
+그러므로 `scrollWidth > clientWidth` 검사는 모든 정렬에서 동일한 결과를 낸다.
+
+또한 글자 배치 순서는 항상 **왼쪽에서 오른쪽**이다. 정렬은 배치가 끝난 뒤 CSS로 시각적으로만 이동시키므로 래핑 결과에 영향을 주지 않는다.
+
+### 21.3 정렬은 어디에서 적용되는가
+
+정렬은 모델이 아니라 렌더링 단계에서 `genPartStyle()`과 `LayoutColumnElement.renderText()`가 생성하는 CSS에 반영된다.
+
+#### `genPartStyle()`의 매핑
+
+| textAlign | justifyContent |
+| :-------- | :------------- |
+| `left`    | `flex-start`   |
+| `right`   | `flex-end`     |
+| `center`  | `center`       |
+| `justify` | `space-between` |
+
+`textBlockStyle?.textAlign`이 명시되면 그 값으로 `justifyContent`가 재정의된다.
+
+#### `LayoutColumnElement.renderText()`의 마지막 줄 처리
+
+블록의 마지막 줄(`endOfBlock`)이면 일부 정렬에 대해 시각적 조정이 추가된다.
+
+```ts
+let partJustify = curPartStyle.justifyContent;
+if (p === line.parts.length - 1 && endOfBlock && partJustify === 'space-between') {
+  partJustify = 'flex-start';  // justify: 마지막 줄은 왼쪽 정렬
+}
+switch (textBlockStyle?.textAlign) {
+  case 'center': partJustify = 'center'; break;  // center: 그대로 유지
+  case 'right': partJustify = 'flex-end'; break; // right: 그대로 유지
+  default: break;
+}
+```
+
+| textAlign | 마지막 줄 처리 | 시각적 결과 |
+| :-------- | :------------- | :---------- |
+| `left`    | 재정의 없음 (`flex-start`) | 마지막 줄 왼쪽 정렬 |
+| `right`   | `flex-end`로 명시 유지 | 마지막 줄 오른쪽 정렬 |
+| `center`  | `center`로 명시 유지 | 마지막 줄 가운데 정렬 |
+| `justify` | `space-between` → `flex-start` | 마지막 줄 왼쪽 정렬 |
+
+이 조정은 모두 래핑이 완료된 뒤 **CSS 시각 정렬**만 바꾸는 것이다. `TextPartData.content`에 들어 있는 글자 배열과 파트의 `width` 값은 변하지 않는다.
+
+### 21.4 정렬별 오버랩 예시
+
+아래 예시는 동일한 이미지와 동일한 텍스트를 두고, 정렬만 바꿨을 때 렌더링이 어떻게 달라지는지 보여준다.
+파트 경계(자유 영역)는 모두 동일하고, 글자 배치도 동일하다. 달라지는 것은 파트 내부에서 글자가 정렬되는 위치뿐이다.
+
+```text
+textAlign = 'left' (flex-start)
+
+컬럼
+┌────────────────────────────────────────┐
+│ line 0  ┌──────────┐                   │
+│         │  IMAGE   │ 텍스트 텍스트     │
+│ line 1  │          │                   │
+│ line 2  └──────────┘ 텍스트            │
+│ line 3                               │
+└────────────────────────────────────────┘
+
+텍스트는 항상 자유 영역 안에서 왼쪽부터 배치된다.
+```
+
+```text
+textAlign = 'right' (flex-end)
+
+컬럼
+┌────────────────────────────────────────┐
+│ line 0  ┌──────────┐           텍스트 │
+│         │  IMAGE   │ 텍스트           │
+│ line 1  │          │                  │
+│ line 2  └──────────┘      텍스트      │
+│ line 3                               │
+└────────────────────────────────────────┘
+
+같은 자유 영역 안에서 글자가 오른쪽으로 밀린다.
+```
+
+```text
+textAlign = 'center'
+
+컬럼
+┌────────────────────────────────────────┐
+│ line 0  ┌──────────┐     텍스트       │
+│         │  IMAGE   │   텍스트 텍스트  │
+│ line 1  │          │                  │
+│ line 2  └──────────┘    텍스트       │
+│ line 3                               │
+└────────────────────────────────────────┘
+
+같은 자유 영역 안에서 글자가 가운데로 배치된다.
+```
+
+```text
+textAlign = 'justify' (space-between)
+
+컬럼
+┌────────────────────────────────────────┐
+│ line 0  ┌──────────┐ 텍스트    텍스트│
+│         │  IMAGE   │                  │
+│ line 1  │          │ 텍스트           │
+│ line 2  └──────────┘ 텍스트    텍스트 │
+│ line 3                               │
+└────────────────────────────────────────┘
+
+자유 영역의 양끝에 글자가 붙고, 중간 공백이 늘어난다.
+```
+
+모든 경우에 이미지와 겹치는 영역(COVER/PART)은 완전히 동일하게 계산되며, 텍스트는 그 영역을 피해서만 배치된다.
+
+### 21.5 정렬 영향 요약
+
+| 관심사 | 정렬에 영향받는가 | 이유 |
+| :----- | :--------------- | :--- |
+| 오버랩 영역 계산 | 아니오 | `_applyOverlap()`이 `getBoundingClientRect()`로 물리 좌표만 사용 |
+| 자유 영역 분할 | 아니오 | `_computeFreeRegions()`이 기하 여집합만 계산 |
+| 글자 래핑 | 아니오 | `scrollWidth > clientWidth`는 자식 총 너비를 측정, `justifyContent`와 무관 |
+| 글자 배치 순서 | 아니오 | 항상 왼쪽에서 오른쪽으로 추가 |
+| 파트의 `left` / `width` | 아니오 | 스켈레톤 geometry는 정렬과 무관 |
+| 시각적 정렬 위치 | 예 | `genPartStyle()`의 `justifyContent` 매핑과 `renderText()`의 오버라이드 |
+| 마지막 줄 처리 | 예 | `justify`일 때만 `flex-start`로 강제 |
+
+결론적으로, ParagraphModel의 핵심 기능인 오버랩 회피와 텍스트 래핑은 어떤 `textAlign` 값이 오든 정확하게 동작한다. 정렬은 최종 렌더링 단계에서 시각적 위치만 바꾼다.
