@@ -30,6 +30,7 @@ export class EditController {
   private _handleCompositionStart: () => void;
   private _handleCompositionUpdate: (event: CompositionEvent) => void;
   private _handleCompositionEnd: (event: CompositionEvent) => void;
+  private _handlePaste: (event: ClipboardEvent) => void;
 
   private _handleMouseDown: (event: MouseEvent) => void;
   private _handleMouseMove: (event: MouseEvent) => void;
@@ -63,6 +64,7 @@ export class EditController {
     this._handleCompositionStart = () => this._onCompositionStart();
     this._handleCompositionUpdate = () => this._onCompositionUpdate();
     this._handleCompositionEnd = (event: CompositionEvent) => this._onCompositionEnd(event);
+    this._handlePaste = (event: ClipboardEvent) => this._onPaste(event);
 
     this._handleMouseDown = (event: MouseEvent) => this._onMouseDown(event);
     this._handleMouseMove = (event: MouseEvent) => this._onMouseMove(event);
@@ -93,6 +95,7 @@ export class EditController {
     this._textarea.addEventListener("compositionupdate", this._handleCompositionUpdate as EventListener);
     this._textarea.addEventListener("compositionend", this._handleCompositionEnd as EventListener);
     this._textarea.addEventListener("keydown", this._handleKeydown);
+    this._textarea.addEventListener("paste", this._handlePaste as EventListener);
 
     this._updateCursorPosition();
   }
@@ -134,6 +137,7 @@ export class EditController {
     this._textarea.removeEventListener("compositionstart", this._handleCompositionStart);
     this._textarea.removeEventListener("compositionupdate", this._handleCompositionUpdate as EventListener);
     this._textarea.removeEventListener("compositionend", this._handleCompositionEnd as EventListener);
+    this._textarea.removeEventListener("paste", this._handlePaste as EventListener);
 
     if (this._debounceTimer !== null) {
       clearTimeout(this._debounceTimer);
@@ -358,6 +362,15 @@ export class EditController {
       return;
     }
 
+    if (hasShortcut && (event.key.toLowerCase() === "c" || event.key.toLowerCase() === "x")) {
+      event.preventDefault();
+      this._copySelection();
+      if (event.key.toLowerCase() === "x") {
+        this._deleteSelection();
+      }
+      return;
+    }
+
     if (event.key === "Escape") {
       event.preventDefault();
       this._clearSelection();
@@ -505,6 +518,81 @@ export class EditController {
     const anchor = current.selection?.anchor.textOffset ?? current.offset;
     current.selection = SelectionRange.fromOffsets(anchor, newOffset);
     current.offset = newOffset;
+  }
+
+  private _copySelection(): void {
+    const selection = this._cursorModel.selection;
+    if (!selection) return;
+
+    const { start, end } = selection.normalized();
+    const text = this._mapper.getTextContent(start.textOffset, end.textOffset);
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => this._copyWithFallback(text));
+    } else {
+      this._copyWithFallback(text);
+    }
+  }
+
+  private _copyWithFallback(text: string): void {
+    this._textarea.value = text;
+    this._textarea.select();
+    document.execCommand("copy");
+    this._textarea.value = "";
+  }
+
+  private _deleteSelection(): void {
+    const model = this._paragraph.model;
+    if (!model) return;
+
+    const selection = this._cursorModel.selection;
+    if (!selection) return;
+
+    const content = model.inputContent as string;
+    const { start, end } = selection.normalized();
+    const newContent = content.slice(0, start.textOffset) + content.slice(end.textOffset);
+
+    model.inputContent = newContent;
+    this._textarea.value = newContent;
+    this._cursorModel.offset = start.textOffset;
+    this._cursorModel.selection = null;
+    this._textarea.setSelectionRange(start.textOffset, start.textOffset);
+    this._updateCursorPosition();
+    this._updateSelection();
+    this._debouncedRender();
+  }
+
+  private _onPaste(event: ClipboardEvent): void {
+    event.preventDefault();
+
+    const model = this._paragraph.model;
+    if (!model) return;
+
+    const pastedText = event.clipboardData?.getData("text/plain") ?? "";
+    if (pastedText.length === 0) return;
+
+    const content = model.inputContent as string;
+    let startOffset = this._cursorModel.offset;
+    let endOffset = this._cursorModel.offset;
+
+    const selection = this._cursorModel.selection;
+    if (selection) {
+      const { start, end } = selection.normalized();
+      startOffset = start.textOffset;
+      endOffset = end.textOffset;
+    }
+
+    const newContent = content.slice(0, startOffset) + pastedText + content.slice(endOffset);
+    const newOffset = startOffset + pastedText.length;
+
+    model.inputContent = newContent;
+    this._textarea.value = newContent;
+    this._cursorModel.offset = newOffset;
+    this._cursorModel.selection = null;
+    this._textarea.setSelectionRange(newOffset, newOffset);
+    this._updateCursorPosition();
+    this._updateSelection();
+    this._debouncedRender();
   }
 
   private _selectAll(): void {
