@@ -66,7 +66,7 @@ export class EditController {
 
     this._handleInput = (event: InputEvent) => this._onInput(event);
     this._handleCompositionStart = () => this._onCompositionStart();
-    this._handleCompositionUpdate = () => this._onCompositionUpdate();
+    this._handleCompositionUpdate = (event: CompositionEvent) => this._onCompositionUpdate(event);
     this._handleCompositionEnd = (event: CompositionEvent) => this._onCompositionEnd(event);
     this._handlePaste = (event: ClipboardEvent) => this._onPaste(event);
 
@@ -402,8 +402,9 @@ export class EditController {
 
     const model = this._paragraph.model;
     if (!model) return;
+    if (typeof model.inputContent !== "string") return;
 
-    const content = model.inputContent as string;
+    const content = model.inputContent;
     const { start, end } = this._findWordBoundaries(content, sourceOffset);
     this._cursorModel.selection = SelectionRange.fromOffsets(start, end);
     this._cursorModel.offset = end;
@@ -656,7 +657,9 @@ export class EditController {
     const selection = this._cursorModel.selection;
     if (!selection) return;
 
-    const content = model.inputContent as string;
+    if (typeof model.inputContent !== "string") return;
+
+    const content = model.inputContent;
     const { start, end } = selection.normalized();
     const newContent = content.slice(0, start.textOffset) + content.slice(end.textOffset);
 
@@ -679,7 +682,9 @@ export class EditController {
     const pastedText = event.clipboardData?.getData("text/plain") ?? "";
     if (pastedText.length === 0) return;
 
-    const content = model.inputContent as string;
+    if (typeof model.inputContent !== "string") return;
+
+    const content = model.inputContent;
     let startOffset = this._cursorModel.offset;
     let endOffset = this._cursorModel.offset;
 
@@ -707,7 +712,9 @@ export class EditController {
     const model = this._paragraph.model;
     if (!model) return;
 
-    const content = model.inputContent as string;
+    if (typeof model.inputContent !== "string") return;
+
+    const content = model.inputContent;
     this._cursorModel.selection = SelectionRange.fromOffsets(0, content.length);
     this._cursorModel.offset = content.length;
     this._updateCursorPosition();
@@ -723,15 +730,19 @@ export class EditController {
   private _computeVerticalOffset(direction: -1 | 1): number | null {
     const model = this._paragraph.model;
     if (!model) return null;
+    if (typeof model.inputContent !== "string") return null;
 
-    const content = model.inputContent as string;
+    const content = model.inputContent;
     const offset = this._cursorModel.offset;
 
     const cursorRect = this._getCursorLocalRect(offset);
     if (!cursorRect) {
-      const newOffset = offset + direction;
-      if (newOffset >= 0 && newOffset <= content.length) {
-        return newOffset;
+      let newOffset = offset + direction;
+      while (newOffset >= 0 && newOffset <= content.length) {
+        if (newOffset === content.length || content[newOffset] !== "\n") {
+          return newOffset;
+        }
+        newOffset += direction;
       }
       return null;
     }
@@ -855,7 +866,9 @@ export class EditController {
     const model = this._paragraph.model;
     if (!model) return;
 
-    const content = model.inputContent as string;
+    if (typeof model.inputContent !== "string") return;
+
+    const content = model.inputContent;
     const activeSelection = this._cursorModel.selection;
     if (!activeSelection) return;
 
@@ -890,8 +903,12 @@ export class EditController {
     this._updateSelection();
   }
 
-  private _onCompositionUpdate(): void {
+  private _onCompositionUpdate(event: CompositionEvent): void {
     if (!this._isComposing) return;
+
+    if (event.data) {
+      this._cursorModel.offset = this._compositionStartOffset + event.data.length;
+    }
     this._updateCursorPosition();
   }
 

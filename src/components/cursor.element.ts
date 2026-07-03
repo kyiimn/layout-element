@@ -14,6 +14,7 @@ export class LayoutCursorElement extends HTMLElement {
 
   private _dirty: boolean = false;
   private _rafId: number | null = null;
+  private _styleEl: HTMLStyleElement | null = null;
 
   constructor() {
     super();
@@ -30,6 +31,7 @@ export class LayoutCursorElement extends HTMLElement {
       this._rafId = null;
     }
     this._dirty = false;
+    this._styleEl = null;
   }
 
   private _scheduleRender(): void {
@@ -45,37 +47,44 @@ export class LayoutCursorElement extends HTMLElement {
   render() {
     if (!this.isConnected) return;
 
-    this._shadowRoot.innerHTML = '';
+    if (!this._styleEl) {
+      this._shadowRoot.innerHTML = '';
+      this._styleEl = document.createElement('style');
+      this._shadowRoot.appendChild(this._styleEl);
 
-    const styleEl = document.createElement('style');
-    this._shadowRoot.appendChild(styleEl);
-
-    if (styleEl.sheet) {
-      styleEl.sheet.insertRule(":host {}", 0);
-      const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
-      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(rule.style, {
-        position: 'absolute',
-        pointerEvents: 'none',
-        top: `${this._top}px`,
-        left: `${this._left}px`,
-        width: '2px',
-        height: `${this._height}px`,
-      });
-      rule.style.setProperty('background-color', 'currentColor');
-
-      if (!this._visible) {
-        rule.style.setProperty('visibility', 'hidden');
+      const sheet = this._styleEl.sheet;
+      if (sheet) {
+        sheet.insertRule(":host {}", 0);
+        sheet.insertRule(
+          `@keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }`,
+          sheet.cssRules.length,
+        );
+        sheet.insertRule(
+          `:host { animation: blink 530ms step-end infinite; }`,
+          sheet.cssRules.length,
+        );
       }
     }
 
-    styleEl.sheet!.insertRule(
-      `@keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }`,
-      styleEl.sheet!.cssRules.length,
-    );
-    styleEl.sheet!.insertRule(
-      `:host { animation: blink 530ms step-end infinite; }`,
-      styleEl.sheet!.cssRules.length,
-    );
+    const sheet = this._styleEl.sheet;
+    if (!sheet || sheet.cssRules.length < 1) return;
+
+    const rule = sheet.cssRules[0] as CSSStyleRule;
+    Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(rule.style, {
+      position: 'absolute',
+      pointerEvents: 'none',
+      top: `${this._top}px`,
+      left: `${this._left}px`,
+      width: '2px',
+      height: `${this._height}px`,
+    });
+    rule.style.setProperty('background-color', 'currentColor');
+
+    if (!this._visible) {
+      rule.style.setProperty('visibility', 'hidden');
+    } else {
+      rule.style.removeProperty('visibility');
+    }
   }
 
   set top(value: number) {
