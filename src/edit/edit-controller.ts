@@ -1056,6 +1056,7 @@ export class EditController {
     if (this._debounceTimer !== null) {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
+      this._paragraph.render();
     }
 
     if (this._compositionEndTimer !== null) {
@@ -1174,10 +1175,8 @@ export class EditController {
   }
 
   private _onCompositionEnd(_event: CompositionEvent): void {
-    const sessionAtScheduleTime = this._compositionSession;
     this._isComposing = false;
 
-    // 조합 span 제거
     this._removeCompositionSpan();
 
     const model = this._paragraph.model;
@@ -1188,28 +1187,28 @@ export class EditController {
     const beforeContent = this._compositionBeforeContent;
     const selectionLength = this._compositionSelectionLength;
 
-    // compositionend의 event.data는 크로스 플랫폼에서 불안정하므로
-    // setTimeout(0) 후에 textarea 값을 읽어 확정 텍스트를 얻는다
+    if (this._compositionEndTimer !== null) {
+      clearTimeout(this._compositionEndTimer);
+      this._compositionEndTimer = null;
+    }
+
     this._compositionJustEnded = true;
+
+    const after = this._textarea.value;
+    model.inputContent = after;
+
+    const composedLength = after.length - beforeContent.length + selectionLength;
+    this._cursorModel.offset = startOffset + composedLength;
+
+    this._updateCursorPosition();
+    this._debouncedRender();
 
     if (this._compositionEndTimer !== null) {
       clearTimeout(this._compositionEndTimer);
     }
-
     this._compositionEndTimer = setTimeout(() => {
       this._compositionEndTimer = null;
-
-      if (this._compositionSession !== sessionAtScheduleTime) return;
       this._compositionJustEnded = false;
-
-      const after = this._textarea.value;
-      model.inputContent = after;
-
-      const composedLength = after.length - beforeContent.length + selectionLength;
-      this._cursorModel.offset = startOffset + composedLength;
-
-      this._updateCursorPosition();
-      this._debouncedRender();
     }, 0);
   }
 
