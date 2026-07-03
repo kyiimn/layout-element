@@ -44,6 +44,7 @@ export class EditController {
   private _isComposing: boolean = false;
   private _compositionStartOffset: number = 0;
   private _compositionJustEnded: boolean = false;
+  private _compositionSpan: HTMLSpanElement | null = null;
   private _debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private _wasFocused: boolean = false;
 
@@ -105,6 +106,7 @@ export class EditController {
       if (document.hidden) {
         this._isComposing = false;
         this._compositionJustEnded = false;
+        this._removeCompositionSpan();
       }
     };
     document.addEventListener("visibilitychange", this._handleVisibilityChange);
@@ -169,6 +171,7 @@ export class EditController {
     document.removeEventListener("visibilitychange", this._handleVisibilityChange);
 
     this._isFocused = false;
+    this._removeCompositionSpan();
 
     if (this._textarea.parentNode) {
       this._textarea.parentNode.removeChild(this._textarea);
@@ -485,6 +488,7 @@ export class EditController {
     this._isFocused = false;
     this._isComposing = false;
     this._compositionJustEnded = false;
+    this._removeCompositionSpan();
     this._cursorEl.visible = false;
   }
 
@@ -977,12 +981,46 @@ export class EditController {
     }
     this._cursorModel.selection = null;
     this._updateSelection();
+
+    // 조합 span을 커서 위치에 생성하여 조합 중인 글자를 시각적으로 표시
+    this._compositionSpan = this._createOptimisticSpan("", this._compositionStartOffset);
+    this._compositionSpan.style.textDecoration = "underline";
+    this._compositionSpan.style.textUnderlineOffset = "2px";
+
+    const renderedOffset = this._mapper.renderedOffset(this._compositionStartOffset);
+    if (renderedOffset !== null) {
+      const span = this._mapper.getSpanByOffset(renderedOffset);
+      if (span) {
+        span.before(this._compositionSpan);
+      }
+    } else if (this._compositionStartOffset > 0) {
+      const prevRendered = this._mapper.renderedOffset(this._compositionStartOffset - 1);
+      if (prevRendered !== null) {
+        const prevSpan = this._mapper.getSpanByOffset(prevRendered);
+        if (prevSpan) {
+          prevSpan.after(this._compositionSpan);
+        }
+      }
+    }
+
+    this._updateCursorPosition();
   }
 
   private _onCompositionUpdate(event: CompositionEvent): void {
     if (!this._isComposing) return;
 
-    if (event.data) {
+    if (event.data && this._compositionSpan) {
+      this._compositionSpan.innerText = event.data;
+
+      // 조합 글자의 스타일 업데이트 (글자가 바뀌면 너비도 변함)
+      const model = this._paragraph.model;
+      if (model) {
+        const charStyle = model.genCharStyle(event.data);
+        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(this._compositionSpan.style, charStyle);
+        this._compositionSpan.style.textDecoration = "underline";
+        this._compositionSpan.style.textUnderlineOffset = "2px";
+      }
+
       this._cursorModel.offset = this._compositionStartOffset + event.data.length;
     }
     this._updateCursorPosition();
@@ -992,24 +1030,39 @@ export class EditController {
   private _onCompositionEnd(event: CompositionEvent): void {
     this._isComposing = false;
 
+    // 조합 span 제거
+    this._removeCompositionSpan();
+
     const model = this._paragraph.model;
     if (!model) return;
     if (typeof model.inputContent !== "string") return;
 
-    const after = this._textarea.value;
-    model.inputContent = after;
-
+    // event.data를 setTimeout 밖에서 캡처 (이벤트 객체가 무효화되기 전에)
     const composedText = event.data ?? "";
-    this._cursorModel.offset = this._compositionStartOffset + composedText.length;
+    const composedLength = composedText.length;
+    const startOffset = this._compositionStartOffset;
 
-    this._updateCursorPosition();
-    this._debouncedRender();
+    // compositionend의 event.data는 크로스 플랫폼에서 불안정하므로
+    // setTimeout(0) 후에 textarea 값을 읽어 확정 텍스트를 얻는다
     this._compositionJustEnded = true;
     setTimeout(() => {
       this._compositionJustEnded = false;
-    }, 100);
 
-    event.preventDefault();
+      const after = this._textarea.value;
+      model.inputContent = after;
+
+      this._cursorModel.offset = startOffset + composedLength;
+
+      this._updateCursorPosition();
+      this._debouncedRender();
+    }, 0);
+  }
+
+  private _removeCompositionSpan(): void {
+    if (this._compositionSpan && this._compositionSpan.parentNode) {
+      this._compositionSpan.remove();
+    }
+    this._compositionSpan = null;
   }
 
   private _computeTextChange(
