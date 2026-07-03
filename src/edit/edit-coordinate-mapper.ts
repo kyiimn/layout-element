@@ -449,19 +449,33 @@ export class EditCoordinateMapper {
    * Home/End 키에서 사용 — \n 기준이 아닌 렌더링된 줄 기준.
    */
   findVisualLineBounds(sourceOffset: number): { start: number; end: number } | null {
-    const renderedOffset = this.renderedOffset(sourceOffset);
-    if (renderedOffset === null) return null;
+    // renderedOffset이 null이면 인접 오프셋으로 폴백
+    let renderedOffset = this.renderedOffset(sourceOffset);
+    if (renderedOffset === null) {
+      if (sourceOffset > 0) {
+        renderedOffset = this.renderedOffset(sourceOffset - 1);
+      }
+      if (renderedOffset === null && sourceOffset === 0) {
+        // 빈 단락이거나 오프셋 0이 렌더링되지 않은 경우
+        return { start: 0, end: 0 };
+      }
+      if (renderedOffset === null) return null;
+    }
 
     const anchorSpan = this.getSpanByOffset(renderedOffset);
     if (!anchorSpan) return null;
 
+    // anchorSpan이 속한 컬럼만 검색 (다중 컬럼에서 같은 Y좌표가 다른 단인 것을 방지)
+    const anchorColumn = this._findColumnBySpan(anchorSpan);
+    if (anchorColumn === null) return null;
+
     const anchorRect = anchorSpan.getBoundingClientRect();
     const anchorTop = Math.round(anchorRect.top);
 
-    // 같은 시각적 행(같은 top 좌표)의 모든 span 수집
-    const allSpans = this._getAllSortedSpans();
+    // 같은 컬럼 내에서 같은 시각적 행(같은 top 좌표)의 span 수집
+    const columnSpans = this._getColumnSpans(anchorColumn);
     const lineSpans: HTMLSpanElement[] = [];
-    for (const s of allSpans) {
+    for (const s of columnSpans) {
       const r = s.getBoundingClientRect();
       if (Math.round(r.top) === anchorTop) {
         lineSpans.push(s);
@@ -483,6 +497,23 @@ export class EditCoordinateMapper {
 
     // end는 마지막 글자 "다음" 위치이므로 +1
     return { start: startSource, end: endSource + 1 };
+  }
+
+  /** span이 속한 컬럼 요소를 반환한다. */
+  private _findColumnBySpan(span: HTMLSpanElement): LayoutColumnElement | null {
+    let node: Node | null = span;
+    while (node) {
+      if (node instanceof HTMLElement && node.tagName.toLowerCase() === 'x-layout-column') {
+        return node as LayoutColumnElement;
+      }
+      // Shadow DOM 경계를 넘어야 함 — span은 column의 shadow root 안에 있음
+      if (node instanceof ShadowRoot) {
+        node = node.host;
+        continue;
+      }
+      node = node.parentNode;
+    }
+    return null;
   }
 
   /** paragraph의 모든 컬럼 요소를 렌더링 순서대로 반환한다. */
