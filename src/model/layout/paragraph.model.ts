@@ -364,15 +364,25 @@ export class ParagraphModel {
                   textBlockStyle: block.textBlockStyle,
                 });
 
-                partEls[0].appendChild(charEl);
-                if (partEls[0].scrollWidth > partEls[0].clientWidth) {
+                currentPartIdx = 0;
+                partEls[currentPartIdx].appendChild(charEl);
+
+                while (partEls[currentPartIdx].scrollWidth > partEls[currentPartIdx].clientWidth) {
                   charEl.remove();
+                  currentPartIdx++;
+                  if (currentPartIdx >= partEls.length) break;
+                  partEls[currentPartIdx].appendChild(charEl);
+                }
+
+                if (currentPartIdx >= partEls.length) {
+                  if (columnContent[columnContent.length - 1].parts.every(p => p.content.length === 0)) {
+                    columnContent = columnContent.slice(0, columnContent.length - 1);
+                  }
                   idxContentOfBlock--;
                   currentPartIdx = 0;
                   continue;
                 }
 
-                currentPartIdx = 0;
                 columnContent[columnContent.length - 1].parts[currentPartIdx].content.push(char);
                 break;
               }
