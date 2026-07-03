@@ -17,6 +17,7 @@ Thumbs.db
 *.tsbuildinfo
 
 # etc
+.omo/run-continuation
 .codegraph
 .playwright-mcp
 bak
