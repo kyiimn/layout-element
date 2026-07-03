@@ -55,14 +55,6 @@ export class LayoutCursorElement extends HTMLElement {
       const sheet = this._styleEl.sheet;
       if (sheet) {
         sheet.insertRule(":host {}", 0);
-        sheet.insertRule(
-          `@keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }`,
-          sheet.cssRules.length,
-        );
-        sheet.insertRule(
-          `:host { animation: blink 530ms step-end infinite; }`,
-          sheet.cssRules.length,
-        );
       }
     }
 
