@@ -62,6 +62,11 @@ export class TextLayoutEngine {
   private _previousLineCount: number = -1;
   private _previousOverflow: number = -1;
 
+  private _cachedWidthRatio: number = 0;
+  private _cachedHalfWidthStyle: Partial<CSSStyleDeclaration> = {};
+  private _cachedFullWidthStyle: Partial<CSSStyleDeclaration> = {};
+  private _cachedSpaceStyle: Partial<CSSStyleDeclaration> = {};
+
   private _lineHeight: number = 0;
 
   private _columnPpm: number[] = [];
@@ -689,18 +694,44 @@ export class TextLayoutEngine {
    * 실제 렌더링 폭을 보정하므로, `minWidth` 오차는 최종 결과에 영향하지 않는다.
    * 정밀한 분류가 필요하면 Unicode East Asian Width 범위 기반 판별로 교체해야 한다.
    */
-  public genCharStyle = (char: string): Partial<CSSStyleDeclaration> => {
-    const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
-    const isSpace = char === ' ';
+  private _updateCharStyleCache(): void {
+    const wr = this.widthRatio;
+    if (wr === this._cachedWidthRatio) return;
+    this._cachedWidthRatio = wr;
 
-    return {
+    this._cachedHalfWidthStyle = {
       display: 'inline-block',
-      maxWidth: `${this.widthRatio}em`,
-      minWidth: isSpace ? '0.15em' : isHalfWidth ? '0.35em' : '0.15em',
-      scale: `${this.widthRatio} 1`,
+      maxWidth: `${wr}em`,
+      minWidth: '0.35em',
+      scale: `${wr} 1`,
       textAlign: 'center',
       transformOrigin: '0',
     };
+
+    this._cachedFullWidthStyle = {
+      display: 'inline-block',
+      maxWidth: `${wr}em`,
+      minWidth: '0.15em',
+      scale: `${wr} 1`,
+      textAlign: 'center',
+      transformOrigin: '0',
+    };
+
+    this._cachedSpaceStyle = {
+      display: 'inline-block',
+      maxWidth: `${wr}em`,
+      minWidth: '0.15em',
+      scale: `${wr} 1`,
+      textAlign: 'center',
+      transformOrigin: '0',
+    };
+  }
+
+  public genCharStyle = (char: string): Partial<CSSStyleDeclaration> => {
+    this._updateCharStyleCache();
+    if (char === ' ') return this._cachedSpaceStyle;
+    if (char.length === 1 && char.charCodeAt(0) <= 255) return this._cachedHalfWidthStyle;
+    return this._cachedFullWidthStyle;
   }
 
   set inheritStyle(inheritStyle: InheritStyle) {
