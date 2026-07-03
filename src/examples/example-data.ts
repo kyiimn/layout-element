@@ -77,7 +77,10 @@ const block2: BoxData = {
     width: 2,
     height: 37,
     children: [
-      { type: 'paragraph', content: body },
+      {
+        id: 'asdlkjfjasf',
+        type: 'paragraph', content: body
+      },
     ]
   }, {
     type: 'box',
