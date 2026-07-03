@@ -311,7 +311,19 @@ export class EditCoordinateMapper {
       if (sourceOffset < startOffset || sourceOffset >= endOffset) continue;
 
       if (lastSourceOffset !== null && sourceOffset > lastSourceOffset + 1) {
-        result += '\n';
+        // Fill the gap from the source string. Gaps contain either \n
+        // characters (from block splits) or stripped spaces.
+        const model = this._paragraph.model;
+        if (model && typeof model.inputContent === 'string') {
+          const content = model.inputContent;
+          for (let i = lastSourceOffset + 1; i < sourceOffset; i++) {
+            if (i < content.length) {
+              result += content[i];
+            }
+          }
+        } else {
+          result += '\n';
+        }
       }
 
       result += span.innerText;
@@ -319,6 +331,23 @@ export class EditCoordinateMapper {
     }
 
     return result;
+  }
+
+  /**
+   * 첫 번째 컬럼의 paragraph-로컬 좌표와 폰트 크기를 반환한다.
+   * 빈 단락에서 커서를 위치시킬 때 사용한다.
+   */
+  getFirstColumnRect(): { top: number; left: number; fontSize: number } | null {
+    const columns = this._getAllColumns();
+    if (columns.length === 0) return null;
+    const firstColumn = columns[0];
+    const colRect = firstColumn.getBoundingClientRect();
+    const paraRect = this._paragraph.getBoundingClientRect();
+    return {
+      top: colRect.top - paraRect.top,
+      left: colRect.left - paraRect.left,
+      fontSize: parseFloat(getComputedStyle(firstColumn).fontSize) || 16,
+    };
   }
 
   /** paragraph의 모든 컬럼 요소를 렌더링 순서대로 반환한다. */

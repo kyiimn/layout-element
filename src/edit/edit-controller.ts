@@ -1011,6 +1011,21 @@ export class EditController {
       }
     }
 
+    if (renderedOffset === null && offset === 0) {
+      const firstCol = this._mapper.getFirstColumnRect();
+      if (firstCol) {
+        this._cursorEl.top = firstCol.top;
+        this._cursorEl.left = firstCol.left;
+        this._cursorEl.height = firstCol.fontSize;
+        const hasVisibleSelection = this._cursorModel.selection !== null &&
+          this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
+        this._cursorEl.visible = document.activeElement === this._textarea && !hasVisibleSelection;
+        this._textarea.style.top = `${firstCol.top}px`;
+        this._textarea.style.left = `${firstCol.left}px`;
+        return;
+      }
+    }
+
     if (renderedOffset === null) {
       this._cursorEl.visible = false;
       return;
@@ -1025,7 +1040,9 @@ export class EditController {
     this._cursorEl.top = rect.top;
     this._cursorEl.left = atEndOfChar ? rect.left + rect.width : rect.left;
     this._cursorEl.height = rect.height;
-    this._cursorEl.visible = document.activeElement === this._textarea && !this._cursorModel.selection;
+    const hasVisibleSelection = this._cursorModel.selection !== null &&
+      this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
+    this._cursorEl.visible = document.activeElement === this._textarea && !hasVisibleSelection;
 
     this._textarea.style.top = `${rect.top}px`;
     this._textarea.style.left = `${rect.left}px`;
