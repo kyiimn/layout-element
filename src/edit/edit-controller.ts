@@ -112,17 +112,11 @@ export class EditController {
     this._handleVisibilityChange = () => {
       if (document.hidden) {
         const wasComposing = this._isComposing;
-        this._isComposing = false;
-        this._compositionJustEnded = false;
-        this._removeCompositionSpan();
+        this._resetCompositionState();
 
         if (wasComposing) {
           const model = this._paragraph.model;
           if (model && typeof model.inputContent === "string") {
-            if (this._compositionEndTimer !== null) {
-              clearTimeout(this._compositionEndTimer);
-              this._compositionEndTimer = null;
-            }
             const after = this._textarea.value;
             model.inputContent = after;
             const composedLength = after.length - this._compositionBeforeContent.length + this._compositionSelectionLength;
@@ -201,8 +195,7 @@ export class EditController {
     document.removeEventListener("visibilitychange", this._handleVisibilityChange);
 
     this._isFocused = false;
-    this._isComposing = false;
-    this._removeCompositionSpan();
+    this._resetCompositionState();
 
     if (this._textarea.parentNode) {
       this._textarea.parentNode.removeChild(this._textarea);
@@ -226,6 +219,42 @@ export class EditController {
     }
     this._updateCursorPosition();
     this._updateSelection();
+
+    if (this._isComposing && this._compositionSpan && !this._compositionSpan.parentNode) {
+      let reattached = false;
+      const renderedOffset = this._mapper.renderedOffset(this._compositionStartOffset);
+      if (renderedOffset !== null) {
+        const span = this._mapper.getSpanByOffset(renderedOffset);
+        if (span) {
+          span.before(this._compositionSpan);
+          reattached = true;
+        }
+      } else if (this._compositionStartOffset > 0) {
+        const prevRendered = this._mapper.renderedOffset(this._compositionStartOffset - 1);
+        if (prevRendered !== null) {
+          const prevSpan = this._mapper.getSpanByOffset(prevRendered);
+          if (prevSpan) {
+            prevSpan.after(this._compositionSpan);
+            reattached = true;
+          }
+        }
+      }
+
+      if (!reattached && this._compositionStartOffset === 0) {
+        const firstColumn = this._paragraph.querySelector("x-layout-column");
+        if (firstColumn && firstColumn.shadowRoot) {
+          const firstContainer = firstColumn.shadowRoot.firstElementChild;
+          if (firstContainer instanceof HTMLElement) {
+            firstContainer.appendChild(this._compositionSpan);
+          }
+        }
+      }
+
+      if (this._compositionSpan.parentNode) {
+        this._positionCursorFromCompositionSpan();
+      }
+    }
+
     if (this._wasFocused) {
       this._textarea.focus();
       this._wasFocused = false;
@@ -518,17 +547,11 @@ export class EditController {
   private _onBlur(): void {
     const wasComposing = this._isComposing;
     this._isFocused = false;
-    this._isComposing = false;
-    this._compositionJustEnded = false;
-    this._removeCompositionSpan();
+    this._resetCompositionState();
 
     if (wasComposing) {
       const model = this._paragraph.model;
       if (model && typeof model.inputContent === "string") {
-        if (this._compositionEndTimer !== null) {
-          clearTimeout(this._compositionEndTimer);
-          this._compositionEndTimer = null;
-        }
         const after = this._textarea.value;
         model.inputContent = after;
         const composedLength = after.length - this._compositionBeforeContent.length + this._compositionSelectionLength;
@@ -542,7 +565,19 @@ export class EditController {
   }
 
   private _onKeydown(event: KeyboardEvent): void {
-    if (this._isComposing && event.key !== "Escape") return;
+    if (this._isComposing) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this._isComposing = false;
+        this._compositionJustEnded = false;
+        if (this._compositionEndTimer !== null) {
+          clearTimeout(this._compositionEndTimer);
+          this._compositionEndTimer = null;
+        }
+        this._removeCompositionSpan();
+      }
+      return;
+    }
     const model = this._paragraph.model;
     if (!model) return;
 
@@ -930,7 +965,7 @@ export class EditController {
   }
 
   private _onInput(event: InputEvent): void {
-    if (this._isComposing) return;
+    if (this._isComposing || event.isComposing) return;
     if (this._compositionJustEnded) {
       this._compositionJustEnded = false;
       return;
@@ -1041,6 +1076,14 @@ export class EditController {
       const normalized = this._cursorModel.selection.normalized();
       this._compositionStartOffset = normalized.start.textOffset;
       this._compositionSelectionLength = normalized.end.textOffset - normalized.start.textOffset;
+
+      // 조합 시작 시 선택 영역을 모델에서 삭제하여 일관성 유지
+      if (model && typeof model.inputContent === "string") {
+        const content = model.inputContent;
+        model.inputContent = content.slice(0, normalized.start.textOffset) + content.slice(normalized.end.textOffset);
+        this._textarea.value = model.inputContent;
+        this._textarea.setSelectionRange(normalized.start.textOffset, normalized.start.textOffset);
+      }
     } else {
       this._compositionStartOffset = this._cursorModel.offset;
       this._compositionSelectionLength = 0;
@@ -1050,6 +1093,7 @@ export class EditController {
 
     // 조합 span을 커서 위치에 생성하여 조합 중인 글자를 시각적으로 표시
     this._compositionSpan = this._createOptimisticSpan("", this._compositionStartOffset);
+    this._compositionSpan.style.minWidth = "0";
     this._compositionSpan.style.textDecoration = "underline";
     this._compositionSpan.style.textUnderlineOffset = "2px";
 
@@ -1082,7 +1126,9 @@ export class EditController {
       }
     }
 
-    this._updateCursorPosition();
+    if (!this._positionCursorFromCompositionSpan()) {
+      this._updateCursorPosition();
+    }
   }
 
   private _onCompositionUpdate(event: CompositionEvent): void {
@@ -1095,6 +1141,7 @@ export class EditController {
       const model = this._paragraph.model;
       if (model) {
         const charStyle = model.genCharStyle(event.data);
+      // genCharStyle does not include textDecoration — underline must be re-applied after Object.assign
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(this._compositionSpan.style, charStyle);
         this._compositionSpan.style.textDecoration = "underline";
         this._compositionSpan.style.textUnderlineOffset = "2px";
@@ -1105,18 +1152,25 @@ export class EditController {
       this._compositionSpan.innerText = "";
       this._cursorModel.offset = this._compositionStartOffset;
     }
-    this._updateCursorPosition();
+    if (!this._positionCursorFromCompositionSpan()) {
+      this._updateCursorPosition();
+    }
+  }
+
+  private _positionCursorFromCompositionSpan(): boolean {
+    if (!this._compositionSpan || !this._compositionSpan.parentNode) return false;
+    const spanRect = this._compositionSpan.getBoundingClientRect();
+    const paragraphRect = this._paragraph.getBoundingClientRect();
+    this._cursorEl.top = spanRect.top - paragraphRect.top;
+    this._cursorEl.left = spanRect.right - paragraphRect.left;
+    this._cursorEl.height = spanRect.height;
+    this._cursorEl.visible = true;
+    return true;
   }
 
 
   private _onCompositionCancel(): void {
-    this._isComposing = false;
-    this._compositionJustEnded = false;
-    if (this._compositionEndTimer !== null) {
-      clearTimeout(this._compositionEndTimer);
-      this._compositionEndTimer = null;
-    }
-    this._removeCompositionSpan();
+    this._resetCompositionState();
   }
 
   private _onCompositionEnd(_event: CompositionEvent): void {
@@ -1164,6 +1218,16 @@ export class EditController {
       this._compositionSpan.remove();
     }
     this._compositionSpan = null;
+  }
+
+  private _resetCompositionState(): void {
+    this._isComposing = false;
+    this._compositionJustEnded = false;
+    if (this._compositionEndTimer !== null) {
+      clearTimeout(this._compositionEndTimer);
+      this._compositionEndTimer = null;
+    }
+    this._removeCompositionSpan();
   }
 
   private _computeTextChange(
