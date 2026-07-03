@@ -107,6 +107,12 @@ export class EditController {
     };
     document.addEventListener("visibilitychange", this._handleVisibilityChange);
 
+    // Sync textarea value with model content so _onInput can compute correct diffs
+    const model = paragraph.model;
+    if (model && typeof model.inputContent === "string") {
+      this._textarea.value = model.inputContent;
+    }
+
     this._updateCursorPosition();
   }
 
@@ -176,6 +182,10 @@ export class EditController {
    */
   postRender(): void {
     this._mapper.rebuild();
+    const model = this._paragraph.model;
+    if (model && typeof model.inputContent === "string") {
+      this._textarea.value = model.inputContent;
+    }
     this._updateCursorPosition();
     this._updateSelection();
     if (this._wasFocused) {
