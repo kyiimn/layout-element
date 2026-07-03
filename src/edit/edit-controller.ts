@@ -33,6 +33,7 @@ export class EditController {
 
   private _isComposing: boolean = false;
   private _debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private _wasFocused: boolean = false;
 
   constructor(paragraph: LayoutParagraphElement) {
     this._paragraph = paragraph;
@@ -122,6 +123,10 @@ export class EditController {
     this._mapper.rebuild();
     this._updateCursorPosition();
     this._updateSelection();
+    if (this._wasFocused) {
+      this._textarea.focus();
+      this._wasFocused = false;
+    }
   }
 
   /**
@@ -473,6 +478,7 @@ export class EditController {
     if (this._debounceTimer !== null) {
       clearTimeout(this._debounceTimer);
     }
+    this._wasFocused = document.activeElement === this._textarea;
     this._debounceTimer = setTimeout(() => {
       this._debounceTimer = null;
       this._paragraph.render();
