@@ -37,6 +37,7 @@ export class EditController {
   private _handleMouseUp: (event: MouseEvent) => void;
   private _handleDoubleClick: (event: MouseEvent) => void;
   private _handleTripleClick: (event: MouseEvent) => void;
+  private _handleVisibilityChange: () => void;
   private _clickCount: number = 0;
   private _clickTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -98,6 +99,14 @@ export class EditController {
     this._textarea.addEventListener("keydown", this._handleKeydown);
     this._textarea.addEventListener("paste", this._handlePaste as EventListener);
 
+    this._handleVisibilityChange = () => {
+      if (document.hidden) {
+        this._isComposing = false;
+        this._compositionJustEnded = false;
+      }
+    };
+    document.addEventListener("visibilitychange", this._handleVisibilityChange);
+
     this._updateCursorPosition();
   }
 
@@ -143,6 +152,13 @@ export class EditController {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
     }
+
+    if (this._mousemoveRafId !== null) {
+      cancelAnimationFrame(this._mousemoveRafId);
+      this._mousemoveRafId = null;
+    }
+
+    document.removeEventListener("visibilitychange", this._handleVisibilityChange);
 
     if (this._textarea.parentNode) {
       this._textarea.parentNode.removeChild(this._textarea);
@@ -427,10 +443,13 @@ export class EditController {
   }
 
   private _onBlur(): void {
+    this._isComposing = false;
+    this._compositionJustEnded = false;
     this._cursorEl.visible = false;
   }
 
   private _onKeydown(event: KeyboardEvent): void {
+    this._compositionJustEnded = false;
     if (this._isComposing && event.key !== "Escape") return;
     const model = this._paragraph.model;
     if (!model) return;
@@ -883,6 +902,9 @@ export class EditController {
     this._updateCursorPosition();
     this._debouncedRender();
     this._compositionJustEnded = true;
+    setTimeout(() => {
+      this._compositionJustEnded = false;
+    }, 100);
 
     event.preventDefault();
   }

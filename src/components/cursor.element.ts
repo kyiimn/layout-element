@@ -29,6 +29,7 @@ export class LayoutCursorElement extends HTMLElement {
       cancelAnimationFrame(this._rafId);
       this._rafId = null;
     }
+    this._dirty = false;
   }
 
   private _scheduleRender(): void {
