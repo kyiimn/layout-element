@@ -49,6 +49,7 @@ export class EditController {
 
   private _selectionAnchor: number | null = null;
   private _isMouseDown: boolean = false;
+  private _isFocused: boolean = false;
   private _mousemoveRafId: number | null = null;
 
   constructor(paragraph: LayoutParagraphElement) {
@@ -165,6 +166,8 @@ export class EditController {
     }
 
     document.removeEventListener("visibilitychange", this._handleVisibilityChange);
+
+    this._isFocused = false;
 
     if (this._textarea.parentNode) {
       this._textarea.parentNode.removeChild(this._textarea);
@@ -447,6 +450,7 @@ export class EditController {
   }
 
   private _onFocus(): void {
+    this._isFocused = true;
     if (this._cursorModel.selection) {
       this._cursorEl.visible = false;
     } else {
@@ -455,6 +459,7 @@ export class EditController {
   }
 
   private _onBlur(): void {
+    this._isFocused = false;
     this._isComposing = false;
     this._compositionJustEnded = false;
     this._cursorEl.visible = false;
@@ -1008,7 +1013,7 @@ export class EditController {
     if (this._debounceTimer !== null) {
       clearTimeout(this._debounceTimer);
     }
-    this._wasFocused = document.activeElement === this._textarea;
+    this._wasFocused = this._isFocused;
     this._debounceTimer = setTimeout(() => {
       this._debounceTimer = null;
       this._paragraph.render();
@@ -1047,7 +1052,7 @@ export class EditController {
         this._cursorEl.height = firstCol.fontSize;
         const hasVisibleSelection = this._cursorModel.selection !== null &&
           this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
-        this._cursorEl.visible = document.activeElement === this._textarea && !hasVisibleSelection;
+        this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
         this._textarea.style.top = `${firstCol.top}px`;
         this._textarea.style.left = `${firstCol.left}px`;
         return;
@@ -1070,7 +1075,7 @@ export class EditController {
     this._cursorEl.height = rect.height;
     const hasVisibleSelection = this._cursorModel.selection !== null &&
       this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
-    this._cursorEl.visible = document.activeElement === this._textarea && !hasVisibleSelection;
+    this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
 
     this._textarea.style.top = `${rect.top}px`;
     this._textarea.style.left = `${rect.left}px`;
