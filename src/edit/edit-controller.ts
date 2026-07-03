@@ -44,7 +44,7 @@ export class EditController {
 
   private _isComposing: boolean = false;
   private _compositionStartOffset: number = 0;
-  private _compositionJustEnded: boolean = false;
+
   private _compositionSpan: HTMLSpanElement | null = null;
   private _compositionSession: number = 0;
   private _compositionBeforeContent: string = "";
@@ -121,7 +121,11 @@ export class EditController {
             const composedLength = after.length - this._compositionBeforeContent.length + this._compositionSelectionLength;
             this._cursorModel.offset = this._compositionStartOffset + composedLength;
             this._updateCursorPosition();
-            this._debouncedRender();
+            if (this._debounceTimer !== null) {
+              clearTimeout(this._debounceTimer);
+              this._debounceTimer = null;
+            }
+            this._paragraph.render();
           }
         }
       }
@@ -551,7 +555,11 @@ export class EditController {
         const composedLength = after.length - this._compositionBeforeContent.length + this._compositionSelectionLength;
         this._cursorModel.offset = this._compositionStartOffset + composedLength;
         this._updateCursorPosition();
-        this._debouncedRender();
+        if (this._debounceTimer !== null) {
+          clearTimeout(this._debounceTimer);
+          this._debounceTimer = null;
+        }
+        this._paragraph.render();
       }
     }
 
@@ -563,10 +571,10 @@ export class EditController {
       if (event.key === "Escape") {
         event.preventDefault();
         this._isComposing = false;
-        this._compositionJustEnded = false;
         this._removeCompositionSpan();
       } else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) {
         event.preventDefault();
+        this._textarea.setSelectionRange(this._compositionStartOffset, this._compositionStartOffset);
       }
       return;
     }
@@ -958,10 +966,6 @@ export class EditController {
 
   private _onInput(event: InputEvent): void {
     if (this._isComposing || event.isComposing) return;
-    if (this._compositionJustEnded) {
-      this._compositionJustEnded = false;
-      return;
-    }
 
     const model = this._paragraph.model;
     if (!model) return;
@@ -1044,7 +1048,6 @@ export class EditController {
   private _onCompositionStart(): void {
     this._compositionSession++;
     this._isComposing = true;
-    this._compositionJustEnded = false;
 
     if (this._debounceTimer !== null) {
       clearTimeout(this._debounceTimer);
@@ -1159,11 +1162,31 @@ export class EditController {
 
 
   private _onCompositionCancel(): void {
-    this._resetCompositionState();
+    this._isComposing = false;
+    this._removeCompositionSpan();
+
+    const model = this._paragraph.model;
+    if (model && typeof model.inputContent === "string") {
+      model.inputContent = this._compositionBeforeContent;
+      this._textarea.value = this._compositionBeforeContent;
+      this._cursorModel.offset = this._compositionStartOffset;
+      this._textarea.setSelectionRange(this._compositionStartOffset, this._compositionStartOffset);
+      if (this._debounceTimer !== null) {
+        clearTimeout(this._debounceTimer);
+        this._debounceTimer = null;
+      }
+      this._paragraph.render();
+      this._updateCursorPosition();
+    }
   }
 
   private _onCompositionEnd(_event: CompositionEvent): void {
     this._isComposing = false;
+
+    if (this._debounceTimer !== null) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
 
     this._removeCompositionSpan();
 
@@ -1174,8 +1197,6 @@ export class EditController {
     const startOffset = this._compositionStartOffset;
     const beforeContent = this._compositionBeforeContent;
     const selectionLength = this._compositionSelectionLength;
-
-    this._compositionJustEnded = true;
 
     const after = this._textarea.value;
     model.inputContent = after;
@@ -1196,7 +1217,6 @@ export class EditController {
 
   private _resetCompositionState(): void {
     this._isComposing = false;
-    this._compositionJustEnded = false;
     this._removeCompositionSpan();
   }
 
