@@ -202,10 +202,10 @@ export class ParagraphModel {
       return { cover: true, overflow: (vColumnEl as any).isOverflow, lineEl: null, partEls: [], lineData };
     }
 
-    if ((vColumnEl as any).isOverflow) {
-      lineEl.remove();
-      return { cover: false, overflow: true, lineEl: null, partEls: [], lineData: { parts: [], textBlockStyle } };
-    }
+    // 오버플로우 시에도 lineEl을 DOM에 유지하고 freeRegions를 계산하여
+    // 문자 배치를 시도한다. 원래 코드에서도 오버플로우 시 lineEl을 제거하지 않았다.
+    // 오버플로우 플래그는 최종 반환값에 반영한다.
+    const isOverflow = (vColumnEl as any).isOverflow;
 
     const lineWidth = lineEl.getBoundingClientRect().width;
     const freeRegions = this._computeFreeRegions(lineWidth, overlapParts);
@@ -244,7 +244,7 @@ export class ParagraphModel {
       textBlockStyle,
     };
 
-    return { cover: false, overflow: false, lineEl, partEls, lineData };
+    return { cover: false, overflow: isOverflow, lineEl, partEls, lineData };
   }
 
   /**
@@ -399,10 +399,6 @@ export class ParagraphModel {
                 partEls = result.partEls;
                 currentPartIdx = 0;
 
-                if (partEls.length === 0) {
-                  break;
-                }
-
                 partEls[currentPartIdx].appendChild(charEl);
 
                 while (partEls[currentPartIdx].scrollWidth > partEls[currentPartIdx].clientWidth) {
@@ -425,7 +421,7 @@ export class ParagraphModel {
                 break;
               }
 
-              if (!lineEl || partEls.length === 0 || (vColumnEl.isOverflow && curColumn < this._columnWidths.length - 1)) {
+              if (vColumnEl.isOverflow && curColumn < this._columnWidths.length - 1) {
                 break;
               }
             } else {
