@@ -346,18 +346,20 @@ export class EditCoordinateMapper {
 
       rects.sort((a, b) => a.top - b.top || a.left - b.left);
 
+      // 같은 행의 연속된 사각형을 간격에 관계없이 병합하여
+      // 글자 사이 빈 공간까지 선택 영역으로 덮도록 한다.
       let current = rects[0];
       for (let i = 1; i < rects.length; i++) {
         const rect = rects[i];
-        if (
-          Math.abs(rect.top - current.top) < 0.001 &&
-          Math.abs(rect.left - (current.left + current.width)) < 0.001
-        ) {
+        if (Math.abs(rect.top - current.top) < 0.001) {
+          // 같은 행: 간격에 관계없이 병합 (오른쪽 끝까지 확장)
+          const newLeft = Math.min(current.left, rect.left);
+          const newRight = Math.max(current.left + current.width, rect.left + rect.width);
           current = new DOMRect(
-            current.left,
+            newLeft,
             current.top,
-            current.width + rect.width,
-            current.height,
+            newRight - newLeft,
+            Math.max(current.height, rect.height),
           );
         } else {
           result.push({
