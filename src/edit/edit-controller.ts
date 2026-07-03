@@ -47,7 +47,6 @@ export class EditController {
   private _compositionJustEnded: boolean = false;
   private _compositionSpan: HTMLSpanElement | null = null;
   private _compositionSession: number = 0;
-  private _compositionEndTimer: ReturnType<typeof setTimeout> | null = null;
   private _compositionBeforeContent: string = "";
   private _compositionSelectionLength: number = 0;
   private _debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -180,11 +179,6 @@ export class EditController {
     if (this._debounceTimer !== null) {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
-    }
-
-    if (this._compositionEndTimer !== null) {
-      clearTimeout(this._compositionEndTimer);
-      this._compositionEndTimer = null;
     }
 
     if (this._mousemoveRafId !== null) {
@@ -570,10 +564,6 @@ export class EditController {
         event.preventDefault();
         this._isComposing = false;
         this._compositionJustEnded = false;
-        if (this._compositionEndTimer !== null) {
-          clearTimeout(this._compositionEndTimer);
-          this._compositionEndTimer = null;
-        }
         this._removeCompositionSpan();
       }
       return;
@@ -1052,16 +1042,12 @@ export class EditController {
   private _onCompositionStart(): void {
     this._compositionSession++;
     this._isComposing = true;
+    this._compositionJustEnded = false;
 
     if (this._debounceTimer !== null) {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
       this._paragraph.render();
-    }
-
-    if (this._compositionEndTimer !== null) {
-      clearTimeout(this._compositionEndTimer);
-      this._compositionEndTimer = null;
     }
 
     this._removeCompositionSpan();
@@ -1187,11 +1173,6 @@ export class EditController {
     const beforeContent = this._compositionBeforeContent;
     const selectionLength = this._compositionSelectionLength;
 
-    if (this._compositionEndTimer !== null) {
-      clearTimeout(this._compositionEndTimer);
-      this._compositionEndTimer = null;
-    }
-
     this._compositionJustEnded = true;
 
     const after = this._textarea.value;
@@ -1200,16 +1181,8 @@ export class EditController {
     const composedLength = after.length - beforeContent.length + selectionLength;
     this._cursorModel.offset = startOffset + composedLength;
 
+    this._paragraph.render();
     this._updateCursorPosition();
-    this._debouncedRender();
-
-    if (this._compositionEndTimer !== null) {
-      clearTimeout(this._compositionEndTimer);
-    }
-    this._compositionEndTimer = setTimeout(() => {
-      this._compositionEndTimer = null;
-      this._compositionJustEnded = false;
-    }, 0);
   }
 
   private _removeCompositionSpan(): void {
@@ -1222,10 +1195,6 @@ export class EditController {
   private _resetCompositionState(): void {
     this._isComposing = false;
     this._compositionJustEnded = false;
-    if (this._compositionEndTimer !== null) {
-      clearTimeout(this._compositionEndTimer);
-      this._compositionEndTimer = null;
-    }
     this._removeCompositionSpan();
   }
 
