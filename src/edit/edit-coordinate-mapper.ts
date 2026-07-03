@@ -535,7 +535,9 @@ export class EditCoordinateMapper {
     const column = columns[columnIndex];
     if (!column || !column.shadowRoot) return null;
 
-    const span = column.shadowRoot.querySelector<HTMLSpanElement>(`[data-offset="${offset}"]`);
+    const span = column.shadowRoot.querySelector<HTMLSpanElement>(
+      `[data-offset="${offset}"]:not([data-temporary])`,
+    );
     if (!span) return null;
 
     this._spanCache.set(offset, span);
@@ -566,7 +568,9 @@ export class EditCoordinateMapper {
   /** 한 컬럼의 shadow root 내 모든 문자 span을 data-offset 순서대로 반환한다. */
   private _getColumnSpans(column: LayoutColumnElement): HTMLSpanElement[] {
     if (!column.shadowRoot) return [];
-    return Array.from(column.shadowRoot.querySelectorAll<HTMLSpanElement>('[data-offset]'));
+    return Array.from(
+      column.shadowRoot.querySelectorAll<HTMLSpanElement>('[data-offset]:not([data-temporary])'),
+    );
   }
 
   private _getAllSortedSpans(): HTMLSpanElement[] {

@@ -30,6 +30,7 @@ export class EditController {
   private _handleCompositionStart: () => void;
   private _handleCompositionUpdate: (event: CompositionEvent) => void;
   private _handleCompositionEnd: (event: CompositionEvent) => void;
+  private _handleCompositionCancel: () => void;
   private _handlePaste: (event: ClipboardEvent) => void;
 
   private _handleMouseDown: (event: MouseEvent) => void;
@@ -45,6 +46,10 @@ export class EditController {
   private _compositionStartOffset: number = 0;
   private _compositionJustEnded: boolean = false;
   private _compositionSpan: HTMLSpanElement | null = null;
+  private _compositionSession: number = 0;
+  private _compositionEndTimer: ReturnType<typeof setTimeout> | null = null;
+  private _compositionBeforeContent: string = "";
+  private _compositionSelectionLength: number = 0;
   private _debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private _wasFocused: boolean = false;
 
@@ -71,6 +76,7 @@ export class EditController {
     this._handleCompositionStart = () => this._onCompositionStart();
     this._handleCompositionUpdate = (event: CompositionEvent) => this._onCompositionUpdate(event);
     this._handleCompositionEnd = (event: CompositionEvent) => this._onCompositionEnd(event);
+    this._handleCompositionCancel = () => this._onCompositionCancel();
     this._handlePaste = (event: ClipboardEvent) => this._onPaste(event);
 
     this._handleMouseDown = (event: MouseEvent) => this._onMouseDown(event);
@@ -99,14 +105,32 @@ export class EditController {
     this._textarea.addEventListener("compositionstart", this._handleCompositionStart);
     this._textarea.addEventListener("compositionupdate", this._handleCompositionUpdate as EventListener);
     this._textarea.addEventListener("compositionend", this._handleCompositionEnd as EventListener);
+    this._textarea.addEventListener("compositioncancel", this._handleCompositionCancel);
     this._textarea.addEventListener("keydown", this._handleKeydown);
     this._textarea.addEventListener("paste", this._handlePaste as EventListener);
 
     this._handleVisibilityChange = () => {
       if (document.hidden) {
+        const wasComposing = this._isComposing;
         this._isComposing = false;
         this._compositionJustEnded = false;
         this._removeCompositionSpan();
+
+        if (wasComposing) {
+          const model = this._paragraph.model;
+          if (model && typeof model.inputContent === "string") {
+            if (this._compositionEndTimer !== null) {
+              clearTimeout(this._compositionEndTimer);
+              this._compositionEndTimer = null;
+            }
+            const after = this._textarea.value;
+            model.inputContent = after;
+            const composedLength = after.length - this._compositionBeforeContent.length + this._compositionSelectionLength;
+            this._cursorModel.offset = this._compositionStartOffset + composedLength;
+            this._updateCursorPosition();
+            this._debouncedRender();
+          }
+        }
       }
     };
     document.addEventListener("visibilitychange", this._handleVisibilityChange);
@@ -156,11 +180,17 @@ export class EditController {
     this._textarea.removeEventListener("compositionstart", this._handleCompositionStart);
     this._textarea.removeEventListener("compositionupdate", this._handleCompositionUpdate as EventListener);
     this._textarea.removeEventListener("compositionend", this._handleCompositionEnd as EventListener);
+    this._textarea.removeEventListener("compositioncancel", this._handleCompositionCancel);
     this._textarea.removeEventListener("paste", this._handlePaste as EventListener);
 
     if (this._debounceTimer !== null) {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
+    }
+
+    if (this._compositionEndTimer !== null) {
+      clearTimeout(this._compositionEndTimer);
+      this._compositionEndTimer = null;
     }
 
     if (this._mousemoveRafId !== null) {
@@ -171,6 +201,7 @@ export class EditController {
     document.removeEventListener("visibilitychange", this._handleVisibilityChange);
 
     this._isFocused = false;
+    this._isComposing = false;
     this._removeCompositionSpan();
 
     if (this._textarea.parentNode) {
@@ -485,15 +516,32 @@ export class EditController {
   }
 
   private _onBlur(): void {
+    const wasComposing = this._isComposing;
     this._isFocused = false;
     this._isComposing = false;
     this._compositionJustEnded = false;
     this._removeCompositionSpan();
+
+    if (wasComposing) {
+      const model = this._paragraph.model;
+      if (model && typeof model.inputContent === "string") {
+        if (this._compositionEndTimer !== null) {
+          clearTimeout(this._compositionEndTimer);
+          this._compositionEndTimer = null;
+        }
+        const after = this._textarea.value;
+        model.inputContent = after;
+        const composedLength = after.length - this._compositionBeforeContent.length + this._compositionSelectionLength;
+        this._cursorModel.offset = this._compositionStartOffset + composedLength;
+        this._updateCursorPosition();
+        this._debouncedRender();
+      }
+    }
+
     this._cursorEl.visible = false;
   }
 
   private _onKeydown(event: KeyboardEvent): void {
-    this._compositionJustEnded = false;
     if (this._isComposing && event.key !== "Escape") return;
     const model = this._paragraph.model;
     if (!model) return;
@@ -967,6 +1015,7 @@ export class EditController {
   }
 
   private _onCompositionStart(): void {
+    this._compositionSession++;
     this._isComposing = true;
 
     if (this._debounceTimer !== null) {
@@ -974,10 +1023,27 @@ export class EditController {
       this._debounceTimer = null;
     }
 
+    if (this._compositionEndTimer !== null) {
+      clearTimeout(this._compositionEndTimer);
+      this._compositionEndTimer = null;
+    }
+
+    this._removeCompositionSpan();
+
+    const model = this._paragraph.model;
+    if (model && typeof model.inputContent === "string") {
+      this._compositionBeforeContent = model.inputContent;
+    } else {
+      this._compositionBeforeContent = "";
+    }
+
     if (this._cursorModel.selection) {
-      this._compositionStartOffset = this._cursorModel.selection.normalized().start.textOffset;
+      const normalized = this._cursorModel.selection.normalized();
+      this._compositionStartOffset = normalized.start.textOffset;
+      this._compositionSelectionLength = normalized.end.textOffset - normalized.start.textOffset;
     } else {
       this._compositionStartOffset = this._cursorModel.offset;
+      this._compositionSelectionLength = 0;
     }
     this._cursorModel.selection = null;
     this._updateSelection();
@@ -987,11 +1053,13 @@ export class EditController {
     this._compositionSpan.style.textDecoration = "underline";
     this._compositionSpan.style.textUnderlineOffset = "2px";
 
+    let spanInserted = false;
     const renderedOffset = this._mapper.renderedOffset(this._compositionStartOffset);
     if (renderedOffset !== null) {
       const span = this._mapper.getSpanByOffset(renderedOffset);
       if (span) {
         span.before(this._compositionSpan);
+        spanInserted = true;
       }
     } else if (this._compositionStartOffset > 0) {
       const prevRendered = this._mapper.renderedOffset(this._compositionStartOffset - 1);
@@ -999,6 +1067,17 @@ export class EditController {
         const prevSpan = this._mapper.getSpanByOffset(prevRendered);
         if (prevSpan) {
           prevSpan.after(this._compositionSpan);
+          spanInserted = true;
+        }
+      }
+    }
+
+    if (!spanInserted && this._compositionStartOffset === 0) {
+      const firstColumn = this._paragraph.querySelector("x-layout-column");
+      if (firstColumn && firstColumn.shadowRoot) {
+        const firstContainer = firstColumn.shadowRoot.firstElementChild;
+        if (firstContainer instanceof HTMLElement) {
+          firstContainer.appendChild(this._compositionSpan);
         }
       }
     }
@@ -1022,12 +1101,26 @@ export class EditController {
       }
 
       this._cursorModel.offset = this._compositionStartOffset + event.data.length;
+    } else if (this._compositionSpan) {
+      this._compositionSpan.innerText = "";
+      this._cursorModel.offset = this._compositionStartOffset;
     }
     this._updateCursorPosition();
   }
 
 
-  private _onCompositionEnd(event: CompositionEvent): void {
+  private _onCompositionCancel(): void {
+    this._isComposing = false;
+    this._compositionJustEnded = false;
+    if (this._compositionEndTimer !== null) {
+      clearTimeout(this._compositionEndTimer);
+      this._compositionEndTimer = null;
+    }
+    this._removeCompositionSpan();
+  }
+
+  private _onCompositionEnd(_event: CompositionEvent): void {
+    const sessionAtScheduleTime = this._compositionSession;
     this._isComposing = false;
 
     // 조합 span 제거
@@ -1037,20 +1130,28 @@ export class EditController {
     if (!model) return;
     if (typeof model.inputContent !== "string") return;
 
-    // event.data를 setTimeout 밖에서 캡처 (이벤트 객체가 무효화되기 전에)
-    const composedText = event.data ?? "";
-    const composedLength = composedText.length;
     const startOffset = this._compositionStartOffset;
+    const beforeContent = this._compositionBeforeContent;
+    const selectionLength = this._compositionSelectionLength;
 
     // compositionend의 event.data는 크로스 플랫폼에서 불안정하므로
     // setTimeout(0) 후에 textarea 값을 읽어 확정 텍스트를 얻는다
     this._compositionJustEnded = true;
-    setTimeout(() => {
+
+    if (this._compositionEndTimer !== null) {
+      clearTimeout(this._compositionEndTimer);
+    }
+
+    this._compositionEndTimer = setTimeout(() => {
+      this._compositionEndTimer = null;
+
+      if (this._compositionSession !== sessionAtScheduleTime) return;
       this._compositionJustEnded = false;
 
       const after = this._textarea.value;
       model.inputContent = after;
 
+      const composedLength = after.length - beforeContent.length + selectionLength;
       this._cursorModel.offset = startOffset + composedLength;
 
       this._updateCursorPosition();
@@ -1139,6 +1240,7 @@ export class EditController {
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(span.style, charStyle);
     }
     span.dataset.offset = String(sourceOffset); // temporary offset; will be corrected on re-render
+    span.dataset.temporary = "true";
     span.innerText = char;
     return span;
   }
