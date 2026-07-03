@@ -591,6 +591,14 @@ export class ParagraphModel {
     this._initLayout();
   }
 
+  public set inputContent(value: string | (string | TextBlockData)[]) {
+    this._inputContent = value;
+  }
+
+  public get inputContent() {
+    return this._inputContent;
+  }
+
   /** 텍스트 블록 배열 (`\n`으로 분리된) */
   public get contents() {
     return this._contents;
