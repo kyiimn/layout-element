@@ -788,13 +788,31 @@ export class EditController {
       return null;
     }
 
-    const lineHeight = cursorRect.height;
-    const paragraphRect = this._paragraph.getBoundingClientRect();
-    const targetX = cursorRect.left + paragraphRect.left;
-    const targetY = cursorRect.top + paragraphRect.top + direction * lineHeight;
+	    const lineHeight = cursorRect.height;
+	    const paragraphRect = this._paragraph.getBoundingClientRect();
+	    const targetX = cursorRect.left + paragraphRect.left;
+	    const baseY = cursorRect.top + paragraphRect.top + direction * lineHeight;
 
-    const result = this._mapper.getCharOffsetFromPoint(targetX, targetY);
-    return result?.textOffset ?? null;
+	    // Probe strategy: line spacing can exceed font height, placing targetY
+	    // in the gap between lines where no span exists. Try multiple Y positions.
+	    const probeOffsets = [
+	      0,                                                // exact target
+	      direction * lineHeight * 0.5,                     // half a line further
+	    ];
+
+	    for (const offset of probeOffsets) {
+	      const result = this._mapper.getCharOffsetFromPoint(targetX, baseY + offset);
+	      if (result?.textOffset != null) return result.textOffset;
+	    }
+
+	    // Scan in small increments until a character is found or we exceed one line height
+	    const step = 2;
+	    for (let scanOffset = step; scanOffset <= lineHeight; scanOffset += step) {
+	      const result = this._mapper.getCharOffsetFromPoint(targetX, baseY + direction * scanOffset);
+	      if (result?.textOffset != null) return result.textOffset;
+	    }
+
+	    return null;
   }
 
   private _getCursorLocalRect(offset: number): DOMRect | null {
