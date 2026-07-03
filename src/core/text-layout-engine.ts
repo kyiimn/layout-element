@@ -1,5 +1,5 @@
 import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/constants";
-import type { LayoutParagraphElement } from "@/components";
+import type { LayoutBoxElement, LayoutParagraphElement } from "@/components";
 import type { LayoutVirtualColumnElement } from "@/components/layout/v-column.element";
 import {
   InheritStyle,
@@ -11,6 +11,7 @@ import {
   TextLineData,
   OverlapParts
 } from "@/types";
+import { GridCalculator } from "@/core/grid-calculator";
 import { getOverlapSizePX, mergeOverlapParts } from "@/utils";
 import { FontLoader } from "@/resource/font-loader";
 import { ColorRegistry } from "@/resource/color-registry";
@@ -74,6 +75,16 @@ export class TextLayoutEngine {
   private _paragraphElement: LayoutParagraphElement;
   private _rootNode: Node;
 
+  private _canvas: HTMLCanvasElement;
+  private _ctx: CanvasRenderingContext2D;
+
+  /** Font string cache: avoids recomputing on every character */
+  private _lastFontKey: string = '';
+  private _lastFontString: string = '';
+
+  /** Overlay rect cache: avoids repeated getBoundingClientRect on overlay elements per render cycle */
+  private _overlayRects: Map<LayoutBoxElement, DOMRect> | null = null;
+
   /**
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
    */
@@ -84,6 +95,9 @@ export class TextLayoutEngine {
   private constructor(options: TextLayoutEngineOptions) {
     this._paragraphElement = options.paragraphEl;
     this._rootNode = options.rootNode;
+
+    this._canvas = document.createElement('canvas');
+    this._ctx = this._canvas.getContext('2d')!;
 
     this.data = options;
   }
@@ -151,6 +165,41 @@ export class TextLayoutEngine {
     return freeRegions;
   }
 
+  private _getCanvasFont(textBlockStyle?: TextBlockStyle, ppm?: number): string {
+    const fontLoader = FontLoader.getInstance();
+    const fontFamily = textBlockStyle?.fontFamily
+      ? fontLoader.getFontFamily(textBlockStyle.fontFamily)
+      : fontLoader.getFontFamily();
+    const fontSize = textBlockStyle?.fontSize
+      ? textBlockStyle.fontSize
+      : this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+    const fontWeight = textBlockStyle?.fontWeight || this._textStyle?.fontWeight || this._inheritStyle?.fontWeight || 'normal';
+    const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
+    const fontSizePx = fontSize * effectivePpm;
+
+    const key = `${fontWeight}|${fontSizePx}|${fontFamily}`;
+    if (key === this._lastFontKey) return this._lastFontString;
+
+    const fontString = `${fontWeight} ${fontSizePx}px ${fontFamily}`;
+    this._lastFontKey = key;
+    this._lastFontString = fontString;
+    return fontString;
+  }
+
+  private _charWidthPx(char: string, textBlockStyle?: TextBlockStyle, ppm?: number): number {
+    const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
+    this._ctx.font = this._getCanvasFont(textBlockStyle, effectivePpm);
+    const metrics = this._ctx.measureText(char);
+    const rawWidth = metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight;
+    const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+    const fontSizePx = fontSize * effectivePpm;
+    const maxWidthPx = this.widthRatio * fontSizePx;
+    const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
+    const minWidthEm = (char === ' ' || !isHalfWidth) ? 0.15 : 0.35;
+    const minWidthPx = minWidthEm * fontSizePx;
+    return Math.round(Math.min(Math.max(rawWidth, minWidthPx), maxWidthPx));
+  }
+
   /** 마지막 줄이 빈 파트만 있으면 제거 */
   private _removeEmptyLastLine(columnContent: TextLineData[]): TextLineData[] {
     if (columnContent.length > 0 && columnContent[columnContent.length - 1].parts.every(p => p.content.length === 0)) {
@@ -168,11 +217,27 @@ export class TextLayoutEngine {
     let cover = false;
     let parts: OverlapParts[] = [];
 
-    overlapEls.forEach(el => {
+    if (this._overlayRects === null) {
+      this._overlayRects = new Map();
+      for (const el of overlapEls) {
+        this._overlayRects.set(el, el.getBoundingClientRect());
+      }
+    }
+
+    const lineRect = lineEl.getBoundingClientRect();
+
+    for (const el of overlapEls) {
+      const elRect = this._overlayRects.get(el);
+      if (!elRect) continue;
+
+      if (lineRect.bottom <= elRect.top || lineRect.top >= elRect.bottom) {
+        continue;
+      }
+
       const type = getOverlapSizePX(lineEl, el);
       if (type.direction === 'COVERS') cover = true;
       if (type.direction === 'PART') parts = parts.concat(type.parts);
-    });
+    }
 
     if (cover) lineEl.style.width = '0';
     lineEl.style.maxWidth = lineEl.style.width;
@@ -204,6 +269,7 @@ export class TextLayoutEngine {
     overflow: boolean;
     lineEl: HTMLDivElement | null;
     partEls: HTMLDivElement[];
+    partWidths: number[];
     lineData: TextLineData;
   } {
     const lineEl = this._createLineElement(textBlockStyle);
@@ -218,7 +284,7 @@ export class TextLayoutEngine {
         parts: [],
         textBlockStyle,
       };
-      return { cover: true, overflow: (vColumnEl as LayoutVirtualColumnElement).isOverflow, lineEl: null, partEls: [], lineData };
+      return { cover: true, overflow: (vColumnEl as LayoutVirtualColumnElement).isOverflow, lineEl: null, partEls: [], partWidths: [], lineData };
     }
 
     // 오버플로우 시에도 lineEl을 DOM에 유지하고 freeRegions를 계산하여
@@ -239,7 +305,7 @@ export class TextLayoutEngine {
         parts: [],
         textBlockStyle,
       };
-      return { cover: true, overflow: (vColumnEl as LayoutVirtualColumnElement).isOverflow, lineEl: null, partEls: [], lineData };
+      return { cover: true, overflow: (vColumnEl as LayoutVirtualColumnElement).isOverflow, lineEl: null, partEls: [], partWidths: [], lineData };
     }
 
     const parts: TextPartData[] = freeRegions.map((region, i) => ({
@@ -247,6 +313,8 @@ export class TextLayoutEngine {
       left: i === 0 ? region.start / ppm : (region.start - freeRegions[i - 1].end) / ppm,
       width: (region.end - region.start) / ppm,
     }));
+
+    const partWidths = freeRegions.map(r => r.end - r.start);
 
     const partEls = freeRegions.map(region => this._createPartElement(
       region.end - region.start,
@@ -265,7 +333,7 @@ export class TextLayoutEngine {
       textBlockStyle,
     };
 
-    return { cover: false, overflow: isOverflow, lineEl, partEls, lineData };
+    return { cover: false, overflow: isOverflow, lineEl, partEls, partWidths, lineData };
   }
 
   /**
@@ -338,6 +406,7 @@ export class TextLayoutEngine {
 
     this._columnContents = [];
     this._overflow = 0;
+    this._overlayRects = null;
 
     let beforeIdxBlock = 0;
     let beforeIdxContentOfBlock = 0;
@@ -346,7 +415,9 @@ export class TextLayoutEngine {
       let columnContent: TextLineData[] = [];
       let lineEl: HTMLDivElement | null = null;
       let partEls: HTMLDivElement[] = [];
+      let partWidths: number[] = [];
       let currentPartIdx = 0;
+      let cumulativeWidths: number[] = [];
 
       let idxBlock = beforeIdxBlock;
       let idxContentOfBlock = beforeIdxContentOfBlock;
@@ -394,7 +465,9 @@ export class TextLayoutEngine {
             columnContent.push(result.lineData);
             lineEl = result.lineEl;
             partEls = result.partEls;
+            partWidths = result.partWidths;
             currentPartIdx = 0;
+            cumulativeWidths = new Array(partWidths.length).fill(0);
             isFirstLineInLoop = false;
             break;
           }
@@ -409,97 +482,141 @@ export class TextLayoutEngine {
           }
         }
 
+        const letterSpacingEm = this._textStyle?.letterSpacing || this._inheritStyle?.letterSpacing || 0;
+        const letterSpacingFontSize = block.textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+        const letterSpacingPx = letterSpacingEm * letterSpacingFontSize * ppm;
+
         for (; idxContentOfBlock < block.content.length; idxContentOfBlock++) {
           const char = block.content[idxContentOfBlock];
+          const charWidth = this._charWidthPx(char, block.textBlockStyle, ppm) + letterSpacingPx;
 
-          const charEl = document.createElement('span');
-          Object.assign(charEl.style, this.genCharStyle(char));
-          charEl.innerText = char;
+          const placeChar = (): boolean => {
+            if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
+              cumulativeWidths[currentPartIdx] += charWidth;
+              columnContent[columnContent.length - 1].parts[currentPartIdx].content.push(char);
+              return true;
+            }
+            return false;
+          };
 
-          partEls[currentPartIdx].appendChild(charEl);
-
-          if (partEls[currentPartIdx].scrollWidth > partEls[currentPartIdx].clientWidth) {
-            charEl.remove();
-
-            let placed = false;
-            currentPartIdx++;
-            while (currentPartIdx < partEls.length) {
-              partEls[currentPartIdx].appendChild(charEl);
-              if (partEls[currentPartIdx].scrollWidth <= partEls[currentPartIdx].clientWidth) {
-                placed = true;
-                break;
-              }
-              charEl.remove();
-              currentPartIdx++;
+          if (placeChar()) {
+            if (idxContentOfBlock >= block.content.length - 1) {
+              columnContent[columnContent.length - 1].endOfBlock = true;
             }
 
-            if (!placed) {
-              while (true) {
-                const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, false);
-
-                if (result.cover) {
-                  columnContent.push(result.lineData);
-                  partEls = [];
-                  lineEl = null;
-                  if (result.overflow) {
-                    if (curColumn < this._columnWidths.length - 1) {
-                      if (idxContentOfBlock < block.content.length - 1) {
-                        columnContent = this._removeEmptyLastLine(columnContent);
-                      }
-                      break;
-                    } else {
-                      this._overflow++;
-                    }
-                  }
-                  continue;
-                }
-
-                if (result.overflow) {
-                  if (curColumn < this._columnWidths.length - 1) {
-                    if (idxContentOfBlock < block.content.length - 1) {
-                      columnContent = this._removeEmptyLastLine(columnContent);
-                    }
-                    lineEl = null;
-                    partEls = [];
-                    break;
-                  } else {
-                    this._overflow++;
-                  }
-                }
-
-                columnContent.push(result.lineData);
-                lineEl = result.lineEl;
-                partEls = result.partEls;
-                currentPartIdx = 0;
-
-                partEls[currentPartIdx].appendChild(charEl);
-
-                while (partEls[currentPartIdx].scrollWidth > partEls[currentPartIdx].clientWidth) {
-                  charEl.remove();
-                  currentPartIdx++;
-                  if (currentPartIdx >= partEls.length) break;
-                  partEls[currentPartIdx].appendChild(charEl);
-                }
-
-                if (currentPartIdx >= partEls.length) {
+            if (vColumnEl.isOverflow) {
+              if (curColumn < this._columnWidths.length - 1) {
+                if (idxContentOfBlock < block.content.length - 1) {
                   columnContent = this._removeEmptyLastLine(columnContent);
-                  idxContentOfBlock--;
-                  currentPartIdx = 0;
-                  continue;
                 }
+                break;
+              } else {
+                this._overflow++;
+              }
+            }
+            continue;
+          }
 
+          let placed = false;
+          currentPartIdx++;
+          while (currentPartIdx < partWidths.length) {
+            if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
+              cumulativeWidths[currentPartIdx] += charWidth;
+              columnContent[columnContent.length - 1].parts[currentPartIdx].content.push(char);
+              placed = true;
+              break;
+            }
+            currentPartIdx++;
+          }
+
+          if (placed) {
+            if (idxContentOfBlock >= block.content.length - 1) {
+              columnContent[columnContent.length - 1].endOfBlock = true;
+            }
+
+            if (vColumnEl.isOverflow) {
+              if (curColumn < this._columnWidths.length - 1) {
+                if (idxContentOfBlock < block.content.length - 1) {
+                  columnContent = this._removeEmptyLastLine(columnContent);
+                }
+                break;
+              } else {
+                this._overflow++;
+              }
+            }
+            continue;
+          }
+
+          while (true) {
+            const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, false);
+
+            if (result.cover) {
+              columnContent.push(result.lineData);
+              partEls = [];
+              partWidths = [];
+              lineEl = null;
+              if (result.overflow) {
+                if (curColumn < this._columnWidths.length - 1) {
+                  if (idxContentOfBlock < block.content.length - 1) {
+                    columnContent = this._removeEmptyLastLine(columnContent);
+                  }
+                  break;
+                } else {
+                  this._overflow++;
+                }
+              }
+              continue;
+            }
+
+            if (result.overflow) {
+              if (curColumn < this._columnWidths.length - 1) {
+                if (idxContentOfBlock < block.content.length - 1) {
+                  columnContent = this._removeEmptyLastLine(columnContent);
+                }
+                lineEl = null;
+                partEls = [];
+                partWidths = [];
+                break;
+              } else {
+                this._overflow++;
+              }
+            }
+
+            columnContent.push(result.lineData);
+            lineEl = result.lineEl;
+            partEls = result.partEls;
+            partWidths = result.partWidths;
+            currentPartIdx = 0;
+            cumulativeWidths = new Array(partWidths.length).fill(0);
+
+            if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
+              cumulativeWidths[currentPartIdx] += charWidth;
+              columnContent[columnContent.length - 1].parts[currentPartIdx].content.push(char);
+              break;
+            }
+
+            currentPartIdx++;
+            while (currentPartIdx < partWidths.length) {
+              if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
+                cumulativeWidths[currentPartIdx] += charWidth;
                 columnContent[columnContent.length - 1].parts[currentPartIdx].content.push(char);
                 break;
               }
-
-              if (vColumnEl.isOverflow && curColumn < this._columnWidths.length - 1) {
-                break;
-              }
-            } else {
-              columnContent[columnContent.length - 1].parts[currentPartIdx].content.push(char);
+              currentPartIdx++;
             }
-          } else {
-            columnContent[columnContent.length - 1].parts[currentPartIdx].content.push(char);
+
+            if (currentPartIdx >= partWidths.length) {
+              columnContent = this._removeEmptyLastLine(columnContent);
+              idxContentOfBlock--;
+              currentPartIdx = 0;
+              continue;
+            }
+
+            break;
+          }
+
+          if (vColumnEl.isOverflow && curColumn < this._columnWidths.length - 1) {
+            break;
           }
 
           if (idxContentOfBlock >= block.content.length - 1) {

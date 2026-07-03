@@ -273,7 +273,7 @@ export const exampleData = {
     color: 'black',
     fontFamily: 'Myoungjo',
     fontSize: 4,
-    letterSpacing: -0.2,
+    letterSpacing: -0.05,
     widthRatio: 0.8,
   },
   paragraphStyle: {
