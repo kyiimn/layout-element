@@ -875,7 +875,17 @@ export class EditController {
 
   private _onCompositionStart(): void {
     this._isComposing = true;
-    this._compositionStartOffset = this._cursorModel.offset;
+
+    if (this._debounceTimer !== null) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
+
+    if (this._cursorModel.selection) {
+      this._compositionStartOffset = this._cursorModel.selection.normalized().start.textOffset;
+    } else {
+      this._compositionStartOffset = this._cursorModel.offset;
+    }
     this._cursorModel.selection = null;
     this._updateSelection();
   }
@@ -946,8 +956,19 @@ export class EditController {
   }
 
   private _optimisticSpanUpdate(sourceOffset: number, char: string): void {
-    const renderedOffset = this._mapper.renderedOffset(sourceOffset);
-    if (renderedOffset === null) return;
+    let renderedOffset = this._mapper.renderedOffset(sourceOffset);
+    if (renderedOffset === null) {
+      if (sourceOffset > 0) {
+        renderedOffset = this._mapper.renderedOffset(sourceOffset - 1);
+      }
+      if (renderedOffset === null) return;
+
+      const span = this._mapper.getSpanByOffset(renderedOffset);
+      if (span && span.nextSibling && span.nextSibling instanceof HTMLSpanElement) {
+        span.nextSibling.innerText = char;
+      }
+      return;
+    }
 
     const span = this._mapper.getSpanByOffset(renderedOffset);
     if (span) {

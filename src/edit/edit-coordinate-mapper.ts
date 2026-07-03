@@ -175,7 +175,28 @@ export class EditCoordinateMapper {
 
             return { textOffset: sourceOffset };
           } else {
-            break;
+            const targetY = spanRect.top;
+            let bestSpan: HTMLSpanElement | null = null;
+            let bestDist = Infinity;
+            for (const s of spans) {
+              const r = s.getBoundingClientRect();
+              if (r.top !== targetY) continue;
+              const dist = x < r.left ? r.left - x : (x >= r.right ? x - r.right : 0);
+              if (dist < bestDist) {
+                bestDist = dist;
+                bestSpan = s;
+              }
+            }
+            if (bestSpan) {
+              const renderedOffset = parseInt(bestSpan.dataset.offset ?? '', 10);
+              if (!Number.isNaN(renderedOffset)) {
+                const sourceOffset = this.sourceOffset(renderedOffset);
+                if (sourceOffset !== null) {
+                  return { textOffset: sourceOffset };
+                }
+              }
+            }
+            return null;
           }
         }
 
