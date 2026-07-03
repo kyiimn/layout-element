@@ -18,5 +18,6 @@ Thumbs.db
 
 # etc
 .codegraph
+.playwright-mcp
 bak
 src.bak
