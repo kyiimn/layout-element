@@ -1067,7 +1067,7 @@ export class EditController {
     const content = this._paragraph.model?.inputContent as string | undefined;
     const offset = this._cursorModel.offset;
     let renderedOffset = this._mapper.renderedOffset(offset);
-    let atEndOfChar = true; // Cursor at right edge of the rendered char
+    let atEndOfChar = false; // Cursor at left edge of the rendered char (offset N = before char N)
 
     if (renderedOffset === null && content !== undefined) {
       // Offset is at a \n position or end-of-string — fallback to adjacent chars
