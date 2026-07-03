@@ -49,8 +49,9 @@ export class EditController {
   private _compositionSession: number = 0;
   private _compositionBeforeContent: string = "";
   private _compositionSelectionLength: number = 0;
-  private _debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private _debounceTimer: number | null = null;
   private _wasFocused: boolean = false;
+  private _optimisticSpan: HTMLSpanElement | null = null;
 
   private _selectionAnchor: number | null = null;
   private _isMouseDown: boolean = false;
@@ -122,7 +123,7 @@ export class EditController {
             this._cursorModel.offset = this._compositionStartOffset + composedLength;
             this._updateCursorPosition();
             if (this._debounceTimer !== null) {
-              clearTimeout(this._debounceTimer);
+              cancelAnimationFrame(this._debounceTimer);
               this._debounceTimer = null;
               this._wasFocused = false;
             }
@@ -182,7 +183,7 @@ export class EditController {
     this._textarea.removeEventListener("paste", this._handlePaste as EventListener);
 
     if (this._debounceTimer !== null) {
-      clearTimeout(this._debounceTimer);
+      cancelAnimationFrame(this._debounceTimer);
       this._debounceTimer = null;
     }
 
@@ -195,6 +196,7 @@ export class EditController {
 
     this._isFocused = false;
     this._resetCompositionState();
+    this._optimisticSpan = null;
 
     if (this._textarea.parentNode) {
       this._textarea.parentNode.removeChild(this._textarea);
@@ -215,6 +217,7 @@ export class EditController {
    */
   postRender(_fullRebuild: boolean = true): void {
     this._mapper.rebuild();
+    this._optimisticSpan = null;
     const model = this._paragraph.model;
     if (model && typeof model.inputContent === "string") {
       if (!this._isComposing) {
@@ -565,7 +568,7 @@ export class EditController {
         this._cursorModel.offset = this._compositionStartOffset + composedLength;
         this._updateCursorPosition();
         if (this._debounceTimer !== null) {
-          clearTimeout(this._debounceTimer);
+          cancelAnimationFrame(this._debounceTimer);
           this._debounceTimer = null;
         }
         this._paragraph.render();
@@ -1060,7 +1063,7 @@ export class EditController {
     this._isComposing = true;
 
     if (this._debounceTimer !== null) {
-      clearTimeout(this._debounceTimer);
+      cancelAnimationFrame(this._debounceTimer);
       this._debounceTimer = null;
       this._paragraph.render();
     }
@@ -1187,7 +1190,7 @@ export class EditController {
       this._cursorModel.offset = this._compositionStartOffset;
       this._textarea.setSelectionRange(this._compositionStartOffset, this._compositionStartOffset);
       if (this._debounceTimer !== null) {
-        clearTimeout(this._debounceTimer);
+        cancelAnimationFrame(this._debounceTimer);
         this._debounceTimer = null;
         this._wasFocused = false;
       }
@@ -1200,7 +1203,7 @@ export class EditController {
     this._isComposing = false;
 
     if (this._debounceTimer !== null) {
-      clearTimeout(this._debounceTimer);
+      cancelAnimationFrame(this._debounceTimer);
       this._debounceTimer = null;
     }
 
@@ -1273,6 +1276,12 @@ export class EditController {
   }
 
   private _optimisticSpanUpdate(sourceOffset: number, char: string): void {
+    // Clear any previous optimistic span before creating a new one
+    if (this._optimisticSpan && this._optimisticSpan.parentNode) {
+      this._optimisticSpan.remove();
+    }
+    this._optimisticSpan = null;
+
     // Insert a new span BEFORE the character at sourceOffset, instead of
     // replacing the existing span's text. This prevents the visual "replace then
     // restore" flicker — the existing character stays visible and the new
@@ -1291,6 +1300,7 @@ export class EditController {
       if (prevSpan && prevSpan.nextSibling && prevSpan.nextSibling instanceof HTMLSpanElement) {
         const newSpan = this._createOptimisticSpan(char, sourceOffset);
         prevSpan.nextSibling.before(newSpan);
+        this._optimisticSpan = newSpan;
       }
       return;
     }
@@ -1299,6 +1309,7 @@ export class EditController {
     if (span) {
       const newSpan = this._createOptimisticSpan(char, sourceOffset);
       span.before(newSpan);
+      this._optimisticSpan = newSpan;
     }
   }
 
@@ -1317,18 +1328,33 @@ export class EditController {
 
   private _debouncedRender(): void {
     if (this._debounceTimer !== null) {
-      clearTimeout(this._debounceTimer);
+      cancelAnimationFrame(this._debounceTimer);
     }
     this._wasFocused = this._isFocused;
-    this._debounceTimer = setTimeout(() => {
+    this._debounceTimer = requestAnimationFrame(() => {
       this._debounceTimer = null;
       this._paragraph.render();
-    }, 150);
+    });
   }
 
   private _updateCursorPosition(): void {
     const content = this._paragraph.model?.inputContent as string | undefined;
     const offset = this._cursorModel.offset;
+
+    if (this._optimisticSpan && this._optimisticSpan.parentNode) {
+      const spanRect = this._optimisticSpan.getBoundingClientRect();
+      const paragraphRect = this._paragraph.getBoundingClientRect();
+      this._cursorEl.top = spanRect.top - paragraphRect.top;
+      this._cursorEl.left = spanRect.right - paragraphRect.left;
+      this._cursorEl.height = spanRect.height;
+      const hasVisibleSelection = this._cursorModel.selection !== null &&
+        this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
+      this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
+      this._textarea.style.top = `${spanRect.top - paragraphRect.top}px`;
+      this._textarea.style.left = `${spanRect.left - paragraphRect.left}px`;
+      return;
+    }
+
     let renderedOffset = this._mapper.renderedOffset(offset);
     let atEndOfChar = false; // Cursor at left edge of the rendered char (offset N = before char N)
 
