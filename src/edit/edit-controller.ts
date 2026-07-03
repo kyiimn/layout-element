@@ -124,6 +124,7 @@ export class EditController {
             if (this._debounceTimer !== null) {
               clearTimeout(this._debounceTimer);
               this._debounceTimer = null;
+              this._wasFocused = false;
             }
             this._paragraph.render();
           }
@@ -218,12 +219,14 @@ export class EditController {
     if (model && typeof model.inputContent === "string") {
       if (!this._isComposing) {
         this._textarea.value = model.inputContent;
+        this._syncTextareaSelection();
       }
     }
     this._updateCursorPosition();
     this._updateSelection();
 
-    if (this._isComposing && this._compositionSpan && !this._compositionSpan.parentNode) {
+    if (this._isComposing && this._compositionSpan) {
+      this._compositionSpan.remove();
       let reattached = false;
       const renderedOffset = this._mapper.renderedOffset(this._compositionStartOffset);
       if (renderedOffset !== null) {
@@ -1071,6 +1074,7 @@ export class EditController {
       this._compositionBeforeContent = "";
     }
 
+    const hadSelection = this._cursorModel.selection !== null;
     if (this._cursorModel.selection) {
       const normalized = this._cursorModel.selection.normalized();
       this._compositionStartOffset = normalized.start.textOffset;
@@ -1089,6 +1093,10 @@ export class EditController {
     }
     this._cursorModel.selection = null;
     this._updateSelection();
+
+    if (hadSelection) {
+      this._paragraph.render();
+    }
 
     // 조합 span을 커서 위치에 생성하여 조합 중인 글자를 시각적으로 표시
     this._compositionSpan = this._createOptimisticSpan("", this._compositionStartOffset);
@@ -1181,6 +1189,7 @@ export class EditController {
       if (this._debounceTimer !== null) {
         clearTimeout(this._debounceTimer);
         this._debounceTimer = null;
+        this._wasFocused = false;
       }
       this._paragraph.render();
       this._updateCursorPosition();

@@ -174,10 +174,19 @@ export class LayoutParagraphElement extends HTMLElement {
         this.appendChild(columnEl);
       }
     } else {
+      const columnContents = this._model.columnContents;
       const columnEls = this.querySelectorAll('x-layout-column');
-      for (let i = 0; i < columnEls.length; i++) {
-        const columnEl = columnEls[i] as LayoutColumnElement;
-        columnEl.renderText();
+      if (columnEls.length !== columnContents.length) {
+        this.replaceChildren();
+        for (let i = 0; i < columnContents.length; i++) {
+          const columnEl = document.createElement('x-layout-column');
+          columnEl.index = i;
+          this.appendChild(columnEl);
+        }
+      } else {
+        for (let i = 0; i < columnEls.length; i++) {
+          (columnEls[i] as LayoutColumnElement).renderText();
+        }
       }
     }
 
