@@ -33,6 +33,8 @@ export class LayoutParagraphElement extends HTMLElement {
   private _editable: boolean = false;
   private _editController: EditController | null = null;
 
+  private _structureDirty: boolean = true;
+
   constructor() {
     super();
 
@@ -122,12 +124,19 @@ export class LayoutParagraphElement extends HTMLElement {
     } else {
       this._model.data = paragraphData;
     }
+
+    this._structureDirty = true;
   }
 
   render() {
     if (!this.isConnected || !this._model) return;
 
-    this._model.preTextWrap();
+    if (this._structureDirty) {
+      this._model.preTextWrap();
+      this._structureDirty = false;
+    } else {
+      this._model.layoutText();
+    }
 
     if (this._model.overflow > 0) {
       const event = new CustomEvent('render-error', {
@@ -164,6 +173,7 @@ export class LayoutParagraphElement extends HTMLElement {
     this._content = data.content;
 
     this.layout();
+    this._structureDirty = true;
   }
 
   get data() {
@@ -198,6 +208,7 @@ export class LayoutParagraphElement extends HTMLElement {
   set inheritStyle(style: InheritStyle | undefined) {
     this._inheritStyle = style;
     this.layout();
+    this._structureDirty = true;
   }
 
   get inheritStyle() {

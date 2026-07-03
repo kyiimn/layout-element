@@ -61,6 +61,8 @@ export class TextLayoutEngine {
 
   private _lineHeight: number = 0;
 
+  private _columnPpm: number[] = [];
+
   private _paragraphElement: LayoutParagraphElement;
   private _rootNode: Node;
 
@@ -259,15 +261,11 @@ export class TextLayoutEngine {
   }
 
   /**
-   * 텍스트 래핑 수행. `TextLineData[][]` 생성.
-   *
-   * 처리 과정:
-   * 1. `content`를 `\n` 단위로 분리하여 `TextBlockData[]` 변환
-   * 2. 각 컬럼마다 가상 컬럼(`x-layout-vcolumn`) 생성하여 실제 렌더링 크기 측정
-   * 3. 문자 단위로 줄바꿈 판단 (오버플로우 시 다음 줄/컬럼으로)
-   * 4. `_columnContents`에 `TextLineData[]` 저장
+   * 구조적 레이아웃 초기화. 컬럼 폭/간격/lineHeight를 계산하고, 가상 컬럼을
+   * 생성하여 픽셀/mm 비율(`_columnPpm`)을 측정한 뒤 제거한다.
+   * `_inputContent`를 파싱한 `_contents`도 이 단계에서 생성한다.
    */
-  public preTextWrap() {
+  private _initStructure() {
     if (!this._rootNode) return;
 
     this._columnContents = [];
@@ -285,6 +283,53 @@ export class TextLayoutEngine {
     });
 
     if (this.columnCount < 1) return;
+
+    this._columnPpm = [];
+    for (let curColumn = 0; curColumn < this.columnCount; curColumn++) {
+      const vColumnEl = document.createElement('x-layout-vcolumn');
+      vColumnEl.index = curColumn;
+      vColumnEl.model = this;
+      vColumnEl.parentElement = this._paragraphElement;
+      this._rootNode.appendChild(vColumnEl);
+
+      const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColumn];
+      this._columnPpm.push(ppm);
+
+      vColumnEl.remove();
+    }
+  }
+
+  /**
+   * `inputContent`를 `_contents`로 파싱한다.
+   * `layoutText()` 호출 시 `inputContent`가 변경되었을 수 있으므로
+   * 매번 다시 파싱하여 최신 텍스트를 반영한다.
+   */
+  private _parseContents() {
+    const rawContents = !Array.isArray(this._inputContent) ? [{
+      content: this._inputContent
+    }] : this._inputContent;
+
+    this._contents = [];
+    rawContents.forEach(c => {
+      const rawBlock = (typeof c === 'string') ? { content: c } : c;
+      const lines = rawBlock.content.split("\n");
+      this._contents.push(...(lines.map(l => ({ ...rawBlock, content: l }))));
+    });
+  }
+
+  /**
+   * 문자 단위 줄바꿈 루프. `_initStructure()`가 먼저 실행되어 `_columnWidths`,
+   * `_gaps`, `_lineHeight`, `_columnPpm`이 준비되어 있어야 한다.
+   * `inputContent` 변경을 반영하기 위해 `_contents`를 다시 파싱한다.
+   * 결과는 `_columnContents`와 `_overflow`에 저장된다.
+   */
+  private _layoutTextIntoColumns() {
+    if (!this._rootNode || this.columnCount < 1) return;
+
+    this._parseContents();
+
+    this._columnContents = [];
+    this._overflow = 0;
 
     let beforeIdxBlock = 0;
     let beforeIdxContentOfBlock = 0;
@@ -304,7 +349,7 @@ export class TextLayoutEngine {
       vColumnEl.parentElement = this._paragraphElement;
       this._rootNode.appendChild(vColumnEl);
 
-      const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColumn];
+      const ppm = this._columnPpm[curColumn];
 
       for (; idxBlock < this.contents.length; idxBlock++) {
         const block = this.contents[idxBlock];
@@ -486,6 +531,38 @@ export class TextLayoutEngine {
 
       this._columnContents.push(columnContent);
     }
+  }
+
+  /**
+   * 구조적 레이아웃만 계산하고 캐싱한다. 컬럼 폭, 간격, ppm 등 DOM 측정에
+   * 의존하는 값들을 `_columnPpm`과 기타 private 필드에 저장한다.
+   */
+  public layoutStructure() {
+    this._initStructure();
+  }
+
+  /**
+   * 문자 단위 줄바꿈 레이아웃을 실행한다. `layoutStructure()`가 먼저 호출되어
+   * 구조 데이터가 준비되어 있어야 한다.
+   */
+  public layoutText() {
+    this._layoutTextIntoColumns();
+  }
+
+  /**
+   * 텍스트 래핑 수행. `TextLineData[][]` 생성.
+   *
+   * 처리 과정:
+   * 1. `content`를 `\n` 단위로 분리하여 `TextBlockData[]` 변환
+   * 2. 각 컬럼마다 가상 컬럼(`x-layout-vcolumn`) 생성하여 실제 렌더링 크기 측정
+   * 3. 문자 단위로 줄바꿈 판단 (오버플로우 시 다음 줄/컬럼으로)
+   * 4. `_columnContents`에 `TextLineData[]` 저장
+   *
+   * @deprecated Use `layoutStructure()` + `layoutText()` for incremental re-layout.
+   */
+  public preTextWrap() {
+    this._initStructure();
+    this._layoutTextIntoColumns();
   }
 
   /** 컬럼 스타일 생성 (Flexbox 컨테이너) */
