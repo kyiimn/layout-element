@@ -1,4 +1,5 @@
 import { TextLayoutEngine } from "@/core";
+import { EditController } from "@/edit/edit-controller";
 import { ColorRegistry } from "@/resource";
 import { InheritStyle, ParagraphData, ParagraphStyle, TextBlockData, TextStyle } from "@/types";
 import { checkOverlap, genUUID } from "@/utils";
@@ -28,6 +29,9 @@ export class LayoutParagraphElement extends HTMLElement {
   private _textStyle: TextStyle;
 
   private _zIndex: number;
+
+  private _editable: boolean = false;
+  private _editController: EditController | null = null;
 
   constructor() {
     super();
@@ -134,12 +138,19 @@ export class LayoutParagraphElement extends HTMLElement {
       this.dispatchEvent(event);
     }
 
+    // BUG FIX: Remove old columns before creating new ones
+    while (this.firstChild) this.removeChild(this.firstChild);
+
     const columnContents = this._model.columnContents;
     for (let i = 0; i < columnContents.length; i++) {
       const columnEl = document.createElement('x-layout-column');
       columnEl.index = i;
 
       this.appendChild(columnEl);
+    }
+
+    if (this._editController) {
+      this._editController.postRender();
     }
   }
 
@@ -248,5 +259,19 @@ export class LayoutParagraphElement extends HTMLElement {
   get type() { return 'paragraph' as const; }
 
   get zIndex() { return this._zIndex; }
+
+  get editable(): boolean {
+    return this._editable;
+  }
+
+  set editable(value: boolean) {
+    if (value && !this._editController) {
+      this._editController = new EditController(this);
+    } else if (!value && this._editController) {
+      this._editController.destroy();
+      this._editController = null;
+    }
+    this._editable = value;
+  }
 }
 customElements.define('x-layout-paragraph', LayoutParagraphElement);

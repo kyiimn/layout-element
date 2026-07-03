@@ -38,6 +38,24 @@ export class LayoutColumnElement extends HTMLElement {
     const lines = this.model.columnContents[this._index] || [];
     const colStyle = this.model.genColumnStyle(this._index);
 
+    // Compute rendered offset: count character spans across all preceding columns
+    let renderedOffset = 0;
+    for (let c = 0; c < this._index; c++) {
+      const colLines = this.model.columnContents[c] || [];
+      for (const line of colLines) {
+        for (let p = 0; p < line.parts.length; p++) {
+          let content = line.parts[p].content;
+          if (p === 0) {
+            while (content.length > 0 && content[0] === ' ') content = content.slice(1);
+          }
+          if (p === line.parts.length - 1) {
+            while (content.length > 0 && content[content.length - 1] === ' ') content = content.slice(0, content.length - 1);
+          }
+          renderedOffset += content.length;
+        }
+      }
+    }
+
     const styleEl = document.createElement('style');
     this._shadowRoot.appendChild(styleEl);
 
@@ -92,6 +110,7 @@ export class LayoutColumnElement extends HTMLElement {
           const charEl = document.createElement('span');
           const charStyle = this.model.genCharStyle(char);
           Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, charStyle);
+          charEl.dataset.offset = String(renderedOffset++);
           charEl.innerText = char;
           partEl.appendChild(charEl);
         }
