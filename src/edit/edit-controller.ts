@@ -563,7 +563,8 @@ export class EditController {
       }
       case "Home": {
         event.preventDefault();
-        const lineStart = this._findLineStart(content, offset);
+        const visualHome = this._mapper.findVisualLineBounds(offset);
+        const lineStart = visualHome ? visualHome.start : this._findLineStart(content, offset);
         if (isShift) {
           this._extendSelection(lineStart);
         } else {
@@ -577,7 +578,8 @@ export class EditController {
       }
       case "End": {
         event.preventDefault();
-        const lineEnd = this._findLineEnd(content, offset);
+        const visualEnd = this._mapper.findVisualLineBounds(offset);
+        const lineEnd = visualEnd ? visualEnd.end : this._findLineEnd(content, offset);
         if (isShift) {
           this._extendSelection(lineEnd);
         } else {

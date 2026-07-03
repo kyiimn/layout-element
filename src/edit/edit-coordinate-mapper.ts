@@ -444,6 +444,47 @@ export class EditCoordinateMapper {
     };
   }
 
+  /**
+   * 주어진 source 오프셋이 속한 시각적 라인의 시작과 끝 source 오프셋을 반환한다.
+   * Home/End 키에서 사용 — \n 기준이 아닌 렌더링된 줄 기준.
+   */
+  findVisualLineBounds(sourceOffset: number): { start: number; end: number } | null {
+    const renderedOffset = this.renderedOffset(sourceOffset);
+    if (renderedOffset === null) return null;
+
+    const anchorSpan = this.getSpanByOffset(renderedOffset);
+    if (!anchorSpan) return null;
+
+    const anchorRect = anchorSpan.getBoundingClientRect();
+    const anchorTop = Math.round(anchorRect.top);
+
+    // 같은 시각적 행(같은 top 좌표)의 모든 span 수집
+    const allSpans = this._getAllSortedSpans();
+    const lineSpans: HTMLSpanElement[] = [];
+    for (const s of allSpans) {
+      const r = s.getBoundingClientRect();
+      if (Math.round(r.top) === anchorTop) {
+        lineSpans.push(s);
+      }
+    }
+
+    if (lineSpans.length === 0) return null;
+
+    const firstSpan = lineSpans[0];
+    const lastSpan = lineSpans[lineSpans.length - 1];
+
+    const startRendered = parseInt(firstSpan.dataset.offset ?? '', 10);
+    const endRendered = parseInt(lastSpan.dataset.offset ?? '', 10);
+    if (Number.isNaN(startRendered) || Number.isNaN(endRendered)) return null;
+
+    const startSource = this.sourceOffset(startRendered);
+    const endSource = this.sourceOffset(endRendered);
+    if (startSource === null || endSource === null) return null;
+
+    // end는 마지막 글자 "다음" 위치이므로 +1
+    return { start: startSource, end: endSource + 1 };
+  }
+
   /** paragraph의 모든 컬럼 요소를 렌더링 순서대로 반환한다. */
   private _getAllColumns(): LayoutColumnElement[] {
     return Array.from(this._paragraph.querySelectorAll('x-layout-column'));
