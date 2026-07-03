@@ -1032,24 +1032,45 @@ export class EditController {
   }
 
   private _optimisticSpanUpdate(sourceOffset: number, char: string): void {
+    // Insert a new span BEFORE the character at sourceOffset, instead of
+    // replacing the existing span's text. This prevents the visual "replace then
+    // restore" flicker — the existing character stays visible and the new
+    // character appears to its left, matching the insert semantics.
+    if (!this._paragraph.model) return;
+
     let renderedOffset = this._mapper.renderedOffset(sourceOffset);
     if (renderedOffset === null) {
+      // sourceOffset is at a \n position — insert after the previous rendered char
       if (sourceOffset > 0) {
         renderedOffset = this._mapper.renderedOffset(sourceOffset - 1);
       }
       if (renderedOffset === null) return;
 
-      const span = this._mapper.getSpanByOffset(renderedOffset);
-      if (span && span.nextSibling && span.nextSibling instanceof HTMLSpanElement) {
-        span.nextSibling.innerText = char;
+      const prevSpan = this._mapper.getSpanByOffset(renderedOffset);
+      if (prevSpan && prevSpan.nextSibling && prevSpan.nextSibling instanceof HTMLSpanElement) {
+        const newSpan = this._createOptimisticSpan(char, sourceOffset);
+        prevSpan.nextSibling.before(newSpan);
       }
       return;
     }
 
     const span = this._mapper.getSpanByOffset(renderedOffset);
     if (span) {
-      span.innerText = char;
+      const newSpan = this._createOptimisticSpan(char, sourceOffset);
+      span.before(newSpan);
     }
+  }
+
+  private _createOptimisticSpan(char: string, sourceOffset: number): HTMLSpanElement {
+    const model = this._paragraph.model;
+    const span = document.createElement('span');
+    const charStyle = model?.genCharStyle(char);
+    if (charStyle) {
+      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(span.style, charStyle);
+    }
+    span.dataset.offset = String(sourceOffset); // temporary offset; will be corrected on re-render
+    span.innerText = char;
+    return span;
   }
 
   private _debouncedRender(): void {
