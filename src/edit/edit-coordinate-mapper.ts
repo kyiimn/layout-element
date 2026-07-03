@@ -23,6 +23,8 @@ export class EditCoordinateMapper {
   /** 각 컬럼의 렌더링 오프셋 범위 (binary search용) */
   private _columnRanges: { start: number; end: number }[] = [];
 
+  private _columnStartOffsets: number[] = [];
+
   constructor(paragraph: LayoutParagraphElement) {
     this._paragraph = paragraph;
     this.rebuild();
@@ -37,6 +39,7 @@ export class EditCoordinateMapper {
     this._sourceToRendered.clear();
     this._spanCache.clear();
     this._columnRanges = [];
+    this._columnStartOffsets = [];
 
     const model = this._paragraph.model;
     if (!model) return;
@@ -47,6 +50,7 @@ export class EditCoordinateMapper {
 
     for (const lines of columnContents) {
       const columnStart = renderedOffset;
+      this._columnStartOffsets.push(columnStart);
 
       for (const line of lines) {
         for (let p = 0; p < line.parts.length; p++) {
@@ -112,7 +116,7 @@ export class EditCoordinateMapper {
    * 좌표는 paragraph 로컬 좌표계(픽셀)로 변환된다.
    */
   getCharRect(offset: number): DOMRect | null {
-    const span = this._getSpanByOffset(offset);
+    const span = this.getSpanByOffset(offset);
     if (!span) return null;
 
     const spanRect = span.getBoundingClientRect();
@@ -192,8 +196,16 @@ export class EditCoordinateMapper {
     if (startOffset >= endOffset) return result;
 
     const paragraphRect = this._paragraph.getBoundingClientRect();
+    const columns = this._getAllColumns();
 
-    for (const column of this._getAllColumns()) {
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+      const columnStartOffset = this._columnStartOffsets[columnIndex] ?? 0;
+      const columnEndOffset = this._columnRanges[columnIndex]?.end ?? Infinity;
+
+      if (startOffset >= columnEndOffset) continue;
+      if (endOffset <= columnStartOffset) break;
+
+      const column = columns[columnIndex];
       const spans = this._getColumnSpans(column);
       const rects: DOMRect[] = [];
 
@@ -293,8 +305,7 @@ export class EditCoordinateMapper {
     return Array.from(this._paragraph.querySelectorAll('x-layout-column'));
   }
 
-  /** 렌더링 오프셋에 해당하는 span을 전체 컬럼에서 찾는다. */
-  private _getSpanByOffset(offset: number): HTMLSpanElement | null {
+  getSpanByOffset(offset: number): HTMLSpanElement | null {
     if (this._spanCache.has(offset)) {
       return this._spanCache.get(offset)!;
     }
@@ -340,17 +351,11 @@ export class EditCoordinateMapper {
     return Array.from(column.shadowRoot.querySelectorAll<HTMLSpanElement>('[data-offset]'));
   }
 
-  /** 전체 paragraph의 모든 문자 span을 data-offset 순서대로 반환한다. */
   private _getAllSortedSpans(): HTMLSpanElement[] {
     const spans: HTMLSpanElement[] = [];
     for (const column of this._getAllColumns()) {
       spans.push(...this._getColumnSpans(column));
     }
-    spans.sort((a, b) => {
-      const offsetA = parseInt(a.dataset.offset ?? '', 10);
-      const offsetB = parseInt(b.dataset.offset ?? '', 10);
-      return offsetA - offsetB;
-    });
     return spans;
   }
 }

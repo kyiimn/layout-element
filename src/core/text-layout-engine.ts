@@ -270,6 +270,9 @@ export class TextLayoutEngine {
   public preTextWrap() {
     if (!this._rootNode) return;
 
+    this._columnContents = [];
+    this._overflow = 0;
+
     const rawContents = !Array.isArray(this._inputContent) ? [{
       content: this._inputContent
     }] : this._inputContent;

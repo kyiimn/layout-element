@@ -12,6 +12,9 @@ export class LayoutCursorElement extends HTMLElement {
   private _height: number = 0;
   private _visible: boolean = true;
 
+  private _dirty: boolean = false;
+  private _rafId: number | null = null;
+
   constructor() {
     super();
     this._shadowRoot = this.attachShadow({ mode: "open" });
@@ -19,6 +22,23 @@ export class LayoutCursorElement extends HTMLElement {
 
   connectedCallback() {
     this.render();
+  }
+
+  disconnectedCallback() {
+    if (this._rafId !== null) {
+      cancelAnimationFrame(this._rafId);
+      this._rafId = null;
+    }
+  }
+
+  private _scheduleRender(): void {
+    if (this._dirty) return;
+    this._dirty = true;
+    this._rafId = requestAnimationFrame(() => {
+      this._rafId = null;
+      this._dirty = false;
+      this.render();
+    });
   }
 
   render() {
@@ -52,14 +72,14 @@ export class LayoutCursorElement extends HTMLElement {
       styleEl.sheet!.cssRules.length,
     );
     styleEl.sheet!.insertRule(
-      `:host { animation: blink 1060ms step-end infinite; }`,
+      `:host { animation: blink 530ms step-end infinite; }`,
       styleEl.sheet!.cssRules.length,
     );
   }
 
   set top(value: number) {
     this._top = value;
-    this.render();
+    this._scheduleRender();
   }
 
   get top(): number {
@@ -68,7 +88,7 @@ export class LayoutCursorElement extends HTMLElement {
 
   set left(value: number) {
     this._left = value;
-    this.render();
+    this._scheduleRender();
   }
 
   get left(): number {
@@ -77,7 +97,7 @@ export class LayoutCursorElement extends HTMLElement {
 
   set height(value: number) {
     this._height = value;
-    this.render();
+    this._scheduleRender();
   }
 
   get height(): number {
@@ -86,7 +106,7 @@ export class LayoutCursorElement extends HTMLElement {
 
   set visible(value: boolean) {
     this._visible = value;
-    this.render();
+    this._scheduleRender();
   }
 
   get visible(): boolean {

@@ -41,11 +41,14 @@ export class EditController {
   private _clickTimer: ReturnType<typeof setTimeout> | null = null;
 
   private _isComposing: boolean = false;
+  private _compositionStartOffset: number = 0;
+  private _compositionJustEnded: boolean = false;
   private _debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private _wasFocused: boolean = false;
 
   private _selectionAnchor: number | null = null;
   private _isMouseDown: boolean = false;
+  private _mousemoveRafId: number | null = null;
 
   constructor(paragraph: LayoutParagraphElement) {
     this._paragraph = paragraph;
@@ -71,6 +74,7 @@ export class EditController {
     this._handleMouseUp = (event: MouseEvent) => this._onMouseUp(event);
     this._handleDoubleClick = (event: MouseEvent) => this._onDoubleClick(event);
     this._handleTripleClick = (event: MouseEvent) => this._onTripleClick(event);
+    void this._handleTripleClick;
 
     const shadowRoot = paragraph.shadowRoot;
     if (!shadowRoot) throw new Error("paragraph shadow root is not initialized");
@@ -82,10 +86,7 @@ export class EditController {
     paragraph.addEventListener("click", this._handleClick);
     paragraph.addEventListener("mousedown", this._handleMouseDown);
     paragraph.addEventListener("dblclick", this._handleDoubleClick);
-    paragraph.addEventListener("mousemove", this._handleMouseMove);
-    paragraph.addEventListener("mouseup", this._handleMouseUp);
-
-    paragraph.addEventListener("click", this._handleTripleClick);
+    document.addEventListener("mouseup", this._handleMouseUp);
 
     this._textarea.addEventListener("focus", this._handleFocus);
     this._textarea.addEventListener("blur", this._handleBlur);
@@ -121,9 +122,8 @@ export class EditController {
     this._paragraph.removeEventListener("click", this._handleClick);
     this._paragraph.removeEventListener("mousedown", this._handleMouseDown);
     this._paragraph.removeEventListener("dblclick", this._handleDoubleClick);
-    this._paragraph.removeEventListener("mousemove", this._handleMouseMove);
-    this._paragraph.removeEventListener("mouseup", this._handleMouseUp);
-    this._paragraph.removeEventListener("click", this._handleTripleClick);
+    document.removeEventListener("mouseup", this._handleMouseUp);
+    document.removeEventListener("mousemove", this._handleMouseMove);
 
     if (this._clickTimer !== null) {
       clearTimeout(this._clickTimer);
@@ -222,7 +222,29 @@ export class EditController {
     }
 
     const sourceOffset = this._getSourceOffsetFromEvent(event);
-    if (sourceOffset === null) return;
+    if (sourceOffset === null) {
+      const rect = this._paragraph.getBoundingClientRect();
+      if (
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom
+      ) {
+        const content = this._paragraph.model?.inputContent;
+        if (content !== undefined) {
+          if (event.shiftKey) {
+            this._extendSelection(0);
+          } else {
+            this._cursorModel.offset = 0;
+            this._cursorModel.selection = null;
+          }
+          this.focus();
+          this._updateCursorPosition();
+          this._updateSelection();
+        }
+      }
+      return;
+    }
 
     if (!event.shiftKey) {
       this._cursorModel.offset = sourceOffset;
@@ -260,43 +282,100 @@ export class EditController {
     const renderedOffset = parseInt(targetSpan.dataset.offset ?? "", 10);
     if (Number.isNaN(renderedOffset)) return null;
 
-    return this._mapper.sourceOffset(renderedOffset);
+    const sourceOffset = this._mapper.sourceOffset(renderedOffset);
+    if (sourceOffset === null) return null;
+
+    const spanRect = targetSpan.getBoundingClientRect();
+    const midpoint = spanRect.left + spanRect.width / 2;
+    if (event.clientX >= midpoint) {
+      const content = this._paragraph.model?.inputContent as string | undefined;
+      if (content !== undefined && sourceOffset < content.length) {
+        return sourceOffset + 1;
+      }
+    }
+
+    return sourceOffset;
   }
 
   private _onMouseDown(event: MouseEvent): void {
     if (event.button !== 0) return;
 
     const sourceOffset = this._getSourceOffsetFromEvent(event);
-    if (sourceOffset === null) return;
+    if (sourceOffset === null) {
+      const rect = this._paragraph.getBoundingClientRect();
+      if (
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom
+      ) {
+        const content = this._paragraph.model?.inputContent;
+        if (content !== undefined) {
+          if (event.shiftKey) {
+            this._extendSelection(0);
+          } else {
+            this._cursorModel.offset = 0;
+            this._cursorModel.selection = null;
+          }
+          this._isMouseDown = true;
+          this._selectionAnchor = 0;
+          this.focus();
+          this._updateCursorPosition();
+          this._updateSelection();
+          document.addEventListener("mousemove", this._handleMouseMove);
+        }
+      }
+      return;
+    }
 
     event.preventDefault();
     this._isMouseDown = true;
+    if (event.shiftKey) {
+      this._extendSelection(sourceOffset);
+      this.focus();
+      this._updateCursorPosition();
+      this._updateSelection();
+      document.addEventListener("mousemove", this._handleMouseMove);
+      return;
+    }
     this._selectionAnchor = sourceOffset;
     this._cursorModel.offset = sourceOffset;
     this._cursorModel.selection = null;
     this.focus();
     this._updateCursorPosition();
     this._updateSelection();
+    document.addEventListener("mousemove", this._handleMouseMove);
   }
 
   private _onMouseMove(event: MouseEvent): void {
     if (!this._isMouseDown) return;
+    if (this._mousemoveRafId !== null) return;
 
-    const result = this._mapper.getCharOffsetFromPoint(event.clientX, event.clientY);
-    if (result === null) return;
+    this._mousemoveRafId = requestAnimationFrame(() => {
+      this._mousemoveRafId = null;
+      if (!this._isMouseDown) return;
 
-    const focusOffset = result.textOffset;
-    const anchor = this._selectionAnchor ?? this._cursorModel.offset;
-    this._cursorModel.selection = SelectionRange.fromOffsets(anchor, focusOffset);
-    this._cursorModel.offset = focusOffset;
-    this._updateCursorPosition();
-    this._updateSelection();
+      const result = this._mapper.getCharOffsetFromPoint(event.clientX, event.clientY);
+      if (result === null) return;
+
+      const focusOffset = result.textOffset;
+      const anchor = this._selectionAnchor ?? this._cursorModel.offset;
+      this._cursorModel.selection = SelectionRange.fromOffsets(anchor, focusOffset);
+      this._cursorModel.offset = focusOffset;
+      this._updateCursorPosition();
+      this._updateSelection();
+    });
   }
 
   private _onMouseUp(_event: MouseEvent): void {
     if (!this._isMouseDown) return;
     this._isMouseDown = false;
     this._selectionAnchor = null;
+    if (this._mousemoveRafId !== null) {
+      cancelAnimationFrame(this._mousemoveRafId);
+      this._mousemoveRafId = null;
+    }
+    document.removeEventListener("mousemove", this._handleMouseMove);
   }
 
   private _onDoubleClick(event: MouseEvent): void {
@@ -319,20 +398,23 @@ export class EditController {
 
   private _findWordBoundaries(content: string, offset: number): { start: number; end: number } {
     const clamped = Math.max(0, Math.min(offset, content.length));
+
+    if (clamped < content.length && /\s/.test(content[clamped])) {
+      let end = clamped;
+      while (end < content.length && /\s/.test(content[end])) end++;
+      let start = clamped;
+      while (start > 0 && /\s/.test(content[start - 1])) start--;
+      return { start, end };
+    }
+
     let start = clamped;
     let end = clamped;
-
-    while (start > 0 && !this._isWhitespace(content[start - 1])) {
-      start--;
-    }
-    while (end < content.length && !this._isWhitespace(content[end])) {
-      end++;
-    }
-
+    while (start > 0 && !this._isWordBoundary(content[start - 1])) start--;
+    while (end < content.length && !this._isWordBoundary(content[end])) end++;
     return { start, end };
   }
 
-  private _isWhitespace(char: string): boolean {
+  private _isWordBoundary(char: string): boolean {
     return /\s/.test(char);
   }
 
@@ -349,10 +431,13 @@ export class EditController {
   }
 
   private _onKeydown(event: KeyboardEvent): void {
+    if (this._isComposing && event.key !== "Escape") return;
     const model = this._paragraph.model;
     if (!model) return;
 
-    const content = model.inputContent as string;
+    if (typeof model.inputContent !== "string") return;
+
+    const content = model.inputContent;
     const offset = this._cursorModel.offset;
     const hasShortcut = event.ctrlKey || event.metaKey;
 
@@ -535,10 +620,14 @@ export class EditController {
   }
 
   private _copyWithFallback(text: string): void {
+    const saved = this._textarea.value;
+    const savedStart = this._textarea.selectionStart;
+    const savedEnd = this._textarea.selectionEnd;
     this._textarea.value = text;
     this._textarea.select();
     document.execCommand("copy");
-    this._textarea.value = "";
+    this._textarea.value = saved;
+    this._textarea.setSelectionRange(savedStart, savedEnd);
   }
 
   private _deleteSelection(): void {
@@ -684,11 +773,16 @@ export class EditController {
 
   private _onInput(event: InputEvent): void {
     if (this._isComposing) return;
+    if (this._compositionJustEnded) {
+      this._compositionJustEnded = false;
+      return;
+    }
 
     const model = this._paragraph.model;
     if (!model) return;
+    if (typeof model.inputContent !== "string") return;
 
-    const before = model.inputContent as string;
+    const before = model.inputContent;
     let after = this._textarea.value;
     let newOffset: number;
 
@@ -762,11 +856,14 @@ export class EditController {
 
   private _onCompositionStart(): void {
     this._isComposing = true;
+    this._compositionStartOffset = this._cursorModel.offset;
     this._cursorModel.selection = null;
     this._updateSelection();
   }
 
   private _onCompositionUpdate(): void {
+    if (!this._isComposing) return;
+    this._updateCursorPosition();
   }
 
 
@@ -775,13 +872,17 @@ export class EditController {
 
     const model = this._paragraph.model;
     if (!model) return;
+    if (typeof model.inputContent !== "string") return;
 
     const after = this._textarea.value;
     model.inputContent = after;
-    this._cursorModel.offset = after.length;
+
+    const composedText = event.data ?? "";
+    this._cursorModel.offset = this._compositionStartOffset + composedText.length;
 
     this._updateCursorPosition();
     this._debouncedRender();
+    this._compositionJustEnded = true;
 
     event.preventDefault();
   }
@@ -826,20 +927,10 @@ export class EditController {
     const renderedOffset = this._mapper.renderedOffset(sourceOffset);
     if (renderedOffset === null) return;
 
-    const span = this._getSpanByOffset(renderedOffset);
+    const span = this._mapper.getSpanByOffset(renderedOffset);
     if (span) {
       span.innerText = char;
     }
-  }
-
-  private _getSpanByOffset(offset: number): HTMLSpanElement | null {
-    const columns = Array.from(this._paragraph.querySelectorAll("x-layout-column"));
-    for (const column of columns) {
-      if (!column.shadowRoot) continue;
-      const span = column.shadowRoot.querySelector<HTMLSpanElement>(`[data-offset="${offset}"]`);
-      if (span) return span;
-    }
-    return null;
   }
 
   private _debouncedRender(): void {
@@ -891,7 +982,7 @@ export class EditController {
     this._cursorEl.top = rect.top;
     this._cursorEl.left = atEndOfChar ? rect.left + rect.width : rect.left;
     this._cursorEl.height = rect.height;
-    this._cursorEl.visible = true;
+    this._cursorEl.visible = document.activeElement === this._textarea && !this._cursorModel.selection;
 
     this._textarea.style.top = `${rect.top}px`;
     this._textarea.style.left = `${rect.left}px`;
@@ -907,9 +998,7 @@ export class EditController {
     const ranges = this._mapper.getTextRange(start.textOffset, end.textOffset);
     this._selectionEl.setRanges(ranges);
 
-    if (document.activeElement === this._textarea) {
-      this._cursorEl.visible = false;
-    }
+    this._cursorEl.visible = false;
   }
 
   /**

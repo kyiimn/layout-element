@@ -138,8 +138,7 @@ export class LayoutParagraphElement extends HTMLElement {
       this.dispatchEvent(event);
     }
 
-    // BUG FIX: Remove old columns before creating new ones
-    while (this.firstChild) this.removeChild(this.firstChild);
+    this.replaceChildren();
 
     const columnContents = this._model.columnContents;
     for (let i = 0; i < columnContents.length; i++) {

@@ -7,6 +7,7 @@
  */
 export class LayoutSelectionElement extends HTMLElement {
   private _shadowRoot: ShadowRoot;
+  private _pool: HTMLDivElement[] = [];
 
   constructor() {
     super();
@@ -25,18 +26,28 @@ export class LayoutSelectionElement extends HTMLElement {
    * 빈 배열을 전달하면 모든 하이라이트를 제거한다.
    */
   setRanges(ranges: { top: number; left: number; width: number; height: number }[]): void {
-    this._shadowRoot.innerHTML = "";
+    for (const div of this._pool) {
+      div.style.visibility = "hidden";
+    }
 
-    for (const range of ranges) {
-      const div = document.createElement("div");
-      div.style.position = "absolute";
-      div.style.pointerEvents = "none";
-      div.style.backgroundColor = "rgba(0, 100, 200, 0.3)";
+    for (let i = 0; i < ranges.length; i++) {
+      const range = ranges[i];
+      let div: HTMLDivElement;
+      if (i < this._pool.length) {
+        div = this._pool[i];
+      } else {
+        div = document.createElement("div");
+        div.style.position = "absolute";
+        div.style.pointerEvents = "none";
+        div.style.backgroundColor = "rgba(0, 100, 200, 0.3)";
+        this._shadowRoot.appendChild(div);
+        this._pool.push(div);
+      }
       div.style.top = `${range.top}px`;
       div.style.left = `${range.left}px`;
       div.style.width = `${range.width}px`;
       div.style.height = `${range.height}px`;
-      this._shadowRoot.appendChild(div);
+      div.style.visibility = "visible";
     }
   }
 }
