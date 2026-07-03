@@ -565,6 +565,8 @@ export class EditController {
         this._isComposing = false;
         this._compositionJustEnded = false;
         this._removeCompositionSpan();
+      } else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) {
+        event.preventDefault();
       }
       return;
     }
