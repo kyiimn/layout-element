@@ -17,12 +17,9 @@ export class EditCoordinateMapper {
   /** 소스 오프셋 → 렌더링 오프셋 */
   private _sourceToRendered: Map<number, number> = new Map();
 
-  /** 오프셋 → span 캐시. rebuild() 시 초기화된다. */
   private _spanCache: Map<number, HTMLSpanElement> = new Map();
-
-  /** 각 컬럼의 렌더링 오프셋 범위 (binary search용) */
+  private _columnSpansCache: Map<LayoutColumnElement, HTMLSpanElement[]> = new Map();
   private _columnRanges: { start: number; end: number }[] = [];
-
   private _columnStartOffsets: number[] = [];
 
   constructor(paragraph: LayoutParagraphElement) {
@@ -38,6 +35,7 @@ export class EditCoordinateMapper {
     this._renderedToSource.clear();
     this._sourceToRendered.clear();
     this._spanCache.clear();
+    this._columnSpansCache.clear();
     this._columnRanges = [];
     this._columnStartOffsets = [];
 
@@ -226,13 +224,18 @@ export class EditCoordinateMapper {
     const spans = this._getColumnSpans(nearestColumn);
     if (spans.length === 0) return null;
 
+    const spanRects = new Map<HTMLSpanElement, DOMRect>();
+    for (const s of spans) {
+      spanRects.set(s, s.getBoundingClientRect());
+    }
+
     // 2. 클릭한 y 좌표가 속한 행(row) 찾기
     // 각 행의 top과 bottom을 모두 고려하여 y가 행 범위 내에 있으면 그 행을 선택.
     // 어느 행에도 속하지 않으면(행간 클릭) 행 중심에 가장 가까운 행을 선택.
     let nearestRowY = Infinity;
     const rowBounds = new Map<number, { top: number; bottom: number }>();
     for (const s of spans) {
-      const r = s.getBoundingClientRect();
+      const r = spanRects.get(s)!;
       const rowTop = Math.round(r.top);
       const existing = rowBounds.get(rowTop);
       if (!existing || r.bottom > existing.bottom) {
@@ -265,12 +268,9 @@ export class EditCoordinateMapper {
     let bestSpan: HTMLSpanElement | null = null;
     let bestDist = Infinity;
     for (const s of spans) {
-      const r = s.getBoundingClientRect();
+      const r = spanRects.get(s)!;
       if (Math.round(r.top) !== nearestRowY) continue;
 
-      // 클릭이 span 내부면 거리 0
-      // 클릭이 span 왼쪽이면 span.left - x
-      // 클릭이 span 오른쪽이면 x - span.right
       let dist: number;
       if (x >= r.left && x <= r.right) {
         dist = 0;
@@ -300,7 +300,7 @@ export class EditCoordinateMapper {
     let leftmostLeft = Infinity;
 
     for (const s of spans) {
-      const r = s.getBoundingClientRect();
+      const r = spanRects.get(s)!;
       if (Math.round(r.top) !== nearestRowY) continue;
       if (r.right > rightmostRight) {
         rightmostRight = r.right;
@@ -332,7 +332,7 @@ export class EditCoordinateMapper {
       }
     }
 
-    const spanRect = bestSpan.getBoundingClientRect();
+    const spanRect = spanRects.get(bestSpan)!;
     const midpoint = spanRect.left + spanRect.width / 2;
     if (x >= midpoint) {
       const content = this._paragraph.model?.inputContent;
@@ -629,12 +629,16 @@ export class EditCoordinateMapper {
     return null;
   }
 
-  /** 한 컬럼의 shadow root 내 모든 문자 span을 data-offset 순서대로 반환한다. */
   private _getColumnSpans(column: LayoutColumnElement): HTMLSpanElement[] {
+    const cached = this._columnSpansCache.get(column);
+    if (cached) return cached;
+
     if (!column.shadowRoot) return [];
-    return Array.from(
+    const spans = Array.from(
       column.shadowRoot.querySelectorAll<HTMLSpanElement>('[data-offset]:not([data-temporary])'),
     );
+    this._columnSpansCache.set(column, spans);
+    return spans;
   }
 
   private _getAllSortedSpans(): HTMLSpanElement[] {
