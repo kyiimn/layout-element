@@ -67,7 +67,7 @@ export class LayoutCursorElement extends HTMLElement {
       pointerEvents: 'none',
       top: `${this._top}px`,
       left: `${this._left}px`,
-      width: '2px',
+      width: '1px',
       height: `${this._height}px`,
     });
     rule.style.setProperty('background-color', 'currentColor');

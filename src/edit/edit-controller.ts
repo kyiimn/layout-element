@@ -1407,9 +1407,10 @@ export class EditController {
       return;
     }
 
+    const cursorHeight = rect.height > 1 ? rect.height : (this._mapper.getFirstColumnRect()?.fontSize ?? rect.height);
     this._cursorEl.top = rect.top;
     this._cursorEl.left = atEndOfChar ? rect.left + rect.width : rect.left;
-    this._cursorEl.height = rect.height;
+    this._cursorEl.height = cursorHeight;
     const hasVisibleSelection = this._cursorModel.selection !== null &&
       this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
     this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
