@@ -1,8 +1,21 @@
 import { LayoutCursorElement, LayoutSelectionElement } from "@/components";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
+import { TextBlockStyle, ParagraphStyle, TextStyle } from "@/types/style";
 import { CursorPosition } from "@/types/edit/cursor.type";
 import { SelectionRange } from "@/types/edit/selection.type";
 import { EditCoordinateMapper } from "./edit-coordinate-mapper";
+
+/**
+ * 커서 위치에서 유효한 스타일 정보.
+ * 단락의 TextStyle/ParagraphStyle과 상속 스타일(InheritStyle)을 병합하고,
+ * 커서가 위치한 텍스트 블록의 TextBlockStyle로 오버라이드한 결과.
+ */
+export type CurrentStyle = {
+  /** 커서 위치에서 유효한 글자 스타일 */
+  textStyle: TextStyle;
+  /** 커서 위치에서 유효한 문단 스타일 */
+  paragraphStyle: ParagraphStyle;
+};
 
 /**
  * 단락 편집 상태를 관리하는 컨트롤러.
@@ -57,6 +70,8 @@ export class EditController {
   private _wasDragged: boolean = false;
   private _isFocused: boolean = false;
   private _mousemoveRafId: number | null = null;
+  private _lastMouseX: number = 0;
+  private _lastMouseY: number = 0;
 
   constructor(paragraph: LayoutParagraphElement) {
     this._paragraph = paragraph;
@@ -154,6 +169,57 @@ export class EditController {
    */
   get selection(): SelectionRange | null {
     return this._cursorModel.selection;
+  }
+
+  /**
+   * 현재 커서 위치에서 유효한 TextStyle과 ParagraphStyle을 반환한다.
+   *
+   * 단락의 기본 `textStyle`/`paragraphStyle`과 부모에서 상속된
+   * `inheritStyle`을 병합한 후, 커서가 위치한 텍스트 블록의
+   * `textBlockStyle`로 필드를 오버라이드한다.
+   *
+   * 커서가 텍스트 끝이나 빈 단락에 있어도 단락 수준의 스타일을 반환한다.
+   * 편집 모드가 활성화되지 않았거나 모델이 없으면 빈 객체를 반환한다.
+   */
+  get currentStyle(): CurrentStyle {
+    const model = this._paragraph.model;
+    if (!model) return { textStyle: {}, paragraphStyle: {} };
+
+    // 1. 단락 수준 스타일 + 상속 스타일 병합
+    const inheritStyle = model.inheritStyle ?? {};
+    const baseTextStyle: TextStyle = {
+      color: model.textStyle?.color ?? inheritStyle.color,
+      fontFamily: model.textStyle?.fontFamily ?? inheritStyle.fontFamily,
+      fontWeight: model.textStyle?.fontWeight ?? inheritStyle.fontWeight,
+      fontStyle: model.textStyle?.fontStyle ?? inheritStyle.fontStyle,
+      fontSize: model.textStyle?.fontSize ?? inheritStyle.fontSize,
+      letterSpacing: model.textStyle?.letterSpacing ?? inheritStyle.letterSpacing,
+      widthRatio: model.textStyle?.widthRatio ?? inheritStyle.widthRatio,
+    };
+    const baseParagraphStyle: ParagraphStyle = {
+      lineGap: model.paragraphStyle?.lineGap ?? inheritStyle.lineGap,
+      verticalAlign: model.paragraphStyle?.verticalAlign ?? inheritStyle.verticalAlign,
+      textAlign: model.paragraphStyle?.textAlign ?? inheritStyle.textAlign,
+    };
+
+    // 2. 커서가 위치한 텍스트 블록의 textBlockStyle 찾기
+    const blockStyle = this._findTextBlockStyleAtOffset(this._cursorModel.offset);
+    if (!blockStyle) return { textStyle: baseTextStyle, paragraphStyle: baseParagraphStyle };
+
+    // 3. textBlockStyle로 필드 오버라이드
+    const effectiveTextStyle: TextStyle = {
+      ...baseTextStyle,
+      ...(blockStyle.fontFamily !== undefined && { fontFamily: blockStyle.fontFamily }),
+      ...(blockStyle.fontSize !== undefined && { fontSize: blockStyle.fontSize }),
+      ...(blockStyle.fontWeight !== undefined && { fontWeight: blockStyle.fontWeight }),
+      ...(blockStyle.color !== undefined && { color: blockStyle.color }),
+    };
+    const effectiveParagraphStyle: ParagraphStyle = {
+      ...baseParagraphStyle,
+      ...(blockStyle.textAlign !== undefined && { textAlign: blockStyle.textAlign }),
+    };
+
+    return { textStyle: effectiveTextStyle, paragraphStyle: effectiveParagraphStyle };
   }
 
   /**
@@ -395,6 +461,8 @@ export class EditController {
 
     if (!targetSpan) return null;
 
+    if (targetSpan.innerText === ' ') return null;
+
     const renderedOffset = parseInt(targetSpan.dataset.offset ?? "", 10);
     if (Number.isNaN(renderedOffset)) return null;
 
@@ -438,6 +506,8 @@ export class EditController {
             this._cursorModel.selection = null;
           }
           this._isMouseDown = true;
+          this._lastMouseX = event.clientX;
+          this._lastMouseY = event.clientY;
           this._selectionAnchor = targetOffset;
           this._syncTextareaSelection();
           this.focus();
@@ -451,6 +521,8 @@ export class EditController {
 
     event.preventDefault();
     this._isMouseDown = true;
+    this._lastMouseX = event.clientX;
+    this._lastMouseY = event.clientY;
     if (event.shiftKey) {
       this._extendSelection(sourceOffset);
       this._syncTextareaSelection();
@@ -472,6 +544,8 @@ export class EditController {
 
   private _onMouseMove(event: MouseEvent): void {
     if (!this._isMouseDown) return;
+    this._lastMouseX = event.clientX;
+    this._lastMouseY = event.clientY;
     if (this._mousemoveRafId !== null) return;
 
     this._wasDragged = true;
@@ -480,7 +554,7 @@ export class EditController {
       this._mousemoveRafId = null;
       if (!this._isMouseDown) return;
 
-      const result = this._mapper.getCharOffsetFromPoint(event.clientX, event.clientY);
+      const result = this._mapper.getNearestOffsetFromPoint(this._lastMouseX, this._lastMouseY);
       if (result === null) return;
 
       const focusOffset = result.textOffset;
@@ -977,6 +1051,37 @@ export class EditController {
       pos++;
     }
     return pos;
+  }
+
+  /**
+   * 주어진 소스 오프셋이 속한 텍스트 블록의 textBlockStyle을 반환한다.
+   * 각 블록은 `\n`으로 분리되며, 블록의 시작 오프셋부터 끝 오프셋(다음 \n 또는 문자열 끝)까지가 해당 블록의 범위이다.
+   */
+  private _findTextBlockStyleAtOffset(offset: number): TextBlockStyle | undefined {
+    const model = this._paragraph.model;
+    if (!model) return undefined;
+
+    const contents = model.contents;
+    if (contents.length === 0) return undefined;
+
+    // 각 블록의 시작 오프셋을 누적하며 커서 오프셋이 어느 블록에 속하는지 찾는다
+    let currentOffset = 0;
+    for (const block of contents) {
+      const blockLength = block.content.length;
+      const blockStart = currentOffset;
+      const blockEnd = currentOffset + blockLength;
+
+      // 커서가 이 블록의 범위 내에 있으면 (끝 오프셋 포함)
+      if (offset >= blockStart && offset <= blockEnd) {
+        return block.textBlockStyle;
+      }
+
+      // 다음 블록으로 이동: 블록 길이 + \n(1)
+      currentOffset = blockEnd + 1;
+    }
+
+    // 커서가 마지막 블록 끝을 넘어선 경우, 마지막 블록의 스타일 반환
+    return contents[contents.length - 1].textBlockStyle;
   }
 
   private _onInput(event: InputEvent): void {
