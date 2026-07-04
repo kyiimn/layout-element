@@ -180,27 +180,8 @@ export class EditCoordinateMapper {
 
             return { textOffset: sourceOffset };
           } else {
-            const targetY = spanRect.top;
-            let bestSpan: HTMLSpanElement | null = null;
-            let bestDist = Infinity;
-            for (const s of spans) {
-              const r = s.getBoundingClientRect();
-              if (r.top !== targetY) continue;
-              const dist = x < r.left ? r.left - x : (x >= r.right ? x - r.right : 0);
-              if (dist < bestDist) {
-                bestDist = dist;
-                bestSpan = s;
-              }
-            }
-            if (bestSpan) {
-              const renderedOffset = parseInt(bestSpan.dataset.offset ?? '', 10);
-              if (!Number.isNaN(renderedOffset)) {
-                const sourceOffset = this.sourceOffset(renderedOffset);
-                if (sourceOffset !== null) {
-                  return { textOffset: sourceOffset };
-                }
-              }
-            }
+            // x is on the correct row but not within any span's bounds.
+            // Return null so getNearestOffsetFromPoint() handles trailing/leading whitespace.
             return null;
           }
         }
@@ -245,19 +226,38 @@ export class EditCoordinateMapper {
     const spans = this._getColumnSpans(nearestColumn);
     if (spans.length === 0) return null;
 
-    // 2. 클릭한 y 좌표에서 가장 가까운 행(row) 찾기
+    // 2. 클릭한 y 좌표가 속한 행(row) 찾기
+    // 각 행의 top과 bottom을 모두 고려하여 y가 행 범위 내에 있으면 그 행을 선택.
+    // 어느 행에도 속하지 않으면(행간 클릭) 행 중심에 가장 가까운 행을 선택.
     let nearestRowY = Infinity;
-    const rowYs = new Set<number>();
+    const rowBounds = new Map<number, { top: number; bottom: number }>();
     for (const s of spans) {
       const r = s.getBoundingClientRect();
-      rowYs.add(Math.round(r.top));
+      const rowTop = Math.round(r.top);
+      const existing = rowBounds.get(rowTop);
+      if (!existing || r.bottom > existing.bottom) {
+        rowBounds.set(rowTop, { top: rowTop, bottom: r.bottom });
+      }
     }
-    let bestRowDist = Infinity;
-    for (const rowY of rowYs) {
-      const dist = Math.abs(y - rowY);
-      if (dist < bestRowDist) {
-        bestRowDist = dist;
-        nearestRowY = rowY;
+
+    // y가 행 범위 내에 있으면 그 행 선택
+    for (const [rowTop, bounds] of rowBounds) {
+      if (y >= bounds.top && y <= bounds.bottom) {
+        nearestRowY = rowTop;
+        break;
+      }
+    }
+
+    // 어느 행에도 속하지 않으면 행 중심에 가장 가까운 행 선택
+    if (nearestRowY === Infinity) {
+      let bestRowDist = Infinity;
+      for (const [rowTop, bounds] of rowBounds) {
+        const centerY = (bounds.top + bounds.bottom) / 2;
+        const dist = Math.abs(y - centerY);
+        if (dist < bestRowDist) {
+          bestRowDist = dist;
+          nearestRowY = rowTop;
+        }
       }
     }
 
@@ -294,7 +294,44 @@ export class EditCoordinateMapper {
     const sourceOffset = this.sourceOffset(renderedOffset);
     if (sourceOffset === null) return null;
 
-    // 클릭이 span의 오른쪽 절반이면 다음 위치로
+    let rightmostSpan: HTMLSpanElement | null = null;
+    let rightmostRight = -Infinity;
+    let leftmostSpan: HTMLSpanElement | null = null;
+    let leftmostLeft = Infinity;
+
+    for (const s of spans) {
+      const r = s.getBoundingClientRect();
+      if (Math.round(r.top) !== nearestRowY) continue;
+      if (r.right > rightmostRight) {
+        rightmostRight = r.right;
+        rightmostSpan = s;
+      }
+      if (r.left < leftmostLeft) {
+        leftmostLeft = r.left;
+        leftmostSpan = s;
+      }
+    }
+
+    if (rightmostSpan && x >= rightmostRight) {
+      const rightmostOffset = parseInt(rightmostSpan.dataset.offset ?? '', 10);
+      const rightmostSource = this.sourceOffset(rightmostOffset);
+      if (rightmostSource !== null) {
+        const content = this._paragraph.model?.inputContent;
+        if (content !== undefined && rightmostSource < content.length) {
+          return { textOffset: rightmostSource + 1 };
+        }
+        return { textOffset: rightmostSource };
+      }
+    }
+
+    if (leftmostSpan && x <= leftmostLeft) {
+      const leftmostOffset = parseInt(leftmostSpan.dataset.offset ?? '', 10);
+      const leftmostSource = this.sourceOffset(leftmostOffset);
+      if (leftmostSource !== null) {
+        return { textOffset: leftmostSource };
+      }
+    }
+
     const spanRect = bestSpan.getBoundingClientRect();
     const midpoint = spanRect.left + spanRect.width / 2;
     if (x >= midpoint) {
