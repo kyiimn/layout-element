@@ -1407,8 +1407,10 @@ export class EditController {
       return;
     }
 
-    const cursorHeight = rect.height > 1 ? rect.height : (this._mapper.getFirstColumnRect()?.fontSize ?? rect.height);
-    this._cursorEl.top = rect.top;
+    const useFallback = rect.height <= 1;
+    const cursorHeight = useFallback ? (this._mapper.getFirstColumnRect()?.fontSize ?? rect.height) : rect.height;
+    const cursorTop = useFallback ? this._resolveFallbackTop(renderedOffset, cursorHeight) : rect.top;
+    this._cursorEl.top = cursorTop;
     this._cursorEl.left = atEndOfChar ? rect.left + rect.width : rect.left;
     this._cursorEl.height = cursorHeight;
     const hasVisibleSelection = this._cursorModel.selection !== null &&
@@ -1417,6 +1419,23 @@ export class EditController {
 
     this._textarea.style.top = `${rect.top}px`;
     this._textarea.style.left = `${rect.left}px`;
+  }
+
+  /**
+   * 공백 등 height≈0인 span에서 커서 top을 결정한다.
+   * 인접한 일반 문자의 top을 우선 사용하고, 실패하면 rect.top에서 cursorHeight를 뺀다.
+   */
+  private _resolveFallbackTop(renderedOffset: number, cursorHeight: number): number {
+    const offsets = [renderedOffset - 1, renderedOffset + 1];
+    for (const off of offsets) {
+      if (off < 0) continue;
+      const neighborRect = this._mapper.getCharRect(off);
+      if (neighborRect && neighborRect.height > 1) {
+        return neighborRect.top;
+      }
+    }
+    const rect = this._mapper.getCharRect(renderedOffset);
+    return rect ? rect.top - cursorHeight : 0;
   }
 
   private _updateSelection(): void {
