@@ -685,6 +685,15 @@ export class TextLayoutEngine {
   }
 
   /**
+   * 증분 렌더링 상태를 초기화한다. 구조 변경 후 전체 재생성을 보장하기 위해
+   * `previousLineCount`와 `previousOverflow`를 -1로 설정한다.
+   */
+  public resetIncrementalState() {
+    this._previousLineCount = -1;
+    this._previousOverflow = -1;
+  }
+
+  /**
    * 텍스트 래핑 수행. `TextLineData[][]` 생성.
    *
    * 처리 과정:
@@ -693,7 +702,7 @@ export class TextLayoutEngine {
    * 3. 문자 단위로 줄바꿈 판단 (오버플로우 시 다음 줄/컬럼으로)
    * 4. `_columnContents`에 `TextLineData[]` 저장
    *
-   * @deprecated Use `layoutStructure()` + `layoutText()` for incremental re-layout.
+   * @deprecated Use `resetIncrementalState()` + `layoutStructure()` + `layoutText()` for incremental re-layout.
    */
   public preTextWrap() {
     this._previousLineCount = -1;

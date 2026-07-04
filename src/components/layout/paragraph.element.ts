@@ -140,7 +140,9 @@ export class LayoutParagraphElement extends HTMLElement {
     const overflowBefore = this._model.previousOverflow;
 
     if (this._structureDirty) {
-      this._model.preTextWrap();
+      this._model.resetIncrementalState();
+      this._model.layoutStructure();
+      this._model.layoutText();
       this._structureDirty = false;
     } else {
       this._model.layoutText();
