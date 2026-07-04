@@ -84,7 +84,10 @@ export class ColorRegistry {
       this._defaultColor = { c: 0, m: 0, y: 0, k: 0 };
 
       const sheet = globalThis.document?.styleSheets[0];
-      if (!sheet) return;
+      if (!sheet) {
+        this._ready = true;
+        return this.colorMap;
+      }
 
       const ruleIdx = sheet.cssRules.length;
       sheet.insertRule(":root {}", ruleIdx);
