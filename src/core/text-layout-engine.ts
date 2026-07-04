@@ -362,16 +362,22 @@ export class TextLayoutEngine {
     if (this.columnCount < 1) return;
 
     this._columnPpm = [];
+    const vColumnEls: LayoutVirtualColumnElement[] = [];
     for (let curColumn = 0; curColumn < this.columnCount; curColumn++) {
       const vColumnEl = document.createElement('x-layout-vcolumn');
       vColumnEl.index = curColumn;
       vColumnEl.model = this;
       vColumnEl.parentElement = this._paragraphElement;
       this._rootNode.appendChild(vColumnEl);
+      vColumnEls.push(vColumnEl);
+    }
 
-      const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColumn];
+    for (let i = 0; i < vColumnEls.length; i++) {
+      const ppm = vColumnEls[i].getBoundingClientRect().width / this._columnWidths[i];
       this._columnPpm.push(ppm);
+    }
 
+    for (const vColumnEl of vColumnEls) {
       vColumnEl.remove();
     }
   }
