@@ -1,5 +1,7 @@
 import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/constants";
 import { Rect } from "@/core";
+import { GuideColumnData } from "@/types/layout";
+import { PrintPostData, PrintPostDataRect } from "@/types/print";
 
 /**
  * 컬럼 가이드 표시 요소. `<x-layout-guide-column>` 커스텀 엘리먼트.
@@ -153,6 +155,33 @@ export class LayoutGuideColumnElement extends HTMLElement {
 
   get lineHeight() {
     return this._lineHeight;
+  }
+
+  get data(): GuideColumnData {
+    return {
+      type: 'guide-column',
+      id: this.id || undefined,
+      left: this._left,
+      top: this._top,
+      width: this._width,
+      height: this._height,
+      visible: this._visible,
+      fontSize: this._fontSize,
+      lineHeight: this._lineHeight,
+    };
+  }
+
+  get printPostData(): PrintPostData<GuideColumnData>[] {
+    const rect = this.getBoundingClientRect();
+    return [{
+      data: this.data,
+      rect: {
+        x: rect.left + window.scrollX,
+        y: rect.top + window.scrollY,
+        width: rect.width,
+        height: rect.height,
+      } as PrintPostDataRect,
+    }];
   }
 }
 customElements.define('x-layout-guide-column', LayoutGuideColumnElement);
