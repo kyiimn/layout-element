@@ -614,10 +614,11 @@ export class TextLayoutEngine {
 
             if (currentPartIdx >= partWidths.length) {
               const maxPartWidth = partWidths.length > 0 ? Math.max(...partWidths) : 0;
-              if (charWidth > maxPartWidth + 1e-6) {
-                columnContent[columnContent.length - 1].parts[0].content.push(char);
-                break;
-              }
+            if (charWidth > maxPartWidth + 1e-6) {
+              columnContent[columnContent.length - 1].parts[0].content.push(char);
+              cumulativeWidths[0] += charWidth;
+              break;
+            }
               columnContent = this._removeEmptyLastLine(columnContent);
               idxContentOfBlock--;
               currentPartIdx = 0;

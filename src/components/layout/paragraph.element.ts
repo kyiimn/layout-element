@@ -50,6 +50,9 @@ export class LayoutParagraphElement extends HTMLElement {
   connectedCallback() {
     if (!this.id) this.id = genUUID();
     this.layout();
+    if (this._editable && !this._editController) {
+      this._editController = new EditController(this);
+    }
   }
 
   disconnectedCallback() {
