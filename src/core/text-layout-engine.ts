@@ -190,7 +190,7 @@ export class TextLayoutEngine {
     const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
     this._ctx.font = this._getCanvasFont(textBlockStyle, effectivePpm);
     const metrics = this._ctx.measureText(char);
-    const rawWidth = metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight;
+    const rawWidth = metrics.width;
     const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
     const fontSizePx = fontSize * effectivePpm;
     const maxWidthPx = this.widthRatio * fontSizePx;
@@ -613,6 +613,11 @@ export class TextLayoutEngine {
             }
 
             if (currentPartIdx >= partWidths.length) {
+              const maxPartWidth = partWidths.length > 0 ? Math.max(...partWidths) : 0;
+              if (charWidth > maxPartWidth + 1e-6) {
+                columnContent[columnContent.length - 1].parts[0].content.push(char);
+                break;
+              }
               columnContent = this._removeEmptyLastLine(columnContent);
               idxContentOfBlock--;
               currentPartIdx = 0;
