@@ -67,6 +67,11 @@ export class EditCoordinateMapper {
             }
           }
           if (p === line.parts.length - 1) {
+            let trailingSpaces = 0;
+            for (let i = content.length - 1; i >= 0 && content[i] === ' '; i--) {
+              trailingSpaces++;
+            }
+            sourceOffset += trailingSpaces;
             while (content.length > 0 && content[content.length - 1] === ' ') {
               content = content.slice(0, content.length - 1);
             }
@@ -77,15 +82,6 @@ export class EditCoordinateMapper {
             this._sourceToRendered.set(sourceOffset, renderedOffset);
             renderedOffset++;
             sourceOffset++;
-          }
-
-          if (p === line.parts.length - 1) {
-            const original = part.content.join('');
-            let trailingSpaces = 0;
-            for (let i = original.length - 1; i >= 0 && original[i] === ' '; i--) {
-              trailingSpaces++;
-            }
-            sourceOffset += trailingSpaces;
           }
         }
 

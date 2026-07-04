@@ -1,4 +1,6 @@
 import { LayoutParagraphElement } from "./paragraph.element";
+import type { TextLineData, TextPartData } from "@/types/layout/text/text-line.type";
+import type { TextBlockStyle } from "@/types/style/text-block-style.type";
 
 /**
  * 텍스트 컬럼 렌더링 요소. `<x-layout-column>` 커스텀 엘리먼트.
@@ -13,7 +15,7 @@ export class LayoutColumnElement extends HTMLElement {
   constructor() {
     super();
 
-    this._index = this.getAttribute("index") ? parseInt(this.getAttribute("index")!) : undefined;
+    this._index = this.getAttribute("index") ? parseInt(this.getAttribute("index")!, 10) : undefined;
     this._shadowRoot = this.attachShadow({ mode: "open" });
   }
 
@@ -23,64 +25,182 @@ export class LayoutColumnElement extends HTMLElement {
 
   disconnectedCallback() { }
 
-  attributeChangedCallback(name: string, oldval: string, newval: string) {
+  attributeChangedCallback(name: string, oldval: string | null, newval: string | null) {
     if (name === 'index' && oldval !== newval) {
-      this.index = parseInt(newval) || undefined;
+      this.index = newval ? parseInt(newval, 10) : undefined;
     }
+  }
+
+  private _computeSourceOffsets(): { renderedOffset: number; sourceOffset: number } {
+    let renderedOffset = 0;
+    let sourceOffset = 0;
+    const model = this.model!;
+    for (let c = 0; c < this._index!; c++) {
+      const colLines = model.columnContents[c] || [];
+      for (const line of colLines) {
+        for (let p = 0; p < line.parts.length; p++) {
+          const original = line.parts[p].content;
+          let content = original;
+          if (p === 0) {
+            while (content.length > 0 && content[0] === ' ') { sourceOffset++; content = content.slice(1); }
+          }
+          if (p === line.parts.length - 1) {
+            let trailingSpaces = 0;
+            for (let i = content.length - 1; i >= 0 && content[i] === ' '; i--) trailingSpaces++;
+            sourceOffset += trailingSpaces;
+            while (content.length > 0 && content[content.length - 1] === ' ') content = content.slice(0, content.length - 1);
+          }
+          renderedOffset += content.length;
+          sourceOffset += content.length;
+        }
+        if (line.endOfBlock) sourceOffset++;
+      }
+    }
+    return { renderedOffset, sourceOffset };
+  }
+
+  private _stripSpaces(content: string[], isFirst: boolean, isLast: boolean): string[] {
+    let result = content;
+    if (isFirst) {
+      while (result.length > 0 && result[0] === ' ') { result = result.slice(1); }
+    }
+    if (isLast) {
+      while (result.length > 0 && result[result.length - 1] === ' ') { result = result.slice(0, result.length - 1); }
+    }
+    return result;
+  }
+
+  private _createLineElement(lineData: TextLineData, textBlockStyle: TextBlockStyle | undefined): HTMLDivElement {
+    const lineEl = document.createElement('div');
+    this._applyLineStyle(lineEl, lineData, textBlockStyle);
+    return lineEl;
+  }
+
+  private _applyLineStyle(lineEl: HTMLDivElement, _lineData: TextLineData, textBlockStyle: TextBlockStyle | undefined): void {
+    const curLineStyle = this.model!.genLineStyle(textBlockStyle) || {};
+    lineEl.style.cssText = '';
+    Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(lineEl.style, curLineStyle);
+  }
+
+  private _createPartElement(part: TextPartData, lineData: TextLineData, curPartStyle: Record<string, string>, partJustify: string | undefined): HTMLDivElement {
+    const partEl = document.createElement('div');
+    this._applyPartStyle(partEl, part, lineData, curPartStyle, partJustify);
+    return partEl;
+  }
+
+  private _applyPartStyle(partEl: HTMLDivElement, part: TextPartData, _lineData: TextLineData, curPartStyle: Record<string, string>, partJustify: string | undefined): void {
+    partEl.style.cssText = '';
+    Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(partEl.style, {
+      ...curPartStyle,
+      width: `${part.width}mm`,
+      marginLeft: `${part.left}mm`,
+      justifyContent: partJustify || curPartStyle.justifyContent,
+    });
+  }
+
+  private _createSpanElement(char: string, renderedOffset: number, sourceOffset: number): HTMLSpanElement {
+    const charEl = document.createElement('span');
+    this._applySpanStyle(charEl, char, renderedOffset, sourceOffset);
+    return charEl;
+  }
+
+  private _applySpanStyle(charEl: HTMLSpanElement, char: string, renderedOffset: number, sourceOffset: number): void {
+    const charStyle = this.model!.genCharStyle(char);
+    charEl.style.cssText = '';
+    Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, charStyle);
+    charEl.dataset.offset = String(renderedOffset);
+    charEl.dataset.sourceOffset = String(sourceOffset);
+    charEl.innerText = char;
   }
 
   renderText() {
     if (!this.isConnected) return;
 
-    this._shadowRoot.innerHTML = '';
-    if (!this.model || this._index === undefined) return;
+    // Preserve existing <style> element instead of innerHTML = ''
+    const existingStyleEl = this._shadowRoot.querySelector('style');
+
+    if (!this.model || this._index === undefined) {
+      // Early return: remove line elements only, keep <style>
+      const lineEls = Array.from(this._shadowRoot.children).filter(
+        (child): child is HTMLDivElement => child.tagName === 'DIV'
+      );
+      for (const el of lineEls) el.remove();
+      return;
+    }
 
     const lines = this.model.columnContents[this._index] || [];
     const colStyle = this.model.genColumnStyle(this._index);
 
-    // Compute rendered offset: count character spans across all preceding columns
-    let renderedOffset = 0;
-    for (let c = 0; c < this._index; c++) {
-      const colLines = this.model.columnContents[c] || [];
-      for (const line of colLines) {
-        for (let p = 0; p < line.parts.length; p++) {
-          let content = line.parts[p].content;
-          if (p === 0) {
-            while (content.length > 0 && content[0] === ' ') content = content.slice(1);
-          }
-          if (p === line.parts.length - 1) {
-            while (content.length > 0 && content[content.length - 1] === ' ') content = content.slice(0, content.length - 1);
-          }
-          renderedOffset += content.length;
-        }
-      }
+    const { renderedOffset, sourceOffset } = this._computeSourceOffsets();
+
+    // Reuse or create <style> element
+    const styleEl = existingStyleEl || document.createElement('style');
+    if (!existingStyleEl) {
+      this._shadowRoot.appendChild(styleEl);
     }
-
-    const styleEl = document.createElement('style');
-    this._shadowRoot.appendChild(styleEl);
-
+    // Update style rules
     if (styleEl.sheet) {
+      while (styleEl.sheet.cssRules.length > 0) {
+        styleEl.sheet.deleteRule(0);
+      }
       styleEl.sheet.insertRule(":host {}", 0);
       const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
+      rule.style.cssText = '';
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(rule.style, colStyle);
     }
+
+    // Remove data-temporary spans (created by EditController) before collecting existing lines
+    const temporarySpans = this._shadowRoot.querySelectorAll('span[data-temporary]');
+    for (const span of temporarySpans) span.remove();
+
+    // Collect existing line elements for diff rendering (Task 4)
+    const existingLineEls = Array.from(this._shadowRoot.children).filter(
+      (child): child is HTMLDivElement => child.tagName === 'DIV'
+    );
+
+    let curRenderedOffset = renderedOffset;
+    let curSourceOffset = sourceOffset;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const { endOfBlock, textBlockStyle } = line;
-      const curLineStyle = this.model.genLineStyle(textBlockStyle) || {};
       const curPartStyle = this.model.genPartStyle(textBlockStyle) || {};
 
-      const lineEl = document.createElement('div');
-      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(lineEl.style, curLineStyle);
-      this._shadowRoot.appendChild(lineEl);
+      const lineEl = i < existingLineEls.length
+        ? existingLineEls[i]
+        : this._createLineElement(line, textBlockStyle);
+      if (i < existingLineEls.length) {
+        this._applyLineStyle(lineEl, line, textBlockStyle);
+      } else {
+        this._shadowRoot.appendChild(lineEl);
+      }
+
+      if (line.parts.length === 0) {
+        while (lineEl.firstChild) lineEl.firstChild.remove();
+        if (endOfBlock) curSourceOffset++;
+        continue;
+      }
+
+      const existingPartEls = Array.from(lineEl.children).filter(
+        (child): child is HTMLDivElement => child.tagName === 'DIV'
+      );
 
       for (let p = 0; p < line.parts.length; p++) {
         const part = line.parts[p];
-        let { content } = part;
+        const original = part.content;
+        const isFirst = p === 0;
+        const isLast = p === line.parts.length - 1;
+
+        let leadingSpaces = 0;
+        if (isFirst) {
+          for (let k = 0; k < original.length && original[k] === ' '; k++) leadingSpaces++;
+          curSourceOffset += leadingSpaces;
+        }
+
+        const content = this._stripSpaces(part.content, isFirst, isLast);
 
         let partJustify = curPartStyle.justifyContent;
-        if (p === line.parts.length - 1 && endOfBlock && partJustify === 'space-between') {
+        if (isLast && endOfBlock && partJustify === 'space-between') {
           partJustify = 'flex-start';
         }
         switch (textBlockStyle?.textAlign) {
@@ -89,32 +209,69 @@ export class LayoutColumnElement extends HTMLElement {
           default: break;
         }
 
-        if (p === 0) {
-          while (content.length > 0 && content[0] === ' ') content = content.slice(1);
-        }
-        if (p === line.parts.length - 1) {
-          while (content.length > 0 && content[content.length - 1] === ' ') content = content.slice(0, content.length - 1);
+        const partEl = p < existingPartEls.length
+          ? existingPartEls[p]
+          : this._createPartElement(part, line, curPartStyle as Record<string, string>, partJustify);
+        if (p < existingPartEls.length) {
+          this._applyPartStyle(partEl, part, line, curPartStyle as Record<string, string>, partJustify);
+        } else {
+          lineEl.appendChild(partEl);
         }
 
-        const partEl = document.createElement('div');
-        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(partEl.style, {
-          ...curPartStyle,
-          width: `${part.width}mm`,
-          marginLeft: `${part.left}mm`,
-          justifyContent: partJustify || curPartStyle.justifyContent,
-        });
-        lineEl.appendChild(partEl);
+        const existingSpans = new Map<string, HTMLSpanElement>();
+        const currentSpans = partEl.querySelectorAll(':scope > span[data-source-offset]') as NodeListOf<HTMLSpanElement>;
+        for (const span of currentSpans) {
+          const key = span.dataset.sourceOffset;
+          if (key !== undefined) existingSpans.set(key, span);
+        }
+
+        let nextRef: Node | null = partEl.firstChild;
 
         for (let j = 0; j < content.length; j++) {
           const char = content[j];
-          const charEl = document.createElement('span');
-          const charStyle = this.model.genCharStyle(char);
-          Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, charStyle);
-          charEl.dataset.offset = String(renderedOffset++);
-          charEl.innerText = char;
-          partEl.appendChild(charEl);
+          const thisCharSourceOffset = String(curSourceOffset);
+          const existingSpan = existingSpans.get(thisCharSourceOffset);
+
+          let charEl: HTMLSpanElement;
+          if (existingSpan) {
+            charEl = existingSpan;
+            this._applySpanStyle(charEl, char, curRenderedOffset, curSourceOffset);
+            existingSpans.delete(thisCharSourceOffset);
+          } else {
+            charEl = this._createSpanElement(char, curRenderedOffset, curSourceOffset);
+          }
+
+          if (nextRef === charEl) {
+            nextRef = charEl.nextSibling;
+          } else {
+            partEl.insertBefore(charEl, nextRef);
+          }
+
+          curRenderedOffset++;
+          curSourceOffset++;
+        }
+
+        for (const unusedSpan of existingSpans.values()) {
+          unusedSpan.remove();
+        }
+
+        if (isLast) {
+          const afterLeading: string[] = isFirst ? original.slice(leadingSpaces) : original;
+          let trailingSpaces = 0;
+          for (let k = afterLeading.length - 1; k >= 0 && afterLeading[k] === ' '; k--) trailingSpaces++;
+          curSourceOffset += trailingSpaces;
         }
       }
+
+      for (let p = line.parts.length; p < existingPartEls.length; p++) {
+        existingPartEls[p].remove();
+      }
+
+      if (endOfBlock) curSourceOffset++;
+    }
+
+    for (let i = lines.length; i < existingLineEls.length; i++) {
+      existingLineEls[i].remove();
     }
   }
 
