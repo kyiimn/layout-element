@@ -346,6 +346,7 @@ export class TextLayoutEngine {
 
     this._columnContents = [];
     this._overflow = 0;
+    this._overlayRects = null;
 
     const rawContents = !Array.isArray(this._inputContent) ? [{
       content: this._inputContent
@@ -640,12 +641,12 @@ export class TextLayoutEngine {
         }
       }
 
-      // M4: 텍스트가 끝났거나 마지막 컬럼에서 오버플로우 시 endOfText 설정
+      // C3: 텍스트가 끝났거나 컬럼에서 오버플로우 시 endOfText 설정
       if (columnContent.length > 0) {
         const isEndOfText = idxBlock === this.contents.length &&
           idxContentOfBlock >= this.contents[this.contents.length - 1].content.length;
-        const isLastColumnOverflow = curColumn === this._columnWidths.length - 1 && vColumnEl.isOverflow;
-        if (isEndOfText || isLastColumnOverflow) {
+        const isOverflow = vColumnEl.isOverflow;
+        if (isEndOfText || isOverflow) {
           columnContent[columnContent.length - 1].endOfText = true;
         }
       }

@@ -48,7 +48,6 @@ export class EditController {
   private _compositionSpan: HTMLSpanElement | null = null;
   private _compositionSession: number = 0;
   private _compositionBeforeContent: string = "";
-  private _compositionSelectionLength: number = 0;
   private _debounceTimer: number | null = null;
   private _wasFocused: boolean = false;
   private _optimisticSpan: HTMLSpanElement | null = null;
@@ -119,7 +118,7 @@ export class EditController {
           if (model && typeof model.inputContent === "string") {
             const after = this._textarea.value;
             model.inputContent = after;
-            const composedLength = after.length - this._compositionBeforeContent.length + this._compositionSelectionLength;
+            const composedLength = after.length - this._compositionBeforeContent.length;
             this._cursorModel.offset = this._compositionStartOffset + composedLength;
             this._updateCursorPosition();
             if (this._debounceTimer !== null) {
@@ -567,7 +566,7 @@ export class EditController {
       if (model && typeof model.inputContent === "string") {
         const after = this._textarea.value;
         model.inputContent = after;
-        const composedLength = after.length - this._compositionBeforeContent.length + this._compositionSelectionLength;
+        const composedLength = after.length - this._compositionBeforeContent.length;
         this._cursorModel.offset = this._compositionStartOffset + composedLength;
         this._updateCursorPosition();
         if (this._debounceTimer !== null) {
@@ -1081,7 +1080,6 @@ export class EditController {
     if (this._cursorModel.selection) {
       const normalized = this._cursorModel.selection.normalized();
       this._compositionStartOffset = normalized.start.textOffset;
-      this._compositionSelectionLength = normalized.end.textOffset - normalized.start.textOffset;
 
       // 조합 시작 시 선택 영역을 모델에서 삭제하여 일관성 유지
       if (model && typeof model.inputContent === "string") {
@@ -1092,12 +1090,11 @@ export class EditController {
       }
     } else {
       this._compositionStartOffset = this._cursorModel.offset;
-      this._compositionSelectionLength = 0;
     }
 
     // _compositionBeforeContent must be captured AFTER selection deletion
-    // so that composedLength = after.length - beforeContent.length + selectionLength
-    // correctly represents: (new text length) - (base text length) + (deleted selection length)
+    // so that composedLength = after.length - beforeContent.length
+    // correctly represents the composed text length
     if (model && typeof model.inputContent === "string") {
       this._compositionBeforeContent = model.inputContent;
     } else {
@@ -1224,12 +1221,11 @@ export class EditController {
 
     const startOffset = this._compositionStartOffset;
     const beforeContent = this._compositionBeforeContent;
-    const selectionLength = this._compositionSelectionLength;
 
     const after = this._textarea.value;
     model.inputContent = after;
 
-    const composedLength = after.length - beforeContent.length + selectionLength;
+    const composedLength = after.length - beforeContent.length;
     this._cursorModel.offset = startOffset + composedLength;
 
     this._paragraph.render();

@@ -113,6 +113,10 @@ export class GridCalculator {
     return this._ppm;
   }
 
+  static resetPpm() {
+    this._ppm = undefined;
+  }
+
   /** 컬럼 좌표 및 행 높이 계산 */
   private _calcCoordUnit() {
     this._lineHeight = this.fontSize * this.lineGap;
