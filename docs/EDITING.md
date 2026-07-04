@@ -1,8 +1,8 @@
 # layout-element 편집 모드 상세 명세
 
-> 작성 기준: `src/edit/edit-controller.ts`, `src/edit/edit-coordinate-mapper.ts`, `src/types/edit/`, `src/components/edit/cursor.element.ts`, `src/components/edit/selection.element.ts`, `src/components/layout/paragraph.element.ts`
+> 작성 기준: `src/edit/edit-controller.ts`, `src/edit/edit-coordinate-mapper.ts`, `src/edit/edit-manager.ts`, `src/types/edit/`, `src/components/edit/cursor.element.ts`, `src/components/edit/selection.element.ts`, `src/components/layout/paragraph.element.ts`
 >
-> 본 문서는 `layout-element` 라이브러리의 편집 모드 기능, 공개 API, 키보드/마우스 입력 처리, IME 조합, 렌더링 생명 주기, 그리고 호스트 프로그램 연동 방법을 상세히 기술한다.
+> 본 문서는 `layout-element` 라이브러리의 편집 모드 기능, 공개 API, 키보드/마우스 입력 처리, IME 조합, 렌더링 생명 주기, 글로벌 편집 관리(`EditManager`), 그리고 호스트 프로그램 연동 방법을 상세히 기술한다.
 
 ---
 
@@ -17,6 +17,8 @@
 1. 숨겨진 `<textarea>`: 1x1 픽셀, 투명, `tabindex="-1"`, `opacity: 0`. 모든 키보드 이벤트, `input` 이벤트, IME 조합 이벤트, 붙여넣기 이벤트를 이 요소가 수신한다. 사용자에게 보이지 않지만 브라우저의 표준 입력기 동작을 그대로 활용한다.
 2. `<x-layout-cursor>`: 1px 너비의 수직 커서. 실제 DOM 위치는 `EditCoordinateMapper`가 반환하는 문자 rect 기준으로 계산한다.
 3. `<x-layout-selection>`: 선택된 텍스트 위에 반투명 사각형 오버레이를 렌더링한다.
+
+모든 `EditController` 인스턴스는 생성 시 `EditManager` 싱글톤에 등록된다. `EditManager`는 문서 전체의 편집 상태를 글로벌하게 관리하며, 한 번에 하나의 단락만 포커스를 가지도록 보장한다. 포커스가 다른 단락으로 이동하면 이전 단락의 선택 영역이 자동으로 해제된다.
 
 ```mermaid
 flowchart TD
@@ -376,6 +378,172 @@ InheritStyle (부모에서 상속)
   ↓
 기본값 (DEFAULT_FONT_SIZE 등)
 ```
+
+---
+
+## 3.6 `EditManager` — 글로벌 편집 관리자
+
+`EditManager`는 문서 전체의 편집 상태를 중앙에서 관리하는 싱글톤이다. `ColorRegistry`, `FontLoader`와 동일한 싱글톤 패턴을 따른다.
+
+### 3.6.1 역할
+
+- **포커스 관리**: 한 번에 하나의 단락만 포커스를 가진다. 포커스가 B 단락으로 이동하면 A 단락의 선택 영역이 자동으로 해제된다.
+- **이벤트 시스템**: `focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `selectionChange` 이벤트를 외부 편집 UI에 전달한다.
+- **상태 조회**: 현재 포커스된 단락, 커서 위치, 선택 영역, 스타일을 조회할 수 있다.
+- **Selection 객체 조회**: DOM `Selection` API처럼 현재 `SelectionRange` 객체를 직접 조회할 수 있다.
+
+### 3.6.2 API 참조
+
+| API | 타입 | 설명 |
+|-----|------|------|
+| `getInstance()` | `EditManager` static | 싱글톤 인스턴스를 반환한다. |
+| `focusedParagraph` | `LayoutParagraphElement \| null` get | 현재 포커스된 단락 요소. 없으면 `null`. |
+| `focusedController` | `EditController \| null` get | 현재 포커스된 편집 컨트롤러. 없으면 `null`. |
+| `cursorOffset` | `number \| null` get | 현재 커서 위치. 포커스된 단락이 없으면 `null`. |
+| `selection` | `SelectionRange \| null` get | 현재 선택 영역. 선택이 없거나 포커스된 단락이 없으면 `null`. DOM `Selection` API와 유사하게 현재 selection 객체를 직접 조회. |
+| `currentStyle` | `CurrentStyle \| null` get | 현재 커서 위치의 유효 스타일. 포커스된 단락이 없으면 `null`. |
+| `controllers` | `Set<EditController>` get | 등록된 모든 편집 컨트롤러. |
+| `addEventListener(type, listener)` | `void` | 이벤트 리스너를 등록한다. |
+| `removeEventListener(type, listener)` | `void` | 이벤트 리스너를 제거한다. |
+| `deactivateAll()` | `void` | 모든 단락의 편집 모드를 비활성화한다. |
+
+### 3.6.3 이벤트 시스템
+
+| 이벤트 | 발생 시점 | `EditManagerEvent` 필드 |
+|--------|----------|------------------------|
+| `focusChange` | 포커스가 다른 단락으로 이동할 때 | `paragraph`, `controller`, `previousParagraph`, `previousController` |
+| `textChange` | 텍스트 내용이 변경될 때 (입력, 삭제, 붙여넣기, 줄바꿈) | `paragraph`, `controller` |
+| `styleChange` | 커서 위치가 변경되어 유효 스타일이 달라질 때 | `paragraph`, `controller` |
+| `selectionStart` | 마우스 드래그로 선택이 시작될 때 | `paragraph`, `controller` |
+| `selectionEnd` | 마우스 드래그가 끝나고 선택이 확정될 때 | `paragraph`, `controller` |
+| `selectionChange` | 선택 영역이 변경될 때 (확장, 해제, 전체 선택) | `paragraph`, `controller` |
+
+```ts
+type EditManagerEventType =
+  | 'focusChange'
+  | 'textChange'
+  | 'styleChange'
+  | 'selectionStart'
+  | 'selectionEnd'
+  | 'selectionChange';
+
+interface EditManagerEvent {
+  type: EditManagerEventType;
+  paragraph: LayoutParagraphElement;
+  controller: EditController;
+  previousParagraph?: LayoutParagraphElement | null;
+  previousController?: EditController | null;
+}
+
+type EditManagerEventListener = (event: EditManagerEvent) => void;
+```
+
+### 3.6.4 포커스 이동 메커니즘
+
+포커스가 B 단락으로 이동할 때의 내부 처리 순서:
+
+```
+1. 사용자가 B 단락 클릭 → controllerB.focus() → textarea.focus()
+2. 브라우저가 A 단락의 textarea에서 blur 발생
+   → controllerA._onBlur() (시각적 상태만 업데이트, _releaseFocus 호출 안 함)
+3. B 단락의 textarea에 focus 발생
+   → controllerB._onFocus() → EditManager._requestFocus(controllerB)
+4. _requestFocus 내부:
+   a. previousController = controllerA
+   b. controllerA._clearSelection() ← A 단락의 selection 해제!
+   c. controllerA._blurInternal() → textarea.blur() + _releaseFocus(controllerA)
+   d. _focusedController = controllerB
+   e. focusChange 이벤트 발생
+```
+
+`_onBlur`에서 `_releaseFocus`를 호출하지 않는 이유: `controllerB.focus()`를 호출하면 브라우저가 `controllerA`의 textarea blur를 먼저 처리하고, 그 후 `controllerB`의 textarea focus를 처리한다. 만약 `_onBlur`에서 `_releaseFocus`를 호출하면, `_requestFocus`가 호출될 때 `_focusedController`가 이미 null이 되어 `previousController`를 잡지 못한다.
+
+### 3.6.5 사용 예시
+
+```ts
+import { EditManager } from 'layout-element';
+
+const manager = EditManager.getInstance();
+
+// 이벤트 리스너 등록
+manager.addEventListener('focusChange', (e) => {
+  console.log('포커스 이동:', e.previousParagraph?.id, '→', e.paragraph.id);
+  // 편집 UI의 스타일 패널을 새 단락의 스타일로 갱신
+  updateStylePanel(manager.currentStyle);
+});
+
+manager.addEventListener('textChange', (e) => {
+  console.log('텍스트 변경:', e.paragraph.id);
+  // undo/redo 스택에 변경 이력 추가
+  pushUndoStack(e.paragraph, e.controller.cursorOffset);
+});
+
+manager.addEventListener('selectionChange', (e) => {
+  const sel = manager.selection;
+  if (sel) {
+    const { start, end } = sel.normalized();
+    console.log(`선택: ${start.textOffset}–${end.textOffset}`);
+    // 복사/잘라내기 버튼 활성화
+    setClipboardButtonsEnabled(true);
+  } else {
+    setClipboardButtonsEnabled(false);
+  }
+});
+
+manager.addEventListener('selectionStart', (e) => {
+  console.log('선택 시작:', e.paragraph.id);
+});
+
+manager.addEventListener('selectionEnd', (e) => {
+  console.log('선택 종료:', e.paragraph.id);
+});
+
+// 상태 조회
+const focusedP = manager.focusedParagraph;
+const cursor = manager.cursorOffset;
+const selection = manager.selection;
+const style = manager.currentStyle;
+
+// 모든 편집 모드 비활성화
+manager.deactivateAll();
+```
+
+### 3.6.6 `EditManager`와 `EditController`의 관계
+
+```mermaid
+flowchart TD
+    subgraph EM["EditManager (싱글톤)"]
+        FC["_focusedController"]
+        CS["_controllers (Set)"]
+        LST["_listeners (Map)"]
+    end
+
+    subgraph P1["Paragraph A"]
+        EC1["EditController A"]
+        TA1["textarea A"]
+    end
+
+    subgraph P2["Paragraph B"]
+        EC2["EditController B"]
+        TA2["textarea B"]
+    end
+
+    EC1 -->|"_register / _unregister"| CS
+    EC2 -->|"_register / _unregister"| CS
+
+    EC1 -->|"_onFocus → _requestFocus"| FC
+    EC2 -->|"_onFocus → _requestFocus"| FC
+
+    FC -->|"_clearSelection + _blurInternal"| EC1
+    FC -->|"_notifyTextChange etc."| LST
+    LST -->|이벤트 디스패치| HOST["호스트 프로그램"]
+```
+
+- `EditController` 생성자에서 `EditManager._register(this)` 호출.
+- `EditController.destroy()`에서 `EditManager._unregister(this)` 호출.
+- `EditController._onFocus()`에서 `EditManager._requestFocus(this)` 호출.
+- `EditController`의 텍스트/선택/스타일 변경 시 `EditManager._notify*()` 호출.
+- `EditManager`는 이벤트 리스너를 통해 호스트 프로그램에 변경을 알림.
 
 ---
 
