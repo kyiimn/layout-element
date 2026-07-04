@@ -1,7 +1,7 @@
 import { TextBlockStyle } from "../../style";
 
 /**
- * `TextLayoutEngine.preTextWrap()`의 출력물. 텍스트 래핑 후 **한 줄**에 해당하는 데이터.
+ * `TextLayoutEngine.layoutText()`의 출력물. 텍스트 래핑 후 **한 줄**에 해당하는 데이터.
  *
  * **내부 전용 타입**: 외부에서 직접 생성하지 않는다.
  * `TextLayoutEngine`이 텍스트 래핑 과정에서 자동 생성하며,

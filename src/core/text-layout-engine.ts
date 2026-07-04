@@ -37,13 +37,13 @@ type FreeRegion = { start: number; end: number };
  * 정적 팩토리 메서드 `create()`로만 인스턴스를 생성한다.
  *
  * 주요 기능:
- * - 텍스트 래핑 (`preTextWrap()`): 문자 단위로 줄바꿈 처리
+ * - 텍스트 래핑 (`layoutStructure()` + `layoutText()`): 문자 단위로 줄바꿈 처리
  * - 오버랩 회피: 이미지 등 다른 요소와 겹치는 영역 계산
  * - 스타일 적용: `genLineStyle()`, `genPartStyle()`, `genCharStyle()`으로 CSS 스타일 생성
  *
  * 렌더링 파이프라인:
  * 1. `_initLayout()` - fontSize, lineGap, lineHeight 초기화
- * 2. `preTextWrap()` - 텍스트를 줄 단위로 분리, 오버랩 처리, `TextLineData[]` 생성
+ * 2. `layoutStructure()` - 컬럼 폭/ppm 계산, `layoutText()` - 텍스트 래핑 수행
  * 3. `LayoutColumnElement`가 `columnContents`를 소비하여 렌더링
  */
 export class TextLayoutEngine {
@@ -693,25 +693,6 @@ export class TextLayoutEngine {
     this._previousOverflow = -1;
   }
 
-  /**
-   * 텍스트 래핑 수행. `TextLineData[][]` 생성.
-   *
-   * 처리 과정:
-   * 1. `content`를 `\n` 단위로 분리하여 `TextBlockData[]` 변환
-   * 2. 각 컬럼마다 가상 컬럼(`x-layout-vcolumn`) 생성하여 실제 렌더링 크기 측정
-   * 3. 문자 단위로 줄바꿈 판단 (오버플로우 시 다음 줄/컬럼으로)
-   * 4. `_columnContents`에 `TextLineData[]` 저장
-   *
-   * @deprecated Use `resetIncrementalState()` + `layoutStructure()` + `layoutText()` for incremental re-layout.
-   */
-  public preTextWrap() {
-    this._previousLineCount = -1;
-    this._previousOverflow = -1;
-
-    this._initStructure();
-    this._layoutTextIntoColumns();
-  }
-
   /** 컬럼 스타일 생성 (Flexbox 컨테이너) */
   public genColumnStyle(idx: number): Partial<CSSStyleDeclaration> {
     const left = this._columnWidths.slice(0, idx).reduce((a, b) => a + b, 0) + this._gaps.slice(0, idx).reduce((a, b) => a + b, 0);
@@ -823,8 +804,6 @@ export class TextLayoutEngine {
    * - 반각 문자/공백 → `minWidth` 차등 적용
    *
    * `isHalfWidth`는 Latin-1 범위(128-255)의 전각 문자를 반각으로 오분류할 수 있다.
-   * 하지만 `preTextWrap()`이 DOM 측정(`scrollWidth > clientWidth`)으로
-   * 실제 렌더링 폭을 보정하므로, `minWidth` 오차는 최종 결과에 영향하지 않는다.
    * 정밀한 분류가 필요하면 Unicode East Asian Width 범위 기반 판별로 교체해야 한다.
    */
   private _updateCharStyleCache(): void {

@@ -4,7 +4,7 @@ import { LayoutParagraphElement } from "./paragraph.element";
 /**
  * 텍스트 래핑용 가상 컬럼 요소. `<x-layout-vcolumn>` 커스텀 엘리먼트.
  *
- * `TextLayoutEngine.preTextWrap()`에서 오버플로우 측정을 위해 임시로 생성된다.
+ * `TextLayoutEngine.layoutText()`에서 오버플로우 측정을 위해 임시로 생성된다.
  * 실제 렌더링(`LayoutColumnElement`)이 시작되기 전에 제거된다.
  */
 export class LayoutVirtualColumnElement extends HTMLElement {
