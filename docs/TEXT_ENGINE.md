@@ -683,13 +683,16 @@ public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
 ```
 
 - `display: 'inline-block'`
-- `maxWidth`: `'1em'` (이전 `${widthRatio}em`에서 변경)
+- `maxWidth`: `${widthRatio}em` (장평 비율만큼 레이아웃 박스 너비 제한)
 - `minWidth`: 공백 `0.15em`, 1바이트 문자 `0.35em`, 그 외 `0.15em`
-- `scale`: `${widthRatio} 1` (장평)
+- `scale`: `${widthRatio} 1` (글자 모양 자체를 수평 축소 — 장평)
 - `textAlign`: `'center'`
 - `transformOrigin`: `'0'`
 
-`maxWidth`가 `'1em'`인 이유: CSS `scale: ${wr} 1`이 이미 장평 변환을 적용한다. 여기에 `maxWidth: ${wr}em`을 추가하면 `widthRatio ≠ 1`일 때 폭이 의도보다 좁아진다. 따라서 `maxWidth`는 변환 전 기준값인 `'1em'`을 사용한다.
+`maxWidth`와 `scale`은 함께 작동한다:
+- `maxWidth: ${wr}em`은 레이아웃 박스 너비를 `wr * fontSize`로 제한한다. 글자 사이 간격이 줄어든다.
+- `scale: ${wr} 1`은 글자 모양(glyph) 자체를 수평으로 `wr`배 축소한다. 글자가 좁아진다.
+- 둘 다 `widthRatio`를 적용하므로, 장평 0.8이면 레이아웃 박스도 0.8em, 글자 모양도 80%로 축소된다.
 
 ---
 
