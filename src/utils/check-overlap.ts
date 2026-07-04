@@ -61,11 +61,7 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
   const relStart = intersectionStart - r1.left;
   const relEnd = intersectionEnd - r1.left;
 
-  if (r2.left <= r1.left && r2.right >= r1.right) {
-    return { direction: 'COVERS', parts: [{ x1: 0, x2: r1.width }] };
-  }
-
-  // 이미지 픽셀 단위 겹침 탐지
+  // 이미지 픽셀 단위 겹침 탐지 — COVERS 판정 전에 수행
   if (targetElement.contentType === 'image') {
     const imageEl = targetElement.items[0] as LayoutImageElement;
     if (imageEl.canvas) {
@@ -76,67 +72,73 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
         const scaleY = canvas.height / r2.height;
 
         const relativeX = intersectionStart - r2.left;
-        const relativeY = Math.max(r1.top, r2.top) - r2.top; // 수직 겹침 시작점
+        const relativeY = Math.max(r1.top, r2.top) - r2.top;
         const relativeHeight = Math.min(r1.bottom, r2.bottom) - Math.max(r1.top, r2.top);
 
-        // 정수 좌표로 변환 (픽셀 데이터 접근을 위해)
         const sx = Math.floor(relativeX * scaleX);
         const sy = Math.floor(relativeY * scaleY);
         const sw = Math.ceil(rawOverlapWidth * scaleX);
         const sh = Math.ceil(relativeHeight * scaleY);
 
-        // 캔버스 범위를 벗어나지 않도록 클램핑
-        if (sw <= 0 || sh <= 0) return { direction: "NONE", parts: [] };
+        if (sw > 0 && sh > 0) {
+          try {
+            const imageData = ctx.getImageData(sx, sy, sw, sh);
+            const pixels = imageData.data;
+            const imgWidth = imageData.width;
+            const imgHeight = imageData.height;
 
-        try {
-          // 겹치는 영역의 픽셀 데이터 추출
-          const imageData = ctx.getImageData(sx, sy, sw, sh);
-          const pixels = imageData.data;
-          const imgWidth = imageData.width;
-          const imgHeight = imageData.height;
-
-          // 불투명 픽셀이 하나라도 있는 열(col) 수집
-          const opaqueColumns = new Set<number>();
-          for (let y = 0; y < imgHeight; y++) {
-            for (let x = 0; x < imgWidth; x++) {
-              const alphaIndex = (y * imgWidth + x) * 4 + 3;
-              if (pixels[alphaIndex] > 0) {
-                opaqueColumns.add(x);
+            const opaqueColumns = new Set<number>();
+            for (let y = 0; y < imgHeight; y++) {
+              for (let x = 0; x < imgWidth; x++) {
+                const alphaIndex = (y * imgWidth + x) * 4 + 3;
+                if (pixels[alphaIndex] > 0) {
+                  opaqueColumns.add(x);
+                }
               }
             }
-          }
 
-          if (opaqueColumns.size === 0) return { direction: "NONE", parts: [] };
+            if (opaqueColumns.size === 0) return { direction: "NONE", parts: [] };
 
-          // 인접한 열을 연속 구간으로 그룹화 → parts
-          const sortedCols = Array.from(opaqueColumns).sort((a, b) => a - b);
-          const parts: { x1: number, x2: number }[] = [];
-          let partStart = sortedCols[0];
-          let prevCol = sortedCols[0];
-          const pxWidth = rawOverlapWidth / imgWidth; // imageData 픽셀 1열당 화면 px 폭
-
-          for (let i = 1; i < sortedCols.length; i++) {
-            if (sortedCols[i] === prevCol + 1) {
-              prevCol = sortedCols[i];
-            } else {
-              parts.push({
-                x1: relStart + partStart * pxWidth,
-                x2: relStart + (prevCol + 1) * pxWidth,
-              });
-              partStart = sortedCols[i];
-              prevCol = sortedCols[i];
+            // 모든 열에 불투명 픽셀이 있으면 완전 차단
+            const isFullyCovering = opaqueColumns.size === imgWidth;
+            if (isFullyCovering) {
+              return { direction: 'COVERS', parts: [{ x1: 0, x2: r1.width }] };
             }
-          }
-          // 마지막 구간
-          parts.push({
-            x1: relStart + partStart * pxWidth,
-            x2: relStart + (prevCol + 1) * pxWidth,
-          });
 
-          return { direction: 'PART', parts };
-        } catch (e) { }
+            // 인접한 열을 연속 구간으로 그룹화 → parts
+            const sortedCols = Array.from(opaqueColumns).sort((a, b) => a - b);
+            const parts: { x1: number, x2: number }[] = [];
+            let partStart = sortedCols[0];
+            let prevCol = sortedCols[0];
+            const pxWidth = rawOverlapWidth / imgWidth;
+
+            for (let i = 1; i < sortedCols.length; i++) {
+              if (sortedCols[i] === prevCol + 1) {
+                prevCol = sortedCols[i];
+              } else {
+                parts.push({
+                  x1: relStart + partStart * pxWidth,
+                  x2: relStart + (prevCol + 1) * pxWidth,
+                });
+                partStart = sortedCols[i];
+                prevCol = sortedCols[i];
+              }
+            }
+            parts.push({
+              x1: relStart + partStart * pxWidth,
+              x2: relStart + (prevCol + 1) * pxWidth,
+            });
+
+            return { direction: 'PART', parts };
+          } catch (e) { }
+        }
       }
     }
+  }
+
+  // 기하학적 COVERS 판정 (이미지가 아닌 요소 또는 픽셀 검사 실패 시)
+  if (r2.left <= r1.left && r2.right >= r1.right) {
+    return { direction: 'COVERS', parts: [{ x1: 0, x2: r1.width }] };
   }
 
   // 기하학적 겹침 (픽셀 검사 불가 또는 이미지 아님)
