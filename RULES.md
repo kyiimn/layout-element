@@ -127,6 +127,43 @@
   이것은 AGENTS.md에 명시된 설계 결정이다.
   런타임에 인쇄 모드가 토글되는 것을 지원하지 않는다.
 
+### 2.7 Zero-height span(공백 문자)과 좌표 계산
+
+- **공백 문자의 span은 `getBoundingClientRect().height === 0`이다.**
+  `width`도 0에 가깝고 `top` 값이 실제 텍스트 줄과 다르다.
+  모든 좌표 계산 메서드에서 이 속성을 반드시 고려해야 한다.
+- **`_computeVerticalOffset`**: `cursorRect.height`가 0이면
+  `getFirstColumnRect().fontSize`를 lineHeight 폴백으로 사용해야 한다.
+  `height === 0`이면 `direction * lineHeight === 0`이 되어
+  상하 이동이 불가능해진다.
+- **`_computeVerticalOffset`**: `getNearestOffsetFromPoint`는
+  현재 시각적 줄의 문자를 반환할 수 있다.
+  반환값이 현재 오프셋과 같으면 `null`을 반환해야 한다 (이동 없음).
+  또한 `isOnDifferentLine()` 검사로 같은 줄의 문자를 걸러내야 한다.
+- **`findVisualLineBounds`**: 공백 span을 anchor로 사용하면
+  `anchorRect.top`이 실제 텍스트 줄과 다른 값을 가진다.
+  `anchorRect.height <= 1`일 때 가장 가까운 가시 span의 `top`을 사용해야 하며,
+  `lineSpans` 수집 시 `height <= 1`인 span을 제외해야 한다.
+- **`_updateCursorPosition`**: `rect.height <= 1`이면
+  `getFirstColumnRect().fontSize`를 커서 높이 폴백으로 사용하고
+  `_resolveFallbackTop()`으로 인접 문자의 `top`을 사용해야 한다.
+
+### 2.8 편집 기능 회귀 방지 — 기능 추가/수정 시 필수 검증
+
+편집 컨트롤러(`EditController`)와 좌표 매퍼(`EditCoordinateMapper`)를 수정할 때,
+다음 시나리오를 **반드시** 브라우저에서 수동 검증해야 한다:
+
+1. **ArrowLeft / ArrowRight**: 한 글자씩 이동
+2. **ArrowUp / ArrowDown**: 시각적 줄 단위 이동 (공백 앞/뒤에서도)
+3. **Home / End**: 시각적 줄 시작/끝 이동 (공백 문자 위에서도)
+4. **Ctrl+ArrowLeft / Ctrl+ArrowRight**: 단어 단위 이동
+5. **클릭으로 커서 배치**: 공백 문자 위 클릭, 줄 끝 빈 공간 클릭
+6. **IME 조합**: 한국어 입력
+
+회귀의 가장 흔한 원인은 **공백 문자의 zero-height span**이다.
+좌표 계산, 라인 바운드, 커서 위치 계산에서 `height <= 1`인 span을
+일반 문자와 동일하게 처리하면 안 된다.
+
 ---
 
 ## 3. 인쇄 모드 규칙
