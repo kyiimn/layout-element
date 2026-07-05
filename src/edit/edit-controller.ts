@@ -1071,10 +1071,14 @@ export class EditController {
       return null;
     }
 
-	    const lineHeight = cursorRect.height;
-	    const paragraphRect = this._paragraph.getBoundingClientRect();
-	    const targetX = cursorRect.left + paragraphRect.left;
-	    const baseY = cursorRect.top + paragraphRect.top + direction * lineHeight;
+		    let lineHeight = cursorRect.height;
+		    if (!lineHeight) {
+		      lineHeight = this._mapper.getFirstColumnRect()?.fontSize ?? 0;
+		      if (!lineHeight) return null;
+		    }
+		    const paragraphRect = this._paragraph.getBoundingClientRect();
+		    const targetX = cursorRect.left + paragraphRect.left;
+		    const baseY = cursorRect.top + paragraphRect.top + direction * lineHeight;
 
 	    // Probe strategy: line spacing can exceed font height, placing targetY
 	    // in the gap between lines where no span exists. Try multiple Y positions.
@@ -1086,6 +1090,9 @@ export class EditController {
 	    for (const offset of probeOffsets) {
 	      const result = this._mapper.getCharOffsetFromPoint(targetX, baseY + offset);
 	      if (result?.textOffset != null) return result.textOffset;
+	      // Fallback: getCharOffsetFromPoint returns null in whitespace/between spans
+	      const nearest = this._mapper.getNearestOffsetFromPoint(targetX, baseY + offset);
+	      if (nearest?.textOffset != null) return nearest.textOffset;
 	    }
 
 	    // Scan in small increments until a character is found or we exceed one line height
@@ -1094,6 +1101,9 @@ export class EditController {
 	      const result = this._mapper.getCharOffsetFromPoint(targetX, baseY + direction * scanOffset);
 	      if (result?.textOffset != null) return result.textOffset;
 	    }
+
+	    const finalNearest = this._mapper.getNearestOffsetFromPoint(targetX, baseY);
+	    if (finalNearest?.textOffset != null) return finalNearest.textOffset;
 
 	    return null;
   }
