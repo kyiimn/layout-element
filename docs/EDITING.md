@@ -631,8 +631,12 @@ flowchart TD
 |---|--------|------|
 | `ArrowLeft` | 없음 | 커서를 왼쪽으로 한 문자 이동 |
 | `ArrowLeft` | `Shift` | 선택 영역을 왼쪽으로 한 문자 확장 |
+| `ArrowLeft` | `Ctrl`/`Cmd` | 이전 단어의 시작으로 이동 |
+| `ArrowLeft` | `Shift`+`Ctrl`/`Cmd` | 선택 영역을 이전 단어의 시작까지 확장 |
 | `ArrowRight` | 없음 | 커서를 오른쪽으로 한 문자 이동 |
 | `ArrowRight` | `Shift` | 선택 영역을 오른쪽으로 한 문자 확장 |
+| `ArrowRight` | `Ctrl`/`Cmd` | 다음 단어의 시작으로 이동 |
+| `ArrowRight` | `Shift`+`Ctrl`/`Cmd` | 선택 영역을 다음 단어의 시작까지 확장 |
 | `ArrowUp` | 없음 | 커서를 위 시각적 라인으로 이동 |
 | `ArrowUp` | `Shift` | 선택 영역을 위 시각적 라인으로 확장 |
 | `ArrowDown` | 없음 | 커서를 아래 시각적 라인으로 이동 |
@@ -677,6 +681,31 @@ flowchart TD
 - `Home`: `findVisualLineBounds(offset)?.start`를 우선 사용하고, 실패하면 `_findLineStart(content, offset)`로 폴백한다.
 - `End`: `findVisualLineBounds(offset)?.end`를 우선 사용하고, 실패하면 `_findLineEnd(content, offset)`로 폴백한다.
 - 보조키가 눌려 있으면 선택 영역을 해당 위치까지 확장한다.
+
+#### `Ctrl`+`ArrowLeft` / `Ctrl`+`ArrowRight` (단어 이동)
+
+- `Ctrl`+`ArrowLeft`: `_findWordStart(content, offset)`을 호출해 이전 단어의 시작 위치로 이동한다.
+- `Ctrl`+`ArrowRight`: `_findWordEnd(content, offset)`을 호출해 다음 단어의 시작 위치로 이동한다.
+- `Shift`+`Ctrl`+`ArrowLeft`: `_extendSelection(_findWordStart(...))`로 선택 영역을 이전 단어 시작까지 확장한다.
+- `Shift`+`Ctrl`+`ArrowRight`: `_extendSelection(_findWordEnd(...))`로 선택 영역을 다음 단어 시작까지 확장한다.
+
+단어 경계는 공백 문자(`\s`)와 비공백 문자의 전환 지점으로 정의한다.
+
+**`_findWordStart(content, offset)` 내부 로직:**
+
+1. `offset <= 0`이면 `0`을 반환한다.
+2. 현재 위치에서 왼쪽으로 공백 문자를 모두 건너뛴다 (`/\s/` 테스트).
+3. 공백이 아닌 문자를 모두 건너뛴다.
+4. 도달한 위치가 이전 단어의 시작이다.
+
+**`_findWordEnd(content, offset)` 내부 로직:**
+
+1. `offset >= content.length`이면 `content.length`를 반환한다.
+2. 현재 위치에서 오른쪽으로 비공백 문자를 모두 건너뛴다 (`!/\s/` 테스트).
+3. 공백 문자를 모두 건너뛴다.
+4. 도달한 위치가 다음 단어의 시작이다.
+
+**예시:** `"hello  world"`에서 offset 7(`w` 위치)에서 `Ctrl+ArrowLeft` → offset 0, `Ctrl+ArrowRight` → offset 12.
 
 #### `Backspace` / `Delete`
 

@@ -120,21 +120,4 @@ examples/
 - **Korean IME composition**: EditController handles IME composition via `compositionstart`, `compositionupdate`, and `compositionend` events. This is essential for Korean text input on Windows (TSF), macOS, and Linux (IBus).
 - **Mouse coordinate freshness**: `_onMouseMove` stores the latest `clientX`/`clientY` on every mousemove event and reads them from the `requestAnimationFrame` callback, ensuring drag selection follows the cursor accurately during fast movement.
 
-### Keyboard Shortcuts in Edit Mode
-
-| Key | Action |
-|---|---|
-| ArrowLeft / ArrowRight | Move cursor one character |
-| ArrowUp / ArrowDown | Move cursor one visual line |
-| Home / End | Move to visual line start / end |
-| Ctrl+ArrowLeft | Move to previous word start |
-| Ctrl+ArrowRight | Move to next word start |
-| Shift+Arrow | Extend selection |
-| Shift+Ctrl+Arrow | Extend selection by word |
-| Ctrl+A | Select all |
-| Ctrl+C / Ctrl+X | Copy / Cut selection |
-| Backspace / Delete | Delete character or selection |
-| Enter | Insert newline |
-| Escape | Clear selection |
-
-Word boundaries are defined as transitions between whitespace (`\s`) and non-whitespace characters.
+Keyboard shortcut documentation has been moved to `docs/EDITING.md` Section 4.
