@@ -388,7 +388,7 @@ InheritStyle (부모에서 상속)
 ### 3.6.1 역할
 
 - **포커스 관리**: 한 번에 하나의 단락만 포커스를 가진다. 포커스가 B 단락으로 이동하면 A 단락의 선택 영역이 자동으로 해제된다.
-- **이벤트 시스템**: `focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `selectionChange` 이벤트를 외부 편집 UI에 전달한다.
+- **이벤트 시스템**: `focusChange`, `textChange`, `styleChange`, `cursorMove`, `selectionStart`, `selectionEnd` 이벤트를 외부 편집 UI에 전달한다.
 - **상태 조회**: 현재 포커스된 단락, 커서 위치, 선택 영역, 스타일을 조회할 수 있다.
 - **Selection 객체 조회**: DOM `Selection` API처럼 현재 `SelectionRange` 객체를 직접 조회할 수 있다.
 
@@ -414,18 +414,18 @@ InheritStyle (부모에서 상속)
 | `focusChange` | 포커스가 다른 단락으로 이동할 때 | `paragraph`, `controller`, `previousParagraph`, `previousController` |
 | `textChange` | 텍스트 내용이 변경될 때 (입력, 삭제, 붙여넣기, 줄바꿈) | `paragraph`, `controller` |
 | `styleChange` | 커서 위치가 변경되어 유효 스타일이 달라질 때 | `paragraph`, `controller` |
+| `cursorMove` | 커서 위치가 변경될 때. 키보드 연속 입력 시 최초 KeyDown과 마지막 KeyUp에만 발생 | `paragraph`, `controller` |
 | `selectionStart` | 마우스 드래그로 선택이 시작될 때 | `paragraph`, `controller` |
 | `selectionEnd` | 마우스 드래그가 끝나고 선택이 확정될 때 | `paragraph`, `controller` |
-| `selectionChange` | 선택 영역이 변경될 때 (확장, 해제, 전체 선택) | `paragraph`, `controller` |
 
 ```ts
 type EditManagerEventType =
   | 'focusChange'
   | 'textChange'
   | 'styleChange'
+  | 'cursorMove'
   | 'selectionStart'
-  | 'selectionEnd'
-  | 'selectionChange';
+  | 'selectionEnd';
 
 interface EditManagerEvent {
   type: EditManagerEventType;
@@ -478,24 +478,17 @@ manager.addEventListener('textChange', (e) => {
   pushUndoStack(e.paragraph, e.controller.cursorOffset);
 });
 
-manager.addEventListener('selectionChange', (e) => {
-  const sel = manager.selection;
-  if (sel) {
-    const { start, end } = sel.normalized();
-    console.log(`선택: ${start.textOffset}–${end.textOffset}`);
-    // 복사/잘라내기 버튼 활성화
-    setClipboardButtonsEnabled(true);
-  } else {
-    setClipboardButtonsEnabled(false);
-  }
-});
-
 manager.addEventListener('selectionStart', (e) => {
   console.log('선택 시작:', e.paragraph.id);
 });
 
 manager.addEventListener('selectionEnd', (e) => {
   console.log('선택 종료:', e.paragraph.id);
+});
+
+manager.addEventListener('cursorMove', (e) => {
+  console.log('커서 이동:', e.controller.cursorOffset);
+  // 커서 위치 기반 UI 업데이트 (줄/열 표시, 스크롤 동기화 등)
 });
 
 // 상태 조회

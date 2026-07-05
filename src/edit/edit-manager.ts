@@ -11,7 +11,7 @@ export type EditManagerEventType =
   | 'styleChange'
   | 'selectionStart'
   | 'selectionEnd'
-  | 'selectionChange';
+  | 'cursorMove';
 
 /**
  * 글로벌 편집 관리 이벤트.
@@ -55,8 +55,8 @@ export type EditManagerEventListener = (event: EditManagerEvent) => void;
  * manager.addEventListener('textChange', (e) => {
  *   console.log('Text changed in', e.paragraph);
  * });
- * manager.addEventListener('selectionChange', (e) => {
- *   console.log('Selection changed in', e.paragraph);
+ * manager.addEventListener('styleChange', (e) => {
+ *   console.log('Style changed in', e.paragraph);
  * });
  *
  * // 상태 조회
@@ -184,12 +184,13 @@ export class EditManager {
   }
 
   /**
-   * 선택 변경 이벤트를 발생시킨다.
-   * `EditController`에서 선택 영역이 변경될 때 호출된다.
+   * 커서 이동 이벤트를 발생시킨다.
+   * 키보드 입력, 마우스 클릭, 외부 API 등 커서 위치가 변경될 때 호출된다.
+   * 키보드 연속 입력 시 최초 KeyDown과 마지막 KeyUp에만 발생한다.
    * @internal
    */
-  _notifySelectionChange(controller: EditController): void {
-    this._dispatch('selectionChange', controller);
+  _notifyCursorMove(controller: EditController): void {
+    this._dispatch('cursorMove', controller);
   }
 
   /**

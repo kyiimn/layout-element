@@ -39,6 +39,7 @@ export class EditController {
   private _handleFocus: () => void;
   private _handleBlur: () => void;
   private _handleKeydown: (event: KeyboardEvent) => void;
+  private _handleKeyup: (event: KeyboardEvent) => void;
 
   private _handleInput: (event: InputEvent) => void;
   private _handleCompositionStart: () => void;
@@ -65,6 +66,7 @@ export class EditController {
   private _debounceTimer: number | null = null;
   private _wasFocused: boolean = false;
   private _optimisticSpan: HTMLSpanElement | null = null;
+  private _lastStyleJson: string | null = null;
 
   private _selectionAnchor: number | null = null;
   private _isMouseDown: boolean = false;
@@ -86,6 +88,7 @@ export class EditController {
     this._handleFocus = () => this._onFocus();
     this._handleBlur = () => this._onBlur();
     this._handleKeydown = (event: KeyboardEvent) => this._onKeydown(event);
+    this._handleKeyup = (event: KeyboardEvent) => this._onKeyup(event);
 
     this._handleInput = (event: InputEvent) => this._onInput(event);
     this._handleCompositionStart = () => this._onCompositionStart();
@@ -122,6 +125,7 @@ export class EditController {
     this._textarea.addEventListener("compositionend", this._handleCompositionEnd as EventListener);
     this._textarea.addEventListener("compositioncancel", this._handleCompositionCancel);
     this._textarea.addEventListener("keydown", this._handleKeydown);
+    this._textarea.addEventListener("keyup", this._handleKeyup);
     this._textarea.addEventListener("paste", this._handlePaste as EventListener);
 
     this._handleVisibilityChange = () => {
@@ -245,6 +249,7 @@ export class EditController {
     this._textarea.removeEventListener("focus", this._handleFocus);
     this._textarea.removeEventListener("blur", this._handleBlur);
     this._textarea.removeEventListener("keydown", this._handleKeydown);
+    this._textarea.removeEventListener("keyup", this._handleKeyup);
     this._textarea.removeEventListener("input", this._handleInput as EventListener);
     this._textarea.removeEventListener("compositionstart", this._handleCompositionStart);
     this._textarea.removeEventListener("compositionupdate", this._handleCompositionUpdate as EventListener);
@@ -375,7 +380,7 @@ export class EditController {
     textarea.style.opacity = "0";
     textarea.style.width = "1px";
     textarea.style.height = "1px";
-    textarea.style.pointerEvents = "auto";
+    textarea.style.pointerEvents = "none";
     textarea.style.border = "none";
     textarea.style.padding = "0";
     textarea.style.margin = "0";
@@ -438,8 +443,6 @@ export class EditController {
           this.focus();
           this._updateCursorPosition();
           this._updateSelection();
-          EditManager.getInstance()._notifySelectionChange(this);
-          EditManager.getInstance()._notifyStyleChange(this);
         }
       }
       return;
@@ -451,8 +454,6 @@ export class EditController {
       this._textarea.setSelectionRange(sourceOffset, sourceOffset);
       this._updateCursorPosition();
       this._updateSelection();
-      EditManager.getInstance()._notifySelectionChange(this);
-      EditManager.getInstance()._notifyStyleChange(this);
       this.focus();
       return;
     }
@@ -508,6 +509,7 @@ export class EditController {
     this._wasDragged = false;
 
     const sourceOffset = this._getSourceOffsetFromEvent(event);
+    event.preventDefault();
     if (sourceOffset === null) {
       const rect = this._paragraph.getBoundingClientRect();
       if (
@@ -534,15 +536,14 @@ export class EditController {
           this.focus();
           this._updateCursorPosition();
           this._updateSelection();
-          EditManager.getInstance()._notifySelectionChange(this);
-          EditManager.getInstance()._notifyStyleChange(this);
+          this._emitStyleChange();
+          EditManager.getInstance()._notifyCursorMove(this);
           document.addEventListener("mousemove", this._handleMouseMove);
         }
       }
       return;
     }
 
-    event.preventDefault();
     this._isMouseDown = true;
     this._lastMouseX = event.clientX;
     this._lastMouseY = event.clientY;
@@ -552,6 +553,7 @@ export class EditController {
       this.focus();
       this._updateCursorPosition();
       this._updateSelection();
+      EditManager.getInstance()._notifyCursorMove(this);
       document.addEventListener("mousemove", this._handleMouseMove);
       return;
     }
@@ -562,8 +564,8 @@ export class EditController {
     this.focus();
     this._updateCursorPosition();
     this._updateSelection();
-    EditManager.getInstance()._notifySelectionChange(this);
-    EditManager.getInstance()._notifyStyleChange(this);
+    this._emitStyleChange();
+    EditManager.getInstance()._notifyCursorMove(this);
     document.addEventListener("mousemove", this._handleMouseMove);
   }
 
@@ -592,10 +594,10 @@ export class EditController {
       this._syncTextareaSelection();
       this._updateCursorPosition();
       this._updateSelection();
-      // 의도적으로 selectionChange를 발생시키지 않는다.
-      // 드래그 중 매 프레임 selectionChange를 발생시키면 성능 부하가 크다.
+      // 의도적으로 이벤트를 발생시키지 않는다.
+      // 드래그 중 매 프레임 이벤트를 발생시키면 성능 부하가 크다.
       // selectionStart(드래그 시작)와 selectionEnd(마우스 업) 사이의
-      // 변경은 selectionChange로 통지하지 않고, selectionEnd에서 최종 선택 영역을 전달한다.
+      // 변경은 통지하지 않고, selectionEnd에서 최종 선택 영역을 전달한다.
     });
   }
 
@@ -610,6 +612,7 @@ export class EditController {
     document.removeEventListener("mousemove", this._handleMouseMove);
     if (this._cursorModel.selection) {
       EditManager.getInstance()._notifySelectionEnd(this);
+      EditManager.getInstance()._notifyCursorMove(this);
     }
   }
 
@@ -632,8 +635,8 @@ export class EditController {
     this._updateCursorPosition();
     this._updateSelection();
     EditManager.getInstance()._notifySelectionStart(this);
-    EditManager.getInstance()._notifySelectionChange(this);
     EditManager.getInstance()._notifySelectionEnd(this);
+    EditManager.getInstance()._notifyCursorMove(this);
   }
 
   private _findWordBoundaries(content: string, offset: number): { start: number; end: number } {
@@ -666,8 +669,6 @@ export class EditController {
     } else {
       this._cursorEl.visible = true;
     }
-
-    EditManager.getInstance()._notifyStyleChange(this);
   }
 
   private _onBlur(): void {
@@ -694,8 +695,6 @@ export class EditController {
     }
 
     this._cursorEl.visible = false;
-
-    EditManager.getInstance()._notifyStyleChange(this);
   }
 
   private _onKeydown(event: KeyboardEvent): void {
@@ -722,6 +721,7 @@ export class EditController {
     if (hasShortcut && event.key.toLowerCase() === "a") {
       event.preventDefault();
       this._selectAll();
+      EditManager.getInstance()._notifyCursorMove(this);
       return;
     }
 
@@ -741,6 +741,7 @@ export class EditController {
     }
 
     const isShift = event.shiftKey;
+    const isCursorKey = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key);
 
     switch (event.key) {
       case "ArrowLeft": {
@@ -757,7 +758,10 @@ export class EditController {
       this._updateCursorPosition();
       this._updateSelection();
       if (!isShift) {
-        EditManager.getInstance()._notifyStyleChange(this);
+        this._emitStyleChange();
+      }
+      if (!event.repeat && isCursorKey) {
+        EditManager.getInstance()._notifyCursorMove(this);
       }
       break;
     }
@@ -775,7 +779,10 @@ export class EditController {
       this._updateCursorPosition();
       this._updateSelection();
       if (!isShift) {
-        EditManager.getInstance()._notifyStyleChange(this);
+        this._emitStyleChange();
+      }
+      if (!event.repeat && isCursorKey) {
+        EditManager.getInstance()._notifyCursorMove(this);
       }
       break;
     }
@@ -795,7 +802,10 @@ export class EditController {
       this._updateCursorPosition();
       this._updateSelection();
       if (!isShift) {
-        EditManager.getInstance()._notifyStyleChange(this);
+        this._emitStyleChange();
+      }
+      if (!event.repeat && isCursorKey) {
+        EditManager.getInstance()._notifyCursorMove(this);
       }
       break;
     }
@@ -813,7 +823,10 @@ export class EditController {
       this._updateCursorPosition();
       this._updateSelection();
       if (!isShift) {
-        EditManager.getInstance()._notifyStyleChange(this);
+        this._emitStyleChange();
+      }
+      if (!event.repeat && isCursorKey) {
+        EditManager.getInstance()._notifyCursorMove(this);
       }
       break;
     }
@@ -831,7 +844,10 @@ export class EditController {
       this._updateCursorPosition();
       this._updateSelection();
       if (!isShift) {
-        EditManager.getInstance()._notifyStyleChange(this);
+        this._emitStyleChange();
+      }
+      if (!event.repeat && isCursorKey) {
+        EditManager.getInstance()._notifyCursorMove(this);
       }
       break;
     }
@@ -850,6 +866,7 @@ export class EditController {
         this._updateSelection();
         this._debouncedRender();
         EditManager.getInstance()._notifyTextChange(this);
+        EditManager.getInstance()._notifyCursorMove(this);
       }
       break;
     }
@@ -867,6 +884,7 @@ export class EditController {
         this._updateSelection();
         this._debouncedRender();
         EditManager.getInstance()._notifyTextChange(this);
+        EditManager.getInstance()._notifyCursorMove(this);
       }
       break;
     }
@@ -887,6 +905,7 @@ export class EditController {
     this._updateSelection();
     this._debouncedRender();
     EditManager.getInstance()._notifyTextChange(this);
+    EditManager.getInstance()._notifyCursorMove(this);
     break;
   }
       default:
@@ -895,12 +914,20 @@ export class EditController {
     }
   }
 
+  private _onKeyup(event: KeyboardEvent): void {
+    if (this._isComposing) return;
+
+    const cursorKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
+    if (cursorKeys.includes(event.key)) {
+      EditManager.getInstance()._notifyCursorMove(this);
+    }
+  }
+
   private _extendSelection(newOffset: number): void {
     const current = this._cursorModel;
     const anchor = current.selection?.anchor.textOffset ?? current.offset;
     current.selection = SelectionRange.fromOffsets(anchor, newOffset);
     current.offset = newOffset;
-    EditManager.getInstance()._notifySelectionChange(this);
   }
 
   private _syncTextareaSelection(): void {
@@ -959,7 +986,6 @@ export class EditController {
     this._updateCursorPosition();
     this._updateSelection();
     this._debouncedRender();
-    EditManager.getInstance()._notifySelectionChange(this);
   }
 
   private _onPaste(event: ClipboardEvent): void {
@@ -997,6 +1023,7 @@ export class EditController {
     this._updateSelection();
     this._debouncedRender();
     EditManager.getInstance()._notifyTextChange(this);
+    EditManager.getInstance()._notifyCursorMove(this);
   }
 
   private _selectAll(): void {
@@ -1011,7 +1038,6 @@ export class EditController {
     this._textarea.setSelectionRange(0, content.length);
     this._updateCursorPosition();
     this._updateSelection();
-    EditManager.getInstance()._notifySelectionChange(this);
   }
 
   _clearSelection(): void {
@@ -1019,7 +1045,6 @@ export class EditController {
     this._selectionEl.setRanges([]);
     this._textarea.setSelectionRange(this._cursorModel.offset, this._cursorModel.offset);
     this._updateCursorPosition();
-    EditManager.getInstance()._notifySelectionChange(this);
   }
 
   private _computeVerticalOffset(direction: -1 | 1): number | null {
@@ -1184,6 +1209,7 @@ export class EditController {
       this._updateSelection();
       this._debouncedRender();
       EditManager.getInstance()._notifyTextChange(this);
+      EditManager.getInstance()._notifyCursorMove(this);
       return;
     }
 
@@ -1203,8 +1229,9 @@ export class EditController {
 
     this._updateCursorPosition();
     this._debouncedRender();
-    EditManager.getInstance()._notifyStyleChange(this);
+    this._emitStyleChange();
     EditManager.getInstance()._notifyTextChange(this);
+    EditManager.getInstance()._notifyCursorMove(this);
   }
 
   private _replaceSelection(replacement: string): void {
@@ -1229,8 +1256,8 @@ export class EditController {
     this._updateCursorPosition();
     this._updateSelection();
     this._debouncedRender();
-    EditManager.getInstance()._notifySelectionChange(this);
     EditManager.getInstance()._notifyTextChange(this);
+    EditManager.getInstance()._notifyCursorMove(this);
   }
 
   private _onCompositionStart(): void {
@@ -1343,7 +1370,7 @@ export class EditController {
       this._updateCursorPosition();
     }
 
-    EditManager.getInstance()._notifyStyleChange(this);
+    this._emitStyleChange();
   }
 
   private _positionCursorFromCompositionSpan(): boolean {
@@ -1404,8 +1431,9 @@ export class EditController {
     this._paragraph.render();
     this._updateCursorPosition();
     this._updateSelection();
-    EditManager.getInstance()._notifyStyleChange(this);
+    this._emitStyleChange();
     EditManager.getInstance()._notifyTextChange(this);
+    EditManager.getInstance()._notifyCursorMove(this);
   }
 
   private _removeCompositionSpan(): void {
@@ -1634,7 +1662,8 @@ export class EditController {
   setCursor(position: CursorPosition): void {
     this._cursorModel.offset = position.textOffset;
     this._updateCursorPosition();
-    EditManager.getInstance()._notifyStyleChange(this);
+    this._emitStyleChange();
+    EditManager.getInstance()._notifyCursorMove(this);
   }
 
   /**
@@ -1644,8 +1673,20 @@ export class EditController {
   setSelection(range: SelectionRange): void {
     this._cursorModel.selection = range;
     this._updateSelection();
-    EditManager.getInstance()._notifySelectionChange(this);
-    EditManager.getInstance()._notifyStyleChange(this);
+    this._emitStyleChange();
+    EditManager.getInstance()._notifyCursorMove(this);
+  }
+
+  /**
+   * 현재 커서 위치의 스타일이 이전과 다를 때만 styleChange 이벤트를 발생시킨다.
+   */
+  private _emitStyleChange(): void {
+    const current = this.currentStyle;
+    const json = JSON.stringify(current);
+    if (json !== this._lastStyleJson) {
+      this._lastStyleJson = json;
+      EditManager.getInstance()._notifyStyleChange(this);
+    }
   }
 }
 

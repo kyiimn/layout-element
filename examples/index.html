@@ -93,6 +93,26 @@
 
         btnRead.addEventListener("click", () => setEditMode(false));
         btnEdit.addEventListener("click", () => setEditMode(true));
+
+        // EditManager 이벤트 수신 → 콘솔 출력
+        const { EditManager } = await import("/src/edit/edit-manager");
+        const em = EditManager.getInstance();
+        const eventTypes = [
+          'focusChange',
+          'textChange',
+          'styleChange',
+          'cursorMove',
+          'selectionStart',
+          'selectionEnd',
+        ];
+        for (const type of eventTypes) {
+          em.addEventListener(type, (event) => {
+            const detail = type === 'focusChange'
+              ? `from: ${event.previousParagraph?.id ?? '(null)'}`
+              : `paragraph: ${event.paragraph.id}`;
+            console.log(`[EditManager] ${type} — ${detail}`);
+          });
+        }
       })();
     </script>
   </body>
