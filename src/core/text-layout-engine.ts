@@ -1,4 +1,4 @@
-import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/constants";
+import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP, DEFAULT_SPACE_RATIO } from "@/constants";
 import type { LayoutBoxElement, LayoutParagraphElement } from "@/components";
 import type { LayoutVirtualColumnElement } from "@/components/layout/v-column.element";
 import {
@@ -64,6 +64,7 @@ export class TextLayoutEngine {
   private _previousOverflow: number = -1;
 
   private _cachedWidthRatio: number = 0;
+  private _cachedSpaceRatio: number = 0;
   private _cachedHalfWidthStyle: Partial<CSSStyleDeclaration> = {};
   private _cachedFullWidthStyle: Partial<CSSStyleDeclaration> = {};
   private _cachedSpaceStyle: Partial<CSSStyleDeclaration> = {};
@@ -195,7 +196,7 @@ export class TextLayoutEngine {
     const fontSizePx = fontSize * effectivePpm;
     const maxWidthPx = this.widthRatio * fontSizePx;
     const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
-    const minWidthEm = (char === ' ' || !isHalfWidth) ? 0.15 : 0.35;
+    const minWidthEm = (char === ' ') ? this.spaceRatio : (!isHalfWidth ? 0.15 : 0.35);
     const minWidthPx = minWidthEm * fontSizePx;
     return Math.round(Math.min(Math.max(rawWidth, minWidthPx), maxWidthPx));
   }
@@ -814,8 +815,10 @@ export class TextLayoutEngine {
    */
   private _updateCharStyleCache(): void {
     const wr = this.widthRatio;
-    if (wr === this._cachedWidthRatio) return;
+    const sr = this.spaceRatio;
+    if (wr === this._cachedWidthRatio && sr === this._cachedSpaceRatio) return;
     this._cachedWidthRatio = wr;
+    this._cachedSpaceRatio = sr;
 
     this._cachedHalfWidthStyle = {
       display: 'inline-block',
@@ -838,7 +841,7 @@ export class TextLayoutEngine {
     this._cachedSpaceStyle = {
       display: 'inline-block',
       maxWidth: `${wr}em`,
-      minWidth: '0.15em',
+      minWidth: `${sr}em`,
       scale: `${wr} 1`,
       textAlign: 'center',
       transformOrigin: '0',
@@ -944,6 +947,11 @@ export class TextLayoutEngine {
   /** 장평 비율 */
   public get widthRatio() {
     return this.textStyle?.widthRatio || this.inheritStyle?.widthRatio || 1;
+  }
+
+  /** 공백 너비 비율 (em 단위) */
+  public get spaceRatio() {
+    return this.textStyle?.spaceRatio ?? this.inheritStyle?.spaceRatio ?? DEFAULT_SPACE_RATIO;
   }
 
   public get columnWidths() {

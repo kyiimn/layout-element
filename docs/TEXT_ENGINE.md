@@ -313,23 +313,24 @@ private _charWidthPx(char: string, textBlockStyle?: TextBlockStyle, ppm?: number
   const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
   this._ctx.font = this._getCanvasFont(textBlockStyle, effectivePpm);
   const metrics = this._ctx.measureText(char);
-  const rawWidth = metrics.width;  // advance width
-  const scaledWidth = rawWidth * this.widthRatio;
+  const rawWidth = metrics.width;
   const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
   const fontSizePx = fontSize * effectivePpm;
+  const maxWidthPx = this.widthRatio * fontSizePx;
   const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
-  const minWidthEm = (char === ' ' || !isHalfWidth) ? 0.15 : 0.35;
+  const minWidthEm = (char === ' ') ? this.spaceRatio : (!isHalfWidth ? 0.15 : 0.35);
   const minWidthPx = minWidthEm * fontSizePx;
-  return Math.round(Math.max(scaledWidth, minWidthPx));
+  return Math.round(Math.min(Math.max(rawWidth, minWidthPx), maxWidthPx));
 }
 ```
 
 ### 6.2 핵심 포인트
 
 - `metrics.width`(advance width)를 사용한다. `actualBoundingBoxLeft + actualBoundingBoxRight`는 사용하지 않는다.
-- 측정값에 `widthRatio`(장평)를 곱해 CSS `scale: widthRatio 1` 렌더링과 일치시킨다.
+- `maxWidthPx = widthRatio * fontSizePx`로 상한 클램프 — 장평 비율 반영.
 - `minWidthPx` 바닥값을 두어 0 폭 문자가 되는 것을 방지한다.
-  - 공백 또는 반각이 아닌 문자: `0.15em`
+  - 공백 문자: `spaceRatio` em (기본값 0.15, `TextStyle.spaceRatio`로 설정 가능)
+  - 반각이 아닌 문자: `0.15em`
   - 반각 문자: `0.35em`
 - 반각 판정은 `char.charCodeAt(0) <= 255`로 이루어진다. Latin-1 전각 문자(128-255)는 반각으로 오분류될 수 있다.
 
@@ -684,7 +685,7 @@ public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
 
 - `display: 'inline-block'`
 - `maxWidth`: `${widthRatio}em` (장평 비율만큼 레이아웃 박스 너비 제한)
-- `minWidth`: 공백 `0.15em`, 1바이트 문자 `0.35em`, 그 외 `0.15em`
+- `minWidth`: 공백 `${spaceRatio}em` (기본값 0.15em, `TextStyle.spaceRatio`로 설정 가능), 1바이트 문자 `0.35em`, 그 외 `0.15em`
 - `scale`: `${widthRatio} 1` (글자 모양 자체를 수평 축소 — 장평)
 - `textAlign`: `'center'`
 - `transformOrigin`: `'0'`
@@ -771,6 +772,7 @@ const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColu
 | `lineHeight` | `number` | 줄 높이(mm) |
 | `overflow` | `number` | 오버플로우된 문자 수 |
 | `widthRatio` | `number` | 장평 비율 |
+| `spaceRatio` | `number` | 공백 너비 비율 (em 단위). 기본값: 0.15 |
 | `columnWidths` | `number[]` | 컬럼별 너비(mm) 배열 |
 | `inputContent` | `string \| (string \| TextBlockData)[]` | 현재 입력 콘텐츠 |
 | `previousLineCount` | `number` | 이전 렌더링 사이클의 총 줄 수 |
@@ -809,6 +811,7 @@ const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColu
 | `DEFAULT_FONT_WEIGHT` | `400` | 기본 폰트 굵기 |
 | `DEFAULT_PPM` | `96 / 25.4` | 기본 pixels-per-mm |
 | `DEFAULT_IMAGE_DPI` | `72` | 기본 이미지 DPI |
+| `DEFAULT_SPACE_RATIO` | `0.15` | 기본 공백 너비 비율 (em) |
 
 `_lineHeight` 계산:
 
@@ -1137,7 +1140,7 @@ private _charWidthPx(char: string, textBlockStyle?: TextBlockStyle, ppm?: number
   const fontSizePx = fontSize * effectivePpm;
   const maxWidthPx = this.widthRatio * fontSizePx;
   const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
-  const minWidthEm = (char === ' ' || !isHalfWidth) ? 0.15 : 0.35;
+  const minWidthEm = (char === ' ') ? this.spaceRatio : (!isHalfWidth ? 0.15 : 0.35);
   const minWidthPx = minWidthEm * fontSizePx;
   return Math.round(Math.min(Math.max(rawWidth, minWidthPx), maxWidthPx));
 }
@@ -1146,7 +1149,7 @@ private _charWidthPx(char: string, textBlockStyle?: TextBlockStyle, ppm?: number
 **핵심 포인트:**
 - `metrics.width` (advance width)를 사용 — `actualBoundingBoxLeft + actualBoundingBoxRight`는 잉크 영역만 측정하여 좁은 문자(i, l, j)를 과소측정한다.
 - `maxWidthPx = widthRatio * fontSizePx`로 상한 클램프 — 장평 비율 반영.
-- `minWidthPx` 바닥값 — 0폭 문자 방지 (공백/전각 `0.15em`, 반각 `0.35em`).
+- `minWidthPx` 바닥값 — 0폭 문자 방지 (공백 `spaceRatio`em 기본 0.15, 전각 `0.15em`, 반각 `0.35em`).
 - 측정값에 `widthRatio`를 직접 곱하지 않음 — `maxWidthPx` 클램프가 장평을 반영.
 
 **효과:** 텍스트 래핑 계산 시 DOM 조작 없이 순수 계산으로 처리. O(n)번의 강제 리플로우 제거.

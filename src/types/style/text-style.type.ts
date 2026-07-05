@@ -6,6 +6,10 @@
  *
  * `widthRatio`는 CSS `transform: scaleX()`로 구현된다.
  * 신문 본문에서 좁은 컬럼에 텍스트를 맞추기 위해 수평 압축할 때 사용한다.
+ *
+ * `spaceRatio`는 공백 문자의 최소 너비 비율(em 단위)을 설정한다.
+ * 공백 문자의 렌더링 너비는 `spaceRatio × fontSizePx`로 제한되며,
+ * 기본값은 0.15로 반각 문자보다 좁은 공백을 표현한다.
  */
 export type TextStyle = {
   /** 글자 색상 (CSS 색상 문자열 또는 CMYK 색상 이름) */
@@ -28,4 +32,7 @@ export type TextStyle = {
 
   /** 장평 비율. 1.0 = 100%, 0.8 = 80%로 수평 압축 */
   widthRatio?: number;
+
+  /** 공백 너비 비율 (em 단위). 공백 문자의 최소 렌더링 너비. 기본값: 0.15 */
+  spaceRatio?: number;
 };

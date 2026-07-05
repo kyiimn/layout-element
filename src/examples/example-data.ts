@@ -292,6 +292,7 @@ export const exampleData = {
     fontSize: 4,
     letterSpacing: -0.15,
     widthRatio: 0.8,
+    spaceRatio: 0.2
   },
   paragraphStyle: {
     lineGap: 1.2,

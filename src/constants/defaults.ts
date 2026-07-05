@@ -5,3 +5,4 @@ export const DEFAULT_FONT_WEIGHT = 400;
 export const DEFAULT_LINE_GAP = 1;
 export const DEFAULT_PPM = 96 / 25.4;
 export const DEFAULT_IMAGE_DPI = 72;
+export const DEFAULT_SPACE_RATIO = 0.15;
