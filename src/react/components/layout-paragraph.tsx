@@ -45,6 +45,13 @@ export const LayoutParagraph = forwardRef<LayoutParagraphElement, LayoutParagrap
       } else if (ref) {
         ref.current = innerRef.current;
       }
+      return () => {
+        if (typeof ref === 'function') {
+          ref(null);
+        } else if (ref) {
+          ref.current = null;
+        }
+      };
     }, [ref, innerRef]);
 
     return (

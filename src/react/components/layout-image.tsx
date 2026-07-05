@@ -5,10 +5,17 @@ import { useLayoutElement } from '@/react/hooks';
 
 export interface LayoutImageProps {
   data: ImageData;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  dpi?: number;
+  url?: string;
+  zIndex?: number;
 }
 
 export const LayoutImage = forwardRef<LayoutImageElement, LayoutImageProps>(
-  function LayoutImage({ data }, ref) {
+  function LayoutImage({ data, x, y, width, height, dpi, url, zIndex }, ref) {
     const { ref: innerRef, define } = useLayoutElement<LayoutImageElement>();
 
     useEffect(() => {
@@ -22,11 +29,60 @@ export const LayoutImage = forwardRef<LayoutImageElement, LayoutImageProps>(
     }, [innerRef, data]);
 
     useEffect(() => {
+      const element = innerRef.current;
+      if (!element || x === undefined) return;
+      element.x = x;
+    }, [innerRef, x]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || y === undefined) return;
+      element.y = y;
+    }, [innerRef, y]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || width === undefined) return;
+      element.width = width;
+    }, [innerRef, width]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || height === undefined) return;
+      element.height = height;
+    }, [innerRef, height]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || dpi === undefined) return;
+      element.dpi = dpi;
+    }, [innerRef, dpi]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || url === undefined) return;
+      element.url = url;
+    }, [innerRef, url]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || zIndex === undefined) return;
+      element.zIndex = zIndex;
+    }, [innerRef, zIndex]);
+
+    useEffect(() => {
       if (typeof ref === 'function') {
         ref(innerRef.current);
       } else if (ref) {
         ref.current = innerRef.current;
       }
+      return () => {
+        if (typeof ref === 'function') {
+          ref(null);
+        } else if (ref) {
+          ref.current = null;
+        }
+      };
     }, [ref, innerRef]);
 
     return (

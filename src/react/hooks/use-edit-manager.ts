@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   EditManager,
   EditManagerEvent,
@@ -30,36 +30,29 @@ export interface UseEditManagerReturn {
   blurParagraph: (target?: LayoutParagraphElement | string) => boolean;
 }
 
-const EVENT_TYPE_MAP: Record<
-  keyof UseEditManagerOptions,
-  EditManagerEventType
-> = {
-  onFocusChange: 'focusChange',
-  onTextChange: 'textChange',
-  onStyleChange: 'styleChange',
-  onSelectionStart: 'selectionStart',
-  onSelectionEnd: 'selectionEnd',
-  onCursorMove: 'cursorMove',
-};
+const EVENT_TYPES: Array<{ key: keyof UseEditManagerOptions; type: EditManagerEventType }> = [
+  { key: 'onFocusChange', type: 'focusChange' },
+  { key: 'onTextChange', type: 'textChange' },
+  { key: 'onStyleChange', type: 'styleChange' },
+  { key: 'onSelectionStart', type: 'selectionStart' },
+  { key: 'onSelectionEnd', type: 'selectionEnd' },
+  { key: 'onCursorMove', type: 'cursorMove' },
+];
 
 export function useEditManager(
   options: UseEditManagerOptions = {},
 ): UseEditManagerReturn {
   const manager = EditManager.getInstance();
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   const [focusedParagraph, setFocusedParagraph] =
     useState<LayoutParagraphElement | null>(manager.focusedParagraph);
   const [focusedController, setFocusedController] =
     useState<EditController | null>(manager.focusedController);
-  const [cursorOffset, setCursorOffset] = useState<number | null>(
-    manager.cursorOffset,
-  );
-  const [selection, setSelection] = useState<SelectionRange | null>(
-    manager.selection,
-  );
-  const [currentStyle, setCurrentStyle] = useState<CurrentStyle | null>(
-    manager.currentStyle,
-  );
+  const [cursorOffset, setCursorOffset] = useState<number | null>(manager.cursorOffset);
+  const [selection, setSelection] = useState<SelectionRange | null>(manager.selection);
+  const [currentStyle, setCurrentStyle] = useState<CurrentStyle | null>(manager.currentStyle);
 
   const syncState = useCallback(() => {
     setFocusedParagraph(manager.focusedParagraph);
@@ -70,22 +63,14 @@ export function useEditManager(
   }, [manager]);
 
   useEffect(() => {
-    const listeners: Array<{
-      type: EditManagerEventType;
-      listener: (event: EditManagerEvent) => void;
-    }> = [];
+    const listeners: Array<{ type: EditManagerEventType; listener: (event: EditManagerEvent) => void }> = [];
 
-    for (const [key, type] of Object.entries(EVENT_TYPE_MAP) as Array<
-      [keyof UseEditManagerOptions, EditManagerEventType]
-    >) {
-      const handler = options[key];
-      if (!handler) continue;
-
+    for (const { key, type } of EVENT_TYPES) {
       const listener = (event: EditManagerEvent) => {
         syncState();
-        handler(event);
+        const handler = optionsRef.current[key];
+        if (handler) handler(event);
       };
-
       manager.addEventListener(type, listener);
       listeners.push({ type, listener });
     }
@@ -95,19 +80,16 @@ export function useEditManager(
         manager.removeEventListener(type, listener);
       }
     };
-  }, [manager, options, syncState]);
+  }, [manager, syncState]);
 
   const focusParagraph = useCallback(
-    (
-      target: LayoutParagraphElement | string,
-      focusOptions?: { cursorOffset?: number; selection?: SelectionRange },
-    ): boolean => manager.focusParagraph(target, focusOptions),
+    (target: LayoutParagraphElement | string, focusOptions?: { cursorOffset?: number; selection?: SelectionRange }): boolean =>
+      manager.focusParagraph(target, focusOptions),
     [manager],
   );
 
   const blurParagraph = useCallback(
-    (target?: LayoutParagraphElement | string): boolean =>
-      manager.blurParagraph(target),
+    (target?: LayoutParagraphElement | string): boolean => manager.blurParagraph(target),
     [manager],
   );
 
