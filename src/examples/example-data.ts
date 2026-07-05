@@ -95,7 +95,8 @@ const block2: BoxData = {
       dpi: 72,
       x: 0, y: 0,
       width: 80.08,
-      height: 47.98
+      height: 47.98,
+      overlapPadding: 10
     }]
   }, {
     type: 'box',
@@ -110,7 +111,8 @@ const block2: BoxData = {
       dpi: 72,
       x: 0, y: 0,
       width: 80.08,
-      height: 47.98
+      height: 47.98,
+      overlapPadding: 5
     }]
   }
   ]
