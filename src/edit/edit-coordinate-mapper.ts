@@ -532,13 +532,36 @@ export class EditCoordinateMapper {
     if (anchorColumn === null) return null;
 
     const anchorRect = anchorSpan.getBoundingClientRect();
-    const anchorTop = Math.round(anchorRect.top);
+    let anchorTop = Math.round(anchorRect.top);
 
-    // 같은 컬럼 내에서 같은 시각적 행(같은 top 좌표)의 span 수집
+    // 공백 문자의 span은 height가 0이고 top이 실제 텍스트 행과 달라
+    // 시각적 행 탐지가 틀어지므로, 가장 가까운 가시 span의 Y로 보정한다.
+    if (anchorRect.height <= 1) {
+      const columnSpansForY = this._getColumnSpans(anchorColumn);
+      let bestSpan: HTMLSpanElement | null = null;
+      let bestOffset = Infinity;
+      for (const s of columnSpansForY) {
+        const r = s.getBoundingClientRect();
+        if (r.height <= 1) continue;
+        const sOffset = parseInt(s.dataset.offset ?? '', 10);
+        const distance = Math.abs(sOffset - renderedOffset);
+        if (distance < bestOffset) {
+          bestOffset = distance;
+          bestSpan = s;
+        }
+      }
+      if (bestSpan) {
+        anchorTop = Math.round(bestSpan.getBoundingClientRect().top);
+      }
+    }
+
+    // 같은 컬럼 내에서 같은 시각적 행(같은 top 좌표)의 가시 span 수집
+    // 공백 등 height≤1 span은 가시 문자가 아니므로 제외
     const columnSpans = this._getColumnSpans(anchorColumn);
     const lineSpans: HTMLSpanElement[] = [];
     for (const s of columnSpans) {
       const r = s.getBoundingClientRect();
+      if (r.height <= 1) continue;
       if (Math.round(r.top) === anchorTop) {
         lineSpans.push(s);
       }
