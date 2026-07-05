@@ -1080,6 +1080,17 @@ export class EditController {
 		    const targetX = cursorRect.left + paragraphRect.left;
 		    const baseY = cursorRect.top + paragraphRect.top + direction * lineHeight;
 
+	    // Helper: verify that a candidate offset is on a visually different line
+	    // than the current cursor. getNearestOffsetFromPoint can snap back to
+	    // the current line when the target Y lands between lines.
+	    const isOnDifferentLine = (candidateOffset: number): boolean => {
+	      const rendered = this._mapper.renderedOffset(candidateOffset);
+	      if (rendered === null) return true;
+	      const candidateRect = this._mapper.getCharRect(rendered);
+	      if (!candidateRect) return true;
+	      return Math.abs(candidateRect.top - cursorRect.top) > 1;
+	    };
+
 	    // Probe strategy: line spacing can exceed font height, placing targetY
 	    // in the gap between lines where no span exists. Try multiple Y positions.
 	    const probeOffsets = [
@@ -1087,23 +1098,23 @@ export class EditController {
 	      direction * lineHeight * 0.5,                     // half a line further
 	    ];
 
-	    for (const offset of probeOffsets) {
-	      const result = this._mapper.getCharOffsetFromPoint(targetX, baseY + offset);
-	      if (result?.textOffset != null) return result.textOffset;
+	    for (const probeY of probeOffsets) {
+	      const result = this._mapper.getCharOffsetFromPoint(targetX, baseY + probeY);
+	      if (result?.textOffset != null && result.textOffset !== offset && isOnDifferentLine(result.textOffset)) return result.textOffset;
 	      // Fallback: getCharOffsetFromPoint returns null in whitespace/between spans
-	      const nearest = this._mapper.getNearestOffsetFromPoint(targetX, baseY + offset);
-	      if (nearest?.textOffset != null) return nearest.textOffset;
+	      const nearest = this._mapper.getNearestOffsetFromPoint(targetX, baseY + probeY);
+	      if (nearest?.textOffset != null && nearest.textOffset !== offset && isOnDifferentLine(nearest.textOffset)) return nearest.textOffset;
 	    }
 
 	    // Scan in small increments until a character is found or we exceed one line height
 	    const step = 2;
 	    for (let scanOffset = step; scanOffset <= lineHeight; scanOffset += step) {
 	      const result = this._mapper.getCharOffsetFromPoint(targetX, baseY + direction * scanOffset);
-	      if (result?.textOffset != null) return result.textOffset;
+	      if (result?.textOffset != null && result.textOffset !== offset && isOnDifferentLine(result.textOffset)) return result.textOffset;
 	    }
 
 	    const finalNearest = this._mapper.getNearestOffsetFromPoint(targetX, baseY);
-	    if (finalNearest?.textOffset != null) return finalNearest.textOffset;
+	    if (finalNearest?.textOffset != null && finalNearest.textOffset !== offset && isOnDifferentLine(finalNearest.textOffset)) return finalNearest.textOffset;
 
 	    return null;
   }
