@@ -110,6 +110,7 @@ sequenceDiagram
 - 텍스트 선택 (마우스 드래그, 키보드 확장, 더블/트리플 클릭)
 - 한국어, 일본어, 중국어 IME 조합 입력
 - 키보드 입력 (문자 삽입/삭제, 줄바꿈, 탐색 단축키)
+- 단어 단위 커서 이동 (Ctrl+ArrowLeft/ArrowRight)
 - 마우스 클릭 및 드래그
 - 클립보드 복사/붙여넣기/잘라내기
 
@@ -1095,12 +1096,18 @@ private _debouncedRender(): void {
 - `postRender()`에서 `_optimisticSpan = null`로 참조 제거, 실제 렌더링된 span으로 대체.
 - 효과: 키 입력과 화면 갱신 사이 지연 감소.
 
-#### 7.4.3 증분 렌더링 (`paragraph.render()` 내부)
+#### 7.4.3 key 기반 증분 span 렌더링 (`renderText()` 내부)
 
-- `_structureDirty` 플래그로 구조 재계산 필요 여부를 판단.
-- 구조가 변경되지 않았으면 `layoutText()`만 호출 (오버랩 측정 생략).
-- 라인 수가 변하지 않았으면 기존 컬럼 요소를 재사용하고 `renderText()`만 호출.
-- 효과: 텍스트 내용만 변경된 경우 DOM 재생성 비용 절약.
+- `column.element.ts`의 `renderText()`는 `data-source-offset`을 key로 사용한 diff 렌더링으로 동작한다.
+- 기존 span들을 `data-source-offset` 기준으로 Map에 저장한다.
+- `data-temporary` span(낙관적 span)은 diff 시작 전 모두 제거한다.
+- 새 content의 각 문자에 대해 source offset을 계산한다.
+- 기존 span이 있으면: `innerText`, 스타일, `data-offset`을 갱신하고 DOM 순서를 `insertBefore`로 조정한다.
+- 기존 span이 없으면: 새 span을 생성한다.
+- 사용되지 않은 기존 span은 제거한다.
+- `<style>` 요소는 재사용하고 CSS 룰만 갱신한다 (재생성하지 않음).
+- COVER 라인(`parts: []`)은 라인 div의 모든 자식을 제거하고 빈 div만 유지한다.
+- 효과: 한 글자 입력 시 변경된 라인의 span만 갱신되고 나머지는 재사용된다. `innerHTML = ''`가 발생하지 않는다.
 
 #### 7.4.4 Canvas `measureText()` 기반 측정
 
@@ -1127,7 +1134,7 @@ private _debouncedRender(): void {
 | 상황 | 비용 |
 |------|------|
 | 전체 재렌더링 (`needsFullRecreate = true`) | `replaceChildren()` + 모든 컬럼 재생성 + 모든 span 재생성. 가장 비싸다. |
-| 증분 렌더링 (`needsFullRecreate = false`) | 기존 컬럼의 `renderText()`만 호출, span 재생성. 구조 변경이 없을 때 사용. |
+| 증분 렌더링 (`needsFullRecreate = false`) | 기존 컬럼의 `renderText()` 호출. key 기반 diff로 변경된 span만 갱신, 나머지 재사용. 구조 변경이 없을 때 사용. |
 | 디바운스 렌더링 | 최대 1회/프레임. `requestAnimationFrame`으로 다음 프레임에 실행. 연속 입력을 묶는다. |
 | 낙관적 span | 렌더링 대기 시간 동안 사용자에게 즉각적인 피드백. 추가 DOM 요소 1개만 삽입. |
 
@@ -1146,8 +1153,9 @@ flowchart LR
     end
 
     subgraph Incremental["증분 렌더링"]
-        I1["_structureDirty = false"] --> I2["layoutText()만 호출"]
-        I2 --> I3["기존 컬럼 renderText()"]
+        I1["needsFullRecreate = false"] --> I2["layoutText() + renderText()"]
+        I2 --> I3["key 기반 span diff"]
+        I3 --> I4["변경된 span만 갱신"]
     end
 ```
 

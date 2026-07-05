@@ -4,7 +4,7 @@
 
 Newspaper layout engine implemented as Web Components (Custom Elements). Renders print-style document layouts in the browser — multi-column text, character-by-character text wrapping with overlap avoidance around images, and proportional font width (장평) control — features CSS cannot properly handle.
 
-**Editing support is under development.** Cursor, selection, and IME composition are implemented in `EditController` and `EditCoordinateMapper`.
+**Editing support is under development.** Cursor, selection, and IME composition are implemented in `EditController` and `EditCoordinateMapper`. Global edit state (focus, events) is managed by the `EditManager` singleton.
 
 ## Commands
 
@@ -38,6 +38,10 @@ No test runner, linter, or formatter is configured.
       <x-layout-column>      ← Individual text column (rendered text lines)
     <x-layout-image>         ← Canvas-based image crop element
   <x-layout-vcolumn>         ← Virtual column (temporary, used only during layoutText)
+
+Edit mode elements (in shadow DOM of <x-layout-paragraph>):
+  <x-edit-cursor>            ← 1px width cursor element (in src/components/edit/)
+  <x-layout-selection>       ← Selection highlight element (in src/components/edit/)
 ```
 
 ### Rendering Pipeline (3 phases)
@@ -62,6 +66,7 @@ No test runner, linter, or formatter is configured.
 
 - **`ColorRegistry`**: Loads `color.json` → CMYK→RGB conversion → injects CSS variables `--colorman-{name}`. In print mode, receives `CMYKColorSet` via `init()` instead of fetching.
 - **`FontLoader`**: Loads `fonts.json` → registers `FontFace` objects. In print mode, uses `base64Data` instead of `ttfFilename`. Hardcoded return value `getFontFamily()` → `'Myoungjo'`.
+- **`EditManager`**: Singleton (`src/edit/edit-manager.ts`) that manages global edit state. Tracks focused paragraph/controller, dispatches events (`focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`). Provides `focusParagraph()` / `blurParagraph()` API for programmatic focus control. `EditController` instances register/unregister with it.
 
 ## Important Constraints
 
@@ -76,37 +81,93 @@ No test runner, linter, or formatter is configured.
 - **No tests exist**: There is no test infrastructure. No `vitest`, no `jest`, no test files.
 - **ColorRegistry without stylesheet**: `ColorRegistry.init()` sets `_ready = true` even when no stylesheet is available (SSR, test environments). Color data is accessible via `colorMap` but CSS variables are not injected.
 - **Guide column printPostData**: `LayoutGuideColumnElement` has a `printPostData` getter that returns position/size data for print post-processing, matching the pattern of other layout elements.
+- **EditManager singleton**: `EditManager.getInstance()` manages focus across all editable paragraphs. Only one paragraph can be focused at a time. `EditController` auto-registers on construction and auto-unregisters on `destroy()`.
+- **Key-based span rendering**: `column.element.ts` `renderText()` uses `data-source-offset` as the reconciliation key for span diff rendering. Existing spans are reused when content unchanged; only changed spans are updated. `data-offset` (rendered offset) is retained for `EditCoordinateMapper` compatibility.
+- **`data-source-offset` vs `data-offset`**: `data-source-offset` = source string position (used as diff key). `data-offset` = rendered position (used by EditCoordinateMapper for click-to-cursor mapping). Both attributes coexist on every span.
+- **Optimistic spans are temporary**: `data-temporary="true"` spans are stripped at the start of every `renderText()` call and recreated by `EditController` as needed.
+- **EditContextAdapter**: `src/edit/edit-context-adapter.ts` bridges the browser EditContext API (Chrome 121+) with the layout engine. `EditContextAdapter.create()` returns `null` if the API is not supported.
 
 ## Directory Structure
 
 ```
 src/
   components/     # Custom Elements (each file = one element + customElements.define)
+    edit/
+      cursor.element.ts      # <x-edit-cursor> (1px width cursor element)
+      selection.element.ts   # <x-layout-selection> (selection highlight element)
+      index.ts
+    layout/
+      box.element.ts
+      column.element.ts
+      document.element.ts
+      guide-column.element.ts
+      image.element.ts
+      paragraph.element.ts
+      v-column.element.ts
+      index.ts
+    index.ts
   core/
-    grid-calculator.ts   # GridCalculator (column grid calculation)
-    text-layout-engine.ts # TextLayoutEngine (text wrapping engine)
+    grid-calculator.ts       # GridCalculator (column grid calculation)
+    text-layout-engine.ts    # TextLayoutEngine (text wrapping engine)
+    index.ts
   edit/
-    edit-controller.ts   # EditController (cursor, selection, IME composition)
+    edit-context-adapter.ts  # Browser EditContext API adapter
+    edit-controller.ts       # EditController (cursor, selection, IME composition)
     edit-coordinate-mapper.ts # EditCoordinateMapper (click-to-offset mapping)
-    cursor.element.ts     # <x-edit-cursor> (1px width cursor element)
+    edit-manager.ts          # EditManager singleton (global edit state)
+    index.ts
   resource/
-    color-registry.ts    # ColorRegistry (CMYK→RGB singleton)
-    font-loader.ts       # FontLoader (font loading singleton)
+    color-registry.ts        # ColorRegistry (CMYK→RGB singleton)
+    font-loader.ts           # FontLoader (font loading singleton)
+    index.ts
   types/
-    layout/        # DocumentData, BoxData, ParagraphData, ImageData, GuideColumnData, TextData
-    style/         # TextStyle, ParagraphStyle, InheritStyle, TextBlockStyle
-    print/         # PrintPostData (for post-processing)
-    edit/          # CursorPosition, SelectionRange, EditModel
-  constants/       # Constants: DEFAULT_FONT_SIZE, DEFAULT_PPM, etc.
-  utils/           # checkOverlap, getOverlapSizePX, genUUID
-  examples/        # exampleData (demo content for dev)
-  globals.d.ts     # JSX intrinsic elements for React interop
+    layout/                  # DocumentData, BoxData, ParagraphData, ImageData, GuideColumnData, TextData
+      box.type.ts
+      document.type.ts
+      guide-column.type.ts
+      image.type.ts
+      paragraph.type.ts
+      text.type.ts
+      text/
+        text-block.type.ts
+        text-line.type.ts
+      index.ts
+    style/                   # TextStyle, ParagraphStyle, InheritStyle, TextBlockStyle
+      color.type.ts
+      font.type.ts
+      inherit-style.type.ts
+      paragraph-style.type.ts
+      text-block-style.type.ts
+      text-style.type.ts
+      index.ts
+    print/                   # PrintPostData (for post-processing)
+      color-map.type.ts
+      post-data.type.ts
+      index.ts
+    edit/                    # CursorPosition, SelectionRange, EditModel
+      cursor.type.ts
+      selection.type.ts
+      index.ts
+    index.ts
+  constants/                 # Constants: DEFAULT_FONT_SIZE, DEFAULT_PPM, etc.
+    defaults.ts
+    index.ts
+  utils/                     # checkOverlap, getOverlapSizePX, genUUID
+    check-overlap.ts
+    gen-uuid.ts
+    random.ts                # genRandom() helper (not exported by utils/index.ts)
+    index.ts
+  examples/                  # exampleData (demo content for dev)
+    example-data.ts
+    index.ts
+  globals.d.ts               # JSX intrinsic elements for React interop
+  index.ts                   # Entry point: exports components, core, resource, types, constants, examples
 examples/
-  index.html       # Dev demo page
-  color.json       # CMYK color definitions (fetched at runtime)
-  fonts.json       # Font metadata (fetched at runtime)
-  fonts/           # TTF font files
-  test/            # Test images
+  index.html                 # Dev demo page
+  color.json                 # CMYK color definitions (fetched at runtime)
+  fonts.json                 # Font metadata (fetched at runtime)
+  fonts/                     # TTF font files
+  test/                      # Test images
 ```
 
 ## Dev Workflow Gotchas
@@ -119,5 +180,7 @@ examples/
 - **Cursor width is 1px**: The `<x-edit-cursor>` element has a fixed width of 1px and does not blink.
 - **Korean IME composition**: EditController handles IME composition via `compositionstart`, `compositionupdate`, and `compositionend` events. This is essential for Korean text input on Windows (TSF), macOS, and Linux (IBus).
 - **Mouse coordinate freshness**: `_onMouseMove` stores the latest `clientX`/`clientY` on every mousemove event and reads them from the `requestAnimationFrame` callback, ensuring drag selection follows the cursor accurately during fast movement.
+- **EditManager events**: Use `EditManager.getInstance().addEventListener(type, listener)` to subscribe to edit events. Types: `focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`. The old `selectionChange` event was removed.
+- **Programmatic focus**: Use `EditManager.getInstance().focusParagraph(target, options?)` and `blurParagraph(target?)` instead of calling `paragraph.editable` or `controller.focus()` directly.
 
 Keyboard shortcut documentation has been moved to `docs/EDITING.md` Section 4.

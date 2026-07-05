@@ -208,18 +208,48 @@
 - `overlayElements` 게터는 호출마다 오버랩 요소 목록을 재계산한다.
 - 렌더링 사이클 내에서 캐싱하면 성능 향상 가능.
 
-### 4.4 `getColumnSpans` / `getAllColumns` 캐싱 없음
+### 4.4 `getColumnSpans` 캐싱 (구현됨), `getAllColumns` 미구현
 
-- `EditCoordinateMapper`의 `_getColumnSpans()`와 `_getAllColumns()`는
-  호출마다 DOM 쿼리(`querySelectorAll`)를 수행한다.
-- 드래그 선택 시 매 프레임 호출되므로 성능 영향이 있음.
-- 편집 중 DOM이 변경되므로 캐시 무효화 시점에 주의.
+- `EditCoordinateMapper._getColumnSpans()`는 `_columnSpansCache`
+  (`Map<LayoutColumnElement, HTMLSpanElement[]>`)로 컬럼별 span 목록을 캐싱한다.
+- 캐시는 `rebuild()` 호출 시 초기화된다 (`postRender()`에서 호출).
+- `getNearestOffsetFromPoint()`는 로컬 `spanRects` Map을 한 번에 구축하여
+  모든 `getBoundingClientRect()` 호출을 단일 패스로 통합한다.
+  이 Map은 메서드 종료 시 폐기된다 (인스턴스 필드가 아님).
+- **여전히 미구현**: `_getAllColumns()`는 호출마다 `querySelectorAll('x-layout-column')`을 수행한다.
+- **여전히 미구현**: `getCharRect()`, `getCharOffsetFromPoint()`, `getTextRange()`,
+  `findVisualLineBounds()`는 호출마다 `getBoundingClientRect()`를 수행한다.
 
-### 4.5 `renderText` 전체 Shadow DOM 재구축
+### 4.5 `renderText` key 기반 증분 렌더링 (구현됨)
 
-- 편집 시 `renderText()`가 컬럼의 Shadow DOM을 전체 재구축한다.
-- 증분 렌더링(변경된 라인만 갱신)을 도입하면 성능 향상 가능.
-- 단, 커서/선택 상태와 DOM 동기화에 주의.
+- `column.element.ts`의 `renderText()`는 key 기반 diff 렌더링을 사용한다.
+- 각 span은 `data-source-offset` 속성을 key로 사용하여 재사용 여부를 결정한다.
+- 기존 span이 있으면: `innerText`, 스타일, `data-offset`을 갱신하고 DOM 순서를 `insertBefore`로 조정한다.
+- 기존 span이 없으면: 새 span을 생성한다.
+- 사용되지 않은 기존 span은 제거한다.
+- `innerHTML = ''`는 더 이상 발생하지 않는다.
+- `<style>` 요소는 재사용하고 CSS 룰만 갱신한다.
+- `data-temporary` span(낙관적 span)은 diff 시작 전 모두 제거된다.
+- COVER 라인(`parts: []`)은 라인 div의 모든 자식을 제거하고 빈 div만 유지한다.
+- 헬퍼 메서드: `_computeSourceOffsets()`, `_stripSpaces()`, `_createLineElement()`,
+  `_applyLineStyle()`, `_createPartElement()`, `_applyPartStyle()`,
+  `_createSpanElement()`, `_applySpanStyle()`
+
+### 4.6 `data-source-offset`과 `data-offset`의 구분
+
+- **`data-source-offset`**: 소스 문자열의 문자 위치. key 기반 diff 렌더링의 reconciliation key로 사용.
+- **`data-offset`**: 렌더링된 문자 위치. `EditCoordinateMapper`가 클릭-to-커서 매핑에 사용.
+- 두 속성은 모든 span에 공존한다.
+- `data-offset`을 제거하면 `EditCoordinateMapper`의 `getCharOffsetFromPoint()` 등이 동작하지 않는다.
+- `data-source-offset`을 제거하면 diff 렌더링이 모든 span을 새로 생성하게 된다.
+
+### 4.7 `EditCoordinateMapper.rebuild()` 캐시 무효화
+
+- `rebuild()`는 `_renderedToSource`, `_sourceToRendered`, `_spanCache`,
+  `_columnSpansCache`, `_columnRanges`, `_columnStartOffsets`를 모두 초기화한다.
+- `rebuild()`는 `EditController.postRender()`에서 호출된다.
+- 렌더링 후 반드시 `postRender()`가 호출되어야 캐시가 최신 상태를 반영한다.
+- `rebuild()` 없이 DOM을 직접 조작하면 캐시가 stale 상태가 된다.
 
 ---
 
@@ -273,6 +303,8 @@
 - 새 컴포넌트, 새 타입, 새 제약사항이 추가되면 업데이트할 것.
 - `Important Constraints` 섹션에 코드 수준의 제약을 기록.
 - `Dev Workflow Gotchas` 섹션에 개발 시 주의사항을 기록.
+- `src/edit/` 디렉토리에 `edit-manager.ts`, `edit-context-adapter.ts`가 추가됨.
+  새 편집 관련 파일이 추가되면 AGENTS.md 디렉토리 구조와 함께 업데이트할 것.
 
 ---
 
