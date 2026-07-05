@@ -750,12 +750,11 @@ export class EditController {
     switch (event.key) {
       case "ArrowLeft": {
       event.preventDefault();
+      const targetLeft = hasShortcut ? this._findWordStart(content, offset) : (offset > 0 ? offset - 1 : offset);
       if (isShift) {
-        this._extendSelection(offset > 0 ? offset - 1 : offset);
+        this._extendSelection(targetLeft);
       } else {
-        if (offset > 0) {
-          this._cursorModel.offset = offset - 1;
-        }
+        this._cursorModel.offset = targetLeft;
         this._cursorModel.selection = null;
       }
       this._syncTextareaSelection();
@@ -771,12 +770,11 @@ export class EditController {
     }
     case "ArrowRight": {
       event.preventDefault();
+      const targetRight = hasShortcut ? this._findWordEnd(content, offset) : (offset < content.length ? offset + 1 : offset);
       if (isShift) {
-        this._extendSelection(offset < content.length ? offset + 1 : offset);
+        this._extendSelection(targetRight);
       } else {
-        if (offset < content.length) {
-          this._cursorModel.offset = offset + 1;
-        }
+        this._cursorModel.offset = targetRight;
         this._cursorModel.selection = null;
       }
       this._syncTextareaSelection();
@@ -1159,6 +1157,32 @@ export class EditController {
   private _findLineEnd(content: string, offset: number): number {
     let pos = offset;
     while (pos < content.length && content[pos] !== "\n") {
+      pos++;
+    }
+    return pos;
+  }
+
+  /** Ctrl+ArrowLeft: 이전 단어의 시작 위치로 이동 */
+  private _findWordStart(content: string, offset: number): number {
+    if (offset <= 0) return 0;
+    let pos = offset;
+    while (pos > 0 && /\s/.test(content[pos - 1])) {
+      pos--;
+    }
+    while (pos > 0 && !/\s/.test(content[pos - 1])) {
+      pos--;
+    }
+    return pos;
+  }
+
+  /** Ctrl+ArrowRight: 다음 단어의 시작 위치로 이동 */
+  private _findWordEnd(content: string, offset: number): number {
+    if (offset >= content.length) return content.length;
+    let pos = offset;
+    while (pos < content.length && !/\s/.test(content[pos])) {
+      pos++;
+    }
+    while (pos < content.length && /\s/.test(content[pos])) {
       pos++;
     }
     return pos;
