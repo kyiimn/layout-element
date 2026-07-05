@@ -36,4 +36,7 @@ export type ImageData = {
 
   /** 렌더링 순서 (z-index) */
   zIndex?: number;
+
+  /** 오버랩 감지 시 이미지 불투명 픽셀 주변의 패딩 (mm). 숫자면 상하좌우 동일. */
+  overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number };
 }

@@ -24,6 +24,7 @@ export class LayoutImageElement extends HTMLElement {
   private _dpi: number = DEFAULT_IMAGE_DPI;
   private _url?: string;
   private _zIndex: number = 0;
+  private _overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number };
 
   constructor() {
     super();
@@ -125,6 +126,7 @@ export class LayoutImageElement extends HTMLElement {
   set data(data: ImageData) {
     if (data.id !== undefined) this.id = data.id;
     if (data.zIndex !== undefined) this._zIndex = data.zIndex;
+    if (data.overlapPadding !== undefined) this._overlapPadding = data.overlapPadding;
 
     this._x = data.x;
     this._y = data.y;
@@ -178,10 +180,21 @@ export class LayoutImageElement extends HTMLElement {
     this.layout();
   }
 
+  set overlapPadding(value: number | { top?: number; right?: number; bottom?: number; left?: number } | undefined) {
+    if (this._overlapPadding === value) return;
+    this._overlapPadding = value;
+    this.layout();
+  }
+
+  get overlapPadding() {
+    return this._overlapPadding;
+  }
+
   get data() {
     return {
       id: this.id,
       zIndex: this._zIndex,
+      overlapPadding: this._overlapPadding,
       x: this._x,
       y: this._y,
       width: this._width,

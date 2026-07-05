@@ -12,10 +12,11 @@ export interface LayoutImageProps {
   dpi?: number;
   url?: string;
   zIndex?: number;
+  overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number };
 }
 
 export const LayoutImage = forwardRef<LayoutImageElement, LayoutImageProps>(
-  function LayoutImage({ data, x, y, width, height, dpi, url, zIndex }, ref) {
+  function LayoutImage({ data, x, y, width, height, dpi, url, zIndex, overlapPadding }, ref) {
     const { ref: innerRef, define } = useLayoutElement<LayoutImageElement>();
 
     useEffect(() => {
@@ -69,6 +70,12 @@ export const LayoutImage = forwardRef<LayoutImageElement, LayoutImageProps>(
       if (!element || zIndex === undefined) return;
       element.zIndex = zIndex;
     }, [innerRef, zIndex]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || overlapPadding === undefined) return;
+      element.overlapPadding = overlapPadding;
+    }, [innerRef, overlapPadding]);
 
     useEffect(() => {
       if (typeof ref === 'function') {
