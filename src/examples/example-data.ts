@@ -97,6 +97,21 @@ const block2: BoxData = {
       width: 80.08,
       height: 47.98
     }]
+  }, {
+    type: 'box',
+    left: 10, top: 79,
+    width: 55,
+    height: 35,
+    position: 'absolute',
+    zIndex: 1,
+    children: [{
+      type: 'image',
+      url: 'test/g10506uf.png',
+      dpi: 72,
+      x: 0, y: 0,
+      width: 80.08,
+      height: 47.98
+    }]
   }
   ]
 };
