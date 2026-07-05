@@ -1,4 +1,4 @@
-import type { LayoutParagraphElement } from "@/components/layout/paragraph.element";
+import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import type { EditController, CurrentStyle } from "./edit-controller";
 import type { SelectionRange } from "@/types/edit";
 
@@ -256,6 +256,113 @@ export class EditManager {
    */
   get controllers(): Set<EditController> {
     return new Set(this._controllers);
+  }
+
+  /**
+   * 단락 요소 또는 ID로 포커스를 설정한다.
+   *
+   * 지정된 단락이 편집 모드가 아니면 `editable = true`로 설정하여
+   * `EditController`를 생성한 뒤 포커스를 부여한다.
+   * 단락을 찾을 수 없거나 등록되지 않은 경우 `false`를 반환한다.
+   *
+   * @param target - 포커스를 설정할 단락 요소 또는 단락 요소의 ID
+   * @param options - 커서 위치 및 선택 영역 설정 옵션 (선택 사항)
+   * @param options.cursorOffset - 포커스 후 커서를 배치할 소스 텍스트 오프셋.
+   *   생략하면 커서 위치를 변경하지 않는다.
+   * @param options.selection - 포커스 후 설정할 선택 영역.
+   *   `cursorOffset`과 함께 지정하면 `selection`의 적용이 우선이며,
+   *   커서 위치는 `selection.focus.textOffset`으로 설정된다.
+   * @returns 포커스 설정 성공 여부
+   */
+  focusParagraph(
+    target: LayoutParagraphElement | string,
+    options?: { cursorOffset?: number; selection?: SelectionRange },
+  ): boolean {
+    let paragraph: LayoutParagraphElement | null;
+
+    if (typeof target === 'string') {
+      const element = document.getElementById(target);
+      paragraph = element instanceof LayoutParagraphElement
+        ? element
+        : null;
+    } else {
+      paragraph = target;
+    }
+
+    if (!paragraph) return false;
+
+    if (!paragraph.editable) {
+      paragraph.editable = true;
+    }
+
+    let controller = this._findControllerByParagraph(paragraph);
+    if (!controller) {
+      paragraph.editable = false;
+      paragraph.editable = true;
+      controller = this._findControllerByParagraph(paragraph);
+    }
+    if (!controller) return false;
+
+    controller.focus();
+
+    if (options?.selection) {
+      controller.setSelection(options.selection);
+    } else if (options?.cursorOffset !== undefined) {
+      controller.setCursor({ textOffset: options.cursorOffset });
+    }
+
+    return true;
+  }
+
+  /**
+   * 단락 요소에 해당하는 편집 컨트롤러를 찾는다.
+   */
+  private _findControllerByParagraph(paragraph: LayoutParagraphElement): EditController | null {
+    for (const controller of this._controllers) {
+      if ((controller as unknown as { _paragraph: LayoutParagraphElement })._paragraph === paragraph) {
+        return controller;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 단락 요소 또는 ID로 포커스를 해제한다.
+   *
+   * 지정된 단락이 현재 포커스된 단락이면 커서와 선택 영역을 숨기고
+   * `focusChange` 이벤트를 발생시킨다. 포커스된 단락이 아니면 아무 동작도 하지 않는다.
+   *
+   * `target`을 생략하면 현재 포커스된 단락의 포커스를 해제한다.
+   *
+   * @param target - 포커스를 해제할 단락 요소, 단락 요소의 ID, 또는 생략
+   * @returns 포커스 해제 성공 여부. 포커스된 단락이 없으면 `false`.
+   */
+  blurParagraph(target?: LayoutParagraphElement | string): boolean {
+    if (!this._focusedController) return false;
+
+    if (target === undefined) {
+      (this._focusedController as unknown as { _blurInternal(): void })._blurInternal();
+      return true;
+    }
+
+    let paragraph: LayoutParagraphElement | null;
+
+    if (typeof target === 'string') {
+      const element = document.getElementById(target);
+      paragraph = element instanceof LayoutParagraphElement
+        ? element
+        : null;
+    } else {
+      paragraph = target;
+    }
+
+    if (!paragraph) return false;
+
+    const currentParagraph = this._focusedController['_paragraph'] as LayoutParagraphElement;
+    if (currentParagraph !== paragraph) return false;
+
+    (this._focusedController as unknown as { _blurInternal(): void })._blurInternal();
+    return true;
   }
 
   /**

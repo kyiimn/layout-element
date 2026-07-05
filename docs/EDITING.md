@@ -403,6 +403,8 @@ InheritStyle (부모에서 상속)
 | `selection` | `SelectionRange \| null` get | 현재 선택 영역. 선택이 없거나 포커스된 단락이 없으면 `null`. DOM `Selection` API와 유사하게 현재 selection 객체를 직접 조회. |
 | `currentStyle` | `CurrentStyle \| null` get | 현재 커서 위치의 유효 스타일. 포커스된 단락이 없으면 `null`. |
 | `controllers` | `Set<EditController>` get | 등록된 모든 편집 컨트롤러. |
+| `focusParagraph(target, options?)` | `boolean` | 단락 요소 또는 ID로 포커스를 설정한다. 편집 모드가 아니면 자동 활성화. `options.cursorOffset`으로 커서 위치, `options.selection`으로 선택 영역을 지정할 수 있다. 성공 시 `true`, 실패 시 `false`. |
+| `blurParagraph(target?)` | `boolean` | 단락 요소, ID, 또는 생략으로 포커스를 해제한다. 생략하면 현재 포커스된 단락을 blur. 성공 시 `true`, 실패 시 `false`. |
 | `addEventListener(type, listener)` | `void` | 이벤트 리스너를 등록한다. |
 | `removeEventListener(type, listener)` | `void` | 이벤트 리스너를 제거한다. |
 | `deactivateAll()` | `void` | 모든 단락의 편집 모드를 비활성화한다. |
@@ -458,10 +460,75 @@ type EditManagerEventListener = (event: EditManagerEvent) => void;
 
 `_onBlur`에서 `_releaseFocus`를 호출하지 않는 이유: `controllerB.focus()`를 호출하면 브라우저가 `controllerA`의 textarea blur를 먼저 처리하고, 그 후 `controllerB`의 textarea focus를 처리한다. 만약 `_onBlur`에서 `_releaseFocus`를 호출하면, `_requestFocus`가 호출될 때 `_focusedController`가 이미 null이 되어 `previousController`를 잡지 못한다.
 
-### 3.6.5 사용 예시
+### 3.6.5 `focusParagraph()` / `blurParagraph()` 동작 상세
+
+#### `focusParagraph(target, options?)`
+
+단락 요소 또는 ID로 포커스를 설정한다. `EditController`를 직접 다룰 필요 없이 `EditManager` 레벨에서 포커스를 제어할 수 있다.
+
+**시그니처:**
 
 ```ts
-import { EditManager } from 'layout-element';
+focusParagraph(
+  target: LayoutParagraphElement | string,
+  options?: { cursorOffset?: number; selection?: SelectionRange },
+): boolean
+```
+
+**매개변수:**
+
+| 매개변수 | 타입 | 설명 |
+|----------|------|------|
+| `target` | `LayoutParagraphElement \| string` | 포커스를 설정할 단락 요소 또는 단락 요소의 ID |
+| `options.cursorOffset` | `number` | (선택) 포커스 후 커서를 배치할 소스 텍스트 오프셋. 생략하면 커서 위치를 변경하지 않는다 |
+| `options.selection` | `SelectionRange` | (선택) 포커스 후 설정할 선택 영역. `cursorOffset`보다 우선한다 |
+
+**반환값:** `true` — 포커스 설정 성공, `false` — 단락을 찾을 수 없거나 컨트롤러가 등록되지 않음
+
+**동작 순서:**
+
+1. `target`이 문자열이면 `document.getElementById()`로 요소를 찾고 `localName === 'x-layout-paragraph'`인지 확인한다.
+2. `target`이 `LayoutParagraphElement`이면 그대로 사용한다.
+3. 단락이 편집 모드가 아니면 `editable = true`로 설정하여 `EditController`를 생성한다.
+4. 등록된 컨트롤러 중 해당 단락의 컨트롤러를 찾는다.
+5. `controller.focus()`로 textarea에 포커스를 준다.
+6. `options.selection`이 있으면 `controller.setSelection(selection)`을 호출한다. `setSelection`은 내부적으로 커서 위치를 `focus.textOffset`으로 이동시킨다.
+7. `options.selection`이 없고 `options.cursorOffset`이 있으면 `controller.setCursor({ textOffset: cursorOffset })`을 호출한다.
+
+**선택 영역과 커서 위치의 우선순위:**
+
+`selection`과 `cursorOffset`을 모두 지정하면 `selection`이 우선한다. `setSelection()`이 내부적으로 `_cursorModel.offset`을 `focus.textOffset`으로 설정하므로 `cursorOffset` 값은 무시된다.
+
+**`focusChange` 이벤트:** `controller.focus()`가 트리거하는 브라우저 포커스 변경을 통해 `EditManager._requestFocus()`가 호출되고, 이 과정에서 `focusChange` 이벤트가 발생한다.
+
+#### `blurParagraph(target?)`
+
+단락 요소, ID, 또는 생략으로 포커스를 해제한다.
+
+**시그니처:**
+
+```ts
+blurParagraph(target?: LayoutParagraphElement | string): boolean
+```
+
+**매개변수:**
+
+| 매개변수 | 타입 | 설명 |
+|----------|------|------|
+| `target` | `LayoutParagraphElement \| string \| undefined` | 포커스를 해제할 단락 요소, 단락 요소의 ID, 또는 생략 |
+
+**반환값:** `true` — 포커스 해제 성공, `false` — 포커스된 단락이 없거나 지정한 단락이 현재 포커스된 단락이 아님
+
+**동작 순서:**
+
+- `target`을 생략하면 현재 포커스된 컨트롤러의 `_blurInternal()`을 호출한다.
+- `target`을 지정하면 현재 포커스된 단락과 일치하는 경우에만 blur한다. 다른 단락이면 `false`를 반환한다.
+- `_blurInternal()`은 textarea에서 포커스를 해제하고, 커서를 숨기고, `_releaseFocus()`를 호출하여 `focusChange` 이벤트를 발생시킨다.
+
+### 3.6.6 사용 예시
+
+```ts
+import { EditManager, SelectionRange } from 'layout-element';
 
 const manager = EditManager.getInstance();
 
@@ -497,11 +564,27 @@ const cursor = manager.cursorOffset;
 const selection = manager.selection;
 const style = manager.currentStyle;
 
+// 포커스 제어
+manager.focusParagraph('paragraph-1');                          // ID로 포커스
+manager.focusParagraph('paragraph-1', { cursorOffset: 5 });    // ID + 커서 위치
+manager.focusParagraph('paragraph-1', {                         // ID + 선택 영역
+  selection: SelectionRange.fromOffsets(3, 8),
+});
+
+const paragraph = document.querySelector('x-layout-paragraph') as LayoutParagraphElement;
+manager.focusParagraph(paragraph);                               // 요소로 포커스
+manager.focusParagraph(paragraph, { cursorOffset: 12 });        // 요소 + 커서 위치
+
+// 포커스 해제
+manager.blurParagraph();                // 현재 포커스된 단락 blur
+manager.blurParagraph('paragraph-1');   // 특정 단락이 포커스 상태일 때만 blur
+manager.blurParagraph(paragraph);       // 요소로 지정
+
 // 모든 편집 모드 비활성화
 manager.deactivateAll();
 ```
 
-### 3.6.6 `EditManager`와 `EditController`의 관계
+### 3.6.7 `EditManager`와 `EditController`의 관계
 
 ```mermaid
 flowchart TD
