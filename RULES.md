@@ -328,3 +328,51 @@
 - `noEmit: true` — `tsc`는 타입 체크만, 실제 컴파일은 Vite가 담당.
 - `noUnusedLocals`, `noUnusedParameters` 활성화 —
   사용하지 않는 변수/파라미터는 빌드 에러 유발.
+
+### 7.4 React ESM 빌드 추가
+
+- `npm run build`는 `vite.config.ts`(IIFE)와 `vite.config.react.ts`(React ESM)를
+  순차적으로 실행한다.
+- React 빌드는 `emptyOutDir: false`로 설정되어 있으므로
+  IIFE 빌드 결과를 덮어쓰지 않는다.
+- React 빌드는 `react`와 `react/jsx-runtime`을 externalize한다.
+  React를 번들에 포함시키지 않는다.
+
+---
+
+## 8. React 래퍼 규칙
+
+### 8.1 Custom Element 공개 API 변경 시 React 래퍼 동기화
+
+- Custom Element의 public API를 수정할 때(세터/게터/이벤트 추가/제거 등)
+  `src/react/components/`의 대응하는 React 래퍼 컴포넌트도 반드시 함께 수정할 것.
+- API 변경이 React 래퍼에 영향을 주지 않더라도, 검토는 필수.
+
+### 8.2 새 Custom Element 추가 시 React 래퍼 생성
+
+- `src/components/`에 새 Custom Element를 추가하면
+  `src/react/components/`에 대응하는 React 래퍼 컴포넌트를 반드시 생성할 것.
+- 모든 레이아웃 Custom Element는 React 환경에서도 사용 가능해야 한다.
+
+### 8.3 타입/코어/리소스 재출력 확인
+
+- `src/types/`, `src/core/`, `src/resource/`, `src/constants/`, `src/edit/`에
+  새로운 공개 export를 추가하면 `src/react/index.ts`에서 재출력되는지 확인할 것.
+- React 엔트리는 vanilla 라이브러리의 모든 공개 API를 노출해야 한다.
+
+### 8.4 React 의존성 범위 제한
+
+- React 빌드는 `react`와 `react/jsx-runtime`을 externalize한다.
+- `src/`에서 `src/react/` 외부 파일이 `react`를 import하면 안 된다.
+  IIFE 빌드에 React 코드가 침범하지 않도록 한다.
+
+### 8.5 React 래퍼 변경 후 검증
+
+- `src/react/`의 어떤 파일을 수정한 후에는 반드시 `npm run build`를 실행하여
+  IIFE 빌드와 React ESM 빌드가 모두 성공하는지 확인할 것.
+- 두 빌드 중 하나라도 실패하면 머지하지 말 것.
+
+### 8.6 `react`는 peer dependency
+
+- `package.json`의 `peerDependencies`에 `react: ">=18.0.0"`이 명시되어 있다.
+- `react`는 번들에 포함되지 않으며, 사용하는 프로젝트가 직접 설치해야 한다.

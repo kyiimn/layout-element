@@ -5,15 +5,30 @@
   "license": "UNLICENSED",
   "author": "",
   "type": "module",
+  "main": "./dist/layout-element.iife.js",
+  "module": "./dist/layout-element-react.mjs",
+  "types": "./dist/layout-element.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/layout-element-react.mjs",
+      "default": "./dist/layout-element.iife.js"
+    },
+    "./react": {
+      "import": "./dist/layout-element-react.mjs",
+      "types": "./dist/layout-element.d.ts"
+    }
+  },
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "vite build && vite build --config vite.config.react.ts",
     "preview": "vite preview"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
     "@types/react": "^19.2.17",
-    "react": "^19.2.7",
     "typescript": "^7.0.1-rc",
     "vite": "^6.3.0",
     "vite-plugin-dts": "^5.0.3"

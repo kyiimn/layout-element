@@ -10,7 +10,7 @@ Newspaper layout engine implemented as Web Components (Custom Elements). Renders
 
 ```bash
 npm run dev      # Vite dev server, opens examples/index.html
-npm run build    # Vite library build → dist/ (IIFE format + .d.ts)
+npm run build    # Vite library build → dist/ (IIFE + React ESM + .d.ts)
 npm run preview  # Preview production build
 ```
 
@@ -20,10 +20,16 @@ No test runner, linter, or formatter is configured.
 
 ## Build Output
 
-- **Format**: IIFE only (`formats: ['iife']` in vite.config.ts)
-- **Global name**: `LayoutElement`
-- **Entry**: `src/index.ts`
-- **Types**: Generated via `vite-plugin-dts` with `rollupTypes` — produces a single bundled `.d.ts`
+- **IIFE bundle** (`dist/layout-element.iife.js`)
+  - Format: IIFE (`formats: ['iife']` in `vite.config.ts`)
+  - Global name: `LayoutElement`
+  - Entry: `src/index.ts`
+  - Does **not** contain React code
+- **React ESM bundle** (`dist/layout-element-react.mjs`)
+  - Format: ESM (`formats: ['es']` in `vite.config.react.ts`)
+  - Entry: `src/react/index.ts`
+  - Externalizes `react` and `react/jsx-runtime` (peer dependency)
+- **Types**: Generated via `vite-plugin-dts` with `rollupTypes` — produces a single bundled `dist/layout-element.d.ts`
 - **Path alias**: `@` → `./src/*` (both tsconfig.json and vite.config.ts)
 
 ## Architecture
@@ -160,8 +166,23 @@ src/
   examples/                  # exampleData (demo content for dev)
     example-data.ts
     index.ts
+  react/                     # React wrapper layer (separate ESM build)
+    components/              # React wrapper components for each Custom Element
+      layout-document.tsx
+      layout-box.tsx
+      layout-paragraph.tsx
+      layout-image.tsx
+      layout-guide-column.tsx
+      index.ts
+    hooks/                   # React hooks for editable state and manager access
+      use-editable.ts
+      use-edit-manager.ts
+      use-layout-element.ts
+      index.ts
+    context.tsx              # React Context provider for layout options
+    index.ts                 # React entry point: re-exports vanilla library + React layer
   globals.d.ts               # JSX intrinsic elements for React interop
-  index.ts                   # Entry point: exports components, core, resource, types, constants, examples
+  index.ts                   # Vanilla entry point: exports components, core, resource, types, constants, examples
 examples/
   index.html                 # Dev demo page
   color.json                 # CMYK color definitions (fetched at runtime)
@@ -184,3 +205,44 @@ examples/
 - **Programmatic focus**: Use `EditManager.getInstance().focusParagraph(target, options?)` and `blurParagraph(target?)` instead of calling `paragraph.editable` or `controller.focus()` directly.
 
 Keyboard shortcut documentation has been moved to `docs/EDITING.md` Section 4.
+
+## React Integration
+
+The library ships two separate builds:
+
+- **Vanilla**: `layout-element` (or `dist/layout-element.iife.js`) — Custom Elements only, no React code.
+- **React**: `layout-element/react` (or `dist/layout-element-react.mjs`) — React wrappers that render the same Custom Elements.
+
+### Directory structure
+
+`src/react/` is kept in a separate build. It re-exports everything from the vanilla entry point (`@/types`, `@/core`, `@/resource`, `@/constants`, `@/components`, `@/edit`) and adds React-specific wrappers:
+
+- `components/` — one wrapper component per Custom Element (`LayoutDocument`, `LayoutBox`, `LayoutParagraph`, `LayoutImage`, `LayoutGuideColumn`).
+- `hooks/` — `useEditable`, `useEditManager`, `useLayoutElement`.
+- `context.tsx` — React Context provider for layout options.
+
+### Build output
+
+`npm run build` runs two Vite builds sequentially:
+
+1. `vite build` — produces `dist/layout-element.iife.js` and `dist/layout-element.d.ts` from `src/index.ts`.
+2. `vite build --config vite.config.react.ts` — produces `dist/layout-element-react.mjs` from `src/react/index.ts`, externalizing `react` and `react/jsx-runtime`.
+
+The React build does **not** empty `dist/`, so the IIFE bundle and `.d.ts` from the first build are preserved.
+
+### Usage
+
+```ts
+// Vanilla (IIFE or ESM default)
+import { LayoutDocumentElement } from 'layout-element';
+
+// React wrappers
+import {
+  LayoutDocument,
+  LayoutBox,
+  LayoutParagraph,
+  useEditable,
+} from 'layout-element/react';
+```
+
+`react` is a peer dependency (`>=18.0.0`). The IIFE bundle does not bundle or reference React.
