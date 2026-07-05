@@ -66,6 +66,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **`position: 'absolute'`**: `left`/`top`/`width`/`height` are actual mm values.
 - **InheritStyle cascade**: `TextStyle` + `ParagraphStyle` + parent dimensions flow downward. Children override individual fields.
 - **Text overflow**: dispatched as `render-error` CustomEvent with `{ type: 'text-overflow', overflow: number }`.
+- **Overlap padding**: `overlapPadding` on `ImageData` adds padding around opaque image pixels during overlap detection. Values in mm; `number` applies equally to all sides, `{ top?, right?, bottom?, left? }` allows asymmetric padding. Uses per-column ellipse detection: for each opaque pixel, normalized distance `(ndx² + ndy² ≤ 1)` determines if the pixel's padding zone reaches the text line. Transparent pixels are excluded. Each opaque column's blocking range is extended horizontally by `padLeft`/`padRight`.
 - **Print mode**: `window.matchMedia("print")` — managers expect data injection via setters instead of fetch. Images and guide columns are hidden via `@media print` CSS rules; their rendered positions are collected by `printPostData` for post-processing.
 
 ### Managers (Singletons, must init before rendering)
@@ -82,7 +83,8 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **Canvas `measureText()` for char width**: `_charWidthPx()` uses Canvas `measureText().width` (advance width) clamped to `maxWidthPx = widthRatio * fontSizePx` for layout calculations. `genCharStyle()` uses both `maxWidth: ${widthRatio}em` (layout box) and `scale: ${widthRatio} 1` (glyph shape) to implement 장평.
 - **Infinite loop guard**: `_layoutTextIntoColumns()` force-places characters wider than any available part width into the first part, preventing infinite loops.
 - **Cursor position in whitespace**: `getNearestOffsetFromPoint()` detects trailing whitespace (past row's rightmost span) and leading whitespace (before row's leftmost span) clicks to place cursor after last char or before first char respectively, bypassing midpoint logic.
-- **ImageData coordinates are pixels, not mm**: `x`, `y`, `width`, `height` in `ImageData` refer to source image pixels. `dpi` converts them to mm.
+- **ImageData coordinates are pixels, not mm**: `x`, `y`, `width`, `height` in `ImageData` refer to source image pixels. `dpi` converts them to mm. `overlapPadding` values are in mm and internally converted to screen pixels via `GridCalculator.ppm`.
+- **overlapPadding uses ellipse-based detection**: When `overlapPadding` is set on an image, `getOverlapSizePX()` uses per-column ellipse detection instead of simple rectangle intersection. Each opaque pixel's distance to the text line is normalized by the directional padding values (`ndx = dx/horizPad`, `ndy = dy/vertPad`), and pixels within the elliptical padding zone (`ndx² + ndy² ≤ 1`) are considered overlapping. This creates a naturally rounded padding zone around the image's opaque shape, not a rectangular bounding box. Transparent areas do not block text. Falls back to geometric expanded rectangle when canvas is unavailable.
 - **`getFontFamily()` is hardcoded**: Currently returns `'Myoungjo'` regardless of input. Font family mapping is not implemented.
 - **No tests exist**: There is no test infrastructure. No `vitest`, no `jest`, no test files.
 - **ColorRegistry without stylesheet**: `ColorRegistry.init()` sets `_ready = true` even when no stylesheet is available (SSR, test environments). Color data is accessible via `colorMap` but CSS variables are not injected.
@@ -241,8 +243,16 @@ import {
   LayoutDocument,
   LayoutBox,
   LayoutParagraph,
+  LayoutImage,
   useEditable,
 } from 'layout-element/react';
+```
+
+```tsx
+<LayoutImage
+  data={imageData}
+  overlapPadding={{ top: 2, right: 5, bottom: 2, left: 5 }}
+/>
 ```
 
 `react` is a peer dependency (`>=18.0.0`). The IIFE bundle does not bundle or reference React.
