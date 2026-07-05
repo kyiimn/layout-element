@@ -923,6 +923,20 @@ baseElement (line)        targetElement (image box)
 - `genColumnStyle()`, `genLineStyle()`, `genPartStyle()`, `genCharStyle()` 사용
 - 마지막 파트 + `endOfBlock`이면 `justify-content: flex-start`로 조정
 - 양 끝 공백 제거
+- **key 기반 증분 렌더링** (commit cec32e4):
+  - `data-source-offset` 속성을 key로 사용하여 기존 span 재사용
+  - `data-offset` (rendered offset)은 `EditCoordinateMapper` 호환성을 위해 유지
+  - 기존 span이 있으면 `innerText`, 스타일, `data-offset` 갱신 + DOM 순서 조정
+  - 기존 span이 없으면 새 span 생성
+  - 사용되지 않은 span 제거
+  - `data-temporary` span(낙관적 span)은 diff 시작 전 제거
+  - `<style>` 요소는 재사용, CSS 룰만 갱신
+  - COVER 라인(`parts: []`)은 라인 div의 자식을 모두 제거
+  - 헬퍼 메서드: `_computeSourceOffsets()`, `_stripSpaces()`,
+    `_createLineElement()`, `_applyLineStyle()`,
+    `_createPartElement()`, `_applyPartStyle()`,
+    `_createSpanElement()`, `_applySpanStyle()`
+  - `innerHTML = ''`는 더 이상 발생하지 않음
 
 ### 18.3 `LayoutVirtualColumnElement`
 
@@ -1098,3 +1112,343 @@ textAlign = 'justify' (space-between)
 | 마지막 줄 처리 | 예 | `justify`일 때만 `flex-start`로 강제 |
 
 결론적으로, TextLayoutEngine의 핵심 기능인 오버랩 회피와 텍스트 래핑은 어떤 `textAlign` 값이 오든 정확하게 동작한다. 정렬은 최종 렌더링 단계에서 시각적 위치만 바꾼다.
+
+---
+
+## 21. 렌더링 성능 최적화 전략
+
+`TextLayoutEngine`과 연관 컴포넌트들은 렌더링 성능을 향상하기 위해 6가지 최적화 전략을 사용한다. 각 전략은 강제 리플로우(`getBoundingClientRect()`) 호출을 최소화하거나 DOM 조작을 줄이는 것을 목표로 한다.
+
+### 21.1 Canvas `measureText()` 기반 문자 폭 측정
+
+**대상:** `_charWidthPx()` (`src/core/text-layout-engine.ts:189`)
+
+**문제:** DOM 기반 문자 폭 측정(`scrollWidth > clientWidth`)은 강제 리플로우를 유발한다. 문자마다 span을 생성하고 측정하면 O(n)번의 리플로우가 발생한다.
+
+**해결:** Canvas 2D Context의 `measureText().width`(advance width)를 사용하여 DOM 조작 없이 순수 계산으로 문자 폭을 구한다.
+
+```ts
+private _charWidthPx(char: string, textBlockStyle?: TextBlockStyle, ppm?: number): number {
+  const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
+  this._ctx.font = this._getCanvasFont(textBlockStyle, effectivePpm);
+  const metrics = this._ctx.measureText(char);
+  const rawWidth = metrics.width;
+  const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+  const fontSizePx = fontSize * effectivePpm;
+  const maxWidthPx = this.widthRatio * fontSizePx;
+  const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
+  const minWidthEm = (char === ' ' || !isHalfWidth) ? 0.15 : 0.35;
+  const minWidthPx = minWidthEm * fontSizePx;
+  return Math.round(Math.min(Math.max(rawWidth, minWidthPx), maxWidthPx));
+}
+```
+
+**핵심 포인트:**
+- `metrics.width` (advance width)를 사용 — `actualBoundingBoxLeft + actualBoundingBoxRight`는 잉크 영역만 측정하여 좁은 문자(i, l, j)를 과소측정한다.
+- `maxWidthPx = widthRatio * fontSizePx`로 상한 클램프 — 장평 비율 반영.
+- `minWidthPx` 바닥값 — 0폭 문자 방지 (공백/전각 `0.15em`, 반각 `0.35em`).
+- 측정값에 `widthRatio`를 직접 곱하지 않음 — `maxWidthPx` 클램프가 장평을 반영.
+
+**효과:** 텍스트 래핑 계산 시 DOM 조작 없이 순수 계산으로 처리. O(n)번의 강제 리플로우 제거.
+
+> **참고:** 문자 폭 측정의 상세한 규칙은 섹션 6을 참조.
+
+### 21.2 폰트 문자열 단일 항목 캐시
+
+**대상:** `_getCanvasFont()` (`src/core/text-layout-engine.ts:168`)
+
+**문제:** `ctx.font` 설정은 Canvas 상태 변경을 유발하여 비용이 크다. 문자마다 폰트 문자열을 재생성하면 불필요한 오버헤드가 발생한다.
+
+**해결:** 단일 항목 캐시(`_lastFontKey`/`_lastFontString`)로 직전에 사용한 폰트 문자열을 재사용한다.
+
+```ts
+private _getCanvasFont(textBlockStyle?: TextBlockStyle, ppm?: number): string {
+  const fontLoader = FontLoader.getInstance();
+  const fontFamily = textBlockStyle?.fontFamily
+    ? fontLoader.getFontFamily(textBlockStyle.fontFamily)
+    : fontLoader.getFontFamily();
+  const fontSize = textBlockStyle?.fontSize
+    ? textBlockStyle.fontSize
+    : this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+  const fontWeight = textBlockStyle?.fontWeight || this._textStyle?.fontWeight || this._inheritStyle?.fontWeight || 'normal';
+  const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
+  const fontSizePx = fontSize * effectivePpm;
+
+  const key = `${fontWeight}|${fontSizePx}|${fontFamily}`;
+  if (key === this._lastFontKey) return this._lastFontString;
+
+  const fontString = `${fontWeight} ${fontSizePx}px ${fontFamily}`;
+  this._lastFontKey = key;
+  this._lastFontString = fontString;
+  return fontString;
+}
+```
+
+**핵심 포인트:**
+- 키: `${fontWeight}|${fontSizePx}|${fontFamily}`
+- `fontSizePx`(계산된 픽셀값)를 키에 사용 — ppm 차이를 반영.
+- Map 기반 캐시가 아닌 단일 항목 캐시 — 한 렌더링 사이클에서 대부분의 문자가 동일 폰트를 사용하므로 히트율 약 99% 달성.
+- `fontSizePx`가 키에 포함되므로 ppm 변경 시 자동으로 캐시 미스가 발생하여 올바른 폰트 문자열이 재생성됨.
+
+**효과:** `ctx.font` 설정 비용을 렌더링 사이클당 1회로 통합.
+
+> **참고:** 상세한 내용은 섹션 6.3을 참조.
+
+### 21.3 오버랩 rect 캐시 (`_overlayRects`)
+
+**대상:** `_applyOverlap()` (`src/core/text-layout-engine.ts:215`)
+
+**문제:** 각 라인마다 오버랩 요소(이미지 등)와의 겹침을 검사할 때 `getBoundingClientRect()`를 호출하면 라인 수 × 오버랩 요소 수만큼 강제 리플로우가 발생한다.
+
+**해결:** 한 렌더링 사이클 내에서 오버랩 요소의 rect를 `Map`에 캐싱하여 첫 호출 시 한 번만 측정한다.
+
+```ts
+private _overlayRects: Map<LayoutBoxElement, DOMRect> | null = null;
+```
+
+```ts
+if (this._overlayRects === null) {
+  this._overlayRects = new Map();
+  for (const el of overlapEls) {
+    this._overlayRects.set(el, el.getBoundingClientRect());
+  }
+}
+```
+
+**생명 주기:**
+1. `_initStructure()` 시작 시 `null`로 리셋.
+2. `_layoutTextIntoColumns()` 시작 시 `null`로 리셋.
+3. 첫 `_applyOverlap()` 호출 시 `Map` 생성 후 모든 오버랩 요소를 한 번에 측정.
+4. 이후 동일 렌더링 사이클 내에서는 `Map.get(el)`로 재사용.
+5. 다음 렌더링 사이클 시작 시 1번으로 돌아감.
+
+**효과:** 오버랩 요소의 `getBoundingClientRect()` 호출을 렌더링 사이클당 1번으로 통합. 라인 수 × 오버랩 요소 수번의 강제 리플로우를 1번으로 감소.
+
+> **참고:** 상세한 내용은 섹션 8을 참조.
+
+### 21.4 배치 vcolumn ppm 측정
+
+**대상:** `_initStructure()` (`src/core/text-layout-engine.ts:344`)
+
+**문제:** 컬럼마다 개별적으로 가상 컬럼(`<x-layout-vcolumn>`)을 생성/측정/제거하면 컬럼 수만큼의 강제 리플로우가 발생한다.
+
+**해결:** 모든 컬럼의 가상 컬럼을 한 번에 생성하고, 한 번의 루프에서 ppm을 측정한 뒤 한 번에 제거한다.
+
+```ts
+private _initStructure() {
+  // ...
+  this._columnPpm = [];
+  const vColumnEls: LayoutVirtualColumnElement[] = [];
+  for (let curColumn = 0; curColumn < this.columnCount; curColumn++) {
+    const vColumnEl = document.createElement('x-layout-vcolumn');
+    vColumnEl.index = curColumn;
+    vColumnEl.model = this;
+    vColumnEl.parentElement = this._paragraphElement;
+    this._rootNode.appendChild(vColumnEl);
+    vColumnEls.push(vColumnEl);
+  }
+
+  for (let i = 0; i < vColumnEls.length; i++) {
+    const ppm = vColumnEls[i].getBoundingClientRect().width / this._columnWidths[i];
+    this._columnPpm.push(ppm);
+  }
+
+  for (const vColumnEl of vColumnEls) {
+    vColumnEl.remove();
+  }
+}
+```
+
+**핵심 포인트:**
+- 모든 가상 컬럼을 DOM에 추가한 후 한 번에 측정 — 브라우저가 배치를 한 번에 처리.
+- 측정 완료 후 한 번에 제거.
+- 이전 방식(컬럼마다 생성/측정/제거)은 O(columns)번의 강제 리플로우를 유발했음.
+
+**효과:** O(columns)번의 강제 리플로우를 1번으로 통합.
+
+### 21.5 key 기반 증분 span 렌더링
+
+**대상:** `LayoutColumnElement.renderText()` (`src/components/layout/column.element.ts:116`)
+
+**문제:** 편집 시 `renderText()`가 컬럼의 Shadow DOM을 전체 재구축(`innerHTML = ''`)하면 모든 span(수백 개)이 삭제되고 재생성된다. 이는 DOM 조작 비용과 가비지 컬렉션 부하를 유발한다.
+
+**해결:** `data-source-offset` 속성을 reconciliation key로 사용하여 기존 span을 재사용하고 변경된 span만 갱신한다.
+
+**알고리즘:**
+
+1. **`<style>` 요소 보존:** `innerHTML = ''` 대신 기존 `<style>` 요소를 찾아서 CSS 룰만 갱신.
+2. **낙관적 span 제거:** `data-temporary` 속성을 가진 span(IME 조합 중 생성된 임시 span)을 diff 시작 전 모두 제거.
+3. **기존 라인 요소 수집:** `<style>`을 제외한 `<div>` 라인 요소들을 수집.
+4. **라인 단위 diff:** 라인 수가 같으면 기존 라인 div 재사용, 다르면 불필요한 라인 제거/부족한 라인 추가.
+5. **파트 단위 diff:** 각 라인 내에서 파트 div를 재사용.
+6. **span 단위 diff (핵심):**
+   - 기존 span들을 `data-source-offset` 기준으로 `Map`에 저장.
+   - 새 content의 각 문자에 대해 source offset 계산.
+   - 기존 span이 있으면: `innerText`, 스타일, `data-offset`을 갱신하고 DOM 순서를 `insertBefore`로 조정.
+   - 기존 span이 없으면: 새 span 생성.
+   - 사용되지 않은 기존 span 제거.
+7. **COVER 라인 처리:** `parts: []`인 라인은 라인 div의 모든 자식을 제거하고 빈 div만 유지.
+
+```ts
+// 기존 span을 key로 수집
+const existingSpans = new Map<string, HTMLSpanElement>();
+const currentSpans = partEl.querySelectorAll(':scope > span[data-source-offset]');
+for (const span of currentSpans) {
+  const key = span.dataset.sourceOffset;
+  if (key !== undefined) existingSpans.set(key, span);
+}
+
+// 새 content로 diff
+for (let j = 0; j < content.length; j++) {
+  const char = content[j];
+  const thisCharSourceOffset = String(curSourceOffset);
+  const existingSpan = existingSpans.get(thisCharSourceOffset);
+
+  let charEl: HTMLSpanElement;
+  if (existingSpan) {
+    charEl = existingSpan;
+    this._applySpanStyle(charEl, char, curRenderedOffset, curSourceOffset);
+    existingSpans.delete(thisCharSourceOffset);
+  } else {
+    charEl = this._createSpanElement(char, curRenderedOffset, curSourceOffset);
+  }
+
+  if (nextRef === charEl) {
+    nextRef = charEl.nextSibling;
+  } else {
+    partEl.insertBefore(charEl, nextRef);
+  }
+
+  curRenderedOffset++;
+  curSourceOffset++;
+}
+
+// 사용되지 않은 span 제거
+for (const unusedSpan of existingSpans.values()) {
+  unusedSpan.remove();
+}
+```
+
+**`data-source-offset` vs `data-offset`:**
+- `data-source-offset`: 소스 문자열의 문자 위치. diff 렌더링의 reconciliation key로 사용.
+- `data-offset`: 렌더링된 문자 위치. `EditCoordinateMapper`가 클릭-to-커서 매핑에 사용.
+- 두 속성은 모든 span에 공존하며, `data-offset`은 기존 동작 호환성을 위해 유지됨.
+
+**헬퍼 메서드:**
+- `_computeSourceOffsets()`: 컬럼 시작 위치의 rendered/source offset 계산.
+- `_stripSpaces()`: 첫/마지막 파트의 선행/후행 공백 제거.
+- `_createLineElement()` / `_applyLineStyle()`: 라인 div 생성/스타일 갱신.
+- `_createPartElement()` / `_applyPartStyle()`: 파트 div 생성/스타일 갱신.
+- `_createSpanElement()` / `_applySpanStyle()`: span 생성/스타일 갱신.
+
+**효과:** 한 글자 입력 시 변경된 라인의 span만 갱신되고 나머지는 재사용. `innerHTML = ''`가 발생하지 않음. DOM 조작과 가비지 컬렉션 부하 최소화.
+
+### 21.6 `EditCoordinateMapper` 캐싱
+
+**대상:** `EditCoordinateMapper` (`src/edit/edit-coordinate-mapper.ts`)
+
+**문제:** 편집 모드에서 커서 이동, 클릭, 드래그 선택 시 `querySelectorAll`과 `getBoundingClientRect()`가 반복 호출된다. 드래그 선택은 매 프레임(`requestAnimationFrame`)마다 좌표를 계산하므로 성능 영향이 크다.
+
+**해결:** 두 가지 캐싱을 도입한다.
+
+#### 21.6.1 `_columnSpansCache` — 컬럼별 span 목록 캐시
+
+```ts
+private _columnSpansCache: Map<LayoutColumnElement, HTMLSpanElement[]> = new Map();
+```
+
+`_getColumnSpans(column)`은 첫 호출 시 `querySelectorAll('[data-offset]:not([data-temporary])')`을 수행하고 결과를 캐싱한다. 이후 동일 컬럼에 대한 호출은 캐시된 배열을 반환한다.
+
+```ts
+private _getColumnSpans(column: LayoutColumnElement): HTMLSpanElement[] {
+  const cached = this._columnSpansCache.get(column);
+  if (cached) return cached;
+  const spans = Array.from(column.shadowRoot.querySelectorAll('[data-offset]:not([data-temporary])')) as HTMLSpanElement[];
+  this._columnSpansCache.set(column, spans);
+  return spans;
+}
+```
+
+**캐시 무효화:** `rebuild()` 호출 시 `_columnSpansCache.clear()`로 초기화. `rebuild()`는 `EditController.postRender()`에서 호출되므로 렌더링 후 캐시가 자동으로 갱신됨.
+
+#### 21.6.2 `spanRects` — 로컬 rect 맵 (getNearestOffsetFromPoint)
+
+`getNearestOffsetFromPoint()` 내에서 로컬 `Map<HTMLSpanElement, DOMRect>`를 구축하여 모든 `getBoundingClientRect()` 호출을 단일 패스로 통합한다.
+
+```ts
+const spanRects = new Map<HTMLSpanElement, DOMRect>();
+for (const s of spans) {
+  spanRects.set(s, s.getBoundingClientRect());
+}
+```
+
+이 Map은 메서드 종료 시 폐기된다 (인스턴스 필드가 아님). 행 탐지, 가장 가까운 span 탐색, rightmost/leftmost span 검사, midpoint 로직이 모두 동일한 `DOMRect`를 재사용한다.
+
+**이전 방식:** 각 검사마다 개별적으로 `getBoundingClientRect()`를 호출하여 3번의 패스가 발생했음.
+
+**효과:** 드래그 선택 시 매 프레임 `getBoundingClientRect()` 호출을 span 수 × 3번에서 span 수 × 1번으로 감소. `querySelectorAll` 호출을 `rebuild()` 주기당 1번으로 통합.
+
+### 21.7 최적화 전략 요약
+
+| 전략 | 대상 | 문제 | 해결 | 효과 |
+|------|------|------|------|------|
+| Canvas `measureText()` | `_charWidthPx()` | DOM 기반 측정의 O(n) 리플로우 | Canvas 2D `measureText().width` 사용 | DOM 조작 없이 순수 계산 |
+| 폰트 문자열 캐시 | `_getCanvasFont()` | `ctx.font` 설정 비용 | 단일 항목 캐시 (히트율 99%) | `ctx.font` 설정을 사이클당 1회로 통합 |
+| 오버랩 rect 캐시 | `_applyOverlap()` | 라인×오버랩 요소 수의 리플로우 | `Map`에 오버랩 요소 rect 캐싱 | 리플로우를 사이클당 1번으로 통합 |
+| 배치 vcolumn 측정 | `_initStructure()` | 컬럼마다 개별 측정 | 모든 컬럼을 한 번에 생성/측정/제거 | O(columns)번 리플로우를 1번으로 통합 |
+| key 기반 증분 렌더링 | `renderText()` | 전체 DOM 재구축 (`innerHTML = ''`) | `data-source-offset` key로 span 재사용 | 변경된 span만 갱신, DOM 조작 최소화 |
+| Mapper 캐싱 | `EditCoordinateMapper` | 반복 `querySelectorAll` / `getBoundingClientRect` | `_columnSpansCache` + 로컬 `spanRects` Map | 드래그 시 프레임당 리플로우 감소 |
+
+### 21.8 캐시 생명 주기 다이어그램
+
+```mermaid
+flowchart TD
+    subgraph TextLayoutEngine["TextLayoutEngine 캐시"]
+        T1["_initStructure()"] -->|"_overlayRects = null"| T2["_layoutTextIntoColumns()"]
+        T2 -->|"_overlayRects = null"| T3["_applyOverlap() 첫 호출"]
+        T3 -->|"Map 생성 + 일괄 측정"| T4["이후 _applyOverlap() 호출"]
+        T4 -->|"Map.get(el) 재사용"| T5["다음 렌더링 사이클"]
+        T5 --> T1
+
+        T1 -->|"vcolumn 일괄 생성"| T6["ppm 일괄 측정"]
+        T6 -->|"vcolumn 일괄 제거"| T7["_columnPpm[] 확정"]
+    end
+
+    subgraph FontCache["폰트 문자열 캐시"]
+        F1["_charWidthPx() 첫 호출"] -->|"key !== _lastFontKey"| F2["fontString 생성"]
+        F2 -->|"_lastFontKey/ _lastFontString 저장"| F3["이후 _charWidthPx() 호출"]
+        F3 -->|"key === _lastFontKey"| F4["_lastFontString 반환"]
+        F4 -->|"다음 렌더링 사이클"| F1
+    end
+
+    subgraph ColumnElement["LayoutColumnElement 캐시"]
+        C1["renderText() 호출"] -->|"data-temporary span 제거"| C2["기존 span Map 구축"]
+        C2 -->|"data-source-offset key"| C3["span diff: 재사용/갱신/생성/제거"]
+        C3 -->|"<style> 요소 보존"| C4["다음 renderText() 호출"]
+        C4 --> C1
+    end
+
+    subgraph EditMapper["EditCoordinateMapper 캐시"]
+        E1["postRender() → rebuild()"] -->|"_columnSpansCache.clear()"| E2["_getColumnSpans() 첫 호출"]
+        E2 -->|"querySelectorAll + 캐싱"| E3["이후 _getColumnSpans() 호출"]
+        E3 -->|"캐시된 배열 반환"| E4["getNearestOffsetFromPoint()"]
+        E4 -->|"spanRects 로컬 Map 구축"| E5["단일 패스로 모든 rect 측정"]
+        E5 -->|"메서드 종료 시 폐기"| E6["다음 postRender()"]
+        E6 --> E1
+    end
+```
+
+### 21.9 여전히 최적화되지 않은 영역
+
+다음 영역은 현재 캐싱되지 않아 향후 최적화 후보이다:
+
+| 영역 | 메서드 | 문제 |
+|------|--------|------|
+| `_getAllColumns()` | `EditCoordinateMapper` | 호출마다 `querySelectorAll('x-layout-column')` 수행 |
+| `getCharRect()` | `EditCoordinateMapper` | 호출마다 `span.getBoundingClientRect()` 수행 |
+| `getCharOffsetFromPoint()` | `EditCoordinateMapper` | binary search 내에서 span마다 `getBoundingClientRect()` 수행 |
+| `getTextRange()` | `EditCoordinateMapper` | 선택 영역 계산 시 span마다 `getBoundingClientRect()` 수행 |
+| `findVisualLineBounds()` | `EditCoordinateMapper` | Home/End 키 처리 시 span마다 `getBoundingClientRect()` 수행 |
+| 라인 rect 측정 | `_applyOverlap()` | `_overlayRects`는 오버랩 요소만 캐싱, 라인 자체의 rect는 라인마다 측정 |
+| `getImageData` 캐싱 | `getOverlapSizePX()` | 동일 이미지에 대해 라인마다 `getImageData()` 재호출 |
+| `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산 |
