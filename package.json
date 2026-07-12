@@ -10,12 +10,19 @@
   "types": "./dist/layout-element.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/layout-element-react.mjs",
+      "import": {
+        "types": "./dist/layout-element.d.ts",
+        "default": "./dist/layout-element-react.mjs"
+      },
       "default": "./dist/layout-element.iife.js"
     },
     "./react": {
-      "import": "./dist/layout-element-react.mjs",
-      "types": "./dist/layout-element.d.ts"
+      "types": "./dist/react/index.d.ts",
+      "import": {
+        "types": "./dist/react/index.d.ts",
+        "default": "./dist/layout-element-react.mjs"
+      },
+      "default": "./dist/layout-element.iife.js"
     }
   },
   "scripts": {
