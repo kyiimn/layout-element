@@ -62,9 +62,11 @@ export class LayoutDocumentElement extends HTMLElement {
     if (!this.isConnected) return null;
 
     this._model ??= GridCalculator.create({
+      element: this,
       width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}
     });
     this._model.data = {
+      element: this,
       width: this._width,
       height: this._height,
       paddingTop: this._paddingTop,

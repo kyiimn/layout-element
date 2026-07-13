@@ -1,3 +1,4 @@
+import { LayoutBoxElement, LayoutDocumentElement } from "@/components";
 import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/constants";
 import { ParagraphStyle, TextStyle } from "@/types";
 
@@ -20,6 +21,7 @@ export type Rect = {
 };
 
 type GridCalculatorOptions = {
+  element: LayoutBoxElement | LayoutDocumentElement;
   width: number;
   height: number;
   paddingTop?: number;
@@ -51,6 +53,8 @@ type GridCalculatorOptions = {
  */
 export class GridCalculator {
   private static _ppm: number | undefined;
+
+  private _element!: LayoutBoxElement | LayoutDocumentElement;
 
   private _columnCoords: Rect[];
   private _columnWidths: number[];
@@ -152,8 +156,10 @@ export class GridCalculator {
       this._columnWidths = [...this._inputColumns];
       this._gaps = [...gaps];
 
-      this._columnWidths[0] = this._columnWidths[0] - paddingLeft;
-      this._columnWidths[this._columnWidths.length - 1] = this._columnWidths[this._columnWidths.length - 1] - paddingRight;
+      if (this._element instanceof LayoutBoxElement) {
+        this._columnWidths[0] -= paddingLeft;
+        this._columnWidths[this._columnWidths.length - 1] -= paddingRight;
+      }
 
       for (let i = 0; i < this._columnWidths.length; i++) {
         const x1 = i > 0 ? this._columnCoords[this._columnCoords.length - 1].x2 + (gaps[i - 1] || 0) : paddingLeft;
@@ -167,6 +173,8 @@ export class GridCalculator {
   }
 
   set data(data: GridCalculatorOptions) {
+    this._element = data.element;
+
     this._width = data.width;
     this._height = data.height;
     this._paddingTop = data.paddingTop || 0;

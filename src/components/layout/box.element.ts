@@ -60,9 +60,12 @@ export class LayoutBoxElement extends HTMLElement {
     const { columnWidth, gaps, lineHeight } = this.parentModel;
 
     this._model ??= GridCalculator.create({
+      element: this,
       width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}
     });
     this._model.data = {
+      element: this,
+
       paddingTop: (this.position !== 'absolute' && this.paddingTop !== undefined) ? Math.ceil(this.paddingTop / lineHeight) * lineHeight : this.paddingTop,
       paddingRight: this.paddingRight,
       paddingBottom: (this.position !== 'absolute' && this.paddingBottom !== undefined) ? Math.ceil(this.paddingBottom / lineHeight) * lineHeight : this.paddingBottom,

@@ -17,6 +17,8 @@ export interface LayoutDocumentProps {
   textStyle?: TextStyle;
   visibleGuide?: boolean;
   onRenderError?: (event: CustomEvent) => void;
+  /** Called whenever innerWidth or innerHeight changes (derived from width/height minus padding) */
+  onInnerSizeChange?: (innerWidth: number, innerHeight: number) => void;
   children?: ReactNode;
 }
 
@@ -34,6 +36,7 @@ export const LayoutDocument = forwardRef<LayoutDocumentElement, LayoutDocumentPr
     paragraphStyle,
     textStyle,
     visibleGuide,
+    onInnerSizeChange,
     onRenderError,
     children,
   }, ref) {
@@ -114,6 +117,13 @@ export const LayoutDocument = forwardRef<LayoutDocumentElement, LayoutDocumentPr
       if (!element || visibleGuide === undefined) return;
       element.visibleGuide = visibleGuide;
     }, [innerRef, visibleGuide]);
+
+    useEffect(() => {
+      if (!onInnerSizeChange) return;
+      const element = innerRef.current;
+      if (!element) return;
+      onInnerSizeChange(element.innerWidth, element.innerHeight);
+    }, [innerRef, onInnerSizeChange, width, height, paddingTop, paddingRight, paddingBottom, paddingLeft, data]);
 
     useEffect(() => {
       const element = innerRef.current;
