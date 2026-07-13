@@ -271,6 +271,8 @@ export class LayoutDocumentElement extends HTMLElement {
   get paddingBottom() { return this._paddingBottom; }
   get paddingLeft() { return this._paddingLeft; }
   get paddingRight() { return this._paddingRight; }
+  get innerWidth() { return this._width - this.paddingLeft - this.paddingRight; }
+  get innerHeight() { return this._height - this.paddingTop - this.paddingBottom; }
   get columns() { return this._columns; }
   get gap() { return this._gap; }
   get paragraphStyle() { return this._paragraphStyle; }
