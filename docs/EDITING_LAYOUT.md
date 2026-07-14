@@ -85,7 +85,7 @@ element.editableLayout = false;
 
 #### 시각적 피드백
 
-선택된 요소에는 `data-selected=""` 속성이 설정되며, Shadow DOM 내부에 다음 CSS 규칙이 적용된다:
+**선택 표시** (`data-selected`):
 
 ```css
 :host([data-selected]) {
@@ -93,19 +93,38 @@ element.editableLayout = false;
 }
 ```
 
-- **inset shadow**: 요소 내부에 1px 빨간 테두리
-- **outset shadow**: 요소 외부에 1px 빨간 테두리
-- 기존 `border`가 있는 요소에서도 선택 표시가 정상적으로 보인다
+**호버 표시** (`data-hovered`) — `<x-layout-box>`만, `<x-layout-document>`는 제외:
+
+```css
+:host([data-hovered]) {
+  box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px;
+}
+```
+
+| 속성 | 색상 | 적용 대상 | 조건 |
+|------|------|----------|------|
+| `data-selected` | 빨간색 (`red`) | document, box | 클릭으로 선택됨 |
+| `data-hovered` | 파란색 (`#4a90d9`) | box만 | 마우스 hover, 선택되지 않은 요소만 |
+
+- **inset shadow**: 요소 내부에 1px 테두리
+- **outset shadow**: 요소 외부에 1px 테두리
+- 기존 `border`가 있는 요소에서도 표시가 정상적으로 보인다
 - `outline` 대신 `box-shadow`를 사용하는 이유: `outline`은 기존 `border`와 겹칠 때 표시되지 않을 수 있기 때문
 
-| 상태 | 커서 |
-|------|-------|
-| `editableLayout = true` (선택 안 됨) | `grab` |
-| `editableLayout = true` (선택됨, 대기) | `grab` |
-| `editableLayout = true` (드래그 중) | `grabbing` |
-| `editableLayout = false` | (기본값, 제거됨) |
+**호버 동작 규칙**:
 
-> **중요**: `:host[data-selected]`(대괄호가 속성 선택자를 감싸지 않은 형식)는 Shadow DOM에서 작동하지 않는다. 반드시 `:host([data-selected])` 형식을 사용해야 한다.
+1. `editableLayout`이 켜져 있고 `data-selected`가 없는 `<x-layout-box>`에만 `data-hovered`가 설정된다
+2. 이미 선택된 요소(`data-selected`)는 호버 표시가 나타나지 않는다
+3. 마우스가 요소에 진입하면 **조상 요소의 `data-hovered`를 모두 제거**하여, 가장 안쪽(최상위) 요소만 호버 표시가 보인다
+4. 마우스가 자식 요소에서 부모 영역으로 돌아갈 때, `elementFromPoint`를 사용하여 마우스 위치 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다
+5. `<x-layout-document>`는 호버 표시를 지원하지 않는다
+
+| 상태 | 커서 | 시각적 피드백 |
+|------|------|-------------|
+| `editableLayout = true` (선택 안 됨, hover) | `grab` | 파란색 테두리 (`data-hovered`) |
+| `editableLayout = true` (선택됨, 대기) | `grab` | 빨간색 테두리 (`data-selected`) |
+| `editableLayout = true` (드래그 중) | `grabbing` | 빨간색 테두리 (`data-selected`) |
+| `editableLayout = false` | (기본값) | 없음 |
 
 ### 2.2 EditManager API
 
@@ -290,9 +309,17 @@ _onLayoutClick(event)
 
 `editableLayout`을 `false`로 설정하면:
 
-1. `click` 이벤트 리스너 제거 (`<x-layout-box>`는 `mousedown`도 제거)
-2. `data-selected` 속성 제거 (시각적 피드백 해제)
-3. `EditManager._unregisterLayout()` 호출 (선택 목록에서 제거, `layoutSelectionChange` 이벤트 발생)
+**`<x-layout-box>`**:
+1. `click`, `mousedown`, `mouseenter`, `mouseleave` 이벤트 리스너 제거
+2. `data-selected` 속성 제거 (선택 시각적 피드백 해제)
+3. `data-hovered` 속성 제거 (호버 시각적 피드백 해제)
+4. `cursor` 스타일 초기화
+5. `EditManager._unregisterLayout()` 호출 (선택 목록에서 제거, `layoutSelectionChange` 이벤트 발생)
+
+**`<x-layout-document>`**:
+1. `click` 이벤트 리스너 제거
+2. `data-selected` 속성 제거
+3. `EditManager._unregisterLayout()` 호출
 
 ### 3.4 `disconnectedCallback` 정리
 
@@ -914,3 +941,5 @@ mouseup
 - **`_structureDirty`**: `paragraph.render()`에서 이 플래그가 `true`이면 `layout()`과 `TextLayoutEngine.create()`를 재실행한다. `false`이면 기존 모델을 재사용하여 `layoutText()`만 재실행한다. 드래그 중에는 박스 위치가 변하므로 항상 `true`로 설정해야 한다.
 - **`_overlayRects`**: `TextLayoutEngine`이 `_layoutTextIntoColumns()` 시작 시 `null`로 초기화한다. `paragraph.render()`에서 `TextLayoutEngine.create()` 호출 시 `getOverlapSizePX()`를 통해 새로 계산된다.
 - **`layoutMove` 이벤트**: 드래그 완료(mouseup) 또는 취소(ESC) 시 `EditManager._dispatchLayoutMove()`를 통해 발생한다. 단순 클릭(이동 임계값 3px 미만)에서는 발생하지 않는다. `canceled` 필드로 완료와 취소를 구분할 수 있다.
+- **호버 표시 (`data-hovered`)**: `<x-layout-box>`에만 적용되며, `<x-layout-document>`는 호버 표시를 지원하지 않는다. `mouseenter` 시 조상 요소의 `data-hovered`를 모두 제거하여 가장 안쪽 요소만 호버 표시가 보이도록 한다. `mouseleave` 시 `elementFromPoint`로 마우스 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다. 이 동작은 중첩된 박스에서 자식→부모로 마우스가 돌아갈 때 부모의 호버가 복원되도록 보장한다.
+- **호버와 선택의 우선순위**: `data-selected`가 있는 요소는 `data-hovered`를 표시하지 않는다. `_onLayoutMouseEnter`에서 `hasAttribute('data-selected')`를 먼저 검사하여, 이미 선택된 요소 위에 마우스가 있을 때 파란색 호버 테두리가 빨간색 선택 테두리와 겹치지 않도록 한다.
