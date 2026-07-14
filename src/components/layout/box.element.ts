@@ -645,8 +645,35 @@ export class LayoutBoxElement extends HTMLElement {
     this.setAttribute('data-hovered', '');
   }
 
-  private _onLayoutMouseLeave = (): void => {
+  private _onLayoutMouseLeave = (event: MouseEvent): void => {
     this.removeAttribute('data-hovered');
+    const related = event.relatedTarget as Element | null;
+    if (!related) return;
+    let target: Element | null = related;
+    while (target) {
+      if (target === this) return;
+      target = target.parentElement;
+    }
+    this._hoverNearestLayoutChild(event.clientX, event.clientY);
+  }
+
+  /**
+   * 마우스가 자식 요소에서 부모 영역으로 돌아올 때,
+   * Shadow DOM 내부를 순회하며 마우스 위치 아래 가장 가까운 레이아웃 박스를 찾아 hover를 설정한다.
+   */
+  private _hoverNearestLayoutChild(clientX: number, clientY: number): void {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const hit = root.elementFromPoint(clientX, clientY);
+    if (!hit) return;
+    let el: Element | null = hit;
+    while (el) {
+      if (el instanceof LayoutBoxElement && el.editableLayout && !el.hasAttribute('data-selected')) {
+        el._onLayoutMouseEnter();
+        return;
+      }
+      el = el.parentElement;
+    }
   }
 
   private _onLayoutMouseDown = (event: MouseEvent) => {
