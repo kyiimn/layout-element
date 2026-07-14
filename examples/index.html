@@ -250,6 +250,30 @@
           updateInfoPanel();
         });
 
+        // 레이아웃 이동 이벤트
+        em.addEventListener('layoutMove', (event) => {
+          if (event.canceled) {
+            console.log('[EditManager] layoutMove CANCELED', {
+              element: { id: event.layoutElement?.id, type: event.layoutElement?.type },
+              previousLeft: event.previousLeft,
+              previousTop: event.previousTop,
+              left: event.left,
+              top: event.top,
+              canceled: event.canceled,
+            });
+          } else {
+            console.log('[EditManager] layoutMove', {
+              element: { id: event.layoutElement?.id, type: event.layoutElement?.type },
+              previousLeft: event.previousLeft,
+              previousTop: event.previousTop,
+              left: event.left,
+              top: event.top,
+              canceled: event.canceled,
+            });
+          }
+          updateInfoPanel();
+        });
+
         // 포커스 변경 시에도 패널 업데이트
         em.addEventListener('focusChange', () => updateInfoPanel());
         em.addEventListener('cursorMove', () => updateInfoPanel());

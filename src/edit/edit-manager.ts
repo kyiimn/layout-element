@@ -17,7 +17,8 @@ export type EditManagerEventType =
   | 'selectionStart'
   | 'selectionEnd'
   | 'cursorMove'
-  | 'layoutSelectionChange';
+  | 'layoutSelectionChange'
+  | 'layoutMove';
 
 /**
  * 글로벌 편집 관리 이벤트.
@@ -37,6 +38,18 @@ export interface EditManagerEvent {
   selectedLayouts?: LayoutElement[];
   /** 레이아웃 선택 변경 시 이전 선택 요소들 (layoutSelectionChange 이벤트에서만) */
   previousLayouts?: LayoutElement[];
+  /** 레이아웃 이동 이벤트에서 이동된 요소 (layoutMove 이벤트에서만) */
+  layoutElement?: LayoutElement;
+  /** 이동 전 left 값 (layoutMove 이벤트에서만) */
+  previousLeft?: number;
+  /** 이동 전 top 값 (layoutMove 이벤트에서만) */
+  previousTop?: number;
+  /** 이동 후 left 값 (layoutMove 이벤트에서만) */
+  left?: number;
+  /** 이동 후 top 값 (layoutMove 이벤트에서만) */
+  top?: number;
+  /** 이동이 취소되었는지 여부 (ESC 취소 시 true) (layoutMove 이벤트에서만) */
+  canceled?: boolean;
 }
 
 /**
@@ -485,6 +498,46 @@ export class EditManager {
       this._selectedLayouts.splice(idx, 1);
       element.removeAttribute('data-selected');
       this._dispatchLayoutSelection(previousLayouts);
+    }
+  }
+
+  /**
+   * 레이아웃 요소의 이동 완료/취소 이벤트를 발생시킨다.
+   * @internal
+   */
+  _dispatchLayoutMove(
+    element: LayoutElement,
+    previousLeft: number,
+    previousTop: number,
+    left: number,
+    top: number,
+    canceled: boolean,
+  ): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('layoutMove');
+    if (!listeners || listeners.size === 0) return;
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'layoutMove',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null as unknown as EditController,
+            layoutElement: element,
+            previousLeft,
+            previousTop,
+            left,
+            top,
+            canceled,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
     }
   }
 

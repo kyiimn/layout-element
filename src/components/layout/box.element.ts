@@ -641,6 +641,28 @@ export class LayoutBoxElement extends HTMLElement {
     this.style.cursor = 'grabbing';
     document.addEventListener('mousemove', this._onLayoutMouseMove);
     document.addEventListener('mouseup', this._onLayoutMouseUp);
+    document.addEventListener('keydown', this._onLayoutKeyDown);
+  }
+
+  private _onLayoutKeyDown = (event: KeyboardEvent) => {
+    if (!this._isDragging) return;
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    if (this._dragRafId !== null) {
+      cancelAnimationFrame(this._dragRafId);
+      this._dragRafId = null;
+    }
+    document.removeEventListener('mousemove', this._onLayoutMouseMove);
+    document.removeEventListener('mouseup', this._onLayoutMouseUp);
+    document.removeEventListener('keydown', this._onLayoutKeyDown);
+    this._isDragging = false;
+    this._dragMoved = false;
+    this.style.cursor = this._editableLayout ? 'grab' : '';
+    const startLeft = this._dragStartLeft;
+    const startTop = this._dragStartTop;
+    if (this.left !== startLeft) this.left = startLeft;
+    if (this.top !== startTop) this.top = startTop;
+    EditManager.getInstance()._dispatchLayoutMove(this, startLeft, startTop, startLeft, startTop, true);
   }
 
   private _onLayoutMouseMove = (event: MouseEvent) => {
@@ -668,6 +690,7 @@ export class LayoutBoxElement extends HTMLElement {
     if (!this._isDragging) return;
     document.removeEventListener('mousemove', this._onLayoutMouseMove);
     document.removeEventListener('mouseup', this._onLayoutMouseUp);
+    document.removeEventListener('keydown', this._onLayoutKeyDown);
     if (this._dragRafId !== null) {
       cancelAnimationFrame(this._dragRafId);
       this._dragRafId = null;
@@ -676,11 +699,14 @@ export class LayoutBoxElement extends HTMLElement {
     this.style.cursor = this._editableLayout ? 'grab' : '';
 
     if (!this._dragMoved) return;
+    const startLeft = this._dragStartLeft;
+    const startTop = this._dragStartTop;
     const deltaX = event.clientX - this._dragStartMouseX;
     const deltaY = event.clientY - this._dragStartMouseY;
     const { left, top } = this._computeNewPosition(deltaX, deltaY);
     if (left !== this.left) this.left = left;
     if (top !== this.top) this.top = top;
+    EditManager.getInstance()._dispatchLayoutMove(this, startLeft, startTop, left, top, false);
   }
 
   private _computeNewPosition(deltaPxX: number, deltaPxY: number): { left: number; top: number } {
