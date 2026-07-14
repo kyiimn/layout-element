@@ -3,6 +3,7 @@ import {
   EditManager,
   EditManagerEvent,
   EditManagerEventType,
+  type LayoutElement,
 } from '@/edit/edit-manager';
 import { LayoutParagraphElement } from '@/components/layout/paragraph.element';
 import type { EditController, CurrentStyle } from '@/edit/edit-controller';
@@ -15,6 +16,7 @@ export interface UseEditManagerOptions {
   onSelectionStart?: (event: EditManagerEvent) => void;
   onSelectionEnd?: (event: EditManagerEvent) => void;
   onCursorMove?: (event: EditManagerEvent) => void;
+  onLayoutSelectionChange?: (event: EditManagerEvent) => void;
 }
 
 export interface UseEditManagerReturn {
@@ -23,11 +25,15 @@ export interface UseEditManagerReturn {
   cursorOffset: number | null;
   selection: SelectionRange | null;
   currentStyle: CurrentStyle | null;
+  selectedLayouts: LayoutElement[];
+  selectedLayoutIds: string[];
   focusParagraph: (
     target: LayoutParagraphElement | string,
     options?: { cursorOffset?: number; selection?: SelectionRange },
   ) => boolean;
   blurParagraph: (target?: LayoutParagraphElement | string) => boolean;
+  selectLayout: (target: LayoutElement | string | (LayoutElement | string)[]) => boolean;
+  clearLayoutSelection: () => void;
 }
 
 const EVENT_TYPES: Array<{ key: keyof UseEditManagerOptions; type: EditManagerEventType }> = [
@@ -37,6 +43,7 @@ const EVENT_TYPES: Array<{ key: keyof UseEditManagerOptions; type: EditManagerEv
   { key: 'onSelectionStart', type: 'selectionStart' },
   { key: 'onSelectionEnd', type: 'selectionEnd' },
   { key: 'onCursorMove', type: 'cursorMove' },
+  { key: 'onLayoutSelectionChange', type: 'layoutSelectionChange' },
 ];
 
 export function useEditManager(
@@ -53,6 +60,8 @@ export function useEditManager(
   const [cursorOffset, setCursorOffset] = useState<number | null>(manager.cursorOffset);
   const [selection, setSelection] = useState<SelectionRange | null>(manager.selection);
   const [currentStyle, setCurrentStyle] = useState<CurrentStyle | null>(manager.currentStyle);
+  const [selectedLayouts, setSelectedLayouts] = useState<LayoutElement[]>(manager.selectedLayouts);
+  const [selectedLayoutIds, setSelectedLayoutIds] = useState<string[]>(manager.selectedLayoutIds);
 
   const syncState = useCallback(() => {
     setFocusedParagraph(manager.focusedParagraph);
@@ -60,6 +69,8 @@ export function useEditManager(
     setCursorOffset(manager.cursorOffset);
     setSelection(manager.selection);
     setCurrentStyle(manager.currentStyle);
+    setSelectedLayouts(manager.selectedLayouts);
+    setSelectedLayoutIds(manager.selectedLayoutIds);
   }, [manager]);
 
   useEffect(() => {
@@ -93,13 +104,28 @@ export function useEditManager(
     [manager],
   );
 
+  const selectLayout = useCallback(
+    (target: LayoutElement | string | (LayoutElement | string)[]): boolean =>
+      manager.selectLayout(target),
+    [manager],
+  );
+
+  const clearLayoutSelection = useCallback(
+    (): void => manager.clearLayoutSelection(),
+    [manager],
+  );
+
   return {
     focusedParagraph,
     focusedController,
     cursorOffset,
     selection,
     currentStyle,
+    selectedLayouts,
+    selectedLayoutIds,
     focusParagraph,
     blurParagraph,
+    selectLayout,
+    clearLayoutSelection,
   };
 }

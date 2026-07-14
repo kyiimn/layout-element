@@ -31,7 +31,7 @@ export class LayoutParagraphElement extends HTMLElement {
 
   private _zIndex: number;
 
-  private _editable: boolean = false;
+  private _editableText: boolean = false;
   private _editController: EditController | null = null;
 
   private _structureDirty: boolean = true;
@@ -50,7 +50,7 @@ export class LayoutParagraphElement extends HTMLElement {
   connectedCallback() {
     if (!this.id) this.id = genUUID();
     this.layout();
-    if (this._editable && !this._editController) {
+    if (this._editableText && !this._editController) {
       this._editController = new EditController(this);
     }
   }
@@ -308,18 +308,18 @@ export class LayoutParagraphElement extends HTMLElement {
 
   get zIndex() { return this._zIndex; }
 
-  get editable(): boolean {
-    return this._editable;
+  get editableText(): boolean {
+    return this._editableText;
   }
 
-  set editable(value: boolean) {
+  set editableText(value: boolean) {
     if (value && !this._editController) {
       this._editController = new EditController(this);
     } else if (!value && this._editController) {
       this._editController.destroy();
       this._editController = null;
     }
-    this._editable = value;
+    this._editableText = value;
   }
 }
 customElements.define('x-layout-paragraph', LayoutParagraphElement);

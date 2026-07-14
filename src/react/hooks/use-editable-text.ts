@@ -2,22 +2,22 @@ import { useEffect } from 'react';
 import type { RefObject } from 'react';
 import { LayoutParagraphElement } from '@/components/layout/paragraph.element';
 
-export interface UseEditableOptions {
+export interface UseEditableTextOptions {
   ref: RefObject<LayoutParagraphElement | null>;
-  editable: boolean;
+  editableText: boolean;
 }
 
-export function useEditable({ ref, editable }: UseEditableOptions): void {
+export function useEditableText({ ref, editableText }: UseEditableTextOptions): void {
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
 
-    element.editable = editable;
+    element.editableText = editableText;
 
     return () => {
       if (element.isConnected) {
-        element.editable = false;
+        element.editableText = false;
       }
     };
-  }, [ref, editable]);
+  }, [ref, editableText]);
 }

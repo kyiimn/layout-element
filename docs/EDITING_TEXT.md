@@ -1,18 +1,18 @@
-# layout-element 편집 모드 상세 명세
+# layout-element 텍스트 편집 모드 상세 명세
 
 > 작성 기준: `src/edit/edit-controller.ts`, `src/edit/edit-coordinate-mapper.ts`, `src/edit/edit-manager.ts`, `src/types/edit/`, `src/components/edit/cursor.element.ts`, `src/components/edit/selection.element.ts`, `src/components/layout/paragraph.element.ts`
 >
-> 본 문서는 `layout-element` 라이브러리의 편집 모드 기능, 공개 API, 키보드/마우스 입력 처리, IME 조합, 렌더링 생명 주기, 글로벌 편집 관리(`EditManager`), 그리고 호스트 프로그램 연동 방법을 상세히 기술한다.
+> 본 문서는 `layout-element` 라이브러리의 텍스트 편집 모드 기능, 공개 API, 키보드/마우스 입력 처리, IME 조합, 렌더링 생명 주기, 글로벌 편집 관리(`EditManager`), 그리고 호스트 프로그램 연동 방법을 상세히 기술한다.
 
 ---
 
 ## 1. 개요 (Overview)
 
-`layout-element`는 신문 레이웃을 브라우저에서 렌더링하는 엔진이다. 편집 모드는 이 렌더링 엔진 위에서 평문 텍스트를 입력하고 수정할 수 있는 기능이다. 커서, 선택 영역, IME 조합, 키보드 입력, 마우스 상호작용, 클립보드 연동을 제공한다.
+`layout-element`는 신문 레이웃을 브라우저에서 렌더링하는 엔진이다. 텍스트 편집 모드는 이 렌더링 엔진 위에서 평문 텍스트를 입력하고 수정할 수 있는 기능이다. 커서, 선택 영역, IME 조합, 키보드 입력, 마우스 상호작용, 클립보드 연동을 제공한다.
 
-### 1.1 편집 모드 아키텍처
+### 1.1 텍스트 편집 모드 아키텍처
 
-`EditController`는 `LayoutParagraphElement.editable = true`로 활성화된다. 컨트롤러는 단락 요소의 `shadow root` 안에 다음 세 요소를 배치한다.
+`EditController`는 `LayoutParagraphElement.editableText = true`로 활성화된다. 컨트롤러는 단락 요소의 `shadow root` 안에 다음 세 요소를 배치한다.
 
 1. 숨겨진 `<textarea>`: 1x1 픽셀, 투명, `tabindex="-1"`, `opacity: 0`. 모든 키보드 이벤트, `input` 이벤트, IME 조합 이벤트, 붙여넣기 이벤트를 이 요소가 수신한다. 사용자에게 보이지 않지만 브라우저의 표준 입력기 동작을 그대로 활용한다.
 2. `<x-layout-cursor>`: 1px 너비의 수직 커서. 실제 DOM 위치는 `EditCoordinateMapper`가 반환하는 문자 rect 기준으로 계산한다.
@@ -57,7 +57,7 @@ flowchart TD
 
 매퍼는 `rebuild()` 호출 시 `TextLayoutEngine.columnContents`를 순회하며 두 Map(`_renderedToSource`, `_sourceToRendered`)을 재구축한다. 이 매핑은 커서/선택 위치 계산, 마우스 클릭 처리, 클립보드 복사 등 거의 모든 편집 동작의 기반이 된다.
 
-### 1.3 렌더링 엔진과 편집 컨트롤러의 관계
+### 1.3 렌더링 엔진과 텍스트 편집 컨트롤러의 관계
 
 편집 동작은 다음 흐름으로 전체 화면에 반영된다.
 
@@ -74,9 +74,9 @@ flowchart LR
     I --> J[화면 갱신]
 ```
 
-요약하면, 편집 컨트롤러는 입력을 받아 모델을 바꾸고, 단락의 `render()`가 실제 DOM을 다시 그린 뒤, `postRender()`를 통해 매퍼와 커서/선택을 동기화한다. `postRender()`는 항상 `render()` 내부에서 자동 호출되므로 호스트 프로그램은 별도로 호출할 필요가 없다.
+요약하면, 텍스트 편집 컨트롤러는 입력을 받아 모델을 바꾸고, 단락의 `render()`가 실제 DOM을 다시 그린 뒤, `postRender()`를 통해 매퍼와 커서/선택을 동기화한다. `postRender()`는 항상 `render()` 내부에서 자동 호출되므로 호스트 프로그램은 별도로 호출할 필요가 없다.
 
-### 1.4 활성화된 단락의 전체 데이터 흐름
+### 1.4 활성화된 단락의 텍스트 편집 데이터 흐름
 
 ```mermaid
 sequenceDiagram
@@ -121,27 +121,27 @@ sequenceDiagram
 
 ---
 
-## 2. 편집 모드 활성화
+## 2. 텍스트 편집 모드 활성화
 
-### 2.1 `LayoutParagraphElement.editable`
+### 2.1 `LayoutParagraphElement.editableText`
 
-`x-layout-paragraph` 요소의 `editable` 속성으로 편집 모드를 켜고 끈다.
+`x-layout-paragraph` 요소의 `editableText` 속성으로 텍스트 편집 모드를 켜고 끈다.
 
 ```ts
 const paragraph = document.querySelector('x-layout-paragraph') as LayoutParagraphElement;
 
 // 활성화
-paragraph.editable = true;
+paragraph.editableText = true;
 
 // 비활성화
-paragraph.editable = false;
+paragraph.editableText = false;
 ```
 
 동작:
 
-- `editable = true`를 처음 설정하면 `EditController` 인스턴스가 생성된다.
-- `editable = false`를 설정하면 `EditController.destroy()`가 호출되며, 이벤트 리스너와 DOM 요소가 모두 제거된다.
-- 같은 단락에서 다시 `editable = true`를 설정하면 새 `EditController`가 생성된다.
+- `editableText = true`를 처음 설정하면 `EditController` 인스턴스가 생성된다.
+- `editableText = false`를 설정하면 `EditController.destroy()`가 호출되며, 이벤트 리스너와 DOM 요소가 모두 제거된다.
+- 같은 단락에서 다시 `editableText = true`를 설정하면 새 `EditController`가 생성된다.
 
 ### 2.2 `editController` 게터
 
@@ -156,7 +156,7 @@ if (controller) {
 
 ### 2.3 `EditController` 생성 시 추가되는 DOM 요소
 
-`EditController` 생성자는 단락의 `shadow root`에 다음 세 가지 요소를 추가한다.
+`EditController` 생성자는 단락의 `shadow root`에 다음 세 가지 요소를 추가한다. 텍스트 편집을 위한 숨겨진 입력기, 커서, 선택 영역이다.
 
 | 요소 | 태그 | 설명 |
 |------|------|------|
@@ -191,7 +191,7 @@ if (controller) {
 
 ```mermaid
 flowchart LR
-    A[editable = true] --> B[EditController 생성]
+    A[editableText = true] --> B[EditController 생성]
     B --> C["EditCoordinateMapper 생성"]
     C --> D["textarea + cursor + selection 생성"]
     D --> E[shadow root에 추가]
@@ -200,7 +200,7 @@ flowchart LR
     G --> H["_updateCursorPosition()"]
     H --> I[편집 가능 상태]
 
-    J[editable = false] --> K[EditController.destroy() 호출]
+    J[editableText = false] --> K[EditController.destroy() 호출]
     K --> L[이벤트 리스너 제거]
     L --> M[타이머 취소]
     M --> N[조합 상태 리셋]
@@ -232,8 +232,8 @@ flowchart LR
 
 | API | 타입 | 설명 |
 |-----|------|------|
-| `editable` | `boolean` get/set | 편집 모드를 활성화하거나 비활성화한다. `true` 설정 시 `EditController`가 생성되고, `false` 설정 시 제거된다. |
-| `editController` | `EditController \| null` get | 현재 연결된 `EditController` 인스턴스를 반환한다. 편집 모드가 꺼져 있으면 `null`이다. |
+| `editableText` | `boolean` get/set | 텍스트 편집 모드를 활성화하거나 비활성화한다. `true` 설정 시 `EditController`가 생성되고, `false` 설정 시 제거된다. |
+| `editController` | `EditController \| null` get | 현재 연결된 `EditController` 인스턴스를 반환한다. 텍스트 편집 모드가 꺼져 있으면 `null`이다. |
 | `model` | `TextLayoutEngine \| null` get | 단락에 연결된 `TextLayoutEngine` 모델을 반환한다. |
 | `render()` | `void` | 단락을 다시 렌더링한다. 편집 중이면 `editController.postRender()`를 자동으로 호출한다. |
 
@@ -298,7 +298,7 @@ const { textStyle, paragraphStyle } = controller.currentStyle;
 // paragraphStyle.textAlign, paragraphStyle.lineGap, ...
 ```
 
-모델이 없거나 편집 모드가 비활성화된 경우 빈 객체(`{ textStyle: {}, paragraphStyle: {} }`)를 반환한다.
+모델이 없거나 텍스트 편집 모드가 비활성화된 경우 빈 객체(`{ textStyle: {}, paragraphStyle: {} }`)를 반환한다.
 
 #### `focus()` / `blur()`
 
@@ -404,11 +404,11 @@ InheritStyle (부모에서 상속)
 | `selection` | `SelectionRange \| null` get | 현재 선택 영역. 선택이 없거나 포커스된 단락이 없으면 `null`. DOM `Selection` API와 유사하게 현재 selection 객체를 직접 조회. |
 | `currentStyle` | `CurrentStyle \| null` get | 현재 커서 위치의 유효 스타일. 포커스된 단락이 없으면 `null`. |
 | `controllers` | `Set<EditController>` get | 등록된 모든 편집 컨트롤러. |
-| `focusParagraph(target, options?)` | `boolean` | 단락 요소 또는 ID로 포커스를 설정한다. 편집 모드가 아니면 자동 활성화. `options.cursorOffset`으로 커서 위치, `options.selection`으로 선택 영역을 지정할 수 있다. 성공 시 `true`, 실패 시 `false`. |
+| `focusParagraph(target, options?)` | `boolean` | 단락 요소 또는 ID로 포커스를 설정한다. 텍스트 편집 모드가 아니면 자동 활성화. `options.cursorOffset`으로 커서 위치, `options.selection`으로 선택 영역을 지정할 수 있다. 성공 시 `true`, 실패 시 `false`. |
 | `blurParagraph(target?)` | `boolean` | 단락 요소, ID, 또는 생략으로 포커스를 해제한다. 생략하면 현재 포커스된 단락을 blur. 성공 시 `true`, 실패 시 `false`. |
 | `addEventListener(type, listener)` | `void` | 이벤트 리스너를 등록한다. |
 | `removeEventListener(type, listener)` | `void` | 이벤트 리스너를 제거한다. |
-| `deactivateAll()` | `void` | 모든 단락의 편집 모드를 비활성화한다. |
+| `deactivateAll()` | `void` | 모든 단락의 텍스트 편집 모드를 비활성화한다. |
 
 ### 3.6.3 이벤트 시스템
 
@@ -490,7 +490,7 @@ focusParagraph(
 
 1. `target`이 문자열이면 `document.getElementById()`로 요소를 찾고 `localName === 'x-layout-paragraph'`인지 확인한다.
 2. `target`이 `LayoutParagraphElement`이면 그대로 사용한다.
-3. 단락이 편집 모드가 아니면 `editable = true`로 설정하여 `EditController`를 생성한다.
+3. 단락이 텍스트 편집 모드가 아니면 `editableText = true`로 설정하여 `EditController`를 생성한다.
 4. 등록된 컨트롤러 중 해당 단락의 컨트롤러를 찾는다.
 5. `controller.focus()`로 textarea에 포커스를 준다.
 6. `options.selection`이 있으면 `controller.setSelection(selection)`을 호출한다. `setSelection`은 내부적으로 커서 위치를 `focus.textOffset`으로 이동시킨다.
@@ -581,7 +581,7 @@ manager.blurParagraph();                // 현재 포커스된 단락 blur
 manager.blurParagraph('paragraph-1');   // 특정 단락이 포커스 상태일 때만 blur
 manager.blurParagraph(paragraph);       // 요소로 지정
 
-// 모든 편집 모드 비활성화
+// 모든 텍스트 편집 모드 비활성화
 manager.deactivateAll();
 ```
 
@@ -1066,7 +1066,7 @@ paragraph.render();
 
 ### 7.4 렌더링 성능 향상 전략
 
-편집 모드는 빠른 입력 응답성이 중요하다. 다음 전략을 사용해 렌더링 비용을 줄인다.
+텍스트 편집 모드는 빠른 입력 응답성이 중요하다. 다음 전략을 사용해 렌더링 비용을 줄인다.
 
 #### 7.4.1 디바운스 렌더링 (`_debouncedRender()`)
 
@@ -1441,7 +1441,7 @@ flowchart TD
 
 ## 13. 호스트 프로그램 연동 가이드
 
-아래 예시는 신문 레이아웃 편집 프로그램에서 `layout-element`의 편집 모드를 사용하는 전형적인 패턴이다.
+아래 예시는 신문 레이아웃 편집 프로그램에서 `layout-element`의 텍스트 편집 모드를 사용하는 전형적인 패턴이다.
 
 ```ts
 import {
@@ -1461,9 +1461,9 @@ async function initDocument() {
   doc.data = documentData; // DocumentData
 }
 
-// 2. 편집 모드 활성화
+// 2. 텍스트 편집 모드 활성화
 const paragraph = doc.querySelector('x-layout-paragraph') as LayoutParagraphElement;
-paragraph.editable = true;
+paragraph.editableText = true;
 
 // 3. 상태 읽기
 const controller = paragraph.editController!;
@@ -1485,8 +1485,8 @@ paragraph.addEventListener('render-error', (e) => {
   }
 });
 
-// 7. 편집 모드 비활성화
-paragraph.editable = false;
+// 7. 텍스트 편집 모드 비활성화
+paragraph.editableText = false;
 ```
 
 ### 13.1 초기화 순서 상세
@@ -1496,7 +1496,7 @@ paragraph.editable = false;
 3. `<x-layout-document>`를 생성하고 `data` 속성에 `DocumentData`를 설정.
 4. `document.render()`를 호출. `connectedCallback`에서 자동으로 `layout()`은 실행되지만, 인쇄 모드에서는 수동 호출이 필요할 수 있다.
 5. 편집할 `<x-layout-paragraph>` 요소를 찾는다.
-6. `paragraph.editable = true`로 편집 모드를 활성화.
+6. `paragraph.editableText = true`로 텍스트 편집 모드를 활성화.
 
 ### 13.2 외부 텍스트 변경 패턴
 

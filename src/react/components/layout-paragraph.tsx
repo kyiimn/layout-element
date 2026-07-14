@@ -5,13 +5,13 @@ import { useLayoutElement } from '@/react/hooks';
 
 export interface LayoutParagraphProps {
   data: ParagraphData;
-  editable?: boolean;
+  editableText?: boolean;
   onRenderError?: (event: CustomEvent) => void;
   children?: ReactNode;
 }
 
 export const LayoutParagraph = forwardRef<LayoutParagraphElement, LayoutParagraphProps>(
-  function LayoutParagraph({ data, editable, onRenderError, children }, ref) {
+  function LayoutParagraph({ data, editableText, onRenderError, children }, ref) {
     const { ref: innerRef, define } = useLayoutElement<LayoutParagraphElement>();
 
     useEffect(() => {
@@ -26,9 +26,9 @@ export const LayoutParagraph = forwardRef<LayoutParagraphElement, LayoutParagrap
 
     useEffect(() => {
       const element = innerRef.current;
-      if (!element || editable === undefined) return;
-      element.editable = editable;
-    }, [innerRef, editable]);
+      if (!element || editableText === undefined) return;
+      element.editableText = editableText;
+    }, [innerRef, editableText]);
 
     useEffect(() => {
       const element = innerRef.current;

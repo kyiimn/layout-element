@@ -22,6 +22,7 @@ export interface LayoutBoxProps {
   paddingRight?: number;
   paddingBottom?: number;
   paddingLeft?: number;
+  editableLayout?: boolean;
   children?: ReactNode;
 }
 
@@ -45,6 +46,7 @@ export const LayoutBox = forwardRef<LayoutBoxElement, LayoutBoxProps>(
     paddingRight,
     paddingBottom,
     paddingLeft,
+    editableLayout,
     children,
   }, ref) {
     const { ref: innerRef, define } = useLayoutElement<LayoutBoxElement>();
@@ -136,6 +138,12 @@ export const LayoutBox = forwardRef<LayoutBoxElement, LayoutBoxProps>(
       if (!element || borderColor === undefined) return;
       element.borderColor = borderColor;
     }, [innerRef, borderColor]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || editableLayout === undefined) return;
+      element.editableLayout = editableLayout;
+    }, [innerRef, editableLayout]);
 
     useEffect(() => {
       const element = innerRef.current;

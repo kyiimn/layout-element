@@ -1,6 +1,11 @@
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
+import { LayoutDocumentElement } from "@/components/layout/document.element";
+import { LayoutBoxElement } from "@/components/layout/box.element";
 import type { EditController, CurrentStyle } from "./edit-controller";
 import type { SelectionRange } from "@/types/edit";
+
+/** 레이아웃 요소 (document 또는 box) */
+export type LayoutElement = LayoutDocumentElement | LayoutBoxElement;
 
 /**
  * 글로벌 편집 관리 이벤트 타입.
@@ -11,7 +16,8 @@ export type EditManagerEventType =
   | 'styleChange'
   | 'selectionStart'
   | 'selectionEnd'
-  | 'cursorMove';
+  | 'cursorMove'
+  | 'layoutSelectionChange';
 
 /**
  * 글로벌 편집 관리 이벤트.
@@ -27,6 +33,10 @@ export interface EditManagerEvent {
   previousParagraph?: LayoutParagraphElement | null;
   /** 이전 편집 컨트롤러 (focusChange 이벤트에서만) */
   previousController?: EditController | null;
+  /** 레이아웃 선택 변경 시 선택된 요소들 (layoutSelectionChange 이벤트에서만) */
+  selectedLayouts?: LayoutElement[];
+  /** 레이아웃 선택 변경 시 이전 선택 요소들 (layoutSelectionChange 이벤트에서만) */
+  previousLayouts?: LayoutElement[];
 }
 
 /**
@@ -72,6 +82,7 @@ export class EditManager {
   private _focusedController: EditController | null = null;
   private _listeners: Map<EditManagerEventType, Set<EditManagerEventListener>> = new Map();
   private _dispatching = false;
+  private _selectedLayouts: LayoutElement[] = [];
 
   private constructor() {}
 
@@ -291,14 +302,14 @@ export class EditManager {
 
     if (!paragraph) return false;
 
-    if (!paragraph.editable) {
-      paragraph.editable = true;
+    if (!paragraph.editableText) {
+      paragraph.editableText = true;
     }
 
     let controller = this._findControllerByParagraph(paragraph);
     if (!controller) {
-      paragraph.editable = false;
-      paragraph.editable = true;
+      paragraph.editableText = false;
+      paragraph.editableText = true;
       controller = this._findControllerByParagraph(paragraph);
     }
     if (!controller) return false;
@@ -371,7 +382,145 @@ export class EditManager {
   deactivateAll(): void {
     for (const controller of this._controllers) {
       const paragraph = controller['_paragraph'] as LayoutParagraphElement;
-      paragraph.editable = false;
+      paragraph.editableText = false;
+    }
+  }
+
+  /**
+   * 레이아웃 요소를 선택한다.
+   *
+   * `editableLayout`이 켜진 document 또는 box 요소만 선택할 수 있다.
+   * `multi`가 `false`(기본값)이면 기존 선택을 모두 해제하고 지정된 요소만 선택한다.
+   * `multi`가 `true`이면 기존 선택에 지정된 요소를 추가/토글한다.
+   *
+   * @param target - 선택할 레이아웃 요소, 요소의 ID, 또는 그 배열
+   * @param multi - 다중 선택 모드. `true`면 기존 선택에 추가/토글
+   * @returns 선택 성공 여부. 하나도 선택하지 못하면 `false`
+   */
+  selectLayout(target: LayoutElement | string | (LayoutElement | string)[]): boolean {
+    const targets = Array.isArray(target) ? target : [target];
+    const newSelections: LayoutElement[] = [];
+
+    for (const t of targets) {
+      const element = this._resolveLayoutElement(t);
+      if (!element) continue;
+      if (!element.editableLayout) continue;
+      newSelections.push(element);
+    }
+
+    if (newSelections.length === 0) return false;
+
+    const previousLayouts = [...this._selectedLayouts];
+
+    if (this._multiSelect) {
+      for (const el of newSelections) {
+        const idx = this._selectedLayouts.indexOf(el);
+        if (idx >= 0) {
+          this._selectedLayouts.splice(idx, 1);
+          el.removeAttribute('data-selected');
+        } else {
+          this._selectedLayouts.push(el);
+          el.setAttribute('data-selected', '');
+        }
+      }
+    } else {
+      for (const prev of this._selectedLayouts) {
+        prev.removeAttribute('data-selected');
+      }
+      this._selectedLayouts = newSelections;
+      for (const el of newSelections) {
+        el.setAttribute('data-selected', '');
+      }
+    }
+
+    this._dispatchLayoutSelection(previousLayouts);
+    return true;
+  }
+
+  /**
+   * 레이아웃 선택을 모두 해제한다.
+   */
+  clearLayoutSelection(): void {
+    if (this._selectedLayouts.length === 0) return;
+    const previousLayouts = [...this._selectedLayouts];
+    for (const el of this._selectedLayouts) {
+      el.removeAttribute('data-selected');
+    }
+    this._selectedLayouts = [];
+    this._dispatchLayoutSelection(previousLayouts);
+  }
+
+  /**
+   * 현재 선택된 레이아웃 요소들을 반환한다.
+   */
+  get selectedLayouts(): LayoutElement[] {
+    return [...this._selectedLayouts];
+  }
+
+  /**
+   * 현재 선택된 레이아웃 요소들의 ID 배열을 반환한다.
+   */
+  get selectedLayoutIds(): string[] {
+    return this._selectedLayouts.map(el => el.id).filter(Boolean);
+  }
+
+  private _multiSelect = false;
+
+  /**
+   * 다중 선택 모드를 설정한다. `true`면 다음 `selectLayout` 호출이 토글 모드로 동작한다.
+   * @internal
+   */
+  _setMultiSelect(value: boolean): void {
+    this._multiSelect = value;
+  }
+
+  /**
+   * 레이아웃 요소가 DOM에서 제거될 때 선택에서 해제한다.
+   * @internal
+   */
+  _unregisterLayout(element: LayoutElement): void {
+    const idx = this._selectedLayouts.indexOf(element);
+    if (idx >= 0) {
+      const previousLayouts = [...this._selectedLayouts];
+      this._selectedLayouts.splice(idx, 1);
+      element.removeAttribute('data-selected');
+      this._dispatchLayoutSelection(previousLayouts);
+    }
+  }
+
+  private _resolveLayoutElement(target: LayoutElement | string): LayoutElement | null {
+    if (typeof target === 'string') {
+      const element = document.getElementById(target);
+      if (element instanceof LayoutDocumentElement || element instanceof LayoutBoxElement) {
+        return element;
+      }
+      return null;
+    }
+    return target;
+  }
+
+  private _dispatchLayoutSelection(previousLayouts: LayoutElement[]): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('layoutSelectionChange');
+    if (!listeners || listeners.size === 0) return;
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'layoutSelectionChange',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null as unknown as EditController,
+            selectedLayouts: [...this._selectedLayouts],
+            previousLayouts,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
     }
   }
 

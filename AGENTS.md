@@ -40,7 +40,7 @@ No test runner, linter, or formatter is configured.
 <x-layout-document>          ← Root. Owns GridCalculator, coordinates rendering pipeline
   <x-layout-guide-column>    ← Debug grid overlay (hidden in print mode; printPostData for post-processing)
   <x-layout-box>             ← Positioned container (static=column-grid | absolute=mm coords)
-    <x-layout-paragraph>     ← Multi-column text area with wrapping; owns EditController when editable
+    <x-layout-paragraph>     ← Multi-column text area with wrapping; owns EditController when editableText
       <x-layout-column>      ← Individual text column (rendered text lines)
     <x-layout-image>         ← Canvas-based image crop element
   <x-layout-vcolumn>         ← Virtual column (temporary, used only during layoutText)
@@ -89,7 +89,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **No tests exist**: There is no test infrastructure. No `vitest`, no `jest`, no test files.
 - **ColorRegistry without stylesheet**: `ColorRegistry.init()` sets `_ready = true` even when no stylesheet is available (SSR, test environments). Color data is accessible via `colorMap` but CSS variables are not injected.
 - **Guide column printPostData**: `LayoutGuideColumnElement` has a `printPostData` getter that returns position/size data for print post-processing, matching the pattern of other layout elements.
-- **EditManager singleton**: `EditManager.getInstance()` manages focus across all editable paragraphs. Only one paragraph can be focused at a time. `EditController` auto-registers on construction and auto-unregisters on `destroy()`.
+- **EditManager singleton**: `EditManager.getInstance()` manages focus across all editableText paragraphs. Only one paragraph can be focused at a time. `EditController` auto-registers on construction and auto-unregisters on `destroy()`.
 - **Key-based span rendering**: `column.element.ts` `renderText()` uses `data-source-offset` as the reconciliation key for span diff rendering. Existing spans are reused when content unchanged; only changed spans are updated. `data-offset` (rendered offset) is retained for `EditCoordinateMapper` compatibility.
 - **`data-source-offset` vs `data-offset`**: `data-source-offset` = source string position (used as diff key). `data-offset` = rendered position (used by EditCoordinateMapper for click-to-cursor mapping). Both attributes coexist on every span.
 - **Optimistic spans are temporary**: `data-temporary="true"` spans are stripped at the start of every `renderText()` call and recreated by `EditController` as needed.
@@ -176,8 +176,8 @@ src/
       layout-image.tsx
       layout-guide-column.tsx
       index.ts
-    hooks/                   # React hooks for editable state and manager access
-      use-editable.ts
+    hooks/                   # React hooks for editable text state and manager access
+      use-editable-text.ts
       use-edit-manager.ts
       use-layout-element.ts
       index.ts
@@ -204,9 +204,9 @@ examples/
 - **Korean IME composition**: EditController handles IME composition via `compositionstart`, `compositionupdate`, and `compositionend` events. This is essential for Korean text input on Windows (TSF), macOS, and Linux (IBus).
 - **Mouse coordinate freshness**: `_onMouseMove` stores the latest `clientX`/`clientY` on every mousemove event and reads them from the `requestAnimationFrame` callback, ensuring drag selection follows the cursor accurately during fast movement.
 - **EditManager events**: Use `EditManager.getInstance().addEventListener(type, listener)` to subscribe to edit events. Types: `focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`. The old `selectionChange` event was removed.
-- **Programmatic focus**: Use `EditManager.getInstance().focusParagraph(target, options?)` and `blurParagraph(target?)` instead of calling `paragraph.editable` or `controller.focus()` directly.
+- **Programmatic focus**: Use `EditManager.getInstance().focusParagraph(target, options?)` and `blurParagraph(target?)` instead of calling `paragraph.editableText` or `controller.focus()` directly.
 
-Keyboard shortcut documentation has been moved to `docs/EDITING.md` Section 4.
+Keyboard shortcut documentation has been moved to `docs/EDITING_TEXT.md` Section 4.
 
 ## React Integration
 

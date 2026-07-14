@@ -3,6 +3,7 @@ import { GridCalculator } from "@/core";
 import { ColorRegistry } from "@/resource";
 import { InheritStyle, BoxData, ParagraphStyle, TextStyle, PrintPostData, BoxPosition, BoxBorderStyle } from "@/types";
 import { checkOverlap, genUUID } from "@/utils";
+import { EditManager } from "@/edit/edit-manager";
 import { LayoutDocumentElement } from "./document.element";
 import { LayoutImageElement } from "./image.element";
 import { LayoutParagraphElement } from "./paragraph.element";
@@ -41,6 +42,7 @@ export class LayoutBoxElement extends HTMLElement {
   private _paddingLeft: number = 0;
   private _paddingRight: number = 0;
   private _zIndex: number = 0;
+  private _editableLayout: boolean = false;
 
   constructor() {
     super();
@@ -52,7 +54,9 @@ export class LayoutBoxElement extends HTMLElement {
     this.layout();
   }
 
-  disconnectedCallback() { }
+  disconnectedCallback() {
+    EditManager.getInstance()._unregisterLayout(this);
+  }
 
   layout() {
     if (!this.isConnected || !this.parentModel) return;
@@ -86,7 +90,8 @@ export class LayoutBoxElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
-      styleEl.sheet.insertRule(`@media print { [data-border] { display: none; } }`, 1);
+      styleEl.sheet.insertRule(":host([data-selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 1);
+      styleEl.sheet.insertRule(`@media print { [data-border] { display: none; } }`, 2);
       this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));
@@ -576,6 +581,29 @@ export class LayoutBoxElement extends HTMLElement {
     if (this.items.length !== 1) return null;
     if (this.items[0].type === 'box') return this.items[0].contentType;
     return this.items[0].type;
+  }
+
+  get editableLayout() { return this._editableLayout; }
+
+  set editableLayout(value: boolean) {
+    if (this._editableLayout === value) return;
+    this._editableLayout = value;
+
+    if (value) {
+      this.addEventListener('click', this._onLayoutClick);
+    } else {
+      this.removeEventListener('click', this._onLayoutClick);
+      this.removeAttribute('data-selected');
+      EditManager.getInstance()._unregisterLayout(this);
+    }
+  }
+
+  private _onLayoutClick = (event: MouseEvent): void => {
+    event.stopPropagation();
+    const manager = EditManager.getInstance();
+    manager._setMultiSelect(event.ctrlKey || event.metaKey);
+    manager.selectLayout(this);
+    manager._setMultiSelect(false);
   }
 }
 customElements.define('x-layout-box', LayoutBoxElement);

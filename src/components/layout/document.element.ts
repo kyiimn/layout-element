@@ -1,5 +1,6 @@
 import { GridCalculator } from "@/core";
 import { DocumentData, ParagraphStyle, PrintPostData, TextStyle } from "@/types";
+import { EditManager } from "@/edit/edit-manager";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
@@ -27,6 +28,7 @@ export class LayoutDocumentElement extends HTMLElement {
 
   private _visibleGuide: boolean;
   private _isPrint: boolean;
+  private _editableLayout: boolean = false;
 
   private _width: number = 0;
   private _height: number = 0;
@@ -56,7 +58,9 @@ export class LayoutDocumentElement extends HTMLElement {
     this.render();
   }
 
-  disconnectedCallback() { }
+  disconnectedCallback() {
+    EditManager.getInstance()._unregisterLayout(this);
+  }
 
   layout() {
     if (!this.isConnected) return null;
@@ -85,6 +89,7 @@ export class LayoutDocumentElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
+      styleEl.sheet.insertRule(":host([data-selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 1);
       const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
       rule.style.setProperty('background-color', '#ffffff', 'important');
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
@@ -282,6 +287,7 @@ export class LayoutDocumentElement extends HTMLElement {
 
   get model() { return this._model; }
   get visibleGuide() { return this._visibleGuide; }
+  get editableLayout() { return this._editableLayout; }
   get type() { return 'document' as const; }
   get zIndex() { return 0; }
 
@@ -294,6 +300,27 @@ export class LayoutDocumentElement extends HTMLElement {
     Array.from(guideEl).forEach(e => {
       e.visible = this._visibleGuide;
     });
+  }
+
+  set editableLayout(value: boolean) {
+    if (this._editableLayout === value) return;
+    this._editableLayout = value;
+
+    if (value) {
+      this.addEventListener('click', this._onLayoutClick);
+    } else {
+      this.removeEventListener('click', this._onLayoutClick);
+      this.removeAttribute('data-selected');
+      EditManager.getInstance()._unregisterLayout(this);
+    }
+  }
+
+  private _onLayoutClick = (event: MouseEvent): void => {
+    event.stopPropagation();
+    const manager = EditManager.getInstance();
+    manager._setMultiSelect(event.ctrlKey || event.metaKey);
+    manager.selectLayout(this);
+    manager._setMultiSelect(false);
   }
 
   get printPostData() {
