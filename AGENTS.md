@@ -18,6 +18,19 @@ No test runner, linter, or formatter is configured.
 
 > **See also**: `RULES.md` for code modification rules, intentional design decisions, and common mistakes to avoid.
 
+## Required Documentation Loading
+
+Before working on any feature, you **must** read the corresponding documentation file first. After completing changes, you **must** also update the documentation to reflect the results.
+
+| Feature Area | Required Reading | When to Load |
+|---|---|---|
+| Paragraph text rendering | `docs/TEXT_ENGINE.md` | Any request, modification, or work involving TextLayoutEngine, text wrapping, column rendering, character layout, or overlap avoidance |
+| Font & color management | `docs/RESOURCE.md` | Any request, modification, or work involving FontLoader, ColorRegistry, CMYK/RGB conversion, CSS variable injection, or font registration |
+| Text editing mode | `docs/EDITING_TEXT.md` | Any request, modification, or work involving EditController, EditCoordinateMapper, EditManager, cursor, selection, IME composition, or keyboard shortcuts |
+| Layout editing mode | `docs/EDITING_LAYOUT.md` | Any request, modification, or work involving layout editing, box positioning, interactive layout changes, or drag/resize |
+
+**Rule**: Load the doc → understand current state → implement changes → update the doc to reflect what changed.
+
 ## Build Output
 
 - **IIFE bundle** (`dist/layout-element.iife.js`)
