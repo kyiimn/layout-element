@@ -120,10 +120,13 @@ export class FontLoader {
       } else {
         fonts = await this._loadServer();
         this._fontFaces = await Promise.all(
-          fonts.filter(f => f.ttfFilename).map(async f => {
+          fonts.filter(f => f.ttfFilename || f.base64Data).map(async f => {
+            const source = f.base64Data
+              ? `url("data:font/ttf;base64,${f.base64Data}") format("truetype")`
+              : `url("${f.ttfFilename}") format("truetype")`;
             const fontFace = new FontFace(
               f.family,
-              `url("${f.ttfFilename}") format("truetype")`,
+              source,
               { style: f.style, weight: `${f.weight}` }
             );
             globalThis.document?.fonts.add(fontFace);
