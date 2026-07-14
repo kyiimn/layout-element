@@ -50,6 +50,9 @@ export class LayoutBoxElement extends HTMLElement {
   private _dragStartLeft = 0;
   private _dragStartTop = 0;
   private _dragMoved = false;
+  private _dragRafId: number | null = null;
+  private _dragLastClientX = 0;
+  private _dragLastClientY = 0;
 
   constructor() {
     super();
@@ -633,6 +636,8 @@ export class LayoutBoxElement extends HTMLElement {
     this._dragStartMouseY = event.clientY;
     this._dragStartLeft = this.left;
     this._dragStartTop = this.top;
+    this._dragLastClientX = event.clientX;
+    this._dragLastClientY = event.clientY;
     this.style.cursor = 'grabbing';
     document.addEventListener('mousemove', this._onLayoutMouseMove);
     document.addEventListener('mouseup', this._onLayoutMouseUp);
@@ -640,28 +645,42 @@ export class LayoutBoxElement extends HTMLElement {
 
   private _onLayoutMouseMove = (event: MouseEvent) => {
     if (!this._isDragging) return;
+    this._dragLastClientX = event.clientX;
+    this._dragLastClientY = event.clientY;
     const deltaX = event.clientX - this._dragStartMouseX;
     const deltaY = event.clientY - this._dragStartMouseY;
     if (!this._dragMoved && (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3)) {
       this._dragMoved = true;
     }
-    this.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+    if (!this._dragMoved) return;
+    if (this._dragRafId !== null) return;
+    this._dragRafId = requestAnimationFrame(() => {
+      this._dragRafId = null;
+      const dx = this._dragLastClientX - this._dragStartMouseX;
+      const dy = this._dragLastClientY - this._dragStartMouseY;
+      const { left, top } = this._computeNewPosition(dx, dy);
+      if (left !== this.left) this.left = left;
+      if (top !== this.top) this.top = top;
+    });
   }
 
   private _onLayoutMouseUp = (event: MouseEvent) => {
     if (!this._isDragging) return;
     document.removeEventListener('mousemove', this._onLayoutMouseMove);
     document.removeEventListener('mouseup', this._onLayoutMouseUp);
+    if (this._dragRafId !== null) {
+      cancelAnimationFrame(this._dragRafId);
+      this._dragRafId = null;
+    }
     this._isDragging = false;
     this.style.cursor = this._editableLayout ? 'grab' : '';
-    this.style.transform = '';
 
     if (!this._dragMoved) return;
     const deltaX = event.clientX - this._dragStartMouseX;
     const deltaY = event.clientY - this._dragStartMouseY;
     const { left, top } = this._computeNewPosition(deltaX, deltaY);
-    this.left = left;
-    this.top = top;
+    if (left !== this.left) this.left = left;
+    if (top !== this.top) this.top = top;
   }
 
   private _computeNewPosition(deltaPxX: number, deltaPxY: number): { left: number; top: number } {
@@ -669,9 +688,15 @@ export class LayoutBoxElement extends HTMLElement {
     const deltaMmY = deltaPxY / GridCalculator.ppm;
 
     if (this.position === 'absolute') {
+      const padL = this.inheritStyle?.paddingLeft || 0;
+      const padR = this.inheritStyle?.paddingRight || 0;
+      const padT = this.inheritStyle?.paddingTop || 0;
+      const padB = this.inheritStyle?.paddingBottom || 0;
+      const maxLeft = Math.max(0, (this.inheritStyle?.parentWidth || 0) - padL - padR - this.width);
+      const maxTop = Math.max(0, (this.inheritStyle?.parentHeight || 0) - padT - padB - this.height);
       return {
-        left: Math.max(0, this._dragStartLeft + deltaMmX),
-        top: Math.max(0, this._dragStartTop + deltaMmY),
+        left: Math.max(0, Math.min(maxLeft, this._dragStartLeft + deltaMmX)),
+        top: Math.max(0, Math.min(maxTop, this._dragStartTop + deltaMmY)),
       };
     }
 
@@ -680,7 +705,7 @@ export class LayoutBoxElement extends HTMLElement {
       return { left: this._dragStartLeft, top: this._dragStartTop };
     }
 
-    const { columnCoords, lineHeight } = parentModel;
+    const { columnCoords, lineHeight, columnCount, editableHeight } = parentModel;
     const startX = columnCoords[this._dragStartLeft].x1;
     const startY = columnCoords[this._dragStartLeft].y1 + lineHeight * this._dragStartTop;
     const newLeftMm = startX + deltaMmX;
@@ -693,9 +718,10 @@ export class LayoutBoxElement extends HTMLElement {
         break;
       }
     }
-    newLeft = Math.max(0, Math.min(columnCoords.length - 1, newLeft));
+    newLeft = Math.max(0, Math.min(columnCount - this.width, newLeft));
 
-    const newTop = Math.max(0, Math.round((newTopMm - columnCoords[newLeft].y1) / lineHeight));
+    const maxLines = Math.floor(editableHeight / lineHeight);
+    let newTop = Math.max(0, Math.min(maxLines - this.height, Math.round((newTopMm - columnCoords[newLeft].y1) / lineHeight)));
 
     return { left: newLeft, top: newTop };
   }
