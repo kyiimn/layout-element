@@ -44,6 +44,13 @@ export class LayoutBoxElement extends HTMLElement {
   private _zIndex: number = 0;
   private _editableLayout: boolean = false;
 
+  private _isDragging = false;
+  private _dragStartMouseX = 0;
+  private _dragStartMouseY = 0;
+  private _dragStartLeft = 0;
+  private _dragStartTop = 0;
+  private _dragMoved = false;
+
   constructor() {
     super();
     this._shadowRoot = this.attachShadow({ mode: "open" });
@@ -305,12 +312,14 @@ export class LayoutBoxElement extends HTMLElement {
     if (this._left === value) return;
     this._left = value;
     this.layout();
+    this._rerenderAffectedParagraphs();
   }
 
   set top(value: number) {
     if (this._top === value) return;
     this._top = value;
     this.layout();
+    this._rerenderAffectedParagraphs();
   }
 
   set width(value: number) {
@@ -591,19 +600,143 @@ export class LayoutBoxElement extends HTMLElement {
 
     if (value) {
       this.addEventListener('click', this._onLayoutClick);
+      this.addEventListener('mousedown', this._onLayoutMouseDown);
+      this.style.cursor = 'grab';
     } else {
       this.removeEventListener('click', this._onLayoutClick);
+      this.removeEventListener('mousedown', this._onLayoutMouseDown);
       this.removeAttribute('data-selected');
+      this.style.cursor = '';
       EditManager.getInstance()._unregisterLayout(this);
     }
   }
 
   private _onLayoutClick = (event: MouseEvent): void => {
     event.stopPropagation();
+    if (this._dragMoved) {
+      this._dragMoved = false;
+      return;
+    }
     const manager = EditManager.getInstance();
     manager._setMultiSelect(event.ctrlKey || event.metaKey);
     manager.selectLayout(this);
     manager._setMultiSelect(false);
+  }
+
+  private _onLayoutMouseDown = (event: MouseEvent) => {
+    if (event.button !== 0) return;
+    if (!this.hasAttribute('data-selected')) return;
+    event.preventDefault();
+    this._isDragging = true;
+    this._dragMoved = false;
+    this._dragStartMouseX = event.clientX;
+    this._dragStartMouseY = event.clientY;
+    this._dragStartLeft = this.left;
+    this._dragStartTop = this.top;
+    this.style.cursor = 'grabbing';
+    document.addEventListener('mousemove', this._onLayoutMouseMove);
+    document.addEventListener('mouseup', this._onLayoutMouseUp);
+  }
+
+  private _onLayoutMouseMove = (event: MouseEvent) => {
+    if (!this._isDragging) return;
+    const deltaX = event.clientX - this._dragStartMouseX;
+    const deltaY = event.clientY - this._dragStartMouseY;
+    if (!this._dragMoved && (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3)) {
+      this._dragMoved = true;
+    }
+    this.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+  }
+
+  private _onLayoutMouseUp = (event: MouseEvent) => {
+    if (!this._isDragging) return;
+    document.removeEventListener('mousemove', this._onLayoutMouseMove);
+    document.removeEventListener('mouseup', this._onLayoutMouseUp);
+    this._isDragging = false;
+    this.style.cursor = this._editableLayout ? 'grab' : '';
+    this.style.transform = '';
+
+    if (!this._dragMoved) return;
+    const deltaX = event.clientX - this._dragStartMouseX;
+    const deltaY = event.clientY - this._dragStartMouseY;
+    const { left, top } = this._computeNewPosition(deltaX, deltaY);
+    this.left = left;
+    this.top = top;
+  }
+
+  private _computeNewPosition(deltaPxX: number, deltaPxY: number): { left: number; top: number } {
+    const deltaMmX = deltaPxX / GridCalculator.ppm;
+    const deltaMmY = deltaPxY / GridCalculator.ppm;
+
+    if (this.position === 'absolute') {
+      return {
+        left: Math.max(0, this._dragStartLeft + deltaMmX),
+        top: Math.max(0, this._dragStartTop + deltaMmY),
+      };
+    }
+
+    const parentModel = this.parentModel;
+    if (!parentModel) {
+      return { left: this._dragStartLeft, top: this._dragStartTop };
+    }
+
+    const { columnCoords, lineHeight } = parentModel;
+    const startX = columnCoords[this._dragStartLeft].x1;
+    const startY = columnCoords[this._dragStartLeft].y1 + lineHeight * this._dragStartTop;
+    const newLeftMm = startX + deltaMmX;
+    const newTopMm = startY + deltaMmY;
+
+    let newLeft = 0;
+    for (let i = 0; i < columnCoords.length; i++) {
+      if (newLeftMm >= columnCoords[i].x1 && newLeftMm <= columnCoords[i].x2) {
+        newLeft = i;
+        break;
+      }
+    }
+    newLeft = Math.max(0, Math.min(columnCoords.length - 1, newLeft));
+
+    const newTop = Math.max(0, Math.round((newTopMm - columnCoords[newLeft].y1) / lineHeight));
+
+    return { left: newLeft, top: newTop };
+  }
+
+  private _rerenderAffectedParagraphs(): void {
+    const affected = new Set<LayoutParagraphElement>();
+
+    for (const item of this.items) {
+      if (item.type === 'paragraph') {
+        affected.add(item as LayoutParagraphElement);
+      }
+    }
+
+    if (this.parentElement) {
+      for (const sibling of this.parentElement.items) {
+        if (sibling === this) continue;
+        this._collectParagraphs(sibling, affected);
+      }
+    }
+
+    for (const p of affected) {
+      if (p.isConnected) {
+        (p as any)._structureDirty = true;
+        p.render();
+      }
+    }
+  }
+
+  private _collectParagraphs(
+    element: LayoutBoxElement | LayoutParagraphElement | LayoutImageElement,
+    set: Set<LayoutParagraphElement>
+  ): void {
+    if (element.type === 'paragraph') {
+      set.add(element as LayoutParagraphElement);
+      return;
+    }
+    if (element.type === 'box') {
+      for (const child of (element as LayoutBoxElement).items) {
+        this._collectParagraphs(child, set);
+      }
+    }
   }
 }
 customElements.define('x-layout-box', LayoutBoxElement);
