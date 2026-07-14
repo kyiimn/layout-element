@@ -1,6 +1,24 @@
 import { Font } from "@/types";
 
 /**
+ * 폰트 로드 함수 타입.
+ *
+ * 외부에서 `FontLoader.registerLoader()`로 등록할 커스텀 로더가
+ * 반환해야 하는 시그니처.
+ *
+ * @returns 서버 또는 다른 소스에서 로드한 `Font[]`
+ *
+ * @example
+ * ```ts
+ * FontLoader.registerLoader(async () => {
+ *   const res = await fetch('/api/v1/fonts');
+ *   return res.json() as Promise<Font[]>;
+ * });
+ * ```
+ */
+export type FontLoaderFn = () => Promise<Font[]>;
+
+/**
  * 폰트 로드 및 등록을 관리하는 싱글턴 매니저.
  *
  * `fonts.json`에서 `Font[]` 데이터를 로드하고,
@@ -8,9 +26,13 @@ import { Font } from "@/types";
  *
  * 인쇄 모드에서는 `base64Data`를 사용하여 외부 서버 요청 없이 폰트를 로드한다.
  * 화면 모드에서는 `ttfFilename`으로 서버에서 TTF 파일을 가져온다.
+ *
+ * `registerLoader()`로 커스텀 로더를 등록하면 기본 `fetch('fonts.json')` 대신
+ * 해당 로더를 사용한다.
  */
 export class FontLoader {
   private static _instance?: FontLoader;
+  private static _customLoader?: FontLoaderFn;
 
   private _fontFaces: FontFace[] = [];
   private _ready: boolean = false;
@@ -20,8 +42,41 @@ export class FontLoader {
     this._isPrint = window.matchMedia("print").matches;
   }
 
-  /** 서버에서 `fonts.json` 로드 */
-  private async _loadServer() {
+  /**
+   * 커스텀 폰트 로더를 등록한다.
+   *
+   * 등록된 로더는 `_loadServer()`에서 기본 `fetch('fonts.json')` 대신 우선 사용된다.
+   * 이미 초기화된 인스턴스가 있어도 새 로더가 다음 `init()` 호출부터 적용된다.
+   *
+   * @param loader - `Font[]`를 반환하는 비동기 함수
+   *
+   * @example
+   * ```ts
+   * // API 서버에서 폰트 데이터를 로드하도록 커스터마이징
+   * FontLoader.registerLoader(async () => {
+   *   const res = await fetch('/api/v1/fonts');
+   *   if (!res.ok) throw new Error('failed to load fonts');
+   *   return res.json() as Promise<Font[]>;
+   * });
+   * ```
+   */
+  public static registerLoader(loader: FontLoaderFn): void {
+    FontLoader._customLoader = loader;
+  }
+
+  /**
+   * 등록된 커스텀 로더를 제거하고 기본 로더로 되돌린다.
+   */
+  public static resetLoader(): void {
+    FontLoader._customLoader = undefined;
+  }
+
+  /** 서버에서 `fonts.json` 로드 (또는 커스텀 로더 사용) */
+  private async _loadServer(): Promise<Font[]> {
+    if (FontLoader._customLoader) {
+      return FontLoader._customLoader();
+    }
+
     try {
       const res = await fetch('fonts.json');
       if (!res.ok) throw new Error('server connection error');
