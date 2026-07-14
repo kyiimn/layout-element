@@ -199,10 +199,10 @@ FontLoader.resetLoader();
 
 ```ts
 type CMYKColor = {
-  c: number;  // Cyan (0-100)
-  m: number;  // Magenta (0-100)
-  y: number;  // Yellow (0-100)
-  k: number;  // Key/Black (0-100)
+  c: number;  // Cyan (0-255)
+  m: number;  // Magenta (0-255)
+  y: number;  // Yellow (0-255)
+  k: number;  // Key/Black (0-255)
 };
 
 type CMYKColorSet = Record<string, CMYKColor>;
@@ -220,7 +220,7 @@ type ColorMap = {
 ```
 
 - `CMYKColorSet`의 키는 색상 이름(예: `"red"`, `"blue"`)이다.
-- `CMYKColor`의 각 값은 0-100 범위이다.
+- `CMYKColor`의 각 값은 0-255 범위이다.
 - `RGBColor`의 각 값은 0-255 범위이다.
 
 ### 3.3 `ColorLoaderFn` 타입
@@ -303,10 +303,10 @@ _cmykToRgb(cmyk?: CMYKColor): RGBColor
 변환 공식:
 
 ```
-c_ = clamp(c / 100, 0, 1)
-m_ = clamp(m / 100, 0, 1)
-y_ = clamp(y / 100, 0, 1)
-k_ = clamp(k / 100, 0, 1)
+c_ = clamp(c / 255, 0, 1)
+m_ = clamp(m / 255, 0, 1)
+y_ = clamp(y / 255, 0, 1)
+k_ = clamp(k / 255, 0, 1)
 
 r = round(255 * (1 - min(1, c_ + k_)))
 g = round(255 * (1 - min(1, m_ + k_)))

@@ -105,10 +105,10 @@ export class ColorRegistry {
 
     const { c, m, y, k } = cmyk;
 
-    const c_ = Math.min(1, Math.max(0, c / 100));
-    const m_ = Math.min(1, Math.max(0, m / 100));
-    const y_ = Math.min(1, Math.max(0, y / 100));
-    const k_ = Math.min(1, Math.max(0, k / 100));
+    const c_ = Math.min(1, Math.max(0, c / 255));
+    const m_ = Math.min(1, Math.max(0, m / 255));
+    const y_ = Math.min(1, Math.max(0, y / 255));
+    const k_ = Math.min(1, Math.max(0, k / 255));
 
     const r = Math.round(255 * (1 - Math.min(1, c_ + k_)));
     const g = Math.round(255 * (1 - Math.min(1, m_ + k_)));

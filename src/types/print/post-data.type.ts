@@ -27,7 +27,7 @@ export type PrintPostDataRect = {
  *
  * @example
  * const boxPostData: PrintPostData<BoxData> = {
- *   color: { c: 0, m: 0, y: 0, k: 100 },  // 테두리 CMYK 색상
+ *   color: { c: 0, m: 0, y: 0, k: 255 },  // 테두리 CMYK 색상
  *   data: boxData,                          // 원본 BoxData
  *   rect: { x: 100, y: 200, width: 300, height: 150 }  // 렌더링된 위치
  * };

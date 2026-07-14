@@ -10,18 +10,18 @@ export type RGBColor = {
   b: number;
 };
 
-/** CMYK 색상값. 인쇄용 색상 표현. 각 채널 0-100 범위 */
+/** CMYK 색상값. 인쇄용 색상 표현. 각 채널 0-255 범위 */
 export type CMYKColor = {
-  /** Cyan (0–100) */
+  /** Cyan (0–255) */
   c: number;
 
-  /** Magenta (0–100) */
+  /** Magenta (0–255) */
   m: number;
 
-  /** Yellow (0–100) */
+  /** Yellow (0–255) */
   y: number;
 
-  /** Key/Black (0–100) */
+  /** Key/Black (0–255) */
   k: number;
 };
 
@@ -34,8 +34,8 @@ export type CMYKColor = {
  * @example
  * // color.json 예시
  * {
- *   "black": { "c": 0, "m": 0, "y": 0, "k": 100 },
- *   "red": { "c": 0, "m": 100, "y": 100, "k": 0 }
+ *   "black": { "c": 0, "m": 0, "y": 0, "k": 255 },
+ *   "red": { "c": 0, "m": 255, "y": 255, "k": 0 }
  * }
  */
 export type CMYKColorSet = { [name: string]: CMYKColor };
