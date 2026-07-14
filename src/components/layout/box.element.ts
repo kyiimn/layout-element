@@ -101,7 +101,8 @@ export class LayoutBoxElement extends HTMLElement {
 
       styleEl.sheet.insertRule(":host {}", 0);
       styleEl.sheet.insertRule(":host([data-selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 1);
-      styleEl.sheet.insertRule(`@media print { [data-border] { display: none; } }`, 2);
+      styleEl.sheet.insertRule(":host([data-hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 2);
+      styleEl.sheet.insertRule(`@media print { [data-border] { display: none; } }`, 3);
       this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));
@@ -604,11 +605,16 @@ export class LayoutBoxElement extends HTMLElement {
     if (value) {
       this.addEventListener('click', this._onLayoutClick);
       this.addEventListener('mousedown', this._onLayoutMouseDown);
+      this.addEventListener('mouseenter', this._onLayoutMouseEnter);
+      this.addEventListener('mouseleave', this._onLayoutMouseLeave);
       this.style.cursor = 'grab';
     } else {
       this.removeEventListener('click', this._onLayoutClick);
       this.removeEventListener('mousedown', this._onLayoutMouseDown);
+      this.removeEventListener('mouseenter', this._onLayoutMouseEnter);
+      this.removeEventListener('mouseleave', this._onLayoutMouseLeave);
       this.removeAttribute('data-selected');
+      this.removeAttribute('data-hovered');
       this.style.cursor = '';
       EditManager.getInstance()._unregisterLayout(this);
     }
@@ -616,6 +622,7 @@ export class LayoutBoxElement extends HTMLElement {
 
   private _onLayoutClick = (event: MouseEvent): void => {
     event.stopPropagation();
+    this.removeAttribute('data-hovered');
     if (this._dragMoved) {
       this._dragMoved = false;
       return;
@@ -626,10 +633,20 @@ export class LayoutBoxElement extends HTMLElement {
     manager._setMultiSelect(false);
   }
 
+  private _onLayoutMouseEnter = (): void => {
+    if (this.hasAttribute('data-selected')) return;
+    this.setAttribute('data-hovered', '');
+  }
+
+  private _onLayoutMouseLeave = (): void => {
+    this.removeAttribute('data-hovered');
+  }
+
   private _onLayoutMouseDown = (event: MouseEvent) => {
     if (event.button !== 0) return;
     if (!this.hasAttribute('data-selected')) return;
     event.preventDefault();
+    this.removeAttribute('data-hovered');
     this._isDragging = true;
     this._dragMoved = false;
     this._dragStartMouseX = event.clientX;
