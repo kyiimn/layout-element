@@ -90,7 +90,6 @@ export class LayoutDocumentElement extends HTMLElement {
 
       styleEl.sheet.insertRule(":host {}", 0);
       styleEl.sheet.insertRule(":host([data-selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 1);
-      styleEl.sheet.insertRule(":host([data-hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 2);
       const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
       rule.style.setProperty('background-color', '#ffffff', 'important');
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
@@ -309,34 +308,19 @@ export class LayoutDocumentElement extends HTMLElement {
 
     if (value) {
       this.addEventListener('click', this._onLayoutClick);
-      this.addEventListener('mouseenter', this._onLayoutMouseEnter);
-      this.addEventListener('mouseleave', this._onLayoutMouseLeave);
     } else {
       this.removeEventListener('click', this._onLayoutClick);
-      this.removeEventListener('mouseenter', this._onLayoutMouseEnter);
-      this.removeEventListener('mouseleave', this._onLayoutMouseLeave);
       this.removeAttribute('data-selected');
-      this.removeAttribute('data-hovered');
       EditManager.getInstance()._unregisterLayout(this);
     }
   }
 
   private _onLayoutClick = (event: MouseEvent): void => {
     event.stopPropagation();
-    this.removeAttribute('data-hovered');
     const manager = EditManager.getInstance();
     manager._setMultiSelect(event.ctrlKey || event.metaKey);
     manager.selectLayout(this);
     manager._setMultiSelect(false);
-  }
-
-  private _onLayoutMouseEnter = (): void => {
-    if (this.hasAttribute('data-selected')) return;
-    this.setAttribute('data-hovered', '');
-  }
-
-  private _onLayoutMouseLeave = (): void => {
-    this.removeAttribute('data-hovered');
   }
 
   get printPostData() {
