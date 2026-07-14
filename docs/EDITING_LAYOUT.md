@@ -161,6 +161,15 @@ manager.selectedLayoutIds; // string[]
 - 다중 선택 모드(`_multiSelect = true`): 기존 선택에 추가. 이미 선택된 요소를 다시 지정하면 선택 해제(토글).
 - 다중 선택 모드는 클릭 핸들러가 Ctrl/Meta 키 상태에 따라 설정한다. 직접 호출해서는 변경할 수 없다.
 
+#### `getTopLevelDragTargets()`
+
+선택된 레이아웃 요소들 중에서 중첩(ancestor-descendant) 관계에 있는 하위 요소를 제외하고, 최상위 `LayoutBoxElement`만 반환한다.
+
+- `LayoutDocumentElement`은 드래그 대상이 아니므로 항상 제외된다.
+- 서로 ancestor-descendant 관계에 있는 요소 중 ancestor만 유지되고 descendant는 제외된다.
+- 서로 독립적인(형제 또는 다른 트리의) 요소들은 모두 유지된다.
+- 단일 요소만 선택된 경우 필터링 없이 그대로 반환된다.
+
 #### 이벤트: `layoutSelectionChange`
 
 ```typescript
@@ -337,6 +346,8 @@ _onLayoutClick(event)
 
 선택된 `<x-layout-box>` 요소는 마우스 드래그로 이동할 수 있다. 드래그 중에도 주변 텍스트가 실시간으로 회피(리플로우)하여, 박스가 이동하면 텍스트가 그 주변을 흘러가는 신문 레이아웃 특유의 동작이 구현된다.
 
+**다중 선택 드래그**: 여러 요소가 선택된 상태에서 드래그하면 선택된 모든 최상위 요소가 함께 이동한다. 중첩(ancestor-descendant) 관계에 있는 요소 중 하위 요소는 무시되고 가장 상위 요소만 이동한다. 예를 들어, 부모 box와 그 안의 자식 box가 모두 선택된 상태에서 드래그하면 부모 box만 이동하고 자식 box는 부모와 함께 자연스럽게 이동하므로 별도로 움직이지 않는다.
+
 ### 4.2 드래그 전체 흐름
 
 ```
@@ -354,6 +365,9 @@ _onLayoutClick(event)
 │     ├── _dragStartMouseX/Y = clientX/Y                               │
 │     ├── _dragStartLeft/Top = this.left/top (시작 위치 저장)          │
 │     ├── cursor = 'grabbing'                                         │
+│     ├── EditManager._startLayoutDrag()                               │
+│     │   ├── 선택된 요소 중 중첩 하위 요소 제거 (최상위만 유지)         │
+│     │   └── 각 이동 대상의 시작 위치(left/top) 기록                   │
 │     └── document에 mousemove, mouseup, keydown 리스너 등록            │
 │                                                                     │
 │  ② mousemove (드래그 중)                                              │
@@ -369,7 +383,12 @@ _onLayoutClick(event)
 │          ├── dy = lastClientY - startMouseY                           │
 │          ├── newPos = _computeNewPosition(dx, dy)                    │
 │          ├── if (newPos.left !== this.left) this.left = newPos.left  │
-│          └── if (newPos.top !== this.top) this.top = newPos.top       │
+│          ├── if (newPos.top !== this.top) this.top = newPos.top       │
+│          └── for each other drag target:                              │
+│               ├── startPos = EditManager._getDragStartPosition(t)    │
+│               ├── tNewPos = t._computeNewPosition(dx, dy, startPos)  │
+│               ├── if (tNewPos.left !== t.left) t.left = tNewPos.left │
+│               └── if (tNewPos.top !== t.top) t.top = tNewPos.top    │
 │                                                                     │
 │  ③ mouseup (드래그 완료)                                              │
 │     │                                                               │
@@ -377,8 +396,14 @@ _onLayoutClick(event)
 │     ├── rAF 취소 (있으면)                                             │
 │     ├── _isDragging = false                                          │
 │     ├── cursor = 'grab' 또는 ''                                      │
-│     ├── _dragMoved === false? → return (클릭이었음)                   │
-│     └── 최종 위치 계산 → this.left/top 설정                           │
+│     ├── _dragMoved === false? → EditManager._endLayoutDrag(), return │
+│     ├── 최종 위치 계산 → this.left/top 설정                           │
+│     ├── EditManager._dispatchLayoutMove(this, ...)                   │
+│     ├── for each other drag target:                                  │
+│     │    ├── tNewPos = t._computeNewPosition(dx, dy, startPos)       │
+│     │    ├── t.left/top 설정                                         │
+│     │    └── EditManager._dispatchLayoutMove(t, ...)                 │
+│     └── EditManager._endLayoutDrag()                                 │
 │                                                                     │
 │  ③' ESC 키 (드래그 취소)                                              │
 │     │                                                               │
@@ -387,14 +412,21 @@ _onLayoutClick(event)
 │     ├── _isDragging = false                                          │
 │     ├── _dragMoved = false                                           │
 │     ├── cursor = 'grab' 또는 ''                                       │
-│     └── this.left/top = _dragStartLeft/Top (원래 위치로 복원)         │
+│     ├── this.left/top = _dragStartLeft/Top (원래 위치로 복원)         │
+│     ├── EditManager._dispatchLayoutMove(this, start, start, canceled) │
+│     ├── for each other drag target:                                  │
+│     │    ├── t.left/top = startPos (원래 위치로 복원)                 │
+│     │    └── EditManager._dispatchLayoutMove(t, start, start, canceled)│
+│     └── EditManager._endLayoutDrag()                                 │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.3 위치 계산: `_computeNewPosition(deltaPxX, deltaPxY)`
+### 4.3 위치 계산: `_computeNewPosition(deltaPxX, deltaPxY, startLeft?, startTop?)`
 
 드래그 중 마우스 이동량(픽셀)을 받아 최종 위치를 계산한다. `position` 모드에 따라 다른 스냅/클램핑 로직을 적용한다.
+
+다중 선택 드래그에서 각 대상 요소의 시작 위치를 독립적으로 전달할 수 있다. `startLeft`/`startTop`을 생략하면 `this._dragStartLeft`/`this._dragStartTop`을 사용한다.
 
 #### 4.3.1 absolute 모드 (mm 좌표)
 
@@ -863,6 +895,7 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 
 - **드래그 대상**: `<x-layout-box>`만 드래그 이동할 수 있다. `<x-layout-document>`는 선택만 가능하다.
 - **선택 대상**: `<x-layout-document>`와 `<x-layout-box>`만 선택할 수 있다. `<x-layout-paragraph>`, `<x-layout-image>`, `<x-layout-column>`은 레이아웃 선택 대상이 아니다.
+- **중첩 요소 무시**: 다중 선택 드래그 시 선택된 요소들 중 ancestor-descendant 관계에 있으면 가장 상위(ancestor) 요소만 이동하고 하위(descendant) 요소는 무시된다. 하위 요소는 상위 요소와 함께 자연스럽게 이동하므로 별도 이동 처리가 불필요하다. `EditManager.getTopLevelDragTargets()`가 이 필터링을 수행한다.
 - **텍스트 편집과 독립**: 레이아웃 선택은 텍스트 편집 포커스와 무관하게 동작한다. 한 단락이 텍스트 편집 중이더라도 레이아웃 요소를 선택할 수 있다.
 - **시각적 피드백**: 선택 표시는 `box-shadow`를 사용하므로 요소의 레이아웃에 영향을 주지 않는다. `outline`은 기존 `border`와 충돌할 수 있어 사용하지 않는다.
 - **rAF 쓰로틀링**: 드래그 중 위치 업데이트는 `requestAnimationFrame`으로 60fps로 제한된다. 중복 rAF 요청은 무시된다.
@@ -880,7 +913,7 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 |------|------|
 | `src/components/layout/box.element.ts` | 드래그 로직, 위치 setter, `_computeNewPosition`, `_rerenderAffectedParagraphs`, `_collectParagraphs` |
 | `src/components/layout/document.element.ts` | `editableLayout` 속성, `_onLayoutClick`, `:host([data-selected])` CSS 규칙 |
-| `src/edit/edit-manager.ts` | 레이아웃 선택 상태 관리, `selectLayout`, `clearLayoutSelection`, `_unregisterLayout`, `layoutSelectionChange` 이벤트 |
+| `src/edit/edit-manager.ts` | 레이아웃 선택 상태 관리, `selectLayout`, `clearLayoutSelection`, `_startLayoutDrag`, `_endLayoutDrag`, `getTopLevelDragTargets`, `_unregisterLayout`, `layoutSelectionChange` 이벤트 |
 | `src/react/hooks/use-edit-manager.ts` | React 훅: `selectedLayouts`, `selectLayout`, `clearLayoutSelection`, `onLayoutSelectionChange` |
 | `src/core/text-layout-engine.ts` | `_layoutTextIntoColumns`, 오버랩 회피, COVER 라인, PART 분할 |
 | `src/components/layout/paragraph.element.ts` | `render()`, `_structureDirty`, TextLayoutEngine 생성 |
@@ -901,6 +934,10 @@ private _dragStartTop: number = 0;        // 드래그 시작 시 top (mm 또는
 private _dragLastClientX: number = 0;
 private _dragLastClientY: number = 0;
 private _dragRafId: number | null = null; // requestAnimationFrame ID
+
+// edit-manager.ts (드래그 상태 관리)
+private _dragTargets: LayoutBoxElement[] = [];  // 드래그 중인 이동 대상 요소들 (중첩 하위 요소 제외)
+private _dragStartPositions: Map<LayoutBoxElement, { left: number; top: number }>;  // 각 대상의 시작 위치
 ```
 
 ### 10.3 `left`/`top`의 의미 (position 모드에 따라 다름)
@@ -917,17 +954,32 @@ drag rAF 콜백
   → _computeNewPosition(dx, dy) → { left, top }
   → this.left = left  → setter → layout() + _rerenderAffectedParagraphs()
   → this.top  = top   → setter → layout() + _rerenderAffectedParagraphs()
+  → for each other drag target:
+      → t._computeNewPosition(dx, dy, startPos) → { left, top }
+      → t.left = left → setter → layout() + _rerenderAffectedParagraphs()
+      → t.top  = top  → setter → layout() + _rerenderAffectedParagraphs()
 
 ESC 취소
   → this.left = _dragStartLeft → setter → layout() + _rerenderAffectedParagraphs()
   → this.top  = _dragStartTop  → setter → layout() + _rerenderAffectedParagraphs()
   → EditManager._dispatchLayoutMove(this, start, start, canceled=true)
+  → for each other drag target:
+      → t.left = startPos.left → setter → layout() + _rerenderAffectedParagraphs()
+      → t.top  = startPos.top  → setter → layout() + _rerenderAffectedParagraphs()
+      → EditManager._dispatchLayoutMove(t, start, start, canceled=true)
+  → EditManager._endLayoutDrag()
 
 mouseup
   → _computeNewPosition(deltaX, deltaY) → { left, top }
   → this.left = left  → setter → layout() + _rerenderAffectedParagraphs()
   → this.top  = top   → setter → layout() + _rerenderAffectedParagraphs()
   → EditManager._dispatchLayoutMove(this, start, end, canceled=false)
+  → for each other drag target:
+      → t._computeNewPosition(dx, dy, startPos) → { left, top }
+      → t.left = left → setter → layout() + _rerenderAffectedParagraphs()
+      → t.top  = top  → setter → layout() + _rerenderAffectedParagraphs()
+      → EditManager._dispatchLayoutMove(t, start, end, canceled=false)
+  → EditManager._endLayoutDrag()
 ```
 
 ### 10.5 오버랩 회피 캐시 무효화

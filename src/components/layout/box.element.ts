@@ -680,6 +680,7 @@ export class LayoutBoxElement extends HTMLElement {
     if (event.button !== 0) return;
     if (!this.hasAttribute('data-selected')) return;
     event.preventDefault();
+    event.stopPropagation();
     this.removeAttribute('data-hovered');
     this._isDragging = true;
     this._dragMoved = false;
@@ -690,6 +691,7 @@ export class LayoutBoxElement extends HTMLElement {
     this._dragLastClientX = event.clientX;
     this._dragLastClientY = event.clientY;
     this.style.cursor = 'grabbing';
+    EditManager.getInstance()._startLayoutDrag();
     document.addEventListener('mousemove', this._onLayoutMouseMove);
     document.addEventListener('mouseup', this._onLayoutMouseUp);
     document.addEventListener('keydown', this._onLayoutKeyDown);
@@ -709,11 +711,29 @@ export class LayoutBoxElement extends HTMLElement {
     this._isDragging = false;
     this._dragMoved = false;
     this.style.cursor = this._editableLayout ? 'grab' : '';
-    const startLeft = this._dragStartLeft;
-    const startTop = this._dragStartTop;
-    if (this.left !== startLeft) this.left = startLeft;
-    if (this.top !== startTop) this.top = startTop;
-    EditManager.getInstance()._dispatchLayoutMove(this, startLeft, startTop, startLeft, startTop, true);
+
+    const manager = EditManager.getInstance();
+    const dragTargets = manager._getDragTargets();
+    const isTopLevel = dragTargets.includes(this);
+
+    if (isTopLevel) {
+      const startLeft = this._dragStartLeft;
+      const startTop = this._dragStartTop;
+      if (this.left !== startLeft) this.left = startLeft;
+      if (this.top !== startTop) this.top = startTop;
+      manager._dispatchLayoutMove(this, startLeft, startTop, startLeft, startTop, true);
+    }
+
+    for (const target of dragTargets) {
+      if (target === this) continue;
+      const startPos = manager._getDragStartPosition(target);
+      if (!startPos) continue;
+      if (target.left !== startPos.left) target.left = startPos.left;
+      if (target.top !== startPos.top) target.top = startPos.top;
+      manager._dispatchLayoutMove(target, startPos.left, startPos.top, startPos.left, startPos.top, true);
+    }
+
+    manager._endLayoutDrag();
   }
 
   private _onLayoutMouseMove = (event: MouseEvent) => {
@@ -731,9 +751,24 @@ export class LayoutBoxElement extends HTMLElement {
       this._dragRafId = null;
       const dx = this._dragLastClientX - this._dragStartMouseX;
       const dy = this._dragLastClientY - this._dragStartMouseY;
-      const { left, top } = this._computeNewPosition(dx, dy);
-      if (left !== this.left) this.left = left;
-      if (top !== this.top) this.top = top;
+      const manager = EditManager.getInstance();
+      const dragTargets = manager._getDragTargets();
+      const isTopLevel = dragTargets.includes(this);
+
+      if (isTopLevel) {
+        const { left, top } = this._computeNewPosition(dx, dy);
+        if (left !== this.left) this.left = left;
+        if (top !== this.top) this.top = top;
+      }
+
+      for (const target of dragTargets) {
+        if (target === this) continue;
+        const startPos = manager._getDragStartPosition(target);
+        if (!startPos) continue;
+        const { left: tLeft, top: tTop } = target._computeNewPosition(dx, dy, startPos.left, startPos.top);
+        if (tLeft !== target.left) target.left = tLeft;
+        if (tTop !== target.top) target.top = tTop;
+      }
     });
   }
 
@@ -749,18 +784,60 @@ export class LayoutBoxElement extends HTMLElement {
     this._isDragging = false;
     this.style.cursor = this._editableLayout ? 'grab' : '';
 
-    if (!this._dragMoved) return;
-    const startLeft = this._dragStartLeft;
-    const startTop = this._dragStartTop;
+    const manager = EditManager.getInstance();
+
+    if (!this._dragMoved) {
+      manager._endLayoutDrag();
+      return;
+    }
+
+    const dragTargets = manager._getDragTargets();
+    const isTopLevel = dragTargets.includes(this);
     const deltaX = event.clientX - this._dragStartMouseX;
     const deltaY = event.clientY - this._dragStartMouseY;
-    const { left, top } = this._computeNewPosition(deltaX, deltaY);
-    if (left !== this.left) this.left = left;
-    if (top !== this.top) this.top = top;
-    EditManager.getInstance()._dispatchLayoutMove(this, startLeft, startTop, left, top, false);
+
+    if (isTopLevel) {
+      const startLeft = this._dragStartLeft;
+      const startTop = this._dragStartTop;
+      const { left, top } = this._computeNewPosition(deltaX, deltaY);
+      if (left !== this.left) this.left = left;
+      if (top !== this.top) this.top = top;
+      manager._dispatchLayoutMove(this, startLeft, startTop, left, top, false);
+    }
+
+    for (const target of dragTargets) {
+      if (target === this) continue;
+      const startPos = manager._getDragStartPosition(target);
+      if (!startPos) continue;
+      const { left: tLeft, top: tTop } = target._computeNewPosition(deltaX, deltaY, startPos.left, startPos.top);
+      if (tLeft !== target.left) target.left = tLeft;
+      if (tTop !== target.top) target.top = tTop;
+      manager._dispatchLayoutMove(target, startPos.left, startPos.top, tLeft, tTop, false);
+    }
+
+    manager._endLayoutDrag();
   }
 
-  private _computeNewPosition(deltaPxX: number, deltaPxY: number): { left: number; top: number } {
+  /**
+   * 픽셀 델타와 시작 위치를 받아 새 위치를 계산한다.
+   *
+   * 다중 선택 드래그에서 각 대상 요소의 시작 위치를 독립적으로 전달할 수 있다.
+   * `startLeft`/`startTop`을 생략하면 `this._dragStartLeft`/`this._dragStartTop`을 사용한다.
+   *
+   * @param deltaPxX - 마우스 가로 이동량 (픽셀)
+   * @param deltaPxY - 마우스 세로 이동량 (픽셀)
+   * @param startLeft - 드래그 시작 left 값 (생략 시 this._dragStartLeft)
+   * @param startTop - 드래그 시작 top 값 (생략 시 this._dragStartTop)
+   * @returns 스냅/클램핑이 적용된 새 위치
+   */
+  private _computeNewPosition(
+    deltaPxX: number,
+    deltaPxY: number,
+    startLeft?: number,
+    startTop?: number,
+  ): { left: number; top: number } {
+    const sLeft = startLeft ?? this._dragStartLeft;
+    const sTop = startTop ?? this._dragStartTop;
     const deltaMmX = deltaPxX / GridCalculator.ppm;
     const deltaMmY = deltaPxY / GridCalculator.ppm;
 
@@ -772,19 +849,19 @@ export class LayoutBoxElement extends HTMLElement {
       const maxLeft = Math.max(0, (this.inheritStyle?.parentWidth || 0) - padL - padR - this.width);
       const maxTop = Math.max(0, (this.inheritStyle?.parentHeight || 0) - padT - padB - this.height);
       return {
-        left: Math.max(0, Math.min(maxLeft, this._dragStartLeft + deltaMmX)),
-        top: Math.max(0, Math.min(maxTop, this._dragStartTop + deltaMmY)),
+        left: Math.max(0, Math.min(maxLeft, sLeft + deltaMmX)),
+        top: Math.max(0, Math.min(maxTop, sTop + deltaMmY)),
       };
     }
 
     const parentModel = this.parentModel;
     if (!parentModel) {
-      return { left: this._dragStartLeft, top: this._dragStartTop };
+      return { left: sLeft, top: sTop };
     }
 
     const { columnCoords, lineHeight, columnCount, editableHeight } = parentModel;
-    const startX = columnCoords[this._dragStartLeft].x1;
-    const startY = columnCoords[this._dragStartLeft].y1 + lineHeight * this._dragStartTop;
+    const startX = columnCoords[sLeft].x1;
+    const startY = columnCoords[sLeft].y1 + lineHeight * sTop;
     const newLeftMm = startX + deltaMmX;
     const newTopMm = startY + deltaMmY;
 

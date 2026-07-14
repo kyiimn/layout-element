@@ -479,12 +479,111 @@ export class EditManager {
 
   private _multiSelect = false;
 
+  /** 드래그 중인 이동 대상 요소들 (중첩 하위 요소 제외) */
+  private _dragTargets: LayoutBoxElement[] = [];
+  /** 각 드래그 대상 요소의 시작 위치 */
+  private _dragStartPositions: Map<LayoutBoxElement, { left: number; top: number }> = new Map();
+
   /**
    * 다중 선택 모드를 설정한다. `true`면 다음 `selectLayout` 호출이 토글 모드로 동작한다.
    * @internal
    */
   _setMultiSelect(value: boolean): void {
     this._multiSelect = value;
+  }
+
+  /**
+   * 선택된 레이아웃 요소들 중에서 중첩(ancestor-descendant) 관계에 있는
+   * 하위 요소를 제외하고, 최상위 요소만 반환한다.
+   *
+   * 두 요소가 서로 ancestor-descendant 관계에 있으면 ancestor만 유지하고
+   * descendant는 제외한다. 서로 독립적인(형제 또는 다른 트리의) 요소들은 모두 유지한다.
+   *
+   * @example
+   * ```ts
+   * // boxA 안에 boxB가 중첩되어 있고, boxC는 독립적인 경우:
+   * // selectedLayouts = [boxA, boxB, boxC]
+   * // → getTopLevelDragTargets() = [boxA, boxC]
+   * // (boxB는 boxA의 하위 요소이므로 제외됨)
+   * ```
+   *
+   * @returns 중첩 하위 요소가 제거된 최상위 레이아웃 요소 배열
+   */
+  getTopLevelDragTargets(): LayoutBoxElement[] {
+    return this._filterTopLevelLayouts(this._selectedLayouts);
+  }
+
+  /**
+   * 주어진 레이아웃 요소 목록에서 중첩 관계의 하위 요소를 제거하고
+   * 최상위 요소만 필터링한다.
+   *
+   * @param elements - 필터링할 레이아웃 요소 목록
+   * @returns 중첩 하위 요소가 제거된 LayoutBoxElement 배열.
+   *   LayoutDocumentElement은 드래그 대상이 아니므로 항상 제외된다.
+   */
+  private _filterTopLevelLayouts(elements: LayoutElement[]): LayoutBoxElement[] {
+    const boxes = elements.filter(
+      (el): el is LayoutBoxElement => el instanceof LayoutBoxElement
+    );
+    if (boxes.length <= 1) return boxes;
+
+    const result: LayoutBoxElement[] = [];
+    for (const box of boxes) {
+      if (result.some(existing => existing.contains(box))) continue;
+
+      for (let i = result.length - 1; i >= 0; i--) {
+        if (box.contains(result[i])) {
+          result.splice(i, 1);
+        }
+      }
+
+      result.push(box);
+    }
+    return result;
+  }
+
+  /**
+   * 드래그 이동을 시작한다.
+   *
+   * 선택된 요소들 중에서 중첩 관계를 필터링하여 최상위 요소만 이동 대상으로 설정한다.
+   * 각 이동 대상의 시작 위치(left, top)를 기록하여 드래그 중 상대적 이동에 사용한다.
+   *
+   * @internal
+   */
+  _startLayoutDrag(): void {
+    this._dragTargets = this.getTopLevelDragTargets();
+    this._dragStartPositions.clear();
+    for (const target of this._dragTargets) {
+      this._dragStartPositions.set(target, { left: target.left, top: target.top });
+    }
+  }
+
+  /**
+   * 드래그 이동을 종료하고 내부 상태를 초기화한다.
+   * @internal
+   */
+  _endLayoutDrag(): void {
+    this._dragTargets = [];
+    this._dragStartPositions.clear();
+  }
+
+  /**
+   * 현재 드래그 중인 이동 대상 요소들을 반환한다.
+   * @internal
+   */
+  _getDragTargets(): LayoutBoxElement[] {
+    return this._dragTargets;
+  }
+
+  /**
+   * 지정된 이동 대상 요소의 드래그 시작 위치를 반환한다.
+   *
+   * @param element - 시작 위치를 조회할 요소
+   * @returns 시작 위치 객체 `{ left, top }`. 요소가 드래그 대상이 아니면 `undefined`.
+   * @internal
+   */
+  _getDragStartPosition(element: LayoutBoxElement): { left: number; top: number } | undefined {
+    return this._dragStartPositions.get(element);
   }
 
   /**
