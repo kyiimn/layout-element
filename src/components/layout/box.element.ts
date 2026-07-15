@@ -859,23 +859,26 @@ export class LayoutBoxElement extends HTMLElement {
       return { left: sLeft, top: sTop };
     }
 
-    const { columnCoords, lineHeight, columnCount, editableHeight } = parentModel;
+    const { columnCoords, lineHeight, columnCount } = parentModel;
+    const editableTextHeight = parentModel.editableTextHeight;
     const startX = columnCoords[sLeft].x1;
     const startY = columnCoords[sLeft].y1 + lineHeight * sTop;
     const newLeftMm = startX + deltaMmX;
     const newTopMm = startY + deltaMmY;
 
     let newLeft = 0;
-    for (let i = 0; i < columnCoords.length; i++) {
-      if (newLeftMm >= columnCoords[i].x1 && newLeftMm <= columnCoords[i].x2) {
+    let minDist = Infinity;
+    for (let i = 0; i <= columnCount - this.width; i++) {
+      const dist = Math.abs(newLeftMm - columnCoords[i].x1);
+      if (dist < minDist) {
+        minDist = dist;
         newLeft = i;
-        break;
       }
     }
     newLeft = Math.max(0, Math.min(columnCount - this.width, newLeft));
 
-    const maxLines = Math.floor(editableHeight / lineHeight);
-    let newTop = Math.max(0, Math.min(maxLines - this.height, Math.round((newTopMm - columnCoords[newLeft].y1) / lineHeight)));
+    const maxTop = Math.floor((editableTextHeight - (lineHeight * this.height - (lineHeight - parentModel.fontSize))) / lineHeight);
+    let newTop = Math.max(0, Math.min(maxTop, Math.round((newTopMm - columnCoords[newLeft].y1) / lineHeight)));
 
     return { left: newLeft, top: newTop };
   }

@@ -470,22 +470,23 @@ newLeftMm = startX + deltaMmX                   ← mm 좌표계에서 이동
 newTopMm  = startY + deltaMmY
     │
     ▼
-newLeft = 컬럼 탐색: newLeftMm가 어느 컬럼 범위에 속하는지 결정
-    │   (x1 ≤ newLeftMm ≤ x2인 첫 번째 컬럼 인덱스)
+newLeft = 컬럼 탐색: newLeftMm에 가장 가까운 컬럼의 x1을 찾아 해당 인덱스 결정
+    │   (정확히 컬럼 범위 안에 없으면 가장 가까운 컬럼으로 스냅)
     │
     ▼
 newLeft = clamp(newLeft, 0, columnCount - width)  ← 컬럼 스냅 + 범위 제한
     │
     ▼
-maxLines = floor(editableHeight / lineHeight)
+maxTop = floor((editableTextHeight - absHeight) / lineHeight)
 newTop = clamp(round((newTopMm - columnCoords[newLeft].y1) / lineHeight),
-              0, maxLines - height)               ← 라인 스냅 + 범위 제한
+              0, maxTop)                          ← 라인 스냅 + 범위 제한
 ```
 
 - **컬럼 스냅**: 박스의 왼쪽 가장자리가 가장 가까운 컬럼에 스냅된다.
 - **라인 스냅**: 박스의 위쪽 가장자리가 `lineHeight` 단위로 스냅된다.
-- **범위 제한**: 박스가 `columnCount - width` 이상의 컬럼, `maxLines - height` 이상의 라인으로 이동하지 못한다.
-- `columnCoords`, `lineHeight`, `columnCount`, `editableHeight`는 부모의 `GridCalculator`(=`parentModel`)에서 가져온다.
+- **범위 제한**: 박스가 `columnCount - width` 이상의 컬럼, `maxTop` 이상의 라인으로 이동하지 못한다.
+- **`maxTop` 계산**: `editableTextHeight`와 box의 `absHeight`를 사용하여, 박스의 하단이 편집 영역 하단(`editableTextHeight`)을 넘지 않도록 제한한다. 이전 버전에서는 `editableHeight / lineHeight - height`를 사용했으나, 마지막 줄의 `lineHeight - fontSize` (leading) 공간을 고려하지 못해 박스가 하단에 딱 붙지 않는 문제가 있었다.
+- `columnCoords`, `lineHeight`, `columnCount`, `editableTextHeight`는 부모의 `GridCalculator`(=`parentModel`)에서 가져온다.
 - `parentModel`이 없으면 (예: 박스가 DOM에 연결되지 않은 경우) 시작 위치를 그대로 반환한다.
 
 ### 4.4 위치 설정 시 파이프라인: `left`/`top` setter
@@ -902,6 +903,7 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 - **이동 임계값**: mousedown 후 3px 이하의 이동은 클릭으로 간주하며, 드래그로 인식되지 않는다.
 - **`_dragMoved` 플래그**: 드래그 후 `click` 이벤트가 발생하면 `_onLayoutClick`에서 `_dragMoved`를 확인하여 드래그 중 클릭을 무시한다.
 - **`parentModel` 필수**: `_computeNewPosition`에서 `position: 'static'` 모드는 `parentModel`(부모의 `GridCalculator`)이 필요하다. 없으면 시작 위치를 그대로 반환한다.
+- **`maxTop` 계산**: static 모드에서 박스의 하단이 편집 영역 하단을 넘지 않도록 `editableTextHeight`와 `absHeight`를 사용하여 `maxTop`을 계산한다. `editableHeight`만 사용하면 마지막 줄의 leading 공간이 무시되어 박스가 하단에 딱 붙지 않는다.
 
 ---
 
