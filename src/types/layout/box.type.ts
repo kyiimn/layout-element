@@ -15,6 +15,17 @@ export type BoxPosition = 'static' | 'absolute';
 export type BoxBorderStyle = 'solid' | 'dotted' | 'dashed';
 
 /**
+ * 박스의 의미적 역할.
+ * - `'group-article'`: 기사 그룹 컨테이너
+ * - `'body'`: 본문 영역
+ * - `'image'`: 이미지 영역
+ * - `'title'`: 제목 영역
+ * - `'caption'`: 캡션 영역
+ * - `'group-image'`: 이미지 그룹 컨테이너
+ */
+export type BoxRole = 'group-article' | 'body' | 'image' | 'title' | 'caption' | 'group-image';
+
+/**
  * 위치 지정 가능한 컨테이너 데이터.
  *
  * `position` 값에 따라 `left`/`width`의 의미가 달라진다:
@@ -106,6 +117,15 @@ export type BoxData = {
 
   /** 내부 좌측 여백 */
   paddingLeft?: number;
+
+  /** 박스의 의미적 역할 (예: 기사 그룹, 본문, 이미지) */
+  role?: BoxRole;
+
+  /** 그룹 멤버 ID 목록. 쉼표로 구분된 문자열로 직렬화됨 (요소의 JS getter/setter는 string[]로 동작) */
+  groupMember?: string;
+
+  /** 정렬 우선순위 (높을수록 중요). 렌더링 및 레이아웃 배치 시 참조 */
+  priority?: number;
 
   /** 자식 요소들 (중첩 박스, 문단, 텍스트, 이미지) */
   children?: (BoxData | ParagraphData | TextData | ImageData)[];

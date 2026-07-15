@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, type ReactNode } from 'react';
 import { LayoutBoxElement } from '@/components';
-import type { BoxData, BoxPosition, BoxBorderStyle } from '@/types';
+import type { BoxData, BoxPosition, BoxBorderStyle, BoxRole } from '@/types';
 import { useLayoutElement } from '@/react/hooks';
 
 export interface LayoutBoxProps {
@@ -23,6 +23,9 @@ export interface LayoutBoxProps {
   paddingBottom?: number;
   paddingLeft?: number;
   editableLayout?: boolean;
+  role?: BoxRole;
+  groupMember?: string[];
+  priority?: number;
   children?: ReactNode;
 }
 
@@ -47,6 +50,9 @@ export const LayoutBox = forwardRef<LayoutBoxElement, LayoutBoxProps>(
     paddingBottom,
     paddingLeft,
     editableLayout,
+    role,
+    groupMember,
+    priority,
     children,
   }, ref) {
     const { ref: innerRef, define } = useLayoutElement<LayoutBoxElement>();
@@ -168,6 +174,24 @@ export const LayoutBox = forwardRef<LayoutBoxElement, LayoutBoxProps>(
       if (!element || paddingLeft === undefined) return;
       element.paddingLeft = paddingLeft;
     }, [innerRef, paddingLeft]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || role === undefined) return;
+      element.role = role;
+    }, [innerRef, role]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || groupMember === undefined) return;
+      element.groupMember = groupMember;
+    }, [innerRef, groupMember]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || priority === undefined) return;
+      element.priority = priority;
+    }, [innerRef, priority]);
 
     useEffect(() => {
       if (typeof ref === 'function') {

@@ -1,7 +1,7 @@
 import { DEFAULT_BORDER_STYLE } from "@/constants";
 import { GridCalculator } from "@/core";
 import { ColorRegistry } from "@/resource";
-import { InheritStyle, BoxData, ParagraphStyle, TextStyle, PrintPostData, BoxPosition, BoxBorderStyle } from "@/types";
+import { InheritStyle, BoxData, ParagraphStyle, TextStyle, PrintPostData, BoxPosition, BoxBorderStyle, BoxRole } from "@/types";
 import { checkOverlap, genUUID } from "@/utils";
 import { EditManager } from "@/edit/edit-manager";
 import { LayoutDocumentElement } from "./document.element";
@@ -42,6 +42,9 @@ export class LayoutBoxElement extends HTMLElement {
   private _paddingLeft: number = 0;
   private _paddingRight: number = 0;
   private _zIndex: number = 0;
+  private _role?: BoxRole;
+  private _groupMember?: string;
+  private _priority?: number;
   private _editableLayout: boolean = false;
 
   private _savedColumns: number | number[] = 1;
@@ -94,6 +97,20 @@ export class LayoutBoxElement extends HTMLElement {
 
   disconnectedCallback() {
     EditManager.getInstance()._unregisterLayout(this);
+  }
+
+  static get observedAttributes() {
+    return ['role', 'group-member', 'priority'] as const;
+  }
+
+  attributeChangedCallback(name: string, _oldVal: string | null, newVal: string | null) {
+    if (name === 'role') {
+      this._role = newVal as BoxRole | undefined;
+    } else if (name === 'group-member') {
+      this._groupMember = newVal ?? undefined;
+    } else if (name === 'priority') {
+      this._priority = newVal !== null ? Number(newVal) : undefined;
+    }
   }
 
   /**
@@ -365,6 +382,9 @@ export class LayoutBoxElement extends HTMLElement {
     if (data.paddingBottom !== undefined) this._paddingBottom = data.paddingBottom;
     if (data.paddingLeft !== undefined) this._paddingLeft = data.paddingLeft;
     if (data.paddingRight !== undefined) this._paddingRight = data.paddingRight;
+    if (data.role !== undefined) this._role = data.role;
+    if (data.groupMember !== undefined) this._groupMember = data.groupMember;
+    if (data.priority !== undefined) this._priority = data.priority;
 
     this._left = data.left;
     this._top = data.top;
@@ -535,6 +555,9 @@ export class LayoutBoxElement extends HTMLElement {
       paddingRight: this.paddingRight,
       paddingBottom: this.paddingBottom,
       paddingLeft: this.paddingLeft,
+      role: this._role,
+      groupMember: this._groupMember,
+      priority: this.priority,
       children: this.items.map(e => e.data).filter(e => !!e),
     };
   }
@@ -556,6 +579,26 @@ export class LayoutBoxElement extends HTMLElement {
   get paddingRight() { return this._paddingRight; }
   get paddingBottom() { return this._paddingBottom; }
   get paddingLeft() { return this._paddingLeft; }
+
+  get role(): string | null { return this._role ?? null; }
+  set role(value: string | null) {
+    if (value === null) {
+      this._role = undefined;
+    } else {
+      this._role = value as BoxRole;
+    }
+  }
+
+  get groupMember(): string[] {
+    if (!this._groupMember) return [];
+    return this._groupMember.split(',').filter(s => s.length > 0);
+  }
+  set groupMember(value: string[]) {
+    this._groupMember = value.length > 0 ? value.join(',') : undefined;
+  }
+
+  get priority() { return this._priority ?? 0; }
+  set priority(value: number) { this._priority = value; }
 
   get inheritStyle() { return this._inheritStyle; }
   get model() { return this._model; }

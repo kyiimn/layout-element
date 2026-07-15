@@ -8,7 +8,7 @@ import {
   LayoutParagraphElement,
   LayoutVirtualColumnElement,
 } from "./components";
-import type { DocumentData, BoxData, ParagraphData, ImageData, GuideColumnData } from "./types";
+import type { DocumentData, BoxData, ParagraphData, ImageData, GuideColumnData, BoxRole } from "./types";
 
 declare global {
   interface HTMLElementTagNameMap {
@@ -33,7 +33,7 @@ declare module 'react' {
         LayoutDocumentElement> & {
           onTextOverflow?: (e: Event) => void;
         };
-      'x-layout-box': DetailedHTMLProps<HTMLAttributes<LayoutBoxElement> & { data?: BoxData; }, LayoutBoxElement>;
+      'x-layout-box': DetailedHTMLProps<HTMLAttributes<LayoutBoxElement> & { data?: BoxData; role?: BoxRole; groupMember?: string[]; priority?: number; }, LayoutBoxElement>;
       'x-layout-guide-column': DetailedHTMLProps<HTMLAttributes<LayoutGuideColumnElement> & { data?: GuideColumnData; }, LayoutGuideColumnElement>;
       'x-layout-column': DetailedHTMLProps<HTMLAttributes<LayoutColumnElement> & { data?: ParagraphData; }, LayoutColumnElement>;
       'x-layout-image': DetailedHTMLProps<HTMLAttributes<LayoutImageElement> & { data?: ImageData; }, LayoutImageElement>;
