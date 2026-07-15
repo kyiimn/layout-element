@@ -177,14 +177,16 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule(":host {}", 0);
       styleEl.sheet.insertRule(":host([data-selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 1);
       styleEl.sheet.insertRule(":host([data-hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 2);
-      styleEl.sheet.insertRule(":host([data-editable-layout]:not([data-border])) { border: 1px dotted #ccc; }", 3);
-      styleEl.sheet.insertRule(`@media print { [data-border] { display: none; } :host([data-editable-layout]) { border: none; } }`, 4);
-      styleEl.sheet.insertRule('.resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: 99999999; pointer-events: auto; display: none; }', 5);
-      styleEl.sheet.insertRule(':host([data-selected]) .resize-handle { display: block; }', 6);
-      styleEl.sheet.insertRule('.resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 7);
-      styleEl.sheet.insertRule('.resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 8);
-      styleEl.sheet.insertRule('.resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 9);
-      styleEl.sheet.insertRule('.resize-handle[data-handle="right"] { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 10);
+      styleEl.sheet.insertRule(":host([data-editable-layout]:not([data-border])) { box-shadow: #ccc 0px 0px 0px 1px inset; }", 3);
+      styleEl.sheet.insertRule(":host([data-editable-layout][data-selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 4);
+      styleEl.sheet.insertRule(":host([data-editable-layout][data-hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 5);
+      styleEl.sheet.insertRule(`@media print { [data-border] { display: none; } }`, 6);
+      styleEl.sheet.insertRule('.resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: 99999999; pointer-events: auto; display: none; }', 7);
+      styleEl.sheet.insertRule(':host([data-selected]) .resize-handle { display: block; }', 8);
+      styleEl.sheet.insertRule('.resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 9);
+      styleEl.sheet.insertRule('.resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 10);
+      styleEl.sheet.insertRule('.resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 11);
+      styleEl.sheet.insertRule('.resize-handle[data-handle="right"] { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 12);
       this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));
