@@ -76,6 +76,11 @@ export class LayoutBoxElement extends HTMLElement {
   private _resizeLastClientY = 0;
   private _resizeHandles: HTMLDivElement[] = [];
 
+  /** Cached set of paragraphs affected during drag/resize — computed once at start. */
+  private _affectedParagraphs: Set<LayoutParagraphElement> | null = null;
+  /** rAF id for throttled paragraph rerender during drag/resize. */
+  private _rerenderRafId: number | null = null;
+
   constructor() {
     super();
     this._shadowRoot = this.attachShadow({ mode: "open" });
@@ -744,6 +749,7 @@ export class LayoutBoxElement extends HTMLElement {
     this._dragLastClientY = event.clientY;
     this.style.cursor = 'grabbing';
     EditManager.getInstance()._startLayoutDrag();
+    this._affectedParagraphs = this._collectAffectedParagraphs();
 
     const dragTargets = EditManager.getInstance()._getDragTargets();
     for (const target of dragTargets) {
@@ -775,6 +781,7 @@ export class LayoutBoxElement extends HTMLElement {
     document.removeEventListener('keydown', this._onLayoutKeyDown);
     this._isDragging = false;
     this._dragMoved = false;
+    this._flushAffectedParagraphs();
     this.style.cursor = this._editableLayout ? 'grab' : '';
 
     const manager = EditManager.getInstance();
@@ -877,6 +884,7 @@ export class LayoutBoxElement extends HTMLElement {
       this._dragRafId = null;
     }
     this._isDragging = false;
+    this._flushAffectedParagraphs();
     this.style.cursor = this._editableLayout ? 'grab' : '';
 
     const manager = EditManager.getInstance();
@@ -1201,6 +1209,7 @@ export class LayoutBoxElement extends HTMLElement {
     this._resizeLastClientY = event.clientY;
 
     EditManager.getInstance()._startLayoutResize();
+    this._affectedParagraphs = this._collectAffectedParagraphs();
     document.addEventListener('mousemove', this._onResizeMouseMove);
     document.addEventListener('mouseup', this._onResizeMouseUp);
     document.addEventListener('keydown', this._onResizeKeyDown);
@@ -1239,6 +1248,7 @@ export class LayoutBoxElement extends HTMLElement {
       this._resizeRafId = null;
     }
     this._isResizing = false;
+    this._flushAffectedParagraphs();
     EditManager.getInstance()._endLayoutResize();
 
     if (!this._resizeMoved) {
@@ -1281,6 +1291,7 @@ export class LayoutBoxElement extends HTMLElement {
     document.removeEventListener('keydown', this._onResizeKeyDown);
     this._isResizing = false;
     this._resizeHandle = null;
+    this._flushAffectedParagraphs();
     EditManager.getInstance()._endLayoutResize();
 
     if (this.left !== this._resizeStartLeft) this.left = this._resizeStartLeft;
@@ -1398,6 +1409,16 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   private _rerenderAffectedParagraphs(): void {
+    if (this._affectedParagraphs !== null) {
+      this._scheduleRerenderAffectedParagraphs();
+      return;
+    }
+
+    const affected = this._collectAffectedParagraphs();
+    this._renderAffected(affected);
+  }
+
+  private _collectAffectedParagraphs(): Set<LayoutParagraphElement> {
     const affected = new Set<LayoutParagraphElement>();
 
     for (const item of this.items) {
@@ -1411,11 +1432,39 @@ export class LayoutBoxElement extends HTMLElement {
       }
     }
 
+    return affected;
+  }
+
+  private _renderAffected(affected: Set<LayoutParagraphElement>): void {
     for (const p of affected) {
       if (p.isConnected) {
         (p as any)._structureDirty = true;
         p.render();
       }
+    }
+  }
+
+  private _scheduleRerenderAffectedParagraphs(): void {
+    if (this._rerenderRafId !== null) return;
+
+    this._rerenderRafId = requestAnimationFrame(() => {
+      this._rerenderRafId = null;
+      const affected = this._affectedParagraphs;
+      if (affected) {
+        this._renderAffected(affected);
+      }
+    });
+  }
+
+  private _flushAffectedParagraphs(): void {
+    if (this._rerenderRafId !== null) {
+      cancelAnimationFrame(this._rerenderRafId);
+      this._rerenderRafId = null;
+    }
+    const affected = this._affectedParagraphs;
+    this._affectedParagraphs = null;
+    if (affected) {
+      this._renderAffected(affected);
     }
   }
 
