@@ -674,6 +674,7 @@ export class LayoutBoxElement extends HTMLElement {
       if (this.parentModel) {
         const { columnCoords, columnCount } = this.parentModel;
         const col = Math.min(columnCount, this.left + this.width) - 1;
+        if (col < 0 || !columnCoords[col] || !columnCoords[this.left]) return 0; // guard: width=0 crash
         return columnCoords[col].x2 - columnCoords[this.left].x1;
       } else {
         return 0;
@@ -777,6 +778,7 @@ export class LayoutBoxElement extends HTMLElement {
 
   private _onLayoutClick = (event: MouseEvent): void => {
     event.stopPropagation();
+    if (EditManager.getInstance().insertMode) return;
     if (this._isEventFromDescendantLayout(event)) return;
     if (this._isEventFromResizeHandle(event)) return;
     this.removeAttribute('data-hovered');
@@ -861,6 +863,7 @@ export class LayoutBoxElement extends HTMLElement {
 
   private _onLayoutMouseDown = (event: MouseEvent) => {
     if (event.button !== 0) return;
+    if (EditManager.getInstance().insertMode) return;
     if (this._isEventFromResizeHandle(event)) return;
     if (this._isEventFromDescendantLayout(event)) return;
     this._selectedOnMouseDown = false;

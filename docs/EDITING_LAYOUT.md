@@ -236,6 +236,35 @@ manager.addEventListener('layoutSelectionChange', (event) => {
 | `paragraph` | `null` | 레이아웃 이벤트에서는 항상 `null` |
 | `controller` | `null` | 레이아웃 이벤트에서는 항상 `null` |
 
+#### 이벤트: `insert`
+
+새 요소가 성공적으로 삽입되었을 때 발생한다. 자세한 내용은 [12. 삽입 모드 (Insert Mode)](#12-삽입-모드-insert-mode)를 참조한다.
+
+```typescript
+manager.addEventListener('insert', (event) => {
+  console.log(event.type);        // 'insert'
+  console.log(event.position);    // 'absolute' | 'static'
+  console.log(event.element);     // 생성된 <x-layout-box> 요소
+  console.log(event.container);   // 부모 컨테이너
+  console.log(event.left);        // left 좌표
+  console.log(event.top);         // top 좌표
+  console.log(event.width);       // 너비
+  console.log(event.height);      // 높이
+  console.log(event.zIndex);      // z-index
+  console.log(event.canceled);    // false
+});
+```
+
+#### 이벤트: `insertCancel`
+
+삽입 모드에서 드래그가 ESC 키로 취소되었을 때 발생한다. 자세한 내용은 [12. 삽입 모드 (Insert Mode)](#12-삽입-모드-insert-mode)를 참조한다.
+
+```typescript
+manager.addEventListener('insertCancel', (event) => {
+  console.log('Insert canceled');
+});
+```
+
 #### 이벤트: `layoutMove`
 
 드래그 이동이 완료되거나 ESC로 취소될 때 발생한다.
@@ -1159,6 +1188,7 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 | Escape | 전체 선택 해제 | ❌ | — |
 | Delete | 선택된 요소 삭제 | ❌ | — |
 | 방향키 | 선택 이동 | ❌ | — |
+| `ESC` (삽입 모드 드래그 중) | 삽입 취소 | ✅ | `insertCancel` |
 
 ---
 
@@ -1190,7 +1220,7 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 |------|------|
 | `src/components/layout/box.element.ts` | 드래그 로직, 리사이즈 로직, 위치 setter, `_computeNewPosition`, `_computeNewSize`, `_rerenderAffectedParagraphs`, `_collectParagraphs` |
 | `src/components/layout/document.element.ts` | `editableLayout` 속성, `_onLayoutClick`, `:host([data-selected])` CSS 규칙 |
-| `src/edit/edit-manager.ts` | 레이아웃 선택 상태 관리, `selectLayout`, `clearLayoutSelection`, `_startLayoutDrag`, `_endLayoutDrag`, `_startLayoutResize`, `_endLayoutResize`, `_isDraggingLayout`, `_isResizingLayout`, `getTopLevelDragTargets`, `_unregisterLayout`, `layoutSelectionChange` 이벤트, `_dispatchLayoutResize` |
+| `src/edit/edit-manager.ts` | 레이아웃 선택 상태 관리, `selectLayout`, `clearLayoutSelection`, `_startLayoutDrag`, `_endLayoutDrag`, `_startLayoutResize`, `_endLayoutResize`, `_isDraggingLayout`, `_isResizingLayout`, `getTopLevelDragTargets`, `_unregisterLayout`, `layoutSelectionChange` 이벤트, `_dispatchLayoutResize`, `insertMode`, `activateInsert`, `deactivateInsert`, `insert`/`insertCancel` 이벤트 |
 | `src/react/hooks/use-edit-manager.ts` | React 훅: `selectedLayouts`, `selectLayout`, `clearLayoutSelection`, `onLayoutSelectionChange` |
 | `src/core/text-layout-engine.ts` | `_layoutTextIntoColumns`, 오버랩 회피, COVER 라인, PART 분할 |
 | `src/components/layout/paragraph.element.ts` | `render()`, `_structureDirty`, TextLayoutEngine 생성 |
@@ -1543,3 +1573,317 @@ private _resizeLastClientX: number = 0;
 private _resizeLastClientY: number = 0;
 private _resizeHandles: HTMLDivElement[] = [];   // 핸들 DOM 요소 참조
 ```
+
+---
+
+## 12. 삽입 모드 (Insert Mode)
+
+### 12.1 개요
+
+삽입 모드는 문서 표면에서 마우스로 드래그하여 새 요소를 생성하는 기능이다. 사용자가 삽입할 요소의 종류와 배치 모드를 선택하면, `<x-layout-document>` 위에서 드래그한 영역만큼 새 요소가 만들어진다.
+
+- **삽입 가능한 요소**: `box`, `text`, `paragraph`, `image`
+- **배치 모드**: `absolute`(mm 좌표) 또는 `static`(컬럼/라인 그리드)
+- **취소**: 드래그 중 `ESC` 키를 누르면 미리보기 사각형이 제거되고 `insertCancel` 이벤트가 발생한다.
+
+삽입 모드가 활성화되면 문서 요소의 커서가 `crosshair`로 바뀌고, 기존 레이아웃 선택은 자동으로 해제된다. 삽입 모드 중에는 레이아웃 선택과 드래그 이동이 동작하지 않아 삽입 동작과 충돌하지 않는다.
+
+### 12.2 EditManager API
+
+#### `insertMode` getter / setter
+
+```typescript
+const manager = EditManager.getInstance();
+
+// 삽입 모드 활성화
+manager.insertMode = { type: 'box', position: 'absolute' };
+
+// 삽입 모드 비활성화
+manager.insertMode = null;
+
+// 현재 삽입 모드 조회
+const mode = manager.insertMode; // InsertMode | null
+```
+
+| 동작 | 설명 |
+|------|------|
+| non-null 설정 | 삽입 모드 활성화, 기존 레이아웃 선택 해제, 문서 요소에 `crosshair` 커서 적용 |
+| `null` 설정 | 삽입 모드 비활성화, 커서 복원 |
+| 반복 설정 | 동일한 모드로 다시 설정하면 무시된다 |
+
+`x-layout-document` 요소가 DOM에 없으면 `Error`를 throw한다.
+
+#### `activateInsert(mode)`
+
+```typescript
+manager.activateInsert({ type: 'image', position: 'static' });
+```
+
+`insertMode = mode`와 동일한 편의 메서드이다.
+
+#### `deactivateInsert()`
+
+```typescript
+manager.deactivateInsert();
+```
+
+`insertMode = null`과 동일한 편의 메서드이다.
+
+### 12.3 InsertMode 타입
+
+```typescript
+import type { InsertMode } from 'layout-element';
+
+interface InsertMode {
+  type: 'box' | 'text' | 'paragraph' | 'image';
+  position: 'absolute' | 'static';
+}
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `type` | `'box' \| 'text' \| 'paragraph' \| 'image'` | 삽입할 요소의 종류 |
+| `position` | `'absolute' \| 'static'` | 새 요소의 배치 모드 |
+
+`text`와 `paragraph`는 모두 `<x-layout-paragraph>`를 내부에 생성하지만, `text`는 `type: 'text'` 데이터로, `paragraph`는 `type: 'paragraph'` 데이터로 변환된다. 실제 렌더링에서는 둘 다 단락 요소로 표시된다.
+
+### 12.4 이벤트
+
+#### `insert` 이벤트
+
+삽입이 정상적으로 완료되면 `EditManager`에서 `insert` 이벤트가 발생한다.
+
+```typescript
+manager.addEventListener('insert', (event) => {
+  console.log(event.type);        // 'insert'
+  console.log(event.position);    // 'absolute' | 'static'
+  console.log(event.element);       // 생성된 최상위 <x-layout-box> 요소
+  console.log(event.container);     // 부모 컨테이너 요소
+  console.log(event.left);        // left 좌표 (static: 컬럼 인덱스, absolute: mm)
+  console.log(event.top);         // top 좌표 (static: 라인 인덱스, absolute: mm)
+  console.log(event.width);       // 너비 (static: 컬럼 수, absolute: mm)
+  console.log(event.height);      // 높이 (static: 라인 수, absolute: mm)
+  console.log(event.zIndex);      // 할당된 z-index
+  console.log(event.canceled);    // false
+});
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `type` | `'insert'` | 이벤트 타입 |
+| `position` | `'absolute' \| 'static'` | 요소의 배치 모드 |
+| `element` | `HTMLElement` | 생성된 최상위 요소. 항상 `<x-layout-box>`이다 |
+| `container` | `HTMLElement` | 요소가 삽입된 부모 컨테이너 |
+| `left` | `number` | static 모드면 컬럼 인덱스, absolute 모드면 mm |
+| `top` | `number` | static 모드면 라인 인덱스, absolute 모드면 mm |
+| `width` | `number` | static 모드면 컬럼 개수, absolute 모드면 mm |
+| `height` | `number` | static 모드면 라인 수, absolute 모드면 mm |
+| `zIndex` | `number` | 컨테이너 내 기존 자식 z-index의 최대값 + 1, 자식이 없으면 1 |
+| `canceled` | `boolean` | 정상 삽입 시 `false` |
+
+#### `insertCancel` 이벤트
+
+`ESC` 키로 드래그를 취소하면 `insertCancel` 이벤트가 발생한다.
+
+```typescript
+manager.addEventListener('insertCancel', (event) => {
+  console.log('Insert canceled');
+});
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `type` | `'insertCancel'` | 이벤트 타입 |
+| `paragraph` | `null` | 레이아웃/삽입 이벤트에서는 항상 `null` |
+| `controller` | `null` | 레이아웃/삽입 이벤트에서는 항상 `null` |
+
+### 12.5 드래그-삽입 흐름
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    삽입 모드 생명주기                         │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ① 삽입 모드 활성화                                          │
+│     │                                                        │
+│     ├── EditManager.insertMode = { type, position }          │
+│     ├── 기존 레이아웃 선택 해제                               │
+│     ├── InsertController 생성/재사용                         │
+│     └── document에 mousedown 리스너 등록, cursor = crosshair │
+│                                                             │
+│  ② mousedown on document                                     │
+│     │                                                        │
+│     ├── button !== 0? → 무시                                │
+│     ├── event.preventDefault() + stopPropagation()           │
+│     ├── _createPreview()                                     │
+│     ├── _isDragging = true                                   │
+│     └── document에 mousemove, mouseup, keydown 리스너 등록    │
+│                                                             │
+│  ③ mousemove (드래그 중)                                      │
+│     │                                                        │
+│     ├── _currentClientX/Y 업데이트                            │
+│     └── _updatePreview()                                     │
+│         → 점선 테두리 반투명 파란색 사각형 위치/크기 갱신     │
+│                                                             │
+│  ④ mouseup (드래그 완료)                                      │
+│     │                                                        │
+│     ├── 이동 거리 < 3px? → _cleanup(), return (클릭으로 간주) │
+│     ├── 드래그 영역 중심점 계산: centerX, centerY             │
+│     ├── _findTargetContainer(centerX, centerY)               │
+│     │   → nearest x-layout-box 또는 x-layout-document        │
+│     │   → 상위로 거슬러 올라가 유효한 컨테이너 결정           │
+│     ├── screen 픽셀 → container 내부 mm 변환                 │
+│     ├── mm → static 좌표 변환 (static 모드인 경우)            │
+│     ├── _createElement()                                     │
+│     │   → <x-layout-box> 생성, children 설정, data 할당       │
+│     ├── container.appendChild(boxEl)                         │
+│     ├── element.editableLayout = true                        │
+│     ├── EditManager.selectLayout(element)                   │
+│     ├── _cleanup()                                           │
+│     └── EditManager._dispatchInsert(detail)                  │
+│         → insert 이벤트 발생 (canceled = false)               │
+│                                                             │
+│  ④' ESC 키 (드래그 취소)                                      │
+│     │                                                        │
+│     ├── _cancel()                                            │
+│     ├── _cleanup()                                           │
+│     └── EditManager._dispatchInsertCancel()                   │
+│         → insertCancel 이벤트 발생                            │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 12.6 대상 컨테이너 찾기
+
+드래그 영역의 중심점에서 `document.elementsFromPoint(centerX, centerY)`로 마우스 아래의 모든 요소를 조회한다. 그중 처음 만나는 `<x-layout-box>` 또는 `<x-layout-document>`를 시작점으로 삼는다.
+
+찾은 요소에서 DOM 트리를 따라 위로 올라가며 유효한 컨테이너를 결정한다:
+
+| 현재 요소 | 조건 | 결과 |
+|-----------|------|------|
+| `<x-layout-document>` | 항상 | 유효한 컨테이너로 반환 |
+| `<x-layout-box>` | 자식이 없거나 모든 자식이 `type === 'box'` | 유효한 컨테이너로 반환 |
+| `<x-layout-box>` | 자식 중 `paragraph`나 `image`가 있음 | 상위 요소로 계속 이동 |
+
+이 로직은 모든 삽입 타입(`box`, `text`, `paragraph`, `image`)에 동일하게 적용된다. 단락이나 이미지가 이미 들어 있는 박스 안에 새 박스를 추가하면 기존 콘텐츠와의 모순이 생길 수 있으므로, 그 경우 상위 컨테이너로 거슬러 올라간다.
+
+### 12.7 요소 생성
+
+삽입이 완료되면 항상 `<x-layout-box>` 요소를 최상위로 생성한다. 삽입 타입에 따라 박스 내부에 다른 자식 요소를 추가한다.
+
+```typescript
+const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
+const boxData: BoxData = {
+  type: 'box',
+  left,
+  top,
+  width,
+  height,
+  position: mode.position,
+  zIndex,
+};
+```
+
+| 삽입 타입 | `boxData.children` | 생성되는 내부 요소 |
+|-----------|-------------------|-------------------|
+| `box` | `undefined` | 자식 없음, 빈 박스 |
+| `text` | `[{ type: 'text', content: '' }]` | `<x-layout-paragraph>` (텍스트 데이터) |
+| `paragraph` | `[{ type: 'paragraph', content: '', column: 1, gap: 0 }]` | `<x-layout-paragraph>` (단락 데이터) |
+| `image` | `[{ type: 'image', x: 0, y: 0, width: 100, height: 100, dpi: 72, url: '' }]` | `<x-layout-image>` (100×100px, 72dpi, 빈 url) |
+
+중요한 구현 순서:
+
+1. `boxEl.data = boxData`를 먼저 설정
+2. 그 다음 `container.appendChild(boxEl)` 호출
+3. `element.editableLayout = true` 설정
+4. `EditManager.selectLayout(element)` 호출
+
+`data`를 먼저 설정하면 `connectedCallback`이 실행되기 전에 모든 속성이 준비되어 있어, 요소가 DOM에 연결될 때 초기 레이아웃이 올바르게 계산된다. 삽입 완료 후 생성된 요소의 `editableLayout`을 `true`로 설정하고 `selectLayout`으로 선택하면, 새 요소가 빨간색 테두리(`data-selected`)와 함께 선택 상태로 표시된다.
+
+### 12.8 좌표 변환
+
+#### absolute 모드
+
+화면 좌표(픽셀)를 컨테이너 내부의 mm 좌표로 변환한다. 컨테이너의 `paddingLeft`/`paddingTop`을 고려하며, 음수 좌표는 0으로 클램핑한다.
+
+```
+leftMm = max(0, (clientX - containerRect.left) / ppm - containerPaddingLeft)
+topMm  = max(0, (clientY - containerRect.top)  / ppm - containerPaddingTop)
+widthMm  = (endClientX - startClientX) / ppm
+heightMm = (endClientY - startClientY) / ppm
+```
+
+최종 값은 소수점 둘째 자리까지 반올림한다.
+
+#### static 모드
+
+mm 좌표를 컬럼/라인 그리드 좌표로 변환한다.
+
+```
+avgColWidth = editableWidth / columnCount
+editAreaLeft = columnCoords[0].x1
+editAreaTop  = columnCoords[0].y1
+
+nearestColumn = round((leftMm - editAreaLeft) / avgColWidth)
+left = clamp(nearestColumn, 0, columnCount - max(1, round(widthMm / avgColWidth)))
+
+top = max(0, round((topMm - editAreaTop) / lineHeight))
+
+width  = max(1, round(widthMm / avgColWidth))
+height = max(1, round(heightMm / lineHeight))
+```
+
+- `left`: 가장 가까운 컬럼 인덱스로 스냅, `[0, columnCount - width]` 범위로 클램핑
+- `top`: 가장 가까운 라인 인덱스로 스냅, 최소 0
+- `width`: 최소 1컬럼
+- `height`: 최소 1라인
+
+### 12.9 드래그 임계값
+
+이동 거리가 3px 미만이면 클릭으로 간주하여 요소를 생성하지 않는다. 이 값은 레이아웃 드래그 이동과 동일하다.
+
+```typescript
+private static readonly DRAG_THRESHOLD = 3;
+```
+
+### 12.10 레이아웃 편집 모드와의 상호작용
+
+삽입 모드가 활성화되면 다음 핸들러가 early return하여 레이아웃 선택/드래그가 방해되지 않는다.
+
+- `<x-layout-box>`의 `_onLayoutClick`
+- `<x-layout-box>`의 `_onLayoutMouseDown`
+- `<x-layout-document>`의 `_onLayoutClick`
+
+또한 `InsertController.startDrag()` 내부에서 `event.stopPropagation()`을 호출하여, 박스의 `mousedown` 리스너가 함께 실행되지 않도록 한다.
+
+### 12.11 미리보기 사각형
+
+드래그 중 문서 위에 반투명한 점선 파란색 사각형이 표시된다.
+
+| 속성 | 값 |
+|------|-----|
+| `position` | `fixed` |
+| `border` | `2px dashed #1a73e8` |
+| `backgroundColor` | `rgba(26, 115, 232, 0.1)` |
+| `pointerEvents` | `none` |
+| `zIndex` | `999999` |
+
+너비나 높이가 1px 이하면 사각형은 보이지 않는다. 드래그가 끝나거나 취소되면 DOM에서 제거된다.
+
+### 12.12 삽입 모드 관련 핵심 파일
+
+| 파일 | 역할 |
+|------|------|
+| `src/edit/insert-controller.ts` | `InsertController`: 삽입 모드의 드래그, 좌표 변환, 요소 생성, 미리보기 관리 |
+| `src/edit/edit-manager.ts` | `insertMode` getter/setter, `activateInsert`, `deactivateInsert`, `insert`/`insertCancel` 이벤트 발송 |
+| `src/types/edit/insert.type.ts` | `InsertType`, `InsertPosition`, `InsertMode`, `InsertEventDetail` 타입 정의 |
+
+### 12.13 주의사항
+
+- 삽입 모드는 `<x-layout-document>`가 DOM에 있을 때만 활성화할 수 있다. 없으면 `Error`가 발생한다.
+- 삽입된 요소는 항상 `<x-layout-box>`로 감싸진다. `text`, `paragraph`, `image` 타입도 마찬가지이다.
+- `static` 모드로 삽입할 때 `model`이 없으면 `{ left: 0, top: 0, width: 1, height: 1 }` 기본값을 사용한다.
+- `image` 삽입 시 placeholder 이미지는 `100×100px`, `72dpi`, 빈 `url`로 생성된다. 실제 이미지를 표시하려면 삽입 후 `url`을 변경해야 한다.
+- 삽입 모드 중에는 레이아웃 선택과 드래그 이동, 리사이즈가 모두 비활성화된다.
+- `boxData.children` 설정은 `appendChild`보다 먼저 이루어져야 `connectedCallback` 시점에 올바른 초기 상태를 갖는다.
+- 삽입 완료 후 생성된 요소는 자동으로 `editableLayout = true`가 설정되고 `selectLayout`으로 선택된다. `insert` 이벤트 핸들러에서 별도로 선택 처리를 할 필요가 없다.

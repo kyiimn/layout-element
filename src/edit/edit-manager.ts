@@ -2,7 +2,9 @@ import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import type { EditController, CurrentStyle } from "./edit-controller";
+import { InsertController } from "./insert-controller";
 import type { SelectionRange } from "@/types/edit";
+import type { InsertMode, InsertEventDetail } from "@/types/edit";
 
 /** 레이아웃 요소 (document 또는 box) */
 export type LayoutElement = LayoutDocumentElement | LayoutBoxElement;
@@ -19,7 +21,9 @@ export type EditManagerEventType =
   | 'cursorMove'
   | 'layoutSelectionChange'
   | 'layoutMove'
-  | 'layoutResize';
+  | 'layoutResize'
+  | 'insert'
+  | 'insertCancel';
 
 /**
  * 글로벌 편집 관리 이벤트.
@@ -107,6 +111,8 @@ export class EditManager {
   private _selectedLayouts: LayoutElement[] = [];
   private _isLayoutDragging = false;
   private _isLayoutResizing = false;
+  private _insertController: InsertController | null = null;
+  private _insertMode: InsertMode | null = null;
 
   private constructor() {}
 
@@ -494,6 +500,114 @@ export class EditManager {
   private _dragTargets: LayoutBoxElement[] = [];
   /** 각 드래그 대상 요소의 시작 위치 */
   private _dragStartPositions: Map<LayoutBoxElement, { left: number; top: number }> = new Map();
+
+  /**
+   * 현재 삽입 모드를 반환한다. 활성화되지 않은 경우 `null`이다.
+   */
+  get insertMode(): InsertMode | null {
+    return this._insertMode;
+  }
+
+  /**
+   * 삽입 모드를 설정한다.
+   *
+   * `null`이 아닌 값을 설정하면 드래그-삽입 모드가 활성화되어
+   * 문서 표면에서 드래그로 새 요소를 그릴 수 있다.
+   * `null`을 설정하면 삽입 모드가 비활성화된다.
+   */
+  set insertMode(mode: InsertMode | null) {
+    if (this._insertMode === mode) return;
+
+    if (mode) {
+      // 활성화 시 레이아웃 선택을 해제한다.
+      this.clearLayoutSelection();
+
+      const docEl = document.querySelector('x-layout-document') as LayoutDocumentElement | null;
+      if (!docEl) {
+        throw new Error('EditManager.insertMode: 문서 요소(x-layout-document)를 찾을 수 없습니다.');
+      }
+
+      if (!this._insertController) {
+        this._insertController = new InsertController(docEl);
+      }
+      this._insertController.setMode(mode);
+      this._insertMode = mode;
+    } else {
+      if (this._insertController) {
+        this._insertController.setMode(null);
+      }
+      this._insertMode = null;
+    }
+  }
+
+  /**
+   * 삽입 모드를 활성화한다. `insertMode = mode`와 동일하다.
+   */
+  activateInsert(mode: InsertMode): void {
+    this.insertMode = mode;
+  }
+
+  /**
+   * 삽입 모드를 비활성화한다. `insertMode = null`과 동일하다.
+   */
+  deactivateInsert(): void {
+    this.insertMode = null;
+  }
+
+  /**
+   * 삽입 완료 이벤트를 발생시킨다.
+   * @internal
+   */
+  _dispatchInsert(detail: InsertEventDetail): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('insert');
+    if (!listeners || listeners.size === 0) return;
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            ...detail,
+            type: 'insert',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null as unknown as EditController,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
+
+  /**
+   * 삽입 취소 이벤트를 발생시킨다.
+   * @internal
+   */
+  _dispatchInsertCancel(): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('insertCancel');
+    if (!listeners || listeners.size === 0) return;
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'insertCancel',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null as unknown as EditController,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
 
   /**
    * 다중 선택 모드를 설정한다. `true`면 다음 `selectLayout` 호출이 토글 모드로 동작한다.

@@ -49,6 +49,19 @@
         color: #fff;
         border-color: #e8451a;
       }
+      #toolbar button.active-insert {
+        background: #1a7e3a;
+        color: #fff;
+        border-color: #1a7e3a;
+      }
+      #toolbar select {
+        padding: 8px 12px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        background: #fff;
+        font-size: 14px;
+        cursor: pointer;
+      }
       #info-panel {
         position: fixed;
         top: 20px;
@@ -116,9 +129,24 @@
   </head>
   <body>
     <div id="toolbar">
-      <button id="btn-read" class="active">📄 읽기 모드</button>
-      <button id="btn-edit">✏️ 텍스트 편집 모드</button>
-      <button id="btn-layout">📐 레이아웃 편집 모드</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:100%;">
+        <button id="btn-read" class="active">📄 읽기 모드</button>
+        <button id="btn-edit">✏️ 텍스트 편집 모드</button>
+        <button id="btn-layout">📐 레이아웃 편집 모드</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:100%;margin-top:8px;">
+        <select id="insert-type">
+          <option value="box">📦 Box</option>
+          <option value="text">📝 Text</option>
+          <option value="paragraph">¶ Paragraph</option>
+          <option value="image">🖼️ Image</option>
+        </select>
+        <select id="insert-position">
+          <option value="absolute">Absolute</option>
+          <option value="static">Static</option>
+        </select>
+        <button id="btn-insert">📥 삽입 모드</button>
+      </div>
     </div>
 
     <div id="hint"></div>
@@ -164,6 +192,9 @@
         const btnRead = document.getElementById("btn-read");
         const btnEdit = document.getElementById("btn-edit");
         const btnLayout = document.getElementById("btn-layout");
+        const btnInsert = document.getElementById("btn-insert");
+        const insertType = document.getElementById("insert-type");
+        const insertPosition = document.getElementById("insert-position");
         const hint = document.getElementById("hint");
 
         let currentMode = "read";
@@ -180,7 +211,16 @@
           });
         }
 
+        function clearInsertMode() {
+          em.insertMode = null;
+          btnInsert.classList.remove("active-insert");
+          if (currentMode === "insert") {
+            currentMode = "read";
+          }
+        }
+
         function setReadMode() {
+          clearInsertMode();
           currentMode = "read";
           clearAllEditMode();
           btnRead.classList.add("active");
@@ -190,6 +230,7 @@
         }
 
         function setTextEditMode() {
+          clearInsertMode();
           currentMode = "text";
           clearAllEditMode();
           const paragraphs = document.querySelectorAll("x-layout-paragraph");
@@ -203,6 +244,7 @@
         }
 
         function setLayoutEditMode() {
+          clearInsertMode();
           currentMode = "layout";
           clearAllEditMode();
           doc.editableLayout = true;
@@ -215,9 +257,47 @@
           hint.textContent = "레이아웃 요소(document/box)를 클릭하여 선택하세요. Ctrl+클릭으로 다중 선택.";
         }
 
+        function toggleInsertMode() {
+          const isInsert = currentMode === "insert";
+          if (isInsert) {
+            setReadMode();
+          } else {
+            clearAllEditMode();
+            currentMode = "insert";
+            btnRead.classList.remove("active");
+            btnEdit.classList.remove("active");
+            btnLayout.classList.remove("active-layout");
+            btnInsert.classList.add("active-insert");
+            em.insertMode = {
+              type: insertType.value,
+              position: insertPosition.value,
+            };
+            hint.textContent = "삽입 모드: 마우스 드래그로 요소를 그려서 삽입하세요. ESC로 취소.";
+          }
+        }
+
         btnRead.addEventListener("click", setReadMode);
         btnEdit.addEventListener("click", setTextEditMode);
         btnLayout.addEventListener("click", setLayoutEditMode);
+        btnInsert.addEventListener("click", toggleInsertMode);
+
+        insertType.addEventListener("change", () => {
+          if (currentMode === "insert") {
+            em.insertMode = {
+              type: insertType.value,
+              position: insertPosition.value,
+            };
+          }
+        });
+
+        insertPosition.addEventListener("change", () => {
+          if (currentMode === "insert") {
+            em.insertMode = {
+              type: insertType.value,
+              position: insertPosition.value,
+            };
+          }
+        });
 
         // EditManager 이벤트 수신
         const { EditManager } = await import("/src/edit/edit-manager");
@@ -277,6 +357,35 @@
         // 포커스 변경 시에도 패널 업데이트
         em.addEventListener('focusChange', () => updateInfoPanel());
         em.addEventListener('cursorMove', () => updateInfoPanel());
+
+        // 삽입 이벤트
+        em.addEventListener('insert', (event) => {
+          console.log('[EditManager] insert', {
+            type: event.type,
+            position: event.position,
+            element: event.element,
+            container: event.container,
+            left: event.left,
+            top: event.top,
+            width: event.width,
+            height: event.height,
+            zIndex: event.zIndex,
+          });
+          // 삽입 모드 해제 후 레이아웃 편집 모드로 전환 (새 요소 선택 상태 유지)
+          clearInsertMode();
+          setLayoutEditMode();
+          // setLayoutEditMode가 clearAllEditMode를 호출하여 선택이 해제되므로 재선택
+          if (event.element) {
+            em.selectLayout(event.element);
+          }
+          updateInfoPanel();
+        });
+
+        em.addEventListener('insertCancel', (event) => {
+          console.log('[EditManager] insertCancel');
+          clearInsertMode();
+          setReadMode();
+        });
 
         // 정보 패널 업데이트
         const elFocusedParagraph = document.getElementById("focused-paragraph");

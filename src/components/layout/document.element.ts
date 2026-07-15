@@ -371,6 +371,7 @@ export class LayoutDocumentElement extends HTMLElement {
 
   private _onLayoutClick = (event: MouseEvent): void => {
     event.stopPropagation();
+    if (EditManager.getInstance().insertMode) return;
     const path = event.composedPath();
     for (const el of path) {
       if (el === this) break;
