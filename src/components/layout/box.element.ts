@@ -54,6 +54,20 @@ export class LayoutBoxElement extends HTMLElement {
   private _dragLastClientX = 0;
   private _dragLastClientY = 0;
 
+  private _isResizing = false;
+  private _resizeHandle: 'top' | 'bottom' | 'left' | 'right' | null = null;
+  private _resizeStartMouseX = 0;
+  private _resizeStartMouseY = 0;
+  private _resizeStartLeft = 0;
+  private _resizeStartTop = 0;
+  private _resizeStartWidth = 0;
+  private _resizeStartHeight = 0;
+  private _resizeMoved = false;
+  private _resizeRafId: number | null = null;
+  private _resizeLastClientX = 0;
+  private _resizeLastClientY = 0;
+  private _resizeHandles: HTMLDivElement[] = [];
+
   constructor() {
     super();
     this._shadowRoot = this.attachShadow({ mode: "open" });
@@ -103,9 +117,24 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule(":host([data-selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 1);
       styleEl.sheet.insertRule(":host([data-hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 2);
       styleEl.sheet.insertRule(`@media print { [data-border] { display: none; } }`, 3);
+      styleEl.sheet.insertRule('.resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: 99999999; pointer-events: auto; display: none; }', 4);
+      styleEl.sheet.insertRule(':host([data-selected]) .resize-handle { display: block; }', 5);
+      styleEl.sheet.insertRule('.resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 6);
+      styleEl.sheet.insertRule('.resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 7);
+      styleEl.sheet.insertRule('.resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 8);
+      styleEl.sheet.insertRule('.resize-handle[data-handle="right"] { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 9);
       this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));
+
+      for (const dir of ['top', 'bottom', 'left', 'right'] as const) {
+        const handle = document.createElement('div');
+        handle.classList.add('resize-handle');
+        handle.setAttribute('data-handle', dir);
+        this._shadowRoot.appendChild(handle);
+        handle.addEventListener('mousedown', this._onResizeMouseDown);
+        this._resizeHandles.push(handle);
+      }
     }
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
       this._styleRule.style,
@@ -330,12 +359,14 @@ export class LayoutBoxElement extends HTMLElement {
     if (this._width === value) return;
     this._width = value;
     this.layout();
+    this._rerenderAffectedParagraphs();
   }
 
   set height(value: number) {
     if (this._height === value) return;
     this._height = value;
     this.layout();
+    this._rerenderAffectedParagraphs();
   }
 
   set position(value: BoxPosition) {
@@ -616,6 +647,10 @@ export class LayoutBoxElement extends HTMLElement {
       this.removeAttribute('data-selected');
       this.removeAttribute('data-hovered');
       this.style.cursor = '';
+      for (const handle of this._resizeHandles) {
+        handle.removeEventListener('mousedown', this._onResizeMouseDown);
+      }
+      this._resizeHandles = [];
       EditManager.getInstance()._unregisterLayout(this);
     }
   }
@@ -881,6 +916,221 @@ export class LayoutBoxElement extends HTMLElement {
     let newTop = Math.max(0, Math.min(maxTop, Math.round((newTopMm - columnCoords[newLeft].y1) / lineHeight)));
 
     return { left: newLeft, top: newTop };
+  }
+
+  private _onResizeMouseDown = (event: MouseEvent): void => {
+    if (event.button !== 0) return;
+    if (!this.hasAttribute('data-selected')) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const handle = (event.target as HTMLElement).getAttribute('data-handle') as 'top' | 'bottom' | 'left' | 'right';
+    if (!handle) return;
+
+    this._isResizing = true;
+    this._resizeHandle = handle;
+    this._resizeMoved = false;
+    this._resizeStartMouseX = event.clientX;
+    this._resizeStartMouseY = event.clientY;
+    this._resizeStartLeft = this.left;
+    this._resizeStartTop = this.top;
+    this._resizeStartWidth = this.width;
+    this._resizeStartHeight = this.height;
+    this._resizeLastClientX = event.clientX;
+    this._resizeLastClientY = event.clientY;
+
+    document.addEventListener('mousemove', this._onResizeMouseMove);
+    document.addEventListener('mouseup', this._onResizeMouseUp);
+    document.addEventListener('keydown', this._onResizeKeyDown);
+  }
+
+  private _onResizeMouseMove = (event: MouseEvent): void => {
+    if (!this._isResizing) return;
+    this._resizeLastClientX = event.clientX;
+    this._resizeLastClientY = event.clientY;
+    const deltaX = event.clientX - this._resizeStartMouseX;
+    const deltaY = event.clientY - this._resizeStartMouseY;
+    if (!this._resizeMoved && (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3)) {
+      this._resizeMoved = true;
+    }
+    if (!this._resizeMoved) return;
+    if (this._resizeRafId !== null) return;
+    this._resizeRafId = requestAnimationFrame(() => {
+      this._resizeRafId = null;
+      const dx = this._resizeLastClientX - this._resizeStartMouseX;
+      const dy = this._resizeLastClientY - this._resizeStartMouseY;
+      const { left, top, width, height } = this._computeNewSize(dx, dy);
+      if (left !== this.left) this.left = left;
+      if (top !== this.top) this.top = top;
+      if (width !== this.width) this.width = width;
+      if (height !== this.height) this.height = height;
+    });
+  }
+
+  private _onResizeMouseUp = (event: MouseEvent): void => {
+    if (!this._isResizing) return;
+    document.removeEventListener('mousemove', this._onResizeMouseMove);
+    document.removeEventListener('mouseup', this._onResizeMouseUp);
+    document.removeEventListener('keydown', this._onResizeKeyDown);
+    if (this._resizeRafId !== null) {
+      cancelAnimationFrame(this._resizeRafId);
+      this._resizeRafId = null;
+    }
+    this._isResizing = false;
+
+    if (!this._resizeMoved) {
+      this._resizeHandle = null;
+      return;
+    }
+
+    const deltaX = event.clientX - this._resizeStartMouseX;
+    const deltaY = event.clientY - this._resizeStartMouseY;
+    const { left, top, width, height } = this._computeNewSize(deltaX, deltaY);
+    this._resizeHandle = null;
+    if (left !== this.left) this.left = left;
+    if (top !== this.top) this.top = top;
+    if (width !== this.width) this.width = width;
+    if (height !== this.height) this.height = height;
+
+    EditManager.getInstance()._dispatchLayoutResize(
+      this,
+      this._resizeStartLeft,
+      this._resizeStartTop,
+      this._resizeStartWidth,
+      this._resizeStartHeight,
+      left,
+      top,
+      width,
+      height,
+      false,
+    );
+  }
+
+  private _onResizeKeyDown = (event: KeyboardEvent): void => {
+    if (!this._isResizing || event.key !== 'Escape') return;
+    event.preventDefault();
+    if (this._resizeRafId !== null) {
+      cancelAnimationFrame(this._resizeRafId);
+      this._resizeRafId = null;
+    }
+    document.removeEventListener('mousemove', this._onResizeMouseMove);
+    document.removeEventListener('mouseup', this._onResizeMouseUp);
+    document.removeEventListener('keydown', this._onResizeKeyDown);
+    this._isResizing = false;
+    this._resizeHandle = null;
+
+    if (this.left !== this._resizeStartLeft) this.left = this._resizeStartLeft;
+    if (this.top !== this._resizeStartTop) this.top = this._resizeStartTop;
+    if (this.width !== this._resizeStartWidth) this.width = this._resizeStartWidth;
+    if (this.height !== this._resizeStartHeight) this.height = this._resizeStartHeight;
+
+    EditManager.getInstance()._dispatchLayoutResize(
+      this,
+      this._resizeStartLeft,
+      this._resizeStartTop,
+      this._resizeStartWidth,
+      this._resizeStartHeight,
+      this._resizeStartLeft,
+      this._resizeStartTop,
+      this._resizeStartWidth,
+      this._resizeStartHeight,
+      true,
+    );
+  }
+
+  /**
+   * 픽셀 델타를 받아 리사이즈 방향에 따라 새 크기와 위치를 계산한다.
+   *
+   * @param deltaPxX - 마우스 가로 이동량 (픽셀)
+   * @param deltaPxY - 마우스 세로 이동량 (픽셀)
+   * @returns 스냅/클램핑이 적용된 새 위치와 크기
+   */
+  private _computeNewSize(
+    deltaPxX: number,
+    deltaPxY: number,
+  ): { left: number; top: number; width: number; height: number } {
+    const handle = this._resizeHandle;
+    if (!handle) return { left: this._resizeStartLeft, top: this._resizeStartTop, width: this._resizeStartWidth, height: this._resizeStartHeight };
+
+    const sLeft = this._resizeStartLeft;
+    const sTop = this._resizeStartTop;
+    const sWidth = this._resizeStartWidth;
+    const sHeight = this._resizeStartHeight;
+
+    if (this.position === 'absolute') {
+      const deltaMmX = deltaPxX / GridCalculator.ppm;
+      const deltaMmY = deltaPxY / GridCalculator.ppm;
+      const padL = this.inheritStyle?.paddingLeft || 0;
+      const padR = this.inheritStyle?.paddingRight || 0;
+      const padT = this.inheritStyle?.paddingTop || 0;
+      const padB = this.inheritStyle?.paddingBottom || 0;
+      const parentW = this.inheritStyle?.parentWidth || 0;
+      const parentH = this.inheritStyle?.parentHeight || 0;
+
+      switch (handle) {
+        case 'right': {
+          const maxWidth = parentW - padL - padR - sLeft;
+          const width = Math.max(1, Math.min(maxWidth, sWidth + deltaMmX));
+          return { left: sLeft, top: sTop, width, height: sHeight };
+        }
+        case 'left': {
+          const maxWidth = sLeft + sWidth;
+          const width = Math.max(1, Math.min(maxWidth, sWidth - deltaMmX));
+          const left = Math.max(0, Math.min(sLeft + sWidth - 1, sLeft + deltaMmX));
+          return { left, top: sTop, width, height: sHeight };
+        }
+        case 'bottom': {
+          const maxHeight = parentH - padT - padB - sTop;
+          const height = Math.max(1, Math.min(maxHeight, sHeight + deltaMmY));
+          return { left: sLeft, top: sTop, width: sWidth, height };
+        }
+        case 'top': {
+          const maxHeight = sTop + sHeight;
+          const height = Math.max(1, Math.min(maxHeight, sHeight - deltaMmY));
+          const top = Math.max(0, Math.min(sTop + sHeight - 1, sTop + deltaMmY));
+          return { left: sLeft, top, width: sWidth, height };
+        }
+      }
+    }
+
+    const parentModel = this.parentModel;
+    if (!parentModel) return { left: sLeft, top: sTop, width: sWidth, height: sHeight };
+
+    const { columnCount, lineHeight } = parentModel;
+    const editableTextHeight = parentModel.editableTextHeight;
+    const avgColWidth = parentModel.editableWidth / parentModel.columnCount;
+    const deltaMmX = deltaPxX / GridCalculator.ppm;
+    const deltaMmY = deltaPxY / GridCalculator.ppm;
+    const deltaCols = Math.round(deltaMmX / avgColWidth);
+    const deltaLines = Math.round(deltaMmY / lineHeight);
+    const maxLines = Math.floor(editableTextHeight / lineHeight);
+
+    switch (handle) {
+      case 'right': {
+        const maxWidth = columnCount - sLeft;
+        const width = Math.max(1, Math.min(maxWidth, sWidth + deltaCols));
+        return { left: sLeft, top: sTop, width, height: sHeight };
+      }
+      case 'left': {
+        const maxWidth = sLeft + sWidth;
+        const width = Math.max(1, Math.min(maxWidth, sWidth - deltaCols));
+        const left = Math.max(0, Math.min(sLeft + sWidth - 1, sLeft + deltaCols));
+        return { left, top: sTop, width, height: sHeight };
+      }
+      case 'bottom': {
+        const maxHeightForBox = maxLines - sTop;
+        const height = Math.max(1, Math.min(maxHeightForBox, sHeight + deltaLines));
+        return { left: sLeft, top: sTop, width: sWidth, height };
+      }
+      case 'top': {
+        const maxHeight = sTop + sHeight;
+        const height = Math.max(1, Math.min(maxHeight, sHeight - deltaLines));
+        const top = Math.max(0, Math.min(sTop + sHeight - 1, sTop + deltaLines));
+        return { left: sLeft, top, width: sWidth, height };
+      }
+    }
+
+    return { left: sLeft, top: sTop, width: sWidth, height: sHeight };
   }
 
   private _rerenderAffectedParagraphs(): void {

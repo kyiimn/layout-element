@@ -18,7 +18,8 @@ export type EditManagerEventType =
   | 'selectionEnd'
   | 'cursorMove'
   | 'layoutSelectionChange'
-  | 'layoutMove';
+  | 'layoutMove'
+  | 'layoutResize';
 
 /**
  * 글로벌 편집 관리 이벤트.
@@ -50,6 +51,14 @@ export interface EditManagerEvent {
   top?: number;
   /** 이동이 취소되었는지 여부 (ESC 취소 시 true) (layoutMove 이벤트에서만) */
   canceled?: boolean;
+  /** 리사이즈 전 width 값 (layoutResize 이벤트에서만) */
+  previousWidth?: number;
+  /** 리사이즈 전 height 값 (layoutResize 이벤트에서만) */
+  previousHeight?: number;
+  /** 리사이즈 후 width 값 (layoutResize 이벤트에서만) */
+  width?: number;
+  /** 리사이즈 후 height 값 (layoutResize 이벤트에서만) */
+  height?: number;
 }
 
 /**
@@ -629,6 +638,54 @@ export class EditManager {
             previousTop,
             left,
             top,
+            canceled,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
+
+  /**
+   * 레이아웃 요소의 크기 조정 완료/취소 이벤트를 발생시킨다.
+   * @internal
+   */
+  _dispatchLayoutResize(
+    element: LayoutElement,
+    previousLeft: number,
+    previousTop: number,
+    previousWidth: number,
+    previousHeight: number,
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+    canceled: boolean,
+  ): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('layoutResize');
+    if (!listeners || listeners.size === 0) return;
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'layoutResize',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null as unknown as EditController,
+            layoutElement: element,
+            previousLeft,
+            previousTop,
+            previousWidth,
+            previousHeight,
+            left,
+            top,
+            width,
+            height,
             canceled,
           });
         } catch (e) {

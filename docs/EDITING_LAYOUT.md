@@ -18,9 +18,10 @@
 2. **선택 처리**: 클릭 시 `EditManager.selectLayout()`을 호출하여 요소를 선택한다.
 3. **시각적 피드백**: 선택된 요소에 `data-selected` 속성이 설정되고, Shadow DOM의 `:host([data-selected])` 규칙에 의해 빨간색 `box-shadow`가 표시된다.
 4. **드래그 이동**: 선택된 요소를 마우스로 드래그하여 이동할 수 있다.
-5. **텍스트 리플로우**: 드래그 중 주변 단락이 실시간으로 텍스트를 다시 배치하여 이미지/박스를 회피한다.
-6. **ESC 취소**: 드래그 중 ESC 키를 누르면 이동이 취소되고 드래그 시작 전 위치로 복원된다.
-7. **이벤트 전파 차단**: 클릭 이벤트가 `stopPropagation()`되어 부모 요소까지 선택이 전파되지 않는다.
+5. **크기 조정**: 선택된 요소의 가장자리 중앙에 4개의 리사이즈 핸들이 표시되며, 핸들을 드래그하여 크기를 조정할 수 있다.
+6. **텍스트 리플로우**: 드래그 중 주변 단락이 실시간으로 텍스트를 다시 배치하여 이미지/박스를 회피한다.
+7. **ESC 취소**: 드래그/리사이즈 중 ESC 키를 누르면 이동/크기 변경이 취소되고 시작 전 상태로 복원된다.
+8. **이벤트 전파 차단**: 클릭 이벤트가 `stopPropagation()`되어 부모 요소까지 선택이 전파되지 않는다.
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -61,8 +62,8 @@ element.editableLayout = false;
 
 | 동작 | `<x-layout-document>` | `<x-layout-box>` |
 |------|----------------------|-------------------|
-| `true` 설정 | `click` 리스너 등록 | `click` + `mousedown` 리스너 등록, `cursor: grab` |
-| `false` 설정 | `click` 리스너 해제, `data-selected` 제거 | `click` + `mousedown` 리스너 해제, `data-selected` 제거, `cursor` 초기화 |
+| `true` 설정 | `click` 리스너 등록 | `click` + `mousedown` 리스너 등록, `cursor: grab`, 리사이즈 핸들 DOM 생성 |
+| `false` 설정 | `click` 리스너 해제, `data-selected` 제거 | `click` + `mousedown` 리스너 해제, `data-selected` 제거, `cursor` 초기화, 리사이즈 핸들 이벤트 리스너 해제·DOM 제거 |
 | `disconnectedCallback` | `EditManager._unregisterLayout()` 호출 | `EditManager._unregisterLayout()` 호출 |
 
 > **참고**: `<x-layout-document>`는 선택만 가능하고 드래그 이동은 지원하지 않는다. 드래그는 `<x-layout-box>`에서만 동작한다.
@@ -122,9 +123,34 @@ element.editableLayout = false;
 | 상태 | 커서 | 시각적 피드백 |
 |------|------|-------------|
 | `editableLayout = true` (선택 안 됨, hover) | `grab` | 파란색 테두리 (`data-hovered`) |
-| `editableLayout = true` (선택됨, 대기) | `grab` | 빨간색 테두리 (`data-selected`) |
+| `editableLayout = true` (선택됨, 대기) | `grab` | 빨간색 테두리 (`data-selected`), 리사이즈 핸들 4개 표시 |
 | `editableLayout = true` (드래그 중) | `grabbing` | 빨간색 테두리 (`data-selected`) |
+| `editableLayout = true` (리사이즈 중) | 핸들 방향별 (`ns-resize`/`ew-resize`) | 빨간색 테두리 (`data-selected`) |
 | `editableLayout = false` | (기본값) | 없음 |
+
+#### 리사이즈 핸들 (Resize Handles)
+
+선택된 `<x-layout-box>`의 가장자리 중앙에 4개의 리사이즈 핸들이 표시된다.
+
+```
+                  ┌─────── [top] ───────┐
+                  │         •           │
+              [left]•                 •[right]
+                  │         •         │
+                  └─────── [bottom] ───┘
+```
+
+| 핸들 | 위치 | 커서 | 방향 |
+|------|------|------|------|
+| `top` | 상단 가장자리 중앙 | `ns-resize` | 상하 리사이즈 |
+| `bottom` | 하단 가장자리 중앙 | `ns-resize` | 상하 리사이즈 |
+| `left` | 좌측 가장자리 중앙 | `ew-resize` | 좌우 리사이즈 |
+| `right` | 우측 가장자리 중앙 | `ew-resize` | 좌우 리사이즈 |
+
+핸들은 CSS로 표시/숨김을 제어한다:
+- `:host([data-selected]) .resize-handle { display: block; }` — 선택 시 표시
+- `:host(:not([data-selected])) .resize-handle { display: none; }` — 미선택 시 숨김
+- 핸들의 `mousedown` 이벤트는 `stopPropagation()`으로 버블링을 차단하여, 드래그-이동이 함께 트리거되지 않도록 한다.
 
 ### 2.2 EditManager API
 
@@ -219,6 +245,47 @@ manager.addEventListener('layoutMove', (event) => {
 - **ESC (드래그 취소)**: `canceled = true`. `left`/`top`은 `previousLeft`/`previousTop`와 동일 (시작 위치로 복원됨).
 
 **주의**: 단순 클릭(드래그 이동 없음)에서는 `layoutMove` 이벤트가 발생하지 않는다. 이동 임계값(3px)을 초과한 경우에만 발생한다.
+
+#### 이벤트: `layoutResize`
+
+리사이즈가 완료되거나 ESC로 취소될 때 발생한다.
+
+```typescript
+manager.addEventListener('layoutResize', (event) => {
+  console.log(event.layoutElement);  // 리사이즈된 LayoutBoxElement
+  console.log(event.previousLeft);   // 리사이즈 전 left 값
+  console.log(event.previousTop);    // 리사이즈 전 top 값
+  console.log(event.previousWidth);  // 리사이즈 전 width 값
+  console.log(event.previousHeight); // 리사이즈 전 height 값
+  console.log(event.left);           // 리사이즈 후 left 값
+  console.log(event.top);            // 리사이즈 후 top 값
+  console.log(event.width);           // 리사이즈 후 width 값
+  console.log(event.height);          // 리사이즈 후 height 값
+  console.log(event.canceled);       // ESC 취소 여부
+});
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `type` | `'layoutResize'` | 이벤트 타입 |
+| `layoutElement` | `LayoutElement` | 리사이즈된 레이아웃 요소 |
+| `previousLeft` | `number` | 리사이즈 전 `left` 값 |
+| `previousTop` | `number` | 리사이즈 전 `top` 값 |
+| `previousWidth` | `number` | 리사이즈 전 `width` 값 |
+| `previousHeight` | `number` | 리사이즈 전 `height` 값 |
+| `left` | `number` | 리사이즈 후 `left` 값. ESC 취소 시 `previousLeft`와 동일 |
+| `top` | `number` | 리사이즈 후 `top` 값. ESC 취소 시 `previousTop`와 동일 |
+| `width` | `number` | 리사이즈 후 `width` 값. ESC 취소 시 `previousWidth`와 동일 |
+| `height` | `number` | 리사이즈 후 `height` 값. ESC 취소 시 `previousHeight`와 동일 |
+| `canceled` | `boolean` | ESC 키로 리사이즈가 취소되었으면 `true`, 정상 완료되었으면 `false` |
+| `paragraph` | `null` | 레이아웃 이벤트에서는 항상 `null` |
+| `controller` | `null` | 레이아웃 이벤트에서는 항상 `null` |
+
+**발생 시점**:
+- **mouseup (리사이즈 완료)**: `canceled = false`. `left`/`top`/`width`/`height`은 스냅/클램핑이 적용된 최종 값.
+- **ESC (리사이즈 취소)**: `canceled = true`. `left`/`top`/`width`/`height`은 `previousLeft`/`previousTop`/`previousWidth`/`previousHeight`와 동일 (시작 상태로 복원됨).
+
+**주의**: 단순 클릭(리사이즈 이동 없음)에서는 `layoutResize` 이벤트가 발생하지 않는다. 이동 임계값(3px)을 초과한 경우에만 발생한다.
 
 ### 2.3 LayoutElement 타입
 
@@ -886,6 +953,8 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 | Ctrl+클릭 / Cmd+클릭 | 다중 선택 (토글) | ✅ | `layoutSelectionChange` |
 | 마우스 드래그 | 선택된 box 이동 | ✅ | `layoutMove` (canceled=false) |
 | ESC (드래그 중) | 드래그 취소, 시작 전 위치로 복원 | ✅ | `layoutMove` (canceled=true) |
+| 리사이즈 핸들 드래그 | 선택된 box 크기 조정 (4방향) | ✅ | `layoutResize` (canceled=false) |
+| ESC (리사이즈 중) | 리사이즈 취소, 시작 전 크기로 복원 | ✅ | `layoutResize` (canceled=true) |
 | Escape | 전체 선택 해제 | ❌ | — |
 | Delete | 선택된 요소 삭제 | ❌ | — |
 | 방향키 | 선택 이동 | ❌ | — |
@@ -895,6 +964,9 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 ## 9. 제한 사항
 
 - **드래그 대상**: `<x-layout-box>`만 드래그 이동할 수 있다. `<x-layout-document>`는 선택만 가능하다.
+- **리사이즈 대상**: `<x-layout-box>`만 리사이즈할 수 있다. `<x-layout-document>`는 리사이즈할 수 없다.
+- **리사이즈 방향**: 상/하/좌/우 4방향만 지원한다. 대각선 리사이즈는 지원하지 않는다.
+- **리사이즈 단일 요소**: 리사이즈는 항상 단일 요소에만 적용된다. 다중 선택 상태에서도 리사이즈 핸들을 드래그하면 해당 요소만 크기가 변경된다.
 - **선택 대상**: `<x-layout-document>`와 `<x-layout-box>`만 선택할 수 있다. `<x-layout-paragraph>`, `<x-layout-image>`, `<x-layout-column>`은 레이아웃 선택 대상이 아니다.
 - **중첩 요소 무시**: 다중 선택 드래그 시 선택된 요소들 중 ancestor-descendant 관계에 있으면 가장 상위(ancestor) 요소만 이동하고 하위(descendant) 요소는 무시된다. 하위 요소는 상위 요소와 함께 자연스럽게 이동하므로 별도 이동 처리가 불필요하다. `EditManager.getTopLevelDragTargets()`가 이 필터링을 수행한다.
 - **텍스트 편집과 독립**: 레이아웃 선택은 텍스트 편집 포커스와 무관하게 동작한다. 한 단락이 텍스트 편집 중이더라도 레이아웃 요소를 선택할 수 있다.
@@ -913,9 +985,9 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 
 | 파일 | 역할 |
 |------|------|
-| `src/components/layout/box.element.ts` | 드래그 로직, 위치 setter, `_computeNewPosition`, `_rerenderAffectedParagraphs`, `_collectParagraphs` |
+| `src/components/layout/box.element.ts` | 드래그 로직, 리사이즈 로직, 위치 setter, `_computeNewPosition`, `_computeNewSize`, `_rerenderAffectedParagraphs`, `_collectParagraphs` |
 | `src/components/layout/document.element.ts` | `editableLayout` 속성, `_onLayoutClick`, `:host([data-selected])` CSS 규칙 |
-| `src/edit/edit-manager.ts` | 레이아웃 선택 상태 관리, `selectLayout`, `clearLayoutSelection`, `_startLayoutDrag`, `_endLayoutDrag`, `getTopLevelDragTargets`, `_unregisterLayout`, `layoutSelectionChange` 이벤트 |
+| `src/edit/edit-manager.ts` | 레이아웃 선택 상태 관리, `selectLayout`, `clearLayoutSelection`, `_startLayoutDrag`, `_endLayoutDrag`, `getTopLevelDragTargets`, `_unregisterLayout`, `layoutSelectionChange` 이벤트, `_dispatchLayoutResize` |
 | `src/react/hooks/use-edit-manager.ts` | React 훅: `selectedLayouts`, `selectLayout`, `clearLayoutSelection`, `onLayoutSelectionChange` |
 | `src/core/text-layout-engine.ts` | `_layoutTextIntoColumns`, 오버랩 회피, COVER 라인, PART 분할 |
 | `src/components/layout/paragraph.element.ts` | `render()`, `_structureDirty`, TextLayoutEngine 생성 |
@@ -936,6 +1008,21 @@ private _dragStartTop: number = 0;        // 드래그 시작 시 top (mm 또는
 private _dragLastClientX: number = 0;
 private _dragLastClientY: number = 0;
 private _dragRafId: number | null = null; // requestAnimationFrame ID
+
+// box.element.ts (리사이즈 상태)
+private _isResizing: boolean = false;
+private _resizeHandle: 'top' | 'bottom' | 'left' | 'right' | null = null;
+private _resizeStartMouseX: number = 0;
+private _resizeStartMouseY: number = 0;
+private _resizeStartLeft: number = 0;
+private _resizeStartTop: number = 0;
+private _resizeStartWidth: number = 0;
+private _resizeStartHeight: number = 0;
+private _resizeMoved: boolean = false;
+private _resizeRafId: number | null = null;
+private _resizeLastClientX: number = 0;
+private _resizeLastClientY: number = 0;
+private _resizeHandles: HTMLDivElement[] = [];
 
 // edit-manager.ts (드래그 상태 관리)
 private _dragTargets: LayoutBoxElement[] = [];  // 드래그 중인 이동 대상 요소들 (중첩 하위 요소 제외)
@@ -997,3 +1084,183 @@ mouseup
 - **`layoutMove` 이벤트**: 드래그 완료(mouseup) 또는 취소(ESC) 시 `EditManager._dispatchLayoutMove()`를 통해 발생한다. 단순 클릭(이동 임계값 3px 미만)에서는 발생하지 않는다. `canceled` 필드로 완료와 취소를 구분할 수 있다.
 - **호버 표시 (`data-hovered`)**: `<x-layout-box>`에만 적용되며, `<x-layout-document>`는 호버 표시를 지원하지 않는다. `mouseenter` 시 조상 요소의 `data-hovered`를 모두 제거하여 가장 안쪽 요소만 호버 표시가 보이도록 한다. `mouseleave` 시 `elementFromPoint`로 마우스 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다. 이 동작은 중첩된 박스에서 자식→부모로 마우스가 돌아갈 때 부모의 호버가 복원되도록 보장한다.
 - **호버와 선택의 우선순위**: `data-selected`가 있는 요소는 `data-hovered`를 표시하지 않는다. `_onLayoutMouseEnter`에서 `hasAttribute('data-selected')`를 먼저 검사하여, 이미 선택된 요소 위에 마우스가 있을 때 파란색 호버 테두리가 빨간색 선택 테두리와 겹치지 않도록 한다. 조상의 `data-hovered` 제거는 `data-selected` 체크 전에 수행되어, 선택된 요소 위에서 마우스가 움직일 때 조상 요소의 호버 표시도 제거된다.
+
+---
+
+## 11. 크기 조정 (Resize)
+
+### 11.1 개요
+
+선택된 `<x-layout-box>` 요소는 4개의 리사이즈 핸들을 통해 크기를 조정할 수 있다. 핸들은 상/하/좌/우 가장자리의 중앙에 위치하며, 대각선 리사이즈는 지원하지 않는다.
+
+### 11.2 리사이즈 핸들
+
+선택된 box(`data-selected` 속성 있음)에서만 핸들이 표시된다. 핸들은 Shadow DOM 내부의 `<div>` 요소이며, CSS로 표시/숨김을 제어한다:
+
+- 기본: `.resize-handle { display: none; }`
+- 선택 시: `:host([data-selected]) .resize-handle { display: block; }`
+
+핸들의 시각적 속성:
+- 크기: 8px × 8px 원형
+- 배경: 흰색
+- 테두리: 1px solid #4a90d9
+- z-index: 99999999 (다른 요소 위에 표시)
+- pointer-events: auto (핸들 위에서만 마우스 이벤트 수신)
+
+### 11.3 리사이즈 상호작용
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     리사이즈 생명주기 (Resize Lifecycle)              │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ① mousedown on resize handle                                       │
+│     │                                                               │
+│     ├── button !== 0? → 무시                                        │
+│     ├── data-selected 없음? → 무시                                   │
+│     ├── event.preventDefault() + stopPropagation()                   │
+│     │   ← stopPropagation으로 _onLayoutMouseDown 전파 차단           │
+│     ├── _isResizing = true, _resizeHandle = handle direction        │
+│     ├── _resizeMoved = false                                        │
+│     ├── _resizeStartMouseX/Y = clientX/Y                            │
+│     ├── _resizeStartLeft/Top/Width/Height = 현재 값                   │
+│     └── document에 mousemove, mouseup, keydown 리스너 등록            │
+│                                                                     │
+│  ② mousemove (리사이즈 중)                                           │
+│     │                                                               │
+│     ├── _isResizing 아니면 무시                                       │
+│     ├── _resizeLastClientX/Y 업데이트                                 │
+│     ├── 이동 거리 ≤ 3px? → _resizeMoved 유지, return                │
+│     ├── _resizeMoved = true                                          │
+│     ├── rAF 이미 예약? → return (중복 방지)                           │
+│     └── requestAnimationFrame:                                       │
+│          ├── _resizeRafId = null                                     │
+│          ├── dx = lastClientX - startMouseX                           │
+│          ├── dy = lastClientY - startMouseY                           │
+│          ├── newSize = _computeNewSize(dx, dy)                      │
+│          └── if 변경됨: this.left/top/width/height 설정               │
+│                                                                     │
+│  ③ mouseup (리사이즈 완료)                                            │
+│     │                                                               │
+│     ├── document 리스너 제거 (mousemove, mouseup, keydown)            │
+│     ├── rAF 취소 (있으면)                                             │
+│     ├── _isResizing = false, _resizeHandle = null                    │
+│     ├── _resizeMoved === false? → return (클릭이었음)                 │
+│     ├── 최종 크기 계산 → this.left/top/width/height 설정              │
+│     └── EditManager._dispatchLayoutResize(                           │
+│              this, start, end, canceled=false)                       │
+│                                                                     │
+│  ③' ESC 키 (리사이즈 취소)                                           │
+│     │                                                               │
+│     ├── rAF 취소 (있으면)                                             │
+│     ├── document 리스너 제거 (mousemove, mouseup, keydown)            │
+│     ├── _isResizing = false, _resizeHandle = null                    │
+│     ├── this.left/top/width/height = 시작 값 복원                     │
+│     └── EditManager._dispatchLayoutResize(                           │
+│              this, start, start, canceled=true)                      │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 11.4 `_computeNewSize(deltaPxX, deltaPxY)`
+
+픽셀 델타를 받아 리사이즈 방향(`_resizeHandle`)과 `position` 모드에 따라 새 크기와 위치를 계산한다.
+
+#### 11.4.1 absolute 모드 (mm 좌표)
+
+```
+deltaPxX, deltaPxY → deltaMmX/Y = px / GridCalculator.ppm
+padL/R/T/B = inheritStyle padding values
+parentWidth/Height = inheritStyle parent dimensions
+
+right handle:
+  maxWidth = parentWidth - padL - padR - startLeft
+  width = clamp(startWidth + deltaMmX, 1, maxWidth)
+  left, top unchanged
+
+left handle:
+  maxWidth = startLeft + startWidth
+  width = clamp(startWidth - deltaMmX, 1, maxWidth)
+  left = clamp(startLeft + deltaMmX, 0, startLeft + startWidth - 1)
+  top unchanged
+
+bottom handle:
+  maxHeight = parentHeight - padT - padB - startTop
+  height = clamp(startHeight + deltaMmY, 1, maxHeight)
+  left, top unchanged
+
+top handle:
+  maxHeight = startTop + startHeight
+  height = clamp(startHeight - deltaMmY, 1, maxHeight)
+  top = clamp(startTop + deltaMmY, 0, startTop + startHeight - 1)
+  left unchanged
+```
+
+#### 11.4.2 static 모드 (컬럼/라인 그리드)
+
+```
+deltaPxX, deltaPxY → deltaMmX/Y = px / GridCalculator.ppm
+deltaCols = round(deltaMmX / avgColWidth)
+deltaLines = round(deltaMmY / lineHeight)
+avgColWidth = parentModel.editableWidth / parentModel.columnCount
+
+right handle:
+  maxWidth = columnCount - startLeft
+  width = clamp(startWidth + deltaCols, 1, maxWidth)
+  left, top unchanged
+
+left handle:
+  maxWidth = startLeft + startWidth
+  width = clamp(startWidth - deltaCols, 1, maxWidth)
+  left = clamp(startLeft + deltaCols, 0, startLeft + startWidth - 1)
+  top unchanged
+
+bottom handle:
+  maxLines = floor(editableTextHeight / lineHeight)
+  maxHeightForBox = maxLines - startTop
+  height = clamp(startHeight + deltaLines, 1, maxHeightForBox)
+  left, top unchanged
+
+top handle:
+  maxHeight = startTop + startHeight
+  height = clamp(startHeight - deltaLines, 1, maxHeight)
+  top = clamp(startTop + deltaLines, 0, startTop + startHeight - 1)
+  left unchanged
+```
+
+### 11.5 `layoutResize` 이벤트
+
+`EditManager`에서 발생하는 이벤트로, 리사이즈 완료 또는 취소 시 발생한다. 단일 요소에만 적용된다 (다중 선택 리사이즈 없음).
+
+### 11.6 리사이즈와 드래그-이동의 상호작용
+
+리사이즈 핸들의 `mousedown` 이벤트는 `stopPropagation()`으로 버블링을 차단한다. 이로 인해:
+- 핸들에서 `mousedown` → 리사이즈 시작 (`_onResizeMouseDown` 실행)
+- 핸들의 `stopPropagation()`으로 인해 `_onLayoutMouseDown`이 실행되지 않음
+- 결과적으로 리사이즈와 드래그-이동이 동시에 트리거되지 않는다
+
+### 11.7 `editableLayout` 비활성화 시 정리
+
+`editableLayout`을 `false`로 설정하면:
+1. 리사이즈 핸들의 `mousedown` 이벤트 리스너가 제거된다
+2. 핸들 DOM 요소가 shadow DOM에서 제거된다
+3. 기존 드래그 관련 리스너도 제거된다
+
+### 11.8 리사이즈 관련 private 필드
+
+```typescript
+// box.element.ts (리사이즈 상태)
+private _isResizing: boolean = false;
+private _resizeHandle: 'top' | 'bottom' | 'left' | 'right' | null = null;
+private _resizeStartMouseX: number = 0;
+private _resizeStartMouseY: number = 0;
+private _resizeStartLeft: number = 0;
+private _resizeStartTop: number = 0;
+private _resizeStartWidth: number = 0;
+private _resizeStartHeight: number = 0;
+private _resizeMoved: boolean = false;
+private _resizeRafId: number | null = null;
+private _resizeLastClientX: number = 0;
+private _resizeLastClientY: number = 0;
+private _resizeHandles: HTMLDivElement[] = [];   // 핸들 DOM 요소 참조
+```
