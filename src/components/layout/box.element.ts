@@ -46,6 +46,7 @@ export class LayoutBoxElement extends HTMLElement {
   private _groupMember?: string;
   private _priority?: number;
   private _editableLayout: boolean = false;
+  private _isPrint: boolean = window.matchMedia("print").matches;
 
   private _savedColumns: number | number[] = 1;
   private _savedGap: number | number[] = 0;
@@ -99,11 +100,19 @@ export class LayoutBoxElement extends HTMLElement {
   connectedCallback() {
     if (!this.id) this.id = genUUID();
     this._startChildObserver();
+    this.addEventListener('click', this._onLayoutClick);
+    this.addEventListener('mousedown', this._onLayoutMouseDown);
+    this.addEventListener('mouseenter', this._onLayoutMouseEnter);
+    this.addEventListener('mouseleave', this._onLayoutMouseLeave);
     this.layout();
   }
 
   disconnectedCallback() {
     this._stopChildObserver();
+    this.removeEventListener('click', this._onLayoutClick);
+    this.removeEventListener('mousedown', this._onLayoutMouseDown);
+    this.removeEventListener('mouseenter', this._onLayoutMouseEnter);
+    this.removeEventListener('mouseleave', this._onLayoutMouseLeave);
     EditManager.getInstance()._unregisterLayout(this);
   }
 
@@ -178,16 +187,9 @@ export class LayoutBoxElement extends HTMLElement {
       this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));
-
-      for (const dir of ['top', 'bottom', 'left', 'right'] as const) {
-        const handle = document.createElement('div');
-        handle.classList.add('resize-handle');
-        handle.setAttribute('data-handle', dir);
-        this._shadowRoot.appendChild(handle);
-        handle.addEventListener('mousedown', this._onResizeMouseDown);
-        this._resizeHandles.push(handle);
-      }
     }
+
+    this._ensureResizeHandles();
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
       this._styleRule.style,
       {
@@ -203,6 +205,25 @@ export class LayoutBoxElement extends HTMLElement {
     );
   }
 
+  private _ensureResizeHandles(): void {
+    if (this._resizeHandles.length === 4) return;
+
+    for (const handle of this._resizeHandles) {
+      handle.removeEventListener('mousedown', this._onResizeMouseDown);
+    }
+    this._resizeHandles = [];
+    this._shadowRoot.querySelectorAll('.resize-handle').forEach((h) => h.remove());
+
+    for (const dir of ['top', 'bottom', 'left', 'right'] as const) {
+      const handle = document.createElement('div');
+      handle.classList.add('resize-handle');
+      handle.setAttribute('data-handle', dir);
+      this._shadowRoot.appendChild(handle);
+      handle.addEventListener('mousedown', this._onResizeMouseDown);
+      this._resizeHandles.push(handle);
+    }
+  }
+
   /**
    * 테두리 DOM 생성: `borderColor`가 설정된 경우 상/하/좌/우 테두리 요소를 생성한다.
    * 내부 전용. `layout()`에서만 호출된다.
@@ -210,7 +231,7 @@ export class LayoutBoxElement extends HTMLElement {
   private _renderBorder() {
     if (!this.isConnected || !this.parentModel) return;
 
-    this._shadowRoot.querySelectorAll(':scope > :not(slot):not(style)').forEach(node => node.remove());
+    this._shadowRoot.querySelectorAll(':scope > :not(slot):not(style):not(.resize-handle)').forEach(node => node.remove());
 
     const colorManager = ColorRegistry.getInstance();
     if (this.borderColor) {
@@ -421,8 +442,6 @@ export class LayoutBoxElement extends HTMLElement {
           paragraphEl.data = {
             ...child,
             type: 'paragraph',
-            column: 1,
-            gap: 0,
           };
           this.appendChild(paragraphEl);
         } else if (child.type === 'image') {
@@ -751,32 +770,22 @@ export class LayoutBoxElement extends HTMLElement {
   get editableLayout() { return this._editableLayout; }
 
   set editableLayout(value: boolean) {
+    if (this._isPrint) return;
     if (this._editableLayout === value) return;
     this._editableLayout = value;
 
     if (value) {
-      this.addEventListener('click', this._onLayoutClick);
-      this.addEventListener('mousedown', this._onLayoutMouseDown);
-      this.addEventListener('mouseenter', this._onLayoutMouseEnter);
-      this.addEventListener('mouseleave', this._onLayoutMouseLeave);
       this.style.cursor = 'grab';
     } else {
-      this.removeEventListener('click', this._onLayoutClick);
-      this.removeEventListener('mousedown', this._onLayoutMouseDown);
-      this.removeEventListener('mouseenter', this._onLayoutMouseEnter);
-      this.removeEventListener('mouseleave', this._onLayoutMouseLeave);
       this.removeAttribute('data-selected');
       this.removeAttribute('data-hovered');
       this.style.cursor = '';
-      for (const handle of this._resizeHandles) {
-        handle.removeEventListener('mousedown', this._onResizeMouseDown);
-      }
-      this._resizeHandles = [];
       EditManager.getInstance()._unregisterLayout(this);
     }
   }
 
   private _onLayoutClick = (event: MouseEvent): void => {
+    if (!this._editableLayout) return;
     event.stopPropagation();
     if (EditManager.getInstance().insertMode) return;
     if (this._isEventFromDescendantLayout(event)) return;
@@ -798,6 +807,7 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   private _onLayoutMouseEnter = (): void => {
+    if (!this._editableLayout) return;
     const manager = EditManager.getInstance();
     if (manager._isDraggingLayout() || manager._isResizingLayout()) return;
     let ancestor: Element | null = this.parentElement;
@@ -812,6 +822,7 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   private _onLayoutMouseLeave = (event: MouseEvent): void => {
+    if (!this._editableLayout) return;
     this.removeAttribute('data-hovered');
     const manager = EditManager.getInstance();
     if (manager._isDraggingLayout() || manager._isResizingLayout()) return;
@@ -862,6 +873,7 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   private _onLayoutMouseDown = (event: MouseEvent) => {
+    if (!this._editableLayout) return;
     if (event.button !== 0) return;
     if (EditManager.getInstance().insertMode) return;
     if (this._isEventFromResizeHandle(event)) return;
@@ -1286,6 +1298,7 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   private _onResizeMouseDown = (event: MouseEvent): void => {
+    if (!this._editableLayout) return;
     if (event.button !== 0) return;
     if (!this.hasAttribute('data-selected')) return;
     event.preventDefault();
