@@ -371,6 +371,11 @@ export class LayoutDocumentElement extends HTMLElement {
 
   private _onLayoutClick = (event: MouseEvent): void => {
     event.stopPropagation();
+    const path = event.composedPath();
+    for (const el of path) {
+      if (el === this) break;
+      if (el instanceof LayoutBoxElement && el.editableLayout) return;
+    }
     const manager = EditManager.getInstance();
     manager._setMultiSelect(event.ctrlKey || event.metaKey);
     manager.selectLayout(this);

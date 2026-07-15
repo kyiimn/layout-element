@@ -75,6 +75,8 @@ element.editableLayout = false;
 | **클릭** | 기존 선택을 모두 해제하고 클릭한 요소만 선택 |
 | **Ctrl+클릭** (또는 **Cmd+클릭**) | 기존 선택에 추가. 이미 선택된 요소를 다시 클릭하면 선택 해제(토글) |
 | **클릭** (이벤트 전파) | `stopPropagation()`으로 부모 요소의 클릭 이벤트 차단. 중첩된 box를 클릭해도 document가 함께 선택되지 않음 |
+| **하위 요소 클릭** | 이벤트가 하위 레이아웃 요소(box)에서 발생한 경우, 상위 요소의 mousedown/click 핸들러는 `_isEventFromDescendantLayout()` 검사로 해당 이벤트를 무시한다. 이를 통해 상위 요소가 선택된 상태에서도 하위 요소를 클릭하여 선택할 수 있다 |
+| **선택되지 않은 요소 mousedown** | 선택되지 않은 요소를 mousedown하면 기존 선택을 해제하고 해당 요소를 선택한 후 드래그를 시작한다. `_selectedOnMouseDown` 플래그로 click에서 중복 선택을 방지한다 |
 
 #### 드래그 이동 동작
 
@@ -383,8 +385,12 @@ function MyComponent() {
     ▼
 _onLayoutClick(event)
     ├── event.stopPropagation()     ← 부모 요소로의 이벤트 전파 차단
+    ├── _isEventFromDescendantLayout(event)?  ← 하위 레이아웃 요소에서 온 이벤트면 무시
+    │   └── return (하위 요소가 자체적으로 처리)
     ├── _dragMoved === true?        ← 드래그 직후 클릭이면 무시
-    │   └── _dragMoved = false; return
+    │   └── _dragMoved = false; _selectedOnMouseDown = false; return
+    ├── _selectedOnMouseDown === true?  ← mousedown에서 이미 선택한 요소면 중복 선택 방지
+    │   └── _selectedOnMouseDown = false; return
     ├── EditManager._setMultiSelect(event.ctrlKey || event.metaKey)
     ├── EditManager.selectLayout(this)
     │   ├── editableLayout 검증 (false면 무시)
@@ -394,6 +400,54 @@ _onLayoutClick(event)
     │   └── layoutSelectionChange 이벤트 발생
     └── EditManager._setMultiSelect(false)
 ```
+
+### 3.1.1 mousedown에서의 자동 선택
+
+선택되지 않은 요소를 mousedown하면 기존 선택을 해제하고 해당 요소를 선택한 후 드래그를 시작한다.
+이를 통해 사용자가 먼저 클릭하여 선택한 후 드래그하는 두 단계 동작 없이,
+한 번의 드래그 동작으로 요소를 선택하고 이동할 수 있다.
+
+```
+_onLayoutMouseDown(event)
+    ├── button !== 0? → return
+    ├── _isEventFromDescendantLayout(event)? → return (하위 요소가 처리)
+    ├── !data-selected? (선택되지 않은 요소)
+    │   ├── EditManager.selectLayout(this)  ← 기존 선택 해제 + 이 요소 선택
+    │   └── _selectedOnMouseDown = true     ← click에서 중복 선택 방지 플래그
+    ├── event.preventDefault()
+    ├── event.stopPropagation()
+    ├── 드래그 시작 (_isDragging = true, ...)
+    └── ...
+```
+
+`_selectedOnMouseDown` 플래그:
+- `true`: mousedown에서 선택 처리를 완료했음. 이후 click 이벤트에서 `selectLayout`을 다시 호출하지 않음.
+- `false`: mousedown에서 선택하지 않았음(이미 선택된 요소). click에서 정상적으로 선택 토글 처리.
+
+### 3.1.2 하위 요소 클릭 시 이벤트 처리
+
+중첩된 레이아웃 요소 구조에서 하위 box를 클릭하면:
+
+```
+하위 box 클릭 (상위 box가 선택된 상태)
+    │
+    ├── mousedown 이벤트
+    │   ├── 하위 box의 _onLayoutMouseDown
+    │   │   └── !data-selected → selectLayout(하위 box) + _selectedOnMouseDown = true
+    │   └── 상위 box로 버블링
+    │       └── 상위 box의 _onLayoutMouseDown
+    │           └── _isEventFromDescendantLayout(event) === true → return (드래그 시작 안 함)
+    │
+    └── click 이벤트
+        └── 하위 box의 _onLayoutClick
+            ├── event.stopPropagation()
+            ├── _selectedOnMouseDown === true → return (중복 선택 방지)
+            └── (selectLayout 생략, 이미 mousedown에서 선택 완료)
+```
+
+상위 요소의 `_onLayoutMouseDown`과 `_onLayoutClick`은 `_isEventFromDescendantLayout()` 검사로
+하위 레이아웃 요소에서 온 이벤트를 무시한다. 이를 통해 상위 요소가 선택된 상태에서도
+하위 요소를 클릭하여 선택을 전환할 수 있다.
 
 ### 3.2 단일 선택 vs 다중 선택
 
@@ -545,20 +599,13 @@ newLeft = clamp(newLeft, 0, columnCount - width)  ← 컬럼 스냅 + 범위 제
     ▼
 maxTop = floor((editableTextHeight - absHeight) / lineHeight)
 newTop = clamp(round((newTopMm - columnCoords[newLeft].y1) / lineHeight),
-              0, maxTop)                          ← 라인 스냅 + 범위 제한
+               0, maxTop)                          ← 라인 스냅 + 범위 제한
     │
     ▼
-문서 직계 자식인지 확인:
-    ├── YES && 클램핑 전 위치가 편집 영역 밖?
-    │   ├── newLeftMm < columnCoords[0].x1 (왼쪽 밖)
-    │   ├── newLeftMm + absWidth > columnCoords[last].x2 (오른쪽 밖)
-    │   ├── newTopMm < columnCoords[0].y1 (위쪽 밖)
-    │   └── newTopMm > columnCoords[0].y2 (아래쪽 밖)
-    │   → return { left: newLeft, top: newTop,
-    │              converted: { position: 'absolute',
-    │                          left: newLeftMm, top: newTopMm,
-    │                          width: absWidth, height: absHeight } }
-    └── NO → return { left: newLeft, top: newTop }
+return { left: newLeft, top: newTop }
+
+- **static 요소는 편집 영역 밖으로 나갈 수 없다.** 컬럼/라인 스냅과 클램핑으로 항상 편집 영역 내에 유지된다.
+- **position 자동 변환은 발생하지 않는다.** 드래그 중 static ↔ absolute 변환이 일어나지 않는다.
 ```
 
 - **컬럼 스냅**: 박스의 왼쪽 가장자리가 가장 가까운 컬럼에 스냅된다.
@@ -583,14 +630,8 @@ newLeft = dragStartLeft + deltaMmX              ← 시작 위치 + 이동량
 newTop  = dragStartTop  + deltaMmY
     │
     ▼
-문서 직계 자식인지 확인:
-    ├── YES → 편집 영역 안에 완전히 포함?
-    │   ├── YES → 컬럼/라인 스냅 계산 후 static 변환
-    │   │   return { left: clampedColumn, top: clampedLine,
-    │   │              converted: { position: 'static',
-    │   │                          left: clampedColumn, top: clampedLine,
-    │   │                          width: staticWidth, height: staticHeight } }
-    │   └── NO → 클램핑 없이 자유 이동 (음수 좌표 허용)
+ 문서 직계 자식인지 확인:
+    ├── YES → 클램핑 없이 자유 이동 (음수 좌표 허용)
     │       return { left: newLeft, top: newTop }
     └── NO → 부모 경계 클램핑
         maxLeft = max(0, parentWidth - paddingLeft - paddingRight - width)
@@ -599,9 +640,9 @@ newTop  = dragStartTop  + deltaMmY
                  top:  clamp(newTop,  0, maxTop) }
 ```
 
-- **문서 직계 자식**: 클램핑 없이 자유롭게 이동. 음수 좌표도 가능. 편집 영역 안으로 돌아오면 자동으로 static 변환.
+- **문서 직계 자식**: 클램핑 없이 자유롭게 이동. 음수 좌표도 가능. position은 absolute를 유지한다.
 - **다른 박스 안**: 부모의 padding을 고려하여 박스가 부모 영역 밖으로 나가지 않도록 클램핑.
-- **스냅 없음**: absolute 모드에서는 마우스를 따라 자유롭게 이동한다.
+- **position 자동 변환은 발생하지 않는다.** absolute 요소가 편집 영역 안으로 들어와도 static으로 변환되지 않는다.
 
 ### 4.4 위치 설정 시 파이프라인: `left`/`top` setter
 
@@ -625,92 +666,16 @@ setter가 호출될 때마다:
 1. **`this.layout()`**: GridCalculator를 사용하여 박스와 자식 요소의 위치·크기를 재계산하고 DOM 스타일을 업데이트한다.
 2. **`this._rerenderAffectedParagraphs()`**: 영향받는 단락들의 텍스트 레이아웃을 재실행하여 이미지/박스 회피를 다시 계산한다.
 
-### 4.4 문서 영역 밖 드래그 시 위치 변환 (Position Conversion on Drag Outside)
+### 4.4 드래그 중 position 변환 불가
 
-문서(`<x-layout-document>`)의 직계 자식인 `<x-layout-box>` 요소는 드래그 중 문서 편집 영역 밖으로 나가면 `position: 'static'`에서 `position: 'absolute'`로 자동 변환된다. 반대로 절대 위치에서 다시 문서 편집 영역 안으로 돌아오면 `position: 'static'`으로 변환된다.
+드래그 중에는 `position` 자동 변환이 발생하지 않는다. static 요소는 항상 static으로, absolute 요소는 항상 absolute로 유지된다.
 
-**이 동작은 문서의 직계 자식 박스에만 적용된다.** 다른 박스 안에 중첩된 박스는 이 변환의 대상이 아니다.
+- **static 요소**: 컬럼/라인 스냅과 클램핑으로 편집 영역 내에 유지된다. 편집 영역 밖으로 드래그해도 absolute로 변환되지 않고 클램핑된 위치에 머무른다.
+- **absolute 요소**: 자유롭게 이동하며, 편집 영역 안으로 들어와도 static으로 변환되지 않는다.
 
-#### 4.4.1 static → absolute 변환
+position 변환이 필요하면 `convertPosition()`을 명시적으로 호출해야 한다 (4.4.6 참조).
 
-`position: 'static'`인 박스를 드래그하여 새 위치가 문서 편집 영역 밖이면:
-
-1. `_computeNewPosition`에서 변환 조건 감지:
-   - `newLeftMm < columnCoords[0].x1` (왼쪽 밖)
-   - `newLeftMm + absWidth > columnCoords[last].x2` (오른쪽 밖)
-   - `newTopMm < columnCoords[0].y1` (위쪽 밖)
-   - `newTopMm > columnCoords[0].y2` (아래쪽 밖)
-2. 반환값에 `converted` 필드 포함:
-   ```typescript
-   {
-     left: newLeft,  // 클램핑된 static 위치 (fallback)
-     top: newTop,
-     converted: {
-       position: 'absolute',
-       left: newLeftMm,    // mm 좌표 (클램핑 없음)
-       top: newTopMm,       // mm 좌표 (클램핑 없음)
-       width: this.absWidth,  // 현재 mm 너비
-       height: this.absHeight, // 현재 mm 높이
-     }
-   }
-   ```
-3. 드래그 핸들러에서 변환 적용:
-   - `this.position = 'absolute'`
-   - `this.left = converted.left`
-   - `this.top = converted.top`
-   - `this.width = converted.width`
-   - `this.height = converted.height`
-4. 드래그 시작 위치 재설정:
-   - `_dragStartLeft/Top/Width/Height/Position` 갱신
-   - `_dragStartMouseX/Y`를 현재 마우스 위치로 갱신 (델타 재계산)
-
-#### 4.4.2 absolute → static 변환 (문서 영역 안으로 복귀)
-
-`position: 'absolute'`인 박스를 드래그하여 새 위치가 문서 편집 영역 안에 완전히 들어오면:
-
-1. 변환 조건 감지:
-   - `newLeft >= editAreaLeft`
-   - `newLeft + this.width <= editAreaRight`
-   - `newTop >= editAreaTop`
-   - `newTop + this.height <= editAreaBottom`
-2. 컬럼/라인 스냅 계산:
-   - `nearestColumn = round((newLeft - editAreaLeft) / avgColWidth)`
-   - `nearestLine = round((newTop - editAreaTop) / lineHeight)`
-   - 컬럼과 라인 값은 유효 범위로 클램핑
-3. 크기 변환:
-   - `staticWidth = max(1, round(absWidth / avgColWidth))`
-   - `staticHeight = max(1, round(absHeight / lineHeight))`
-4. 반환값에 `converted` 필드 포함:
-   ```typescript
-   {
-     left: clampedColumn,
-     top: clampedLine,
-     converted: {
-       position: 'static',
-       left: clampedColumn,
-       top: clampedLine,
-       width: staticWidth,
-       height: staticHeight,
-     }
-   }
-   ```
-5. 드래그 시작 위치 재설정 (static 모드용)
-
-#### 4.4.3 absolute 모드에서 문서 직계 자식의 클램핑 제거
-
-일반적인 absolute 박스(다른 박스 안에 중첩된)는 부모의 padding 영역 내로 클램핑된다. 그러나 **문서 직계 자식** absolute 박스는 클램핑 없이 자유롭게 음수 좌표까지 이동할 수 있다. 이를 통해 박스를 문서 영역 밖으로 완전히 빼낼 수 있다.
-
-```
-// 일반 absolute 박스 (다른 박스 안):
-left = clamp(startLeft + delta, 0, maxLeft)
-top  = clamp(startTop + delta, 0, maxTop)
-
-// 문서 직계 자식 absolute 박스:
-left = startLeft + delta  // 클램핑 없음, 음수 가능
-top  = startTop + delta   // 클램핑 없음, 음수 가능
-```
-
-#### 4.4.4 ESC 취소 시 위치/크기/position 복원
+#### 4.4.1 ESC 취소 시 위치/크기/position 복원
 
 ESC 키로 드래그를 취소하면 원래 상태로 완전히 복원된다:
 
@@ -722,16 +687,7 @@ ESC 키로 드래그를 취소하면 원래 상태로 완전히 복원된다:
 
 드래그 시작 시 `_dragStartPosition`, `_dragStartWidth`, `_dragStartHeight`가 `_onLayoutMouseDown`에서 저장된다. 다중 선택의 경우, 모든 드래그 대상의 시작 상태가 저장된다.
 
-#### 4.4.5 변환 중 드래그 시작 위치 갱신
-
-위치 변환이 발생하면 (static → absolute 또는 absolute → static), 드래그의 기준점이 변경되어야 한다. 변환 직후:
-
-1. `_dragStartLeft/Top/Width/Height/Position`을 변환된 값으로 갱신
-2. `_dragStartMouseX/Y`를 현재 마우스 위치로 갱신
-
-이 갱신이 없으면 다음 rAF 프레임에서 변환 전의 기준점으로 델타를 계산하여 박스가 튕기는 현상이 발생한다.
-
-#### 4.4.6 컬럼 보존: `_savedColumns` / `_savedGap`
+#### 4.4.5 컬럼 보존: `_savedColumns` / `_savedGap`
 
 `position: 'static'` → `position: 'absolute'` 변환 시, `layout()`은 `columns: 1, gap: 0`으로 설정하여 다중 컬럼 단락이 단일 컬럼으로 붕괘되는 문제가 있었다. 이를 방지하기 위해 변환 전 컬럼/갭 설정을 저장한다.
 
@@ -763,9 +719,9 @@ gap: this.position !== 'absolute'
 
 **ESC 취소 시**: `_dragOriginal*` 필드에 드래그 시작 전 원래 `position`/`left`/`top`/`width`/`height`가 저장되어 있으므로, ESC 시 `_applyPositionConversion(_dragOriginalPosition, ...)`을 호출하면 `absolute` → `static` 변환 경로를 타서 `_savedColumns = 1`, `_savedGap = 0`으로 초기화되고 `layout()`이 static 좌표로 컬럼/갭을 재계산한다.
 
-#### 4.4.7 프로그래밍 API: `convertPosition(targetPosition)`
+#### 4.4.6 프로그래밍 API: `convertPosition(targetPosition)`
 
-드래그 중 자동 변환 외에도, 프로그래밍 방식으로 position 모드를 변환할 수 있는 public 메서드를 제공한다.
+프로그래밍 방식으로 position 모드를 변환할 수 있는 public 메서드. 드래그 중에는 자동 변환이 발생하지 않으므로, 변환이 필요하면 이 메서드를 명시적으로 호출해야 한다.
 
 ```typescript
 box.convertPosition('absolute');  // static → absolute
@@ -789,16 +745,15 @@ box.convertPosition('static');    // absolute → static
 **주의사항**:
 - `parentModel`이 없으면 `Error`를 throw한다. 요소가 DOM에 연결되고 렌더링된 상태에서만 호출 가능.
 - 현재 position과 동일한 모드를 지정하면 아무 동작도 하지 않는다 (no-op).
-- 드래그 핸들러는 `_computeNewPosition()` + `_applyPositionConversion()` 조합을 계속 사용한다. 마우스 델타 기반 계산과 기준점 재설정이 필요하기 때문.
+- 드래그 중에는 position 자동 변환이 발생하지 않는다. 변환이 필요하면 드래그 완료 후 `convertPosition()`을 명시적으로 호출해야 한다.
 
-#### 4.4.8 변환 조건 요약
+#### 4.4.7 변환 조건 요약
 
-| 현재 position | 조건 | 변환 |
+| 현재 position | 조건 | 동작 |
 |---------------|------|------|
-| `static` | 문서 직계 자식이고, 클램핑 전 위치가 편집 영역 밖 | → `absolute` (mm 좌표, 클램핑 없음) |
-| `static` | 문서 직계 자식이 아니거나, 편집 영역 안 | 변환 없음 (기존 컬럼/라인 스냅 유지) |
-| `absolute` | 문서 직계 자식이고, 새 위치가 편집 영역 안에 완전히 포함 | → `static` (컬럼/라인 스냅) |
-| `absolute` | 문서 직계 자식이 아니거나, 편집 영역 밖 | 변환 없음 (클램핑: 다른 박스 안은 클램핑, 문서 직계는 클램핑 없음) |
+| `static` | 모든 경우 | 컬럼/라인 스냅 + 클램핑. 편집 영역 밖으로 나갈 수 없음. 변환 없음 |
+| `absolute` (문서 직계 자식) | 모든 경우 | 클램핑 없이 자유 이동 (음수 좌표 가능). 변환 없음 |
+| `absolute` (다른 박스 안) | 모든 경우 | 부모 padding 영역 내로 클램핑. 변환 없음 |
 
 ---
 

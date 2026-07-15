@@ -48,6 +48,7 @@ export class LayoutBoxElement extends HTMLElement {
   private _savedGap: number | number[] = 0;
 
   private _isDragging = false;
+  private _selectedOnMouseDown = false;
   private _dragStartMouseX = 0;
   private _dragStartMouseY = 0;
   private _dragStartLeft = 0;
@@ -718,9 +719,16 @@ export class LayoutBoxElement extends HTMLElement {
 
   private _onLayoutClick = (event: MouseEvent): void => {
     event.stopPropagation();
+    if (this._isEventFromDescendantLayout(event)) return;
+    if (this._isEventFromResizeHandle(event)) return;
     this.removeAttribute('data-hovered');
     if (this._dragMoved) {
       this._dragMoved = false;
+      this._selectedOnMouseDown = false;
+      return;
+    }
+    if (this._selectedOnMouseDown) {
+      this._selectedOnMouseDown = false;
       return;
     }
     const manager = EditManager.getInstance();
@@ -776,9 +784,35 @@ export class LayoutBoxElement extends HTMLElement {
     }
   }
 
+  private _isEventFromDescendantLayout(event: MouseEvent): boolean {
+    const path = event.composedPath();
+    for (const el of path) {
+      if (el === this) return false;
+      if (el instanceof LayoutBoxElement && el.editableLayout) return true;
+    }
+    return false;
+  }
+
+  private _isEventFromResizeHandle(event: MouseEvent): boolean {
+    for (const el of event.composedPath()) {
+      if (el instanceof HTMLElement && el.classList.contains('resize-handle')) return true;
+      if (el === this) return false;
+    }
+    return false;
+  }
+
   private _onLayoutMouseDown = (event: MouseEvent) => {
     if (event.button !== 0) return;
-    if (!this.hasAttribute('data-selected')) return;
+    if (this._isEventFromResizeHandle(event)) return;
+    if (this._isEventFromDescendantLayout(event)) return;
+    this._selectedOnMouseDown = false;
+    if (!this.hasAttribute('data-selected')) {
+      const manager = EditManager.getInstance();
+      manager._setMultiSelect(event.ctrlKey || event.metaKey);
+      manager.selectLayout(this);
+      manager._setMultiSelect(false);
+      this._selectedOnMouseDown = true;
+    }
     event.preventDefault();
     event.stopPropagation();
     this.removeAttribute('data-hovered');
@@ -1108,15 +1142,18 @@ export class LayoutBoxElement extends HTMLElement {
    * 다중 선택 드래그에서 각 대상 요소의 시작 위치를 독립적으로 전달할 수 있다.
    * `startLeft`/`startTop`을 생략하면 `this._dragStartLeft`/`this._dragStartTop`을 사용한다.
    *
-   * 문서 직계 자식 박스가 드래그 중 문서 영역 밖으로 나가면 `position: 'static'`에서
-   * `position: 'absolute'`로 자동 변환되며, 반대로 절대 위치에서 다시 문서 영역 안으로
-   * 돌아오면 `position: 'static'`으로 변환된다.
+   * - **static 모드**: 컬럼/라인 스냅과 클램핑을 적용한다. 편집 영역 밖으로 나갈 수 없다.
+   * - **absolute 모드 (문서 직계 자식)**: 클램핑 없이 자유 이동. 음수 좌표 허용.
+   * - **absolute 모드 (다른 박스 안)**: 부모 영역 내로 클램핑.
+   *
+   * position 자동 변환(static ↔ absolute)은 드래그 중 발생하지 않는다.
+   * position 변환이 필요하면 `convertPosition()`을 명시적으로 호출해야 한다.
    *
    * @param deltaPxX - 마우스 가로 이동량 (픽셀)
    * @param deltaPxY - 마우스 세로 이동량 (픽셀)
    * @param startLeft - 드래그 시작 left 값 (생략 시 this._dragStartLeft)
    * @param startTop - 드래그 시작 top 값 (생략 시 this._dragStartTop)
-   * @returns 새 위치. `converted`가 있으면 위치 변환이 필요함
+   * @returns 새 위치. `converted` 필드는 드래그 중 position 변환에서만 사용
    */
   private _computeNewPosition(
     deltaPxX: number,
@@ -1138,40 +1175,8 @@ export class LayoutBoxElement extends HTMLElement {
       const padB = this.inheritStyle?.paddingBottom || 0;
 
       if (isDocumentChild) {
-        const newLeft = sLeft + deltaMmX;
-        const newTop = sTop + deltaMmY;
-
-        const parentModel = this.parentModel;
-        if (parentModel) {
-          const { columnCoords } = parentModel;
-          const editAreaLeft = columnCoords[0].x1;
-          const editAreaRight = columnCoords[columnCoords.length - 1].x2;
-          const editAreaTop = columnCoords[0].y1;
-          const editAreaBottom = columnCoords[0].y2;
-
-          if (
-            newLeft >= editAreaLeft &&
-            newLeft + this.width <= editAreaRight &&
-            newTop >= editAreaTop &&
-            newTop + this.height <= editAreaBottom
-          ) {
-            const { left: clampedColumn, top: clampedLine, width: staticWidth, height: staticHeight } = this._absoluteToStaticCoords(newLeft, newTop, this.absWidth, this.absHeight);
-
-            return {
-              left: clampedColumn,
-              top: clampedLine,
-              converted: {
-                position: 'static',
-                left: clampedColumn,
-                top: clampedLine,
-                width: staticWidth,
-                height: staticHeight,
-              },
-            };
-          }
-        }
-
-        return { left: newLeft, top: newTop };
+        // absolute 요소는 position을 유지한다. 편집 영역 안으로 들어와도 static으로 변환하지 않는다.
+        return { left: sLeft + deltaMmX, top: sTop + deltaMmY };
       }
 
       const maxLeft = Math.max(0, (this.inheritStyle?.parentWidth || 0) - padL - padR - this.width);
@@ -1210,26 +1215,10 @@ export class LayoutBoxElement extends HTMLElement {
     let newTop = Math.max(0, Math.min(maxTop, Math.round((newTopMm - columnCoords[newLeft].y1) / lineHeight)));
 
     if (isDocumentChild) {
-      const editAreaLeft = columnCoords[0].x1;
-      const editAreaRight = columnCoords[columnCount - 1].x2;
-      const editAreaTop = columnCoords[0].y1;
-      const editAreaBottom = columnCoords[0].y2;
-
-      if (newLeftMm < editAreaLeft || newLeftMm + this.absWidth > editAreaRight || newTopMm < editAreaTop || newTopMm > editAreaBottom) {
-        const absLeft = newLeftMm;
-        const absTop = newTopMm;
-        return {
-          left: newLeft,
-          top: newTop,
-          converted: {
-            position: 'absolute',
-            left: absLeft,
-            top: absTop,
-            width: this.absWidth,
-            height: this.absHeight,
-          },
-        };
-      }
+      // static 요소는 편집 영역 밖으로 나갈 수 없다.
+      // 클램핑만 적용하고 absolute 변환은 수행하지 않는다.
+      // absolute 요소만 편집 영역 밖으로 자유롭게 이동할 수 있다.
+      return { left: newLeft, top: newTop };
     }
 
     return { left: newLeft, top: newTop };
