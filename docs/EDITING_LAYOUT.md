@@ -763,7 +763,35 @@ gap: this.position !== 'absolute'
 
 **ESC 취소 시**: `_dragOriginal*` 필드에 드래그 시작 전 원래 `position`/`left`/`top`/`width`/`height`가 저장되어 있으므로, ESC 시 `_applyPositionConversion(_dragOriginalPosition, ...)`을 호출하면 `absolute` → `static` 변환 경로를 타서 `_savedColumns = 1`, `_savedGap = 0`으로 초기화되고 `layout()`이 static 좌표로 컬럼/갭을 재계산한다.
 
-#### 4.4.7 변환 조건 요약
+#### 4.4.7 프로그래밍 API: `convertPosition(targetPosition)`
+
+드래그 중 자동 변환 외에도, 프로그래밍 방식으로 position 모드를 변환할 수 있는 public 메서드를 제공한다.
+
+```typescript
+box.convertPosition('absolute');  // static → absolute
+box.convertPosition('static');    // absolute → static
+```
+
+**static → absolute 변환**:
+1. `columnCoords[left].x1` → `absLeft`
+2. `columnCoords[left].y1 + lineHeight * top` → `absTop`
+3. `absWidth` getter → `absWidth` (컬럼 스팬 → mm)
+4. `absHeight` getter → `absHeight` (라인 수 → mm)
+5. `_applyPositionConversion('absolute', ...)` 호출 → `_savedColumns`/`_savedGap` 보존
+
+**absolute → static 변환**:
+1. `round((left - editAreaLeft) / avgColWidth)` → `clampedColumn` (범위 클램핑)
+2. `round((top - editAreaTop) / lineHeight)` → `clampedLine` (범위 클램핑)
+3. `round(width / avgColWidth)` → `staticWidth` (최소 1)
+4. `round(height / lineHeight)` → `staticHeight` (최소 1)
+5. `_applyPositionConversion('static', ...)` 호출 → `_savedColumns = 1`, `_savedGap = 0` 초기화
+
+**주의사항**:
+- `parentModel`이 없으면 `Error`를 throw한다. 요소가 DOM에 연결되고 렌더링된 상태에서만 호출 가능.
+- 현재 position과 동일한 모드를 지정하면 아무 동작도 하지 않는다 (no-op).
+- 드래그 핸들러는 `_computeNewPosition()` + `_applyPositionConversion()` 조합을 계속 사용한다. 마우스 델타 기반 계산과 기준점 재설정이 필요하기 때문.
+
+#### 4.4.8 변환 조건 요약
 
 | 현재 position | 조건 | 변환 |
 |---------------|------|------|

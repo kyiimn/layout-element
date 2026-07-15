@@ -974,6 +974,49 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   /**
+   * 박스의 position 모드를 변환한다.
+   * static → absolute: 컬럼/라인 단위의 좌표를 mm 단위로 변환하고, column/gap 설정을 보존한다.
+   * absolute → static: mm 단위의 좌표를 컬럼/라인 단위로 변환하고, column/gap을 재계산한다.
+   *
+   * 이 메서드는 드래그 중 문서 영역 밖 이동 시 자동 호출되며, 프로그래밍 방식으로도 사용할 수 있다.
+   *
+   * @param targetPosition - 변환할 position 모드 ('static' | 'absolute')
+   * @throws {Error} parentModel이 없는 경우 (DOM에 연결되지 않았거나 렌더링되지 않은 경우)
+   */
+  convertPosition(targetPosition: BoxPosition): void {
+    if (this._position === targetPosition) return;
+
+    const parentModel = this.parentModel;
+    if (!parentModel) {
+      throw new Error('Cannot convert position: parentModel is not available. Ensure the element is connected and rendered.');
+    }
+
+    if (this._position === 'static' && targetPosition === 'absolute') {
+      const { columnCoords, lineHeight } = parentModel;
+      const absLeft = columnCoords[this._left].x1;
+      const absTop = columnCoords[this._left].y1 + lineHeight * this._top;
+      const absWidth = this.absWidth;
+      const absHeight = this.absHeight;
+      this._applyPositionConversion('absolute', absLeft, absTop, absWidth, absHeight);
+    } else if (this._position === 'absolute' && targetPosition === 'static') {
+      const { columnCoords, lineHeight, fontSize, editableWidth, editableHeight, columnCount } = parentModel;
+      const avgColWidth = editableWidth / columnCount;
+      const editAreaLeft = columnCoords[0].x1;
+      const editAreaTop = columnCoords[0].y1;
+
+      const nearestColumn = Math.round((this._left - editAreaLeft) / avgColWidth);
+      const clampedColumn = Math.max(0, Math.min(columnCount - Math.round(this._width / avgColWidth), nearestColumn));
+      const nearestLine = Math.round((this._top - editAreaTop) / lineHeight);
+      const maxTop = Math.floor((editableHeight - (lineHeight * Math.round(this._height / lineHeight) - (lineHeight - fontSize))) / lineHeight);
+      const clampedLine = Math.max(0, Math.min(maxTop, nearestLine));
+      const staticWidth = Math.max(1, Math.round(this._width / avgColWidth));
+      const staticHeight = Math.max(1, Math.round(this._height / lineHeight));
+
+      this._applyPositionConversion('static', clampedColumn, clampedLine, staticWidth, staticHeight);
+    }
+  }
+
+  /**
    * 픽셀 델타와 시작 위치를 받아 새 위치를 계산한다.
    *
    * 다중 선택 드래그에서 각 대상 요소의 시작 위치를 독립적으로 전달할 수 있다.
