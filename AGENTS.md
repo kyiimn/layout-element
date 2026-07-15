@@ -107,6 +107,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **`data-source-offset` vs `data-offset`**: `data-source-offset` = source string position (used as diff key). `data-offset` = rendered position (used by EditCoordinateMapper for click-to-cursor mapping). Both attributes coexist on every span.
 - **Optimistic spans are temporary**: `data-temporary="true"` spans are stripped at the start of every `renderTextWithDiff()` call and recreated by `EditController` as needed.
 - **EditContextAdapter**: `src/edit/edit-context-adapter.ts` bridges the browser EditContext API (Chrome 121+) with the layout engine. `EditContextAdapter.create()` returns `null` if the API is not supported.
+- **Box child DOM mutation detection**: `<x-layout-box>` uses a `MutationObserver` (`_childObserver`) with `{ childList: true }` to detect direct DOM additions/removals of children (`x-layout-box`, `x-layout-paragraph`, `x-layout-image`). When children are added or removed via DOM manipulation (not through the `data` setter), the observer triggers `layout()` + `render()` automatically, mirroring the behavior of the `data` setter. The `_rebuildingChildren` flag suppresses observer callbacks during `data` setter execution to avoid redundant layout passes.
 
 ## Directory Structure
 

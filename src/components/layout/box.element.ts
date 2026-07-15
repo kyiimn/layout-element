@@ -85,6 +85,12 @@ export class LayoutBoxElement extends HTMLElement {
   /** rAF id for throttled paragraph rerender during drag/resize. */
   private _rerenderRafId: number | null = null;
 
+  /** DOM 자식 변경(추가/제거)을 감지하여 layout + render를 자동 수행하는 MutationObserver. */
+  private _childObserver: MutationObserver | null = null;
+
+  /** `data` 세터에서 자식을 재구축할 때 observer 중복 트리거를 방지하는 플래그. */
+  private _rebuildingChildren = false;
+
   constructor() {
     super();
     this._shadowRoot = this.attachShadow({ mode: "open" });
@@ -92,10 +98,12 @@ export class LayoutBoxElement extends HTMLElement {
 
   connectedCallback() {
     if (!this.id) this.id = genUUID();
+    this._startChildObserver();
     this.layout();
   }
 
   disconnectedCallback() {
+    this._stopChildObserver();
     EditManager.getInstance()._unregisterLayout(this);
   }
 
@@ -368,58 +376,65 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   set data(data: BoxData) {
-    if (data.id !== undefined) this.id = data.id;
-    if (data.position !== undefined) this._position = data.position;
-    if (data.zIndex !== undefined) this._zIndex = data.zIndex;
-    if (data.backgroundColor !== undefined) this._backgroundColor = data.backgroundColor;
-    if (data.borderTopWidth !== undefined) this._borderTopWidth = data.borderTopWidth;
-    if (data.borderBottomWidth !== undefined) this._borderBottomWidth = data.borderBottomWidth;
-    if (data.borderLeftWidth !== undefined) this._borderLeftWidth = data.borderLeftWidth;
-    if (data.borderRightWidth !== undefined) this._borderRightWidth = data.borderRightWidth;
-    if (data.borderStyle !== undefined) this._borderStyle = data.borderStyle;
-    if (data.borderColor !== undefined) this._borderColor = data.borderColor;
-    if (data.paddingTop !== undefined) this._paddingTop = data.paddingTop;
-    if (data.paddingBottom !== undefined) this._paddingBottom = data.paddingBottom;
-    if (data.paddingLeft !== undefined) this._paddingLeft = data.paddingLeft;
-    if (data.paddingRight !== undefined) this._paddingRight = data.paddingRight;
-    if (data.role !== undefined) this._role = data.role;
-    if (data.groupMember !== undefined) this._groupMember = data.groupMember;
-    if (data.priority !== undefined) this._priority = data.priority;
+    this._rebuildingChildren = true;
+    try {
+      if (data.id !== undefined) this.id = data.id;
+      if (data.position !== undefined) this._position = data.position;
+      if (data.zIndex !== undefined) this._zIndex = data.zIndex;
+      if (data.backgroundColor !== undefined) this._backgroundColor = data.backgroundColor;
+      if (data.borderTopWidth !== undefined) this._borderTopWidth = data.borderTopWidth;
+      if (data.borderBottomWidth !== undefined) this._borderBottomWidth = data.borderBottomWidth;
+      if (data.borderLeftWidth !== undefined) this._borderLeftWidth = data.borderLeftWidth;
+      if (data.borderRightWidth !== undefined) this._borderRightWidth = data.borderRightWidth;
+      if (data.borderStyle !== undefined) this._borderStyle = data.borderStyle;
+      if (data.borderColor !== undefined) this._borderColor = data.borderColor;
+      if (data.paddingTop !== undefined) this._paddingTop = data.paddingTop;
+      if (data.paddingBottom !== undefined) this._paddingBottom = data.paddingBottom;
+      if (data.paddingLeft !== undefined) this._paddingLeft = data.paddingLeft;
+      if (data.paddingRight !== undefined) this._paddingRight = data.paddingRight;
+      if (data.role !== undefined) this._role = data.role;
+      if (data.groupMember !== undefined) this._groupMember = data.groupMember;
+      if (data.priority !== undefined) this._priority = data.priority;
 
-    this._left = data.left;
-    this._top = data.top;
-    this._width = data.width;
-    this._height = data.height;
+      this._left = data.left;
+      this._top = data.top;
+      this._width = data.width;
+      this._height = data.height;
 
-    this.items.forEach(e => e.remove());
+      this.items.forEach(e => e.remove());
 
-    this.layout();
+      this.layout();
 
-    const children = data.children || [];
-    for (let i = 0; i < children.length; i++) {
-      const child = children[i];
-      if (child.type === 'box') {
-        const boxEl = document.createElement('x-layout-box');
-        boxEl.data = child;
-        this.appendChild(boxEl);
-      } else if (child.type === 'paragraph') {
-        const paragraphEl = document.createElement('x-layout-paragraph');
-        paragraphEl.data = child;
-        this.appendChild(paragraphEl);
-      } else if (child.type === 'text') {
-        const paragraphEl = document.createElement('x-layout-paragraph');
-        paragraphEl.data = {
-          ...child,
-          type: 'paragraph',
-          column: 1,
-          gap: 0,
-        };
-        this.appendChild(paragraphEl);
-      } else if (child.type === 'image') {
-        const imageEl = document.createElement('x-layout-image');
-        imageEl.data = child;
-        this.appendChild(imageEl);
+      const children = data.children || [];
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        if (child.type === 'box') {
+          const boxEl = document.createElement('x-layout-box');
+          boxEl.data = child;
+          this.appendChild(boxEl);
+        } else if (child.type === 'paragraph') {
+          const paragraphEl = document.createElement('x-layout-paragraph');
+          paragraphEl.data = child;
+          this.appendChild(paragraphEl);
+        } else if (child.type === 'text') {
+          const paragraphEl = document.createElement('x-layout-paragraph');
+          paragraphEl.data = {
+            ...child,
+            type: 'paragraph',
+            column: 1,
+            gap: 0,
+          };
+          this.appendChild(paragraphEl);
+        } else if (child.type === 'image') {
+          const imageEl = document.createElement('x-layout-image');
+          imageEl.data = child;
+          this.appendChild(imageEl);
+        }
       }
+
+      this.render();
+    } finally {
+      this._rebuildingChildren = false;
     }
   }
 
@@ -1591,6 +1606,38 @@ export class LayoutBoxElement extends HTMLElement {
       for (const child of (element as LayoutBoxElement).items) {
         this._collectParagraphs(child, set);
       }
+    }
+  }
+
+  /**
+   * MutationObserver를 시작하여 직접 DOM 조작에 의한 자식 추가/제거를 감지한다.
+   * `data` 세터를 통한 자식 재구축 시에는 `_rebuildingChildren` 플래그로 무시한다.
+   */
+  private _startChildObserver(): void {
+    if (this._childObserver) return;
+    this._childObserver = new MutationObserver((mutations) => {
+      if (this._rebuildingChildren) return;
+
+      let hasChildListChange = false;
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList') {
+          hasChildListChange = true;
+          break;
+        }
+      }
+      if (!hasChildListChange) return;
+
+      this.layout();
+      this.render();
+    });
+    this._childObserver.observe(this, { childList: true });
+  }
+
+  /** MutationObserver 연결을 해제한다. */
+  private _stopChildObserver(): void {
+    if (this._childObserver) {
+      this._childObserver.disconnect();
+      this._childObserver = null;
     }
   }
 }
