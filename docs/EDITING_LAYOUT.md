@@ -512,37 +512,15 @@ _onLayoutClick(event)
 
 ### 4.3 위치 계산: `_computeNewPosition(deltaPxX, deltaPxY, startLeft?, startTop?)`
 
-드래그 중 마우스 이동량(픽셀)을 받아 최종 위치를 계산한다. `position` 모드에 따라 다른 스냅/클램핑 로직을 적용한다.
+드래그 중 마우스 이동량(픽셀)을 받아 최종 위치를 계산한다. `position` 모드와 부모 요소 종류에 따라 다른 스냅/클램핑/변환 로직을 적용한다.
 
 다중 선택 드래그에서 각 대상 요소의 시작 위치를 독립적으로 전달할 수 있다. `startLeft`/`startTop`을 생략하면 `this._dragStartLeft`/`this._dragStartTop`을 사용한다.
 
-#### 4.3.1 absolute 모드 (mm 좌표)
+**반환값**: `{ left: number; top: number; converted?: { position: BoxPosition; left: number; top: number; width: number; height: number } }`
 
-```
-deltaPxX, deltaPxY (마우스 이동 픽셀)
-    │
-    ▼
-deltaMmX = deltaPxX / GridCalculator.ppm     ← 픽셀 → mm 변환
-deltaMmY = deltaPxY / GridCalculator.ppm
-    │
-    ▼
-newLeft = dragStartLeft + deltaMmX              ← 시작 위치 + 이동량
-newTop  = dragStartTop  + deltaMmY
-    │
-    ▼
-maxLeft = max(0, parentWidth - paddingLeft - paddingRight - width)
-maxTop  = max(0, parentHeight - paddingTop  - paddingBottom - height)
-    │
-    ▼
-left = clamp(newLeft, 0, maxLeft)              ← 부모 경계 내로 제한
-top  = clamp(newTop,  0, maxTop)
-```
+`converted` 필드가 있으면 위치 변환이 필요함을 나타낸다. 드래그 핸들러는 이 필드를 확인하여 `position`, `left`, `top`, `width`, `height`를 모두 갱신한다.
 
-- **스냅 없음**: absolute 모드에서는 마우스를 따라 자유롭게 이동한다.
-- **경계 클램핑**: 부모의 padding을 고려하여 박스가 부모 영역 밖으로 나가지 않도록 제한한다.
-- `parentWidth`, `parentHeight`는 `inheritStyle.parentWidth`, `inheritStyle.parentHeight`에서 가져온다.
-
-#### 4.3.2 static 모드 (컬럼 그리드)
+#### 4.3.1 static 모드 (컬럼 그리드)
 
 ```
 deltaPxX, deltaPxY (마우스 이동 픽셀)
@@ -568,14 +546,62 @@ newLeft = clamp(newLeft, 0, columnCount - width)  ← 컬럼 스냅 + 범위 제
 maxTop = floor((editableTextHeight - absHeight) / lineHeight)
 newTop = clamp(round((newTopMm - columnCoords[newLeft].y1) / lineHeight),
               0, maxTop)                          ← 라인 스냅 + 범위 제한
+    │
+    ▼
+문서 직계 자식인지 확인:
+    ├── YES && 클램핑 전 위치가 편집 영역 밖?
+    │   ├── newLeftMm < columnCoords[0].x1 (왼쪽 밖)
+    │   ├── newLeftMm + absWidth > columnCoords[last].x2 (오른쪽 밖)
+    │   ├── newTopMm < columnCoords[0].y1 (위쪽 밖)
+    │   └── newTopMm > columnCoords[0].y2 (아래쪽 밖)
+    │   → return { left: newLeft, top: newTop,
+    │              converted: { position: 'absolute',
+    │                          left: newLeftMm, top: newTopMm,
+    │                          width: absWidth, height: absHeight } }
+    └── NO → return { left: newLeft, top: newTop }
 ```
 
 - **컬럼 스냅**: 박스의 왼쪽 가장자리가 가장 가까운 컬럼에 스냅된다.
 - **라인 스냅**: 박스의 위쪽 가장자리가 `lineHeight` 단위로 스냅된다.
 - **범위 제한**: 박스가 `columnCount - width` 이상의 컬럼, `maxTop` 이상의 라인으로 이동하지 못한다.
-- **`maxTop` 계산**: `editableTextHeight`와 box의 `absHeight`를 사용하여, 박스의 하단이 편집 영역 하단(`editableTextHeight`)을 넘지 않도록 제한한다. 이전 버전에서는 `editableHeight / lineHeight - height`를 사용했으나, 마지막 줄의 `lineHeight - fontSize` (leading) 공간을 고려하지 못해 박스가 하단에 딱 붙지 않는 문제가 있었다.
+- **문서 영역 밖 변환**: 클램핑 전의 mm 위치가 편집 영역 밖이면 absolute 위치로 자동 변환된다.
+- **`maxTop` 계산**: `editableTextHeight`와 box의 `absHeight`를 사용하여, 박스의 하단이 편집 영역 하단(`editableTextHeight`)을 넘지 않도록 제한한다.
 - `columnCoords`, `lineHeight`, `columnCount`, `editableTextHeight`는 부모의 `GridCalculator`(=`parentModel`)에서 가져온다.
 - `parentModel`이 없으면 (예: 박스가 DOM에 연결되지 않은 경우) 시작 위치를 그대로 반환한다.
+
+#### 4.3.2 absolute 모드 (mm 좌표)
+
+```
+deltaPxX, deltaPxY (마우스 이동 픽셀)
+    │
+    ▼
+deltaMmX = deltaPxX / GridCalculator.ppm     ← 픽셀 → mm 변환
+deltaMmY = deltaPxY / GridCalculator.ppm
+    │
+    ▼
+newLeft = dragStartLeft + deltaMmX              ← 시작 위치 + 이동량
+newTop  = dragStartTop  + deltaMmY
+    │
+    ▼
+문서 직계 자식인지 확인:
+    ├── YES → 편집 영역 안에 완전히 포함?
+    │   ├── YES → 컬럼/라인 스냅 계산 후 static 변환
+    │   │   return { left: clampedColumn, top: clampedLine,
+    │   │              converted: { position: 'static',
+    │   │                          left: clampedColumn, top: clampedLine,
+    │   │                          width: staticWidth, height: staticHeight } }
+    │   └── NO → 클램핑 없이 자유 이동 (음수 좌표 허용)
+    │       return { left: newLeft, top: newTop }
+    └── NO → 부모 경계 클램핑
+        maxLeft = max(0, parentWidth - paddingLeft - paddingRight - width)
+        maxTop  = max(0, parentHeight - paddingTop  - paddingBottom - height)
+        return { left: clamp(newLeft, 0, maxLeft),
+                 top:  clamp(newTop,  0, maxTop) }
+```
+
+- **문서 직계 자식**: 클램핑 없이 자유롭게 이동. 음수 좌표도 가능. 편집 영역 안으로 돌아오면 자동으로 static 변환.
+- **다른 박스 안**: 부모의 padding을 고려하여 박스가 부모 영역 밖으로 나가지 않도록 클램핑.
+- **스냅 없음**: absolute 모드에서는 마우스를 따라 자유롭게 이동한다.
 
 ### 4.4 위치 설정 시 파이프라인: `left`/`top` setter
 
@@ -598,6 +624,153 @@ set top(value: number) {
 setter가 호출될 때마다:
 1. **`this.layout()`**: GridCalculator를 사용하여 박스와 자식 요소의 위치·크기를 재계산하고 DOM 스타일을 업데이트한다.
 2. **`this._rerenderAffectedParagraphs()`**: 영향받는 단락들의 텍스트 레이아웃을 재실행하여 이미지/박스 회피를 다시 계산한다.
+
+### 4.4 문서 영역 밖 드래그 시 위치 변환 (Position Conversion on Drag Outside)
+
+문서(`<x-layout-document>`)의 직계 자식인 `<x-layout-box>` 요소는 드래그 중 문서 편집 영역 밖으로 나가면 `position: 'static'`에서 `position: 'absolute'`로 자동 변환된다. 반대로 절대 위치에서 다시 문서 편집 영역 안으로 돌아오면 `position: 'static'`으로 변환된다.
+
+**이 동작은 문서의 직계 자식 박스에만 적용된다.** 다른 박스 안에 중첩된 박스는 이 변환의 대상이 아니다.
+
+#### 4.4.1 static → absolute 변환
+
+`position: 'static'`인 박스를 드래그하여 새 위치가 문서 편집 영역 밖이면:
+
+1. `_computeNewPosition`에서 변환 조건 감지:
+   - `newLeftMm < columnCoords[0].x1` (왼쪽 밖)
+   - `newLeftMm + absWidth > columnCoords[last].x2` (오른쪽 밖)
+   - `newTopMm < columnCoords[0].y1` (위쪽 밖)
+   - `newTopMm > columnCoords[0].y2` (아래쪽 밖)
+2. 반환값에 `converted` 필드 포함:
+   ```typescript
+   {
+     left: newLeft,  // 클램핑된 static 위치 (fallback)
+     top: newTop,
+     converted: {
+       position: 'absolute',
+       left: newLeftMm,    // mm 좌표 (클램핑 없음)
+       top: newTopMm,       // mm 좌표 (클램핑 없음)
+       width: this.absWidth,  // 현재 mm 너비
+       height: this.absHeight, // 현재 mm 높이
+     }
+   }
+   ```
+3. 드래그 핸들러에서 변환 적용:
+   - `this.position = 'absolute'`
+   - `this.left = converted.left`
+   - `this.top = converted.top`
+   - `this.width = converted.width`
+   - `this.height = converted.height`
+4. 드래그 시작 위치 재설정:
+   - `_dragStartLeft/Top/Width/Height/Position` 갱신
+   - `_dragStartMouseX/Y`를 현재 마우스 위치로 갱신 (델타 재계산)
+
+#### 4.4.2 absolute → static 변환 (문서 영역 안으로 복귀)
+
+`position: 'absolute'`인 박스를 드래그하여 새 위치가 문서 편집 영역 안에 완전히 들어오면:
+
+1. 변환 조건 감지:
+   - `newLeft >= editAreaLeft`
+   - `newLeft + this.width <= editAreaRight`
+   - `newTop >= editAreaTop`
+   - `newTop + this.height <= editAreaBottom`
+2. 컬럼/라인 스냅 계산:
+   - `nearestColumn = round((newLeft - editAreaLeft) / avgColWidth)`
+   - `nearestLine = round((newTop - editAreaTop) / lineHeight)`
+   - 컬럼과 라인 값은 유효 범위로 클램핑
+3. 크기 변환:
+   - `staticWidth = max(1, round(absWidth / avgColWidth))`
+   - `staticHeight = max(1, round(absHeight / lineHeight))`
+4. 반환값에 `converted` 필드 포함:
+   ```typescript
+   {
+     left: clampedColumn,
+     top: clampedLine,
+     converted: {
+       position: 'static',
+       left: clampedColumn,
+       top: clampedLine,
+       width: staticWidth,
+       height: staticHeight,
+     }
+   }
+   ```
+5. 드래그 시작 위치 재설정 (static 모드용)
+
+#### 4.4.3 absolute 모드에서 문서 직계 자식의 클램핑 제거
+
+일반적인 absolute 박스(다른 박스 안에 중첩된)는 부모의 padding 영역 내로 클램핑된다. 그러나 **문서 직계 자식** absolute 박스는 클램핑 없이 자유롭게 음수 좌표까지 이동할 수 있다. 이를 통해 박스를 문서 영역 밖으로 완전히 빼낼 수 있다.
+
+```
+// 일반 absolute 박스 (다른 박스 안):
+left = clamp(startLeft + delta, 0, maxLeft)
+top  = clamp(startTop + delta, 0, maxTop)
+
+// 문서 직계 자식 absolute 박스:
+left = startLeft + delta  // 클램핑 없음, 음수 가능
+top  = startTop + delta   // 클램핑 없음, 음수 가능
+```
+
+#### 4.4.4 ESC 취소 시 위치/크기/position 복원
+
+ESC 키로 드래그를 취소하면 원래 상태로 완전히 복원된다:
+
+1. `this.position = this._dragStartPosition` (static ↔ absolute 복원)
+2. `this.left = this._dragStartLeft`
+3. `this.top = this._dragStartTop`
+4. `this.width = this._dragStartWidth`
+5. `this.height = this._dragStartHeight`
+
+드래그 시작 시 `_dragStartPosition`, `_dragStartWidth`, `_dragStartHeight`가 `_onLayoutMouseDown`에서 저장된다. 다중 선택의 경우, 모든 드래그 대상의 시작 상태가 저장된다.
+
+#### 4.4.5 변환 중 드래그 시작 위치 갱신
+
+위치 변환이 발생하면 (static → absolute 또는 absolute → static), 드래그의 기준점이 변경되어야 한다. 변환 직후:
+
+1. `_dragStartLeft/Top/Width/Height/Position`을 변환된 값으로 갱신
+2. `_dragStartMouseX/Y`를 현재 마우스 위치로 갱신
+
+이 갱신이 없으면 다음 rAF 프레임에서 변환 전의 기준점으로 델타를 계산하여 박스가 튕기는 현상이 발생한다.
+
+#### 4.4.6 컬럼 보존: `_savedColumns` / `_savedGap`
+
+`position: 'static'` → `position: 'absolute'` 변환 시, `layout()`은 `columns: 1, gap: 0`으로 설정하여 다중 컬럼 단락이 단일 컬럼으로 붕괘되는 문제가 있었다. 이를 방지하기 위해 변환 전 컬럼/갭 설정을 저장한다.
+
+**필드**:
+```typescript
+private _savedColumns: number | number[] = 1;
+private _savedGap: number | number[] = 0;
+```
+
+**저장 시점** (`_applyPositionConversion` 호출 시):
+
+| 변환 방향 | 동작 |
+|-----------|------|
+| `static` → `absolute` | `parentModel.columnWidth.slice(left, left + width)` → `_savedColumns`<br>`parentModel.gaps.slice(left, left + width - 1)` → `_savedGap` |
+| `absolute` → `static` | `_savedColumns = 1`, `_savedGap = 0` (기본값 복원, `layout()`이 static 좌표로 재계산) |
+
+**`layout()`에서의 사용**:
+
+```typescript
+columns: this.position !== 'absolute'
+  ? columnWidth.slice(this.left, this.left + this.width)  // static: 컬럼 슬라이스
+  : this._savedColumns,                                     // absolute: 저장된 값
+gap: this.position !== 'absolute'
+  ? gaps.slice(this.left, this.left + this.width - 1)     // static: 갭 슬라이스
+  : this._savedGap,                                         // absolute: 저장된 값
+```
+
+이렇게 하면 absolute 모드에서도 박스 내부의 단락이 원래 컬럼 수를 유지하여 텍스트 레이아웃이 붕괴되지 않는다.
+
+**ESC 취소 시**: `_dragOriginal*` 필드에 드래그 시작 전 원래 `position`/`left`/`top`/`width`/`height`가 저장되어 있으므로, ESC 시 `_applyPositionConversion(_dragOriginalPosition, ...)`을 호출하면 `absolute` → `static` 변환 경로를 타서 `_savedColumns = 1`, `_savedGap = 0`으로 초기화되고 `layout()`이 static 좌표로 컬럼/갭을 재계산한다.
+
+#### 4.4.7 변환 조건 요약
+
+| 현재 position | 조건 | 변환 |
+|---------------|------|------|
+| `static` | 문서 직계 자식이고, 클램핑 전 위치가 편집 영역 밖 | → `absolute` (mm 좌표, 클램핑 없음) |
+| `static` | 문서 직계 자식이 아니거나, 편집 영역 안 | 변환 없음 (기존 컬럼/라인 스냅 유지) |
+| `absolute` | 문서 직계 자식이고, 새 위치가 편집 영역 안에 완전히 포함 | → `static` (컬럼/라인 스냅) |
+| `absolute` | 문서 직계 자식이 아니거나, 편집 영역 밖 | 변환 없음 (클램핑: 다른 박스 안은 클램핑, 문서 직계는 클램핑 없음) |
 
 ---
 
@@ -768,7 +941,8 @@ _collectParagraphs(element, set)
 2. **리스너 해제**: `document`에 등록된 `mousemove`, `mouseup`, `keydown` 리스너를 모두 제거한다.
 3. **상태 초기화**: `_isDragging = false`, `_dragMoved = false`로 설정한다.
 4. **커서 복원**: `cursor`를 `'grab'`(editableLayout 켜짐) 또는 `''`(꺼짐)로 복원한다.
-5. **위치 복원**: `left`/`top`을 `_dragStartLeft`/`_dragStartTop`으로 복원한다. setter를 통해 호출되므로 `layout()` + `_rerenderAffectedParagraphs()`도 함께 실행되어 텍스트도 원래 배치로 복원된다.
+5. **위치/크기/position 복원**: `position`/`left`/`top`/`width`/`height`을 `_dragStartPosition`/`_dragStartLeft`/`_dragStartTop`/`_dragStartWidth`/`_dragStartHeight`로 복원한다. setter를 통해 호출되므로 `layout()` + `_rerenderAffectedParagraphs()`도 함께 실행되어 텍스트도 원래 배치로 복원된다.
+6. **다중 선택 복원**: 모든 드래그 대상의 `position`/`left`/`top`/`width`/`height`을 각각의 `_dragStartPosition`/`_dragStartLeft`/`_dragStartTop`/`_dragStartWidth`/`_dragStartHeight`로 복원한다.
 
 ### 6.2 구현
 
@@ -794,9 +968,32 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
   this._dragMoved = false;
   this.style.cursor = this._editableLayout ? 'grab' : '';
 
-  // 4) 위치 복원 (setter 호출 → layout() + _rerenderAffectedParagraphs())
-  if (this.left !== this._dragStartLeft) this.left = this._dragStartLeft;
-  if (this.top !== this._dragStartTop) this.top = this._dragStartTop;
+  // 4) position/위치/크기 복원 (setter 호출 → layout() + _rerenderAffectedParagraphs())
+  //    드래그 중 position 변환(static ↔ absolute)이 있었어도 원래 모드로 복원
+  const manager = EditManager.getInstance();
+  const dragTargets = manager._getDragTargets();
+  const isTopLevel = dragTargets.includes(this);
+
+  if (isTopLevel) {
+    if (this.position !== this._dragStartPosition) this.position = this._dragStartPosition;
+    if (this.left !== this._dragStartLeft) this.left = this._dragStartLeft;
+    if (this.top !== this._dragStartTop) this.top = this._dragStartTop;
+    if (this.width !== this._dragStartWidth) this.width = this._dragStartWidth;
+    if (this.height !== this._dragStartHeight) this.height = this._dragStartHeight;
+    manager._dispatchLayoutMove(this, this._dragStartLeft, this._dragStartTop, this._dragStartLeft, this._dragStartTop, true);
+  }
+
+  for (const target of dragTargets) {
+    if (target === this) continue;
+    if (target.position !== target._dragStartPosition) target.position = target._dragStartPosition;
+    if (target.left !== target._dragStartLeft) target.left = target._dragStartLeft;
+    if (target.top !== target._dragStartTop) target.top = target._dragStartTop;
+    if (target.width !== target._dragStartWidth) target.width = target._dragStartWidth;
+    if (target.height !== target._dragStartHeight) target.height = target._dragStartHeight;
+    manager._dispatchLayoutMove(target, target._dragStartLeft, target._dragStartTop, target._dragStartLeft, target._dragStartTop, true);
+  }
+
+  manager._endLayoutDrag();
 }
 ```
 
@@ -997,6 +1194,8 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 - **`_dragMoved` 플래그**: 드래그 후 `click` 이벤트가 발생하면 `_onLayoutClick`에서 `_dragMoved`를 확인하여 드래그 중 클릭을 무시한다.
 - **`parentModel` 필수**: `_computeNewPosition`에서 `position: 'static'` 모드는 `parentModel`(부모의 `GridCalculator`)이 필요하다. 없으면 시작 위치를 그대로 반환한다.
 - **`maxTop` 계산**: static 모드에서 박스의 하단이 편집 영역 하단을 넘지 않도록 `editableTextHeight`와 `absHeight`를 사용하여 `maxTop`을 계산한다. `editableHeight`만 사용하면 마지막 줄의 leading 공간이 무시되어 박스가 하단에 딱 붙지 않는다.
+- **문서 영역 밖 드래그**: 문서 직계 자식 박스(`this.parentElement?.type === 'document'`)만 위치 변환 대상이다. 다른 박스 안에 중첩된 박스는 이 동작의 대상이 아니다.
+- **absolute → static 변환 시 크기 근사**: 절대 위치에서 static으로 복귀할 때 `width = round(absWidth / avgColWidth)`, `height = round(absHeight / lineHeight)`로 근사 변환한다. 정밀한 값이 아닐 수 있으므로 사용자가 조정해야 할 수 있다.
 
 ---
 
@@ -1026,6 +1225,9 @@ private _dragStartMouseX: number = 0;
 private _dragStartMouseY: number = 0;
 private _dragStartLeft: number = 0;      // 드래그 시작 시 left (mm 또는 컬럼 인덱스)
 private _dragStartTop: number = 0;        // 드래그 시작 시 top (mm 또는 라인 인덱스)
+private _dragStartWidth: number = 0;      // 드래그 시작 시 width (mm 또는 컬럼 스팬 수)
+private _dragStartHeight: number = 0;     // 드래그 시작 시 height (mm 또는 라인 수)
+private _dragStartPosition: BoxPosition = 'static'; // 드래그 시작 시 position 모드
 private _dragLastClientX: number = 0;
 private _dragLastClientY: number = 0;
 private _dragRafId: number | null = null; // requestAnimationFrame ID
@@ -1061,33 +1263,41 @@ private _dragStartPositions: Map<LayoutBoxElement, { left: number; top: number }
 
 ```
 drag rAF 콜백
-  → _computeNewPosition(dx, dy) → { left, top }
-  → this.left = left  → setter → layout() + _rerenderAffectedParagraphs()
-  → this.top  = top   → setter → layout() + _rerenderAffectedParagraphs()
+  → _computeNewPosition(dx, dy) → { left, top, converted? }
+  → if converted:
+      → this.position = converted.position (static ↔ absolute)
+      → this.left/top/width/height = converted values
+      → _dragStartLeft/Top/Width/Height/Position 갱신
+      → _dragStartMouseX/Y 갱신 (델타 재계산)
+  → else:
+      → this.left = left  → setter → layout() + _rerenderAffectedParagraphs()
+      → this.top  = top   → setter → layout() + _rerenderAffectedParagraphs()
   → for each other drag target:
-      → t._computeNewPosition(dx, dy, startPos) → { left, top }
-      → t.left = left → setter → layout() + _rerenderAffectedParagraphs()
-      → t.top  = top  → setter → layout() + _rerenderAffectedParagraphs()
+      → 동일한 변환 로직 적용
 
 ESC 취소
-  → this.left = _dragStartLeft → setter → layout() + _rerenderAffectedParagraphs()
-  → this.top  = _dragStartTop  → setter → layout() + _rerenderAffectedParagraphs()
+  → this.position = _dragStartPosition (원래 position 복원)
+  → this.left = _dragStartLeft  → setter → layout() + _rerenderAffectedParagraphs()
+  → this.top  = _dragStartTop   → setter → layout() + _rerenderAffectedParagraphs()
+  → this.width = _dragStartWidth → setter → layout() + _rerenderAffectedParagraphs()
+  → this.height = _dragStartHeight → setter → layout() + _rerenderAffectedParagraphs()
   → EditManager._dispatchLayoutMove(this, start, start, canceled=true)
   → for each other drag target:
-      → t.left = startPos.left → setter → layout() + _rerenderAffectedParagraphs()
-      → t.top  = startPos.top  → setter → layout() + _rerenderAffectedParagraphs()
+      → 동일하게 position/left/top/width/height 복원
       → EditManager._dispatchLayoutMove(t, start, start, canceled=true)
   → EditManager._endLayoutDrag()
 
 mouseup
-  → _computeNewPosition(deltaX, deltaY) → { left, top }
-  → this.left = left  → setter → layout() + _rerenderAffectedParagraphs()
-  → this.top  = top   → setter → layout() + _rerenderAffectedParagraphs()
+  → _computeNewPosition(deltaX, deltaY) → { left, top, converted? }
+  → if converted:
+      → this.position = converted.position
+      → this.left/top/width/height = converted values
+  → else:
+      → this.left = left  → setter → layout() + _rerenderAffectedParagraphs()
+      → this.top  = top   → setter → layout() + _rerenderAffectedParagraphs()
   → EditManager._dispatchLayoutMove(this, start, end, canceled=false)
   → for each other drag target:
-      → t._computeNewPosition(dx, dy, startPos) → { left, top }
-      → t.left = left → setter → layout() + _rerenderAffectedParagraphs()
-      → t.top  = top  → setter → layout() + _rerenderAffectedParagraphs()
+      → 동일한 변환 로직 적용
       → EditManager._dispatchLayoutMove(t, start, end, canceled=false)
   → EditManager._endLayoutDrag()
 ```
