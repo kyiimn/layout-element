@@ -973,6 +973,52 @@ export class LayoutBoxElement extends HTMLElement {
     this._rerenderAffectedParagraphs();
   }
 
+  // ─── Position Conversion Helpers ───────────────────────────────
+
+  /**
+   * static 좌표(컬럼 인덱스, 라인 인덱스)를 absolute 좌표(mm)로 변환한다.
+   * width/height는 absWidth/absHeight getter를 통해 mm로 변환한다.
+   * parentModel이 필요하다.
+   */
+  private _staticToAbsoluteCoords(left: number, top: number): { left: number; top: number; width: number; height: number } {
+    const { columnCoords, lineHeight } = this.parentModel!;
+    return {
+      left: columnCoords[left].x1,
+      top: columnCoords[left].y1 + lineHeight * top,
+      width: this.absWidth,
+      height: this.absHeight,
+    };
+  }
+
+  /**
+   * absolute 좌표(mm)를 static 좌표(컬럼 인덱스, 라인 인덱스)로 변환한다.
+   * 컬럼/라인 스냅과 범위 클램핑을 적용한다.
+   * parentModel이 필요하다.
+   */
+  private _absoluteToStaticCoords(left: number, top: number, width: number, height: number): { left: number; top: number; width: number; height: number } {
+    const { columnCoords, lineHeight, fontSize, editableWidth, editableHeight, columnCount } = this.parentModel!;
+    const avgColWidth = editableWidth / columnCount;
+    const editAreaLeft = columnCoords[0].x1;
+    const editAreaTop = columnCoords[0].y1;
+
+    const nearestColumn = Math.round((left - editAreaLeft) / avgColWidth);
+    const clampedColumn = Math.max(0, Math.min(columnCount - Math.round(width / avgColWidth), nearestColumn));
+    const nearestLine = Math.round((top - editAreaTop) / lineHeight);
+    const maxTop = Math.floor((editableHeight - (lineHeight * Math.round(height / lineHeight) - (lineHeight - fontSize))) / lineHeight);
+    const clampedLine = Math.max(0, Math.min(maxTop, nearestLine));
+    const staticWidth = Math.max(1, Math.round(width / avgColWidth));
+    const staticHeight = Math.max(1, Math.round(height / lineHeight));
+
+    return {
+      left: clampedColumn,
+      top: clampedLine,
+      width: staticWidth,
+      height: staticHeight,
+    };
+  }
+
+  // ─── Public API ─────────────────────────────────────────────
+
   /**
    * 박스의 position 모드를 변환한다.
    * static → absolute: 컬럼/라인 단위의 좌표를 mm 단위로 변환하고, column/gap 설정을 보존한다.
@@ -992,26 +1038,10 @@ export class LayoutBoxElement extends HTMLElement {
     }
 
     if (this._position === 'static' && targetPosition === 'absolute') {
-      const { columnCoords, lineHeight } = parentModel;
-      const absLeft = columnCoords[this._left].x1;
-      const absTop = columnCoords[this._left].y1 + lineHeight * this._top;
-      const absWidth = this.absWidth;
-      const absHeight = this.absHeight;
+      const { left: absLeft, top: absTop, width: absWidth, height: absHeight } = this._staticToAbsoluteCoords(this._left, this._top);
       this._applyPositionConversion('absolute', absLeft, absTop, absWidth, absHeight);
     } else if (this._position === 'absolute' && targetPosition === 'static') {
-      const { columnCoords, lineHeight, fontSize, editableWidth, editableHeight, columnCount } = parentModel;
-      const avgColWidth = editableWidth / columnCount;
-      const editAreaLeft = columnCoords[0].x1;
-      const editAreaTop = columnCoords[0].y1;
-
-      const nearestColumn = Math.round((this._left - editAreaLeft) / avgColWidth);
-      const clampedColumn = Math.max(0, Math.min(columnCount - Math.round(this._width / avgColWidth), nearestColumn));
-      const nearestLine = Math.round((this._top - editAreaTop) / lineHeight);
-      const maxTop = Math.floor((editableHeight - (lineHeight * Math.round(this._height / lineHeight) - (lineHeight - fontSize))) / lineHeight);
-      const clampedLine = Math.max(0, Math.min(maxTop, nearestLine));
-      const staticWidth = Math.max(1, Math.round(this._width / avgColWidth));
-      const staticHeight = Math.max(1, Math.round(this._height / lineHeight));
-
+      const { left: clampedColumn, top: clampedLine, width: staticWidth, height: staticHeight } = this._absoluteToStaticCoords(this._left, this._top, this._width, this._height);
       this._applyPositionConversion('static', clampedColumn, clampedLine, staticWidth, staticHeight);
     }
   }
@@ -1069,14 +1099,7 @@ export class LayoutBoxElement extends HTMLElement {
             newTop >= editAreaTop &&
             newTop + this.height <= editAreaBottom
           ) {
-            const avgColWidth = parentModel.editableWidth / parentModel.columnCount;
-            const nearestColumn = Math.round((newLeft - editAreaLeft) / avgColWidth);
-            const clampedColumn = Math.max(0, Math.min(parentModel.columnCount - Math.round(this.absWidth / avgColWidth), nearestColumn));
-            const nearestLine = Math.round((newTop - editAreaTop) / parentModel.lineHeight);
-            const maxTop = Math.floor((parentModel.editableTextHeight - (parentModel.lineHeight * Math.round(this.absHeight / parentModel.lineHeight) - (parentModel.lineHeight - parentModel.fontSize))) / parentModel.lineHeight);
-            const clampedLine = Math.max(0, Math.min(maxTop, nearestLine));
-            const staticWidth = Math.max(1, Math.round(this.absWidth / avgColWidth));
-            const staticHeight = Math.max(1, Math.round(this.absHeight / parentModel.lineHeight));
+            const { left: clampedColumn, top: clampedLine, width: staticWidth, height: staticHeight } = this._absoluteToStaticCoords(newLeft, newTop, this.absWidth, this.absHeight);
 
             return {
               left: clampedColumn,
