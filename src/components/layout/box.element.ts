@@ -634,7 +634,6 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   private _onLayoutMouseEnter = (): void => {
-    if (this.hasAttribute('data-selected')) return;
     let ancestor: Element | null = this.parentElement;
     while (ancestor) {
       if (ancestor.hasAttribute('data-hovered')) {
@@ -642,6 +641,7 @@ export class LayoutBoxElement extends HTMLElement {
       }
       ancestor = ancestor.parentElement;
     }
+    if (this.hasAttribute('data-selected')) return;
     this.setAttribute('data-hovered', '');
   }
 
