@@ -105,6 +105,8 @@ export class EditManager {
   private _listeners: Map<EditManagerEventType, Set<EditManagerEventListener>> = new Map();
   private _dispatching = false;
   private _selectedLayouts: LayoutElement[] = [];
+  private _isLayoutDragging = false;
+  private _isLayoutResizing = false;
 
   private constructor() {}
 
@@ -560,6 +562,7 @@ export class EditManager {
    * @internal
    */
   _startLayoutDrag(): void {
+    this._isLayoutDragging = true;
     this._dragTargets = this.getTopLevelDragTargets();
     this._dragStartPositions.clear();
     for (const target of this._dragTargets) {
@@ -572,8 +575,41 @@ export class EditManager {
    * @internal
    */
   _endLayoutDrag(): void {
+    this._isLayoutDragging = false;
     this._dragTargets = [];
     this._dragStartPositions.clear();
+  }
+
+  /**
+   * 레이아웃 크기 조정을 시작한다.
+   * @internal
+   */
+  _startLayoutResize(): void {
+    this._isLayoutResizing = true;
+  }
+
+  /**
+   * 레이아웃 크기 조정을 종료하고 내부 상태를 초기화한다.
+   * @internal
+   */
+  _endLayoutResize(): void {
+    this._isLayoutResizing = false;
+  }
+
+  /**
+   * 현재 레이아웃 드래그 이동 중인지 반환한다.
+   * @internal
+   */
+  _isDraggingLayout(): boolean {
+    return this._isLayoutDragging;
+  }
+
+  /**
+   * 현재 레이아웃 크기 조정 중인지 반환한다.
+   * @internal
+   */
+  _isResizingLayout(): boolean {
+    return this._isLayoutResizing;
   }
 
   /**

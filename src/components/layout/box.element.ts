@@ -669,6 +669,8 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   private _onLayoutMouseEnter = (): void => {
+    const manager = EditManager.getInstance();
+    if (manager._isDraggingLayout() || manager._isResizingLayout()) return;
     let ancestor: Element | null = this.parentElement;
     while (ancestor) {
       if (ancestor.hasAttribute('data-hovered')) {
@@ -682,6 +684,8 @@ export class LayoutBoxElement extends HTMLElement {
 
   private _onLayoutMouseLeave = (event: MouseEvent): void => {
     this.removeAttribute('data-hovered');
+    const manager = EditManager.getInstance();
+    if (manager._isDraggingLayout() || manager._isResizingLayout()) return;
     const related = event.relatedTarget as Element | null;
     if (!related) return;
     let target: Element | null = related;
@@ -939,6 +943,7 @@ export class LayoutBoxElement extends HTMLElement {
     this._resizeLastClientX = event.clientX;
     this._resizeLastClientY = event.clientY;
 
+    EditManager.getInstance()._startLayoutResize();
     document.addEventListener('mousemove', this._onResizeMouseMove);
     document.addEventListener('mouseup', this._onResizeMouseUp);
     document.addEventListener('keydown', this._onResizeKeyDown);
@@ -977,6 +982,7 @@ export class LayoutBoxElement extends HTMLElement {
       this._resizeRafId = null;
     }
     this._isResizing = false;
+    EditManager.getInstance()._endLayoutResize();
 
     if (!this._resizeMoved) {
       this._resizeHandle = null;
@@ -1018,6 +1024,7 @@ export class LayoutBoxElement extends HTMLElement {
     document.removeEventListener('keydown', this._onResizeKeyDown);
     this._isResizing = false;
     this._resizeHandle = null;
+    EditManager.getInstance()._endLayoutResize();
 
     if (this.left !== this._resizeStartLeft) this.left = this._resizeStartLeft;
     if (this.top !== this._resizeStartTop) this.top = this._resizeStartTop;
@@ -1137,9 +1144,7 @@ export class LayoutBoxElement extends HTMLElement {
     const affected = new Set<LayoutParagraphElement>();
 
     for (const item of this.items) {
-      if (item.type === 'paragraph') {
-        affected.add(item as LayoutParagraphElement);
-      }
+      this._collectParagraphs(item, affected);
     }
 
     if (this.parentElement) {

@@ -119,6 +119,7 @@ element.editableLayout = false;
 3. 마우스가 요소에 진입하면 **조상 요소의 `data-hovered`를 모두 제거**하여, 가장 안쪽(최상위) 요소만 호버 표시가 보인다
 4. 마우스가 자식 요소에서 부모 영역으로 돌아갈 때, `elementFromPoint`를 사용하여 마우스 위치 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다
 5. `<x-layout-document>`는 호버 표시를 지원하지 않는다
+6. **드래그 이동 중이거나 크기 조정 중에는 hover가 동작하지 않는다**. `EditManager._isDraggingLayout()` 또는 `_isResizingLayout()`이 `true`이면 `_onLayoutMouseEnter`와 `_onLayoutMouseLeave`가 early return하여 hover 표시가 나타나지 않는다. 이로 인해 드래그/리사이즈 중에 마우스가 다른 박스 위로 이동해도 방해가 되지 않는다. 드래그/리사이즈가 종료되면 정상적으로 hover가 동작한다.
 
 | 상태 | 커서 | 시각적 피드백 |
 |------|------|-------------|
@@ -195,6 +196,26 @@ manager.selectedLayoutIds; // string[]
 - 서로 ancestor-descendant 관계에 있는 요소 중 ancestor만 유지되고 descendant는 제외된다.
 - 서로 독립적인(형제 또는 다른 트리의) 요소들은 모두 유지된다.
 - 단일 요소만 선택된 경우 필터링 없이 그대로 반환된다.
+
+#### `_isDraggingLayout()`
+
+현재 레이아웃 드래그 이동 중인지 반환한다.
+
+| 반환값 | 타입 | 설명 |
+|--------|------|------|
+| 반환값 | `boolean` | 드래그 이동 중이면 `true`, 아니면 `false` |
+
+`_startLayoutDrag()`가 호출되면 `true`로 설정되고, `_endLayoutDrag()`가 호출되면 `false`로 설정된다. 이 값은 `_onLayoutMouseEnter`/`_onLayoutMouseLeave`에서 hover 표시를 차단하는 데 사용된다.
+
+#### `_isResizingLayout()`
+
+현재 레이아웃 크기 조정 중인지 반환한다.
+
+| 반환값 | 타입 | 설명 |
+|--------|------|------|
+| 반환값 | `boolean` | 크기 조정 중이면 `true`, 아니면 `false` |
+
+`_startLayoutResize()`가 호출되면 `true`로 설정되고, `_endLayoutResize()`가 호출되면 `false`로 설정된다. 이 값은 `_onLayoutMouseEnter`/`_onLayoutMouseLeave`에서 hover 표시를 차단하는 데 사용된다.
 
 #### 이벤트: `layoutSelectionChange`
 
@@ -987,7 +1008,7 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 |------|------|
 | `src/components/layout/box.element.ts` | 드래그 로직, 리사이즈 로직, 위치 setter, `_computeNewPosition`, `_computeNewSize`, `_rerenderAffectedParagraphs`, `_collectParagraphs` |
 | `src/components/layout/document.element.ts` | `editableLayout` 속성, `_onLayoutClick`, `:host([data-selected])` CSS 규칙 |
-| `src/edit/edit-manager.ts` | 레이아웃 선택 상태 관리, `selectLayout`, `clearLayoutSelection`, `_startLayoutDrag`, `_endLayoutDrag`, `getTopLevelDragTargets`, `_unregisterLayout`, `layoutSelectionChange` 이벤트, `_dispatchLayoutResize` |
+| `src/edit/edit-manager.ts` | 레이아웃 선택 상태 관리, `selectLayout`, `clearLayoutSelection`, `_startLayoutDrag`, `_endLayoutDrag`, `_startLayoutResize`, `_endLayoutResize`, `_isDraggingLayout`, `_isResizingLayout`, `getTopLevelDragTargets`, `_unregisterLayout`, `layoutSelectionChange` 이벤트, `_dispatchLayoutResize` |
 | `src/react/hooks/use-edit-manager.ts` | React 훅: `selectedLayouts`, `selectLayout`, `clearLayoutSelection`, `onLayoutSelectionChange` |
 | `src/core/text-layout-engine.ts` | `_layoutTextIntoColumns`, 오버랩 회피, COVER 라인, PART 분할 |
 | `src/components/layout/paragraph.element.ts` | `render()`, `_structureDirty`, TextLayoutEngine 생성 |
@@ -1084,6 +1105,7 @@ mouseup
 - **`layoutMove` 이벤트**: 드래그 완료(mouseup) 또는 취소(ESC) 시 `EditManager._dispatchLayoutMove()`를 통해 발생한다. 단순 클릭(이동 임계값 3px 미만)에서는 발생하지 않는다. `canceled` 필드로 완료와 취소를 구분할 수 있다.
 - **호버 표시 (`data-hovered`)**: `<x-layout-box>`에만 적용되며, `<x-layout-document>`는 호버 표시를 지원하지 않는다. `mouseenter` 시 조상 요소의 `data-hovered`를 모두 제거하여 가장 안쪽 요소만 호버 표시가 보이도록 한다. `mouseleave` 시 `elementFromPoint`로 마우스 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다. 이 동작은 중첩된 박스에서 자식→부모로 마우스가 돌아갈 때 부모의 호버가 복원되도록 보장한다.
 - **호버와 선택의 우선순위**: `data-selected`가 있는 요소는 `data-hovered`를 표시하지 않는다. `_onLayoutMouseEnter`에서 `hasAttribute('data-selected')`를 먼저 검사하여, 이미 선택된 요소 위에 마우스가 있을 때 파란색 호버 테두리가 빨간색 선택 테두리와 겹치지 않도록 한다. 조상의 `data-hovered` 제거는 `data-selected` 체크 전에 수행되어, 선택된 요소 위에서 마우스가 움직일 때 조상 요소의 호버 표시도 제거된다.
+- **드래그/리사이즈 중 hover 차단**: `EditManager._isDraggingLayout()` 또는 `_isResizingLayout()`이 `true`이면 `_onLayoutMouseEnter`와 `_onLayoutMouseLeave`가 early return하여 hover 표시가 전혀 나타나지 않는다. 드래그 이동 중이나 크기 조정 중에 마우스가 다른 박스 위로 이동해도 방해가 되지 않도록 한다. 드래그/리사이즈가 종료되면 `EditManager._endLayoutDrag()`/`_endLayoutResize()`에서 플래그가 해제되어 hover가 정상 동작한다.
 
 ---
 
@@ -1124,6 +1146,7 @@ mouseup
 │     ├── _resizeMoved = false                                        │
 │     ├── _resizeStartMouseX/Y = clientX/Y                            │
 │     ├── _resizeStartLeft/Top/Width/Height = 현재 값                   │
+│     ├── EditManager._startLayoutResize() ← hover 차단 플래그 설정      │
 │     └── document에 mousemove, mouseup, keydown 리스너 등록            │
 │                                                                     │
 │  ② mousemove (리사이즈 중)                                           │
@@ -1145,6 +1168,7 @@ mouseup
 │     ├── document 리스너 제거 (mousemove, mouseup, keydown)            │
 │     ├── rAF 취소 (있으면)                                             │
 │     ├── _isResizing = false, _resizeHandle = null                    │
+│     ├── EditManager._endLayoutResize() ← hover 차단 플래그 해제        │
 │     ├── _resizeMoved === false? → return (클릭이었음)                 │
 │     ├── 최종 크기 계산 → this.left/top/width/height 설정              │
 │     └── EditManager._dispatchLayoutResize(                           │
@@ -1155,6 +1179,7 @@ mouseup
 │     ├── rAF 취소 (있으면)                                             │
 │     ├── document 리스너 제거 (mousemove, mouseup, keydown)            │
 │     ├── _isResizing = false, _resizeHandle = null                    │
+│     ├── EditManager._endLayoutResize() ← hover 차단 플래그 해제        │
 │     ├── this.left/top/width/height = 시작 값 복원                     │
 │     └── EditManager._dispatchLayoutResize(                           │
 │              this, start, start, canceled=true)                      │
