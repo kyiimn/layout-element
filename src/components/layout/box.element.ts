@@ -44,11 +44,19 @@ export class LayoutBoxElement extends HTMLElement {
   private _zIndex: number = 0;
   private _editableLayout: boolean = false;
 
+  private _savedColumns: number | number[] = 1;
+  private _savedGap: number | number[] = 0;
+
   private _isDragging = false;
   private _dragStartMouseX = 0;
   private _dragStartMouseY = 0;
   private _dragStartLeft = 0;
   private _dragStartTop = 0;
+  private _dragOriginalLeft = 0;
+  private _dragOriginalTop = 0;
+  private _dragOriginalWidth = 0;
+  private _dragOriginalHeight = 0;
+  private _dragOriginalPosition: BoxPosition = 'static';
   private _dragMoved = false;
   private _dragRafId: number | null = null;
   private _dragLastClientX = 0;
@@ -99,8 +107,8 @@ export class LayoutBoxElement extends HTMLElement {
       paddingBottom: (this.position !== 'absolute' && this.paddingBottom !== undefined) ? Math.ceil(this.paddingBottom / lineHeight) * lineHeight : this.paddingBottom,
       paddingLeft: this.paddingLeft,
 
-      columns: this.position !== 'absolute' ? columnWidth.slice(this.left, this.left + this.width) : 1,
-      gap: this.position !== 'absolute' ? gaps.slice(this.left, this.left + this.width - 1) : 0,
+      columns: this.position !== 'absolute' ? columnWidth.slice(this.left, this.left + this.width) : this._savedColumns,
+      gap: this.position !== 'absolute' ? gaps.slice(this.left, this.left + this.width - 1) : this._savedGap,
 
       paragraphStyle: this.paragraphStyle,
       textStyle: this.textStyle,
@@ -727,10 +735,28 @@ export class LayoutBoxElement extends HTMLElement {
     this._dragStartMouseY = event.clientY;
     this._dragStartLeft = this.left;
     this._dragStartTop = this.top;
+    this._dragOriginalLeft = this.left;
+    this._dragOriginalTop = this.top;
+    this._dragOriginalWidth = this.width;
+    this._dragOriginalHeight = this.height;
+    this._dragOriginalPosition = this.position;
     this._dragLastClientX = event.clientX;
     this._dragLastClientY = event.clientY;
     this.style.cursor = 'grabbing';
     EditManager.getInstance()._startLayoutDrag();
+
+    const dragTargets = EditManager.getInstance()._getDragTargets();
+    for (const target of dragTargets) {
+      if (target === this) continue;
+      target._dragStartLeft = target.left;
+      target._dragStartTop = target.top;
+      target._dragOriginalLeft = target.left;
+      target._dragOriginalTop = target.top;
+      target._dragOriginalWidth = target.width;
+      target._dragOriginalHeight = target.height;
+      target._dragOriginalPosition = target.position;
+    }
+
     document.addEventListener('mousemove', this._onLayoutMouseMove);
     document.addEventListener('mouseup', this._onLayoutMouseUp);
     document.addEventListener('keydown', this._onLayoutKeyDown);
@@ -756,20 +782,26 @@ export class LayoutBoxElement extends HTMLElement {
     const isTopLevel = dragTargets.includes(this);
 
     if (isTopLevel) {
-      const startLeft = this._dragStartLeft;
-      const startTop = this._dragStartTop;
-      if (this.left !== startLeft) this.left = startLeft;
-      if (this.top !== startTop) this.top = startTop;
-      manager._dispatchLayoutMove(this, startLeft, startTop, startLeft, startTop, true);
+      this._applyPositionConversion(
+        this._dragOriginalPosition,
+        this._dragOriginalLeft,
+        this._dragOriginalTop,
+        this._dragOriginalWidth,
+        this._dragOriginalHeight,
+      );
+      manager._dispatchLayoutMove(this, this._dragOriginalLeft, this._dragOriginalTop, this._dragOriginalLeft, this._dragOriginalTop, true);
     }
 
     for (const target of dragTargets) {
       if (target === this) continue;
-      const startPos = manager._getDragStartPosition(target);
-      if (!startPos) continue;
-      if (target.left !== startPos.left) target.left = startPos.left;
-      if (target.top !== startPos.top) target.top = startPos.top;
-      manager._dispatchLayoutMove(target, startPos.left, startPos.top, startPos.left, startPos.top, true);
+      target._applyPositionConversion(
+        target._dragOriginalPosition,
+        target._dragOriginalLeft,
+        target._dragOriginalTop,
+        target._dragOriginalWidth,
+        target._dragOriginalHeight,
+      );
+      manager._dispatchLayoutMove(target, target._dragOriginalLeft, target._dragOriginalTop, target._dragOriginalLeft, target._dragOriginalTop, true);
     }
 
     manager._endLayoutDrag();
@@ -795,18 +827,42 @@ export class LayoutBoxElement extends HTMLElement {
       const isTopLevel = dragTargets.includes(this);
 
       if (isTopLevel) {
-        const { left, top } = this._computeNewPosition(dx, dy);
-        if (left !== this.left) this.left = left;
-        if (top !== this.top) this.top = top;
+        const result = this._computeNewPosition(dx, dy);
+        if (result.converted) {
+          this._applyPositionConversion(
+            result.converted.position,
+            result.converted.left,
+            result.converted.top,
+            result.converted.width,
+            result.converted.height,
+          );
+          this._dragStartLeft = result.converted.left;
+          this._dragStartTop = result.converted.top;
+          this._dragStartMouseX = this._dragLastClientX;
+          this._dragStartMouseY = this._dragLastClientY;
+        } else {
+          if (this.left !== result.left) this.left = result.left;
+          if (this.top !== result.top) this.top = result.top;
+        }
       }
 
       for (const target of dragTargets) {
         if (target === this) continue;
-        const startPos = manager._getDragStartPosition(target);
-        if (!startPos) continue;
-        const { left: tLeft, top: tTop } = target._computeNewPosition(dx, dy, startPos.left, startPos.top);
-        if (tLeft !== target.left) target.left = tLeft;
-        if (tTop !== target.top) target.top = tTop;
+        const result = target._computeNewPosition(dx, dy, target._dragStartLeft, target._dragStartTop);
+        if (result.converted) {
+          target._applyPositionConversion(
+            result.converted.position,
+            result.converted.left,
+            result.converted.top,
+            result.converted.width,
+            result.converted.height,
+          );
+          target._dragStartLeft = result.converted.left;
+          target._dragStartTop = result.converted.top;
+        } else {
+          if (result.left !== target.left) target.left = result.left;
+          if (result.top !== target.top) target.top = result.top;
+        }
       }
     });
   }
@@ -838,23 +894,83 @@ export class LayoutBoxElement extends HTMLElement {
     if (isTopLevel) {
       const startLeft = this._dragStartLeft;
       const startTop = this._dragStartTop;
-      const { left, top } = this._computeNewPosition(deltaX, deltaY);
-      if (left !== this.left) this.left = left;
-      if (top !== this.top) this.top = top;
-      manager._dispatchLayoutMove(this, startLeft, startTop, left, top, false);
+      const result = this._computeNewPosition(deltaX, deltaY);
+      if (result.converted) {
+        this._applyPositionConversion(
+          result.converted.position,
+          result.converted.left,
+          result.converted.top,
+          result.converted.width,
+          result.converted.height,
+        );
+      } else {
+        if (result.left !== this.left) this.left = result.left;
+        if (result.top !== this.top) this.top = result.top;
+      }
+      manager._dispatchLayoutMove(this, startLeft, startTop, this.left, this.top, false);
     }
 
     for (const target of dragTargets) {
       if (target === this) continue;
-      const startPos = manager._getDragStartPosition(target);
-      if (!startPos) continue;
-      const { left: tLeft, top: tTop } = target._computeNewPosition(deltaX, deltaY, startPos.left, startPos.top);
-      if (tLeft !== target.left) target.left = tLeft;
-      if (tTop !== target.top) target.top = tTop;
-      manager._dispatchLayoutMove(target, startPos.left, startPos.top, tLeft, tTop, false);
+      const result = target._computeNewPosition(deltaX, deltaY, target._dragStartLeft, target._dragStartTop);
+      if (result.converted) {
+        target._applyPositionConversion(
+          result.converted.position,
+          result.converted.left,
+          result.converted.top,
+          result.converted.width,
+          result.converted.height,
+        );
+      } else {
+        if (result.left !== target.left) target.left = result.left;
+        if (result.top !== target.top) target.top = result.top;
+      }
+      manager._dispatchLayoutMove(target, target._dragStartLeft, target._dragStartTop, target.left, target.top, false);
     }
 
     manager._endLayoutDrag();
+  }
+
+  /**
+   * position 변환 시 모든 좌표 필드를 원자적으로 갱신하고 layout()을 한 번만 호출한다.
+   *
+   * setter를 개별 호출하면 position이 먼저 바뀐 상태에서 left/width가 아직 이전 좌표계 값인
+   * 상태로 layout()이 실행되어 columnWidth.slice(-122, ...) 같은 잘못된 인덱스가 발생한다.
+   * 이 메서드는 private 필드를 직접 설정한 후 layout()과 _rerenderAffectedParagraphs()를
+   * 한 번씩만 호출하여 문제를 방지한다.
+   *
+   * @param position - 새 position 모드 ('static' | 'absolute')
+   * @param left - 새 left 값 (static: 컬럼 인덱스, absolute: mm)
+   * @param top - 새 top 값 (static: 라인 인덱스, absolute: mm)
+   * @param width - 새 width 값 (static: 컬럼 스팬 수, absolute: mm)
+   * @param height - 새 height 값 (static: 라인 수, absolute: mm)
+   */
+  private _applyPositionConversion(
+    position: BoxPosition,
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+  ): void {
+    if (position === 'absolute' && this._position === 'static') {
+      const parentModel = this.parentModel;
+      if (parentModel) {
+        const { columnWidth, gaps } = parentModel;
+        this._savedColumns = columnWidth.slice(this._left, this._left + this._width);
+        this._savedGap = gaps.slice(this._left, this._left + this._width - 1);
+      }
+    } else if (position === 'static') {
+      this._savedColumns = 1;
+      this._savedGap = 0;
+    }
+
+    this._position = position;
+    this._left = left;
+    this._top = top;
+    this._width = width;
+    this._height = height;
+    this.layout();
+    this._rerenderAffectedParagraphs();
   }
 
   /**
@@ -863,28 +979,79 @@ export class LayoutBoxElement extends HTMLElement {
    * 다중 선택 드래그에서 각 대상 요소의 시작 위치를 독립적으로 전달할 수 있다.
    * `startLeft`/`startTop`을 생략하면 `this._dragStartLeft`/`this._dragStartTop`을 사용한다.
    *
+   * 문서 직계 자식 박스가 드래그 중 문서 영역 밖으로 나가면 `position: 'static'`에서
+   * `position: 'absolute'`로 자동 변환되며, 반대로 절대 위치에서 다시 문서 영역 안으로
+   * 돌아오면 `position: 'static'`으로 변환된다.
+   *
    * @param deltaPxX - 마우스 가로 이동량 (픽셀)
    * @param deltaPxY - 마우스 세로 이동량 (픽셀)
    * @param startLeft - 드래그 시작 left 값 (생략 시 this._dragStartLeft)
    * @param startTop - 드래그 시작 top 값 (생략 시 this._dragStartTop)
-   * @returns 스냅/클램핑이 적용된 새 위치
+   * @returns 새 위치. `converted`가 있으면 위치 변환이 필요함
    */
   private _computeNewPosition(
     deltaPxX: number,
     deltaPxY: number,
     startLeft?: number,
     startTop?: number,
-  ): { left: number; top: number } {
+  ): { left: number; top: number; converted?: { position: BoxPosition; left: number; top: number; width: number; height: number } } {
     const sLeft = startLeft ?? this._dragStartLeft;
     const sTop = startTop ?? this._dragStartTop;
     const deltaMmX = deltaPxX / GridCalculator.ppm;
     const deltaMmY = deltaPxY / GridCalculator.ppm;
+
+    const isDocumentChild = this.parentElement?.type === 'document';
 
     if (this.position === 'absolute') {
       const padL = this.inheritStyle?.paddingLeft || 0;
       const padR = this.inheritStyle?.paddingRight || 0;
       const padT = this.inheritStyle?.paddingTop || 0;
       const padB = this.inheritStyle?.paddingBottom || 0;
+
+      if (isDocumentChild) {
+        const newLeft = sLeft + deltaMmX;
+        const newTop = sTop + deltaMmY;
+
+        const parentModel = this.parentModel;
+        if (parentModel) {
+          const { columnCoords } = parentModel;
+          const editAreaLeft = columnCoords[0].x1;
+          const editAreaRight = columnCoords[columnCoords.length - 1].x2;
+          const editAreaTop = columnCoords[0].y1;
+          const editAreaBottom = columnCoords[0].y2;
+
+          if (
+            newLeft >= editAreaLeft &&
+            newLeft + this.width <= editAreaRight &&
+            newTop >= editAreaTop &&
+            newTop + this.height <= editAreaBottom
+          ) {
+            const avgColWidth = parentModel.editableWidth / parentModel.columnCount;
+            const nearestColumn = Math.round((newLeft - editAreaLeft) / avgColWidth);
+            const clampedColumn = Math.max(0, Math.min(parentModel.columnCount - Math.round(this.absWidth / avgColWidth), nearestColumn));
+            const nearestLine = Math.round((newTop - editAreaTop) / parentModel.lineHeight);
+            const maxTop = Math.floor((parentModel.editableTextHeight - (parentModel.lineHeight * Math.round(this.absHeight / parentModel.lineHeight) - (parentModel.lineHeight - parentModel.fontSize))) / parentModel.lineHeight);
+            const clampedLine = Math.max(0, Math.min(maxTop, nearestLine));
+            const staticWidth = Math.max(1, Math.round(this.absWidth / avgColWidth));
+            const staticHeight = Math.max(1, Math.round(this.absHeight / parentModel.lineHeight));
+
+            return {
+              left: clampedColumn,
+              top: clampedLine,
+              converted: {
+                position: 'static',
+                left: clampedColumn,
+                top: clampedLine,
+                width: staticWidth,
+                height: staticHeight,
+              },
+            };
+          }
+        }
+
+        return { left: newLeft, top: newTop };
+      }
+
       const maxLeft = Math.max(0, (this.inheritStyle?.parentWidth || 0) - padL - padR - this.width);
       const maxTop = Math.max(0, (this.inheritStyle?.parentHeight || 0) - padT - padB - this.height);
       return {
@@ -893,6 +1060,7 @@ export class LayoutBoxElement extends HTMLElement {
       };
     }
 
+    // static mode
     const parentModel = this.parentModel;
     if (!parentModel) {
       return { left: sLeft, top: sTop };
@@ -918,6 +1086,29 @@ export class LayoutBoxElement extends HTMLElement {
 
     const maxTop = Math.floor((editableTextHeight - (lineHeight * this.height - (lineHeight - parentModel.fontSize))) / lineHeight);
     let newTop = Math.max(0, Math.min(maxTop, Math.round((newTopMm - columnCoords[newLeft].y1) / lineHeight)));
+
+    if (isDocumentChild) {
+      const editAreaLeft = columnCoords[0].x1;
+      const editAreaRight = columnCoords[columnCount - 1].x2;
+      const editAreaTop = columnCoords[0].y1;
+      const editAreaBottom = columnCoords[0].y2;
+
+      if (newLeftMm < editAreaLeft || newLeftMm + this.absWidth > editAreaRight || newTopMm < editAreaTop || newTopMm > editAreaBottom) {
+        const absLeft = newLeftMm;
+        const absTop = newTopMm;
+        return {
+          left: newLeft,
+          top: newTop,
+          converted: {
+            position: 'absolute',
+            left: absLeft,
+            top: absTop,
+            width: this.absWidth,
+            height: this.absHeight,
+          },
+        };
+      }
+    }
 
     return { left: newLeft, top: newTop };
   }
