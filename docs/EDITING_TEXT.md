@@ -142,6 +142,7 @@ paragraph.editableText = false;
 - `editableText = true`를 처음 설정하면 `EditController` 인스턴스가 생성된다.
 - `editableText = false`를 설정하면 `EditController.destroy()`가 호출되며, 이벤트 리스너와 DOM 요소가 모두 제거된다.
 - 같은 단락에서 다시 `editableText = true`를 설정하면 새 `EditController`가 생성된다.
+- **인쇄 모드**에서는 `editableText` 설정이 무시된다. 인쇄 모드에서는 편집 기능을 활성화할 수 없다.
 
 ### 2.2 `editController` 게터
 

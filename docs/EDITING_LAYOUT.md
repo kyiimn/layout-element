@@ -62,9 +62,13 @@ element.editableLayout = false;
 
 | 동작 | `<x-layout-document>` | `<x-layout-box>` |
 |------|----------------------|-------------------|
-| `true` 설정 | `click` 리스너 등록 | `click` + `mousedown` 리스너 등록, `cursor: grab`, 리사이즈 핸들 DOM 생성 |
-| `false` 설정 | `click` 리스너 해제, `data-selected` 제거 | `click` + `mousedown` 리스너 해제, `data-selected` 제거, `cursor` 초기화, 리사이즈 핸들 이벤트 리스너 해제·DOM 제거 |
-| `disconnectedCallback` | `EditManager._unregisterLayout()` 호출 | `EditManager._unregisterLayout()` 호출 |
+| `true` 설정 | `cursor` 및 내부 상태 업데이트 | `cursor: grab`, 리사이즈 핸들 DOM 표시, 내부 상태 업데이트 |
+| `false` 설정 | `data-selected` 제거, `EditManager` 등록 해제 | `data-selected`·`data-hovered` 제거, `cursor` 초기화, `EditManager` 등록 해제 |
+| `connectedCallback` | `click` 리스너 등록 | `click` + `mousedown` + `mouseenter` + `mouseleave` 리스너 등록, 리사이즈 핸들에 `mousedown` 리스너 등록 |
+| `disconnectedCallback` | `click` 리스너 해제 | `click` + `mousedown` + `mouseenter` + `mouseleave` 리스너 해제, `EditManager._unregisterLayout()` 호출 |
+| 인쇄 모드 | `editableLayout` 설정 무시 | `editableLayout` 설정 무시 |
+
+> **설계**: 이벤트 리스너는 `connectedCallback`에서 항상 등록하고 `disconnectedCallback`에서 항상 해제한다. `editableLayout` 플래그는 핸들러 내부에서 조기 반환하는 가드 역할만 한다. 리사이즈 핸들은 `_ensureResizeHandles()`에서 생성 시 항상 `mousedown` 리스너를 등록하며, `editableLayout = false`에서 리스너를 제거하지 않는다.
 
 > **참고**: `<x-layout-document>`는 선택만 가능하고 드래그 이동은 지원하지 않는다. 드래그는 `<x-layout-box>`에서만 동작한다.
 
@@ -1645,7 +1649,7 @@ interface InsertMode {
 | `type` | `'box' \| 'text' \| 'paragraph' \| 'image'` | 삽입할 요소의 종류 |
 | `position` | `'absolute' \| 'static'` | 새 요소의 배치 모드 |
 
-`text`와 `paragraph`는 모두 `<x-layout-paragraph>`를 내부에 생성하지만, `text`는 `type: 'text'` 데이터로, `paragraph`는 `type: 'paragraph'` 데이터로 변환된다. 실제 렌더링에서는 둘 다 단락 요소로 표시된다.
+`text`와 `paragraph`는 모두 `<x-layout-paragraph>`를 내부에 생성하지만, `text`는 `type: 'text'` 데이터로, `paragraph`는 `type: 'paragraph'` 데이터로 변환된다. `text` 타입은 `box.element.ts`의 `data` 세터에서 `{ ...child, type: 'paragraph' }`로 변환되며, 이때 `column`/`gap`을 명시적으로 설정하지 않아 부모 모델에서 상속받는다. 실제 렌더링에서는 둘 다 단락 요소로 표시된다.
 
 ### 12.4 이벤트
 
@@ -1737,8 +1741,6 @@ manager.addEventListener('insertCancel', (event) => {
 │     ├── _createElement()                                     │
 │     │   → <x-layout-box> 생성, children 설정, data 할당       │
 │     ├── container.appendChild(boxEl)                         │
-│     ├── element.editableLayout = true                        │
-│     ├── EditManager.selectLayout(element)                   │
 │     ├── _cleanup()                                           │
 │     └── EditManager._dispatchInsert(detail)                  │
 │         → insert 이벤트 발생 (canceled = false)               │
@@ -1787,18 +1789,18 @@ const boxData: BoxData = {
 | 삽입 타입 | `boxData.children` | 생성되는 내부 요소 |
 |-----------|-------------------|-------------------|
 | `box` | `undefined` | 자식 없음, 빈 박스 |
-| `text` | `[{ type: 'text', content: '' }]` | `<x-layout-paragraph>` (텍스트 데이터) |
-| `paragraph` | `[{ type: 'paragraph', content: '', column: 1, gap: 0 }]` | `<x-layout-paragraph>` (단락 데이터) |
+| `text` | `[{ type: 'text', content: '' }]` | `<x-layout-paragraph>` (`type`을 `'paragraph'`으로 변환, `column`/`gap` 생략 → 부모 모델에서 상속) |
+| `paragraph` | `[{ type: 'paragraph', content: '' }]` | `<x-layout-paragraph>` (단락 데이터, `column`/`gap` 생략 → 부모 모델에서 상속) |
 | `image` | `[{ type: 'image', x: 0, y: 0, width: 100, height: 100, dpi: 72, url: '' }]` | `<x-layout-image>` (100×100px, 72dpi, 빈 url) |
+
+> **`column`/`gap` 상속**: `text`와 `paragraph` 삽입 시 `ParagraphData`의 `column`과 `gap`을 명시적으로 설정하지 않는다. `LayoutParagraphElement._layoutStructure()`에서 `_column`과 `_gap`이 `undefined`이면 부모 `GridCalculator`의 `columnWidth`/`gaps`를 상속받아, static 모드에서는 부모 박스가 차지하는 컬럼 수와 동일한 컬럼 구성을 자동으로 갖게 된다.
 
 중요한 구현 순서:
 
 1. `boxEl.data = boxData`를 먼저 설정
 2. 그 다음 `container.appendChild(boxEl)` 호출
-3. `element.editableLayout = true` 설정
-4. `EditManager.selectLayout(element)` 호출
 
-`data`를 먼저 설정하면 `connectedCallback`이 실행되기 전에 모든 속성이 준비되어 있어, 요소가 DOM에 연결될 때 초기 레이아웃이 올바르게 계산된다. 삽입 완료 후 생성된 요소의 `editableLayout`을 `true`로 설정하고 `selectLayout`으로 선택하면, 새 요소가 빨간색 테두리(`data-selected`)와 함께 선택 상태로 표시된다.
+`data`를 먼저 설정하면 `connectedCallback`이 실행되기 전에 모든 속성이 준비되어 있어, 요소가 DOM에 연결될 때 초기 레이아웃이 올바르게 계산된다.
 
 ### 12.8 좌표 변환
 
@@ -1886,4 +1888,3 @@ private static readonly DRAG_THRESHOLD = 3;
 - `image` 삽입 시 placeholder 이미지는 `100×100px`, `72dpi`, 빈 `url`로 생성된다. 실제 이미지를 표시하려면 삽입 후 `url`을 변경해야 한다.
 - 삽입 모드 중에는 레이아웃 선택과 드래그 이동, 리사이즈가 모두 비활성화된다.
 - `boxData.children` 설정은 `appendChild`보다 먼저 이루어져야 `connectedCallback` 시점에 올바른 초기 상태를 갖는다.
-- 삽입 완료 후 생성된 요소는 자동으로 `editableLayout = true`가 설정되고 `selectLayout`으로 선택된다. `insert` 이벤트 핸들러에서 별도로 선택 처리를 할 필요가 없다.

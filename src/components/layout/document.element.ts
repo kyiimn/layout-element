@@ -54,11 +54,13 @@ export class LayoutDocumentElement extends HTMLElement {
   connectedCallback() {
     if (this._isPrint) return;
 
+    this.addEventListener('click', this._onLayoutClick);
     this.layout();
     this.render();
   }
 
   disconnectedCallback() {
+    this.removeEventListener('click', this._onLayoutClick);
     EditManager.getInstance()._unregisterLayout(this);
   }
 
@@ -357,19 +359,18 @@ export class LayoutDocumentElement extends HTMLElement {
   }
 
   set editableLayout(value: boolean) {
+    if (this._isPrint) return;
     if (this._editableLayout === value) return;
     this._editableLayout = value;
 
-    if (value) {
-      this.addEventListener('click', this._onLayoutClick);
-    } else {
-      this.removeEventListener('click', this._onLayoutClick);
+    if (!value) {
       this.removeAttribute('data-selected');
       EditManager.getInstance()._unregisterLayout(this);
     }
   }
 
   private _onLayoutClick = (event: MouseEvent): void => {
+    if (!this._editableLayout) return;
     event.stopPropagation();
     if (EditManager.getInstance().insertMode) return;
     const path = event.composedPath();

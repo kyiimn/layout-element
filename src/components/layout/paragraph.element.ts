@@ -33,6 +33,7 @@ export class LayoutParagraphElement extends HTMLElement {
 
   private _editableText: boolean = false;
   private _editController: EditController | null = null;
+  private _isPrint: boolean = window.matchMedia("print").matches;
 
   /** 성능 최적화: 구조 변경 여부 플래그. true면 다음 render()에서 전체 재생성을 수행한다. */
   private _perfStructureChanged: boolean = true;
@@ -365,6 +366,7 @@ export class LayoutParagraphElement extends HTMLElement {
   }
 
   set editableText(value: boolean) {
+    if (this._isPrint) return;
     if (value && !this._editController) {
       this._editController = new EditController(this);
     } else if (!value && this._editController) {
