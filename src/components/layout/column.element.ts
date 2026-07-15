@@ -31,7 +31,11 @@ export class LayoutColumnElement extends HTMLElement {
     }
   }
 
-  private _computeSourceOffsets(): { renderedOffset: number; sourceOffset: number } {
+  /**
+   * 성능 최적화: 소스 오프셋 계산. diff 렌더링에서 기존 span 재사용을 위해
+   * 현재 컬럼 이전의 렌더링된 오프셋과 소스 오프셋을 계산한다.
+   */
+  private _computePerfSourceOffsets(): { renderedOffset: number; sourceOffset: number } {
     let renderedOffset = 0;
     let sourceOffset = 0;
     const model = this.model!;
@@ -59,6 +63,7 @@ export class LayoutColumnElement extends HTMLElement {
     return { renderedOffset, sourceOffset };
   }
 
+  /** 줄의 양 끝 공백을 제거하여 렌더링된 문자열을 정리한다. */
   private _stripSpaces(content: string[], isFirst: boolean, isLast: boolean): string[] {
     let result = content;
     if (isFirst) {
@@ -70,24 +75,28 @@ export class LayoutColumnElement extends HTMLElement {
     return result;
   }
 
+  /** 줄(line) DOM 요소를 생성하고 `genLineStyle()`으로 스타일을 적용한다. */
   private _createLineElement(lineData: TextLineData, textBlockStyle: TextBlockStyle | undefined): HTMLDivElement {
     const lineEl = document.createElement('div');
     this._applyLineStyle(lineEl, lineData, textBlockStyle);
     return lineEl;
   }
 
+  /** 줄 요소에 `genLineStyle()` 결과를 적용하여 기존 스타일을 갱신한다. */
   private _applyLineStyle(lineEl: HTMLDivElement, _lineData: TextLineData, textBlockStyle: TextBlockStyle | undefined): void {
     const curLineStyle = this.model!.genLineStyle(textBlockStyle) || {};
     lineEl.style.cssText = '';
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(lineEl.style, curLineStyle);
   }
 
+  /** 파트(part) DOM 요소를 생성하고 `genPartStyle()` 결과를 적용한다. */
   private _createPartElement(part: TextPartData, lineData: TextLineData, curPartStyle: Record<string, string>, partJustify: string | undefined): HTMLDivElement {
     const partEl = document.createElement('div');
     this._applyPartStyle(partEl, part, lineData, curPartStyle, partJustify);
     return partEl;
   }
 
+  /** 파트 요소에 스타일, 너비, `marginLeft`, `justifyContent`를 적용한다. */
   private _applyPartStyle(partEl: HTMLDivElement, part: TextPartData, _lineData: TextLineData, curPartStyle: Record<string, string>, partJustify: string | undefined): void {
     partEl.style.cssText = '';
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(partEl.style, {
@@ -98,12 +107,14 @@ export class LayoutColumnElement extends HTMLElement {
     });
   }
 
+  /** 글자(span) DOM 요소를 생성하고 `genCharStyle()` 결과와 오프셋 속성을 적용한다. */
   private _createSpanElement(char: string, renderedOffset: number, sourceOffset: number): HTMLSpanElement {
     const charEl = document.createElement('span');
     this._applySpanStyle(charEl, char, renderedOffset, sourceOffset);
     return charEl;
   }
 
+  /** 글자 요소에 `genCharStyle()` 스타일, `data-offset`, `data-source-offset`, `innerText`를 적용한다. */
   private _applySpanStyle(charEl: HTMLSpanElement, char: string, renderedOffset: number, sourceOffset: number): void {
     const charStyle = this.model!.genCharStyle(char);
     charEl.style.cssText = '';
@@ -113,6 +124,10 @@ export class LayoutColumnElement extends HTMLElement {
     charEl.innerText = char;
   }
 
+  /**
+   * Diff 기반 텍스트 렌더링: 기존 span 요소를 `data-source-offset` 키로 재사용하며
+   * 변경된 부분만 업데이트한다. COVER 라인(`parts: []`)은 라인 div의 자식을 모두 제거한다.
+   */
   renderText() {
     if (!this.isConnected) return;
 
@@ -131,7 +146,7 @@ export class LayoutColumnElement extends HTMLElement {
     const lines = this.model.columnContents[this._index] || [];
     const colStyle = this.model.genColumnStyle(this._index);
 
-    const { renderedOffset, sourceOffset } = this._computeSourceOffsets();
+    const { renderedOffset, sourceOffset } = this._computePerfSourceOffsets();
 
     // Reuse or create <style> element
     const styleEl = existingStyleEl || document.createElement('style');

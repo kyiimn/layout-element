@@ -90,8 +90,12 @@ export class GridCalculator {
   }
 
   /**
-   * 브라우저 DPI를 측정하여 픽셀/mm 변환 비율 계산.
-   * 임시 100mm `<div>`를 DOM에 삽입 후 `offsetWidth`를 측정한다.
+   * 브라우저 DPI를 측정하여 픽셀/mm 변환 비율(pixels-per-mm)을 반환한다.
+   *
+   * 성능 최적화: 최초 측정 후 `_ppm`에 캐싱하여 이후 호출 시 DOM 측정을 생략한다.
+   * `resetPpm()` 호출 시 캐시가 무효화되어 다시 측정한다.
+   * 줌, 인쇄, CSS transform 등으로 런타임 ppm이 변경될 수 있으므로
+   * 필요 시 `resetPpm()`을 호출해야 한다.
    */
   static get ppm() {
     if (!this._ppm) {
@@ -117,12 +121,19 @@ export class GridCalculator {
     return this._ppm;
   }
 
+  /**
+   * 캐싱된 ppm 값을 무효화한다. 다음 `ppm` 접근 시 DOM 측정을 다시 수행한다.
+   * 줌 레벨 변경이나 CSS transform 후 호출해야 한다.
+   */
   static resetPpm() {
     this._ppm = undefined;
   }
 
-  /** 컬럼 좌표 및 행 높이 계산 */
-  private _calcCoordUnit() {
+  /**
+   * 컬럼 그리드 좌표(`Rect[]`)와 행 높이를 계산한다.
+   * `padding`, `columns`, `gap` 설정에 따라 각 컬럼의 경계 사각형과 너비를 결정한다.
+   */
+  private _calcColumnGridCoords() {
     this._lineHeight = this.fontSize * this.lineGap;
 
     const paddingTop = this._paddingTop || 0;
@@ -186,7 +197,7 @@ export class GridCalculator {
     this._paragraphStyle = data.paragraphStyle;
     this._textStyle = data.textStyle;
 
-    this._calcCoordUnit();
+    this._calcColumnGridCoords();
   }
 
   get textStyle() { return this._textStyle; }

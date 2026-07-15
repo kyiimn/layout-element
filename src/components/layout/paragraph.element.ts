@@ -34,7 +34,8 @@ export class LayoutParagraphElement extends HTMLElement {
   private _editableText: boolean = false;
   private _editController: EditController | null = null;
 
-  private _structureDirty: boolean = true;
+  /** 성능 최적화: 구조 변경 여부 플래그. true면 다음 render()에서 전체 재생성을 수행한다. */
+  private _perfStructureChanged: boolean = true;
 
   constructor() {
     super();
@@ -60,7 +61,44 @@ export class LayoutParagraphElement extends HTMLElement {
     this._editController = null;
   }
 
-  layout() {
+  /**
+   * 구조 계산: TextLayoutEngine 데이터 할당 및 모델 생성/갱신.
+   * 내부 전용. `layout()`에서만 호출된다.
+   */
+  private _layoutStructure() {
+    if (!this.isConnected || !this.parentModel || !this._inheritStyle) return;
+
+    const paragraphData = {
+      column: this._column !== undefined && this._gap !== undefined ? this._column : this.parentModel.columnWidth,
+      gap: this._column !== undefined && this._gap !== undefined ? this._gap : this.parentModel.gaps,
+
+      content: this._content,
+      paragraphStyle: this.paragraphStyle,
+      textStyle: this.textStyle,
+
+      paragraphEl: this,
+      rootNode: this._shadowRoot,
+      inheritStyle: {
+        ...this._inheritStyle,
+        parentHeight: this.absHeight,
+        parentWidth: this.absWidth,
+      },
+    };
+
+    if (!this._model) {
+      this._model = TextLayoutEngine.create(paragraphData);
+    } else {
+      this._model.data = paragraphData;
+    }
+
+    this._perfStructureChanged = true;
+  }
+
+  /**
+   * CSS 스타일 적용: `:host` 규칙 생성 및 단락 위치/크기 스타일 갱신.
+   * 내부 전용. `layout()`에서만 호출된다.
+   */
+  private _applyStyle() {
     if (!this.isConnected || !this.parentModel || !this._inheritStyle) return;
 
     const color = this.textStyle.color || this._inheritStyle.color;
@@ -68,7 +106,6 @@ export class LayoutParagraphElement extends HTMLElement {
     const fontWeight = this.textStyle.fontWeight || this._inheritStyle.fontWeight;
     const fontStyle = this.textStyle.fontStyle || this._inheritStyle.fontStyle;
     const fontSize = this.textStyle.fontSize || this._inheritStyle.fontSize;
-
     const lineHeight = this.parentModel.lineHeight;
     const paddingTop = this._inheritStyle.paddingTop || 0;
 
@@ -108,45 +145,46 @@ export class LayoutParagraphElement extends HTMLElement {
         zIndex: `${this.zIndex + 100}`,
       }
     );
-
-    const paragraphData = {
-      column: this._column !== undefined && this._gap !== undefined ? this._column : this.parentModel.columnWidth,
-      gap: this._column !== undefined && this._gap !== undefined ? this._gap : this.parentModel.gaps,
-
-      content: this._content,
-      paragraphStyle: this.paragraphStyle,
-      textStyle: this.textStyle,
-
-      paragraphEl: this,
-      rootNode: this._shadowRoot,
-      inheritStyle: {
-        ...this._inheritStyle,
-        parentHeight: this.absHeight,
-        parentWidth: this.absWidth,
-      },
-    };
-
-    if (!this._model) {
-      this._model = TextLayoutEngine.create(paragraphData);
-    } else {
-      this._model.data = paragraphData;
-    }
-
-    this._structureDirty = true;
   }
 
+  /**
+   * InheritStyle 전파: 단락은 자식이 없으므로 아무 작업도 수행하지 않는다.
+   * 레이아웃 파이프라인 일관성을 위해 빈 메서드로 존재한다.
+   * 내부 전용.
+   */
+  private _propagateInheritStyle() {
+    // 단락 요소는 레이아웃 자식이 없으므로 전파할 대상이 없다.
+  }
+
+  /**
+   * 레이아웃 오케스트레이터. `_layoutStructure()`, `_applyStyle()`,
+   * `_propagateInheritStyle()`를 순서대로 호출한다.
+   * 기존 호출자와의 호환성을 위해 유지한다.
+   */
+  layout() {
+    if (!this.isConnected || !this.parentModel || !this._inheritStyle) return;
+
+    this._layoutStructure();
+    this._applyStyle();
+    this._propagateInheritStyle();
+  }
+
+  /**
+   * 텍스트 컬럼 렌더링: TextLayoutEngine으로 텍스트 래핑을 수행하고
+   * 컬럼 DOM을 생성/갱신한다. 오버플로우 발생 시 `render-error` 이벤트를 디스패치한다.
+   */
   render() {
     if (!this.isConnected || !this._model) return;
 
-    const wasStructureDirty = this._structureDirty;
+    const wasStructureDirty = this._perfStructureChanged;
     const lineCountBefore = this._model.previousLineCount;
     const overflowBefore = this._model.previousOverflow;
 
-    if (this._structureDirty) {
+    if (this._perfStructureChanged) {
       this._model.resetIncrementalState();
       this._model.layoutStructure();
       this._model.layoutText();
-      this._structureDirty = false;
+      this._perfStructureChanged = false;
     } else {
       this._model.layoutText();
     }
@@ -163,10 +201,7 @@ export class LayoutParagraphElement extends HTMLElement {
     const lineCountAfter = this._model.columnContents.reduce((sum, col) => sum + col.length, 0);
     const overflowAfter = this._model.overflow;
 
-    const needsFullRecreate = wasStructureDirty
-      || lineCountBefore === -1
-      || lineCountBefore !== lineCountAfter
-      || overflowBefore !== overflowAfter;
+    const needsFullRecreate = this._perfShouldFullRecreate(wasStructureDirty, lineCountBefore, overflowBefore, lineCountAfter, overflowAfter);
 
     if (needsFullRecreate) {
       this.replaceChildren();
@@ -200,6 +235,23 @@ export class LayoutParagraphElement extends HTMLElement {
     }
   }
 
+  /**
+   * 성능 최적화: 전체 재생성이 필요한지 판별한다.
+   * 구조 변경, 줄 수 변경, 오버플로우 변경 시 전체 재생성이 필요하다.
+   */
+  private _perfShouldFullRecreate(
+    wasStructureDirty: boolean,
+    lineCountBefore: number,
+    overflowBefore: number,
+    lineCountAfter: number,
+    overflowAfter: number,
+  ): boolean {
+    return wasStructureDirty
+      || lineCountBefore === -1
+      || lineCountBefore !== lineCountAfter
+      || overflowBefore !== overflowAfter;
+  }
+
   set data(data: ParagraphData) {
     if (data.id !== undefined) this.id = data.id;
     if (data.column !== undefined) this._column = data.column;
@@ -211,7 +263,7 @@ export class LayoutParagraphElement extends HTMLElement {
     this._content = data.content;
 
     this.layout();
-    this._structureDirty = true;
+    this._perfStructureChanged = true;
   }
 
   get data() {
@@ -246,7 +298,7 @@ export class LayoutParagraphElement extends HTMLElement {
   set inheritStyle(style: InheritStyle | undefined) {
     this._inheritStyle = style;
     this.layout();
-    this._structureDirty = true;
+    this._perfStructureChanged = true;
   }
 
   get inheritStyle() {

@@ -38,13 +38,15 @@ export class LayoutImageElement extends HTMLElement {
 
   disconnectedCallback() { }
 
-  layout() {
+  /**
+   * 구조 계산: 스타일 규칙 생성 및 캔버스 요소 생성.
+   * 첫 호출 시 `<style>`과 `<canvas>`를 shadow DOM에 추가한다.
+   * 내부 전용. `layout()`에서만 호출된다.
+   */
+  private _layoutStructure() {
     if (!this.isConnected) return;
 
     if (!this.parentModel || !this._inheritStyle) return;
-
-    const lineHeight = this.parentModel.lineHeight;
-    const paddingTop = this._inheritStyle.paddingTop || 0;
 
     if (!this._styleRule) {
       const styleEl = document.createElement("style");
@@ -68,8 +70,21 @@ export class LayoutImageElement extends HTMLElement {
       );
       this.appendChild(this._canvas);
     }
+  }
+
+  /**
+   * CSS 스타일 적용: 이미지 위치/크기/z-index 스타일을 갱신한다.
+   * 내부 전용. `layout()`에서만 호출된다.
+   */
+  private _applyStyle() {
+    if (!this.isConnected) return;
+    if (!this.parentModel || !this._inheritStyle) return;
+
+    const lineHeight = this.parentModel.lineHeight;
+    const paddingTop = this._inheritStyle.paddingTop || 0;
+
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
-      this._styleRule.style,
+      this._styleRule!.style,
       {
         display: 'flex',
         height: `${this.absHeight}mm`,
@@ -82,6 +97,21 @@ export class LayoutImageElement extends HTMLElement {
     );
   }
 
+  /**
+   * 레이아웃 오케스트레이터. `_layoutStructure()`와 `_applyStyle()`를 순서대로 호출한다.
+   * 기존 호출자와의 호환성을 위해 유지한다.
+   */
+  layout() {
+    if (!this.isConnected) return;
+
+    this._layoutStructure();
+    this._applyStyle();
+  }
+
+  /**
+   * 캔버스 이미지 렌더링: 원본 이미지에서 크롭 영역을 추출하여 캔버스에 그린다.
+   * `dpi`를 기준으로 픽셀/mm 변환을 수행한다.
+   */
   async render() {
     if (!this.isConnected || !this.canvas) return;
     this.canvas.width = this.canvas.width;
@@ -178,12 +208,16 @@ export class LayoutImageElement extends HTMLElement {
     if (this._zIndex === value) return;
     this._zIndex = value;
     this.layout();
+    this.render();
+    this.parentElement?.requestRerenderAffectedParagraphs();
   }
 
   set overlapPadding(value: number | { top?: number; right?: number; bottom?: number; left?: number } | undefined) {
     if (this._overlapPadding === value) return;
     this._overlapPadding = value;
     this.layout();
+    this.render();
+    this.parentElement?.requestRerenderAffectedParagraphs();
   }
 
   get overlapPadding() {

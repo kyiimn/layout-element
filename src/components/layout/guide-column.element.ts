@@ -39,13 +39,18 @@ export class LayoutGuideColumnElement extends HTMLElement {
   }
 
   connectedCallback() {
-    this.renderLayout();
+    this._layoutAndRenderGuideColumns();
   }
 
   disconnectedCallback() {
   }
 
-  renderLayout() {
+  /**
+   * 가이드 컬럼 생성 및 스타일 적용을 동시에 수행한다.
+   * shadow DOM을 초기화하고, 가시성 여부에 따라 가이드 라인을 렌더링한다.
+   * 내부 전용. 각 속성 setter에서만 호출된다.
+   */
+  private _layoutAndRenderGuideColumns() {
     if (!this.isConnected) return;
 
     this._shadowRoot.innerHTML = '';
@@ -91,42 +96,42 @@ export class LayoutGuideColumnElement extends HTMLElement {
     this._width = rect.x2 - rect.x1;
     this._height = rect.y2 - rect.y1;
 
-    this.renderLayout();
+    this._layoutAndRenderGuideColumns();
   }
 
   set left(left: number) {
     this._left = left;
-    this.renderLayout();
+    this._layoutAndRenderGuideColumns();
   }
 
   set top(top: number) {
     this._top = top;
-    this.renderLayout();
+    this._layoutAndRenderGuideColumns();
   }
 
   set width(width: number) {
     this._width = width;
-    this.renderLayout();
+    this._layoutAndRenderGuideColumns();
   }
 
   set height(height: number) {
     this._height = height;
-    this.renderLayout();
+    this._layoutAndRenderGuideColumns();
   }
 
   set visible(visible: boolean) {
     this._visible = visible;
-    this.renderLayout();
+    this._layoutAndRenderGuideColumns();
   }
 
   set fontSize(fontSize: number) {
     this._fontSize = fontSize;
-    this.renderLayout();
+    this._layoutAndRenderGuideColumns();
   }
 
   set lineHeight(lineHeight: number) {
     this._lineHeight = lineHeight;
-    this.renderLayout();
+    this._layoutAndRenderGuideColumns();
   }
 
   get left() {

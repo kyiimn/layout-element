@@ -4,7 +4,7 @@ import { LayoutParagraphElement } from "./paragraph.element";
 /**
  * 텍스트 래핑용 가상 컬럼 요소. `<x-layout-vcolumn>` 커스텀 엘리먼트.
  *
- * `TextLayoutEngine.layoutText()`에서 오버플로우 측정을 위해 임시로 생성된다.
+ * `TextLayoutEngine._layoutTextIntoColumns()`에서 오버플로우 측정을 위해 임시로 생성된다.
  * 실제 렌더링(`LayoutColumnElement`)이 시작되기 전에 제거된다.
  */
 export class LayoutVirtualColumnElement extends HTMLElement {
@@ -26,16 +26,21 @@ export class LayoutVirtualColumnElement extends HTMLElement {
   }
 
   connectedCallback() {
-    this.render();
+    this._renderVirtualColumn();
   }
 
-  attributeChangedCallback(name: string, oldval: string, newval: string) {
+  attributeChangedCallback(name: string, oldval: string | null, newval: string | null) {
     if (name === 'index' && oldval !== newval) {
-      this.index = parseInt(newval) || undefined;
+      this.index = parseInt(newval!) || undefined;
     }
   }
 
-  render() {
+  /**
+   * 가상 컬럼 스타일 설정: `genColumnStyle()` 결과를 `:host` 규칙에 적용한다.
+   * 텍스트 래핑 측정용으로 임시 생성되며, 측정 완료 후 즉시 제거된다.
+   * 내부 전용. `render()`에서만 호출된다.
+   */
+  private _renderVirtualColumn() {
     if (!this.isConnected) return;
 
     this._shadowRoot.innerHTML = '';
@@ -89,12 +94,12 @@ export class LayoutVirtualColumnElement extends HTMLElement {
 
   set model(model: TextLayoutEngine | undefined) {
     this._model = model;
-    this.render();
+    this._renderVirtualColumn();
   }
 
   set index(index: number | undefined) {
     this._index = index;
-    this.render();
+    this._renderVirtualColumn();
   }
 
   get type(): "column" { return 'column'; }

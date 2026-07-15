@@ -65,9 +65,9 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 
 ### Rendering Pipeline (3 phases)
 
-1. **`layout()`** — synchronous. Build DOM tree, create GridCalculator, calculate column grid coordinates
-2. **`render()`** — async. Image loading + canvas crop (recursive to children)
-3. **`renderText()`** (inside `render()` via TextLayoutEngine) — character-by-character text wrapping with overlap avoidance
+1. **`layout()`** — synchronous. Calls `_layoutStructure()` (model data assignment), `_applyStyle()` (CSS styles), `_renderGuideColumns()`/`_renderBorder()` (structural DOM), `_propagateInheritStyle()` (child style propagation). Each element decomposes layout into these private sub-methods.
+2. **`render()`** — async. Delegates to element-specific rendering: `render()` in document/box sorts children by z-index and recurses; `render()` in paragraph calls TextLayoutEngine for text wrapping + column DOM update; `render()` in image loads and crops canvas image.
+3. **`renderText()`** (on `<x-layout-column>`) — Diff-based character-by-character rendering inside `render()` via TextLayoutEngine. Reuses existing spans by `data-source-offset` key.
 
 **Order matters.** `layout()` must complete before `render()`; image elements must render before adjacent text so overlap detection works.
 
@@ -105,7 +105,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **EditManager singleton**: `EditManager.getInstance()` manages focus across all editableText paragraphs. Only one paragraph can be focused at a time. `EditController` auto-registers on construction and auto-unregisters on `destroy()`.
 - **Key-based span rendering**: `column.element.ts` `renderText()` uses `data-source-offset` as the reconciliation key for span diff rendering. Existing spans are reused when content unchanged; only changed spans are updated. `data-offset` (rendered offset) is retained for `EditCoordinateMapper` compatibility.
 - **`data-source-offset` vs `data-offset`**: `data-source-offset` = source string position (used as diff key). `data-offset` = rendered position (used by EditCoordinateMapper for click-to-cursor mapping). Both attributes coexist on every span.
-- **Optimistic spans are temporary**: `data-temporary="true"` spans are stripped at the start of every `renderText()` call and recreated by `EditController` as needed.
+- **Optimistic spans are temporary**: `data-temporary="true"` spans are stripped at the start of every `renderTextWithDiff()` call and recreated by `EditController` as needed.
 - **EditContextAdapter**: `src/edit/edit-context-adapter.ts` bridges the browser EditContext API (Chrome 121+) with the layout engine. `EditContextAdapter.create()` returns `null` if the API is not supported.
 
 ## Directory Structure

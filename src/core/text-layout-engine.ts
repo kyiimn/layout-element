@@ -42,7 +42,7 @@ type FreeRegion = { start: number; end: number };
  * - 스타일 적용: `genLineStyle()`, `genPartStyle()`, `genCharStyle()`으로 CSS 스타일 생성
  *
  * 렌더링 파이프라인:
- * 1. `_initLayout()` - fontSize, lineGap, lineHeight 초기화
+ * 1. `_initLayoutMetrics()` - fontSize, lineGap, lineHeight 초기화
  * 2. `layoutStructure()` - 컬럼 폭/ppm 계산, `layoutText()` - 텍스트 래핑 수행
  * 3. `LayoutColumnElement`가 `columnContents`를 소비하여 렌더링
  */
@@ -63,10 +63,15 @@ export class TextLayoutEngine {
   private _previousLineCount: number = -1;
   private _previousOverflow: number = -1;
 
+  /** 성능 캐시: 장평 비율(`widthRatio`) 변경 시에만 스타일 캐시를 재계산한다. */
   private _cachedWidthRatio: number = 0;
+  /** 성능 캐시: 공백 비율(`spaceRatio`) 변경 시에만 스타일 캐시를 재계산한다. */
   private _cachedSpaceRatio: number = 0;
+  /** 성능 캐시: 반각 문자용 CSS 스타일. `_updatePerfCharStyleCache()`에서 갱신. */
   private _cachedHalfWidthStyle: Partial<CSSStyleDeclaration> = {};
+  /** 성능 캐시: 전각 문자용 CSS 스타일. `_updatePerfCharStyleCache()`에서 갱신. */
   private _cachedFullWidthStyle: Partial<CSSStyleDeclaration> = {};
+  /** 성능 캐시: 공백 문자용 CSS 스타일. `_updatePerfCharStyleCache()`에서 갱신. */
   private _cachedSpaceStyle: Partial<CSSStyleDeclaration> = {};
 
   private _lineHeight: number = 0;
@@ -79,11 +84,11 @@ export class TextLayoutEngine {
   private _canvas: HTMLCanvasElement;
   private _ctx: CanvasRenderingContext2D;
 
-  /** Font string cache: avoids recomputing on every character */
+  /** 성능 캐시: 폰트 문자열 단일 항목 캐시. 히트율 약 99%. 키: `${fontWeight}|${fontSizePx}|${fontFamily}` */
   private _lastFontKey: string = '';
   private _lastFontString: string = '';
 
-  /** Overlay rect cache: avoids repeated getBoundingClientRect on overlay elements per render cycle */
+  /** 성능 캐시: 오버랩 요소의 DOMRect 캐시. 렌더링 사이클당 한 번 측정 후 재사용하여 강제 리플로우를 최소화한다. */
   private _overlayRects: Map<LayoutBoxElement, DOMRect> | null = null;
 
   /**
@@ -103,8 +108,12 @@ export class TextLayoutEngine {
     this.data = options;
   }
 
-  /** fontSize, lineGap, lineHeight 초기화 */
-  private _initLayout() {
+  /**
+   * 레이아웃 메트릭 초기화. `fontSize`, `lineGap`, `lineHeight`를 계산하고
+   * `_columnContents`와 `_overflow`를 리셋한다.
+   * `data` 세터와 `inheritStyle` 세터에서 호출된다.
+   */
+  private _initLayoutMetrics() {
     const fontSize = this.textStyle?.fontSize || this.inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
     const lineGap = this.paragraphStyle?.lineGap || this.inheritStyle?.lineGap || DEFAULT_LINE_GAP;
 
@@ -115,7 +124,7 @@ export class TextLayoutEngine {
     this._lineHeight = fontSize * lineGap;
   }
 
-  /** 줄 요소 생성 (Flexbox 컨테이너) */
+  /** 줄 요소 생성 (Flexbox 컨테이너). `genLineStyle()`으로 스타일을 적용한다. */
   private _createLineElement(textBlockStyle?: TextBlockStyle) {
     const lineEl = document.createElement('div');
     const lineStyle = this.genLineStyle(textBlockStyle);
@@ -126,7 +135,7 @@ export class TextLayoutEngine {
     return lineEl;
   }
 
-  /** 파트 요소 생성 (줄 내부 수평 세그먼트) */
+  /** 파트 요소 생성 (줄 내부 수평 세그먼트). `marginLeft`로 파트 간 간격을 설정한다. */
   private _createPartElement(widthPx: number, marginLeftPx: number) {
     const partEl = document.createElement('div');
     Object.assign(partEl.style, {
@@ -143,6 +152,7 @@ export class TextLayoutEngine {
 
   /**
    * 오버랩 영역의 여집합으로부터 텍스트가 배치될 수 있는 자유 영역을 계산한다.
+   * 오버랩이 없으면 `[{ start: 0, end: lineWidth }]`를 반환한다.
    */
   private _computeFreeRegions(lineWidth: number, overlapParts: OverlapParts[]): FreeRegion[] {
     if (overlapParts.length === 0) {
@@ -166,7 +176,12 @@ export class TextLayoutEngine {
     return freeRegions;
   }
 
-  private _getCanvasFont(textBlockStyle?: TextBlockStyle, ppm?: number): string {
+  /**
+   * Canvas 폰트 문자열을 생성한다. 성능 최적화: 단일 항목 캐시를 사용하여
+   * 동일한 폰트 키에 대해 문자열 재생성을 생략한다.
+   * 키: `${fontWeight}|${fontSizePx}|${fontFamily}`, 히트율 약 99%.
+   */
+  private _getCachedFontString(textBlockStyle?: TextBlockStyle, ppm?: number): string {
     const fontLoader = FontLoader.getInstance();
     const fontFamily = textBlockStyle?.fontFamily
       ? fontLoader.getFontFamily(textBlockStyle.fontFamily)
@@ -189,7 +204,7 @@ export class TextLayoutEngine {
 
   private _charWidthPx(char: string, textBlockStyle?: TextBlockStyle, ppm?: number): number {
     const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
-    this._ctx.font = this._getCanvasFont(textBlockStyle, effectivePpm);
+    this._ctx.font = this._getCachedFontString(textBlockStyle, effectivePpm);
     const metrics = this._ctx.measureText(char);
     const rawWidth = metrics.width;
     const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
@@ -201,8 +216,8 @@ export class TextLayoutEngine {
     return Math.round(Math.min(Math.max(rawWidth, minWidthPx), maxWidthPx));
   }
 
-  /** 마지막 줄이 빈 파트만 있으면 제거 */
-  private _removeEmptyLastLine(columnContent: TextLineData[]): TextLineData[] {
+  /** 마지막 줄의 모든 파트가 비어 있으면 해당 줄을 제거한다. */
+  private _removeTrailingEmptyLine(columnContent: TextLineData[]): TextLineData[] {
     if (columnContent.length > 0 && columnContent[columnContent.length - 1].parts.every(p => p.content.length === 0)) {
       return columnContent.slice(0, columnContent.length - 1);
     }
@@ -211,9 +226,11 @@ export class TextLayoutEngine {
 
   /**
    * 오버랩 요소(이미지 등)와의 겹침 계산.
-   * `getBoundingClientRect()`로 실제 렌더링된 크기를 측정한다.
+   * 성능 최적화: `_overlayRects` 캐시를 사용하여 렌더링 사이클당
+   * `getBoundingClientRect()` 호출을 한 번으로 제한한다.
+   * COVER면 라인 전체가 덮인 것이고, PART면 일부만 덮인 것이다.
    */
-  private _applyOverlap(lineEl: HTMLElement): { cover: boolean; overlapParts: OverlapParts[] } {
+  private _detectOverlapWithCache(lineEl: HTMLElement): { cover: boolean; overlapParts: OverlapParts[] } {
     const overlapEls = this._paragraphElement.overlayElements;
     let cover = false;
     let parts: OverlapParts[] = [];
@@ -248,17 +265,14 @@ export class TextLayoutEngine {
 
   /**
    * 라인 요소를 생성하고 오버랩을 감지하여 파트를 구성한다.
-   *
-   * `_applyOverlap()`으로 겹침을 감지하고, `_computeFreeRegions()`로
+   * `_detectOverlapWithCache()`로 겹침을 감지하고, `_computeFreeRegions()`로
    * 자유 영역을 계산한 뒤, 각 자유 영역에 대한 파트 요소와 TextPartData를 생성한다.
    *
    * @param vColumnEl - 가상 컬럼 요소 (DOM에 삽입되어 있어야 함)
    * @param textBlockStyle - 이 라인에 적용할 블록 스타일
    * @param ppm - 픽셀/mm 변환 비율
    * @param isFirstInColumn - 첫 번째 라인 여부 (firstOfText/firstOfBlock 플래그 설정용)
-   * @returns cover=true면 라인 전체가 덮임 (lineEl=null, partEls=[]),
-   *          overflow=true면 컬럼 높이 초과로 라인을 제거해야 함,
-   *          cover=false && overflow=false면 정상 라인
+   * @returns cover=true면 라인 전체가 덮임, overflow=true면 컬럼 높이 초과
    */
   private _createLineWithParts(
     vColumnEl: HTMLElement,
@@ -276,7 +290,7 @@ export class TextLayoutEngine {
     const lineEl = this._createLineElement(textBlockStyle);
     vColumnEl.appendChild(lineEl);
 
-    const { cover, overlapParts } = this._applyOverlap(lineEl);
+    const { cover, overlapParts } = this._detectOverlapWithCache(lineEl);
 
     if (cover) {
       const lineData: TextLineData = {
@@ -338,11 +352,13 @@ export class TextLayoutEngine {
   }
 
   /**
-   * 구조적 레이아웃 초기화. 컬럼 폭/간격/lineHeight를 계산하고, 가상 컬럼을
-   * 생성하여 픽셀/mm 비율(`_columnPpm`)을 측정한 뒤 제거한다.
-   * `_inputContent`를 파싱한 `_contents`도 이 단계에서 생성한다.
+   * 구조 측정 및 컬럼 ppm 측정.
+   * 컬럼 폭/간격/lineHeight를 계산하고, 가상 컬럼을 생성해
+   * 픽셀/mm 비율(`_columnPpm`)을 측정한 뒤 제거한다.
+   * `_overlayRects`를 null로 리셋하고 `_inputContent`를 파싱한다.
+   * 내부 전용. `layoutStructure()`에서만 호출된다.
    */
-  private _initStructure() {
+  private _initStructureAndMeasureColumns() {
     if (!this._rootNode) return;
 
     this._columnContents = [];
@@ -387,6 +403,7 @@ export class TextLayoutEngine {
    * `inputContent`를 `_contents`로 파싱한다.
    * `layoutText()` 호출 시 `inputContent`가 변경되었을 수 있으므로
    * 매번 다시 파싱하여 최신 텍스트를 반영한다.
+   * 단일 문자열은 `{ content }`로 래핑하고, `\n`으로 블록을 분리한다.
    */
   private _parseContents() {
     const rawContents = !Array.isArray(this._inputContent) ? [{
@@ -402,10 +419,17 @@ export class TextLayoutEngine {
   }
 
   /**
-   * 문자 단위 줄바꿈 루프. `_initStructure()`가 먼저 실행되어 `_columnWidths`,
-   * `_gaps`, `_lineHeight`, `_columnPpm`이 준비되어 있어야 한다.
+   * 문자 단위 줄바꿈 루프. `initStructureAndMeasureColumns()`가 먼저 실행되어
+   * `_columnWidths`, `_gaps`, `_lineHeight`, `_columnPpm`이 준비되어 있어야 한다.
    * `inputContent` 변경을 반영하기 위해 `_contents`를 다시 파싱한다.
    * 결과는 `_columnContents`와 `_overflow`에 저장된다.
+   *
+   * 무한 루프 방지: 문자가 모든 파트 폭보다 클 경우 첫 번째 파트에 강제 배치한다.
+   */
+  /**
+   * 문자 단위 줄바꿈 렌더링을 실행한다. `layoutStructure()`가 먼저 호출되어
+   * 구조 데이터가 준비되어 있어야 한다.
+   * 내부 전용. `layoutText()`에서만 호출된다.
    */
   private _layoutTextIntoColumns() {
     if (!this._rootNode || this.columnCount < 1) return;
@@ -515,7 +539,7 @@ export class TextLayoutEngine {
             if (vColumnEl.isOverflow) {
               if (curColumn < this._columnWidths.length - 1) {
                 if (idxContentOfBlock < block.content.length - 1) {
-                  columnContent = this._removeEmptyLastLine(columnContent);
+                  columnContent = this._removeTrailingEmptyLine(columnContent);
                 }
                 break;
               } else {
@@ -545,7 +569,7 @@ export class TextLayoutEngine {
             if (vColumnEl.isOverflow) {
               if (curColumn < this._columnWidths.length - 1) {
                 if (idxContentOfBlock < block.content.length - 1) {
-                  columnContent = this._removeEmptyLastLine(columnContent);
+                  columnContent = this._removeTrailingEmptyLine(columnContent);
                 }
                 break;
               } else {
@@ -566,7 +590,7 @@ export class TextLayoutEngine {
               if (result.overflow) {
                 if (curColumn < this._columnWidths.length - 1) {
                   if (idxContentOfBlock < block.content.length - 1) {
-                    columnContent = this._removeEmptyLastLine(columnContent);
+                    columnContent = this._removeTrailingEmptyLine(columnContent);
                   }
                   break;
                 } else {
@@ -579,7 +603,7 @@ export class TextLayoutEngine {
             if (result.overflow) {
               if (curColumn < this._columnWidths.length - 1) {
                 if (idxContentOfBlock < block.content.length - 1) {
-                  columnContent = this._removeEmptyLastLine(columnContent);
+                  columnContent = this._removeTrailingEmptyLine(columnContent);
                 }
                 lineEl = null;
                 partEls = [];
@@ -620,7 +644,7 @@ export class TextLayoutEngine {
               cumulativeWidths[0] += charWidth;
               break;
             }
-              columnContent = this._removeEmptyLastLine(columnContent);
+              columnContent = this._removeTrailingEmptyLine(columnContent);
               idxContentOfBlock--;
               currentPartIdx = 0;
               continue;
@@ -640,7 +664,7 @@ export class TextLayoutEngine {
           if (vColumnEl.isOverflow) {
             if (curColumn < this._columnWidths.length - 1) {
               if (idxContentOfBlock < block.content.length - 1) {
-                columnContent = this._removeEmptyLastLine(columnContent);
+                columnContent = this._removeTrailingEmptyLine(columnContent);
               }
               break;
             } else {
@@ -678,14 +702,16 @@ export class TextLayoutEngine {
   /**
    * 구조적 레이아웃만 계산하고 캐싱한다. 컬럼 폭, 간격, ppm 등 DOM 측정에
    * 의존하는 값들을 `_columnPpm`과 기타 private 필드에 저장한다.
+   * 내부적으로 `initStructureAndMeasureColumns()`를 호출한다.
    */
   public layoutStructure() {
-    this._initStructure();
+    this._initStructureAndMeasureColumns();
   }
 
   /**
-   * 문자 단위 줄바꿈 레이아웃을 실행한다. `layoutStructure()`가 먼저 호출되어
+   * 문자 단위 줄바꿈 렌더링을 실행한다. `layoutStructure()`가 먼저 호출되어
    * 구조 데이터가 준비되어 있어야 한다.
+   * 내부적으로 `_layoutTextIntoColumns()`를 호출한다.
    */
   public layoutText() {
     this._layoutTextIntoColumns();
@@ -813,7 +839,11 @@ export class TextLayoutEngine {
    * `isHalfWidth`는 Latin-1 범위(128-255)의 전각 문자를 반각으로 오분류할 수 있다.
    * 정밀한 분류가 필요하면 Unicode East Asian Width 범위 기반 판별로 교체해야 한다.
    */
-  private _updateCharStyleCache(): void {
+  /**
+   * 성능 캐시: 장평/공백 비율이 변경되었을 때만 반각/전각/공백 스타일 캐시를 재계산한다.
+   * `genCharStyle()`에서 호출되며, 캐시 히트 시 재계산을 생략한다.
+   */
+  private _updatePerfCharStyleCache(): void {
     const wr = this.widthRatio;
     const sr = this.spaceRatio;
     if (wr === this._cachedWidthRatio && sr === this._cachedSpaceRatio) return;
@@ -849,7 +879,7 @@ export class TextLayoutEngine {
   }
 
   public genCharStyle = (char: string): Partial<CSSStyleDeclaration> => {
-    this._updateCharStyleCache();
+    this._updatePerfCharStyleCache();
     if (char === ' ') return this._cachedSpaceStyle;
     if (char.length === 1 && char.charCodeAt(0) <= 255) return this._cachedHalfWidthStyle;
     return this._cachedFullWidthStyle;
@@ -858,7 +888,7 @@ export class TextLayoutEngine {
   set inheritStyle(inheritStyle: InheritStyle) {
     this._inheritStyle = inheritStyle;
 
-    this._initLayout();
+    this._initLayoutMetrics();
   }
 
   set data(options: TextLayoutEngineOptions) {
@@ -886,7 +916,7 @@ export class TextLayoutEngine {
       return Array.from<number>({ length: colCount }).map(() => (this.inheritStyle.parentWidth - this._gaps.reduce((a, b) => a + b, 0)) / colCount);
     })();
 
-    this._initLayout();
+    this._initLayoutMetrics();
   }
 
   public set inputContent(value: string | (string | TextBlockData)[]) {

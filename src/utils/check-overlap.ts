@@ -37,7 +37,7 @@ export const mergeOverlapParts = (parts: OverlapParts[]): OverlapParts[] => {
  * 오버랩 크기 계산.
  *
  * `targetElement`는 항상 `LayoutBoxElement`이다:
- * 유일한 호출처인 `_applyOverlap()`이 `overlayElements`에서 요소를 가져오며,
+ * 유일한 호출처인 `detectOverlapWithCache()`이 `overlayElements`에서 요소를 가져오며,
  * `overlayElements`는 `LayoutBoxElement[]` 타입이므로
  * `as LayoutBoxElement` 캐스트는 런타임에 결코 실패하지 않는다.
  */

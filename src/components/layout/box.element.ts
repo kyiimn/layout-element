@@ -95,7 +95,11 @@ export class LayoutBoxElement extends HTMLElement {
     EditManager.getInstance()._unregisterLayout(this);
   }
 
-  layout() {
+  /**
+   * 구조 계산: GridCalculator 데이터 할당, 스타일 규칙 생성, 리사이즈 핸들 생성.
+   * 내부 전용. `layout()`에서만 호출된다.
+   */
+  private _layoutStructure() {
     if (!this.isConnected || !this.parentModel) return;
 
     const { columnWidth, gaps, lineHeight } = this.parentModel;
@@ -120,6 +124,15 @@ export class LayoutBoxElement extends HTMLElement {
       height: this.absHeight,
       width: this.absWidth,
     };
+  }
+
+  /**
+   * CSS 스타일 적용: `:host` 규칙, 리사이즈 핸들 규칙, 박스 위치/크기 스타일.
+   * 첫 호출 시 스타일시트와 리사이즈 핸들을 생성하고, 이후 호출 시 스타일만 갱신한다.
+   * 내부 전용. `layout()`에서만 호출된다.
+   */
+  private _applyStyle() {
+    if (!this.isConnected || !this.parentModel) return;
 
     if (!this._styleRule) {
       const styleEl = document.createElement('style');
@@ -162,6 +175,15 @@ export class LayoutBoxElement extends HTMLElement {
         zIndex: `${this.zIndex + 100}`,
       }
     );
+  }
+
+  /**
+   * 테두리 DOM 생성: `borderColor`가 설정된 경우 상/하/좌/우 테두리 요소를 생성한다.
+   * 내부 전용. `layout()`에서만 호출된다.
+   */
+  private _renderBorder() {
+    if (!this.isConnected || !this.parentModel) return;
+
     this._shadowRoot.querySelectorAll(':scope > :not(slot):not(style)').forEach(node => node.remove());
 
     const colorManager = ColorRegistry.getInstance();
@@ -241,6 +263,15 @@ export class LayoutBoxElement extends HTMLElement {
         this._shadowRoot.appendChild(border);
       }
     }
+  }
+
+  /**
+   * 자식 요소에 InheritStyle 전파.
+   * 박스/단락/이미지 자식마다 다른 `parentHeight`를 적용한다.
+   * 내부 전용. `layout()`에서만 호출된다.
+   */
+  private _propagateInheritStyle() {
+    if (!this.isConnected || !this.parentModel) return;
 
     this.items.forEach(childEl => {
       const childInheritStyle: InheritStyle = {
@@ -265,6 +296,23 @@ export class LayoutBoxElement extends HTMLElement {
     });
   }
 
+  /**
+   * 레이아웃 오케스트레이터. `_layoutStructure()`, `_applyStyle()`,
+   * `_renderBorder()`, `_propagateInheritStyle()`를 순서대로 호출한다.
+   */
+  layout() {
+    if (!this.isConnected || !this.parentModel) return;
+
+    this._layoutStructure();
+    this._applyStyle();
+    this._renderBorder();
+    this._propagateInheritStyle();
+  }
+
+  /**
+   * 자식 요소를 z-index 역순으로 렌더링한다.
+   * 이미지 로딩 등 비동기 처리를 위해 각 자식의 `render()`를 await한다.
+   */
   async render() {
     if (!this.isConnected) return;
     const sortedItems = [...this.items].sort((a, b) => a.zIndex - b.zIndex).reverse();
@@ -358,28 +406,28 @@ export class LayoutBoxElement extends HTMLElement {
     if (this._left === value) return;
     this._left = value;
     this.layout();
-    this._rerenderAffectedParagraphs();
+    this.scheduleRerenderAffectedParagraphs();
   }
 
   set top(value: number) {
     if (this._top === value) return;
     this._top = value;
     this.layout();
-    this._rerenderAffectedParagraphs();
+    this.scheduleRerenderAffectedParagraphs();
   }
 
   set width(value: number) {
     if (this._width === value) return;
     this._width = value;
     this.layout();
-    this._rerenderAffectedParagraphs();
+    this.scheduleRerenderAffectedParagraphs();
   }
 
   set height(value: number) {
     if (this._height === value) return;
     this._height = value;
     this.layout();
-    this._rerenderAffectedParagraphs();
+    this.scheduleRerenderAffectedParagraphs();
   }
 
   set position(value: BoxPosition) {
@@ -781,7 +829,7 @@ export class LayoutBoxElement extends HTMLElement {
     document.removeEventListener('keydown', this._onLayoutKeyDown);
     this._isDragging = false;
     this._dragMoved = false;
-    this._flushAffectedParagraphs();
+    this.flushRerenderAffectedParagraphs();
     this.style.cursor = this._editableLayout ? 'grab' : '';
 
     const manager = EditManager.getInstance();
@@ -884,7 +932,7 @@ export class LayoutBoxElement extends HTMLElement {
       this._dragRafId = null;
     }
     this._isDragging = false;
-    this._flushAffectedParagraphs();
+    this.flushRerenderAffectedParagraphs();
     this.style.cursor = this._editableLayout ? 'grab' : '';
 
     const manager = EditManager.getInstance();
@@ -944,7 +992,7 @@ export class LayoutBoxElement extends HTMLElement {
    *
    * setter를 개별 호출하면 position이 먼저 바뀐 상태에서 left/width가 아직 이전 좌표계 값인
    * 상태로 layout()이 실행되어 columnWidth.slice(-122, ...) 같은 잘못된 인덱스가 발생한다.
-   * 이 메서드는 private 필드를 직접 설정한 후 layout()과 _rerenderAffectedParagraphs()를
+   * 이 메서드는 private 필드를 직접 설정한 후 layout()과 scheduleRerenderAffectedParagraphs()를
    * 한 번씩만 호출하여 문제를 방지한다.
    *
    * @param position - 새 position 모드 ('static' | 'absolute')
@@ -978,7 +1026,7 @@ export class LayoutBoxElement extends HTMLElement {
     this._width = width;
     this._height = height;
     this.layout();
-    this._rerenderAffectedParagraphs();
+    this.scheduleRerenderAffectedParagraphs();
   }
 
   // ─── Position Conversion Helpers ───────────────────────────────
@@ -1248,7 +1296,7 @@ export class LayoutBoxElement extends HTMLElement {
       this._resizeRafId = null;
     }
     this._isResizing = false;
-    this._flushAffectedParagraphs();
+    this.flushRerenderAffectedParagraphs();
     EditManager.getInstance()._endLayoutResize();
 
     if (!this._resizeMoved) {
@@ -1291,7 +1339,7 @@ export class LayoutBoxElement extends HTMLElement {
     document.removeEventListener('keydown', this._onResizeKeyDown);
     this._isResizing = false;
     this._resizeHandle = null;
-    this._flushAffectedParagraphs();
+    this.flushRerenderAffectedParagraphs();
     EditManager.getInstance()._endLayoutResize();
 
     if (this.left !== this._resizeStartLeft) this.left = this._resizeStartLeft;
@@ -1408,16 +1456,25 @@ export class LayoutBoxElement extends HTMLElement {
     return { left: sLeft, top: sTop, width: sWidth, height: sHeight };
   }
 
-  private _rerenderAffectedParagraphs(): void {
+  /**
+   * 영향받는 단락 요소를 다시 렌더링하도록 예약한다.
+   * 드래그/리사이즈 중이면 rAF로 지연하고, 아니면 즉시 실행한다.
+   */
+  private scheduleRerenderAffectedParagraphs(): void {
     if (this._affectedParagraphs !== null) {
-      this._scheduleRerenderAffectedParagraphs();
+      this._debounceRerenderAffectedParagraphs();
       return;
     }
 
     const affected = this._collectAffectedParagraphs();
-    this._renderAffected(affected);
+    this._renderAffectedParagraphs(affected);
   }
 
+  /**
+   * 영향받는 단락 요소 집합을 수집한다.
+   * 자식 박스를 재귀적으로 탐색하여 모든 단락 요소를 찾는다.
+   * 형제 박스의 자식 단락도 포함한다 (오버랩 영향).
+   */
   private _collectAffectedParagraphs(): Set<LayoutParagraphElement> {
     const affected = new Set<LayoutParagraphElement>();
 
@@ -1435,28 +1492,41 @@ export class LayoutBoxElement extends HTMLElement {
     return affected;
   }
 
-  private _renderAffected(affected: Set<LayoutParagraphElement>): void {
+  /**
+   * 수집된 단락 요소들을 다시 렌더링한다.
+   * 각 단락의 `_perfStructureChanged`를 true로 설정하고 `render()`를 호출한다.
+   * 내부 전용.
+   */
+  private _renderAffectedParagraphs(affected: Set<LayoutParagraphElement>): void {
     for (const p of affected) {
       if (p.isConnected) {
-        (p as any)._structureDirty = true;
+        (p as any)._perfStructureChanged = true;
         p.render();
       }
     }
   }
 
-  private _scheduleRerenderAffectedParagraphs(): void {
+  /**
+   * 성능 최적화: rAF로 단락 재렌더링을 지연시킨다.
+   * 내부 전용. `scheduleRerenderAffectedParagraphs()`에서만 호출된다.
+   */
+  private _debounceRerenderAffectedParagraphs(): void {
     if (this._rerenderRafId !== null) return;
 
     this._rerenderRafId = requestAnimationFrame(() => {
       this._rerenderRafId = null;
       const affected = this._affectedParagraphs;
       if (affected) {
-        this._renderAffected(affected);
+        this._renderAffectedParagraphs(affected);
       }
     });
   }
 
-  private _flushAffectedParagraphs(): void {
+  /**
+   * 대기 중인 rAF 재렌더링을 즉시 실행하고 취소한다.
+   * 드래그/리사이즈 종료 시 호출된다.
+   */
+  private flushRerenderAffectedParagraphs(): void {
     if (this._rerenderRafId !== null) {
       cancelAnimationFrame(this._rerenderRafId);
       this._rerenderRafId = null;
@@ -1464,10 +1534,19 @@ export class LayoutBoxElement extends HTMLElement {
     const affected = this._affectedParagraphs;
     this._affectedParagraphs = null;
     if (affected) {
-      this._renderAffected(affected);
+      this._renderAffectedParagraphs(affected);
     }
   }
 
+  /**
+   * 오버랩 관계 단락 재렌더링 예약. 이미지 overlapPadding/zIndex 변경 시 호출.
+   * @see scheduleRerenderAffectedParagraphs
+   */
+  requestRerenderAffectedParagraphs(): void {
+    this.scheduleRerenderAffectedParagraphs();
+  }
+
+  /** 요소 트리를 재귀적으로 탐색하여 모든 단락 요소를 수집한다. */
   private _collectParagraphs(
     element: LayoutBoxElement | LayoutParagraphElement | LayoutImageElement,
     set: Set<LayoutParagraphElement>

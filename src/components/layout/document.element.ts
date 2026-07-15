@@ -62,7 +62,11 @@ export class LayoutDocumentElement extends HTMLElement {
     EditManager.getInstance()._unregisterLayout(this);
   }
 
-  layout() {
+  /**
+   * 구조 계산: GridCalculator 데이터 할당 및 모델 생성.
+   * 내부 전용. `layout()`에서만 호출된다.
+   */
+  private _layoutStructure() {
     if (!this.isConnected) return null;
 
     this._model ??= GridCalculator.create({
@@ -82,7 +86,14 @@ export class LayoutDocumentElement extends HTMLElement {
       paragraphStyle: this._paragraphStyle,
       textStyle: this._textStyle,
     };
+    return this;
+  }
 
+  /**
+   * CSS 스타일 적용: shadow DOM 내의 `:host` 규칙과 루트 div 스타일을 생성/갱신한다.
+   * 내부 전용. `layout()`에서만 호출된다.
+   */
+  private _applyStyle() {
     if (!this._shadowRoot.querySelector(":scope > style")) {
       const styleEl = document.createElement('style');
       this._shadowRoot.appendChild(styleEl);
@@ -119,10 +130,18 @@ export class LayoutDocumentElement extends HTMLElement {
         width: `${this._width}mm`,
       }
     );
+  }
 
-    Array.from(this._root.children).forEach(e => {
+  /**
+   * 가이드 컬럼 요소 생성 및 스타일 적용.
+   * 내부 전용. `layout()`에서만 호출된다.
+   */
+  private _renderGuideColumns() {
+    if (!this._model) return;
+
+    Array.from(this._root?.children || []).forEach(e => {
       if (e.nodeName !== "X-LAYOUT-GUIDE-COLUMN") return;
-      this._root?.removeChild(e);
+      e.remove();
     });
 
     for (let i = 0; i < this._model.columnCoords.length; i++) {
@@ -133,9 +152,16 @@ export class LayoutDocumentElement extends HTMLElement {
       colEl.lineHeight = this._model.lineHeight;
       colEl.visible = this._visibleGuide;
 
-      this._root.appendChild(colEl);
+      this._root?.appendChild(colEl);
     }
+  }
 
+  /**
+   * 자식 요소에 InheritStyle 전파.
+   * 내부 전용. `layout()`에서만 호출된다.
+   */
+  private _propagateInheritStyle() {
+    if (!this._model) return;
     this.items.forEach(childEl => {
       childEl.inheritStyle = {
         ...this.textStyle,
@@ -144,9 +170,27 @@ export class LayoutDocumentElement extends HTMLElement {
         parentWidth: this._model!.editableWidth,
       };
     });
+  }
+
+  /**
+   * 레이아웃 오케스트레이터. `_layoutStructure()`, `_applyStyle()`,
+   * `_renderGuideColumns()`, `_propagateInheritStyle()`를 순서대로 호출한다.
+   * 기존 호출자(`connectedCallback`, 세터)와의 호환성을 위해 유지한다.
+   */
+  layout() {
+    if (!this.isConnected) return null;
+
+    this._layoutStructure();
+    this._applyStyle();
+    this._renderGuideColumns();
+    this._propagateInheritStyle();
     return this;
   }
 
+  /**
+   * 자식 요소를 z-index 역순으로 렌더링한다.
+   * 이미지 로딩 등 비동기 처리를 위해 각 자식의 `render()`를 await한다.
+   */
   async render() {
     if (!this.isConnected) return null;
     const sortedItems = [...this.items].sort((a, b) => a.zIndex - b.zIndex).reverse();
@@ -200,60 +244,70 @@ export class LayoutDocumentElement extends HTMLElement {
     if (this._width === value) return;
     this._width = value;
     this.layout();
+    this.render();
   }
 
   set height(value: number) {
     if (this._height === value) return;
     this._height = value;
     this.layout();
+    this.render();
   }
 
   set paddingTop(value: number) {
     if (this._paddingTop === value) return;
     this._paddingTop = value;
     this.layout();
+    this.render();
   }
 
   set paddingBottom(value: number) {
     if (this._paddingBottom === value) return;
     this._paddingBottom = value;
     this.layout();
+    this.render();
   }
 
   set paddingLeft(value: number) {
     if (this._paddingLeft === value) return;
     this._paddingLeft = value;
     this.layout();
+    this.render();
   }
 
   set paddingRight(value: number) {
     if (this._paddingRight === value) return;
     this._paddingRight = value;
     this.layout();
+    this.render();
   }
 
   set columns(value: number | number[]) {
     if (this._columns === value) return;
     this._columns = value;
     this.layout();
+    this.render();
   }
 
   set gap(value: number | number[]) {
     if (this._gap === value) return;
     this._gap = value;
     this.layout();
+    this.render();
   }
 
   set paragraphStyle(value: ParagraphStyle) {
     if (this._paragraphStyle === value) return;
     this._paragraphStyle = value;
     this.layout();
+    this.render();
   }
 
   set textStyle(value: TextStyle) {
     if (this._textStyle === value) return;
     this._textStyle = value;
     this.layout();
+    this.render();
   }
 
   get data() {

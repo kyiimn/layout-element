@@ -59,9 +59,9 @@ flowchart TD
 
 결과는 `this._contents`에 저장된다.
 
-### 2.2 Phase 2: 구조 측정 (`layoutStructure` / `_initStructure`)
+### 2.2 Phase 2: 구조 측정 (`layoutStructure` / `_initStructureAndMeasureColumns`)
 
-`_initStructure()`에서 컬럼 폭, 간격, 줄 높이를 계산하고, 가상 컬럼을 생성해 컬럼별 `ppm`을 측정한 뒤 제거한다.
+`_initStructureAndMeasureColumns()`에서 컬럼 폭, 간격, 줄 높이를 계산하고, 가상 컬럼을 생성해 컬럼별 `ppm`을 측정한 뒤 제거한다.
 
 - `_columnWidths`, `_gaps`, `_lineHeight` 초기화
 - 각 컬럼마다 `x-layout-vcolumn`을 임시로 생성해 `ppm` 측정
@@ -164,7 +164,7 @@ public resetIncrementalState() {
 flowchart TD
     Start([inputContent = value]) --> SetValue[_inputContent 갱신]
     SetValue --> Caller[호출자가 layoutStructure + layoutText 호출]
-    Caller --> InitStruct[_initStructure<br/>컬럼/ppm 재측정]
+    Caller --> InitStruct[_initStructureAndMeasureColumns<br/>컬럼/ppm 재측정]
     InitStruct --> LayoutText[_layoutTextIntoColumns<br/>전체 재래핑]
     LayoutText --> Render[LayoutColumnElement.renderText]
 ```
@@ -182,12 +182,12 @@ flowchart TD
 - **COVER**: 라인 전체가 덮여 글자를 배치할 수 없음
 - **PART**: 라인 일부가 덮임
 
-### 5.2 `_applyOverlap()`
+### 5.2 `_detectOverlapWithCache()`
 
 `overlayElements`(부모 박스의 오버랩 요소 + 더 높은 zIndex를 가진 형제 박스)를 순회하며 겹침을 계산한다.
 
 ```ts
-private _applyOverlap(lineEl: HTMLElement): { cover: boolean; overlapParts: OverlapParts[] }
+private _detectOverlapWithCache(lineEl: HTMLElement): { cover: boolean; overlapParts: OverlapParts[] }
 ```
 
 동작:
@@ -242,7 +242,7 @@ private _createLineWithParts(
 주요 작업:
 
 1. `_createLineElement()`로 라인 요소 생성
-2. `_applyOverlap()`으로 오버랩 감지
+2. `_detectOverlapWithCache()`으로 오버랩 감지
 3. COVER면 빈 `TextLineData` 반환
 4. OVERFLOW면 플래그만 반환 (lineEl은 DOM에 유지)
 5. `_computeFreeRegions()`로 자유 영역 계산
@@ -311,7 +311,7 @@ freeRegions = [
 ```ts
 private _charWidthPx(char: string, textBlockStyle?: TextBlockStyle, ppm?: number): number {
   const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
-  this._ctx.font = this._getCanvasFont(textBlockStyle, effectivePpm);
+  this._ctx.font = this._getCachedFontString(textBlockStyle, effectivePpm);
   const metrics = this._ctx.measureText(char);
   const rawWidth = metrics.width;
   const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
@@ -336,10 +336,10 @@ private _charWidthPx(char: string, textBlockStyle?: TextBlockStyle, ppm?: number
 
 ### 6.3 폰트 문자열 캐시
 
-`_getCanvasFont()`는 단일 항목 폰트 문자열 캐시를 사용한다.
+`_getCachedFontString()`는 단일 항목 폰트 문자열 캐시를 사용한다.
 
 ```ts
-private _getCanvasFont(textBlockStyle?: TextBlockStyle, ppm?: number): string {
+private _getCachedFontString(textBlockStyle?: TextBlockStyle, ppm?: number): string {
   const fontLoader = FontLoader.getInstance();
   const fontFamily = textBlockStyle?.fontFamily
     ? fontLoader.getFontFamily(textBlockStyle.fontFamily)
@@ -414,7 +414,7 @@ const letterSpacingPx = letterSpacingEm * letterSpacingFontSize * ppm;
 if (vColumnEl.isOverflow) {
   if (curColumn < this._columnWidths.length - 1) {
     if (idxContentOfBlock < block.content.length - 1) {
-      columnContent = this._removeEmptyLastLine(columnContent);
+      columnContent = this._removeTrailingEmptyLine(columnContent);
     }
     break;
   } else {
@@ -442,10 +442,10 @@ if (currentPartIdx >= partWidths.length) {
 
 ### 7.6 빈 마지막 줄 제거
 
-`_removeEmptyLastLine()`은 마지막 줄의 모든 파트가 비어 있으면 해당 줄을 제거한다.
+`_removeTrailingEmptyLine()`은 마지막 줄의 모든 파트가 비어 있으면 해당 줄을 제거한다.
 
 ```ts
-private _removeEmptyLastLine(columnContent: TextLineData[]): TextLineData[] {
+private _removeTrailingEmptyLine(columnContent: TextLineData[]): TextLineData[] {
   if (columnContent.length > 0 && columnContent[columnContent.length - 1].parts.every(p => p.content.length === 0)) {
     return columnContent.slice(0, columnContent.length - 1);
   }
@@ -465,9 +465,9 @@ private _removeEmptyLastLine(columnContent: TextLineData[]): TextLineData[] {
 
 ```mermaid
 flowchart LR
-    A[_initStructure] -->|_overlayRects = null| B[_layoutTextIntoColumns]
-    B -->|_overlayRects = null| C[_applyOverlap 첫 호출]
-    C -->|Map 생성| D[이후 _applyOverlap 호출]
+    A[_initStructureAndMeasureColumns] -->|_overlayRects = null| B[_layoutTextIntoColumns]
+    B -->|_overlayRects = null| C[_detectOverlapWithCache 첫 호출]
+    C -->|Map 생성| D[이후 _detectOverlapWithCache 호출]
     D -->|Map.get(el)| E[재사용]
     E -->|다음 렌더링 사이클| A
 ```
@@ -487,7 +487,7 @@ if (this._overlayRects === null) {
 }
 ```
 
-`_applyOverlap()`가 처음 호출될 때 모든 오버랩 요소를 한 번 측정해 `Map`에 저장한다. 이후 호출에서는 `this._overlayRects.get(el)`로 재사용한다.
+`_detectOverlapWithCache()`가 처음 호출될 때 모든 오버랩 요소를 한 번 측정해 `Map`에 저장한다. 이후 호출에서는 `this._overlayRects.get(el)`로 재사용한다.
 
 ---
 
@@ -754,8 +754,8 @@ const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColu
 
 | 세터 | 타입 | 설명 |
 | ------ | ------ | ------ |
-| `data` | `TextLayoutEngineOptions` | 모델 전체 데이터 설정. 컬럼, 스타일, 콘텐츠 갱신. `_initLayout()` 호출 |
-| `inheritStyle` | `InheritStyle` | 상속 스타일 설정. `_initLayout()` 호출 |
+| `data` | `TextLayoutEngineOptions` | 모델 전체 데이터 설정. 컬럼, 스타일, 콘텐츠 갱신. `_initLayoutMetrics()` 호출 |
+| `inheritStyle` | `InheritStyle` | 상속 스타일 설정. `_initLayoutMetrics()` 호출 |
 | `inputContent` | `string \| (string \| TextBlockData)[]` | 텍스트 콘텐츠 갱신. 래핑은 호출자가 직접 실행 |
 
 ### 13.4 게터
@@ -784,18 +784,18 @@ const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColu
 
 | 메서드 | 설명 |
 | -------- | ------ |
-| `_initLayout()` | 레이아웃 상태 초기화. `_lineHeight` 계산, `_columnContents`/`_overflow` 리셋 |
-| `_initStructure()` | 컬럼 폭/간격/lineHeight 계산, 가상 컬럼 생성 후 ppm 측정 및 제거 |
+| `_initLayoutMetrics()` | 레이아웃 상태 초기화. `_lineHeight` 계산, `_columnContents`/`_overflow` 리셋 |
+| `_initStructureAndMeasureColumns()` | 컬럼 폭/간격/lineHeight 계산, 가상 컬럼 생성 후 ppm 측정 및 제거 |
 | `_parseContents()` | 입력 콘텐츠를 `\n` 단위로 분리하여 `_contents` 생성 |
 | `_layoutTextIntoColumns()` | 메인 래핑 메서드. 라인 생성, 오버랩 적용, 글자 배치를 한 번에 수행 |
 | `_createLineWithParts(...)` | 라인 DOM 생성 + 오버랩 감지 + 파트/데이터 생성 |
 | `_createLineElement(textBlockStyle?)` | 줄 DOM 요소 생성 |
 | `_createPartElement(widthPx, marginLeftPx)` | 파트 DOM 요소 생성 |
 | `_computeFreeRegions(lineWidth, overlapParts)` | 오버랩 영역의 여집합으로 자유 영역 계산 |
-| `_applyOverlap(lineEl)` | 오버랩 요소와의 겹침 계산. COVER/PART 판정. `_overlayRects` 캐시 사용 |
+| `_detectOverlapWithCache(lineEl)` | 오버랩 요소와의 겹침 계산. COVER/PART 판정. `_overlayRects` 캐시 사용 |
 | `_charWidthPx(char, textBlockStyle?, ppm?)` | Canvas `measureText()`로 문자 advance width 측정. `widthRatio` 및 minWidth 적용 |
-| `_getCanvasFont(textBlockStyle?, ppm?)` | Canvas 폰트 문자열 생성. 단일 항목 캐시 사용 |
-| `_removeEmptyLastLine(columnContent)` | 빈 파트만 있는 마지막 줄 제거 |
+| `_getCachedFontString(textBlockStyle?, ppm?)` | Canvas 폰트 문자열 생성. 단일 항목 캐시 사용 |
+| `_removeTrailingEmptyLine(columnContent)` | 빈 파트만 있는 마지막 줄 제거 |
 
 ---
 
@@ -954,7 +954,7 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 - `layout()`에서 `TextLayoutEngine.create()` 또는 `model.data = ...` 호출
 - `render()`에서 `model.layoutStructure()`와 `model.layoutText()` 호출
 - `render()`에서 `columnContents` 길이만큼 `<x-layout-column>` 생성
-- `overlayElements` 게터가 `_applyOverlap()`에 사용될 오버랩 요소 제공
+- `overlayElements` 게터가 `_detectOverlapWithCache()`에 사용될 오버랩 요소 제공
 
 ### 18.2 `LayoutColumnElement`
 
@@ -972,7 +972,7 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
   - `data-temporary` span(낙관적 span)은 diff 시작 전 제거
   - `<style>` 요소는 재사용, CSS 룰만 갱신
   - COVER 라인(`parts: []`)은 라인 div의 자식을 모두 제거
-  - 헬퍼 메서드: `_computeSourceOffsets()`, `_stripSpaces()`,
+  - 헬퍼 메서드: `computePerfSourceOffsets()`, `_stripSpaces()`,
     `_createLineElement()`, `_applyLineStyle()`,
     `_createPartElement()`, `_applyPartStyle()`,
     `_createSpanElement()`, `_applySpanStyle()`
@@ -980,7 +980,7 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 
 ### 18.3 `LayoutVirtualColumnElement`
 
-- `_initStructure()`와 `_layoutTextIntoColumns()`에서 임시로 생성
+- `_initStructureAndMeasureColumns()`와 `_layoutTextIntoColumns()`에서 임시로 생성
 - `isOverflow`로 컬럼 높이 초과 여부 감지
 - 측정 완료 후 제거됨
 
@@ -1004,14 +1004,14 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 
 ### 20.1 오버랩 회피는 정렬과 무관하다
 
-`_applyOverlap()`과 `_computeFreeRegions()`는 모두 **물리적 픽셀 좌표**를 기준으로 계산된다.
+`_detectOverlapWithCache()`과 `_computeFreeRegions()`는 모두 **물리적 픽셀 좌표**를 기준으로 계산된다.
 
 ```ts
-private _applyOverlap(lineEl: HTMLElement): { cover: boolean; overlapParts: OverlapParts[] }
+private _detectOverlapWithCache(lineEl: HTMLElement): { cover: boolean; overlapParts: OverlapParts[] }
 private _computeFreeRegions(lineWidth: number, overlapParts: OverlapParts[]): FreeRegion[]
 ```
 
-- `_applyOverlap()`은 `getBoundingClientRect()`로 라인과 이미지의 실제 렌더링 영역을 측정한다. `_overlayRects` 캐시를 사용한다.
+- `_detectOverlapWithCache()`은 `getBoundingClientRect()`로 라인과 이미지의 실제 렌더링 영역을 측정한다. `_overlayRects` 캐시를 사용한다.
 - `_computeFreeRegions()`은 겹침 구간의 여집합을 기하학적으로 계산한다.
 - 두 메서드 모두 `textAlign`, `justifyContent`와 같은 정렬 속성을 읽지 않는다.
 
@@ -1144,7 +1144,7 @@ textAlign = 'justify' (space-between)
 
 | 관심사 | 정렬에 영향받는가 | 이유 |
 | :----- | :--------------- | :--- |
-| 오버랩 영역 계산 | 아니오 | `_applyOverlap()`이 `_overlayRects`의 `DOMRect`로 물리 좌표만 사용 |
+| 오버랩 영역 계산 | 아니오 | `_detectOverlapWithCache()`이 `_overlayRects`의 `DOMRect`로 물리 좌표만 사용 |
 | 자유 영역 분할 | 아니오 | `_computeFreeRegions()`이 기하 여집합만 계산 |
 | 글자 래핑 | 아니오 | `_charWidthPx()`와 `partWidths`는 정렬과 무관 |
 | 글자 배치 순서 | 아니오 | 항상 왼쪽에서 오른쪽으로 추가 |
@@ -1171,7 +1171,7 @@ textAlign = 'justify' (space-between)
 ```ts
 private _charWidthPx(char: string, textBlockStyle?: TextBlockStyle, ppm?: number): number {
   const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
-  this._ctx.font = this._getCanvasFont(textBlockStyle, effectivePpm);
+  this._ctx.font = this._getCachedFontString(textBlockStyle, effectivePpm);
   const metrics = this._ctx.measureText(char);
   const rawWidth = metrics.width;
   const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
@@ -1196,14 +1196,14 @@ private _charWidthPx(char: string, textBlockStyle?: TextBlockStyle, ppm?: number
 
 ### 21.2 폰트 문자열 단일 항목 캐시
 
-**대상:** `_getCanvasFont()` (`src/core/text-layout-engine.ts:168`)
+**대상:** `_getCachedFontString()` (`src/core/text-layout-engine.ts:168`)
 
 **문제:** `ctx.font` 설정은 Canvas 상태 변경을 유발하여 비용이 크다. 문자마다 폰트 문자열을 재생성하면 불필요한 오버헤드가 발생한다.
 
 **해결:** 단일 항목 캐시(`_lastFontKey`/`_lastFontString`)로 직전에 사용한 폰트 문자열을 재사용한다.
 
 ```ts
-private _getCanvasFont(textBlockStyle?: TextBlockStyle, ppm?: number): string {
+private _getCachedFontString(textBlockStyle?: TextBlockStyle, ppm?: number): string {
   const fontLoader = FontLoader.getInstance();
   const fontFamily = textBlockStyle?.fontFamily
     ? fontLoader.getFontFamily(textBlockStyle.fontFamily)
@@ -1237,7 +1237,7 @@ private _getCanvasFont(textBlockStyle?: TextBlockStyle, ppm?: number): string {
 
 ### 21.3 오버랩 rect 캐시 (`_overlayRects`)
 
-**대상:** `_applyOverlap()` (`src/core/text-layout-engine.ts:215`)
+**대상:** `_detectOverlapWithCache()` (`src/core/text-layout-engine.ts:215`)
 
 **문제:** 각 라인마다 오버랩 요소(이미지 등)와의 겹침을 검사할 때 `getBoundingClientRect()`를 호출하면 라인 수 × 오버랩 요소 수만큼 강제 리플로우가 발생한다.
 
@@ -1257,9 +1257,9 @@ if (this._overlayRects === null) {
 ```
 
 **생명 주기:**
-1. `_initStructure()` 시작 시 `null`로 리셋.
+1. `_initStructureAndMeasureColumns()` 시작 시 `null`로 리셋.
 2. `_layoutTextIntoColumns()` 시작 시 `null`로 리셋.
-3. 첫 `_applyOverlap()` 호출 시 `Map` 생성 후 모든 오버랩 요소를 한 번에 측정.
+3. 첫 `_detectOverlapWithCache()` 호출 시 `Map` 생성 후 모든 오버랩 요소를 한 번에 측정.
 4. 이후 동일 렌더링 사이클 내에서는 `Map.get(el)`로 재사용.
 5. 다음 렌더링 사이클 시작 시 1번으로 돌아감.
 
@@ -1269,14 +1269,14 @@ if (this._overlayRects === null) {
 
 ### 21.4 배치 vcolumn ppm 측정
 
-**대상:** `_initStructure()` (`src/core/text-layout-engine.ts:344`)
+**대상:** `_initStructureAndMeasureColumns()` (`src/core/text-layout-engine.ts:344`)
 
 **문제:** 컬럼마다 개별적으로 가상 컬럼(`<x-layout-vcolumn>`)을 생성/측정/제거하면 컬럼 수만큼의 강제 리플로우가 발생한다.
 
 **해결:** 모든 컬럼의 가상 컬럼을 한 번에 생성하고, 한 번의 루프에서 ppm을 측정한 뒤 한 번에 제거한다.
 
 ```ts
-private _initStructure() {
+private _initStructureAndMeasureColumns() {
   // ...
   this._columnPpm = [];
   const vColumnEls: LayoutVirtualColumnElement[] = [];
@@ -1309,7 +1309,7 @@ private _initStructure() {
 
 ### 21.5 key 기반 증분 span 렌더링
 
-**대상:** `LayoutColumnElement.renderText()` (`src/components/layout/column.element.ts:116`)
+**대상:** `LayoutColumnElement.renderText()` (`src/components/layout/column.element.ts`)
 
 **문제:** 편집 시 `renderText()`가 컬럼의 Shadow DOM을 전체 재구축(`innerHTML = ''`)하면 모든 span(수백 개)이 삭제되고 재생성된다. 이는 DOM 조작 비용과 가비지 컬렉션 부하를 유발한다.
 
@@ -1376,7 +1376,7 @@ for (const unusedSpan of existingSpans.values()) {
 - 두 속성은 모든 span에 공존하며, `data-offset`은 기존 동작 호환성을 위해 유지됨.
 
 **헬퍼 메서드:**
-- `_computeSourceOffsets()`: 컬럼 시작 위치의 rendered/source offset 계산.
+- `computePerfSourceOffsets()`: 컬럼 시작 위치의 rendered/source offset 계산.
 - `_stripSpaces()`: 첫/마지막 파트의 선행/후행 공백 제거.
 - `_createLineElement()` / `_applyLineStyle()`: 라인 div 생성/스타일 갱신.
 - `_createPartElement()` / `_applyPartStyle()`: 파트 div 생성/스타일 갱신.
@@ -1434,9 +1434,9 @@ for (const s of spans) {
 | 전략 | 대상 | 문제 | 해결 | 효과 |
 |------|------|------|------|------|
 | Canvas `measureText()` | `_charWidthPx()` | DOM 기반 측정의 O(n) 리플로우 | Canvas 2D `measureText().width` 사용 | DOM 조작 없이 순수 계산 |
-| 폰트 문자열 캐시 | `_getCanvasFont()` | `ctx.font` 설정 비용 | 단일 항목 캐시 (히트율 99%) | `ctx.font` 설정을 사이클당 1회로 통합 |
-| 오버랩 rect 캐시 | `_applyOverlap()` | 라인×오버랩 요소 수의 리플로우 | `Map`에 오버랩 요소 rect 캐싱 | 리플로우를 사이클당 1번으로 통합 |
-| 배치 vcolumn 측정 | `_initStructure()` | 컬럼마다 개별 측정 | 모든 컬럼을 한 번에 생성/측정/제거 | O(columns)번 리플로우를 1번으로 통합 |
+| 폰트 문자열 캐시 | `_getCachedFontString()` | `ctx.font` 설정 비용 | 단일 항목 캐시 (히트율 99%) | `ctx.font` 설정을 사이클당 1회로 통합 |
+| 오버랩 rect 캐시 | `_detectOverlapWithCache()` | 라인×오버랩 요소 수의 리플로우 | `Map`에 오버랩 요소 rect 캐싱 | 리플로우를 사이클당 1번으로 통합 |
+| 배치 vcolumn 측정 | `_initStructureAndMeasureColumns()` | 컬럼마다 개별 측정 | 모든 컬럼을 한 번에 생성/측정/제거 | O(columns)번 리플로우를 1번으로 통합 |
 | key 기반 증분 렌더링 | `renderText()` | 전체 DOM 재구축 (`innerHTML = ''`) | `data-source-offset` key로 span 재사용 | 변경된 span만 갱신, DOM 조작 최소화 |
 | Mapper 캐싱 | `EditCoordinateMapper` | 반복 `querySelectorAll` / `getBoundingClientRect` | `_columnSpansCache` + 로컬 `spanRects` Map | 드래그 시 프레임당 리플로우 감소 |
 
@@ -1445,9 +1445,9 @@ for (const s of spans) {
 ```mermaid
 flowchart TD
     subgraph TextLayoutEngine["TextLayoutEngine 캐시"]
-        T1["_initStructure()"] -->|"_overlayRects = null"| T2["_layoutTextIntoColumns()"]
-        T2 -->|"_overlayRects = null"| T3["_applyOverlap() 첫 호출"]
-        T3 -->|"Map 생성 + 일괄 측정"| T4["이후 _applyOverlap() 호출"]
+        T1["_initStructureAndMeasureColumns()"] -->|"_overlayRects = null"| T2["_layoutTextIntoColumns()"]
+        T2 -->|"_overlayRects = null"| T3["_detectOverlapWithCache() 첫 호출"]
+        T3 -->|"Map 생성 + 일괄 측정"| T4["이후 _detectOverlapWithCache() 호출"]
         T4 -->|"Map.get(el) 재사용"| T5["다음 렌더링 사이클"]
         T5 --> T1
 
@@ -1490,6 +1490,6 @@ flowchart TD
 | `getCharOffsetFromPoint()` | `EditCoordinateMapper` | binary search 내에서 span마다 `getBoundingClientRect()` 수행 |
 | `getTextRange()` | `EditCoordinateMapper` | 선택 영역 계산 시 span마다 `getBoundingClientRect()` 수행 |
 | `findVisualLineBounds()` | `EditCoordinateMapper` | Home/End 키 처리 시 span마다 `getBoundingClientRect()` 수행 |
-| 라인 rect 측정 | `_applyOverlap()` | `_overlayRects`는 오버랩 요소만 캐싱, 라인 자체의 rect는 라인마다 측정 |
+| 라인 rect 측정 | `_detectOverlapWithCache()` | `_overlayRects`는 오버랩 요소만 캐싱, 라인 자체의 rect는 라인마다 측정 |
 | `getImageData` 캐싱 | `getOverlapSizePX()` | 동일 이미지에 대해 라인마다 `getImageData()` 재호출 |
 | `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산 |
