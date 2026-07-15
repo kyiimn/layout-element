@@ -1,6 +1,7 @@
 import type { LayoutColumnElement } from "@/components/layout/column.element";
 import type { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import type { CursorPosition } from "@/types/edit/cursor.type";
+import { DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN } from "@/constants";
 
 /**
  * `<x-layout-paragraph>` 내부의 텍스트 오프셋과 픽셀 좌표를 매핑한다.
@@ -479,7 +480,7 @@ export class EditCoordinateMapper {
     const paraRect = this._paragraph.getBoundingClientRect();
     const fontSize = parseFloat(getComputedStyle(firstColumn).fontSize) || 16;
 
-    const textAlign = this._paragraph.paragraphStyle?.textAlign;
+    const textAlign = this._paragraph.paragraphStyle?.textAlign || DEFAULT_TEXT_ALIGN;
     let left: number;
     if (textAlign === 'center') {
       left = colRect.left - paraRect.left + colRect.width / 2;
@@ -489,7 +490,7 @@ export class EditCoordinateMapper {
       left = colRect.left - paraRect.left;
     }
 
-    const verticalAlign = this._paragraph.paragraphStyle?.verticalAlign || this._paragraph.inheritStyle?.verticalAlign;
+    const verticalAlign = this._paragraph.paragraphStyle?.verticalAlign || this._paragraph.inheritStyle?.verticalAlign || DEFAULT_VERTICAL_ALIGN;
     let top: number;
     if (verticalAlign === 'center') {
       top = colRect.top - paraRect.top + colRect.height / 2 - fontSize / 2;

@@ -5,6 +5,7 @@ import { CursorPosition } from "@/types/edit/cursor.type";
 import { SelectionRange } from "@/types/edit/selection.type";
 import { EditCoordinateMapper } from "./edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
+import { DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN } from "@/constants";
 
 /**
  * 커서 위치에서 유효한 스타일 정보.
@@ -204,13 +205,13 @@ export class EditController {
       fontWeight: model.textStyle?.fontWeight ?? inheritStyle.fontWeight,
       fontStyle: model.textStyle?.fontStyle ?? inheritStyle.fontStyle,
       fontSize: model.textStyle?.fontSize ?? inheritStyle.fontSize,
-      letterSpacing: model.textStyle?.letterSpacing ?? inheritStyle.letterSpacing,
-      widthRatio: model.textStyle?.widthRatio ?? inheritStyle.widthRatio,
+      letterSpacing: model.textStyle?.letterSpacing ?? inheritStyle.letterSpacing ?? DEFAULT_LETTER_SPACING,
+      widthRatio: model.textStyle?.widthRatio ?? inheritStyle.widthRatio ?? DEFAULT_WIDTH_RATIO,
     };
     const baseParagraphStyle: ParagraphStyle = {
       lineGap: model.paragraphStyle?.lineGap ?? inheritStyle.lineGap,
-      verticalAlign: model.paragraphStyle?.verticalAlign ?? inheritStyle.verticalAlign,
-      textAlign: model.paragraphStyle?.textAlign ?? inheritStyle.textAlign,
+      verticalAlign: model.paragraphStyle?.verticalAlign ?? inheritStyle.verticalAlign ?? DEFAULT_VERTICAL_ALIGN,
+      textAlign: model.paragraphStyle?.textAlign ?? inheritStyle.textAlign ?? DEFAULT_TEXT_ALIGN,
     };
 
     // 2. 커서가 위치한 텍스트 블록의 textBlockStyle 찾기

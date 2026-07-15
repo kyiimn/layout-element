@@ -1,4 +1,4 @@
-import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP, DEFAULT_SPACE_RATIO } from "@/constants";
+import { DEFAULT_FONT_SIZE, DEFAULT_LETTER_SPACING, DEFAULT_LINE_GAP, DEFAULT_SPACE_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, DEFAULT_WIDTH_RATIO } from "@/constants";
 import type { LayoutBoxElement, LayoutParagraphElement } from "@/components";
 import type { LayoutVirtualColumnElement } from "@/components/layout/v-column.element";
 import {
@@ -514,7 +514,7 @@ export class TextLayoutEngine {
           }
         }
 
-        const letterSpacingEm = this._textStyle?.letterSpacing || this._inheritStyle?.letterSpacing || 0;
+        const letterSpacingEm = this._textStyle?.letterSpacing || this._inheritStyle?.letterSpacing || DEFAULT_LETTER_SPACING;
         const letterSpacingFontSize = block.textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
         const letterSpacingPx = letterSpacingEm * letterSpacingFontSize * ppm;
 
@@ -639,11 +639,11 @@ export class TextLayoutEngine {
 
             if (currentPartIdx >= partWidths.length) {
               const maxPartWidth = partWidths.length > 0 ? Math.max(...partWidths) : 0;
-            if (charWidth > maxPartWidth + 1e-6) {
-              columnContent[columnContent.length - 1].parts[0].content.push(char);
-              cumulativeWidths[0] += charWidth;
-              break;
-            }
+              if (charWidth > maxPartWidth + 1e-6) {
+                columnContent[columnContent.length - 1].parts[0].content.push(char);
+                cumulativeWidths[0] += charWidth;
+                break;
+              }
               columnContent = this._removeTrailingEmptyLine(columnContent);
               idxContentOfBlock--;
               currentPartIdx = 0;
@@ -732,7 +732,7 @@ export class TextLayoutEngine {
     const height = this._inheritStyle.parentHeight;
     const width = this._columnWidths[idx];
 
-    const verticalAlign = this.paragraphStyle?.verticalAlign || this.inheritStyle?.verticalAlign;
+    const verticalAlign = this.paragraphStyle?.verticalAlign || this.inheritStyle?.verticalAlign || DEFAULT_VERTICAL_ALIGN;
 
     return {
       boxSizing: "border-box",
@@ -791,8 +791,8 @@ export class TextLayoutEngine {
    * - `textBlockStyle` → 폰트, 색상, 정렬 오버라이드
    */
   public genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> {
-    const letterSpacing = this.textStyle?.letterSpacing || this.inheritStyle?.letterSpacing;
-    const textAlign = this.paragraphStyle?.textAlign || this.inheritStyle?.textAlign || 'justify';
+    const letterSpacing = this.textStyle?.letterSpacing || this.inheritStyle?.letterSpacing || DEFAULT_LETTER_SPACING;
+    const textAlign = this.paragraphStyle?.textAlign || this.inheritStyle?.textAlign || DEFAULT_TEXT_ALIGN;
 
     const fontLoader = FontLoader.getInstance();
     const colorRegistry = ColorRegistry.getInstance();
@@ -976,7 +976,7 @@ export class TextLayoutEngine {
 
   /** 장평 비율 */
   public get widthRatio() {
-    return this.textStyle?.widthRatio || this.inheritStyle?.widthRatio || 1;
+    return this.textStyle?.widthRatio || this.inheritStyle?.widthRatio || DEFAULT_WIDTH_RATIO;
   }
 
   /** 공백 너비 비율 (em 단위) */
