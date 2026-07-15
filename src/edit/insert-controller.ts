@@ -15,6 +15,7 @@ export class InsertController {
   private _currentClientX = 0;
   private _currentClientY = 0;
   private _previewEl: HTMLDivElement | null = null;
+  private _startContainer: LayoutDocumentElement | LayoutBoxElement | null = null;
   private _boundStartDrag: (event: MouseEvent) => void;
   private _boundOnMouseMove: (event: MouseEvent) => void;
   private _boundOnMouseUp: (event: MouseEvent) => void;
@@ -69,6 +70,8 @@ export class InsertController {
     this._startClientY = event.clientY;
     this._currentClientX = event.clientX;
     this._currentClientY = event.clientY;
+
+    this._startContainer = this._findTargetContainer(event.clientX, event.clientY, this._mode.type);
 
     this._previewEl = this._createPreview();
     this._updatePreview(this._startClientX, this._startClientY, this._startClientX, this._startClientY);
@@ -348,11 +351,70 @@ export class InsertController {
     const width = Math.abs(currentX - startX);
     const height = Math.abs(currentY - startY);
 
-    this._previewEl.style.left = `${left}px`;
-    this._previewEl.style.top = `${top}px`;
-    this._previewEl.style.width = `${width}px`;
-    this._previewEl.style.height = `${height}px`;
-    this._previewEl.style.display = width > 1 || height > 1 ? 'block' : 'none';
+    if (width <= 1 && height <= 1) {
+      this._previewEl.style.display = 'none';
+      return;
+    }
+
+    if (this._mode?.position === 'static' && this._startContainer) {
+      const snapped = this._snapPreviewToGrid(left, top, width, height, this._startContainer);
+      this._previewEl.style.left = `${snapped.left}px`;
+      this._previewEl.style.top = `${snapped.top}px`;
+      this._previewEl.style.width = `${snapped.width}px`;
+      this._previewEl.style.height = `${snapped.height}px`;
+    } else {
+      this._previewEl.style.left = `${left}px`;
+      this._previewEl.style.top = `${top}px`;
+      this._previewEl.style.width = `${width}px`;
+      this._previewEl.style.height = `${height}px`;
+    }
+
+    this._previewEl.style.display = 'block';
+  }
+
+  /** static 모드에서 미리보기를 컬럼/라인 그리드에 스냅한다. */
+  private _snapPreviewToGrid(leftPx: number, topPx: number, widthPx: number, heightPx: number, container: LayoutDocumentElement | LayoutBoxElement): { left: number; top: number; width: number; height: number } {
+    const model = container.model;
+    if (!model) {
+      return { left: leftPx, top: topPx, width: widthPx, height: heightPx };
+    }
+
+    const ppm = GridCalculator.ppm;
+    const { lineHeight, editableWidth, columnCount } = model;
+    const avgColWidth = editableWidth / columnCount;
+
+    const rect = container.getBoundingClientRect();
+    let containerPaddingLeft = 0;
+    let containerPaddingTop = 0;
+    if (container instanceof LayoutDocumentElement) {
+      containerPaddingLeft = container.paddingLeft;
+      containerPaddingTop = container.paddingTop;
+    } else if (container instanceof LayoutBoxElement) {
+      containerPaddingLeft = container.paddingLeft ?? 0;
+      containerPaddingTop = container.paddingTop ?? 0;
+    }
+
+    const editAreaLeftPx = rect.left + containerPaddingLeft * ppm;
+    const editAreaTopPx = rect.top + containerPaddingTop * ppm;
+
+    const leftMm = Math.max(0, (leftPx - rect.left) / ppm - containerPaddingLeft);
+    const topMm = Math.max(0, (topPx - rect.top) / ppm - containerPaddingTop);
+    const widthMm = widthPx / ppm;
+    const heightMm = heightPx / ppm;
+
+    const staticCoords = this._mmToStatic(leftMm, topMm, widthMm, heightMm, container);
+
+    const snapLeftPx = editAreaLeftPx + staticCoords.left * avgColWidth * ppm;
+    const snapTopPx = editAreaTopPx + staticCoords.top * lineHeight * ppm;
+    const snapWidthPx = staticCoords.width * avgColWidth * ppm;
+    const snapHeightPx = staticCoords.height * lineHeight * ppm;
+
+    return {
+      left: Math.round(snapLeftPx),
+      top: Math.round(snapTopPx),
+      width: Math.round(snapWidthPx),
+      height: Math.round(snapHeightPx),
+    };
   }
 
   /** 미리보기 사각형을 제거한다. */
@@ -366,6 +428,7 @@ export class InsertController {
   /** 이벤트 리스너와 미리보기를 정리한다. */
   private _cleanup(): void {
     this._isDragging = false;
+    this._startContainer = null;
     this._removePreview();
     document.removeEventListener('mousemove', this._boundOnMouseMove);
     document.removeEventListener('mouseup', this._boundOnMouseUp);
