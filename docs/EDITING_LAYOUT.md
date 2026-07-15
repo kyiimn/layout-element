@@ -1,6 +1,6 @@
 # layout-element 레이아웃 편집 모드 상세 명세
 
-> 작성 기준: `src/edit/edit-manager.ts`, `src/components/layout/document.element.ts`, `src/components/layout/box.element.ts`, `src/react/hooks/use-edit-manager.ts`
+> 작성 기준: `src/edit/edit-manager.ts`, `src/components/layout/box.element.ts`, `src/react/hooks/use-edit-manager.ts`
 >
 > 본 문서는 `layout-element` 라이브러리의 레이아웃 편집 모드 기능, 공개 API, 선택 동작, 드래그-이동, 스냅-그리드, 경계 클램핑, 텍스트 회피(리플로우), ESC 취소, 시각적 피드백, React 연동 방법을 상세히 기술한다.
 
@@ -8,7 +8,7 @@
 
 ## 1. 개요 (Overview)
 
-레이아웃 편집 모드는 `<x-layout-document>`와 `<x-layout-box>` 요소를 시각적으로 선택하고 드래그하여 이동할 수 있는 기능이다. 텍스트 편집 모드(`editableText`)가 단락 내부의 텍스트를 수정하는 기능이라면, 레이아웃 편집 모드(`editableLayout`)는 레이아웃 구조 요소 자체를 선택·이동하는 기능이다.
+레이아웃 편집 모드는 `<x-layout-box>` 요소를 시각적으로 선택하고 드래그하여 이동할 수 있는 기능이다. 텍스트 편집 모드(`editableText`)가 단락 내부의 텍스트를 수정하는 기능이라면, 레이아웃 편집 모드(`editableLayout`)는 레이아웃 구조 요소 자체를 선택·이동하는 기능이다. `<x-layout-document>`는 레이아웃 편집 대상이 아니며, 오직 `<x-layout-box>`만 `editableLayout` 속성을 지원한다.
 
 ### 1.1 레이아웃 편집 모드 아키텍처
 
@@ -16,7 +16,7 @@
 
 1. **클릭 리스너 등록**: 요소에 `click` 및 `mousedown` 이벤트 리스너가 등록된다.
 2. **선택 처리**: 클릭 시 `EditManager.selectLayout()`을 호출하여 요소를 선택한다.
-3. **시각적 피드백**: 선택된 요소에 `data-selected` 속성이 설정되고, Shadow DOM의 `:host([data-selected])` 규칙에 의해 빨간색 `box-shadow`가 표시된다.
+3. **시각적 피드백**: 선택된 요소에 `selected` 속성이 설정되고, Shadow DOM의 `:host([selected])` 규칙에 의해 빨간색 `box-shadow`가 표시된다.
 4. **드래그 이동**: 선택된 요소를 마우스로 드래그하여 이동할 수 있다.
 5. **크기 조정**: 선택된 요소의 가장자리 중앙에 4개의 리사이즈 핸들이 표시되며, 핸들을 드래그하여 크기를 조정할 수 있다.
 6. **텍스트 리플로우**: 드래그 중 주변 단락이 실시간으로 텍스트를 다시 배치하여 이미지/박스를 회피한다.
@@ -25,11 +25,11 @@
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ <x-layout-document editableLayout>                  │
+│ <x-layout-document>                                │
 │   ┌──────────────────┐  ┌──────────────────┐        │
 │   │ <x-layout-box    │  │ <x-layout-box    │        │
 │   │  editableLayout> │  │  editableLayout> │        │
-│   │  [data-selected] │  │                  │        │
+│   │  [selected] │  │                  │        │
 │   │  cursor: grab ↄ  │  │                  │        │
 │   └──────────────────┘  └──────────────────┘        │
 │                                                     │
@@ -49,28 +49,27 @@
 
 #### `editableLayout` 속성
 
-**지원 요소**: `<x-layout-document>`, `<x-layout-box>`
+**지원 요소**: `<x-layout-box>` (document는 레이아웃 편집 대상이 아님)
 
 ```typescript
 // 활성화
-document.querySelector('x-layout-document').editableLayout = true;
 document.querySelector('x-layout-box').editableLayout = true;
 
 // 비활성화
 element.editableLayout = false;
 ```
 
-| 동작 | `<x-layout-document>` | `<x-layout-box>` |
-|------|----------------------|-------------------|
-| `true` 설정 | `cursor` 및 내부 상태 업데이트 | `cursor: grab`, 리사이즈 핸들 DOM 표시, 내부 상태 업데이트 |
-| `false` 설정 | `data-selected` 제거, `EditManager` 등록 해제 | `data-selected`·`data-hovered` 제거, `cursor` 초기화, `EditManager` 등록 해제 |
-| `connectedCallback` | `click` 리스너 등록 | `click` + `mousedown` + `mouseenter` + `mouseleave` 리스너 등록, 리사이즈 핸들에 `mousedown` 리스너 등록 |
-| `disconnectedCallback` | `click` 리스너 해제 | `click` + `mousedown` + `mouseenter` + `mouseleave` 리스너 해제, `EditManager._unregisterLayout()` 호출 |
-| 인쇄 모드 | `editableLayout` 설정 무시 | `editableLayout` 설정 무시 |
+| 동작 | `<x-layout-box>` |
+|------|-------------------|
+| `true` 설정 | `cursor: grab`, 리사이즈 핸들 DOM 표시, 내부 상태 업데이트 |
+| `false` 설정 | `selected`·`hovered` 제거, `cursor` 초기화, `EditManager` 등록 해제 |
+| `connectedCallback` | `click` + `mousedown` + `mouseenter` + `mouseleave` 리스너 등록, 리사이즈 핸들에 `mousedown` 리스너 등록 |
+| `disconnectedCallback` | `click` + `mousedown` + `mouseenter` + `mouseleave` 리스너 해제, `EditManager._unregisterLayout()` 호출 |
+| 인쇄 모드 | `editableLayout` 설정 무시 |
 
 > **설계**: 이벤트 리스너는 `connectedCallback`에서 항상 등록하고 `disconnectedCallback`에서 항상 해제한다. `editableLayout` 플래그는 핸들러 내부에서 조기 반환하는 가드 역할만 한다. 리사이즈 핸들은 `_ensureResizeHandles()`에서 생성 시 항상 `mousedown` 리스너를 등록하며, `editableLayout = false`에서 리스너를 제거하지 않는다.
 
-> **참고**: `<x-layout-document>`는 선택만 가능하고 드래그 이동은 지원하지 않는다. 드래그는 `<x-layout-box>`에서만 동작한다.
+> **참고**: `<x-layout-document>`는 레이아웃 편집 대상이 아니므로 `editableLayout` 속성이 없다. 드래그와 선택은 `<x-layout-box>`에서만 동작한다.
 
 #### 선택 동작
 
@@ -78,7 +77,7 @@ element.editableLayout = false;
 |------|------|
 | **클릭** | 기존 선택을 모두 해제하고 클릭한 요소만 선택 |
 | **Ctrl+클릭** (또는 **Cmd+클릭**) | 기존 선택에 추가. 이미 선택된 요소를 다시 클릭하면 선택 해제(토글) |
-| **클릭** (이벤트 전파) | `stopPropagation()`으로 부모 요소의 클릭 이벤트 차단. 중첩된 box를 클릭해도 document가 함께 선택되지 않음 |
+| **클릭** (이벤트 전파) | `stopPropagation()`으로 부모 요소의 클릭 이벤트 차단. 중첩된 box를 클릭해도 상위 box가 함께 선택되지 않음 |
 | **하위 요소 클릭** | 이벤트가 하위 레이아웃 요소(box)에서 발생한 경우, 상위 요소의 mousedown/click 핸들러는 `_isEventFromDescendantLayout()` 검사로 해당 이벤트를 무시한다. 이를 통해 상위 요소가 선택된 상태에서도 하위 요소를 클릭하여 선택할 수 있다 |
 | **선택되지 않은 요소 mousedown** | 선택되지 않은 요소를 mousedown하면 기존 선택을 해제하고 해당 요소를 선택한 후 드래그를 시작한다. `_selectedOnMouseDown` 플래그로 click에서 중복 선택을 방지한다 |
 
@@ -92,26 +91,26 @@ element.editableLayout = false;
 
 #### 시각적 피드백
 
-**선택 표시** (`data-selected`):
+**선택 표시** (`selected`):
 
 ```css
-:host([data-selected]) {
+:host([selected]) {
   box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px;
 }
 ```
 
-**호버 표시** (`data-hovered`) — `<x-layout-box>`만, `<x-layout-document>`는 제외:
+**호버 표시** (`hovered`) — `<x-layout-box>`만 해당:
 
 ```css
-:host([data-hovered]) {
+:host([hovered]) {
   box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px;
 }
 ```
 
 | 속성 | 색상 | 적용 대상 | 조건 |
 |------|------|----------|------|
-| `data-selected` | 빨간색 (`red`) | document, box | 클릭으로 선택됨 |
-| `data-hovered` | 파란색 (`#4a90d9`) | box만 | 마우스 hover, 선택되지 않은 요소만 |
+| `selected` | 빨간색 (`red`) | box | 클릭으로 선택됨 |
+| `hovered` | 파란색 (`#4a90d9`) | box만 | 마우스 hover, 선택되지 않은 요소만 |
 
 - **inset shadow**: 요소 내부에 1px 테두리
 - **outset shadow**: 요소 외부에 1px 테두리
@@ -120,19 +119,18 @@ element.editableLayout = false;
 
 **호버 동작 규칙**:
 
-1. `editableLayout`이 켜져 있고 `data-selected`가 없는 `<x-layout-box>`에만 `data-hovered`가 설정된다
-2. 이미 선택된 요소(`data-selected`)는 호버 표시가 나타나지 않는다
-3. 마우스가 요소에 진입하면 **조상 요소의 `data-hovered`를 모두 제거**하여, 가장 안쪽(최상위) 요소만 호버 표시가 보인다
+1. `editableLayout`이 켜져 있고 `selected`가 없는 `<x-layout-box>`에만 `hovered`가 설정된다
+2. 이미 선택된 요소(`selected`)는 호버 표시가 나타나지 않는다
+3. 마우스가 요소에 진입하면 **조상 요소의 `hovered`를 모두 제거**하여, 가장 안쪽(최상위) 요소만 호버 표시가 보인다
 4. 마우스가 자식 요소에서 부모 영역으로 돌아갈 때, `elementFromPoint`를 사용하여 마우스 위치 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다
-5. `<x-layout-document>`는 호버 표시를 지원하지 않는다
-6. **드래그 이동 중이거나 크기 조정 중에는 hover가 동작하지 않는다**. `EditManager._isDraggingLayout()` 또는 `_isResizingLayout()`이 `true`이면 `_onLayoutMouseEnter`와 `_onLayoutMouseLeave`가 early return하여 hover 표시가 나타나지 않는다. 이로 인해 드래그/리사이즈 중에 마우스가 다른 박스 위로 이동해도 방해가 되지 않는다. 드래그/리사이즈가 종료되면 정상적으로 hover가 동작한다.
+5. **드래그 이동 중이거나 크기 조정 중에는 hover가 동작하지 않는다**. `EditManager._isDraggingLayout()` 또는 `_isResizingLayout()`이 `true`이면 `_onLayoutMouseEnter`와 `_onLayoutMouseLeave`가 early return하여 hover 표시가 나타나지 않는다. 이로 인해 드래그/리사이즈 중에 마우스가 다른 박스 위로 이동해도 방해가 되지 않는다. 드래그/리사이즈가 종료되면 정상적으로 hover가 동작한다.
 
 | 상태 | 커서 | 시각적 피드백 |
 |------|------|-------------|
-| `editableLayout = true` (선택 안 됨, hover) | `grab` | 파란색 테두리 (`data-hovered`) |
-| `editableLayout = true` (선택됨, 대기) | `grab` | 빨간색 테두리 (`data-selected`), 리사이즈 핸들 4개 표시 |
-| `editableLayout = true` (드래그 중) | `grabbing` | 빨간색 테두리 (`data-selected`) |
-| `editableLayout = true` (리사이즈 중) | 핸들 방향별 (`ns-resize`/`ew-resize`) | 빨간색 테두리 (`data-selected`) |
+| `editableLayout = true` (선택 안 됨, hover) | `grab` | 파란색 테두리 (`hovered`) |
+| `editableLayout = true` (선택됨, 대기) | `grab` | 빨간색 테두리 (`selected`), 리사이즈 핸들 4개 표시 |
+| `editableLayout = true` (드래그 중) | `grabbing` | 빨간색 테두리 (`selected`) |
+| `editableLayout = true` (리사이즈 중) | 핸들 방향별 (`ns-resize`/`ew-resize`) | 빨간색 테두리 (`selected`) |
 | `editableLayout = false` | (기본값) | 없음 |
 
 #### 리사이즈 핸들 (Resize Handles)
@@ -155,8 +153,8 @@ element.editableLayout = false;
 | `right` | 우측 가장자리 중앙 | `ew-resize` | 좌우 리사이즈 |
 
 핸들은 CSS로 표시/숨김을 제어한다:
-- `:host([data-selected]) .resize-handle { display: block; }` — 선택 시 표시
-- `:host(:not([data-selected])) .resize-handle { display: none; }` — 미선택 시 숨김
+- `:host([selected]) .resize-handle { display: block; }` — 선택 시 표시
+- `:host(:not([selected])) .resize-handle { display: none; }` — 미선택 시 숨김
 - 핸들의 `mousedown` 이벤트는 `stopPropagation()`으로 버블링을 차단하여, 드래그-이동이 함께 트리거되지 않도록 한다.
 
 ### 2.2 EditManager API
@@ -198,7 +196,6 @@ manager.selectedLayoutIds; // string[]
 
 선택된 레이아웃 요소들 중에서 중첩(ancestor-descendant) 관계에 있는 하위 요소를 제외하고, 최상위 `LayoutBoxElement`만 반환한다.
 
-- `LayoutDocumentElement`은 드래그 대상이 아니므로 항상 제외된다.
 - 서로 ancestor-descendant 관계에 있는 요소 중 ancestor만 유지되고 descendant는 제외된다.
 - 서로 독립적인(형제 또는 다른 트리의) 요소들은 모두 유지된다.
 - 단일 요소만 선택된 경우 필터링 없이 그대로 반환된다.
@@ -346,10 +343,10 @@ manager.addEventListener('layoutResize', (event) => {
 ### 2.3 LayoutElement 타입
 
 ```typescript
-type LayoutElement = LayoutDocumentElement | LayoutBoxElement;
+type LayoutElement = LayoutBoxElement;
 ```
 
-`LayoutElement`은 `EditManager`에서 레이아웃 선택 대상이 되는 요소의 유니온 타입이다. `<x-layout-paragraph>`은 레이아웃 선택 대상이 아니다.
+`LayoutElement`은 `EditManager`에서 레이아웃 선택 대상이 되는 요소의 타입이다. `<x-layout-document>`은 레이아웃 편집 대상이 아니며, `<x-layout-paragraph>`도 레이아웃 선택 대상이 아니다.
 
 ### 2.4 React API
 
@@ -395,7 +392,7 @@ function MyComponent() {
 #### 컴포넌트 Props
 
 ```tsx
-<LayoutDocument editableLayout={true}>
+<LayoutDocument>
   <LayoutBox editableLayout={true}>
     {/* ... */}
   </LayoutBox>
@@ -404,7 +401,7 @@ function MyComponent() {
 
 | Prop | 타입 | 설명 |
 |------|------|------|
-| `editableLayout` | `boolean?` | 레이아웃 편집 모드 활성화. `LayoutDocument`, `LayoutBox` 모두 지원 |
+| `editableLayout` | `boolean?` | 레이아웃 편집 모드 활성화. `LayoutBox`만 지원 (document는 편집 대상 아님) |
 
 ---
 
@@ -429,7 +426,7 @@ _onLayoutClick(event)
     │   ├── editableLayout 검증 (false면 무시)
     │   ├── 기존 선택 해제 (단일 선택 모드)
     │   │   또는 토글 (다중 선택 모드)
-    │   ├── data-selected 속성 설정/해제
+    │   ├── selected 속성 설정/해제
     │   └── layoutSelectionChange 이벤트 발생
     └── EditManager._setMultiSelect(false)
 ```
@@ -444,7 +441,7 @@ _onLayoutClick(event)
 _onLayoutMouseDown(event)
     ├── button !== 0? → return
     ├── _isEventFromDescendantLayout(event)? → return (하위 요소가 처리)
-    ├── !data-selected? (선택되지 않은 요소)
+    ├── !selected? (선택되지 않은 요소)
     │   ├── EditManager.selectLayout(this)  ← 기존 선택 해제 + 이 요소 선택
     │   └── _selectedOnMouseDown = true     ← click에서 중복 선택 방지 플래그
     ├── event.preventDefault()
@@ -466,7 +463,7 @@ _onLayoutMouseDown(event)
     │
     ├── mousedown 이벤트
     │   ├── 하위 box의 _onLayoutMouseDown
-    │   │   └── !data-selected → selectLayout(하위 box) + _selectedOnMouseDown = true
+    │   │   └── !selected → selectLayout(하위 box) + _selectedOnMouseDown = true
     │   └── 상위 box로 버블링
     │       └── 상위 box의 _onLayoutMouseDown
     │           └── _isEventFromDescendantLayout(event) === true → return (드래그 시작 안 함)
@@ -495,15 +492,10 @@ _onLayoutMouseDown(event)
 
 **`<x-layout-box>`**:
 1. `click`, `mousedown`, `mouseenter`, `mouseleave` 이벤트 리스너 제거
-2. `data-selected` 속성 제거 (선택 시각적 피드백 해제)
-3. `data-hovered` 속성 제거 (호버 시각적 피드백 해제)
+2. `selected` 속성 제거 (선택 시각적 피드백 해제)
+3. `hovered` 속성 제거 (호버 시각적 피드백 해제)
 4. `cursor` 스타일 초기화
 5. `EditManager._unregisterLayout()` 호출 (선택 목록에서 제거, `layoutSelectionChange` 이벤트 발생)
-
-**`<x-layout-document>`**:
-1. `click` 이벤트 리스너 제거
-2. `data-selected` 속성 제거
-3. `EditManager._unregisterLayout()` 호출
 
 ### 3.4 `disconnectedCallback` 정리
 
@@ -533,7 +525,7 @@ _onLayoutMouseDown(event)
 │  ① mousedown (선택된 box 위에서)                                     │
 │     │                                                               │
 │     ├── button !== 0? → 무시                                        │
-│     ├── data-selected 없음? → 무시                                   │
+│     ├── selected 없음? → 무시                                   │
 │     ├── event.preventDefault()                                       │
 │     ├── _isDragging = true                                           │
 │     ├── _dragMoved = false                                          │
@@ -1198,11 +1190,11 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 
 ## 9. 제한 사항
 
-- **드래그 대상**: `<x-layout-box>`만 드래그 이동할 수 있다. `<x-layout-document>`는 선택만 가능하다.
+- **드래그 대상**: `<x-layout-box>`만 드래그 이동할 수 있다.
 - **리사이즈 대상**: `<x-layout-box>`만 리사이즈할 수 있다. `<x-layout-document>`는 리사이즈할 수 없다.
 - **리사이즈 방향**: 상/하/좌/우 4방향만 지원한다. 대각선 리사이즈는 지원하지 않는다.
 - **리사이즈 단일 요소**: 리사이즈는 항상 단일 요소에만 적용된다. 다중 선택 상태에서도 리사이즈 핸들을 드래그하면 해당 요소만 크기가 변경된다.
-- **선택 대상**: `<x-layout-document>`와 `<x-layout-box>`만 선택할 수 있다. `<x-layout-paragraph>`, `<x-layout-image>`, `<x-layout-column>`은 레이아웃 선택 대상이 아니다.
+- **선택 대상**: `<x-layout-box>`만 선택할 수 있다. `<x-layout-document>`, `<x-layout-paragraph>`, `<x-layout-image>`, `<x-layout-column>`은 레이아웃 선택 대상이 아니다.
 - **중첩 요소 무시**: 다중 선택 드래그 시 선택된 요소들 중 ancestor-descendant 관계에 있으면 가장 상위(ancestor) 요소만 이동하고 하위(descendant) 요소는 무시된다. 하위 요소는 상위 요소와 함께 자연스럽게 이동하므로 별도 이동 처리가 불필요하다. `EditManager.getTopLevelDragTargets()`가 이 필터링을 수행한다.
 - **텍스트 편집과 독립**: 레이아웃 선택은 텍스트 편집 포커스와 무관하게 동작한다. 한 단락이 텍스트 편집 중이더라도 레이아웃 요소를 선택할 수 있다.
 - **시각적 피드백**: 선택 표시는 `box-shadow`를 사용하므로 요소의 레이아웃에 영향을 주지 않는다. `outline`은 기존 `border`와 충돌할 수 있어 사용하지 않는다.
@@ -1222,8 +1214,7 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 
 | 파일 | 역할 |
 |------|------|
-| `src/components/layout/box.element.ts` | 드래그 로직, 리사이즈 로직, 위치 setter, `_computeNewPosition`, `_computeNewSize`, `_rerenderAffectedParagraphs`, `_collectParagraphs` |
-| `src/components/layout/document.element.ts` | `editableLayout` 속성, `_onLayoutClick`, `:host([data-selected])` CSS 규칙 |
+| `src/components/layout/box.element.ts` | 드래그 로직, 리사이즈 로직, 위치 setter, `_computeNewPosition`, `_computeNewSize`, `_rerenderAffectedParagraphs`, `_collectParagraphs`, `editableLayout` 속성, `_onLayoutClick`, `_onLayoutMouseDown`, `selected`/`hovered` 속성 |
 | `src/edit/edit-manager.ts` | 레이아웃 선택 상태 관리, `selectLayout`, `clearLayoutSelection`, `_startLayoutDrag`, `_endLayoutDrag`, `_startLayoutResize`, `_endLayoutResize`, `_isDraggingLayout`, `_isResizingLayout`, `getTopLevelDragTargets`, `_unregisterLayout`, `layoutSelectionChange` 이벤트, `_dispatchLayoutResize`, `insertMode`, `activateInsert`, `deactivateInsert`, `insert`/`insertCancel` 이벤트 |
 | `src/react/hooks/use-edit-manager.ts` | React 훅: `selectedLayouts`, `selectLayout`, `clearLayoutSelection`, `onLayoutSelectionChange` |
 | `src/core/text-layout-engine.ts` | `_layoutTextIntoColumns`, 오버랩 회피, COVER 라인, PART 분할 |
@@ -1386,13 +1377,13 @@ mouseup
 
 ### 10.7 주의사항
 
-- **`_onLayoutClick`과 `_onLayoutMouseDown`의 관계**: `mousedown`은 `data-selected`가 있는 요소에서만 드래그를 시작한다. `click`은 `_dragMoved`가 `true`이면 무시한다. 두 핸들러는 독립적으로 동작한다.
+- **`_onLayoutClick`과 `_onLayoutMouseDown`의 관계**: `mousedown`은 `selected`가 있는 요소에서만 드래그를 시작한다. `click`은 `_dragMoved`가 `true`이면 무시한다. 두 핸들러는 독립적으로 동작한다.
 - **`_onLayoutClick`의 `stopPropagation()`**: 클릭이 부모 박스나 문서로 전파되는 것을 막는다. 이로 인해 중첩된 박스를 클릭해도 부모가 함께 선택되지 않는다.
 - **`_structureDirty`**: `paragraph.render()`에서 이 플래그가 `true`이면 `layout()`과 `TextLayoutEngine.create()`를 재실행한다. `false`이면 기존 모델을 재사용하여 `layoutText()`만 재실행한다. 드래그 중에는 박스 위치가 변하므로 항상 `true`로 설정해야 한다.
 - **`_overlayRects`**: `TextLayoutEngine`이 `_layoutTextIntoColumns()` 시작 시 `null`로 초기화한다. `paragraph.render()`에서 `TextLayoutEngine.create()` 호출 시 `getOverlapSizePX()`를 통해 새로 계산된다.
 - **`layoutMove` 이벤트**: 드래그 완료(mouseup) 또는 취소(ESC) 시 `EditManager._dispatchLayoutMove()`를 통해 발생한다. 단순 클릭(이동 임계값 3px 미만)에서는 발생하지 않는다. `canceled` 필드로 완료와 취소를 구분할 수 있다.
-- **호버 표시 (`data-hovered`)**: `<x-layout-box>`에만 적용되며, `<x-layout-document>`는 호버 표시를 지원하지 않는다. `mouseenter` 시 조상 요소의 `data-hovered`를 모두 제거하여 가장 안쪽 요소만 호버 표시가 보이도록 한다. `mouseleave` 시 `elementFromPoint`로 마우스 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다. 이 동작은 중첩된 박스에서 자식→부모로 마우스가 돌아갈 때 부모의 호버가 복원되도록 보장한다.
-- **호버와 선택의 우선순위**: `data-selected`가 있는 요소는 `data-hovered`를 표시하지 않는다. `_onLayoutMouseEnter`에서 `hasAttribute('data-selected')`를 먼저 검사하여, 이미 선택된 요소 위에 마우스가 있을 때 파란색 호버 테두리가 빨간색 선택 테두리와 겹치지 않도록 한다. 조상의 `data-hovered` 제거는 `data-selected` 체크 전에 수행되어, 선택된 요소 위에서 마우스가 움직일 때 조상 요소의 호버 표시도 제거된다.
+- **호버 표시 (`hovered`)**: `<x-layout-box>`에만 적용되며, `<x-layout-document>`는 호버 표시를 지원하지 않는다. `mouseenter` 시 조상 요소의 `hovered`를 모두 제거하여 가장 안쪽 요소만 호버 표시가 보이도록 한다. `mouseleave` 시 `elementFromPoint`로 마우스 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다. 이 동작은 중첩된 박스에서 자식→부모로 마우스가 돌아갈 때 부모의 호버가 복원되도록 보장한다.
+- **호버와 선택의 우선순위**: `selected`가 있는 요소는 `hovered`를 표시하지 않는다. `_onLayoutMouseEnter`에서 `hasAttribute('selected')`를 먼저 검사하여, 이미 선택된 요소 위에 마우스가 있을 때 파란색 호버 테두리가 빨간색 선택 테두리와 겹치지 않도록 한다. 조상의 `hovered` 제거는 `selected` 체크 전에 수행되어, 선택된 요소 위에서 마우스가 움직일 때 조상 요소의 호버 표시도 제거된다.
 - **드래그/리사이즈 중 hover 차단**: `EditManager._isDraggingLayout()` 또는 `_isResizingLayout()`이 `true`이면 `_onLayoutMouseEnter`와 `_onLayoutMouseLeave`가 early return하여 hover 표시가 전혀 나타나지 않는다. 드래그 이동 중이나 크기 조정 중에 마우스가 다른 박스 위로 이동해도 방해가 되지 않도록 한다. 드래그/리사이즈가 종료되면 `EditManager._endLayoutDrag()`/`_endLayoutResize()`에서 플래그가 해제되어 hover가 정상 동작한다.
 
 ---
@@ -1405,10 +1396,10 @@ mouseup
 
 ### 11.2 리사이즈 핸들
 
-선택된 box(`data-selected` 속성 있음)에서만 핸들이 표시된다. 핸들은 Shadow DOM 내부의 `<div>` 요소이며, CSS로 표시/숨김을 제어한다:
+선택된 box(`selected` 속성 있음)에서만 핸들이 표시된다. 핸들은 Shadow DOM 내부의 `<div>` 요소이며, CSS로 표시/숨김을 제어한다:
 
 - 기본: `.resize-handle { display: none; }`
-- 선택 시: `:host([data-selected]) .resize-handle { display: block; }`
+- 선택 시: `:host([selected]) .resize-handle { display: block; }`
 
 핸들의 시각적 속성:
 - 크기: 8px × 8px 원형
@@ -1427,7 +1418,7 @@ mouseup
 │  ① mousedown on resize handle                                       │
 │     │                                                               │
 │     ├── button !== 0? → 무시                                        │
-│     ├── data-selected 없음? → 무시                                   │
+│     ├── selected 없음? → 무시                                   │
 │     ├── event.preventDefault() + stopPropagation()                   │
 │     │   ← stopPropagation으로 _onLayoutMouseDown 전파 차단           │
 │     ├── _isResizing = true, _resizeHandle = handle direction        │
@@ -1592,6 +1583,8 @@ private _resizeHandles: HTMLDivElement[] = [];   // 핸들 DOM 요소 참조
 
 삽입 모드가 활성화되면 문서 요소의 커서가 `crosshair`로 바뀌고, 기존 레이아웃 선택은 자동으로 해제된다. 삽입 모드 중에는 레이아웃 선택과 드래그 이동이 동작하지 않아 삽입 동작과 충돌하지 않는다.
 
+> **사전 조건**: 삽입 모드는 `editableLayout`이 활성화된 `<x-layout-box>` 요소가 하나 이상 있어야만 활성화할 수 있다. `insertMode` setter에서 `x-layout-box[editable-layout]` 요소를 확인하며, 없으면 설정이 무시된다.
+
 ### 12.2 EditManager API
 
 #### `insertMode` getter / setter
@@ -1611,11 +1604,11 @@ const mode = manager.insertMode; // InsertMode | null
 
 | 동작 | 설명 |
 |------|------|
-| non-null 설정 | 삽입 모드 활성화, 기존 레이아웃 선택 해제, 문서 요소에 `crosshair` 커서 적용 |
+| non-null 설정 | 삽입 모드 활성화, 기존 레이아웃 선택 해제, 문서 요소에 `crosshair` 커서 적용. `editableLayout`이 활성화된 요소가 없으면 무시됨 |
 | `null` 설정 | 삽입 모드 비활성화, 커서 복원 |
 | 반복 설정 | 동일한 모드로 다시 설정하면 무시된다 |
 
-`x-layout-document` 요소가 DOM에 없으면 `Error`를 throw한다.
+`x-layout-document` 요소가 DOM에 없으면 `Error`가 throw된다. `editableLayout`이 활성화된 `<x-layout-box>`가 하나도 없으면 삽입 모드가 활성화되지 않는다.
 
 #### `activateInsert(mode)`
 
@@ -1713,15 +1706,30 @@ manager.addEventListener('insertCancel', (event) => {
 │     ├── EditManager.insertMode = { type, position }          │
 │     ├── 기존 레이아웃 선택 해제                               │
 │     ├── InsertController 생성/재사용                         │
-│     └── document에 mousedown 리스너 등록, cursor = crosshair │
+│     ├── document에 mousedown 리스너 등록(버블링)             │
+│     │   (문서 빈 공간에서의 mousedown 처리)                  │
+│     └── 편집 가능한 box의 커서를 crosshair로 변경             │
 │                                                             │
-│  ② mousedown on document                                     │
+│  ② mousedown (box 위에서)                                    │
 │     │                                                        │
-│     ├── button !== 0? → 무시                                │
-│     ├── event.preventDefault() + stopPropagation()           │
-│     ├── _createPreview()                                     │
-│     ├── _isDragging = true                                   │
-│     └── document에 mousemove, mouseup, keydown 리스너 등록    │
+│     ├── _onLayoutMouseDown 실행                              │
+│     ├── insertMode 가드 → EditManager.handleInsertMouseDown  │
+│     │   └── InsertController.startDrag(event)                │
+│     │       ├── button !== 0? → 무시                        │
+│     │       ├── _isDragging? → 무시 (중복 실행 방지)         │
+│     │       ├── event.preventDefault() + stopPropagation()   │
+│     │       ├── _createPreview()                             │
+│     │       ├── _isDragging = true                           │
+│     │       └── document에 mousemove, mouseup, keydown 등록  │
+│     └── return (이후 레이아웃 선택/드래그 로직 건너뜀)      │
+│                                                             │
+│  ②' mousedown (문서 빈 공간에서)                              │
+│     │                                                        │
+│     ├── InsertController._boundStartDrag 실행               │
+│     │   (box 핸들러가 먼저 startDrag()를 호출하지 않았으므로)  │
+│     └── InsertController.startDrag(event)                    │
+│         ├── _isDragging 가드로 중복 방지                     │
+│         └── (이후 동일)                                     │
 │                                                             │
 │  ③ mousemove (드래그 중)                                      │
 │     │                                                        │
@@ -1850,13 +1858,19 @@ private static readonly DRAG_THRESHOLD = 3;
 
 ### 12.10 레이아웃 편집 모드와의 상호작용
 
-삽입 모드가 활성화되면 다음 핸들러가 early return하여 레이아웃 선택/드래그가 방해되지 않는다.
+삽입 모드가 활성화되면 다음 핸들러가 `EditManager.getInstance().insertMode` 가드로 early return하여 레이아웃 선택/드래그/리사이즈가 방해되지 않는다.
 
-- `<x-layout-box>`의 `_onLayoutClick`
-- `<x-layout-box>`의 `_onLayoutMouseDown`
-- `<x-layout-document>`의 `_onLayoutClick`
+- `<x-layout-box>`의 `_onLayoutClick` — 삽입 모드 중 클릭 이벤트 무시
+- `<x-layout-box>`의 `_onLayoutMouseDown` — 삽입 모드 중 `EditManager.handleInsertMouseDown()` 위임 후 return
+- `<x-layout-box>`의 `_onResizeMouseDown` — 삽입 모드 중 리사이즈 시작 차단
+- `<x-layout-box>`의 `_onLayoutMouseEnter` — 삽입 모드 중 호버 표시 차단
+- `<x-layout-box>`의 `_onLayoutMouseLeave` — 삽입 모드 중 호버 해제 차단
 
-또한 `InsertController.startDrag()` 내부에서 `event.stopPropagation()`을 호출하여, 박스의 `mousedown` 리스너가 함께 실행되지 않도록 한다.
+**`_onLayoutMouseDown`에서의 삽입 위임**: 삽입 모드 중 box에서 mousedown하면 `_onLayoutMouseDown`이 `EditManager.handleInsertMouseDown(event)`를 호출한다. 이 메서드는 `InsertController.startDrag(event)`를 위임 호출하며, `startDrag()`는 `event.preventDefault()` + `event.stopPropagation()`을 호출하여 이후 레이아웃 선택/드래그 로직이 실행되지 않도록 한다.
+
+**문서 빈 공간 처리**: `InsertController`는 `_document`에 버블링 단계로 `mousedown` 리스너를 등록하여, box가 없는 문서 빈 공간에서도 삽입 드래그가 시작되도록 한다. box 위에서는 `_onLayoutMouseDown`이 먼저 `startDrag()`를 호출하며, `_isDragging` 가드로 중복 실행을 방지한다.
+
+**커서 변경**: 삽입 모드 활성화 시 `editableLayout`이 켜진 모든 `<x-layout-box>`의 커서가 `crosshair`로 변경된다. 비활성화 시 `grab`으로 복원된다.
 
 ### 12.11 미리보기 사각형
 
@@ -1883,8 +1897,11 @@ private static readonly DRAG_THRESHOLD = 3;
 ### 12.13 주의사항
 
 - 삽입 모드는 `<x-layout-document>`가 DOM에 있을 때만 활성화할 수 있다. 없으면 `Error`가 발생한다.
+- 삽입 모드는 `editableLayout`이 활성화된 `<x-layout-box>`가 하나 이상 있어야만 활성화할 수 있다. 없으면 `insertMode` 설정이 무시된다. `insertMode` 세터는 `x-layout-box[editable-layout]` 속성으로 편집 가능한 박스를 검색한다.
 - 삽입된 요소는 항상 `<x-layout-box>`로 감싸진다. `text`, `paragraph`, `image` 타입도 마찬가지이다.
 - `static` 모드로 삽입할 때 `model`이 없으면 `{ left: 0, top: 0, width: 1, height: 1 }` 기본값을 사용한다.
 - `image` 삽입 시 placeholder 이미지는 `100×100px`, `72dpi`, 빈 `url`로 생성된다. 실제 이미지를 표시하려면 삽입 후 `url`을 변경해야 한다.
 - 삽입 모드 중에는 레이아웃 선택과 드래그 이동, 리사이즈가 모두 비활성화된다.
 - `boxData.children` 설정은 `appendChild`보다 먼저 이루어져야 `connectedCallback` 시점에 올바른 초기 상태를 갖는다.
+- **mousedown 캡처/버블링**: `InsertController`의 `mousedown` 리스너는 버블링 단계로 `_document`에 등록된다. box 위에서 mousedown하면 `_onLayoutMouseDown`이 먼저 `EditManager.handleInsertMouseDown()`을 호출하여 `InsertController.startDrag()`를 위임 실행하고, `startDrag()` 내부의 `_isDragging` 가드로 중복 실행을 방지한다. 문서 빈 공간에서는 `_document`의 버블링 리스너가 직접 `startDrag()`를 호출한다.
+- **커스텀 속성명**: `selected`, `hovered`, `editable-layout`, `border`는 모두 커스텀 엘리먼트의 전용 속성이므로 `data-` 접두사 없이 사용한다. HTML 표준 `data-*` 속성과 달리, 커스텀 엘리먼트의 내부 상태 표시용 속성은 접두사가 필요 없다.

@@ -43,14 +43,16 @@ export class InsertController {
 
     if (this._mode) {
       this._document.removeEventListener('mousedown', this._boundStartDrag);
-      this._document.style.removeProperty('cursor');
     }
 
     this._mode = mode;
 
     if (mode) {
+      // 문서 빈 공간(box가 없는 영역)에서의 mousedown을 처리하기 위해
+      // 버블링 단계로 등록한다. box 위에서는 _onLayoutMouseDown이
+      // handleInsertMouseDown()을 통해 먼저 startDrag()를 호출하므로
+      // _isDragging 가드로 중복 실행을 방지한다.
       this._document.addEventListener('mousedown', this._boundStartDrag);
-      this._document.style.cursor = 'crosshair';
     }
   }
 
@@ -58,6 +60,7 @@ export class InsertController {
   startDrag(event: MouseEvent): void {
     if (event.button !== 0) return;
     if (!this._mode) return;
+    if (this._isDragging) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -84,6 +87,7 @@ export class InsertController {
   }
 
   private _onMouseUp(event: MouseEvent): void {
+    event.stopPropagation();
     const dx = event.clientX - this._startClientX;
     const dy = event.clientY - this._startClientY;
     const distance = Math.sqrt(dx * dx + dy * dy);

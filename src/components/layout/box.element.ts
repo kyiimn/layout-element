@@ -175,14 +175,14 @@ export class LayoutBoxElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
-      styleEl.sheet.insertRule(":host([data-selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 1);
-      styleEl.sheet.insertRule(":host([data-hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 2);
-      styleEl.sheet.insertRule(":host([data-editable-layout]:not([data-border])) { box-shadow: #ccc 0px 0px 0px 1px inset; }", 3);
-      styleEl.sheet.insertRule(":host([data-editable-layout][data-selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 4);
-      styleEl.sheet.insertRule(":host([data-editable-layout][data-hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 5);
-      styleEl.sheet.insertRule(`@media print { [data-border] { display: none; } }`, 6);
+      styleEl.sheet.insertRule(":host(:not([border])) { box-shadow: #ccc 0px 0px 0px 1px inset; }", 1);
+      styleEl.sheet.insertRule(":host([selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 2);
+      styleEl.sheet.insertRule(":host([hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 3);
+      styleEl.sheet.insertRule(":host([editable-layout][selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 4);
+      styleEl.sheet.insertRule(":host([editable-layout][hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 5);
+      styleEl.sheet.insertRule(`@media print { [border] { display: none; } }`, 6);
       styleEl.sheet.insertRule('.resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: 99999999; pointer-events: auto; display: none; }', 7);
-      styleEl.sheet.insertRule(':host([data-selected]) .resize-handle { display: block; }', 8);
+      styleEl.sheet.insertRule(':host([selected]) .resize-handle { display: block; }', 8);
       styleEl.sheet.insertRule('.resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 9);
       styleEl.sheet.insertRule('.resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 10);
       styleEl.sheet.insertRule('.resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 11);
@@ -238,7 +238,7 @@ export class LayoutBoxElement extends HTMLElement {
 
     const colorManager = ColorRegistry.getInstance();
     if (this.borderColor) {
-      this.setAttribute('data-border', '');
+      this.setAttribute('border', '');
       const borderStyle: Partial<CSSStyleDeclaration> = {
         overflow: 'hidden',
         position: 'absolute',
@@ -252,7 +252,7 @@ export class LayoutBoxElement extends HTMLElement {
 
       if (this.borderTopWidth) {
         const border = document.createElement('div');
-        border.setAttribute('data-border', 'top');
+        border.setAttribute('border', 'top');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
           height: `${Math.ceil(this.borderTopWidth * GridCalculator.ppm)}px`, top: '0', width: '100%',
@@ -268,7 +268,7 @@ export class LayoutBoxElement extends HTMLElement {
 
       if (this.borderBottomWidth) {
         const border = document.createElement('div');
-        border.setAttribute('data-border', 'bottom');
+        border.setAttribute('border', 'bottom');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
           height: `${Math.ceil(this.borderBottomWidth * GridCalculator.ppm)}px`, bottom: '0', width: '100%',
@@ -284,7 +284,7 @@ export class LayoutBoxElement extends HTMLElement {
 
       if (this.borderLeftWidth) {
         const border = document.createElement('div');
-        border.setAttribute('data-border', 'left');
+        border.setAttribute('border', 'left');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
           width: `${Math.ceil(this.borderLeftWidth * GridCalculator.ppm)}px`, height: '100%', left: '0',
@@ -300,7 +300,7 @@ export class LayoutBoxElement extends HTMLElement {
 
       if (this.borderRightWidth) {
         const border = document.createElement('div');
-        border.setAttribute('data-border', 'right');
+        border.setAttribute('border', 'right');
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
           ...borderStyle,
           width: `${Math.ceil(this.borderRightWidth * GridCalculator.ppm)}px`, height: '100%', right: '0',
@@ -314,7 +314,7 @@ export class LayoutBoxElement extends HTMLElement {
         this._shadowRoot.appendChild(border);
       }
     } else {
-      this.removeAttribute('data-border');
+      this.removeAttribute('border');
     }
   }
 
@@ -448,6 +448,8 @@ export class LayoutBoxElement extends HTMLElement {
           paragraphEl.data = {
             ...child,
             type: 'paragraph',
+            column: 1,
+            gap: 0,
           };
           this.appendChild(paragraphEl);
         } else if (child.type === 'image') {
@@ -782,11 +784,11 @@ export class LayoutBoxElement extends HTMLElement {
 
     if (value) {
       this.style.cursor = 'grab';
-      this.setAttribute('data-editable-layout', '');
+      this.setAttribute('editable-layout', '');
     } else {
-      this.removeAttribute('data-selected');
-      this.removeAttribute('data-hovered');
-      this.removeAttribute('data-editable-layout');
+      this.removeAttribute('selected');
+      this.removeAttribute('hovered');
+      this.removeAttribute('editable-layout');
       this.style.cursor = '';
       EditManager.getInstance()._unregisterLayout(this);
     }
@@ -798,9 +800,10 @@ export class LayoutBoxElement extends HTMLElement {
     if (EditManager.getInstance().insertMode) return;
     if (this._isEventFromDescendantLayout(event)) return;
     if (this._isEventFromResizeHandle(event)) return;
-    this.removeAttribute('data-hovered');
-    if (this._dragMoved) {
+    this.removeAttribute('hovered');
+    if (this._dragMoved || this._resizeMoved) {
       this._dragMoved = false;
+      this._resizeMoved = false;
       this._selectedOnMouseDown = false;
       return;
     }
@@ -816,22 +819,24 @@ export class LayoutBoxElement extends HTMLElement {
 
   private _onLayoutMouseEnter = (): void => {
     if (!this._editableLayout) return;
+    if (EditManager.getInstance().insertMode) return;
     const manager = EditManager.getInstance();
     if (manager._isDraggingLayout() || manager._isResizingLayout()) return;
     let ancestor: Element | null = this.parentElement;
     while (ancestor) {
-      if (ancestor.hasAttribute('data-hovered')) {
-        ancestor.removeAttribute('data-hovered');
+      if (ancestor.hasAttribute('hovered')) {
+        ancestor.removeAttribute('hovered');
       }
       ancestor = ancestor.parentElement;
     }
-    if (this.hasAttribute('data-selected')) return;
-    this.setAttribute('data-hovered', '');
+    if (this.hasAttribute('selected')) return;
+    this.setAttribute('hovered', '');
   }
 
   private _onLayoutMouseLeave = (event: MouseEvent): void => {
     if (!this._editableLayout) return;
-    this.removeAttribute('data-hovered');
+    if (EditManager.getInstance().insertMode) return;
+    this.removeAttribute('hovered');
     const manager = EditManager.getInstance();
     if (manager._isDraggingLayout() || manager._isResizingLayout()) return;
     const related = event.relatedTarget as Element | null;
@@ -855,7 +860,7 @@ export class LayoutBoxElement extends HTMLElement {
     if (!hit) return;
     let el: Element | null = hit;
     while (el) {
-      if (el instanceof LayoutBoxElement && el.editableLayout && !el.hasAttribute('data-selected')) {
+      if (el instanceof LayoutBoxElement && el.editableLayout && !el.hasAttribute('selected')) {
         el._onLayoutMouseEnter();
         return;
       }
@@ -883,11 +888,14 @@ export class LayoutBoxElement extends HTMLElement {
   private _onLayoutMouseDown = (event: MouseEvent) => {
     if (!this._editableLayout) return;
     if (event.button !== 0) return;
-    if (EditManager.getInstance().insertMode) return;
+    if (EditManager.getInstance().insertMode) {
+      EditManager.getInstance().handleInsertMouseDown(event);
+      return;
+    }
     if (this._isEventFromResizeHandle(event)) return;
     if (this._isEventFromDescendantLayout(event)) return;
     this._selectedOnMouseDown = false;
-    if (!this.hasAttribute('data-selected')) {
+    if (!this.hasAttribute('selected')) {
       const manager = EditManager.getInstance();
       manager._setMultiSelect(event.ctrlKey || event.metaKey);
       manager.selectLayout(this);
@@ -896,7 +904,7 @@ export class LayoutBoxElement extends HTMLElement {
     }
     event.preventDefault();
     event.stopPropagation();
-    this.removeAttribute('data-hovered');
+    this.removeAttribute('hovered');
     this._isDragging = true;
     this._dragMoved = false;
     this._dragStartMouseX = event.clientX;
@@ -1039,6 +1047,7 @@ export class LayoutBoxElement extends HTMLElement {
 
   private _onLayoutMouseUp = (event: MouseEvent) => {
     if (!this._isDragging) return;
+    event.stopPropagation();
     document.removeEventListener('mousemove', this._onLayoutMouseMove);
     document.removeEventListener('mouseup', this._onLayoutMouseUp);
     document.removeEventListener('keydown', this._onLayoutKeyDown);
@@ -1308,7 +1317,8 @@ export class LayoutBoxElement extends HTMLElement {
   private _onResizeMouseDown = (event: MouseEvent): void => {
     if (!this._editableLayout) return;
     if (event.button !== 0) return;
-    if (!this.hasAttribute('data-selected')) return;
+    if (EditManager.getInstance().insertMode) return;
+    if (!this.hasAttribute('selected')) return;
     event.preventDefault();
     event.stopPropagation();
 
@@ -1359,6 +1369,7 @@ export class LayoutBoxElement extends HTMLElement {
 
   private _onResizeMouseUp = (event: MouseEvent): void => {
     if (!this._isResizing) return;
+    event.stopPropagation();
     document.removeEventListener('mousemove', this._onResizeMouseMove);
     document.removeEventListener('mouseup', this._onResizeMouseUp);
     document.removeEventListener('keydown', this._onResizeKeyDown);

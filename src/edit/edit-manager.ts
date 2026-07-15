@@ -6,8 +6,8 @@ import { InsertController } from "./insert-controller";
 import type { SelectionRange } from "@/types/edit";
 import type { InsertMode, InsertEventDetail } from "@/types/edit";
 
-/** 레이아웃 요소 (document 또는 box) */
-export type LayoutElement = LayoutDocumentElement | LayoutBoxElement;
+/** 레이아웃 편집 대상 요소 (box만 해당) */
+export type LayoutElement = LayoutBoxElement;
 
 /**
  * 글로벌 편집 관리 이벤트 타입.
@@ -419,7 +419,7 @@ export class EditManager {
   /**
    * 레이아웃 요소를 선택한다.
    *
-   * `editableLayout`이 켜진 document 또는 box 요소만 선택할 수 있다.
+   * `editableLayout`이 켜진 box 요소만 선택할 수 있다.
    * `multi`가 `false`(기본값)이면 기존 선택을 모두 해제하고 지정된 요소만 선택한다.
    * `multi`가 `true`이면 기존 선택에 지정된 요소를 추가/토글한다.
    *
@@ -447,19 +447,19 @@ export class EditManager {
         const idx = this._selectedLayouts.indexOf(el);
         if (idx >= 0) {
           this._selectedLayouts.splice(idx, 1);
-          el.removeAttribute('data-selected');
+          el.removeAttribute('selected');
         } else {
           this._selectedLayouts.push(el);
-          el.setAttribute('data-selected', '');
+          el.setAttribute('selected', '');
         }
       }
     } else {
       for (const prev of this._selectedLayouts) {
-        prev.removeAttribute('data-selected');
+        prev.removeAttribute('selected');
       }
       this._selectedLayouts = newSelections;
       for (const el of newSelections) {
-        el.setAttribute('data-selected', '');
+        el.setAttribute('selected', '');
       }
     }
 
@@ -474,7 +474,7 @@ export class EditManager {
     if (this._selectedLayouts.length === 0) return;
     const previousLayouts = [...this._selectedLayouts];
     for (const el of this._selectedLayouts) {
-      el.removeAttribute('data-selected');
+      el.removeAttribute('selected');
     }
     this._selectedLayouts = [];
     this._dispatchLayoutSelection(previousLayouts);
@@ -519,8 +519,17 @@ export class EditManager {
     if (this._insertMode === mode) return;
 
     if (mode) {
+      // 레이아웃 편집 모드가 활성화된 box가 없으면 삽입 모드를 활성화하지 않는다.
+      const hasEditable = document.querySelector('x-layout-box[editable-layout]');
+      if (!hasEditable) return;
+
       // 활성화 시 레이아웃 선택을 해제한다.
       this.clearLayoutSelection();
+
+      // 삽입 모드에서는 편집 가능한 box의 커서를 crosshair로 변경한다.
+      document.querySelectorAll<LayoutBoxElement>('x-layout-box[editable-layout]').forEach((box) => {
+        box.style.cursor = 'crosshair';
+      });
 
       const docEl = document.querySelector('x-layout-document') as LayoutDocumentElement | null;
       if (!docEl) {
@@ -537,6 +546,11 @@ export class EditManager {
         this._insertController.setMode(null);
       }
       this._insertMode = null;
+
+      // 삽입 모드 해제 시 편집 가능한 box의 커서를 원래대로 복원한다.
+      document.querySelectorAll<LayoutBoxElement>('x-layout-box[editable-layout]').forEach((box) => {
+        box.style.cursor = 'grab';
+      });
     }
   }
 
@@ -545,6 +559,15 @@ export class EditManager {
    */
   activateInsert(mode: InsertMode): void {
     this.insertMode = mode;
+  }
+
+  /**
+   * 삽입 모드 중 mousedown 이벤트를 InsertController에 위임한다.
+   * 레이아웃 편집 핸들러(_onLayoutMouseDown 등)에서 삽입 모드일 때 호출한다.
+   */
+  handleInsertMouseDown(event: MouseEvent): void {
+    if (!this._insertController || !this._insertMode) return;
+    this._insertController.startDrag(event);
   }
 
   /**
@@ -644,7 +667,6 @@ export class EditManager {
    *
    * @param elements - 필터링할 레이아웃 요소 목록
    * @returns 중첩 하위 요소가 제거된 LayoutBoxElement 배열.
-   *   LayoutDocumentElement은 드래그 대상이 아니므로 항상 제외된다.
    */
   private _filterTopLevelLayouts(elements: LayoutElement[]): LayoutBoxElement[] {
     const boxes = elements.filter(
@@ -754,7 +776,7 @@ export class EditManager {
     if (idx >= 0) {
       const previousLayouts = [...this._selectedLayouts];
       this._selectedLayouts.splice(idx, 1);
-      element.removeAttribute('data-selected');
+      element.removeAttribute('selected');
       this._dispatchLayoutSelection(previousLayouts);
     }
   }
@@ -850,7 +872,7 @@ export class EditManager {
   private _resolveLayoutElement(target: LayoutElement | string): LayoutElement | null {
     if (typeof target === 'string') {
       const element = document.getElementById(target);
-      if (element instanceof LayoutDocumentElement || element instanceof LayoutBoxElement) {
+      if (element instanceof LayoutBoxElement) {
         return element;
       }
       return null;

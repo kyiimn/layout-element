@@ -17,7 +17,8 @@
         align-items: center;
         padding: 40px 20px;
         min-height: 100vh;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       }
       #toolbar {
         display: flex;
@@ -73,7 +74,7 @@
         min-width: 260px;
         max-width: 360px;
         font-size: 13px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         z-index: 10000;
       }
       #info-panel h3 {
@@ -129,12 +130,29 @@
   </head>
   <body>
     <div id="toolbar">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:100%;">
+      <div
+        style="
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          justify-content: center;
+          width: 100%;
+        "
+      >
         <button id="btn-read" class="active">📄 읽기 모드</button>
         <button id="btn-edit">✏️ 텍스트 편집 모드</button>
         <button id="btn-layout">📐 레이아웃 편집 모드</button>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:100%;margin-top:8px;">
+      <div
+        style="
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          justify-content: center;
+          width: 100%;
+          margin-top: 8px;
+        "
+      >
         <select id="insert-type">
           <option value="box">📦 Box</option>
           <option value="text">📝 Text</option>
@@ -205,7 +223,6 @@
             p.editableText = false;
           });
 
-          doc.editableLayout = false;
           document.querySelectorAll("x-layout-box").forEach((b) => {
             b.editableLayout = false;
           });
@@ -247,14 +264,14 @@
           clearInsertMode();
           currentMode = "layout";
           clearAllEditMode();
-          doc.editableLayout = true;
           document.querySelectorAll("x-layout-box").forEach((b) => {
             b.editableLayout = true;
           });
           btnRead.classList.remove("active");
           btnEdit.classList.remove("active");
           btnLayout.classList.add("active-layout");
-          hint.textContent = "레이아웃 요소(document/box)를 클릭하여 선택하세요. Ctrl+클릭으로 다중 선택.";
+          hint.textContent =
+            "레이아웃 요소(box)를 클릭하여 선택하세요. Ctrl+클릭으로 다중 선택.";
         }
 
         function toggleInsertMode() {
@@ -262,17 +279,22 @@
           if (isInsert) {
             setReadMode();
           } else {
-            clearAllEditMode();
+            clearInsertMode();
             currentMode = "insert";
+            clearAllEditMode();
+            document.querySelectorAll("x-layout-box").forEach((b) => {
+              b.editableLayout = true;
+            });
             btnRead.classList.remove("active");
             btnEdit.classList.remove("active");
-            btnLayout.classList.remove("active-layout");
+            btnLayout.classList.add("active-layout");
             btnInsert.classList.add("active-insert");
             em.insertMode = {
               type: insertType.value,
               position: insertPosition.value,
             };
-            hint.textContent = "삽입 모드: 마우스 드래그로 요소를 그려서 삽입하세요. ESC로 취소.";
+            hint.textContent =
+              "삽입 모드: 마우스 드래그로 요소를 그려서 삽입하세요. ESC로 취소.";
           }
         }
 
@@ -305,36 +327,46 @@
 
         // 텍스트 편집 이벤트
         const textEventTypes = [
-          'focusChange',
-          'textChange',
-          'styleChange',
-          'cursorMove',
-          'selectionStart',
-          'selectionEnd',
+          "focusChange",
+          "textChange",
+          "styleChange",
+          "cursorMove",
+          "selectionStart",
+          "selectionEnd",
         ];
         for (const type of textEventTypes) {
           em.addEventListener(type, (event) => {
-            const detail = type === 'focusChange'
-              ? `from: ${event.previousParagraph?.id ?? '(null)'}`
-              : `paragraph: ${event.paragraph.id}`;
+            const detail =
+              type === "focusChange"
+                ? `from: ${event.previousParagraph?.id ?? "(null)"}`
+                : `paragraph: ${event.paragraph.id}`;
             console.log(`[EditManager] ${type} — ${detail}`);
           });
         }
 
         // 레이아웃 선택 이벤트
-        em.addEventListener('layoutSelectionChange', (event) => {
-          console.log('[EditManager] layoutSelectionChange', {
-            selected: event.selectedLayouts?.map(e => ({ id: e.id, type: e.type })),
-            previous: event.previousLayouts?.map(e => ({ id: e.id, type: e.type })),
+        em.addEventListener("layoutSelectionChange", (event) => {
+          console.log("[EditManager] layoutSelectionChange", {
+            selected: event.selectedLayouts?.map((e) => ({
+              id: e.id,
+              type: e.type,
+            })),
+            previous: event.previousLayouts?.map((e) => ({
+              id: e.id,
+              type: e.type,
+            })),
           });
           updateInfoPanel();
         });
 
         // 레이아웃 이동 이벤트
-        em.addEventListener('layoutMove', (event) => {
+        em.addEventListener("layoutMove", (event) => {
           if (event.canceled) {
-            console.log('[EditManager] layoutMove CANCELED', {
-              element: { id: event.layoutElement?.id, type: event.layoutElement?.type },
+            console.log("[EditManager] layoutMove CANCELED", {
+              element: {
+                id: event.layoutElement?.id,
+                type: event.layoutElement?.type,
+              },
               previousLeft: event.previousLeft,
               previousTop: event.previousTop,
               left: event.left,
@@ -342,8 +374,11 @@
               canceled: event.canceled,
             });
           } else {
-            console.log('[EditManager] layoutMove', {
-              element: { id: event.layoutElement?.id, type: event.layoutElement?.type },
+            console.log("[EditManager] layoutMove", {
+              element: {
+                id: event.layoutElement?.id,
+                type: event.layoutElement?.type,
+              },
               previousLeft: event.previousLeft,
               previousTop: event.previousTop,
               left: event.left,
@@ -355,12 +390,12 @@
         });
 
         // 포커스 변경 시에도 패널 업데이트
-        em.addEventListener('focusChange', () => updateInfoPanel());
-        em.addEventListener('cursorMove', () => updateInfoPanel());
+        em.addEventListener("focusChange", () => updateInfoPanel());
+        em.addEventListener("cursorMove", () => updateInfoPanel());
 
         // 삽입 이벤트: 삽입 완료 후 레이아웃 편집 모드로 전환하고 삽입된 요소를 선택
-        em.addEventListener('insert', (event) => {
-          console.log('[EditManager] insert', {
+        em.addEventListener("insert", (event) => {
+          console.log("[EditManager] insert", {
             type: event.type,
             position: event.position,
             element: event.element,
@@ -377,7 +412,6 @@
 
           // 레이아웃 편집 모드로 전환 (기존 편집 상태 해제 후 활성화)
           clearAllEditMode();
-          doc.editableLayout = true;
           document.querySelectorAll("x-layout-box").forEach((b) => {
             b.editableLayout = true;
           });
@@ -385,7 +419,8 @@
           btnEdit.classList.remove("active");
           btnLayout.classList.add("active-layout");
           currentMode = "layout";
-          hint.textContent = "레이아웃 요소(document/box)를 클릭하여 선택하세요. Ctrl+클릭으로 다중 선택.";
+          hint.textContent =
+            "레이아웃 요소(box)를 클릭하여 선택하세요. Ctrl+클릭으로 다중 선택.";
 
           // 삽입된 요소를 편집 가능 상태로 만들고 선택
           if (event.element) {
@@ -396,8 +431,8 @@
           updateInfoPanel();
         });
 
-        em.addEventListener('insertCancel', (event) => {
-          console.log('[EditManager] insertCancel');
+        em.addEventListener("insertCancel", (event) => {
+          console.log("[EditManager] insertCancel");
           clearInsertMode();
           setReadMode();
         });
@@ -406,13 +441,15 @@
         const elFocusedParagraph = document.getElementById("focused-paragraph");
         const elCursorOffset = document.getElementById("cursor-offset");
         const elSelectedLayouts = document.getElementById("selected-layouts");
-        const elSelectedLayoutIds = document.getElementById("selected-layout-ids");
+        const elSelectedLayoutIds = document.getElementById(
+          "selected-layout-ids",
+        );
 
         function updateInfoPanel() {
           // 포커스된 단락
           const focusedP = em.focusedParagraph;
           if (focusedP) {
-            elFocusedParagraph.textContent = focusedP.id || '(no id)';
+            elFocusedParagraph.textContent = focusedP.id || "(no id)";
             elFocusedParagraph.classList.remove("empty");
           } else {
             elFocusedParagraph.textContent = "없음";
@@ -432,9 +469,12 @@
           // 선택된 레이아웃
           const layouts = em.selectedLayouts;
           if (layouts.length > 0) {
-            elSelectedLayouts.innerHTML = layouts.map(l =>
-              `<div class="layout-item"><span class="id">${l.id || '(no id)'}</span><span class="type">${l.type}</span></div>`
-            ).join('');
+            elSelectedLayouts.innerHTML = layouts
+              .map(
+                (l) =>
+                  `<div class="layout-item"><span class="id">${l.id || "(no id)"}</span><span class="type">${l.type}</span></div>`,
+              )
+              .join("");
             elSelectedLayouts.classList.remove("empty");
           } else {
             elSelectedLayouts.textContent = "없음";

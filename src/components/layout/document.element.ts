@@ -1,6 +1,5 @@
 import { GridCalculator } from "@/core";
 import { DocumentData, ParagraphStyle, PrintPostData, TextStyle } from "@/types";
-import { EditManager } from "@/edit/edit-manager";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
@@ -28,7 +27,6 @@ export class LayoutDocumentElement extends HTMLElement {
 
   private _visibleGuide: boolean;
   private _isPrint: boolean;
-  private _editableLayout: boolean = false;
 
   private _width: number = 0;
   private _height: number = 0;
@@ -54,15 +52,11 @@ export class LayoutDocumentElement extends HTMLElement {
   connectedCallback() {
     if (this._isPrint) return;
 
-    this.addEventListener('click', this._onLayoutClick);
     this.layout();
     this.render();
   }
 
-  disconnectedCallback() {
-    this.removeEventListener('click', this._onLayoutClick);
-    EditManager.getInstance()._unregisterLayout(this);
-  }
+  disconnectedCallback() {}
 
   /**
    * 구조 계산: GridCalculator 데이터 할당 및 모델 생성.
@@ -102,7 +96,6 @@ export class LayoutDocumentElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
-      styleEl.sheet.insertRule(":host([data-selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 1);
       const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
       rule.style.setProperty('background-color', '#ffffff', 'important');
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
@@ -343,7 +336,6 @@ export class LayoutDocumentElement extends HTMLElement {
 
   get model() { return this._model; }
   get visibleGuide() { return this._visibleGuide; }
-  get editableLayout() { return this._editableLayout; }
   get type() { return 'document' as const; }
   get zIndex() { return 0; }
 
@@ -356,32 +348,6 @@ export class LayoutDocumentElement extends HTMLElement {
     Array.from(guideEl).forEach(e => {
       e.visible = this._visibleGuide;
     });
-  }
-
-  set editableLayout(value: boolean) {
-    if (this._isPrint) return;
-    if (this._editableLayout === value) return;
-    this._editableLayout = value;
-
-    if (!value) {
-      this.removeAttribute('data-selected');
-      EditManager.getInstance()._unregisterLayout(this);
-    }
-  }
-
-  private _onLayoutClick = (event: MouseEvent): void => {
-    if (!this._editableLayout) return;
-    event.stopPropagation();
-    if (EditManager.getInstance().insertMode) return;
-    const path = event.composedPath();
-    for (const el of path) {
-      if (el === this) break;
-      if (el instanceof LayoutBoxElement && el.editableLayout) return;
-    }
-    const manager = EditManager.getInstance();
-    manager._setMultiSelect(event.ctrlKey || event.metaKey);
-    manager.selectLayout(this);
-    manager._setMultiSelect(false);
   }
 
   get printPostData() {
