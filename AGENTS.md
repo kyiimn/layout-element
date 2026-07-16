@@ -77,6 +77,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **Column grid system**: `columns: number` = equal-width columns; `columns: number[]` = explicit per-column widths. Same for `gap`.
 - **`position: 'static'`** (default): `left` = column index (0-based), `width` = column span count, `height` = line count. **Not mm.**
 - **`position: 'absolute'`**: `left`/`top`/`width`/`height` are actual mm values.
+- **`BoxRole`** (`BoxData.role`): 박스의 의미적 역할. `<x-layout-box>`의 `role` 속성으로 설정되며, 렌더링 및 레이아웃 배치 시 참조된다. 가능한 값: `'group-article'` (기사 그룹 컨테이너), `'body'` (본문 영역), `'image'` (이미지 영역), `'title'` (제목 영역), `'caption'` (캡션 영역), `'group-image'` (이미지 그룹 컨테이너), `'header'` (면머리 그룹 컨테이너), `'ad'` (광고 이미지 영역).
 - **InheritStyle cascade**: `TextStyle` + `ParagraphStyle` + parent dimensions flow downward. Children override individual fields.
 - **Text overflow**: dispatched as `render-error` CustomEvent with `{ type: 'text-overflow', overflow: number }`.
 - **Overlap padding**: `overlapPadding` on `ImageData` adds padding around opaque image pixels during overlap detection. Values in mm; `number` applies equally to all sides, `{ top?, right?, bottom?, left? }` allows asymmetric padding. Uses per-column ellipse detection: for each opaque pixel, normalized distance `(ndx² + ndy² ≤ 1)` determines if the pixel's padding zone reaches the text line. Transparent pixels are excluded. Each opaque column's blocking range is extended horizontally by `padLeft`/`padRight`.

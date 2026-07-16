@@ -348,6 +348,35 @@ type LayoutElement = LayoutBoxElement;
 
 `LayoutElement`은 `EditManager`에서 레이아웃 선택 대상이 되는 요소의 타입이다. `<x-layout-document>`은 레이아웃 편집 대상이 아니며, `<x-layout-paragraph>`도 레이아웃 선택 대상이 아니다.
 
+#### 2.3.1 BoxRole (박스 역할)
+
+`<x-layout-box>`는 `role` 속성을 통해 의미적 역할을 가진다. `BoxData.role` 필드에 매핑되며, 렌더링 및 레이아웃 배치 시 참조된다.
+
+```typescript
+type BoxRole =
+  | 'group-article'   // 기사 그룹 컨테이너
+  | 'body'            // 본문 영역
+  | 'image'           // 이미지 영역
+  | 'title'           // 제목 영역
+  | 'caption'         // 캡션 영역
+  | 'group-image'     // 이미지 그룹 컨테이너
+  | 'header'          // 면머리 그룹 컨테이너
+  | 'ad';             // 광고 이미지 영역
+```
+
+| 역할 | 설명 |
+|------|------|
+| `'group-article'` | 기사 그룹 컨테이너. 여러 박스를 묶어 하나의 기사 단위로 구성 |
+| `'body'` | 본문 영역. 일반 텍스트 본문이 위치하는 박스 |
+| `'image'` | 이미지 영역. 단일 이미지가 위치하는 박스 |
+| `'title'` | 제목 영역. 기사 제목이 위치하는 박스 |
+| `'caption'` | 캡션 영역. 이미지 캡션 등 부가 설명이 위치하는 박스 |
+| `'group-image'` | 이미지 그룹 컨테이너. 여러 이미지 박스를 묶어 하나의 이미지 그룹으로 구성 |
+| `'header'` | 면머리 그룹 컨테이너. 신문 지면 상단의 면머리 영역을 구성하는 박스 그룹 |
+| `'ad'` | 광고 이미지 영역. 광고 이미지가 위치하는 박스 |
+
+`role` 속성은 `<x-layout-box>`의 `observedAttributes`에 등록되어 있어, DOM 속성 변경 시 `attributeChangedCallback`을 통해 `_role` 필드로 반영된다. `data` setter를 통해서도 `data.role`에서 `_role`로 동기화된다. React 래퍼(`LayoutBox`)는 `role` prop을 통해 이 값을 설정한다.
+
 ### 2.4 React API
 
 #### `useEditManager` 훅
@@ -402,6 +431,7 @@ function MyComponent() {
 | Prop | 타입 | 설명 |
 |------|------|------|
 | `editableLayout` | `boolean?` | 레이아웃 편집 모드 활성화. `LayoutBox`만 지원 (document는 편집 대상 아님) |
+| `role` | `BoxRole?` | 박스의 의미적 역할. 자세한 값은 [2.3.1 BoxRole](#231-boxrole-박스-역할) 참조 |
 
 ---
 

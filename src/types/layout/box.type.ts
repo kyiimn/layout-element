@@ -22,8 +22,10 @@ export type BoxBorderStyle = 'solid' | 'dotted' | 'dashed';
  * - `'title'`: 제목 영역
  * - `'caption'`: 캡션 영역
  * - `'group-image'`: 이미지 그룹 컨테이너
+ * - `'header'`: 면머리 그룹 컨테이너
+ * - `'ad'`: 광고 이미지 영역
  */
-export type BoxRole = 'group-article' | 'body' | 'image' | 'title' | 'caption' | 'group-image';
+export type BoxRole = 'group-article' | 'body' | 'image' | 'title' | 'caption' | 'group-image' | 'header' | 'ad';
 
 /**
  * 위치 지정 가능한 컨테이너 데이터.
