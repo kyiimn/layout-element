@@ -228,7 +228,37 @@ export class LayoutEditController {
    */
   private _isBoxEditable(box: LayoutBoxElement): boolean {
     const manager = EditManager.getInstance();
+    if (this._isBoxOrAncestorLocked(box)) return false;
+    if (!this._isWithinEditableRoot(box)) return false;
     return manager.isBoxEditable(box) || box.editableLayout;
+  }
+
+  /**
+   * box 자체 또는 조상 box 중 lock이 설정된 것이 있는지 확인한다.
+   */
+  private _isBoxOrAncestorLocked(box: LayoutBoxElement): boolean {
+    let current: LayoutBoxElement | null = box;
+    while (current) {
+      if (current.lock) return true;
+      current = current.parentElement instanceof LayoutBoxElement ? current.parentElement : null;
+    }
+    return false;
+  }
+
+  /**
+   * box가 편집 루트 내부에 있는지 확인한다.
+   * 루트가 지정되지 않았거나 box가 루트의 자손이면 true, 루트 자체이거나 외부이면 false.
+   */
+  private _isWithinEditableRoot(box: LayoutBoxElement): boolean {
+    const rootId = EditManager.getInstance().editableRootId;
+    if (rootId === null) return true;
+    if (box.id === rootId) return false;
+    let current: Element | null = box.parentElement;
+    while (current) {
+      if (current.id === rootId) return true;
+      current = current.parentElement;
+    }
+    return false;
   }
 
   /**

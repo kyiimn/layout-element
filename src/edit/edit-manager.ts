@@ -121,6 +121,9 @@ export class EditManager {
   private _editableBoxIds: Set<string> | null = null;
   private _layoutEditController: LayoutEditController | null = null;
 
+  /** 편집 루트 box id. null이면 제한 없음. 지정 시 해당 box 내부 요소만 편집 가능, Root 자체는 편집 불가. */
+  private _editableRootId: string | null = null;
+
   private constructor() {}
 
   /**
@@ -541,21 +544,22 @@ export class EditManager {
   /**
    * 특정 paragraph가 텍스트 편집 가능한지 판별한다.
    *
-   * 판별 규칙 (AND):
+   * 판별 규칙:
    * 1. `_textEditMode`가 `true`여야 함
-   * 2. 세 필터가 모두 `null`이면 편집 불가 (모두 허용하지 않음 규칙)
-   * 3. `_editableTextRoles`가 `null`이 아니면 부모 box의 role이 Set에 포함되어야 함
-   * 4. `_editableTextBoxIds`가 `null`이 아니면 부모 box의 id가 Set에 포함되어야 함
-   * 5. `_editableParagraphIds`가 `null`이 아니면 paragraph 자체 id가 Set에 포함되어야 함
+   * 2. 조상 box 중 lock이 없어야 함
+   * 3. `_editableRootId`가 지정된 경우, paragraph가 Root 내부에 있어야 함
+   * 4. `_editableTextRoles`가 `null`이 아니면 부모 box의 role이 Set에 포함되어야 함
+   * 5. `_editableTextBoxIds`가 `null`이 아니면 부모 box의 id가 Set에 포함되어야 함
+   * 6. `_editableParagraphIds`가 `null`이 아니면 paragraph 자체 id가 Set에 포함되어야 함
+   * 7. 모든 필터가 `null`이면 Root 내부의 모든 paragraph 편집 가능
    *
    * @param paragraph - 판별할 paragraph 요소
    * @returns 편집 가능 여부
    */
   isParagraphEditable(paragraph: LayoutParagraphElement): boolean {
     if (!this._textEditMode) return false;
-    if (this._editableTextRoles === null
-        && this._editableTextBoxIds === null
-        && this._editableParagraphIds === null) return false;
+    if (this._isAncestorBoxLocked(paragraph)) return false;
+    if (!this._isWithinEditableRoot(paragraph)) return false;
 
     const parentBox = paragraph.parentElement;
     if (this._editableTextRoles !== null) {
@@ -568,6 +572,37 @@ export class EditManager {
       if (!this._editableParagraphIds.has(paragraph.id)) return false;
     }
     return true;
+  }
+
+  /**
+   * box 자체 또는 조상 box 중 lock이 설정된 것이 있는지 확인한다.
+   *
+   * @param box - 확인할 box 요소
+   * @returns lock된 box가 하나라도 있으면 `true`
+   */
+  private _isBoxOrAncestorLocked(box: LayoutBoxElement): boolean {
+    let current: LayoutBoxElement | null = box;
+    while (current) {
+      if (current.lock) return true;
+      current = current.parentElement instanceof LayoutBoxElement ? current.parentElement : null;
+    }
+    return false;
+  }
+
+  /**
+   * 요소의 조상 box 중 lock이 설정된 것이 있는지 확인한다.
+   * paragraph 등 box가 아닌 요소의 편집 가능 여부 판별에 사용된다.
+   *
+   * @param element - 확인할 요소 (paragraph 등)
+   * @returns 조상 box 중 lock된 것이 있으면 `true`
+   */
+  private _isAncestorBoxLocked(element: Element): boolean {
+    let current: Element | null = element.parentElement;
+    while (current) {
+      if (current instanceof LayoutBoxElement && current.lock) return true;
+      current = current.parentElement;
+    }
+    return false;
   }
 
   /**
@@ -696,24 +731,71 @@ export class EditManager {
   }
 
   /**
+   * 편집 루트 box id를 설정한다.
+   *
+   * `null`이 아닌 값을 설정하면, 해당 box 내부의 요소만 편집 가능하다.
+   * 루트 box 자체는 이동/크기 조정이 불가하다 (편집 컨테이너 역할).
+   * `null`을 설정하면 루트 제한이 해제되어 문서 전체가 편집 대상이 된다.
+   *
+   * layout 편집 모드와 text 편집 모드 모두에 공유되어 적용된다.
+   *
+   * @example
+   * ```ts
+   * manager.setEditableRootId('box-1');
+   * manager.setEditableRoles(['body']);
+   * manager.layoutEditMode = true;
+   * // → box-1 내부의 role='body' box만 편집 가능
+   * // → box-1 자체는 편집 불가 (컨테이너)
+   * // → box-1 외부의 box는 편집 불가
+   * ```
+   */
+  setEditableRootId(id: string | null): void {
+    this._editableRootId = id;
+    if (this._layoutEditMode) this._applyEditableLayoutToAllBoxes();
+    if (this._textEditMode) this._applyEditableTextToAllParagraphs();
+  }
+
+  get editableRootId(): string | null {
+    return this._editableRootId;
+  }
+
+  /**
+   * 요소가 지정된 루트 box의 내부(자손)에 있는지 확인한다.
+   *
+   * @param element - 확인할 요소
+   * @returns 루트가 지정되지 않았거나, 요소가 루트의 자손이면 `true`.
+   *           요소가 루트 자체이거나 루트 외부이면 `false`.
+   */
+  private _isWithinEditableRoot(element: Element): boolean {
+    if (this._editableRootId === null) return true;
+    if (element.id === this._editableRootId) return false;
+    let current: Element | null = element.parentElement;
+    while (current) {
+      if (current.id === this._editableRootId) return true;
+      current = current.parentElement;
+    }
+    return false;
+  }
+
+  /**
    * 특정 box가 레이아웃 편집 가능한지 판별한다.
    *
-   * 판별 규칙 (AND):
+   * 판별 규칙:
    * 1. `_layoutEditMode`가 `true`여야 함
-   * 2. `_editableRoles`가 `null`이 아니면 box.role이 Set에 포함되어야 함
-   * 3. `_editableBoxIds`가 `null`이 아니면 box.id가 Set에 포함되어야 함
-   *
-   * `_editableRoles === null && _editableBoxIds === null`이면
-   * `_layoutEditMode`가 true여도 어떤 box도 편집 불가 (모두 허용하지 않음 규칙).
+   * 2. box 자체 또는 조상 box 중 lock이 없어야 함
+   * 3. `_editableRootId`가 지정된 경우, box가 Root 내부에 있어야 함 (Root 자체는 불가)
+   * 4. `_editableRoles`가 `null`이 아니면 box.role이 Set에 포함되어야 함
+   * 5. `_editableBoxIds`가 `null`이 아니면 box.id가 Set에 포함되어야 함
+   * 6. 모든 필터가 `null`이면 Root 내부의 모든 box 편집 가능
    *
    * @param box - 판별할 box 요소
    * @returns 편집 가능 여부
    */
   isBoxEditable(box: LayoutBoxElement): boolean {
     if (!this._layoutEditMode) return false;
-    if (this._editableRoles === null && this._editableBoxIds === null) return false;
-    const role = box.role;
-    if (this._editableRoles !== null && !this._editableRoles.has(role)) return false;
+    if (this._isBoxOrAncestorLocked(box)) return false;
+    if (!this._isWithinEditableRoot(box)) return false;
+    if (this._editableRoles !== null && !this._editableRoles.has(box.role)) return false;
     if (this._editableBoxIds !== null && !this._editableBoxIds.has(box.id)) return false;
     return true;
   }
@@ -750,6 +832,8 @@ export class EditManager {
     for (const t of targets) {
       const element = this._resolveLayoutElement(t);
       if (!element) continue;
+      if (this._isBoxOrAncestorLocked(element)) continue;
+      if (!this._isWithinEditableRoot(element)) continue;
       if (!this.isBoxEditable(element) && !element.editableLayout) continue;
       newSelections.push(element);
     }

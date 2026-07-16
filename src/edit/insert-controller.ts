@@ -220,19 +220,22 @@ export class InsertController {
 
     if (!target) return null;
 
-    // Walk up to find a valid container
+    // Walk up to find a valid container, skipping locked boxes
     let current: HTMLElement | null = target;
     while (current) {
       if (current instanceof LayoutDocumentElement) {
         return current;
       }
       if (current instanceof LayoutBoxElement) {
+        if (current.lock) {
+          current = current.parentElement;
+          continue;
+        }
         const items = current.items;
         const hasNonBoxChild = items.some(item => item.type !== 'box');
         if (!hasNonBoxChild) {
           return current;
         }
-        // Invalid container (has paragraph/image child), go up
       }
       current = current.parentElement;
     }

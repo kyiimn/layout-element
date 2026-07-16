@@ -45,6 +45,7 @@ export class LayoutBoxElement extends HTMLElement {
   private _role?: BoxRole;
   private _groupMember?: string;
   private _priority?: number;
+  private _lock: boolean = false;
   private _editableLayout: boolean = false;
   private _isPrint: boolean = window.matchMedia("print").matches;
 
@@ -86,7 +87,7 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   static get observedAttributes() {
-    return ['role', 'group-member', 'priority'] as const;
+    return ['role', 'group-member', 'priority', 'lock'] as const;
   }
 
   attributeChangedCallback(name: string, _oldVal: string | null, newVal: string | null) {
@@ -99,6 +100,8 @@ export class LayoutBoxElement extends HTMLElement {
         this._groupMember = newVal ?? undefined;
       } else if (name === 'priority') {
         this._priority = newVal !== null ? Number(newVal) : undefined;
+      } else if (name === 'lock') {
+        this._lock = newVal !== null;
       }
     } finally {
       this._isSyncingAttribute = false;
@@ -393,6 +396,7 @@ export class LayoutBoxElement extends HTMLElement {
       if (data.role !== undefined) this.role = data.role;
       if (data.groupMember !== undefined) this.groupMember = data.groupMember.split(',').filter(s => s.length > 0);
       if (data.priority !== undefined) this.priority = data.priority;
+      if (data.lock !== undefined) this.lock = data.lock;
 
       this._left = data.left;
       this._top = data.top;
@@ -571,6 +575,7 @@ export class LayoutBoxElement extends HTMLElement {
       role: this._role,
       groupMember: this._groupMember,
       priority: this.priority,
+      lock: this._lock || undefined,
       children: this.items.map(e => e.data).filter(e => !!e),
     };
   }
@@ -623,6 +628,16 @@ export class LayoutBoxElement extends HTMLElement {
   set priority(value: number) {
     this._priority = value;
     this.setAttribute('priority', String(value));
+  }
+
+  get lock(): boolean { return this._lock; }
+  set lock(value: boolean) {
+    this._lock = value;
+    if (value) {
+      this.setAttribute('lock', '');
+    } else {
+      this.removeAttribute('lock');
+    }
   }
 
   get inheritStyle() { return this._inheritStyle; }

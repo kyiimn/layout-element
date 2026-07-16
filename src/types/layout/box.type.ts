@@ -130,6 +130,13 @@ export type BoxData = {
   /** 정렬 우선순위 (높을수록 중요). 렌더링 및 레이아웃 배치 시 참조 */
   priority?: number;
 
+  /**
+   * 편집 잠금 여부. `true`이면 box 자체와 내부의 모든 자식 요소가
+   * 편집(레이아웃 드래그/리사이즈, 텍스트 편집, 요소 삽입)에서 제외된다.
+   * 조상 box 중 하나라도 lock이면 하위 요소 전부에 적용된다.
+   */
+  lock?: boolean;
+
   /** 자식 요소들 (중첩 박스, 문단, 텍스트, 이미지) */
   children?: (BoxData | ParagraphData | TextData | ImageData)[];
 };
