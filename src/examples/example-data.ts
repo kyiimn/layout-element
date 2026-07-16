@@ -24,24 +24,23 @@ const block1: BoxData = {
     left: 0, top: 0,
     width: 3,
     height: 4,
-    children: [
-      {
-        type: 'text',
-        content: title,
-        textStyle: { fontSize: 10 },
-        paragraphStyle: { textAlign: 'center', verticalAlign: 'center' }
-      }]
+    children: {
+      type: 'text',
+      content: title,
+      textStyle: { fontSize: 10 },
+      paragraphStyle: { textAlign: 'center', verticalAlign: 'center' }
+    }
   }, {
     type: 'box',
     left: 0, top: 4,
     width: 3,
     height: 16,
-    children: [{
+    children: {
       type: 'paragraph',
       content: body,
       column: 3,
       gap: 5,
-    }]
+    }
   }]
 };
 
@@ -64,24 +63,21 @@ const block2: BoxData = {
     left: 0, top: 0,
     width: 2,
     height: 5,
-    children: [
-      {
-        type: 'text',
-        content: '제목제목제목1',
-        textStyle: { fontSize: 12 },
-        paragraphStyle: { textAlign: 'center', verticalAlign: 'center' }
-      }]
+    children: {
+      type: 'text',
+      content: '제목제목제목1',
+      textStyle: { fontSize: 12 },
+      paragraphStyle: { textAlign: 'center', verticalAlign: 'center' }
+    }
   }, {
     type: 'box',
     left: 0, top: 5,
     width: 2,
     height: 37,
-    children: [
-      {
-        id: 'asdlkjfjasf',
-        type: 'paragraph', content: body
-      },
-    ]
+    children: {
+      id: 'asdlkjfjasf',
+      type: 'paragraph', content: body
+    }
   }, {
     type: 'box',
     left: 40, top: 29,
@@ -89,7 +85,7 @@ const block2: BoxData = {
     height: 35,
     position: 'absolute',
     zIndex: 1,
-    children: [{
+    children: {
       type: 'image',
       url: 'test/g10506uf.png',
       dpi: 72,
@@ -97,7 +93,7 @@ const block2: BoxData = {
       width: 80.08,
       height: 47.98,
       overlapPadding: 10
-    }]
+    }
   }, {
     type: 'box',
     left: 10, top: 79,
@@ -105,7 +101,7 @@ const block2: BoxData = {
     height: 35,
     position: 'absolute',
     zIndex: 1,
-    children: [{
+    children: {
       type: 'image',
       url: 'test/g10506uf.png',
       dpi: 72,
@@ -113,9 +109,8 @@ const block2: BoxData = {
       width: 80.08,
       height: 47.98,
       overlapPadding: 5
-    }]
-  }
-  ]
+    }
+  }]
 };
 
 const block3: BoxData = {
@@ -130,40 +125,44 @@ const block3: BoxData = {
     left: 0, top: 0,
     width: 6,
     height: 7,
-    children: [
-      {
-        type: 'text',
-        content: title,
-        textStyle: { fontSize: 12 },
-        paragraphStyle: { textAlign: 'center', verticalAlign: 'center' }
-      }]
+    children: {
+      type: 'text',
+      content: title,
+      textStyle: { fontSize: 12 },
+      paragraphStyle: { textAlign: 'center', verticalAlign: 'center' }
+    }
   }, {
     type: 'box',
     left: 0, top: 7,
     width: 4,
     height: 15,
-    children: [
-      {
-        type: 'box',
-        left: 28.3, top: 18,
-        width: 56.6,
-        height: 14.3,
-        zIndex: 1,
-        position: "absolute",
-        children: [{
-          type: 'text', content: '파고드는 텍스트',
-          textStyle: {
-            fontSize: 5,
-            fontWeight: 600
-          },
-          paragraphStyle: {
-            textAlign: "center",
-            verticalAlign: "center"
-          }
-        }]
-      },
-      { type: 'paragraph', content: body }
-    ]
+    children: [{
+      type: 'box',
+      left: 28.3, top: 18,
+      width: 56.6,
+      height: 14.3,
+      zIndex: 1,
+      position: "absolute",
+      children: {
+        type: 'text', content: '파고드는 텍스트',
+        textStyle: {
+          fontSize: 5,
+          fontWeight: 600
+        },
+        paragraphStyle: {
+          textAlign: "center",
+          verticalAlign: "center"
+        }
+      }
+    }, {
+      type: 'box',
+      left: 0, top: 0,
+      width: 4,
+      height: 15,
+      children: {
+        type: 'paragraph', content: body
+      }
+    }]
   }]
 };
 
@@ -179,41 +178,45 @@ const block4: BoxData = {
     left: 0, top: 0,
     width: 4,
     height: 4,
-    children: [
-      {
-        type: 'text',
-        content: title,
-        textStyle: { fontSize: 12 },
-        paragraphStyle: { textAlign: 'center', verticalAlign: 'center' }
-      }]
+    children: {
+      type: 'text',
+      content: title,
+      textStyle: { fontSize: 12 },
+      paragraphStyle: { textAlign: 'center', verticalAlign: 'center' }
+    }
   }, {
     type: 'box',
     left: 0, top: 4,
     width: 4,
     height: 19,
-    children: [
-      { type: 'paragraph', content: body },
-      {
-        type: 'box',
-        borderTopWidth: .5,
-        borderLeftWidth: .5,
-        borderRightWidth: .5,
-        borderBottomWidth: .5,
-        borderColor: 'black',
-        left: 1, top: 0,
-        width: 2,
-        height: 14,
-        zIndex: 1,
-        children: [{
-          type: 'image',
-          url: 'test/g1051501.png',
-          dpi: 200,
-          x: 0, y: 0,
-          width: 300,
-          height: 186
-        }]
+    children: [{
+      type: 'box',
+      left: 0, top: 0,
+      width: 4,
+      height: 19,
+      children: {
+        type: 'paragraph', content: body
       }
-    ]
+    }, {
+      type: 'box',
+      borderTopWidth: .5,
+      borderLeftWidth: .5,
+      borderRightWidth: .5,
+      borderBottomWidth: .5,
+      borderColor: 'black',
+      left: 1, top: 0,
+      width: 2,
+      height: 14,
+      zIndex: 1,
+      children: {
+        type: 'image',
+        url: 'test/g1051501.png',
+        dpi: 200,
+        x: 0, y: 0,
+        width: 300,
+        height: 186
+      }
+    }]
   }]
 };
 
@@ -229,29 +232,33 @@ const block5: BoxData = {
     left: 0, top: 0,
     width: 1,
     height: 4,
-    children: [
-      {
-        type: 'text',
-        content: '제목제목',
-        textStyle: { fontSize: 6, fontWeight: 600 },
-        paragraphStyle: { textAlign: 'center', verticalAlign: 'center' }
-      }]
+    children: {
+      type: 'text',
+      content: '제목제목',
+      textStyle: { fontSize: 6, fontWeight: 600 },
+      paragraphStyle: { textAlign: 'center', verticalAlign: 'center' }
+    }
   }, {
     type: 'box',
     left: 0, top: 4,
     width: 1,
     height: 41,
-    children: [
-      {
-        type: 'box',
-        left: 145, top: 0,
-        width: 55,
-        height: 33,
-        zIndex: 1,
-        position: "absolute",
-      },
-      { type: 'paragraph', content: body }
-    ]
+    children: [{
+      type: 'box',
+      left: 145, top: 0,
+      width: 55,
+      height: 33,
+      zIndex: 1,
+      position: "absolute",
+    }, {
+      type: 'box',
+      left: 0, top: 0,
+      width: 1,
+      height: 41,
+      children: {
+        type: 'paragraph', content: body
+      }
+    }]
   }]
 };
 
@@ -265,14 +272,14 @@ const ad: BoxData = {
   left: 0, top: 66,
   width: 5,
   height: 26,
-  children: [{
+  children: {
     type: 'image',
     url: 'test/k11099q7.png',
     dpi: 300,
     x: 0, y: 0,
     width: 71.62,
     height: 37.9,
-  }]
+  }
 };
 
 export const exampleData = {

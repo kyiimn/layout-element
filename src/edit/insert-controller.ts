@@ -318,11 +318,11 @@ export class InsertController {
     };
 
     if (mode.type === 'text') {
-      boxData.children = [{ type: 'text', content: '' }];
+      boxData.children = { type: 'text', content: '' };
     } else if (mode.type === 'paragraph') {
-      boxData.children = [{ type: 'paragraph', content: '' }];
+      boxData.children = { type: 'paragraph', content: '' };
     } else if (mode.type === 'image') {
-      boxData.children = [{ type: 'image', x: 0, y: 0, width: 100, height: 100, dpi: 72, url: '' }];
+      boxData.children = { type: 'image', x: 0, y: 0, width: 100, height: 100, dpi: 72, url: '' };
     }
 
     boxEl.data = boxData;

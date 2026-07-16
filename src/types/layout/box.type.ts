@@ -137,6 +137,6 @@ export type BoxData = {
    */
   lock?: boolean;
 
-  /** 자식 요소들 (중첩 박스, 문단, 텍스트, 이미지) */
-  children?: (BoxData | ParagraphData | TextData | ImageData)[];
+  /** 자식 요소들. 복수의 중첩 박스이거나 단일 컨텐츠(문단, 텍스트, 이미지)이다. */
+  children?: BoxData[] | ParagraphData | TextData | ImageData;
 };

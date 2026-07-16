@@ -1,7 +1,7 @@
 import { DEFAULT_BORDER_STYLE } from "@/constants";
 import { GridCalculator } from "@/core";
 import { ColorRegistry } from "@/resource";
-import { InheritStyle, BoxData, ParagraphStyle, TextStyle, PrintPostData, BoxPosition, BoxBorderStyle, BoxRole } from "@/types";
+import { InheritStyle, BoxData, ParagraphData, TextData, ImageData, ParagraphStyle, TextStyle, PrintPostData, BoxPosition, BoxBorderStyle, BoxRole } from "@/types";
 import { checkOverlap, genUUID } from "@/utils";
 import { EditManager } from "@/edit/edit-manager";
 import { LayoutDocumentElement } from "./document.element";
@@ -407,30 +407,14 @@ export class LayoutBoxElement extends HTMLElement {
 
       this.layout();
 
-      const children = data.children || [];
-      for (let i = 0; i < children.length; i++) {
-        const child = children[i];
-        if (child.type === 'box') {
-          const boxEl = document.createElement('x-layout-box');
-          boxEl.data = child;
-          this.appendChild(boxEl);
-        } else if (child.type === 'paragraph') {
-          const paragraphEl = document.createElement('x-layout-paragraph');
-          paragraphEl.data = child;
-          this.appendChild(paragraphEl);
-        } else if (child.type === 'text') {
-          const paragraphEl = document.createElement('x-layout-paragraph');
-          paragraphEl.data = {
-            ...child,
-            type: 'paragraph',
-            column: 1,
-            gap: 0,
-          };
-          this.appendChild(paragraphEl);
-        } else if (child.type === 'image') {
-          const imageEl = document.createElement('x-layout-image');
-          imageEl.data = child;
-          this.appendChild(imageEl);
+      const children = data.children;
+      if (children) {
+        if (Array.isArray(children)) {
+          for (const child of children) {
+            this._appendChildData(child);
+          }
+        } else {
+          this._appendChildData(children);
         }
       }
 
@@ -438,6 +422,47 @@ export class LayoutBoxElement extends HTMLElement {
     } finally {
       this._rebuildingChildren = false;
     }
+  }
+
+  /**
+   * 자식 데이터를 받아 적절한 커스텀 엘리먼트를 생성하여 추가한다.
+   *
+   * @param child - BoxData | ParagraphData | TextData | ImageData
+   */
+  private _appendChildData(child: BoxData | ParagraphData | TextData | ImageData): void {
+    if (child.type === 'box') {
+      const boxEl = document.createElement('x-layout-box');
+      boxEl.data = child;
+      this.appendChild(boxEl);
+    } else if (child.type === 'paragraph') {
+      const paragraphEl = document.createElement('x-layout-paragraph');
+      paragraphEl.data = child;
+      this.appendChild(paragraphEl);
+    } else if (child.type === 'text') {
+      const paragraphEl = document.createElement('x-layout-paragraph');
+      paragraphEl.data = {
+        ...child,
+        type: 'paragraph',
+        column: 1,
+        gap: 0,
+      };
+      this.appendChild(paragraphEl);
+    } else if (child.type === 'image') {
+      const imageEl = document.createElement('x-layout-image');
+      imageEl.data = child;
+      this.appendChild(imageEl);
+    }
+  }
+
+  /**
+   * 자식 요소들을 `BoxData[] | ParagraphData | TextData | ImageData` 형태로 직렬화한다.
+   * 자식이 1개이고 box가 아닌 경우 단일 객체를 반환하고, 그 외에는 배열을 반환한다.
+   */
+  private _serializeChildren(): BoxData[] | ParagraphData | TextData | ImageData | undefined {
+    const items = this.items.map(e => e.data).filter(e => !!e) as (BoxData | ParagraphData | TextData | ImageData)[];
+    if (items.length === 0) return undefined;
+    if (items.length === 1 && items[0].type !== 'box') return items[0];
+    return items as BoxData[];
   }
 
   set left(value: number) {
@@ -576,7 +601,7 @@ export class LayoutBoxElement extends HTMLElement {
       groupMember: this._groupMember,
       priority: this.priority,
       lock: this._lock || undefined,
-      children: this.items.map(e => e.data).filter(e => !!e),
+      children: this._serializeChildren(),
     };
   }
 
