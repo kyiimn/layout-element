@@ -145,6 +145,7 @@ paragraph.editableText = false;
 - `editableText = false`를 설정하면 `TextEditController.destroy()`가 호출되며, 이벤트 리스너와 DOM 요소가 모두 제거된다.
 - 같은 단락에서 다시 `editableText = true`를 설정하면 새 `TextEditController`가 생성된다.
 - **인쇄 모드**에서는 `editableText` 설정이 무시된다. 인쇄 모드에서는 편집 기능을 활성화할 수 없다.
+- **lock 제한**: 조상 box 중 하나라도 `lock`이 `true`이면, `EditManager.isParagraphEditable()`은 이 단락에 대해 `false`를 반환하므로 `EditManager`를 통해 `editableText = true`로 강제할 수 없다. 단, 호스트 프로그램이 paragraph 요소에 직접 `editableText = true`를 설정하면 `TextEditController`는 생성되지만, `EditManager`의 전역 필터와 독립적으로 동작하며 이벤트/상태가 달라질 수 있으므로 권장하지 않는다.
 
 ### 2.2 `editController` 게터
 
@@ -391,7 +392,8 @@ InheritStyle (부모에서 상속)
 
 ### 3.6.1 역할
 
-- **텍스트 편집 모드 활성화 관리**: `textEditMode`와 3단계 필터(`editableTextRoles`, `editableTextBoxIds`, `editableParagraphIds`)를 통해 문서 전체에서 어떤 단락을 편집 가능하게 할지 중앙에서 제어한다.
+- **텍스트 편집 모드 활성화 관리**: `textEditMode`와 3단계 필터(`editableTextRoles`, `editableTextBoxIds`, `editableParagraphIds`), 그리고 `editableRootId`를 통해 문서 전체에서 어떤 단락을 편집 가능하게 할지 중앙에서 제어한다.
+- **편집 잠금 상속**: 조상 box 중 하나라도 `lock`이면 해당 box 내부의 모든 paragraph는 텍스트 편집 불가이다.
 - **포커스 관리**: 한 번에 하나의 단락만 포커스를 가진다. 포커스가 B 단락으로 이동하면 A 단락의 선택 영역이 자동으로 해제된다.
 - **이벤트 시스템**: `focusChange`, `textChange`, `styleChange`, `cursorMove`, `selectionStart`, `selectionEnd` 이벤트를 외부 편집 UI에 전달한다.
 - **상태 조회**: 현재 포커스된 단락, 커서 위치, 선택 영역, 스타일을 조회할 수 있다.
@@ -421,8 +423,10 @@ InheritStyle (부모에서 상속)
 | `setEditableParagraphIds(ids)` | `void` | `string[] \| null`을 받아 `editableParagraphIds` 필터를 설정한다. `null`이면 단락 ID 필터를 해제한다. |
 | `addEditableParagraph(id)` | `void` | 개별 단락 ID를 `editableParagraphIds` 필터에 추가한다. |
 | `removeEditableParagraph(id)` | `void` | 개별 단락 ID를 `editableParagraphIds` 필터에서 제거한다. |
-| `isParagraphEditable(paragraph)` | `boolean` | 3단계 AND 필터를 적용해 단락이 편집 가능한지 판정한다. `textEditMode`가 `false`이면 `false`를 반환하고, 세 필터가 모두 `null`이면 `false`를 반환한다. 그 외에는 `editableTextRoles`로 부모 상자 역할, `editableTextBoxIds`로 부모 상자 ID, `editableParagraphIds`로 단락 ID를 각각 검사한다. |
+| `isParagraphEditable(paragraph)` | `boolean` | 3단계 AND 필터와 lock/Root 제한을 적용해 단락이 편집 가능한지 판정한다. `textEditMode`가 `false`이면 `false`를 반환한다. 조상 box 중 하나라도 lock이면 `false`를 반환한다. `editableRootId`가 지정된 경우 Root 외부 단락은 `false`를 반환한다. 세 필터가 모두 `null`이면 Root 내부의 모든 단락이 편집 가능하다. 그 외에는 `editableTextRoles`로 부모 상자 역할, `editableTextBoxIds`로 부모 상자 ID, `editableParagraphIds`로 단락 ID를 각각 검사한다. |
 | `deactivateAll()` | `void` | `textEditMode`를 `false`로 설정한 뒤, 모든 단락의 텍스트 편집 모드를 비활성화한다. |
+| `setEditableRootId(id)` | `void` | 편집 루트 box ID를 설정한다. `null`이면 문서 전체. 지정 시 해당 box 내부 paragraph만 편집 가능하며, layout/text 모드 모두에 공유 적용된다. |
+| `editableRootId` | `string \| null` get | 현재 편집 루트 box ID |
 
 ### 3.6.3 이벤트 시스템
 
@@ -459,6 +463,25 @@ type EditManagerEventListener = (event: EditManagerEvent) => void;
 
 `EditManager`는 레이아웃 편집 모드와 유사한 방식으로 텍스트 편집 활성화를 중앙에서 관리한다. 단, 실제 입력 처리(IME, 커서, 선택, 키보드)는 여전히 단락에 종속된 `TextEditController`가 담당한다.
 
+#### `setEditableRootId(id)` / `editableRootId`
+
+```ts
+// 특정 box 내부 단락만 텍스트 편집 가능
+manager.setEditableRootId('article-1');
+manager.textEditMode = true;
+// → article-1 내부의 paragraph만 editableText = true
+// → article-1 외부의 paragraph는 편집 불가
+
+// 제한 해제
+manager.setEditableRootId(null);
+```
+
+| 매개변수 | 타입 | 설명 |
+|----------|------|------|
+| `id` | `string \| null` | 편집 루트로 지정할 box ID. `null`이면 문서 전체 |
+
+`setEditableRootId`는 레이아웃 편집 모드와 텍스트 편집 모드 모두에 동시에 적용된다. 값이 변경되면 활성화된 모드의 box/paragraph 상태를 갱신한다.
+
 #### `textEditMode`
 
 전역 텍스트 편집 모드 스위치이다.
@@ -466,6 +489,7 @@ type EditManagerEventListener = (event: EditManagerEvent) => void;
 - `true`로 설정하면 `_applyEditableTextToAllParagraphs()`가 호출되어 조건에 맞는 단락의 `editableText`가 `true`로 설정된다.
 - `false`로 설정하면 포커스를 해제하고, 모든 단락의 `editableText`를 `false`로 설정한다.
 - 현재 포커스된 단락이 비활성화 대상이면 `blurParagraph()`로 포커스를 먼저 해제한다.
+- **기본적으로 모든 단락이 허용된다.** `textEditMode`만 켜고 세 필터(`editableTextRoles`, `editableTextBoxIds`, `editableParagraphIds`)를 모두 `null`로 두면, lock과 `editableRootId` 제한만 적용된 채 문서 전체(또는 Root 내부)의 단락이 편집 가능하다. 편집을 막으려면 `textEditMode`를 `false`로 설정해야 한다.
 
 ```ts
 const manager = EditManager.getInstance();
@@ -517,13 +541,15 @@ manager.removeEditableParagraph('p-old'); // editableParagraphIds에서 제거
 
 #### `isParagraphEditable(paragraph)`
 
-세 단계 AND 필터를 적용해 단락이 현재 편집 가능한지 판정한다.
+세 단계 AND 필터와 lock/Root 제한을 적용해 단락이 현재 편집 가능한지 판정한다.
 
 **반환 규칙:**
 
 1. `textEditMode === false`이면 `false`.
-2. `editableTextRoles`, `editableTextBoxIds`, `editableParagraphIds`가 모두 `null`이면 `false` (아무것도 허용하지 않는 규칙).
-3. 각 필터가 `null`이 아니면 해당 조건을 AND로 검사:
+2. 조상 box 중 하나라도 `lock`이면 `false`.
+3. `editableRootId`가 지정된 경우, 단락이 Root box 내부의 자손이어야 한다. Root box 자체는 paragraph가 아니므로 판별 대상이 아니다.
+4. `editableTextRoles`, `editableTextBoxIds`, `editableParagraphIds`가 모두 `null`이면, Root 제한과 lock 제한을 제외한 모든 단락이 편집 가능하다 (모두 허용 규칙).
+5. 각 필터가 `null`이 아니면 해당 조건을 AND로 검사:
    - `editableTextRoles`: 단락의 부모 상자 `role`이 집합에 포함되어야 한다.
    - `editableTextBoxIds`: 단락의 부모 상자 `id`가 집합에 포함되어야 한다.
    - `editableParagraphIds`: 단락의 `id`가 집합에 포함되어야 한다.
@@ -638,7 +664,8 @@ const manager = EditManager.getInstance();
 // 텍스트 편집 모드 활성화 + 필터 적용
 manager.setEditableTextRoles(['body', 'caption']);
 manager.setEditableTextBoxIds(['article-1']);
-manager.textEditMode = true; // 위 역할/상자 ID 조건을 만족하는 단락만 editableText = true
+manager.setEditableRootId('root-box');
+manager.textEditMode = true; // 위 역할/상자 ID/루트 조건을 만족하는 단락만 editableText = true
 
 // 이벤트 리스너 등록
 manager.addEventListener('focusChange', (e) => {

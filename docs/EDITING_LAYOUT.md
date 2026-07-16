@@ -40,6 +40,8 @@
 │  ├── layoutEditMode: boolean                                         │
 │  ├── editableRoles: ReadonlySet<BoxRole> | null                      │
 │  ├── editableBoxIds: ReadonlySet<string> | null                      │
+│  ├── editableRootId: string | null                                    │
+│  ├── setEditableRootId(id)                                           │
 │  ├── isBoxEditable(box)                                              │
 │  ├── selectedLayouts: LayoutElement[]                               │
 │  ├── selectLayout()                                                  │
@@ -79,7 +81,7 @@ manager.layoutEditMode = false;
 
 `layoutEditMode`가 `true`가 되면 `EditManager`는 문서 안의 모든 `<x-layout-box>`를 순회하며, `isBoxEditable(box)` 결과에 따라 각 box의 `editableLayout` 속성을 갱신한다. `false`로 설정되면 모든 선택이 해제되고 모든 box의 `editableLayout` 속성이 `false`가 된다.
 
-**기본적으로 아무 것도 허용하지 않는다.** `layoutEditMode`만 켜고 `editableRoles`나 `editableBoxIds`를 설정하지 않으면 어떤 box도 편집할 수 없다. 반드시 두 필터 중 하나 이상을 설정해야 한다.
+**기본적으로 모든 box가 허용된다.** `layoutEditMode`만 켜고 `editableRoles`와 `editableBoxIds`를 모두 `null`로 두면 Root 제한(`setEditableRootId`)과 lock을 제외한 모든 box가 편집 가능하다. 편집을 막으려면 `layoutEditMode`를 `false`로 설정하거나, `editableRoles`/`editableBoxIds`를 지정해 허용 범위를 좁혀야 한다. box의 `lock` 속성이 `true`이거나 조상 box 중 하나라도 lock이면 해당 box와 하위 요소는 항상 편집 불가이다.
 
 #### 역할 기반 필터: `setEditableRoles(roles)` / `editableRoles`
 
@@ -123,19 +125,23 @@ const editable = manager.isBoxEditable(box); // boolean
 판별 규칙은 AND 기반이다:
 
 1. `layoutEditMode`가 `true`여야 한다.
-2. `editableRoles`가 설정되어 있으면 box의 `role`이 그 안에 포함되어야 한다.
-3. `editableBoxIds`가 설정되어 있으면 box의 `id`가 그 안에 포함되어야 한다.
-4. `editableRoles`와 `editableBoxIds`가 둘 다 `null`이면 `false`를 반환한다 (모두 허용하지 않음 규칙).
+2. box 자체 또는 조상 box 중 lock이 설정된 것이 있으면 `false`를 반환한다. lock은 box와 그 내부의 모든 하위 요소를 편집에서 제외한다.
+3. `editableRootId`가 지정된 경우, box가 해당 Root box 내부의 자손이어야 한다. Root box 자체는 편집 불가하며 컨테이너 역할만 한다.
+4. `editableRoles`가 설정되어 있으면 box의 `role`이 그 안에 포함되어야 한다.
+5. `editableBoxIds`가 설정되어 있으면 box의 `id`가 그 안에 포함되어야 한다.
+6. `editableRoles`와 `editableBoxIds`가 둘 다 `null`이면, Root 제한과 lock 제한을 제외한 모든 box가 편집 가능하다 (모두 허용 규칙).
 
-| `layoutEditMode` | `editableRoles` | `editableBoxIds` | box.role | box.id | 결과 |
-|------------------|-----------------|------------------|----------|--------|------|
-| false | (any) | (any) | (any) | (any) | `false` |
-| true | `null` | `null` | (any) | (any) | `false` |
-| true | `['body']` | `null` | `'body'` | (any) | `true` |
-| true | `['body']` | `null` | `'image'` | (any) | `false` |
-| true | `null` | `['b1']` | (any) | `'b1'` | `true` |
-| true | `['body']` | `['b1']` | `'body'` | `'b1'` | `true` |
-| true | `['body']` | `['b1']` | `'body'` | `'b2'` | `false` |
+| `layoutEditMode` | lock/ancestor lock | Root 범위 | `editableRoles` | `editableBoxIds` | box.role | box.id | 결과 |
+|------------------|------------------|-----------|-----------------|------------------|----------|--------|------|
+| false | (any) | (any) | (any) | (any) | (any) | (any) | `false` |
+| true | locked | (any) | (any) | (any) | (any) | (any) | `false` |
+| true | unlocked | outside Root | (any) | (any) | (any) | (any) | `false` |
+| true | unlocked | inside Root | `null` | `null` | (any) | (any) | `true` |
+| true | unlocked | inside Root | `['body']` | `null` | `'body'` | (any) | `true` |
+| true | unlocked | inside Root | `['body']` | `null` | `'image'` | (any) | `false` |
+| true | unlocked | inside Root | `null` | `['b1']` | (any) | `'b1'` | `true` |
+| true | unlocked | inside Root | `['body']` | `['b1']` | `'body'` | `'b1'` | `true` |
+| true | unlocked | inside Root | `['body']` | `['b1']` | `'body'` | `'b2'` | `false` |
 
 #### `editableLayout` 속성 (하위 호환)
 
@@ -249,6 +255,8 @@ element.editableLayout = false;
 
 `LayoutEditController`는 `EditManager.layoutEditMode`가 활성화될 때 생성되어 문서(document) 수준에서 마우스 이벤트를 캡처 단계로 처리한다. 이전의 per-box 핸들러(`box._onLayoutClick`, `box._onLayoutMouseDown` 등)는 제거되었고, 모든 드래그/리사이즈/선택 로직이 여기로 집중되었다.
 
+`LayoutEditController`는 `EditManager.isBoxEditable()` 외에도 lock과 `editableRootId`를 별도로 검사한다. 따라서 `EditManager`에서 잠금이나 루트 제한을 판별하지 않더라도, 이벤트 처리 단계에서 동일한 제한이 적용되어 lock/Root 밖의 box는 드래그/리사이즈/선택되지 않는다.
+
 #### 이벤트 등록
 
 ```typescript
@@ -312,6 +320,10 @@ manager.addEditableBox('box-3');
 manager.removeEditableBox('box-1');
 console.log(manager.editableBoxIds); // ReadonlySet<string> | null
 
+// 편집 루트 (null = 문서 전체)
+manager.setEditableRootId('box-1');
+console.log(manager.editableRootId); // string | null
+
 // 판별
 const editable = manager.isBoxEditable(box); // boolean
 ```
@@ -341,6 +353,7 @@ manager.selectedLayoutIds; // string[]
 
 **동작**:
 - `EditManager.isBoxEditable(element)`가 `true`이거나, 하위 호환을 위해 `element.editableLayout`이 `true`인 요소만 선택 가능하다. 둘 다 아니면 무시된다.
+- lock이거나 조상 lock인 box, 또는 `editableRootId`가 지정된 경우 Root 밖의 box는 선택되지 않는다.
 - 기본(단일 선택) 모드: 기존 선택을 모두 해제하고 지정된 요소만 선택한다.
 - 다중 선택 모드(`_multiSelect = true`): 기존 선택에 추가. 이미 선택된 요소를 다시 지정하면 선택 해제(토글).
 - 다중 선택 모드는 클릭 핸들러가 Ctrl/Meta 키 상태에 따라 설정한다. 직접 호출해서는 변경할 수 없다.
@@ -372,6 +385,27 @@ manager.selectedLayoutIds; // string[]
 | 반환값 | `boolean` | 크기 조정 중이면 `true`, 아니면 `false` |
 
 `_startLayoutResize()`가 호출되면 `true`로 설정되고, `_endLayoutResize()`가 호출되면 `false`로 설정된다. 이 값은 `LayoutBoxElement._onLayoutMouseEnter`/`_onLayoutMouseLeave`에서 hover 표시를 차단하는 데 사용된다.
+
+#### `setEditableRootId(id)` / `editableRootId`
+
+```typescript
+// 특정 box 내부 요소만 편집 가능. Root 자체는 이동/크기조정 불가
+manager.setEditableRootId('box-1');
+manager.setEditableRoles(['body']);
+manager.layoutEditMode = true;
+// → box-1 내부의 role='body' box만 편집 가능
+// → box-1 자체는 편집 불가 (컨테이너)
+// → box-1 외부의 box는 편집 불가
+
+// 제한 해제
+manager.setEditableRootId(null);
+```
+
+| 매개변수 | 타입 | 설명 |
+|----------|------|------|
+| `id` | `string \| null` | 편집 루트로 지정할 box ID. `null`이면 루트 제한 없음 |
+
+`setEditableRootId`는 레이아웃 편집 모드와 텍스트 편집 모드 모두에 동시에 적용된다. 값이 변경되면 두 모드에 대해 각각 `_applyEditableLayoutToAllBoxes()`와 `_applyEditableTextToAllParagraphs()`가 호출되어, 활성화된 모드의 요소 상태를 갱신한다.
 
 #### 이벤트: `layoutSelectionChange`
 
@@ -532,6 +566,30 @@ type BoxRole =
 
 `role` 속성은 `<x-layout-box>`의 `observedAttributes`에 등록되어 있어, DOM 속성 변경 시 `attributeChangedCallback`을 통해 `_role` 필드로 반영된다. `data` setter를 통해서도 `data.role`에서 `_role`로 동기화된다. React 래퍼(`LayoutBox`)는 `role` prop을 통해 이 값을 설정한다. role이 설정되지 않은 box의 `box.role` getter는 이제 `null` 대신 `'none'`을 반환한다.
 
+### 2.4.2 `lock` (편집 잠금)
+
+`BoxData.lock?: boolean`은 box의 편집 잠금 상태를 나타낸다. `true`이면 box 자체와 내부의 모든 자식 요소(box, paragraph, image 등)가 편집에서 제외된다. 조상 box 중 하나라도 lock이면 하위 요소 전부에 적용된다.
+
+```typescript
+const boxData: BoxData = {
+  type: 'box',
+  id: 'locked-group',
+  lock: true,
+  children: [
+    // lock이 적용되어 있으므로 이 안의 모든 자식 요소도 편집 불가
+    { type: 'paragraph', /* ... */ },
+    { type: 'box', /* ... */ },
+  ],
+};
+```
+
+| 상태 | 레이아웃 편집 | 텍스트 편집 | 요소 삽입 |
+|------|--------------|------------|----------|
+| lock = false, 조상도 unlock | 필터 통과 시 가능 | 필터 통과 시 가능 | 가능 |
+| lock = true 또는 조상 lock | box 이동/리사이즈 불가 | 내부 paragraph 포커스/입력 불가 | lock 영역 내부에 삽입 불가 |
+
+`LayoutBoxElement`는 `lock`을 DOM 속성(`[lock]`)과 JS getter/setter로 노출한다. `data` setter로 `BoxData.lock`을 설정하거나, `element.lock = true`로 직접 설정할 수 있다. lock이 변경되면 `EditManager`가 활성화된 편집 모드에 따라 모든 box/paragraph의 `editableLayout`/`editableText`를 재평가한다.
+
 ### 2.5 React API
 
 #### `useEditManager` 훅
@@ -599,7 +657,8 @@ function MyComponent() {
 |------|------|------|
 | `editableLayout` | `boolean?` | 하위 호환용. DOM 속성/커서/시각적 피드백만 제어. 실제 편집 가능 여부는 `EditManager.isBoxEditable()`이 결정 |
 | `role` | `BoxRole?` | 박스의 의미적 역할. `'none'`이 기본값. 자세한 값은 [2.4.1 BoxRole](#241-boxrole-박스-역할) 참조 |
-| `id` | `string?` | box ID. `editableBoxIds` 필터에 사용 |
+| `id` | `string?` | box ID. `editableBoxIds` 필터와 `editableRootId`에 사용 |
+| `lock` | `boolean?` | 편집 잠금. `true`이면 box와 내부 자식 요소 모두 편집 불가. 조상 lock도 하위에 상속 적용 |
 
 ---
 
