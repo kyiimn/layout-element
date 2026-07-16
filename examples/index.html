@@ -223,9 +223,7 @@
             p.editableText = false;
           });
 
-          document.querySelectorAll("x-layout-box").forEach((b) => {
-            b.editableLayout = false;
-          });
+          em.layoutEditMode = false;
         }
 
         function clearInsertMode() {
@@ -264,9 +262,8 @@
           clearInsertMode();
           currentMode = "layout";
           clearAllEditMode();
-          document.querySelectorAll("x-layout-box").forEach((b) => {
-            b.editableLayout = true;
-          });
+          em.setEditableRoles(["none"]);
+          em.layoutEditMode = true;
           btnRead.classList.remove("active");
           btnEdit.classList.remove("active");
           btnLayout.classList.add("active-layout");
@@ -282,9 +279,8 @@
             clearInsertMode();
             currentMode = "insert";
             clearAllEditMode();
-            document.querySelectorAll("x-layout-box").forEach((b) => {
-              b.editableLayout = true;
-            });
+            em.setEditableRoles(["none"]);
+            em.layoutEditMode = true;
             btnRead.classList.remove("active");
             btnEdit.classList.remove("active");
             btnLayout.classList.add("active-layout");
@@ -412,9 +408,8 @@
 
           // 레이아웃 편집 모드로 전환 (기존 편집 상태 해제 후 활성화)
           clearAllEditMode();
-          document.querySelectorAll("x-layout-box").forEach((b) => {
-            b.editableLayout = true;
-          });
+          em.setEditableRoles(["none"]);
+          em.layoutEditMode = true;
           btnRead.classList.remove("active");
           btnEdit.classList.remove("active");
           btnLayout.classList.add("active-layout");
@@ -422,9 +417,8 @@
           hint.textContent =
             "레이아웃 요소(box)를 클릭하여 선택하세요. Ctrl+클릭으로 다중 선택.";
 
-          // 삽입된 요소를 편집 가능 상태로 만들고 선택
+          // 삽입된 요소를 선택
           if (event.element) {
-            event.element.editableLayout = true;
             em.selectLayout(event.element);
           }
 

@@ -8,37 +8,53 @@
 
 ## 1. 개요 (Overview)
 
-레이아웃 편집 모드는 `<x-layout-box>` 요소를 시각적으로 선택하고 드래그하여 이동할 수 있는 기능이다. 텍스트 편집 모드(`editableText`)가 단락 내부의 텍스트를 수정하는 기능이라면, 레이아웃 편집 모드(`editableLayout`)는 레이아웃 구조 요소 자체를 선택·이동하는 기능이다. `<x-layout-document>`는 레이아웃 편집 대상이 아니며, 오직 `<x-layout-box>`만 `editableLayout` 속성을 지원한다.
+레이아웃 편집 모드는 `<x-layout-box>` 요소를 시각적으로 선택하고 드래그하여 이동할 수 있는 기능이다. 텍스트 편집 모드(`editableText`)가 단락 내부의 텍스트를 수정하는 기능이라면, 레이아웃 편집 모드는 레이아웃 구조 요소 자체를 선택·이동하는 기능이다. `<x-layout-document>`는 레이아웃 편집 대상이 아니며, 오직 `<x-layout-box>`만 편집 대상이 된다.
+
+이전에는 각 `<x-layout-box>`의 `editableLayout` 속성으로 개별적으로 편집 모드를 켰지만, 현재는 `EditManager`의 글로벌 `layoutEditMode`와 필터(`editableRoles`, `editableBoxIds`)를 통해 한 번에 제어한다. 개별 `editableLayout` 속성은 이제 DOM 속성/커서 표시용으로만 동작하며, 실제 판단은 `EditManager.isBoxEditable()`이 수행한다.
 
 ### 1.1 레이아웃 편집 모드 아키텍처
 
-`editableLayout` 속성이 `true`로 설정되면:
+`EditManager.layoutEditMode = true`로 설정되면:
 
-1. **클릭 리스너 등록**: 요소에 `click` 및 `mousedown` 이벤트 리스너가 등록된다.
-2. **선택 처리**: 클릭 시 `EditManager.selectLayout()`을 호출하여 요소를 선택한다.
-3. **시각적 피드백**: 선택된 요소에 `selected` 속성이 설정되고, Shadow DOM의 `:host([selected])` 규칙에 의해 빨간색 `box-shadow`가 표시된다.
-4. **드래그 이동**: 선택된 요소를 마우스로 드래그하여 이동할 수 있다.
-5. **크기 조정**: 선택된 요소의 가장자리 중앙에 4개의 리사이즈 핸들이 표시되며, 핸들을 드래그하여 크기를 조정할 수 있다.
-6. **텍스트 리플로우**: 드래그 중 주변 단락이 실시간으로 텍스트를 다시 배치하여 이미지/박스를 회피한다.
-7. **ESC 취소**: 드래그/리사이즈 중 ESC 키를 누르면 이동/크기 변경이 취소되고 시작 전 상태로 복원된다.
-8. **이벤트 전파 차단**: 클릭 이벤트가 `stopPropagation()`되어 부모 요소까지 선택이 전파되지 않는다.
+1. **전역 필터 활성화**: `editableRoles`와 `editableBoxIds`에 맞는 box가 편집 가능 상태로 전환된다.
+2. **중앙 집중형 이벤트 처리**: `LayoutEditController`가 문서(document) 수준에서 `mousedown`과 `click`을 캡처 단계로 감지하여, 편집 가능한 box에 한해 선택, 드래그, 리사이즈를 처리한다.
+3. **선택 처리**: `LayoutEditController`는 클릭 시 `EditManager.selectLayout()`을 호출하여 요소를 선택한다.
+4. **시각적 피드백**: 선택된 요소에 `selected` 속성이 설정되고, Shadow DOM의 `:host([selected])` 규칙에 의해 빨간색 `box-shadow`가 표시된다. `editableLayout` 속성이 켜진 box에는 `hovered` 상태로 파란색 외곽선이 표시된다.
+5. **드래그 이동**: 선택된 요소를 마우스로 드래그하여 이동할 수 있다.
+6. **크기 조정**: 선택된 요소의 가장자리 중앙에 4개의 리사이즈 핸들이 표시되며, 핸들을 드래그하여 크기를 조정할 수 있다.
+7. **텍스트 리플로우**: 드래그 중 주변 단락이 실시간으로 텍스트를 다시 배치하여 이미지/박스를 회피한다.
+8. **ESC 취소**: 드래그/리사이즈 중 ESC 키를 누르면 이동/크기 변경이 취소되고 시작 전 상태로 복원된다.
+9. **이벤트 전파 차단**: `LayoutEditController`는 클릭 이벤트를 `stopPropagation()`하여 부모 요소까지 선택이 전파되지 않도록 한다.
 
 ```
-┌─────────────────────────────────────────────────────┐
-│ <x-layout-document>                                │
-│   ┌──────────────────┐  ┌──────────────────┐        │
-│   │ <x-layout-box    │  │ <x-layout-box    │        │
-│   │  editableLayout> │  │  editableLayout> │        │
-│   │  [selected] │  │                  │        │
-│   │  cursor: grab ↄ  │  │                  │        │
-│   └──────────────────┘  └──────────────────┘        │
-│                                                     │
-│  EditManager (singleton)                            │
-│  ├── selectedLayouts: LayoutElement[]               │
-│  ├── selectLayout()                                 │
-│  ├── clearLayoutSelection()                         │
-│  └── layoutSelectionChange event                    │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│ <x-layout-document>                                                  │
+│   ┌────────────────────┐    ┌────────────────────┐                  │
+│   │ <x-layout-box      │    │ <x-layout-box      │                  │
+│   │  role="title"      │    │  role="body"       │                  │
+│   │  [selected]        │    │  [hovered]         │                  │
+│   │  cursor: grab ↄ   │    │  cursor: grab ↄ    │                  │
+│   └────────────────────┘    └────────────────────┘                  │
+│                                                                      │
+│  EditManager (singleton)                                             │
+│  ├── layoutEditMode: boolean                                         │
+│  ├── editableRoles: ReadonlySet<BoxRole> | null                      │
+│  ├── editableBoxIds: ReadonlySet<string> | null                      │
+│  ├── isBoxEditable(box)                                              │
+│  ├── selectedLayouts: LayoutElement[]                               │
+│  ├── selectLayout()                                                  │
+│  ├── clearLayoutSelection()                                          │
+│  ├── setEditableRoles(roles) / setEditableBoxIds(ids)                │
+│  └── layoutSelectionChange event                                     │
+│                                                                      │
+│  LayoutEditController                                                  │
+│  ├── document-level mousedown / click (capture)                      │
+│  ├── drag state per box: Map<LayoutBoxElement, BoxDragState>          │
+│  ├── resize state per box: Map<LayoutBoxElement, BoxResizeState>    │
+│  ├── _computeNewPosition() / _computeNewSize()                        │
+│  ├── ESC cancel                                                      │
+│  └── affected paragraph rerender                                    │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -47,12 +63,86 @@
 
 ### 2.1 Vanilla (Custom Element) API
 
-#### `editableLayout` 속성
+#### 글로벌 레이아웃 편집 모드 (`EditManager.layoutEditMode`)
+
+레이아웃 편집 모드는 이제 `EditManager`의 글로벌 상태로 제어한다.
+
+```typescript
+const manager = EditManager.getInstance();
+
+// 활성화
+manager.layoutEditMode = true;
+
+// 비활성화
+manager.layoutEditMode = false;
+```
+
+`layoutEditMode`가 `true`가 되면 `EditManager`는 문서 안의 모든 `<x-layout-box>`를 순회하며, `isBoxEditable(box)` 결과에 따라 각 box의 `editableLayout` 속성을 갱신한다. `false`로 설정되면 모든 선택이 해제되고 모든 box의 `editableLayout` 속성이 `false`가 된다.
+
+**기본적으로 아무 것도 허용하지 않는다.** `layoutEditMode`만 켜고 `editableRoles`나 `editableBoxIds`를 설정하지 않으면 어떤 box도 편집할 수 없다. 반드시 두 필터 중 하나 이상을 설정해야 한다.
+
+#### 역할 기반 필터: `setEditableRoles(roles)` / `editableRoles`
+
+```typescript
+manager.setEditableRoles(['body', 'title', 'none']);
+console.log(manager.editableRoles); // ReadonlySet<BoxRole> | null
+
+// 제한 해제
+manager.setEditableRoles(null);
+```
+
+| 매개변수 | 타입 | 설명 |
+|----------|------|------|
+| `roles` | `BoxRole[] \| null` | 편집을 허용할 역할 목록. `null`이면 역할 기반 제한 없음 |
+
+`BoxRole`에 `'none'`이 추가되었다. `box.role`이 설정되지 않았을 때는 `'none'`을 반환한다. 역할 미지정 box도 편집하려면 `'none'`을 목록에 포함해야 한다.
+
+#### ID 기반 필터: `setEditableBoxIds(ids)` / `editableBoxIds` / `addEditableBox(id)` / `removeEditableBox(id)`
+
+```typescript
+manager.setEditableBoxIds(['box-1', 'box-2']);
+manager.addEditableBox('box-3');
+manager.removeEditableBox('box-1');
+console.log(manager.editableBoxIds); // ReadonlySet<string> | null
+
+// 제한 해제
+manager.setEditableBoxIds(null);
+```
+
+| 매개변수 | 타입 | 설명 |
+|----------|------|------|
+| `ids` | `string[] \| null` | 편집을 허용할 box ID 목록. `null`이면 ID 기반 제한 없음 |
+| `id` | `string` | `addEditableBox`/`removeEditableBox`로 개별 추가/제거할 box ID |
+
+#### `isBoxEditable(box)` — 중앙 판별 함수
+
+```typescript
+const editable = manager.isBoxEditable(box); // boolean
+```
+
+판별 규칙은 AND 기반이다:
+
+1. `layoutEditMode`가 `true`여야 한다.
+2. `editableRoles`가 설정되어 있으면 box의 `role`이 그 안에 포함되어야 한다.
+3. `editableBoxIds`가 설정되어 있으면 box의 `id`가 그 안에 포함되어야 한다.
+4. `editableRoles`와 `editableBoxIds`가 둘 다 `null`이면 `false`를 반환한다 (모두 허용하지 않음 규칙).
+
+| `layoutEditMode` | `editableRoles` | `editableBoxIds` | box.role | box.id | 결과 |
+|------------------|-----------------|------------------|----------|--------|------|
+| false | (any) | (any) | (any) | (any) | `false` |
+| true | `null` | `null` | (any) | (any) | `false` |
+| true | `['body']` | `null` | `'body'` | (any) | `true` |
+| true | `['body']` | `null` | `'image'` | (any) | `false` |
+| true | `null` | `['b1']` | (any) | `'b1'` | `true` |
+| true | `['body']` | `['b1']` | `'body'` | `'b1'` | `true` |
+| true | `['body']` | `['b1']` | `'body'` | `'b2'` | `false` |
+
+#### `editableLayout` 속성 (하위 호환)
 
 **지원 요소**: `<x-layout-box>` (document는 레이아웃 편집 대상이 아님)
 
 ```typescript
-// 활성화
+// 활성화 (DOM 속성 + 커서 + 호버/선택 가능)
 document.querySelector('x-layout-box').editableLayout = true;
 
 // 비활성화
@@ -61,13 +151,11 @@ element.editableLayout = false;
 
 | 동작 | `<x-layout-box>` |
 |------|-------------------|
-| `true` 설정 | `cursor: grab`, 리사이즈 핸들 DOM 표시, 내부 상태 업데이트 |
-| `false` 설정 | `selected`·`hovered` 제거, `cursor` 초기화, `EditManager` 등록 해제 |
-| `connectedCallback` | `click` + `mousedown` + `mouseenter` + `mouseleave` 리스너 등록, 리사이즈 핸들에 `mousedown` 리스너 등록 |
-| `disconnectedCallback` | `click` + `mousedown` + `mouseenter` + `mouseleave` 리스너 해제, `EditManager._unregisterLayout()` 호출 |
+| `true` 설정 | `cursor: grab`, `editable-layout` DOM 속성 추가, 호버/선택 시각적 피드백 활성화 |
+| `false` 설정 | `selected`·`hovered`·`editable-layout` 제거, `cursor` 초기화, `EditManager._unregisterLayout()` 호출 |
 | 인쇄 모드 | `editableLayout` 설정 무시 |
 
-> **설계**: 이벤트 리스너는 `connectedCallback`에서 항상 등록하고 `disconnectedCallback`에서 항상 해제한다. `editableLayout` 플래그는 핸들러 내부에서 조기 반환하는 가드 역할만 한다. 리사이즈 핸들은 `_ensureResizeHandles()`에서 생성 시 항상 `mousedown` 리스너를 등록하며, `editableLayout = false`에서 리스너를 제거하지 않는다.
+> **설계**: `editableLayout` 속성은 더 이상 이벤트 리스너를 직접 등록하지 않는다. `connectedCallback`은 `mouseenter`와 `mouseleave`만 등록하고, `click`/`mousedown`/리사이즈 핸들 이벤트는 `LayoutEditController`가 문서 수준에서 처리한다. 개별 box에 `editableLayout = true`를 설정하면 `EditManager.isBoxEditable()`은 아니지만 `LayoutEditController`가 이전 버전과의 호환을 위해 여전히 편집 가능한 것으로 간주한다.
 
 > **참고**: `<x-layout-document>`는 레이아웃 편집 대상이 아니므로 `editableLayout` 속성이 없다. 드래그와 선택은 `<x-layout-box>`에서만 동작한다.
 
@@ -78,8 +166,8 @@ element.editableLayout = false;
 | **클릭** | 기존 선택을 모두 해제하고 클릭한 요소만 선택 |
 | **Ctrl+클릭** (또는 **Cmd+클릭**) | 기존 선택에 추가. 이미 선택된 요소를 다시 클릭하면 선택 해제(토글) |
 | **클릭** (이벤트 전파) | `stopPropagation()`으로 부모 요소의 클릭 이벤트 차단. 중첩된 box를 클릭해도 상위 box가 함께 선택되지 않음 |
-| **하위 요소 클릭** | 이벤트가 하위 레이아웃 요소(box)에서 발생한 경우, 상위 요소의 mousedown/click 핸들러는 `_isEventFromDescendantLayout()` 검사로 해당 이벤트를 무시한다. 이를 통해 상위 요소가 선택된 상태에서도 하위 요소를 클릭하여 선택할 수 있다 |
-| **선택되지 않은 요소 mousedown** | 선택되지 않은 요소를 mousedown하면 기존 선택을 해제하고 해당 요소를 선택한 후 드래그를 시작한다. `_selectedOnMouseDown` 플래그로 click에서 중복 선택을 방지한다 |
+| **하위 요소 클릭** | 이벤트가 하위 레이아웃 요소(box)에서 발생한 경우, 상위 요소의 `LayoutEditController._onClick`/`LayoutEditController._onMouseDown`은 `_isEventFromDescendantLayout()` 검사로 해당 이벤트를 무시한다. 이를 통해 상위 요소가 선택된 상태에서도 하위 요소를 클릭하여 선택할 수 있다 |
+| **선택되지 않은 요소 mousedown** | 선택되지 않은 요소를 mousedown하면 기존 선택을 해제하고 해당 요소를 선택한 후 드래그를 시작한다. `BoxDragState.selectedOnMouseDown` 플래그로 click에서 중복 선택을 방지한다 |
 
 #### 드래그 이동 동작
 
@@ -123,7 +211,7 @@ element.editableLayout = false;
 2. 이미 선택된 요소(`selected`)는 호버 표시가 나타나지 않는다
 3. 마우스가 요소에 진입하면 **조상 요소의 `hovered`를 모두 제거**하여, 가장 안쪽(최상위) 요소만 호버 표시가 보인다
 4. 마우스가 자식 요소에서 부모 영역으로 돌아갈 때, `elementFromPoint`를 사용하여 마우스 위치 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다
-5. **드래그 이동 중이거나 크기 조정 중에는 hover가 동작하지 않는다**. `EditManager._isDraggingLayout()` 또는 `_isResizingLayout()`이 `true`이면 `_onLayoutMouseEnter`와 `_onLayoutMouseLeave`가 early return하여 hover 표시가 나타나지 않는다. 이로 인해 드래그/리사이즈 중에 마우스가 다른 박스 위로 이동해도 방해가 되지 않는다. 드래그/리사이즈가 종료되면 정상적으로 hover가 동작한다.
+5. **드래그 이동 중이거나 크기 조정 중에는 hover가 동작하지 않는다**. `EditManager._isDraggingLayout()` 또는 `_isResizingLayout()`이 `true`이면 `LayoutBoxElement._onLayoutMouseEnter`와 `_onLayoutMouseLeave`가 early return하여 hover 표시가 나타나지 않는다. 이로 인해 드래그/리사이즈 중에 마우스가 다른 박스 위로 이동해도 방해가 되지 않는다. 드래그/리사이즈가 종료되면 정상적으로 hover가 동작한다.
 
 | 상태 | 커서 | 시각적 피드백 |
 |------|------|-------------|
@@ -157,15 +245,80 @@ element.editableLayout = false;
 - `:host(:not([selected])) .resize-handle { display: none; }` — 미선택 시 숨김
 - 핸들의 `mousedown` 이벤트는 `stopPropagation()`으로 버블링을 차단하여, 드래그-이동이 함께 트리거되지 않도록 한다.
 
-### 2.2 EditManager API
+### 2.2 `LayoutEditController` 중앙 이벤트 처리
+
+`LayoutEditController`는 `EditManager.layoutEditMode`가 활성화될 때 생성되어 문서(document) 수준에서 마우스 이벤트를 캡처 단계로 처리한다. 이전의 per-box 핸들러(`box._onLayoutClick`, `box._onLayoutMouseDown` 등)는 제거되었고, 모든 드래그/리사이즈/선택 로직이 여기로 집중되었다.
+
+#### 이벤트 등록
+
+```typescript
+// EditManager.layoutEditMode = true 일 때
+this._layoutEditController = new LayoutEditController(document.documentElement);
+this._layoutEditController.attach();
+```
+
+`attach()`는 다음 리스너를 등록한다:
+
+| 이벤트 | 단계 | 콜백 | 목적 |
+|--------|------|------|------|
+| `mousedown` | capture | `_onMouseDown` | 드래그 시작, 리사이즈 핸들 감지, 삽입 모드 위임 |
+| `click` | capture | `_onClick` | 단일/다중 선택, 드래그 직후 클릭 무시 |
+
+`detach()`는 위 리스너를 제거하고 진행 중인 모든 드래그/리사이즈를 취소한다.
+
+#### 상태 저장 방식
+
+각 box별 상태는 box 인스턴스가 아닌 `LayoutEditController` 내부의 `Map`에 저장된다.
+
+```typescript
+private _dragStates = new Map<LayoutBoxElement, BoxDragState>();
+private _resizeStates = new Map<LayoutBoxElement, BoxResizeState>();
+```
+
+| 상태 | 필드 | 설명 |
+|------|------|------|
+| 드래그 | `BoxDragState` | `isDragging`, `dragMoved`, `selectedOnMouseDown`, `startMouseX/Y`, `startLeft/Top`, `originalLeft/Top/Width/Height/Position`, `lastClientX/Y`, `rafId`, `affectedParagraphs` |
+| 리사이즈 | `BoxResizeState` | `isResizing`, `handle`, `moved`, `startMouseX/Y`, `startLeft/Top/Width/Height`, `lastClientX/Y`, `rafId`, `affectedParagraphs` |
+
+#### 삽입 모드 위임
+
+`_onMouseDown`은 `EditManager.insertMode`가 활성화되어 있으면 `EditManager.handleInsertMouseDown(event)`를 호출한 후 모든 레이아웃 편집 동작을 중단한다.
+
+#### 하위 요소 이벤트 무시
+
+`_isEventFromDescendantLayout(event, box)`는 `event.composedPath()`를 검사하여 하위 box에서 시작된 이벤트인지 확인한다. 하위 box에서 시작된 이벤트면 상위 box의 처리를 건너뛴다.
+
+---
+
+### 2.3 EditManager API
 
 `EditManager`는 텍스트 편집과 레이아웃 선택 모두를 관리하는 글로벌 싱글톤이다.
 
-#### 레이아웃 선택 관련 메서드
+#### 레이아웃 편집 모드 및 필터
 
 ```typescript
 const manager = EditManager.getInstance();
 
+// 글로벌 모드
+manager.layoutEditMode = true;
+
+// 역할 필터 (null = 제한 없음)
+manager.setEditableRoles(['body', 'title', 'none']);
+console.log(manager.editableRoles); // ReadonlySet<BoxRole> | null
+
+// ID 필터 (null = 제한 없음)
+manager.setEditableBoxIds(['box-1', 'box-2']);
+manager.addEditableBox('box-3');
+manager.removeEditableBox('box-1');
+console.log(manager.editableBoxIds); // ReadonlySet<string> | null
+
+// 판별
+const editable = manager.isBoxEditable(box); // boolean
+```
+
+#### 레이아웃 선택 관련 메서드
+
+```typescript
 // 선택
 manager.selectLayout(element);              // 단일 요소 선택 (기존 선택 해제)
 manager.selectLayout('element-id');          // ID로 선택
@@ -187,7 +340,7 @@ manager.selectedLayoutIds; // string[]
 | 반환값 | `boolean` | 하나 이상 선택되면 `true`, 모두 실패하면 `false` |
 
 **동작**:
-- `editableLayout`이 켜진 요소만 선택 가능하다. 켜지 않은 요소는 무시된다.
+- `EditManager.isBoxEditable(element)`가 `true`이거나, 하위 호환을 위해 `element.editableLayout`이 `true`인 요소만 선택 가능하다. 둘 다 아니면 무시된다.
 - 기본(단일 선택) 모드: 기존 선택을 모두 해제하고 지정된 요소만 선택한다.
 - 다중 선택 모드(`_multiSelect = true`): 기존 선택에 추가. 이미 선택된 요소를 다시 지정하면 선택 해제(토글).
 - 다중 선택 모드는 클릭 핸들러가 Ctrl/Meta 키 상태에 따라 설정한다. 직접 호출해서는 변경할 수 없다.
@@ -208,7 +361,7 @@ manager.selectedLayoutIds; // string[]
 |--------|------|------|
 | 반환값 | `boolean` | 드래그 이동 중이면 `true`, 아니면 `false` |
 
-`_startLayoutDrag()`가 호출되면 `true`로 설정되고, `_endLayoutDrag()`가 호출되면 `false`로 설정된다. 이 값은 `_onLayoutMouseEnter`/`_onLayoutMouseLeave`에서 hover 표시를 차단하는 데 사용된다.
+`_startLayoutDrag()`가 호출되면 `true`로 설정되고, `_endLayoutDrag()`가 호출되면 `false`로 설정된다. 이 값은 `LayoutBoxElement._onLayoutMouseEnter`/`_onLayoutMouseLeave`에서 hover 표시를 차단하는 데 사용된다.
 
 #### `_isResizingLayout()`
 
@@ -218,7 +371,7 @@ manager.selectedLayoutIds; // string[]
 |--------|------|------|
 | 반환값 | `boolean` | 크기 조정 중이면 `true`, 아니면 `false` |
 
-`_startLayoutResize()`가 호출되면 `true`로 설정되고, `_endLayoutResize()`가 호출되면 `false`로 설정된다. 이 값은 `_onLayoutMouseEnter`/`_onLayoutMouseLeave`에서 hover 표시를 차단하는 데 사용된다.
+`_startLayoutResize()`가 호출되면 `true`로 설정되고, `_endLayoutResize()`가 호출되면 `false`로 설정된다. 이 값은 `LayoutBoxElement._onLayoutMouseEnter`/`_onLayoutMouseLeave`에서 hover 표시를 차단하는 데 사용된다.
 
 #### 이벤트: `layoutSelectionChange`
 
@@ -340,7 +493,7 @@ manager.addEventListener('layoutResize', (event) => {
 
 **주의**: 단순 클릭(리사이즈 이동 없음)에서는 `layoutResize` 이벤트가 발생하지 않는다. 이동 임계값(3px)을 초과한 경우에만 발생한다.
 
-### 2.3 LayoutElement 타입
+### 2.4 LayoutElement 타입
 
 ```typescript
 type LayoutElement = LayoutBoxElement;
@@ -348,7 +501,7 @@ type LayoutElement = LayoutBoxElement;
 
 `LayoutElement`은 `EditManager`에서 레이아웃 선택 대상이 되는 요소의 타입이다. `<x-layout-document>`은 레이아웃 편집 대상이 아니며, `<x-layout-paragraph>`도 레이아웃 선택 대상이 아니다.
 
-#### 2.3.1 BoxRole (박스 역할)
+#### 2.4.1 BoxRole (박스 역할)
 
 `<x-layout-box>`는 `role` 속성을 통해 의미적 역할을 가진다. `BoxData.role` 필드에 매핑되며, 렌더링 및 레이아웃 배치 시 참조된다.
 
@@ -361,7 +514,8 @@ type BoxRole =
   | 'caption'         // 캡션 영역
   | 'group-image'     // 이미지 그룹 컨테이너
   | 'header'          // 면머리 그룹 컨테이너
-  | 'ad';             // 광고 이미지 영역
+  | 'ad'              // 광고 이미지 영역
+  | 'none';           // 역할 미지정 (기본값)
 ```
 
 | 역할 | 설명 |
@@ -374,10 +528,11 @@ type BoxRole =
 | `'group-image'` | 이미지 그룹 컨테이너. 여러 이미지 박스를 묶어 하나의 이미지 그룹으로 구성 |
 | `'header'` | 면머리 그룹 컨테이너. 신문 지면 상단의 면머리 영역을 구성하는 박스 그룹 |
 | `'ad'` | 광고 이미지 영역. 광고 이미지가 위치하는 박스 |
+| `'none'` | 역할 미지정. `role` 속성이 없는 box의 기본값 |
 
-`role` 속성은 `<x-layout-box>`의 `observedAttributes`에 등록되어 있어, DOM 속성 변경 시 `attributeChangedCallback`을 통해 `_role` 필드로 반영된다. `data` setter를 통해서도 `data.role`에서 `_role`로 동기화된다. React 래퍼(`LayoutBox`)는 `role` prop을 통해 이 값을 설정한다.
+`role` 속성은 `<x-layout-box>`의 `observedAttributes`에 등록되어 있어, DOM 속성 변경 시 `attributeChangedCallback`을 통해 `_role` 필드로 반영된다. `data` setter를 통해서도 `data.role`에서 `_role`로 동기화된다. React 래퍼(`LayoutBox`)는 `role` prop을 통해 이 값을 설정한다. role이 설정되지 않은 box의 `box.role` getter는 이제 `null` 대신 `'none'`을 반환한다.
 
-### 2.4 React API
+### 2.5 React API
 
 #### `useEditManager` 훅
 
@@ -390,6 +545,10 @@ function MyComponent() {
     selectedLayoutIds,      // string[]
     selectLayout,           // (target) => boolean
     clearLayoutSelection,   // () => void
+    layoutEditMode,         // boolean
+    setLayoutEditMode,      // (value: boolean) => void
+    setEditableRoles,       // (roles: BoxRole[] | null) => void
+    setEditableBoxIds,    // (ids: string[] | null) => void
     onLayoutSelectionChange, // callback
     onLayoutMove,           // callback
   } = useEditManager({
@@ -417,12 +576,20 @@ function MyComponent() {
 | `selectedLayoutIds` | `string[]` | 선택된 요소의 ID 배열 |
 | `selectLayout` | `(target) => boolean` | 레이아웃 선택 |
 | `clearLayoutSelection` | `() => void` | 모든 레이아웃 선택 해제 |
+| `layoutEditMode` | `boolean` | 현재 글로벌 레이아웃 편집 모드 상태 |
+| `setLayoutEditMode` | `(value: boolean) => void` | 글로벌 레이아웃 편집 모드 설정 |
+| `setEditableRoles` | `(roles: BoxRole[] \| null) => void` | 편집 허용 역할 집합 설정 |
+| `setEditableBoxIds` | `(ids: string[] \| null) => void` | 편집 허용 box ID 집합 설정 |
 
 #### 컴포넌트 Props
 
 ```tsx
 <LayoutDocument>
-  <LayoutBox editableLayout={true}>
+  {/* 권장: EditManager의 글로벌 모드 + 필터로 제어 */}
+  <LayoutBox role="body" id="body-1">
+    {/* ... */}
+  </LayoutBox>
+  <LayoutBox role="image" id="image-1">
     {/* ... */}
   </LayoutBox>
 </LayoutDocument>
@@ -430,8 +597,9 @@ function MyComponent() {
 
 | Prop | 타입 | 설명 |
 |------|------|------|
-| `editableLayout` | `boolean?` | 레이아웃 편집 모드 활성화. `LayoutBox`만 지원 (document는 편집 대상 아님) |
-| `role` | `BoxRole?` | 박스의 의미적 역할. 자세한 값은 [2.3.1 BoxRole](#231-boxrole-박스-역할) 참조 |
+| `editableLayout` | `boolean?` | 하위 호환용. DOM 속성/커서/시각적 피드백만 제어. 실제 편집 가능 여부는 `EditManager.isBoxEditable()`이 결정 |
+| `role` | `BoxRole?` | 박스의 의미적 역할. `'none'`이 기본값. 자세한 값은 [2.4.1 BoxRole](#241-boxrole-박스-역할) 참조 |
+| `id` | `string?` | box ID. `editableBoxIds` 필터에 사용 |
 
 ---
 
@@ -443,17 +611,18 @@ function MyComponent() {
 사용자 클릭
     │
     ▼
-_onLayoutClick(event)
-    ├── event.stopPropagation()     ← 부모 요소로의 이벤트 전파 차단
-    ├── _isEventFromDescendantLayout(event)?  ← 하위 레이아웃 요소에서 온 이벤트면 무시
+LayoutEditController._onClick(event)
+    ├── _findEditableBoxFromEvent(event)  ← composedPath에서 가장 안쪽 편집 가능 box 반환
+    ├── event.stopPropagation()             ← 부모 요소로의 이벤트 전파 차단
+    ├── _isEventFromDescendantLayout(event, box)?  ← 하위 레이아웃 요소에서 온 이벤트면 무시
     │   └── return (하위 요소가 자체적으로 처리)
-    ├── _dragMoved === true?        ← 드래그 직후 클릭이면 무시
-    │   └── _dragMoved = false; _selectedOnMouseDown = false; return
-    ├── _selectedOnMouseDown === true?  ← mousedown에서 이미 선택한 요소면 중복 선택 방지
-    │   └── _selectedOnMouseDown = false; return
+    ├── BoxDragState.dragMoved === true?   ← 드래그 직후 클릭이면 무시
+    │   └── dragMoved = false; selectedOnMouseDown = false; return
+    ├── BoxDragState.selectedOnMouseDown === true?  ← mousedown에서 이미 선택한 요소면 중복 선택 방지
+    │   └── selectedOnMouseDown = false; return
     ├── EditManager._setMultiSelect(event.ctrlKey || event.metaKey)
-    ├── EditManager.selectLayout(this)
-    │   ├── editableLayout 검증 (false면 무시)
+    ├── EditManager.selectLayout(box)
+    │   ├── isBoxEditable(box) || box.editableLayout 검증
     │   ├── 기존 선택 해제 (단일 선택 모드)
     │   │   또는 토글 (다중 선택 모드)
     │   ├── selected 속성 설정/해제
@@ -468,19 +637,24 @@ _onLayoutClick(event)
 한 번의 드래그 동작으로 요소를 선택하고 이동할 수 있다.
 
 ```
-_onLayoutMouseDown(event)
+LayoutEditController._onMouseDown(event)
+    ├── _findEditableBoxFromEvent(event)
     ├── button !== 0? → return
-    ├── _isEventFromDescendantLayout(event)? → return (하위 요소가 처리)
-    ├── !selected? (선택되지 않은 요소)
-    │   ├── EditManager.selectLayout(this)  ← 기존 선택 해제 + 이 요소 선택
-    │   └── _selectedOnMouseDown = true     ← click에서 중복 선택 방지 플래그
+    ├── _isEventFromResizeHandle(event, box)? → _startResize(event, box); return
+    ├── _isEventFromDescendantLayout(event, box)? → return (하위 요소가 처리)
+    ├── !box.hasAttribute('selected')? (선택되지 않은 요소)
+    │   ├── EditManager.selectLayout(box)   ← 기존 선택 해제 + 이 요소 선택
+    │   └── BoxDragState.selectedOnMouseDown = true  ← click에서 중복 선택 방지 플래그
     ├── event.preventDefault()
     ├── event.stopPropagation()
-    ├── 드래그 시작 (_isDragging = true, ...)
+    ├── _startDrag(event, box)              ← 드래그 상태 초기화
+    │   ├── BoxDragState.isDragging = true
+    │   ├── BoxDragState.dragMoved = false
+    │   └── EditManager._startLayoutDrag()
     └── ...
 ```
 
-`_selectedOnMouseDown` 플래그:
+`BoxDragState.selectedOnMouseDown` 플래그:
 - `true`: mousedown에서 선택 처리를 완료했음. 이후 click 이벤트에서 `selectLayout`을 다시 호출하지 않음.
 - `false`: mousedown에서 선택하지 않았음(이미 선택된 요소). click에서 정상적으로 선택 토글 처리.
 
@@ -491,21 +665,20 @@ _onLayoutMouseDown(event)
 ```
 하위 box 클릭 (상위 box가 선택된 상태)
     │
-    ├── mousedown 이벤트
-    │   ├── 하위 box의 _onLayoutMouseDown
-    │   │   └── !selected → selectLayout(하위 box) + _selectedOnMouseDown = true
-    │   └── 상위 box로 버블링
-    │       └── 상위 box의 _onLayoutMouseDown
-    │           └── _isEventFromDescendantLayout(event) === true → return (드래그 시작 안 함)
+    ├── mousedown 이벤트 (document capture)
+    │   ├── LayoutEditController._onMouseDown
+    │   │   └── _findEditableBoxFromEvent → 가장 안쪽 편집 가능 box 반환
+    │   └── _isEventFromDescendantLayout(event, 상위 box) === true → return (상위는 무시)
     │
-    └── click 이벤트
-        └── 하위 box의 _onLayoutClick
+    └── click 이벤트 (document capture)
+        └── LayoutEditController._onClick
+            ├── _findEditableBoxFromEvent → 하위 box
             ├── event.stopPropagation()
-            ├── _selectedOnMouseDown === true → return (중복 선택 방지)
+            ├── selectedOnMouseDown === true → return (중복 선택 방지)
             └── (selectLayout 생략, 이미 mousedown에서 선택 완료)
 ```
 
-상위 요소의 `_onLayoutMouseDown`과 `_onLayoutClick`은 `_isEventFromDescendantLayout()` 검사로
+`LayoutEditController`의 `_onMouseDown`과 `_onClick`은 `_isEventFromDescendantLayout()` 검사로
 하위 레이아웃 요소에서 온 이벤트를 무시한다. 이를 통해 상위 요소가 선택된 상태에서도
 하위 요소를 클릭하여 선택을 전환할 수 있다.
 
@@ -521,15 +694,17 @@ _onLayoutMouseDown(event)
 `editableLayout`을 `false`로 설정하면:
 
 **`<x-layout-box>`**:
-1. `click`, `mousedown`, `mouseenter`, `mouseleave` 이벤트 리스너 제거
-2. `selected` 속성 제거 (선택 시각적 피드백 해제)
-3. `hovered` 속성 제거 (호버 시각적 피드백 해제)
+1. `selected` 속성 제거 (선택 시각적 피드백 해제)
+2. `hovered` 속성 제거 (호버 시각적 피드백 해제)
+3. `editable-layout` DOM 속성 제거
 4. `cursor` 스타일 초기화
 5. `EditManager._unregisterLayout()` 호출 (선택 목록에서 제거, `layoutSelectionChange` 이벤트 발생)
 
+이벤트 리스너는 box에서 직접 등록하지 않으므로 제거할 `click`/`mousedown` 리스너도 없다.
+
 ### 3.4 `disconnectedCallback` 정리
 
-요소가 DOM에서 제거되면 `EditManager._unregisterLayout()`이 호출되어 선택 목록을 정리한다.
+요소가 DOM에서 제거되면 `EditManager._unregisterLayout()`이 호출되어 선택 목록을 정리한다. `LayoutEditController`는 계속 문서에 부착되어 있으며, 다음 이벤트에서 더 이상 DOM에 없는 box를 자연스럽게 무시한다.
 
 ### 3.5 EditManager의 텍스트 편집과 레이아웃 선택의 관계
 
@@ -554,80 +729,97 @@ _onLayoutMouseDown(event)
 │                                                                     │
 │  ① mousedown (선택된 box 위에서)                                     │
 │     │                                                               │
+│     ├── LayoutEditController._onMouseDown (document capture)         │
+│     ├── _findEditableBoxFromEvent(event)                             │
 │     ├── button !== 0? → 무시                                        │
-│     ├── selected 없음? → 무시                                   │
+│     ├── _isEventFromResizeHandle(event, box)? → _startResize(); return│
+│     ├── _isEventFromDescendantLayout(event, box)? → return            │
+│     ├── !box.hasAttribute('selected')?                              │
+│     │   ├── EditManager.selectLayout(box)                            │
+│     │   └── BoxDragState.selectedOnMouseDown = true                  │
 │     ├── event.preventDefault()                                       │
-│     ├── _isDragging = true                                           │
-│     ├── _dragMoved = false                                          │
-│     ├── _dragStartMouseX/Y = clientX/Y                               │
-│     ├── _dragStartLeft/Top = this.left/top (시작 위치 저장)          │
-│     ├── cursor = 'grabbing'                                         │
+│     ├── BoxDragState.isDragging = true                               │
+│     ├── BoxDragState.dragMoved = false                               │
+│     ├── BoxDragState.startMouseX/Y = clientX/Y                       │
+│     ├── BoxDragState.startLeft/Top = box.left/top (시작 위치 저장)   │
+│     ├── BoxDragState.originalLeft/Top/Width/Height/Position = 현재값   │
+│     ├── box.style.cursor = 'grabbing'                               │
 │     ├── EditManager._startLayoutDrag()                               │
 │     │   ├── 선택된 요소 중 중첩 하위 요소 제거 (최상위만 유지)         │
 │     │   └── 각 이동 대상의 시작 위치(left/top) 기록                   │
+│     ├── BoxDragState.affectedParagraphs = _collectAffectedParagraphs(box)
 │     └── document에 mousemove, mouseup, keydown 리스너 등록            │
 │                                                                     │
 │  ② mousemove (드래그 중)                                              │
 │     │                                                               │
-│     ├── _isDragging 아니면 무시                                       │
-│     ├── _dragLastClientX/Y 업데이트                                   │
-│     ├── 이동 거리 ≤ 3px? → _dragMoved 유지, return                   │
-│     ├── _dragMoved = true                                            │
+│     ├── LayoutEditController._onMouseMove                            │
+│     ├── activeDragBox가 없으면 return                                │
+│     ├── BoxDragState.lastClientX/Y 업데이트                           │
+│     ├── 이동 거리 ≤ 3px? → dragMoved 유지, return                    │
+│     ├── BoxDragState.dragMoved = true                                │
 │     ├── rAF 이미 예약? → return (중복 방지)                           │
 │     └── requestAnimationFrame:                                       │
-│          ├── _dragRafId = null                                       │
+│          ├── BoxDragState.rafId = null                               │
 │          ├── dx = lastClientX - startMouseX                           │
 │          ├── dy = lastClientY - startMouseY                           │
-│          ├── newPos = _computeNewPosition(dx, dy)                    │
-│          ├── if (newPos.left !== this.left) this.left = newPos.left  │
-│          ├── if (newPos.top !== this.top) this.top = newPos.top       │
+│          ├── newPos = LayoutEditController._computeNewPosition(box, dx, dy, startLeft, startTop)│
+│          ├── if (newPos.converted) _applyPositionConversion(...)     │
+│          ├── else if (newPos.left !== box.left) box.left = newPos.left│
+│          ├── else if (newPos.top !== box.top) box.top = newPos.top    │
 │          └── for each other drag target:                              │
-│               ├── startPos = EditManager._getDragStartPosition(t)    │
-│               ├── tNewPos = t._computeNewPosition(dx, dy, startPos)  │
-│               ├── if (tNewPos.left !== t.left) t.left = tNewPos.left │
-│               └── if (tNewPos.top !== t.top) t.top = tNewPos.top    │
+│               ├── targetState = _dragStates.get(t)                   │
+│               ├── tNewPos = _computeNewPosition(t, dx, dy, targetState.startLeft, targetState.startTop)│
+│               ├── if (tNewPos.converted) _applyPositionConversion(t, ...)│
+│               ├── else if (tNewPos.left !== t.left) t.left = tNewPos.left│
+│               └── else if (tNewPos.top !== t.top) t.top = tNewPos.top │
 │                                                                     │
 │  ③ mouseup (드래그 완료)                                              │
 │     │                                                               │
+│     ├── LayoutEditController._onMouseUp                              │
 │     ├── document 리스너 제거 (mousemove, mouseup, keydown)            │
 │     ├── rAF 취소 (있으면)                                             │
-│     ├── _isDragging = false                                          │
-│     ├── cursor = 'grab' 또는 ''                                      │
-│     ├── _dragMoved === false? → EditManager._endLayoutDrag(), return │
-│     ├── 최종 위치 계산 → this.left/top 설정                           │
-│     ├── EditManager._dispatchLayoutMove(this, ...)                   │
+│     ├── BoxDragState.isDragging = false                              │
+│     ├── _flushRerenderAffectedParagraphs(box, state)                 │
+│     ├── box.style.cursor = 'grab' (편집 가능 시)                     │
+│     ├── BoxDragState.dragMoved === false? → EditManager._endLayoutDrag(), return│
+│     ├── 최종 위치 계산 → box.left/top 설정                           │
+│     ├── EditManager._dispatchLayoutMove(box, ...)                    │
 │     ├── for each other drag target:                                  │
-│     │    ├── tNewPos = t._computeNewPosition(dx, dy, startPos)       │
+│     │    ├── tNewPos = _computeNewPosition(t, dx, dy, targetState.startLeft, targetState.startTop)│
 │     │    ├── t.left/top 설정                                         │
 │     │    └── EditManager._dispatchLayoutMove(t, ...)                 │
 │     └── EditManager._endLayoutDrag()                                 │
 │                                                                     │
 │  ③' ESC 키 (드래그 취소)                                              │
 │     │                                                               │
+│     ├── LayoutEditController._onKeyDown                              │
 │     ├── rAF 취소 (있으면)                                             │
 │     ├── document 리스너 제거 (mousemove, mouseup, keydown)            │
-│     ├── _isDragging = false                                          │
-│     ├── _dragMoved = false                                           │
-│     ├── cursor = 'grab' 또는 ''                                       │
-│     ├── this.left/top = _dragStartLeft/Top (원래 위치로 복원)         │
-│     ├── EditManager._dispatchLayoutMove(this, start, start, canceled) │
+│     ├── BoxDragState.isDragging = false                              │
+│     ├── BoxDragState.dragMoved = false                               │
+│     ├── _flushRerenderAffectedParagraphs(box, state)                 │
+│     ├── box.style.cursor = 'grab' (편집 가능 시)                     │
+│     ├── _applyPositionConversion(box, originalPosition, originalLeft/Top/Width/Height)│
+│     ├── EditManager._dispatchLayoutMove(box, start, start, canceled=true)│
 │     ├── for each other drag target:                                  │
-│     │    ├── t.left/top = startPos (원래 위치로 복원)                 │
-│     │    └── EditManager._dispatchLayoutMove(t, start, start, canceled)│
+│     │    ├── _applyPositionConversion(t, targetState.originalPosition, targetState.originalLeft/Top/Width/Height)│
+│     │    └── EditManager._dispatchLayoutMove(t, start, start, canceled=true)│
 │     └── EditManager._endLayoutDrag()                                 │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.3 위치 계산: `_computeNewPosition(deltaPxX, deltaPxY, startLeft?, startTop?)`
+### 4.3 위치 계산: `LayoutEditController._computeNewPosition(box, deltaPxX, deltaPxY, startLeft?, startTop?)`
 
 드래그 중 마우스 이동량(픽셀)을 받아 최종 위치를 계산한다. `position` 모드와 부모 요소 종류에 따라 다른 스냅/클램핑/변환 로직을 적용한다.
 
-다중 선택 드래그에서 각 대상 요소의 시작 위치를 독립적으로 전달할 수 있다. `startLeft`/`startTop`을 생략하면 `this._dragStartLeft`/`this._dragStartTop`을 사용한다.
+다중 선택 드래그에서 각 대상 요소의 시작 위치를 독립적으로 전달할 수 있다. `startLeft`/`startTop`을 생략하면 해당 box의 `BoxDragState.startLeft`/`startTop`을 사용한다.
 
 **반환값**: `{ left: number; top: number; converted?: { position: BoxPosition; left: number; top: number; width: number; height: number } }`
 
 `converted` 필드가 있으면 위치 변환이 필요함을 나타낸다. 드래그 핸들러는 이 필드를 확인하여 `position`, `left`, `top`, `width`, `height`를 모두 갱신한다.
+
+실제 구현은 `src/edit/layout-edit-controller.ts`에 있으며, box 인스턴스에 의존하지 않고 인자로 받은 box의 좌표계와 부모 모델(parentModel)을 기반으로 계산한다.
 
 #### 4.3.1 static 모드 (컬럼 그리드)
 
@@ -734,13 +926,9 @@ position 변환이 필요하면 `convertPosition()`을 명시적으로 호출해
 
 ESC 키로 드래그를 취소하면 원래 상태로 완전히 복원된다:
 
-1. `this.position = this._dragStartPosition` (static ↔ absolute 복원)
-2. `this.left = this._dragStartLeft`
-3. `this.top = this._dragStartTop`
-4. `this.width = this._dragStartWidth`
-5. `this.height = this._dragStartHeight`
+1. `box.applyPositionConversion(originalPosition, originalLeft, originalTop, originalWidth, originalHeight)` (static ↔ absolute 복원)
 
-드래그 시작 시 `_dragStartPosition`, `_dragStartWidth`, `_dragStartHeight`가 `_onLayoutMouseDown`에서 저장된다. 다중 선택의 경우, 모든 드래그 대상의 시작 상태가 저장된다.
+`BoxDragState.originalPosition`, `originalLeft`, `originalTop`, `originalWidth`, `originalHeight`는 `_startDrag()`에서 저장된다. 다중 선택의 경우, `LayoutEditController`가 모든 드래그 대상의 시작 상태를 저장하고, ESC 시 각각 `applyPositionConversion()`을 호출하여 원래 상태로 복원한다.
 
 #### 4.4.5 컬럼 보존: `_savedColumns` / `_savedGap`
 
@@ -774,7 +962,7 @@ gap: this.position !== 'absolute'
 
 **ESC 취소 시**: `_dragOriginal*` 필드에 드래그 시작 전 원래 `position`/`left`/`top`/`width`/`height`가 저장되어 있으므로, ESC 시 `_applyPositionConversion(_dragOriginalPosition, ...)`을 호출하면 `absolute` → `static` 변환 경로를 타서 `_savedColumns = 1`, `_savedGap = 0`으로 초기화되고 `layout()`이 static 좌표로 컬럼/갭을 재계산한다.
 
-#### 4.4.6 프로그래밍 API: `convertPosition(targetPosition)`
+#### 4.4.6 프로그래밍 API: `convertPosition(targetPosition)` / `applyPositionConversion()`
 
 프로그래밍 방식으로 position 모드를 변환할 수 있는 public 메서드. 드래그 중에는 자동 변환이 발생하지 않으므로, 변환이 필요하면 이 메서드를 명시적으로 호출해야 한다.
 
@@ -782,6 +970,8 @@ gap: this.position !== 'absolute'
 box.convertPosition('absolute');  // static → absolute
 box.convertPosition('static');    // absolute → static
 ```
+
+`LayoutEditController`는 드래그 중 position 변환이 필요할 때 `box.applyPositionConversion(position, left, top, width, height)`를 호출한다. 이 메서드는 `_applyPositionConversion()`의 public wrapper로, position과 좌표/크기를 원자적으로 갱신하고 한 번의 `layout()` 호출로 처리한다.
 
 **static → absolute 변환**:
 1. `columnCoords[left].x1` → `absLeft`
@@ -977,61 +1167,73 @@ _collectParagraphs(element, set)
 
 1. **rAF 취소**: 대기 중인 `requestAnimationFrame` 콜백을 취소한다.
 2. **리스너 해제**: `document`에 등록된 `mousemove`, `mouseup`, `keydown` 리스너를 모두 제거한다.
-3. **상태 초기화**: `_isDragging = false`, `_dragMoved = false`로 설정한다.
-4. **커서 복원**: `cursor`를 `'grab'`(editableLayout 켜짐) 또는 `''`(꺼짐)로 복원한다.
-5. **위치/크기/position 복원**: `position`/`left`/`top`/`width`/`height`을 `_dragStartPosition`/`_dragStartLeft`/`_dragStartTop`/`_dragStartWidth`/`_dragStartHeight`로 복원한다. setter를 통해 호출되므로 `layout()` + `_rerenderAffectedParagraphs()`도 함께 실행되어 텍스트도 원래 배치로 복원된다.
-6. **다중 선택 복원**: 모든 드래그 대상의 `position`/`left`/`top`/`width`/`height`을 각각의 `_dragStartPosition`/`_dragStartLeft`/`_dragStartTop`/`_dragStartWidth`/`_dragStartHeight`로 복원한다.
+3. **상태 초기화**: `BoxDragState.isDragging = false`, `BoxDragState.dragMoved = false`로 설정한다.
+4. **커서 복원**: `box.style.cursor`를 `'grab'`(편집 가능 시) 또는 `''`(편집 불가 시)로 복원한다.
+5. **위치/크기/position 복원**: `_applyPositionConversion(box, originalPosition, originalLeft, originalTop, originalWidth, originalHeight)`를 호출하여 원래 상태로 복원한다. `applyPositionConversion()`은 private 필드를 원자적으로 갱신하고 `layout()` + `_renderAffectedParagraphs()`를 한 번만 실행하여 텍스트도 원래 배치로 복원한다. `LayoutEditController`는 `box.applyPositionConversion()` public wrapper를 호출한다.
+6. **다중 선택 복원**: 모든 드래그 대상의 시작 상태를 `applyPositionConversion()`으로 복원한다.
 
 ### 6.2 구현
 
 ```typescript
-private _onLayoutKeyDown = (event: KeyboardEvent) => {
-  if (!this._isDragging) return;
+private _onKeyDown = (event: KeyboardEvent): void => {
+  const box = this._activeDragBox;
+  if (!box) return;
+  const state = this._dragStates.get(box);
+  if (!state || !state.isDragging) return;
   if (event.key !== 'Escape') return;
+
   event.preventDefault();
-
-  // 1) rAF 취소
-  if (this._dragRafId !== null) {
-    cancelAnimationFrame(this._dragRafId);
-    this._dragRafId = null;
+  if (state.rafId !== null) {
+    cancelAnimationFrame(state.rafId);
+    state.rafId = null;
   }
+  document.removeEventListener('mousemove', this._onMouseMove);
+  document.removeEventListener('mouseup', this._onMouseUp);
+  document.removeEventListener('keydown', this._onKeyDown);
+  state.isDragging = false;
+  state.dragMoved = false;
+  this._flushRerenderAffectedParagraphs(box, state);
+  box.style.cursor = this._isBoxEditable(box) ? 'grab' : '';
 
-  // 2) 리스너 해제
-  document.removeEventListener('mousemove', this._onLayoutMouseMove);
-  document.removeEventListener('mouseup', this._onLayoutMouseUp);
-  document.removeEventListener('keydown', this._onLayoutKeyDown);
-
-  // 3) 상태 초기화
-  this._isDragging = false;
-  this._dragMoved = false;
-  this.style.cursor = this._editableLayout ? 'grab' : '';
-
-  // 4) position/위치/크기 복원 (setter 호출 → layout() + _rerenderAffectedParagraphs())
-  //    드래그 중 position 변환(static ↔ absolute)이 있었어도 원래 모드로 복원
   const manager = EditManager.getInstance();
   const dragTargets = manager._getDragTargets();
-  const isTopLevel = dragTargets.includes(this);
+  const isTopLevel = dragTargets.includes(box);
 
   if (isTopLevel) {
-    if (this.position !== this._dragStartPosition) this.position = this._dragStartPosition;
-    if (this.left !== this._dragStartLeft) this.left = this._dragStartLeft;
-    if (this.top !== this._dragStartTop) this.top = this._dragStartTop;
-    if (this.width !== this._dragStartWidth) this.width = this._dragStartWidth;
-    if (this.height !== this._dragStartHeight) this.height = this._dragStartHeight;
-    manager._dispatchLayoutMove(this, this._dragStartLeft, this._dragStartTop, this._dragStartLeft, this._dragStartTop, true);
+    this._applyPositionConversion(
+      box,
+      state.originalPosition,
+      state.originalLeft,
+      state.originalTop,
+      state.originalWidth,
+      state.originalHeight,
+    );
+    manager._dispatchLayoutMove(box, state.originalLeft, state.originalTop, state.originalLeft, state.originalTop, true);
   }
 
   for (const target of dragTargets) {
-    if (target === this) continue;
-    if (target.position !== target._dragStartPosition) target.position = target._dragStartPosition;
-    if (target.left !== target._dragStartLeft) target.left = target._dragStartLeft;
-    if (target.top !== target._dragStartTop) target.top = target._dragStartTop;
-    if (target.width !== target._dragStartWidth) target.width = target._dragStartWidth;
-    if (target.height !== target._dragStartHeight) target.height = target._dragStartHeight;
-    manager._dispatchLayoutMove(target, target._dragStartLeft, target._dragStartTop, target._dragStartLeft, target._dragStartTop, true);
+    if (target === box) continue;
+    const targetState = this._getOrCreateDragState(target);
+    this._applyPositionConversion(
+      target,
+      targetState.originalPosition,
+      targetState.originalLeft,
+      targetState.originalTop,
+      targetState.originalWidth,
+      targetState.originalHeight,
+    );
+    manager._dispatchLayoutMove(
+      target,
+      targetState.originalLeft,
+      targetState.originalTop,
+      targetState.originalLeft,
+      targetState.originalTop,
+      true,
+    );
   }
 
   manager._endLayoutDrag();
+  this._activeDragBox = null;
 }
 ```
 
@@ -1039,9 +1241,9 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 
 | 이벤트 | 등록 시점 | 해제 시점 |
 |--------|----------|----------|
-| `mousemove` | `_onLayoutMouseDown` | `_onLayoutMouseUp`, `_onLayoutKeyDown(ESC)` |
-| `mouseup` | `_onLayoutMouseDown` | `_onLayoutMouseUp`, `_onLayoutKeyDown(ESC)` |
-| `keydown` | `_onLayoutMouseDown` | `_onLayoutMouseUp`, `_onLayoutKeyDown(ESC)` |
+| `mousemove` | `LayoutEditController._startDrag` | `LayoutEditController._onMouseUp`, `LayoutEditController._onKeyDown(ESC)` |
+| `mouseup` | `LayoutEditController._startDrag` | `LayoutEditController._onMouseUp`, `LayoutEditController._onKeyDown(ESC)` |
+| `keydown` | `LayoutEditController._startDrag` | `LayoutEditController._onMouseUp`, `LayoutEditController._onKeyDown(ESC)` |
 
 모든 드래그 종료 경로(mouseup, ESC)에서 세 리스너가 모두 해제됨을 보장한다.
 
@@ -1051,16 +1253,18 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 ┌──────────────────────────────────────────────────────────┐
 │               드래그 완료 (mouseup)                       │
 │                                                          │
-│  _onLayoutMouseUp                                        │
+│  LayoutEditController._onMouseUp                           │
 │      ├── 리스너 해제 (mousemove, mouseup, keydown)        │
 │      ├── rAF 취소                                         │
-│      ├── _isDragging = false                              │
-│      ├── _dragMoved === false? → return (클릭이었음)       │
-│      ├── 최종 위치 계산: _computeNewPosition(delta)        │
-│      ├── this.left = left  → layout() + reflow           │
-│      ├── this.top  = top   → layout() + reflow           │
+│      ├── BoxDragState.isDragging = false                  │
+│      ├── _flushRerenderAffectedParagraphs(box, state)   │
+│      ├── BoxDragState.dragMoved === false? → return (클릭이었음) │
+│      ├── 최종 위치 계산: _computeNewPosition(box, delta, startLeft, startTop)│
+│      ├── if (converted) _applyPositionConversion(box, ...) │
+│      ├── else box.left = left → layout() + reflow        │
+│      ├──      box.top  = top  → layout() + reflow        │
 │      └── EditManager._dispatchLayoutMove(                 │
-│              this, startLeft, startTop, left, top, false)  │
+│              box, startLeft, startTop, box.left, box.top, false)│
 │                        │                                  │
 │                        ▼                                  │
 │          layoutMove 이벤트 발생                            │
@@ -1070,23 +1274,24 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 ┌──────────────────────────────────────────────────────────┐
 │               드래그 취소 (ESC)                           │
 │                                                          │
-│  _onLayoutKeyDown                                         │
+│  LayoutEditController._onKeyDown                          │
 │      ├── rAF 취소                                         │
 │      ├── 리스너 해제 (mousemove, mouseup, keydown)        │
-│      ├── _isDragging = false, _dragMoved = false         │
-│      ├── cursor = 'grab'                                  │
-│      ├── this.left = startLeft → layout() + reflow        │
-│      ├── this.top  = startTop  → layout() + reflow        │
+│      ├── BoxDragState.isDragging = false, dragMoved = false│
+│      ├── _flushRerenderAffectedParagraphs(box, state)     │
+│      ├── cursor = 'grab' (편집 가능 시)                   │
+│      ├── _applyPositionConversion(box, originalPosition, originalLeft/Top/Width/Height)│
+│      │    → layout() + reflow                              │
 │      └── EditManager._dispatchLayoutMove(                 │
-│              this, startLeft, startTop, startLeft, startTop, true)
+│              box, originalLeft, originalTop, originalLeft, originalTop, true)│
 │                        │                                  │
 │                        ▼                                  │
 │          layoutMove 이벤트 발생                            │
-│          (canceled = true, left/top = startLeft/startTop) │
+│          (canceled = true, left/top = originalLeft/originalTop)│
 └──────────────────────────────────────────────────────────┘
 ```
 
-**발생 조건**: `_dragMoved === true`일 때만. 3px 이하의 이동(클릭으로 간주)에서는 `layoutMove` 이벤트가 발생하지 않는다.
+**발생 조건**: `BoxDragState.dragMoved === true`일 때만. 3px 이하의 이동(클릭으로 간주)에서는 `layoutMove` 이벤트가 발생하지 않는다.
 
 **ESC 취소 시**: `left`/`top` 값은 `previousLeft`/`previousTop`과 동일하다. 이동이 취소되어 원래 위치로 복원되었음을 나타낸다.
 
@@ -1101,51 +1306,52 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
                        │
                        ▼
             ┌─────────────────────┐
-            │ _onLayoutMouseDown  │ ← 선택된 box에서만 동작
-            │ (button=0 필터)      │
-            └──────────┬──────────┘
-                       │
-                       ▼
-            ┌─────────────────────┐
-            │ _onLayoutMouseMove  │ ← rAF로 60fps 쓰로틀링
-            │ delta > 3px? →      │    이동 임계값 초과 시 드래그로 인식
-            │   _dragMoved = true │
-            └──────────┬──────────┘
-                       │
-                       ▼
-            ┌─────────────────────┐
-            │ _computeNewPosition │ ← position 모드에 따라 분기
-            │                     │
-            │  ┌─────────────────┐│
-            │  │ absolute 모드   ││ ← mm 좌표 + padding 경계 클램핑
-            │  │ clamp(0, max)   ││
-            │  └────────┬────────┘│
-            │           │         │
-            │  ┌─────────────────┐│
-            │  │ static 모드      ││ ← 컬럼 스냅 + 라인 스냅 + 범위 제한
-            │  │ 컬럼 인덱스 스냅 ││
-            │  │ 라인 단위 스냅   ││
-            │  └────────┬────────┘│
-            │           │         │
-            └───────────┼─────────┘
+             │ _onMouseDown (capture)│ ← document capture; 편집 가능 box 감지
+             │ (button=0 필터)      │
+             └──────────┬──────────┘
                         │
                         ▼
-            ┌─────────────────────┐
-            │ this.left = newLeft │ ← setter 호출
-            │ this.top  = newTop  │
-            └──────────┬──────────┘
-                       │
-              ┌────────┴────────┐
-              │                  │
-              ▼                  ▼
-    ┌──────────────────┐  ┌───────────────────────────┐
-    │   this.layout()  │  │ _rerenderAffectedParagraphs│
-    │                  │  │                             │
-    │ GridCalculator   │  │ 1) 자식 단락 수집           │
-    │ 재계산           │  │ 2) 형제 단락 수집           │
-    │ DOM 스타일 업데이트│  │ 3) _structureDirty = true  │
-    │                  │  │ 4) paragraph.render() 호출   │
-    └────────┬─────────┘  └──────────┬──────────────────┘
+             ┌─────────────────────┐
+             │ _onMouseMove         │ ← rAF로 60fps 쓰로틀링
+             │ delta > 3px? →      │    이동 임계값 초과 시 드래그로 인식
+             │   dragMoved = true  │
+             └──────────┬──────────┘
+                        │
+                        ▼
+             ┌─────────────────────┐
+             │ _computeNewPosition  │ ← position 모드에 따라 분기
+             │ (box, dx, dy, ...)   │
+             │                     │
+             │  ┌─────────────────┐│
+             │  │ absolute 모드   ││ ← mm 좌표 + padding 경계 클램핑
+             │  │ clamp(0, max)   ││
+             │  └────────┬────────┘│
+             │           │         │
+             │  ┌─────────────────┐│
+             │  │ static 모드      ││ ← 컬럼 스냅 + 라인 스냅 + 범위 제한
+             │  │ 컬럼 인덱스 스냅 ││
+             │  │ 라인 단위 스냅   ││
+             │  └────────┬────────┘│
+             │           │         │
+             └───────────┼─────────┘
+                         │
+                         ▼
+             ┌─────────────────────┐
+             │ box.left = newLeft │ ← setter 호출
+             │ box.top  = newTop  │
+             └──────────┬──────────┘
+                        │
+               ┌────────┴────────┐
+               │                  │
+               ▼                  ▼
+     ┌──────────────────┐  ┌───────────────────────────┐
+     │   box.layout()   │  │ _renderAffectedParagraphs│
+     │                  │  │                             │
+     │ GridCalculator   │  │ 1) 자식 단락 수집           │
+     │ 재계산           │  │ 2) 형제 단락 수집           │
+     │ DOM 스타일 업데이트│  │ 3) _structureDirty = true  │
+     │                  │  │ 4) paragraph.render() 호출   │
+     └────────┬─────────┘  └──────────┬──────────────────┘
              │                       │
              │              ┌────────┴────────┐
              │              │                 │
@@ -1230,8 +1436,8 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 - **시각적 피드백**: 선택 표시는 `box-shadow`를 사용하므로 요소의 레이아웃에 영향을 주지 않는다. `outline`은 기존 `border`와 충돌할 수 있어 사용하지 않는다.
 - **rAF 쓰로틀링**: 드래그 중 위치 업데이트는 `requestAnimationFrame`으로 60fps로 제한된다. 중복 rAF 요청은 무시된다.
 - **이동 임계값**: mousedown 후 3px 이하의 이동은 클릭으로 간주하며, 드래그로 인식되지 않는다.
-- **`_dragMoved` 플래그**: 드래그 후 `click` 이벤트가 발생하면 `_onLayoutClick`에서 `_dragMoved`를 확인하여 드래그 중 클릭을 무시한다.
-- **`parentModel` 필수**: `_computeNewPosition`에서 `position: 'static'` 모드는 `parentModel`(부모의 `GridCalculator`)이 필요하다. 없으면 시작 위치를 그대로 반환한다.
+- **`BoxDragState.dragMoved` 플래그**: 드래그 후 `click` 이벤트가 발생하면 `LayoutEditController._onClick`에서 `dragMoved`를 확인하여 드래그 중 클릭을 무시한다.
+- **`parentModel` 필수**: `LayoutEditController._computeNewPosition`에서 `position: 'static'` 모드는 `parentModel`(부모의 `GridCalculator`)이 필요하다. 없으면 시작 위치를 그대로 반환한다.
 - **`maxTop` 계산**: static 모드에서 박스의 하단이 편집 영역 하단을 넘지 않도록 `editableTextHeight`와 `absHeight`를 사용하여 `maxTop`을 계산한다. `editableHeight`만 사용하면 마지막 줄의 leading 공간이 무시되어 박스가 하단에 딱 붙지 않는다.
 - **문서 영역 밖 드래그**: 문서 직계 자식 박스(`this.parentElement?.type === 'document'`)만 위치 변환 대상이다. 다른 박스 안에 중첩된 박스는 이 동작의 대상이 아니다.
 - **absolute → static 변환 시 크기 근사**: 절대 위치에서 static으로 복귀할 때 `width = round(absWidth / avgColWidth)`, `height = round(absHeight / lineHeight)`로 근사 변환한다. 정밀한 값이 아닐 수 있으므로 사용자가 조정해야 할 수 있다.
@@ -1244,45 +1450,63 @@ private _onLayoutKeyDown = (event: KeyboardEvent) => {
 
 | 파일 | 역할 |
 |------|------|
-| `src/components/layout/box.element.ts` | 드래그 로직, 리사이즈 로직, 위치 setter, `_computeNewPosition`, `_computeNewSize`, `_rerenderAffectedParagraphs`, `_collectParagraphs`, `editableLayout` 속성, `_onLayoutClick`, `_onLayoutMouseDown`, `selected`/`hovered` 속성 |
-| `src/edit/edit-manager.ts` | 레이아웃 선택 상태 관리, `selectLayout`, `clearLayoutSelection`, `_startLayoutDrag`, `_endLayoutDrag`, `_startLayoutResize`, `_endLayoutResize`, `_isDraggingLayout`, `_isResizingLayout`, `getTopLevelDragTargets`, `_unregisterLayout`, `layoutSelectionChange` 이벤트, `_dispatchLayoutResize`, `insertMode`, `activateInsert`, `deactivateInsert`, `insert`/`insertCancel` 이벤트 |
-| `src/react/hooks/use-edit-manager.ts` | React 훅: `selectedLayouts`, `selectLayout`, `clearLayoutSelection`, `onLayoutSelectionChange` |
+| `src/components/layout/box.element.ts` | 박스 렌더링, 위치/크기 setter, `convertPosition()`, `applyPositionConversion()`, `requestRerenderAffectedParagraphs()`, `editableLayout` 속성(DOM 속성/커서/시각적 피드백), `_onLayoutMouseEnter`/`_onLayoutMouseLeave` |
+| `src/edit/edit-manager.ts` | 레이아웃 편집 모드/필터(`layoutEditMode`, `editableRoles`, `editableBoxIds`, `isBoxEditable`), 레이아웃 선택 상태 관리, `selectLayout`, `clearLayoutSelection`, `_startLayoutDrag`, `_endLayoutDrag`, `_startLayoutResize`, `_endLayoutResize`, `_isDraggingLayout`, `_isResizingLayout`, `getTopLevelDragTargets`, `_unregisterLayout`, `layoutSelectionChange` 이벤트, `_dispatchLayoutResize`, `insertMode`, `activateInsert`, `deactivateInsert`, `insert`/`insertCancel` 이벤트 |
+| `src/edit/layout-edit-controller.ts` | 문서 수준 이벤트 처리, 드래그/리사이즈 상태(`Map` 기반), `_computeNewPosition`, `_computeNewSize`, ESC 취소, `applyPositionConversion` 호출, 영향받는 단락 재렌더링 |
+| `src/react/hooks/use-edit-manager.ts` | React 훅: `selectedLayouts`, `selectLayout`, `clearLayoutSelection`, `layoutEditMode`, `setLayoutEditMode`, `setEditableRoles`, `setEditableBoxIds`, `onLayoutSelectionChange` |
 | `src/core/text-layout-engine.ts` | `_layoutTextIntoColumns`, 오버랩 회피, COVER 라인, PART 분할 |
 | `src/components/layout/paragraph.element.ts` | `render()`, `_structureDirty`, TextLayoutEngine 생성 |
 | `src/components/layout/column.element.ts` | `renderText()`, span 기반 diff 렌더링 |
 | `src/utils/check-overlap.ts` | `checkOverlap()`, `mergeOverlapParts()`, `getOverlapSizePX()` |
 
-### 10.2 드래그 관련 private 필드
+### 10.2 드래그/리사이즈 관련 상태
+
+드래그와 리사이즈 상태는 이전에는 `box.element.ts`의 private 필드에 있었으나, 현재는 `LayoutEditController` 내부의 `Map`으로 관리된다.
 
 ```typescript
-// box.element.ts
-private _editableLayout: boolean = false;
-private _isDragging: boolean = false;
-private _dragMoved: boolean = false;
-private _dragStartMouseX: number = 0;
-private _dragStartMouseY: number = 0;
-private _dragStartLeft: number = 0;      // 드래그 시작 시 left (mm 또는 컬럼 인덱스)
-private _dragStartTop: number = 0;        // 드래그 시작 시 top (mm 또는 라인 인덱스)
-private _dragStartWidth: number = 0;      // 드래그 시작 시 width (mm 또는 컬럼 스팬 수)
-private _dragStartHeight: number = 0;     // 드래그 시작 시 height (mm 또는 라인 수)
-private _dragStartPosition: BoxPosition = 'static'; // 드래그 시작 시 position 모드
-private _dragLastClientX: number = 0;
-private _dragLastClientY: number = 0;
-private _dragRafId: number | null = null; // requestAnimationFrame ID
+// layout-edit-controller.ts
+private _dragStates = new Map<LayoutBoxElement, BoxDragState>();
+private _resizeStates = new Map<LayoutBoxElement, BoxResizeState>();
 
-// box.element.ts (리사이즈 상태)
-private _isResizing: boolean = false;
-private _resizeHandle: 'top' | 'bottom' | 'left' | 'right' | null = null;
-private _resizeStartMouseX: number = 0;
-private _resizeStartMouseY: number = 0;
-private _resizeStartLeft: number = 0;
-private _resizeStartTop: number = 0;
-private _resizeStartWidth: number = 0;
-private _resizeStartHeight: number = 0;
-private _resizeMoved: boolean = false;
-private _resizeRafId: number | null = null;
-private _resizeLastClientX: number = 0;
-private _resizeLastClientY: number = 0;
+interface BoxDragState {
+  isDragging: boolean;
+  dragMoved: boolean;
+  selectedOnMouseDown: boolean;
+  startMouseX: number;
+  startMouseY: number;
+  startLeft: number;
+  startTop: number;
+  originalLeft: number;
+  originalTop: number;
+  originalWidth: number;
+  originalHeight: number;
+  originalPosition: BoxPosition;
+  lastClientX: number;
+  lastClientY: number;
+  rafId: number | null;
+  affectedParagraphs: Set<LayoutParagraphElement> | null;
+}
+
+interface BoxResizeState {
+  isResizing: boolean;
+  handle: 'top' | 'bottom' | 'left' | 'right' | null;
+  moved: boolean;
+  startMouseX: number;
+  startMouseY: number;
+  startLeft: number;
+  startTop: number;
+  startWidth: number;
+  startHeight: number;
+  lastClientX: number;
+  lastClientY: number;
+  rafId: number | null;
+  affectedParagraphs: Set<LayoutParagraphElement> | null;
+}
+
+// box.element.ts (box 인스턴스에 남아있는 필드)
+private _editableLayout: boolean = false;
+private _savedColumns: number | number[] = 1;
+private _savedGap: number | number[] = 0;
 private _resizeHandles: HTMLDivElement[] = [];
 
 // edit-manager.ts (드래그 상태 관리)
@@ -1297,46 +1521,42 @@ private _dragStartPositions: Map<LayoutBoxElement, { left: number; top: number }
 | `'static'` | 컬럼 인덱스 (0부터) | 라인 인덱스 (0부터) | 컬럼 스팬 수 | 라인 수 |
 | `'absolute'` | mm 좌표 | mm 좌표 | mm | mm |
 
-### 10.4 드래그에서 `layout()` + `_rerenderAffectedParagraphs()`가 호출되는 경로
+### 10.4 드래그에서 `layout()` + `_renderAffectedParagraphs()`가 호출되는 경로
 
 ```
 drag rAF 콜백
-  → _computeNewPosition(dx, dy) → { left, top, converted? }
+  → _computeNewPosition(box, dx, dy, startLeft, startTop) → { left, top, converted? }
   → if converted:
-      → this.position = converted.position (static ↔ absolute)
-      → this.left/top/width/height = converted values
-      → _dragStartLeft/Top/Width/Height/Position 갱신
-      → _dragStartMouseX/Y 갱신 (델타 재계산)
+      → _applyPositionConversion(box, converted.position, converted.left, converted.top, converted.width, converted.height)
+      → BoxDragState.startLeft/Top = converted.left/top (델타 재계산용)
+      → BoxDragState.startMouseX/Y = lastClientX/Y (델타 재계산용)
   → else:
-      → this.left = left  → setter → layout() + _rerenderAffectedParagraphs()
-      → this.top  = top   → setter → layout() + _rerenderAffectedParagraphs()
+      → box.left = left  → setter → layout() + _renderAffectedParagraphs()
+      → box.top  = top   → setter → layout() + _renderAffectedParagraphs()
   → for each other drag target:
+      → targetState = _dragStates.get(t)
       → 동일한 변환 로직 적용
 
 ESC 취소
-  → this.position = _dragStartPosition (원래 position 복원)
-  → this.left = _dragStartLeft  → setter → layout() + _rerenderAffectedParagraphs()
-  → this.top  = _dragStartTop   → setter → layout() + _rerenderAffectedParagraphs()
-  → this.width = _dragStartWidth → setter → layout() + _rerenderAffectedParagraphs()
-  → this.height = _dragStartHeight → setter → layout() + _rerenderAffectedParagraphs()
-  → EditManager._dispatchLayoutMove(this, start, start, canceled=true)
+  → _applyPositionConversion(box, originalPosition, originalLeft, originalTop, originalWidth, originalHeight)
+     → layout() + _renderAffectedParagraphs() (원자적 갱신)
+  → EditManager._dispatchLayoutMove(box, originalLeft, originalTop, originalLeft, originalTop, canceled=true)
   → for each other drag target:
-      → 동일하게 position/left/top/width/height 복원
-      → EditManager._dispatchLayoutMove(t, start, start, canceled=true)
+      → _applyPositionConversion(t, targetState.originalPosition, targetState.originalLeft, targetState.originalTop, targetState.originalWidth, targetState.originalHeight)
+      → EditManager._dispatchLayoutMove(t, targetState.originalLeft, targetState.originalTop, targetState.originalLeft, targetState.originalTop, canceled=true)
   → EditManager._endLayoutDrag()
 
 mouseup
   → _computeNewPosition(deltaX, deltaY) → { left, top, converted? }
   → if converted:
-      → this.position = converted.position
-      → this.left/top/width/height = converted values
+      → _applyPositionConversion(box, converted.position, converted.left, converted.top, converted.width, converted.height)
   → else:
-      → this.left = left  → setter → layout() + _rerenderAffectedParagraphs()
-      → this.top  = top   → setter → layout() + _rerenderAffectedParagraphs()
-  → EditManager._dispatchLayoutMove(this, start, end, canceled=false)
+      → box.left = left  → setter → layout() + _renderAffectedParagraphs()
+      → box.top  = top   → setter → layout() + _renderAffectedParagraphs()
+  → EditManager._dispatchLayoutMove(box, startLeft, startTop, box.left, box.top, canceled=false)
   → for each other drag target:
       → 동일한 변환 로직 적용
-      → EditManager._dispatchLayoutMove(t, start, end, canceled=false)
+      → EditManager._dispatchLayoutMove(t, targetState.startLeft, targetState.startTop, t.left, t.top, canceled=false)
   → EditManager._endLayoutDrag()
 ```
 
@@ -1346,9 +1566,9 @@ mouseup
 
 ### 10.6 성능: 중첩된 하위 요소를 가진 박스의 드래그/리사이즈
 
-드래그나 리사이즈 중 **박스가 움직이거나 크기가 바뀔 때마다** `_rerenderAffectedParagraphs()`가 호출된다. 이 메서드는 다음 작업을 수행한다:
+드래그나 리사이즈 중 **박스가 움직이거나 크기가 바뀔 때마다** 영향받는 단락들을 다시 렌더링한다. `LayoutEditController`는 `_startDrag()`/`_startResize()`에서 `_collectAffectedParagraphs(box)`로 영향받는 단락 집합을 수집하고, drag/resize 종료 시 `_flushRerenderAffectedParagraphs()`로 한 번에 다시 렌더링한다. 이 메서드는 다음 작업을 수행한다:
 
-1. 자식 단락 수집: `this.items`를 재귀적으로 순회
+1. 자식 단락 수집: `box.items`를 재귀적으로 순회
 2. 형제 단락 수집: 부모의 `items`를 재귀적으로 순회
 3. 수집된 모든 `LayoutParagraphElement`에 대해 `_structureDirty = true`를 설정하고 `render()` 호출
 
@@ -1358,7 +1578,7 @@ mouseup
 
 | 단계 | 비용 | 빈도 |
 |------|------|------|
-| `_rerenderAffectedParagraphs()`가 수집하는 단락 수 | O(박스 하위 트리 크기) | rAF 프레임마다 |
+| `_collectAffectedParagraphs()`가 수집하는 단락 수 | O(박스 하위 트리 크기) | 드래그/리사이즈 시작 시 한 번 |
 | `_collectParagraphs()` 재귀 순회 | O(트리 노드 수) | rAF 프레임마다 |
 | `paragraph.layout()` | DOM 측정, GridCalculator 재생성/업데이트 | `_structureDirty` 변경 시 |
 | `TextLayoutEngine.layoutText()` | 문자 단위 줄바꿈 + 오버랩 계산 | rAF 프레임마다 |
@@ -1373,9 +1593,9 @@ mouseup
 - 매 rAF마다 전체 텍스트를 재계산하지 않고, **누적된 마우스 이동을 한 번에 처리**하도록 조정.
 - 또는 `_rerenderAffectedParagraphs()`를 쓰로틀링하여 16ms보다 긴 간격(예: 33ms, 50ms)으로만 실행.
 
-**2. `_rerenderAffectedParagraphs()` 결과 캐싱**
+**2. `_collectAffectedParagraphs()` 결과 캐싱**
 - 드래그 중 영향받는 단락 집합(`Set<LayoutParagraphElement>`)은 변하지 않는다면 매 프레임마다 재귀 순회할 필요 없음.
-- `_dragAffectedParagraphs` 필드에 캐시하고, 드래그 시작 시 한 번만 수집.
+- `BoxDragState.affectedParagraphs`/`BoxResizeState.affectedParagraphs`에 캐시하고, 드래그/리사이즈 시작 시 한 번만 수집.
 
 **3. `_structureDirty`와 `render()` 디바운싱**
 - `paragraph.render()`를 즉시 실행하지 않고, **microtask/macrotask 큐에 예약**하여 동일한 rAF 안에서 여러 번 위치가 바뀌어도 한 번만 렌더링.
@@ -1407,14 +1627,14 @@ mouseup
 
 ### 10.7 주의사항
 
-- **`_onLayoutClick`과 `_onLayoutMouseDown`의 관계**: `mousedown`은 `selected`가 있는 요소에서만 드래그를 시작한다. `click`은 `_dragMoved`가 `true`이면 무시한다. 두 핸들러는 독립적으로 동작한다.
-- **`_onLayoutClick`의 `stopPropagation()`**: 클릭이 부모 박스나 문서로 전파되는 것을 막는다. 이로 인해 중첩된 박스를 클릭해도 부모가 함께 선택되지 않는다.
+- **`LayoutEditController._onClick`과 `_onMouseDown`의 관계**: `_onMouseDown`은 편집 가능한 box에서 드래그/리사이즈를 시작한다. `_onClick`은 `BoxDragState.dragMoved`나 `BoxResizeState.moved`가 `true`이면 무시한다. 두 핸들러는 문서 수준에서 캡처 단계로 동작한다.
+- **`_onClick`의 `stopPropagation()`**: 클릭이 부모 박스나 문서로 전파되는 것을 막는다. 이로 인해 중첩된 박스를 클릭해도 부모가 함께 선택되지 않는다.
 - **`_structureDirty`**: `paragraph.render()`에서 이 플래그가 `true`이면 `layout()`과 `TextLayoutEngine.create()`를 재실행한다. `false`이면 기존 모델을 재사용하여 `layoutText()`만 재실행한다. 드래그 중에는 박스 위치가 변하므로 항상 `true`로 설정해야 한다.
 - **`_overlayRects`**: `TextLayoutEngine`이 `_layoutTextIntoColumns()` 시작 시 `null`로 초기화한다. `paragraph.render()`에서 `TextLayoutEngine.create()` 호출 시 `getOverlapSizePX()`를 통해 새로 계산된다.
 - **`layoutMove` 이벤트**: 드래그 완료(mouseup) 또는 취소(ESC) 시 `EditManager._dispatchLayoutMove()`를 통해 발생한다. 단순 클릭(이동 임계값 3px 미만)에서는 발생하지 않는다. `canceled` 필드로 완료와 취소를 구분할 수 있다.
 - **호버 표시 (`hovered`)**: `<x-layout-box>`에만 적용되며, `<x-layout-document>`는 호버 표시를 지원하지 않는다. `mouseenter` 시 조상 요소의 `hovered`를 모두 제거하여 가장 안쪽 요소만 호버 표시가 보이도록 한다. `mouseleave` 시 `elementFromPoint`로 마우스 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다. 이 동작은 중첩된 박스에서 자식→부모로 마우스가 돌아갈 때 부모의 호버가 복원되도록 보장한다.
-- **호버와 선택의 우선순위**: `selected`가 있는 요소는 `hovered`를 표시하지 않는다. `_onLayoutMouseEnter`에서 `hasAttribute('selected')`를 먼저 검사하여, 이미 선택된 요소 위에 마우스가 있을 때 파란색 호버 테두리가 빨간색 선택 테두리와 겹치지 않도록 한다. 조상의 `hovered` 제거는 `selected` 체크 전에 수행되어, 선택된 요소 위에서 마우스가 움직일 때 조상 요소의 호버 표시도 제거된다.
-- **드래그/리사이즈 중 hover 차단**: `EditManager._isDraggingLayout()` 또는 `_isResizingLayout()`이 `true`이면 `_onLayoutMouseEnter`와 `_onLayoutMouseLeave`가 early return하여 hover 표시가 전혀 나타나지 않는다. 드래그 이동 중이나 크기 조정 중에 마우스가 다른 박스 위로 이동해도 방해가 되지 않도록 한다. 드래그/리사이즈가 종료되면 `EditManager._endLayoutDrag()`/`_endLayoutResize()`에서 플래그가 해제되어 hover가 정상 동작한다.
+- **호버와 선택의 우선순위**: `selected`가 있는 요소는 `hovered`를 표시하지 않는다. `LayoutBoxElement._onLayoutMouseEnter`에서 `hasAttribute('selected')`를 먼저 검사하여, 이미 선택된 요소 위에 마우스가 있을 때 파란색 호버 테두리가 빨간색 선택 테두리와 겹치지 않도록 한다. 조상의 `hovered` 제거는 `selected` 체크 전에 수행되어, 선택된 요소 위에서 마우스가 움직일 때 조상 요소의 호버 표시도 제거된다.
+- **드래그/리사이즈 중 hover 차단**: `EditManager._isDraggingLayout()` 또는 `_isResizingLayout()`이 `true`이면 `LayoutBoxElement._onLayoutMouseEnter`와 `_onLayoutMouseLeave`가 early return하여 hover 표시가 전혀 나타나지 않는다. 드래그 이동 중이나 크기 조정 중에 마우스가 다른 박스 위로 이동해도 방해가 되지 않도록 한다. 드래그/리사이즈가 종료되면 `EditManager._endLayoutDrag()`/`_endLayoutResize()`에서 플래그가 해제되어 hover가 정상 동작한다.
 
 ---
 
@@ -1447,58 +1667,67 @@ mouseup
 │                                                                     │
 │  ① mousedown on resize handle                                       │
 │     │                                                               │
+│     ├── LayoutEditController._onMouseDown (document capture)         │
+│     ├── _findEditableBoxFromEvent(event) → box                       │
+│     ├── _isEventFromResizeHandle(event, box)? → _startResize(event, box)│
 │     ├── button !== 0? → 무시                                        │
-│     ├── selected 없음? → 무시                                   │
+│     ├── !box.hasAttribute('selected')? → 무시                        │
 │     ├── event.preventDefault() + stopPropagation()                   │
-│     │   ← stopPropagation으로 _onLayoutMouseDown 전파 차단           │
-│     ├── _isResizing = true, _resizeHandle = handle direction        │
-│     ├── _resizeMoved = false                                        │
-│     ├── _resizeStartMouseX/Y = clientX/Y                            │
-│     ├── _resizeStartLeft/Top/Width/Height = 현재 값                   │
-│     ├── EditManager._startLayoutResize() ← hover 차단 플래그 설정      │
+│     ├── BoxResizeState.handle = handle direction                     │
+│     ├── BoxResizeState.isResizing = true                             │
+│     ├── BoxResizeState.moved = false                                 │
+│     ├── BoxResizeState.startMouseX/Y = clientX/Y                     │
+│     ├── BoxResizeState.startLeft/Top/Width/Height = 현재 값            │
+│     ├── BoxResizeState.affectedParagraphs = _collectAffectedParagraphs(box)│
+│     ├── EditManager._startLayoutResize() ← hover 차단 플래그 설정       │
 │     └── document에 mousemove, mouseup, keydown 리스너 등록            │
 │                                                                     │
 │  ② mousemove (리사이즈 중)                                           │
 │     │                                                               │
-│     ├── _isResizing 아니면 무시                                       │
-│     ├── _resizeLastClientX/Y 업데이트                                 │
-│     ├── 이동 거리 ≤ 3px? → _resizeMoved 유지, return                │
-│     ├── _resizeMoved = true                                          │
+│     ├── LayoutEditController._onResizeMouseMove                      │
+│     ├── activeResizeBox가 없으면 return                              │
+│     ├── BoxResizeState.lastClientX/Y 업데이트                         │
+│     ├── 이동 거리 ≤ 3px? → moved 유지, return                         │
+│     ├── BoxResizeState.moved = true                                  │
 │     ├── rAF 이미 예약? → return (중복 방지)                           │
 │     └── requestAnimationFrame:                                       │
-│          ├── _resizeRafId = null                                     │
+│          ├── BoxResizeState.rafId = null                             │
 │          ├── dx = lastClientX - startMouseX                           │
 │          ├── dy = lastClientY - startMouseY                           │
-│          ├── newSize = _computeNewSize(dx, dy)                      │
-│          └── if 변경됨: this.left/top/width/height 설정               │
+│          ├── newSize = _computeNewSize(box, state, dx, dy)           │
+│          └── if 변경됨: box.left/top/width/height 설정                 │
 │                                                                     │
 │  ③ mouseup (리사이즈 완료)                                            │
 │     │                                                               │
+│     ├── LayoutEditController._onResizeMouseUp                        │
 │     ├── document 리스너 제거 (mousemove, mouseup, keydown)            │
 │     ├── rAF 취소 (있으면)                                             │
-│     ├── _isResizing = false, _resizeHandle = null                    │
+│     ├── BoxResizeState.isResizing = false, BoxResizeState.handle = null│
+│     ├── _flushRerenderAffectedParagraphs(box, state)                 │
 │     ├── EditManager._endLayoutResize() ← hover 차단 플래그 해제        │
-│     ├── _resizeMoved === false? → return (클릭이었음)                 │
-│     ├── 최종 크기 계산 → this.left/top/width/height 설정              │
+│     ├── BoxResizeState.moved === false? → return (클릭이었음)        │
+│     ├── 최종 크기 계산 → box.left/top/width/height 설정               │
 │     └── EditManager._dispatchLayoutResize(                           │
-│              this, start, end, canceled=false)                       │
+│              box, start, end, canceled=false)                        │
 │                                                                     │
 │  ③' ESC 키 (리사이즈 취소)                                           │
 │     │                                                               │
+│     ├── LayoutEditController._onResizeKeyDown                        │
 │     ├── rAF 취소 (있으면)                                             │
 │     ├── document 리스너 제거 (mousemove, mouseup, keydown)            │
-│     ├── _isResizing = false, _resizeHandle = null                    │
+│     ├── BoxResizeState.isResizing = false, BoxResizeState.handle = null│
+│     ├── _flushRerenderAffectedParagraphs(box, state)                 │
 │     ├── EditManager._endLayoutResize() ← hover 차단 플래그 해제        │
-│     ├── this.left/top/width/height = 시작 값 복원                     │
+│     ├── box.left/top/width/height = 시작 값 복원                     │
 │     └── EditManager._dispatchLayoutResize(                           │
-│              this, start, start, canceled=true)                      │
+│              box, start, start, canceled=true)                       │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 11.4 `_computeNewSize(deltaPxX, deltaPxY)`
+### 11.4 `LayoutEditController._computeNewSize(box, state, deltaPxX, deltaPxY)`
 
-픽셀 델타를 받아 리사이즈 방향(`_resizeHandle`)과 `position` 모드에 따라 새 크기와 위치를 계산한다.
+픽셀 델타를 받아 리사이즈 방향(`BoxResizeState.handle`)과 `position` 모드에 따라 새 크기와 위치를 계산한다. 실제 구현은 `src/edit/layout-edit-controller.ts`에 있으며, box 인스턴스에 의존하지 않고 인자로 전달받는다.
 
 #### 11.4.1 absolute 모드 (mm 좌표)
 
@@ -1568,36 +1797,22 @@ top handle:
 
 ### 11.6 리사이즈와 드래그-이동의 상호작용
 
-리사이즈 핸들의 `mousedown` 이벤트는 `stopPropagation()`으로 버블링을 차단한다. 이로 인해:
-- 핸들에서 `mousedown` → 리사이즈 시작 (`_onResizeMouseDown` 실행)
-- 핸들의 `stopPropagation()`으로 인해 `_onLayoutMouseDown`이 실행되지 않음
-- 결과적으로 리사이즈와 드래그-이동이 동시에 트리거되지 않는다
+`LayoutEditController._onMouseDown`이 실행될 때, `_isEventFromResizeHandle()`로 먼저 핸들 클릭을 감지한다. 핸일 클릭이면 `_startResize()`를 호출하고 리턴한다. 핸들 DOM에는 별도의 리스너가 없으므로 `stopPropagation()`만으로 충분하지 않고, `composedPath()`에서 `.resize-handle` 클래스가 있는지 검사하여 핸들 클릭과 box 본체 클릭을 구분한다.
 
 ### 11.7 `editableLayout` 비활성화 시 정리
 
 `editableLayout`을 `false`로 설정하면:
-1. 리사이즈 핸들의 `mousedown` 이벤트 리스너가 제거된다
-2. 핸들 DOM 요소가 shadow DOM에서 제거된다
-3. 기존 드래그 관련 리스너도 제거된다
+1. `selected` 속성 제거
+2. `hovered` 속성 제거
+3. `editable-layout` DOM 속성 제거
+4. `cursor` 스타일 초기화
+5. `EditManager._unregisterLayout()` 호출
+
+`LayoutEditController`는 문서에 계속 부착되어 있으며, 다음 이벤트에서 `isBoxEditable()`/`editableLayout` 조건을 만족하지 않는 box는 무시한다.
 
 ### 11.8 리사이즈 관련 private 필드
 
-```typescript
-// box.element.ts (리사이즈 상태)
-private _isResizing: boolean = false;
-private _resizeHandle: 'top' | 'bottom' | 'left' | 'right' | null = null;
-private _resizeStartMouseX: number = 0;
-private _resizeStartMouseY: number = 0;
-private _resizeStartLeft: number = 0;
-private _resizeStartTop: number = 0;
-private _resizeStartWidth: number = 0;
-private _resizeStartHeight: number = 0;
-private _resizeMoved: boolean = false;
-private _resizeRafId: number | null = null;
-private _resizeLastClientX: number = 0;
-private _resizeLastClientY: number = 0;
-private _resizeHandles: HTMLDivElement[] = [];   // 핸들 DOM 요소 참조
-```
+리사이즈 상태도 `src/edit/layout-edit-controller.ts`의 `BoxResizeState` 인터페이스와 `_resizeStates` Map으로 이전되었다. box 인스턴스에는 `_resizeHandles` 배열만 남아 핸들 DOM 요소를 재활용한다.
 
 ---
 
@@ -1613,7 +1828,7 @@ private _resizeHandles: HTMLDivElement[] = [];   // 핸들 DOM 요소 참조
 
 삽입 모드가 활성화되면 문서 요소의 커서가 `crosshair`로 바뀌고, 기존 레이아웃 선택은 자동으로 해제된다. 삽입 모드 중에는 레이아웃 선택과 드래그 이동이 동작하지 않아 삽입 동작과 충돌하지 않는다.
 
-> **사전 조건**: 삽입 모드는 `editableLayout`이 활성화된 `<x-layout-box>` 요소가 하나 이상 있어야만 활성화할 수 있다. `insertMode` setter에서 `x-layout-box[editable-layout]` 요소를 확인하며, 없으면 설정이 무시된다.
+> **사전 조건**: 삽입 모드는 `EditManager.isBoxEditable()`이 `true`인 `<x-layout-box>` 요소가 하나 이상 있어야만 활성화할 수 있다. `insertMode` setter에서 `isBoxEditable()`로 편집 가능한 box를 필터링하며, 없으면 설정이 무시된다. 비활성화 시에는 `editable-layout` DOM 속성이 있는 box의 커서를 `grab`으로 복원한다.
 
 ### 12.2 EditManager API
 
@@ -1634,11 +1849,11 @@ const mode = manager.insertMode; // InsertMode | null
 
 | 동작 | 설명 |
 |------|------|
-| non-null 설정 | 삽입 모드 활성화, 기존 레이아웃 선택 해제, 문서 요소에 `crosshair` 커서 적용. `editableLayout`이 활성화된 요소가 없으면 무시됨 |
+| non-null 설정 | 삽입 모드 활성화, 기존 레이아웃 선택 해제, 문서 요소에 `crosshair` 커서 적용. `EditManager.isBoxEditable()`이 true인 box가 없으면 무시됨 |
 | `null` 설정 | 삽입 모드 비활성화, 커서 복원 |
 | 반복 설정 | 동일한 모드로 다시 설정하면 무시된다 |
 
-`x-layout-document` 요소가 DOM에 없으면 `Error`가 throw된다. `editableLayout`이 활성화된 `<x-layout-box>`가 하나도 없으면 삽입 모드가 활성화되지 않는다.
+`x-layout-document` 요소가 DOM에 없으면 `Error`가 throw된다. `EditManager.isBoxEditable()`이 true인 `<x-layout-box>`가 하나도 없으면 삽입 모드가 활성화되지 않는다.
 
 #### `activateInsert(mode)`
 
@@ -1742,7 +1957,7 @@ manager.addEventListener('insertCancel', (event) => {
 │                                                             │
 │  ② mousedown (box 위에서)                                    │
 │     │                                                        │
-│     ├── _onLayoutMouseDown 실행                              │
+│     ├── LayoutEditController._onMouseDown (document capture) │
 │     ├── insertMode 가드 → EditManager.handleInsertMouseDown  │
 │     │   └── InsertController.startDrag(event)                │
 │     │       ├── button !== 0? → 무시                        │
@@ -1890,17 +2105,16 @@ private static readonly DRAG_THRESHOLD = 3;
 
 삽입 모드가 활성화되면 다음 핸들러가 `EditManager.getInstance().insertMode` 가드로 early return하여 레이아웃 선택/드래그/리사이즈가 방해되지 않는다.
 
-- `<x-layout-box>`의 `_onLayoutClick` — 삽입 모드 중 클릭 이벤트 무시
-- `<x-layout-box>`의 `_onLayoutMouseDown` — 삽입 모드 중 `EditManager.handleInsertMouseDown()` 위임 후 return
-- `<x-layout-box>`의 `_onResizeMouseDown` — 삽입 모드 중 리사이즈 시작 차단
-- `<x-layout-box>`의 `_onLayoutMouseEnter` — 삽입 모드 중 호버 표시 차단
-- `<x-layout-box>`의 `_onLayoutMouseLeave` — 삽입 모드 중 호버 해제 차단
+- `LayoutEditController._onClick` — 삽입 모드 중 클릭 이벤트 무시
+- `LayoutEditController._onMouseDown` — 삽입 모드 중 `EditManager.handleInsertMouseDown()` 위임 후 return
+- `LayoutEditController._startResize`가 호출되지 않음 — 삽입 모드 중 리사이즈 시작 차단
+- `<x-layout-box>`의 `_onLayoutMouseEnter`/`_onLayoutMouseLeave` — 삽입 모드 중 호버 표시 차단
 
-**`_onLayoutMouseDown`에서의 삽입 위임**: 삽입 모드 중 box에서 mousedown하면 `_onLayoutMouseDown`이 `EditManager.handleInsertMouseDown(event)`를 호출한다. 이 메서드는 `InsertController.startDrag(event)`를 위임 호출하며, `startDrag()`는 `event.preventDefault()` + `event.stopPropagation()`을 호출하여 이후 레이아웃 선택/드래그 로직이 실행되지 않도록 한다.
+**`_onMouseDown`에서의 삽입 위임**: 삽입 모드 중 box에서 mousedown하면 `LayoutEditController._onMouseDown`이 `EditManager.handleInsertMouseDown(event)`를 호출한다. 이 메서드는 `InsertController.startDrag(event)`를 위임 호출하며, `startDrag()`는 `event.preventDefault()` + `event.stopPropagation()`을 호출하여 이후 레이아웃 선택/드래그 로직이 실행되지 않도록 한다.
 
-**문서 빈 공간 처리**: `InsertController`는 `_document`에 버블링 단계로 `mousedown` 리스너를 등록하여, box가 없는 문서 빈 공간에서도 삽입 드래그가 시작되도록 한다. box 위에서는 `_onLayoutMouseDown`이 먼저 `startDrag()`를 호출하며, `_isDragging` 가드로 중복 실행을 방지한다.
+**문서 빈 공간 처리**: `InsertController`는 `_document`에 버블링 단계로 `mousedown` 리스너를 등록하여, box가 없는 문서 빈 공간에서도 삽입 드래그가 시작되도록 한다. box 위에서는 `LayoutEditController._onMouseDown`이 먼저 `startDrag()`를 호출하며, `_isDragging` 가드로 중복 실행을 방지한다.
 
-**커서 변경**: 삽입 모드 활성화 시 `editableLayout`이 켜진 모든 `<x-layout-box>`의 커서가 `crosshair`로 변경된다. 비활성화 시 `grab`으로 복원된다.
+**커서 변경**: 삽입 모드 활성화 시 `EditManager.isBoxEditable()`이 true이거나 `editableLayout` DOM 속성이 있는 모든 `<x-layout-box>`의 커서가 `crosshair`로 변경된다. 비활성화 시 `grab`으로 복원된다.
 
 ### 12.11 미리보기 사각형
 
@@ -1929,11 +2143,11 @@ private static readonly DRAG_THRESHOLD = 3;
 ### 12.13 주의사항
 
 - 삽입 모드는 `<x-layout-document>`가 DOM에 있을 때만 활성화할 수 있다. 없으면 `Error`가 발생한다.
-- 삽입 모드는 `editableLayout`이 활성화된 `<x-layout-box>`가 하나 이상 있어야만 활성화할 수 있다. 없으면 `insertMode` 설정이 무시된다. `insertMode` 세터는 `x-layout-box[editable-layout]` 속성으로 편집 가능한 박스를 검색한다.
+- 삽입 모드는 `EditManager.isBoxEditable()`이 true인 `<x-layout-box>`가 하나 이상 있어야만 활성화할 수 있다. 없으면 `insertMode` 설정이 무시된다. 비활성화 시에는 `x-layout-box[editable-layout]` DOM 속성이 있는 box들의 커서를 `grab`으로 복원한다.
 - 삽입된 요소는 항상 `<x-layout-box>`로 감싸진다. `text`, `paragraph`, `image` 타입도 마찬가지이다.
 - `static` 모드로 삽입할 때 `model`이 없으면 `{ left: 0, top: 0, width: 1, height: 1 }` 기본값을 사용한다.
 - `image` 삽입 시 placeholder 이미지는 `100×100px`, `72dpi`, 빈 `url`로 생성된다. 실제 이미지를 표시하려면 삽입 후 `url`을 변경해야 한다.
 - 삽입 모드 중에는 레이아웃 선택과 드래그 이동, 리사이즈가 모두 비활성화된다.
 - `boxData.children` 설정은 `appendChild`보다 먼저 이루어져야 `connectedCallback` 시점에 올바른 초기 상태를 갖는다.
-- **mousedown 캡처/버블링**: `InsertController`의 `mousedown` 리스너는 버블링 단계로 `_document`에 등록된다. box 위에서 mousedown하면 `_onLayoutMouseDown`이 먼저 `EditManager.handleInsertMouseDown()`을 호출하여 `InsertController.startDrag()`를 위임 실행하고, `startDrag()` 내부의 `_isDragging` 가드로 중복 실행을 방지한다. 문서 빈 공간에서는 `_document`의 버블링 리스너가 직접 `startDrag()`를 호출한다.
+- **mousedown 캡처/버블링**: `LayoutEditController`의 `mousedown` 리스너는 캡처 단계로 `document.documentElement`에 등록된다. box 위에서 mousedown하면 먼저 `LayoutEditController._onMouseDown`이 `EditManager.handleInsertMouseDown()`을 호출하여 `InsertController.startDrag()`를 위임 실행하고, `startDrag()` 내부의 `_isDragging` 가드로 중복 실행을 방지한다. `InsertController`의 `mousedown` 리스너는 문서(document)에 버블링 단계로 등록되어, box가 없는 문서 빈 공간에서도 삽입 드래그가 시작되도록 한다.
 - **커스텀 속성명**: `selected`, `hovered`, `editable-layout`, `border`는 모두 커스텀 엘리먼트의 전용 속성이므로 `data-` 접두사 없이 사용한다. HTML 표준 `data-*` 속성과 달리, 커스텀 엘리먼트의 내부 상태 표시용 속성은 접두사가 필요 없다.
