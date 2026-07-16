@@ -218,11 +218,7 @@
         let currentMode = "read";
 
         function clearAllEditMode() {
-          const paragraphs = document.querySelectorAll("x-layout-paragraph");
-          paragraphs.forEach((p) => {
-            p.editableText = false;
-          });
-
+          em.textEditMode = false;
           em.layoutEditMode = false;
         }
 
@@ -248,10 +244,8 @@
           clearInsertMode();
           currentMode = "text";
           clearAllEditMode();
-          const paragraphs = document.querySelectorAll("x-layout-paragraph");
-          paragraphs.forEach((p) => {
-            p.editableText = true;
-          });
+          em.setEditableTextRoles(["none"]);
+          em.textEditMode = true;
           btnRead.classList.remove("active");
           btnEdit.classList.add("active");
           btnLayout.classList.remove("active-layout");
