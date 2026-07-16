@@ -1,0 +1,2346 @@
+# API Reference — Vanilla JS
+
+이 문서는 `layout-element` 패키지의 **바닐라 JavaScript API**(Custom Element 기반)에 대한
+전체 레퍼런스입니다. 모든 측정은 **mm(밀리미터)** 단위이며, 픽셀 변환 비율(`ppm`)은 런타임에
+`GridCalculator.ppm`을 통해 측정됩니다.
+
+- **두 가지 빌드 출력**을 사용합니다:
+  - **IIFE 번들**(`dist/layout-element.iife.js`): `LayoutElement` 전역 네임스페이스로 노출
+  - **ESM 진입점**(`layout-element`): `import { ... } from 'layout-element'`
+- **React** 레이어는 별도 문서 [`REACT_COMPONENT.md`](./REACT_COMPONENT.md)를 참고하세요.
+
+---
+
+## 목차
+
+1. [빠른 시작](#빠른-시작)
+2. [Custom Elements](#custom-elements)
+   - [`<x-layout-document>`](#x-layout-document)
+   - [`<x-layout-box>`](#x-layout-box)
+   - [`<x-layout-paragraph>`](#x-layout-paragraph)
+   - [`<x-layout-image>`](#x-layout-image)
+   - [`<x-layout-column>`](#x-layout-column)
+   - [`<x-layout-vcolumn>`](#x-layout-vcolumn)
+   - [`<x-layout-guide-column>`](#x-layout-guide-column)
+   - [`<x-layout-cursor>`](#x-layout-cursor)
+   - [`<x-layout-selection>`](#x-layout-selection)
+3. [Core](#core)
+   - [`GridCalculator`](#gridcalculator)
+   - [`TextLayoutEngine`](#textlayoutengine)
+   - [`Rect`](#rect)
+4. [Resource Managers](#resource-managers)
+   - [`ColorRegistry`](#colorregistry)
+   - [`FontLoader`](#fontloader)
+5. [Edit](#edit)
+   - [`EditManager`](#editmanager)
+   - [`TextEditController`](#texteditcontroller)
+   - [`TextEditCoordinateMapper`](#texteditcoordinatemapper)
+   - [`InsertController`](#insertcontroller)
+   - [`LayoutEditController`](#layouteditcontroller)
+6. [Types](#types)
+   - [Layout](#layout-types)
+   - [Style](#style-types)
+   - [Print](#print-types)
+   - [Edit](#edit-types)
+7. [Constants](#constants)
+8. [Utilities](#utilities)
+9. [Examples](#examples)
+10. [이벤트 레퍼런스](#이벤트-레퍼런스)
+
+---
+
+## 빠른 시작
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="./dist/layout-element.iife.js"></script>
+</head>
+<body>
+  <x-layout-document id="doc"></x-layout-document>
+  <script>
+    // 1. 리소스 매니저 초기화 (필수)
+    await LayoutElement.ColorRegistry.getInstance().init();
+    await LayoutElement.FontLoader.getInstance().init();
+
+    // 2. 데이터 주입
+    const doc = document.getElementById('doc');
+    doc.data = {
+      width: 210, height: 297,        // A4 (mm)
+      columns: 6, gap: 3,             // 6-컬럼 그리드
+      paddingTop: 10, paddingRight: 10,
+      paddingBottom: 10, paddingLeft: 10,
+      paragraphStyle: { lineGap: 1.2, textAlign: 'justify' },
+      textStyle: { fontFamily: 'Myoungjo', fontSize: 4, color: 'black' },
+      children: [
+        {
+          type: 'box',
+          left: 0, top: 0, width: 3, height: 30,
+          children: [{ type: 'text', content: '제목', textStyle: { fontSize: 8 } }],
+        },
+      ],
+    };
+  </script>
+</body>
+</html>
+```
+
+> **ESM 사용 시**:
+> ```ts
+> import {
+>   LayoutDocumentElement, ColorRegistry, FontLoader,
+> } from 'layout-element';
+> ```
+
+---
+
+## Custom Elements
+
+모든 요소는 Shadow DOM(`mode: 'open'`)을 사용하며, 자동 등록을 위해 모듈을 import만 하면
+`customElements.define`이 호출됩니다. React 환경이 아니라면 `useLayoutElement` 훅이 없으므로
+직접 `<x-layout-document>` 마크업을 사용하세요.
+
+### `<x-layout-document>`
+
+**루트 컨테이너**. 문서 전체의 사이즈, 컬럼 그리드, 기본 스타일을 정의하고 자식 박스 트리를
+조율합니다.
+
+#### Class: `LayoutDocumentElement`
+
+```ts
+/**
+ * 문서 루트 요소. `<x-layout-document>` 커스텀 엘리먼트.
+ *
+ * `DocumentData`를 받아 전체 렌더링 파이프라인을 조율한다.
+ *
+ * 렌더링 파이프라인:
+ * 1. `layout()` (동기) — DOM 트리 구축, 자식 박스 생성, `GridCalculator` 생성
+ * 2. `render()` (비동기) — 이미지 로딩 후 자식 박스 렌더링
+ *
+ * @example
+ * const doc: LayoutDocumentElement = document.querySelector('x-layout-document')!;
+ * doc.data = {
+ *   width: 210, height: 297,
+ *   columns: 6, gap: 3,
+ *   paragraphStyle: { lineGap: 1.2 },
+ *   textStyle: { fontSize: 4, fontFamily: 'Myoungjo' },
+ *   children: [/* ... *\/],
+ * };
+ */
+class LayoutDocumentElement extends HTMLElement
+```
+
+#### 메서드
+
+| 메서드 | 시그니처 | 설명 |
+|---|---|---|
+| `layout()` | `(): this \| null` | DOM 트리/스타일/가이드 컬럼을 재구성. `connectedCallback`에서 자동 호출. |
+| `render()` | `(): Promise<this \| null>` | 자식 박스를 z-index 역순으로 비동기 렌더링. `layout()` 완료 후 호출. |
+| `appendChild<T>(node)` | `(node: T): T` | 박스/단락/이미지 자식에 `InheritStyle` 자동 전파. |
+
+#### 데이터 프로퍼티 (setter / getter)
+
+| 이름 | 타입 | 단위 | 설명 |
+|---|---|---|---|
+| `data` | `DocumentData` | — | 한 번에 모든 필드 갱신. `setter`는 자식을 재생성하고 layout+render. |
+| `width` | `number` | mm | 문서 너비. |
+| `height` | `number` | mm | 문서 높이. |
+| `paddingTop` | `number` | mm | 상단 여백. |
+| `paddingRight` | `number` | mm | 우측 여백. |
+| `paddingBottom` | `number` | mm | 하단 여백. |
+| `paddingLeft` | `number` | mm | 좌측 여백. |
+| `columns` | `number \| number[]` | — | 균등 분할 개수 또는 명시적 컬럼 폭 배열. |
+| `gap` | `number \| number[]` | mm | 균등 간격 또는 명시적 간격 배열. |
+| `paragraphStyle` | `ParagraphStyle` | — | 문서 전역 문단 스타일. |
+| `textStyle` | `TextStyle` | — | 문서 전역 텍스트 스타일. |
+| `innerWidth` | `number` (get) | mm | `width - paddingLeft - paddingRight`. |
+| `innerHeight` | `number` (get) | mm | `height - paddingTop - paddingBottom`. |
+
+#### 게터 (계산 프로퍼티)
+
+| 이름 | 타입 | 설명 |
+|---|---|---|
+| `items` | `LayoutBoxElement[]` | 직속 자식 박스 (`<x-layout-box>`) 배열. |
+| `model` | `GridCalculator \| undefined` | 컬럼 그리드 계산기. |
+| `visibleGuide` | `boolean` | 가이드 컬럼 표시 여부. |
+| `type` | `'document'` | 타입 리터럴. |
+| `zIndex` | `number` | 항상 0. |
+
+#### 가시성 / 인쇄 모드
+
+| 이름 | 타입 | 설명 |
+|---|---|---|
+| `visibleGuide` (set) | `boolean` | 가이드 컬럼의 표시 여부 토글. |
+| `printPostData` (get) | `PrintPostData[]` | 인쇄 후처리용 위치/데이터 배열. 인쇄 모드에서 사용. |
+
+#### 인쇄 모드 동작
+
+- `window.matchMedia("print").matches`가 `true`이면 `connectedCallback`이 즉시 리턴.
+- 사용자가 `data`를 직접 주입한 뒤 `layout()`과 `render()`를 수동 호출해야 함.
+- 편집 기능(`editableLayout`, `editableText`)은 인쇄 모드에서 완전히 차단됨.
+
+#### 예제
+
+```ts
+// 1. 컬럼 수 동적 변경
+doc.columns = 5;
+doc.gap = 4;
+
+// 2. 패딩 변경
+doc.paddingTop = 15;
+
+// 3. 자식 직접 추가
+const box = document.createElement('x-layout-box') as LayoutBoxElement;
+box.data = {
+  type: 'box', left: 0, top: 0, width: 2, height: 10,
+  children: [{ type: 'text', content: 'Hello' }],
+};
+doc.appendChild(box);
+
+// 4. 인쇄 모드 후처리 데이터 수집
+const postData = doc.printPostData;
+```
+
+---
+
+### `<x-layout-box>`
+
+**위치 지정 가능한 컨테이너**. 컬럼 그리드(`position: 'static'`) 또는 mm 좌표
+(`position: 'absolute'`)로 배치되며, 다른 박스/단락/이미지를 자식으로 가질 수 있습니다.
+
+#### Class: `LayoutBoxElement`
+
+```ts
+/**
+ * 위치 지정 가능한 컨테이너. `<x-layout-box>` 커스텀 엘리먼트.
+ *
+ * `position` 값에 따라 `left`/`width` 의미가 달라진다:
+ * - `'static'`: `left` = 컬럼 인덱스, `width` = 컬럼 span
+ * - `'absolute'`: mm 좌표
+ *
+ * @example
+ * // 그리드 모드: 1번 컬럼부터 3개 컬럼 차지
+ * const box = document.createElement('x-layout-box') as LayoutBoxElement;
+ * box.data = {
+ *   type: 'box', position: 'static', left: 1, top: 0, width: 3, height: 10,
+ *   children: [{ type: 'paragraph', content: '본문' }],
+ * };
+ */
+class LayoutBoxElement extends HTMLElement
+```
+
+#### 메서드
+
+| 메서드 | 시그니처 | 설명 |
+|---|---|---|
+| `layout()` | `(): void` | 좌표/스타일/테두리/상속 스타일 재계산. `data` setter에서 자동 호출. |
+| `render()` | `(): Promise<void>` | 자식 박스를 z-index 역순으로 비동기 렌더링. |
+| `appendChild<T>(node)` | `(node: T): T` | 자식에 `InheritStyle` 자동 전파 (paragraph는 텍스트 영역). |
+| `convertPosition(target)` | `(target: 'static' \| 'absolute'): void` | 좌표계를 변환 (예: 드래그 중 자동 호출). |
+| `requestRerenderAffectedParagraphs()` | `(): void` | 오버랩 영향 단락 즉시 재렌더링. |
+
+#### 데이터 프로퍼티 (setter / getter)
+
+| 이름 | 타입 | 단위 | 의미 |
+|---|---|---|---|
+| `data` | `BoxData` | — | 한 번에 갱신. 자식 재구축 포함. |
+| `left` | `number` | mm (static: 컬럼 인덱스) | 좌측 위치. |
+| `top` | `number` | mm | 상단 위치. |
+| `width` | `number` | mm (static: 컬럼 수) | 너비. |
+| `height` | `number` | mm (static: 줄 수) | 높이. |
+| `position` | `'static' \| 'absolute'` | — | 배치 모드. |
+| `zIndex` | `number` | — | 렌더링 순서. |
+| `backgroundColor` | `string \| undefined` | — | CSS 색상 또는 CMYK 이름. |
+| `borderTopWidth` | `number` | mm | 상단 테두리 두께. |
+| `borderRightWidth` | `number` | mm | 우측 테두리 두께. |
+| `borderBottomWidth` | `number` | mm | 하단 테두리 두께. |
+| `borderLeftWidth` | `number` | mm | 좌측 테두리 두께. |
+| `borderStyle` | `'solid' \| 'dotted' \| 'dashed'` | — | 테두리 스타일. |
+| `borderColor` | `string \| undefined` | — | 테두리 색상. |
+| `paddingTop` | `number` | mm | 내부 상단 여백. |
+| `paddingRight` | `number` | mm | 내부 우측 여백. |
+| `paddingBottom` | `number` | mm | 내부 하단 여백. |
+| `paddingLeft` | `number` | mm | 내부 좌측 여백. |
+| `role` | `BoxRole` | — | 의미적 역할 (예: `'body'`, `'image'`, `'title'`). |
+| `groupMember` | `string[]` | — | 그룹 멤버 ID 배열. |
+| `priority` | `number` | — | 정렬 우선순위. |
+| `lock` | `boolean` | — | 편집 잠금. |
+| `editableLayout` | `boolean` | — | 레이아웃 편집 가능 여부. |
+| `inheritStyle` (set) | `InheritStyle \| undefined` | — | 부모에서 전파받은 캐스케이드 스타일. |
+
+#### 계산 게터
+
+| 이름 | 타입 | 단위 | 설명 |
+|---|---|---|---|
+| `relLeft` | `number` | mm | 부모 기준 좌측 위치. |
+| `relTop` | `number` | mm | 부모 기준 상단 위치. |
+| `absLeft` | `number` | mm | 루트 기준 절대 좌측. |
+| `absTop` | `number` | mm | 루트 기준 절대 상단. |
+| `absWidth` | `number` | mm | 절대 너비 (그리드 모드는 컬럼 폭 합). |
+| `absHeight` | `number` | mm | 절대 높이 (그리드 모드는 lineHeight × 줄 수). |
+| `parentModel` | `GridCalculator \| undefined` | — | 부모 계산기. |
+| `items` | `(Box \| Paragraph \| Image)[]` | — | 직속 자식 요소 배열. |
+| `overlayElements` | `LayoutBoxElement[]` | — | 오버랩된 형제 박스들. |
+| `contentType` | `'image' \| 'paragraph' \| null` | — | 자식이 1개일 때 그 타입. |
+| `type` | `'box'` | — | 타입 리터럴. |
+
+#### `data` setter 동작
+
+- 모든 필드를 갱신하고 자식을 완전히 재구축합니다.
+- `_rebuildingChildren` 플래그로 `MutationObserver`의 중복 트리거를 억제합니다.
+- `lock: true`면 box 자신과 모든 자손이 편집에서 제외됩니다 (drag/resize/text edit 모두).
+
+#### 예제
+
+```ts
+const box = document.createElement('x-layout-box') as LayoutBoxElement;
+box.data = {
+  type: 'box',
+  position: 'static',
+  left: 0, top: 0, width: 3, height: 12,
+  role: 'body',
+  borderColor: 'black',
+  borderBottomWidth: 0.5,
+  paddingLeft: 5,
+  children: [
+    { type: 'text', content: '제목', textStyle: { fontSize: 8 } },
+  ],
+};
+parentBox.appendChild(box);
+
+// 그리드 → 절대 좌표 변환
+box.convertPosition('absolute');
+console.log(box.left, box.top, box.width, box.height); // mm 값
+```
+
+#### MutationObserver
+
+`<x-layout-box>`는 `{ childList: true }` 옵션의 `MutationObserver`를 등록하여
+`appendChild`/`removeChild`로 직접 자식을 조작해도 자동으로 `layout()` + `render()`를
+수행합니다. `data` setter를 통한 재구축 시에는 `_rebuildingChildren` 플래그로
+중복 호출을 방지합니다.
+
+#### Attributes
+
+| 속성 | 타입 | 설명 |
+|---|---|---|
+| `role` | `BoxRole` | `role` setter/getter와 동기화. |
+| `group-member` | `string` | 쉼표 구분 그룹 멤버 ID. |
+| `priority` | `number` | 우선순위. |
+| `lock` | `boolean` | 잠금. |
+| `selected` | `boolean` | 선택 상태 (편집기에서 토글). |
+| `hovered` | `boolean` | 호버 상태. |
+| `editable-layout` | `boolean` | 편집 가능 상태. |
+| `border` | `boolean` | `borderColor` 설정 시 자동 부여. |
+
+---
+
+### `<x-layout-paragraph>`
+
+**다중 컬럼 텍스트 영역**. `TextLayoutEngine`이 텍스트를 래핑하고, 각 컬럼을
+`<x-layout-column>`으로 렌더링합니다. 오버플로우 발생 시 `render-error` 커스텀 이벤트를
+디스패치합니다.
+
+#### Class: `LayoutParagraphElement`
+
+```ts
+/**
+ * 다중 컬럼 텍스트 영역. `<x-layout-paragraph>` 커스텀 엘리먼트.
+ *
+ * @example
+ * const p = document.createElement('x-layout-paragraph') as LayoutParagraphElement;
+ * p.data = {
+ *   type: 'paragraph',
+ *   content: '안녕하세요',
+ *   column: 3, gap: 3,
+ * };
+ */
+class LayoutParagraphElement extends HTMLElement
+```
+
+#### 메서드
+
+| 메서드 | 시그니처 | 설명 |
+|---|---|---|
+| `layout()` | `(): void` | 모델/스타일 갱신. `data` setter에서 자동 호출. |
+| `render()` | `(): void` | 텍스트 래핑 + 컬럼 DOM 갱신. 오버플로우 시 `render-error` 디스패치. |
+| `markStructureChangedAndRender()` | `(): void` | 구조 변경 플래그 설정 후 `render()`. 외부 컨트롤러가 단락을 다시 그릴 때 사용. |
+
+#### 데이터 프로퍼티
+
+| 이름 | 타입 | 단위 | 설명 |
+|---|---|---|---|
+| `data` | `ParagraphData` | — | 한 번에 갱신. |
+| `column` | `number \| number[]` (via `data`) | — | 하위 컬럼 그리드 (생략 시 부모 상속). |
+| `gap` | `number \| number[]` (via `data`) | mm | 하위 컬럼 간격. |
+| `zIndex` | `number` (via `data`) | — | 렌더링 순서. |
+| `editableText` (set) | `boolean` | — | 텍스트 편집 모드. 인쇄 모드에서는 무시됨. |
+| `inheritStyle` (set) | `InheritStyle \| undefined` | — | 상위 캐스케이드 스타일. |
+
+#### 계산 게터
+
+| 이름 | 타입 | 설명 |
+|---|---|---|
+| `model` | `TextLayoutEngine \| undefined` | 텍스트 래핑 엔진. |
+| `columnEl` | `LayoutColumnElement[]` | 렌더링된 컬럼 요소들. |
+| `relLeft` / `relTop` | `number` (mm) | 부모 기준 상대 위치. |
+| `absLeft` / `absTop` | `number` (mm) | 루트 기준 절대 위치. |
+| `absWidth` / `absHeight` | `number` (mm) | 절대 크기 (InheritStyle 기준). |
+| `overlayElements` | `LayoutBoxElement[]` | 오버랩된 형제 박스. |
+| `type` | `'paragraph'` | 타입 리터럴. |
+| `zIndex` | `number` | 렌더링 순서. |
+| `printPostData` | `[]` | 인쇄 후처리 데이터 (paragraph는 빈 배열). |
+
+#### `render-error` 이벤트
+
+```ts
+paragraph.addEventListener('render-error', (e) => {
+  const detail = (e as CustomEvent<{ id: string; type: 'text-overflow'; overflow: number }>).detail;
+  console.warn(`Paragraph ${detail.id} 오버플로우 ${detail.overflow}자`);
+});
+```
+
+#### `data` setter 동작
+
+- `content` 변경 → 전체 텍스트 재생성.
+- 구조 변경이 감지되면 `_perfStructureChanged` 플래그가 켜져 다음 `render()`에서
+  모든 `<x-layout-column>`을 다시 만듭니다. 변경이 없는 부분(같은 `data-source-offset`)은
+  diff로 재사용됩니다.
+
+#### 예제
+
+```ts
+const p = document.createElement('x-layout-paragraph') as LayoutParagraphElement;
+p.data = {
+  type: 'paragraph',
+  content: [
+    '첫 번째 단락. ',
+    { content: '굵은 텍스트', textBlockStyle: { fontWeight: 700, fontSize: 5 } },
+    ' 다시 기본 텍스트.',
+  ],
+  column: 3,
+  gap: 3,
+  textStyle: { fontSize: 4 },
+};
+box.appendChild(p);
+
+// 텍스트 편집 활성화 (인쇄 모드 X)
+p.editableText = true;
+```
+
+---
+
+### `<x-layout-image>`
+
+**이미지 크롭 렌더링**. `<canvas>`를 사용해 원본 이미지의 `(x, y, width, height)` 영역을
+`dpi`로 mm 단위 변환하여 표시합니다. `overlapPadding`으로 텍스트 회피 영역을 지정할 수
+있습니다.
+
+#### Class: `LayoutImageElement`
+
+```ts
+/**
+ * 이미지 크롭 렌더링. `<x-layout-image>` 커스텀 엘리먼트.
+ *
+ * @example
+ * const img = document.createElement('x-layout-image') as LayoutImageElement;
+ * img.data = {
+ *   type: 'image',
+ *   x: 0, y: 0, width: 800, height: 600,  // 픽셀
+ *   dpi: 300,
+ *   url: '/sample.png',
+ *   overlapPadding: { top: 2, right: 5, bottom: 2, left: 5 },
+ * };
+ */
+class LayoutImageElement extends HTMLElement
+```
+
+#### 메서드
+
+| 메서드 | 시그니처 | 설명 |
+|---|---|---|
+| `layout()` | `(): void` | DOM/스타일 갱신. |
+| `render()` | `(): Promise<void>` | 원본 이미지 로드 후 `<canvas>`에 크롭. |
+
+#### 데이터 프로퍼티
+
+| 이름 | 타입 | 단위 | 설명 |
+|---|---|---|---|
+| `data` | `ImageData` | — | 한 번에 갱신. |
+| `x` | `number` | px (원본) | 크롭 시작 X. |
+| `y` | `number` | px (원본) | 크롭 시작 Y. |
+| `width` | `number` | px (원본) | 크롭 너비. |
+| `height` | `number` | px (원본) | 크롭 높이. |
+| `dpi` | `number` | DPI | 해상도. `mm = px / dpi × 25.4`. |
+| `url` | `string \| undefined` | — | 이미지 URL. |
+| `zIndex` | `number` | — | 렌더링 순서. |
+| `overlapPadding` | `number \| { top?, right?, bottom?, left? }` | mm | 텍스트 회피 패딩. |
+
+#### 게터
+
+| 이름 | 타입 | 설명 |
+|---|---|---|
+| `canvas` | `HTMLCanvasElement \| undefined` | 렌더링된 캔버스. |
+| `absLeft` / `absTop` | `number` (mm) | 절대 위치. |
+| `absWidth` / `absHeight` | `number` (mm) | 절대 크기. |
+| `type` | `'image'` | 타입 리터럴. |
+| `printPostData` | `PrintPostData[]` | 인쇄 후처리 데이터. |
+
+#### `overlapPadding` 사용
+
+- `number` → 4방향 동일.
+- `{ top, right, bottom, left }` → 방향별 지정.
+- **타원형 감지**: 불투명 픽셀 주변을 `(ndx² + ndy² ≤ 1)` 타원으로 패딩 적용.
+  투명 픽셀은 텍스트를 막지 않음.
+- `overlapPadding` 또는 `zIndex` 변경 시 형제 단락을 재렌더링하여
+  텍스트가 새 영역을 회피하도록 함.
+
+#### 예제
+
+```ts
+// 단방향 패딩
+img.overlapPadding = 5;
+// 비대칭 패딩
+img.overlapPadding = { top: 2, right: 8, bottom: 2, left: 3 };
+```
+
+---
+
+### `<x-layout-column>`
+
+**단락 내부의 실제 텍스트 컬럼**. `LayoutParagraphElement`가 `TextLayoutEngine`의
+`columnContents[i]`를 소비하여 생성합니다. 외부에서 직접 만들지 않습니다.
+
+#### Class: `LayoutColumnElement`
+
+```ts
+class LayoutColumnElement extends HTMLElement
+```
+
+#### Attributes
+
+| 속성 | 타입 | 설명 |
+|---|---|---|
+| `index` | `number` | 컬럼 인덱스 (0-based). |
+
+#### 게터
+
+| 이름 | 타입 | 설명 |
+|---|---|---|
+| `index` | `number \| undefined` | 컬럼 인덱스. |
+| `left` / `top` (mm) | `number` | 부모 단락 내 상대 위치. |
+| `absLeft` / `absTop` (mm) | `number` | 루트 기준 절대 위치. |
+| `model` | `TextLayoutEngine \| undefined` | 부모 단락의 모델. |
+| `parentElement` | `LayoutParagraphElement` | 부모 단락. |
+| `zIndex` | `0` | 항상 0. |
+| `type` | `'column'` | 타입 리터럴. |
+
+#### 메서드
+
+| 메서드 | 시그니처 | 설명 |
+|---|---|---|
+| `renderText()` | `(): void` | `data-source-offset` 키로 diff 렌더링. 기존 span 재사용. |
+
+> **Note**: `<x-layout-column>`은 `LayoutParagraphElement`가 관리하며, 직접 생성하지
+> 마세요. `paragraph.data`를 변경하면 `render()`가 자동으로 컬럼 DOM을 갱신합니다.
+
+---
+
+### `<x-layout-vcolumn>`
+
+**가상 컬럼**. `TextLayoutEngine._layoutTextIntoColumns()` 내부에서 오버플로우 측정용으로
+**임시** 생성됩니다. 측정이 끝나면 즉시 제거됩니다.
+
+#### Class: `LayoutVirtualColumnElement`
+
+```ts
+class LayoutVirtualColumnElement extends HTMLElement
+```
+
+#### Attributes
+
+| 속성 | 타입 | 설명 |
+|---|---|---|
+| `index` | `number` | 컬럼 인덱스. |
+
+#### 게터
+
+| 이름 | 타입 | 설명 |
+|---|---|---|
+| `isOverflow` | `boolean` | 누적 `scrollHeight`가 `clientHeight` 초과 여부. |
+| `left` / `top` (mm) | `number` | 부모 단락 내 상대 위치. |
+| `type` | `'column'` | 타입 리터럴. |
+
+> **절대 직접 만들거나 영구 저장하지 마세요.** `TextLayoutEngine` 내부 전용입니다.
+
+---
+
+### `<x-layout-guide-column>`
+
+**텍스트 줄 위치 가이드**. 편집 모드에서 텍스트 줄의 위치/높이를 시각적으로 보여주는
+오버레이입니다. 인쇄 모드에서는 자동 숨김 처리됩니다.
+
+#### Class: `LayoutGuideColumnElement`
+
+```ts
+class LayoutGuideColumnElement extends HTMLElement
+```
+
+#### 데이터 프로퍼티
+
+| 이름 | 타입 | 단위 | 설명 |
+|---|---|---|---|
+| `rect` | `Rect` | mm | 한 번에 위치/크기 갱신. |
+| `left` / `top` | `number` | mm | 위치. |
+| `width` / `height` | `number` | mm | 크기. |
+| `fontSize` | `number` | mm | 가이드 라인 높이 (글자 크기). |
+| `lineHeight` | `number` | mm | 라인 간격. |
+| `visible` | `boolean` | — | 표시 여부. |
+| `data` (get) | `GuideColumnData` | — | 데이터 직렬화. |
+| `printPostData` (get) | `PrintPostData[]` | 인쇄 후처리. |
+
+#### 예제
+
+```ts
+const guide = document.createElement('x-layout-guide-column') as LayoutGuideColumnElement;
+guide.rect = { x1: 10, y1: 10, x2: 100, y2: 200 };  // mm
+guide.fontSize = 4;
+guide.lineHeight = 5;
+guide.visible = true;
+document.body.appendChild(guide);
+```
+
+---
+
+### `<x-layout-cursor>`
+
+**편집 커서 오버레이**. `TextEditController`가 단락 shadow DOM에 추가하는 1px 폭의
+세로 라인입니다. 깜빡임 없음.
+
+#### Class: `LayoutCursorElement`
+
+```ts
+/**
+ * 편집 커서. `<x-layout-cursor>` 커스텀 엘리먼트.
+ *
+ * 좌표는 단락 로컬(px) 기준이다. `pointer-events: none`.
+ * `requestAnimationFrame`을 통해 변경을 디바운스한다.
+ */
+class LayoutCursorElement extends HTMLElement
+```
+
+#### 데이터 프로퍼티
+
+| 이름 | 타입 | 단위 | 설명 |
+|---|---|---|---|
+| `top` | `number` | px | 단락 로컬 좌표. |
+| `left` | `number` | px | 단락 로컬 좌표. |
+| `height` | `number` | px | 커서 높이. |
+| `visible` | `boolean` | — | 표시 여부. |
+
+> **자동 관리**: `TextEditController`가 마우스/키보드 이벤트에 따라 `top`/`left`/`height`를
+> 갱신합니다. 직접 조작할 필요는 없습니다.
+
+---
+
+### `<x-layout-selection>`
+
+**선택 영역 하이라이트 오버레이**. `TextEditController`가 관리합니다.
+
+#### Class: `LayoutSelectionElement`
+
+```ts
+/**
+ * 선택 영역 하이라이트. `<x-layout-selection>` 커스텀 엘리먼트.
+ *
+ * 모든 좌표는 단락 로컬(px) 기준.
+ */
+class LayoutSelectionElement extends HTMLElement
+```
+
+#### 메서드
+
+| 메서드 | 시그니처 | 설명 |
+|---|---|---|
+| `setRanges(ranges)` | `(ranges: { top, left, width, height }[]): void` | 하이라이트 영역을 설정. 빈 배열이면 모두 제거. |
+
+#### 내부 동작
+
+- 사각형 풀(`_pool`)을 유지하며, `setRanges` 호출 시 기존 사각형을 재사용하거나 새로 생성.
+- 각 사각형의 색상은 `rgba(0, 100, 200, 0.3)`.
+
+---
+
+## Core
+
+### `GridCalculator`
+
+문서/박스 단위의 컬럼 그리드와 픽셀-mm 변환 비율을 계산하는 모델.
+
+```ts
+class GridCalculator {
+  static create(data: GridCalculatorOptions): GridCalculator;
+  static get ppm: number;       // 픽셀/mm 변환 비율 (캐싱됨)
+  static resetPpm(): void;       // 캐시 무효화 (zoom/transform 후 호출)
+
+  get textStyle: TextStyle;
+  get paragraphStyle: ParagraphStyle;
+  get columnCount: number;
+  get columnCoords: Rect[];      // 각 컬럼의 (x1, y1, x2, y2)
+  get columnWidth: number[];     // 각 컬럼의 폭
+  get gaps: number[];           // 컬럼 간 간격
+  get lineHeight: number;        // fontSize × lineGap
+  get editableWidth: number;     // mm
+  get editableHeight: number;    // mm
+  get editableTextHeight: number; // editableHeight + (lineHeight - fontSize)
+  get fontSize: number;         // 상속 또는 기본값 (4)
+  get lineGap: number;          // 상속 또는 기본값 (1.25)
+
+  set data(data: GridCalculatorOptions): void;
+}
+```
+
+#### 정적 메서드
+
+```ts
+/**
+ * GridCalculator 인스턴스를 생성한다. `new` 직접 사용 금지.
+ *
+ * @param data - width, height, padding, columns, gap, paragraphStyle, textStyle
+ * @returns 새 GridCalculator 인스턴스
+ */
+static create(data: GridCalculatorOptions): GridCalculator;
+```
+
+```ts
+/**
+ * 픽셀/mm 변환 비율. 100mm div를 만들어 측정한 후 캐싱.
+ *
+ * @returns 픽셀/mm (예: 보통 3.78)
+ * @throws 픽셀이 0 이하일 때 (DOM 측정 실패)
+ *
+ * @example
+ * const px = mm * GridCalculator.ppm;
+ */
+static get ppm: number;
+```
+
+```ts
+/**
+ * ppm 캐시 무효화. zoom 변경, CSS transform, 인쇄 전환 시 호출.
+ */
+static resetPpm(): void;
+```
+
+#### `data` setter
+
+```ts
+/**
+ * 입력 데이터를 갱신하고 컬럼 그리드 좌표를 재계산.
+ *
+ * @param data - element, width, height, padding, columns, gap, paragraphStyle, textStyle
+ */
+set data(data: GridCalculatorOptions): void;
+```
+
+#### 사용 예제
+
+```ts
+const calc = GridCalculator.create({
+  element: docEl,
+  width: 210, height: 297,
+  paddingTop: 10, paddingLeft: 10, paddingRight: 10, paddingBottom: 10,
+  columns: 6, gap: 3,
+  paragraphStyle: { lineGap: 1.2 },
+  textStyle: { fontSize: 4 },
+});
+
+console.log(calc.columnCoords);    // Rect[6]
+console.log(calc.editableWidth);   // 190 - 3*5 = 175 (mm)
+console.log(calc.lineHeight);      // 4 × 1.2 = 4.8 (mm)
+```
+
+### `TextLayoutEngine`
+
+다중 컬럼 텍스트 래핑, 오버랩 회피, 스타일 생성을 담당하는 모델.
+
+```ts
+class TextLayoutEngine {
+  static create(options: TextLayoutEngineOptions): TextLayoutEngine;
+
+  // 렌더링 파이프라인
+  layoutStructure(): void;     // 컬럼 폭/ppm 측정
+  layoutText(): void;          // 문자 단위 줄바꿈
+  resetIncrementalState(): void; // _previousLineCount = -1, _previousOverflow = -1
+
+  // 스타일 생성
+  genColumnStyle(idx: number): Partial<CSSStyleDeclaration>;
+  genLineStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration>;
+  genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration>;
+  genCharStyle(char: string): Partial<CSSStyleDeclaration>;
+
+  // 게터
+  get inputContent: string | (string | TextBlockData)[];
+  get contents: TextBlockData[];
+  get inheritStyle: InheritStyle;
+  get textStyle: TextStyle;
+  get paragraphStyle: ParagraphStyle;
+  get columnCount: number;
+  get columnContents: TextLineData[][];  // 컬럼별 줄 데이터
+  get gaps: number[];
+  get lineHeight: number;
+  get overflow: number;          // 컨테이너 밖으로 밀려난 문자 수
+  get previousLineCount: number;
+  get previousOverflow: number;
+  get widthRatio: number;        // 장평 (기본 0.8)
+  get spaceRatio: number;        // 공백 너비 (em, 기본 0.25)
+  get columnWidths: number[];
+
+  // 세터
+  set inheritStyle(value: InheritStyle): void;
+  set data(options: TextLayoutEngineOptions): void;
+  set inputContent(value: string | (string | TextBlockData)[]): void;
+}
+```
+
+#### `layoutStructure()`
+
+```ts
+/**
+ * 구조적 레이아웃만 계산하고 캐싱. DOM 측정에 의존.
+ * 내부적으로 `initStructureAndMeasureColumns()` 호출.
+ */
+public layoutStructure(): void;
+```
+
+#### `layoutText()`
+
+```ts
+/**
+ * 문자 단위 줄바꿈 렌더링 실행. `layoutStructure()`가 먼저 호출되어야 함.
+ * 내부적으로 `_layoutTextIntoColumns()` 호출.
+ */
+public layoutText(): void;
+```
+
+#### `resetIncrementalState()`
+
+```ts
+/**
+ * 증분 렌더링 상태 초기화. 구조 변경 후 전체 재생성을 보장.
+ * `_previousLineCount`와 `_previousOverflow`를 -1로 설정.
+ */
+public resetIncrementalState(): void;
+```
+
+#### `genColumnStyle(idx)`
+
+```ts
+/**
+ * 컬럼 스타일 생성 (Flexbox 컨테이너).
+ *
+ * @param idx - 컬럼 인덱스 (0-based)
+ * @returns column 위치/크기/수직 정렬을 포함한 CSS 스타일
+ */
+public genColumnStyle(idx: number): Partial<CSSStyleDeclaration>;
+```
+
+#### `genLineStyle(textBlockStyle?)`
+
+```ts
+/**
+ * 줄 스타일 생성.
+ *
+ * - `lineGap` → `height` (mm) 계산
+ * - `textBlockStyle` → 폰트/색상/높이 오버라이드
+ *
+ * @param textBlockStyle - 블록 단위 스타일 (선택)
+ * @returns 줄(line) CSS 스타일
+ */
+public genLineStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration>;
+```
+
+#### `genPartStyle(textBlockStyle?)`
+
+```ts
+/**
+ * 파트(part, 줄 내부 세그먼트) 스타일 생성.
+ *
+ * - `letterSpacing` → em 단위 적용
+ * - `textAlign` → `justify-content` 매핑
+ *   ('justify' → 'space-between')
+ * - `textBlockStyle` → 폰트/색상/정렬 오버라이드
+ *
+ * @param textBlockStyle - 블록 단위 스타일 (선택)
+ * @returns 파트(part) CSS 스타일
+ */
+public genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration>;
+```
+
+#### `genCharStyle(char)`
+
+```ts
+/**
+ * 글자(span) 스타일 생성.
+ *
+ * - `widthRatio` → CSS `scale` 적용 (장평)
+ * - 반각 문자 → `min-width: 0.35em`
+ * - 전각 문자 → `min-width: 0.15em`
+ * - 공백 → `min-width: ${spaceRatio}em`
+ *
+ * @param char - 단일 글자
+ * @returns 글자(span) CSS 스타일
+ */
+public genCharStyle: (char: string) => Partial<CSSStyleDeclaration>;
+```
+
+#### `columnContents`
+
+`TextLineData[][]` — 컬럼별 줄 데이터. `LayoutColumnElement`가 이 데이터를 소비하여
+DOM을 만듭니다. **읽기 전용**으로 취급하세요.
+
+#### `overflow`
+
+컨테이너 밖으로 밀려난(잘린) 문자 수. `> 0`이면 `paragraph`가 `render-error` 이벤트를
+디스패치합니다.
+
+#### 예제
+
+```ts
+const engine = TextLayoutEngine.create({
+  content: 'Hello, world!',
+  column: 3, gap: 3,
+  paragraphStyle: { lineGap: 1.2, textAlign: 'justify' },
+  textStyle: { fontSize: 4, fontFamily: 'Myoungjo', color: 'black' },
+  inheritStyle: { parentWidth: 100, parentHeight: 200 },
+  paragraphEl: paragraphEl,
+  rootNode: paragraphEl.shadowRoot!,
+});
+
+engine.layoutStructure();
+engine.layoutText();
+
+console.log(engine.columnContents); // TextLineData[][]
+console.log(engine.overflow);        // 0
+```
+
+### `Rect`
+
+```ts
+type Rect = {
+  /** 좌측 경계 (mm) */
+  x1: number;
+  /** 상단 경계 (mm) */
+  y1: number;
+  /** 우측 경계 (mm) */
+  x2: number;
+  /** 하단 경계 (mm) */
+  y2: number;
+};
+```
+
+`GridCalculator.columnCoords`의 원소 타입. 가이드 컬럼의 위치 지정에도 사용됩니다.
+
+---
+
+## Resource Managers
+
+### `ColorRegistry`
+
+CMYK 색상 데이터 로드 + RGB 변환 + CSS 변수 주입을 관리하는 **싱글톤**.
+
+```ts
+class ColorRegistry {
+  static getInstance(): ColorRegistry;
+  static registerLoader(loader: ColorLoaderFn): void;
+  static resetLoader(): void;
+
+  init(colorSet?: CMYKColorSet): Promise<ColorMap[]>;
+  getCSSColor(name: string): string;
+  get(name: string): CMYKColor;
+  get colorMap: ColorMap[];
+  get ready: boolean;
+}
+
+type ColorLoaderFn = () => Promise<CMYKColorSet>;
+```
+
+#### 정적 메서드
+
+```ts
+/**
+ * 싱글톤 인스턴스 반환.
+ */
+static getInstance(): ColorRegistry;
+```
+
+```ts
+/**
+ * 커스텀 색상 로더 등록. 기본 `fetch('color.json')` 대신 사용.
+ *
+ * @param loader - CMYKColorSet을 반환하는 비동기 함수
+ *
+ * @example
+ * ColorRegistry.registerLoader(async () => {
+ *   const res = await fetch('/api/v1/colors');
+ *   return res.json() as Promise<CMYKColorSet>;
+ * });
+ */
+static registerLoader(loader: ColorLoaderFn): void;
+```
+
+```ts
+/**
+ * 커스텀 로더 제거. 기본 `fetch('color.json')`로 복귀.
+ */
+static resetLoader(): void;
+```
+
+#### 인스턴스 메서드
+
+```ts
+/**
+ * 색상 데이터를 로드하고 CSS 변수를 주입.
+ *
+ * - 화면 모드: `_loadServer()` (커스텀 로더 또는 `color.json` fetch)
+ * - 인쇄 모드: `colorSet` 인자 직접 사용
+ * - stylesheet이 없으면 (SSR/test) `_ready = true`만 설정하고 colorMap은 반환
+ *
+ * @param colorSet - 인쇄 모드에서 사용할 CMYKColorSet
+ * @returns ColorMap[] (RGB-CMYK 쌍)
+ * @throws {Error} 인쇄 모드인데 `colorSet`이 없을 때
+ *
+ * @example
+ * // 화면 모드
+ * await ColorRegistry.getInstance().init();
+ *
+ * // 인쇄 모드
+ * await ColorRegistry.getInstance().init({ black: { c:0, m:0, y:0, k:255 } });
+ */
+async init(colorSet?: CMYKColorSet): Promise<ColorMap[]>;
+```
+
+```ts
+/**
+ * CSS 변수 형태의 색상 문자열 반환.
+ *
+ * @param name - CMYK 색상 이름
+ * @returns `var(--colorman-${name})` 또는 `var(--colorman-default)`
+ * @throws {Error} `ready === false`일 때
+ *
+ * @example
+ * const bg = registry.getCSSColor('red');
+ * // → 'var(--colorman-red)'
+ */
+getCSSColor(name: string): string;
+```
+
+```ts
+/**
+ * CMYK 색상값 반환.
+ *
+ * @param name - CMYK 색상 이름
+ * @returns 해당 색상의 CMYK 값 또는 기본값
+ * @throws {Error} `ready === false`일 때
+ */
+get(name: string): CMYKColor;
+```
+
+#### 게터
+
+| 이름 | 타입 | 설명 |
+|---|---|---|
+| `colorMap` | `ColorMap[]` | RGB-CMYK 쌍 배열. |
+| `ready` | `boolean` | 초기화 완료 여부. |
+
+#### 예제
+
+```ts
+// 기본 사용
+const registry = ColorRegistry.getInstance();
+await registry.init();
+
+box.borderColor = 'red';      // 'var(--colorman-red)'로 렌더링
+const cmyk = registry.get('red');  // { c:0, m:255, y:255, k:0 }
+
+// 인쇄 모드: 데이터 주입
+const colorSet: CMYKColorSet = {
+  red: { c: 0, m: 255, y: 255, k: 0 },
+  blue: { c: 255, m: 0, y: 0, k: 0 },
+};
+await registry.init(colorSet);
+```
+
+### `FontLoader`
+
+폰트 로드 + `FontFace` API 등록을 관리하는 **싱글톤**.
+
+```ts
+class FontLoader {
+  static getInstance(): FontLoader;
+  static registerLoader(loader: FontLoaderFn): void;
+  static resetLoader(): void;
+
+  init(fonts?: Font[]): Promise<FontFace[]>;
+  getFontFamily(fontFamily?: string): string;
+  get fontFaces: FontFace[];
+  get ready: boolean;
+}
+
+type FontLoaderFn = () => Promise<Font[]>;
+```
+
+#### 정적 메서드
+
+```ts
+/**
+ * 커스텀 폰트 로더 등록. 기본 `fetch('fonts.json')` 대신 사용.
+ *
+ * @param loader - Font[]을 반환하는 비동기 함수
+ *
+ * @example
+ * FontLoader.registerLoader(async () => {
+ *   const res = await fetch('/api/v1/fonts');
+ *   return res.json() as Promise<Font[]>;
+ * });
+ */
+static registerLoader(loader: FontLoaderFn): void;
+```
+
+```ts
+/**
+ * 커스텀 로더 제거.
+ */
+static resetLoader(): void;
+```
+
+#### 인스턴스 메서드
+
+```ts
+/**
+ * 폰트 데이터를 로드하고 `FontFace` API로 등록.
+ *
+ * - 화면 모드: `ttfFilename` 또는 `base64Data` 사용
+ * - 인쇄 모드: `base64Data`만 사용
+ *
+ * @param fonts - 인쇄 모드에서 사용할 Font 배열
+ * @returns 로드된 FontFace[] 배열
+ * @throws {Error} 인쇄 모드인데 `fonts`가 없을 때
+ *
+ * @example
+ * // 화면 모드
+ * await FontLoader.getInstance().init();
+ *
+ * // 인쇄 모드
+ * await FontLoader.getInstance().init([
+ *   { family: 'Myoungjo', weight: 400, style: 'normal', base64Data: '...' },
+ * ]);
+ */
+async init(fonts?: Font[]): Promise<FontFace[]>;
+```
+
+```ts
+/**
+ * 폰트 패밀리명 반환.
+ *
+ * @param _fontFamily - 요청된 폰트 패밀리명 (현재 미사용, 항상 'Myoungjo' 반환)
+ * @returns 기본 폰트 패밀리명
+ * @throws {Error} `ready === false`일 때
+ *
+ * @example
+ * const family = FontLoader.getInstance().getFontFamily('Noto Sans');
+ * // → 'Myoungjo' (현재는 항상 동일)
+ */
+getFontFamily(_fontFamily?: string): string;
+```
+
+#### 게터
+
+| 이름 | 타입 | 설명 |
+|---|---|---|
+| `fontFaces` | `FontFace[]` | 등록된 FontFace 배열. |
+| `ready` | `boolean` | 초기화 완료 여부. |
+
+> **하드코딩된 동작**: `getFontFamily()`는 현재 인자 무관하게 `'Myoungjo'`를 반환합니다.
+> 폰트 패밀리 매핑은 아직 구현되지 않았습니다.
+
+#### 예제
+
+```ts
+await FontLoader.getInstance().init();
+console.log(FontLoader.getInstance().ready); // true
+```
+
+---
+
+## Edit
+
+### `EditManager`
+
+전역 편집 상태를 관리하는 **싱글톤**. 포커스, 선택, 편집 모드, 레이아웃 선택, 삽입 모드
+모두를 이 매니저로 제어합니다.
+
+```ts
+class EditManager {
+  static getInstance(): EditManager;
+
+  // 이벤트
+  addEventListener(type: EditManagerEventType, listener: EditManagerEventListener): void;
+  removeEventListener(type: EditManagerEventType, listener: EditManagerEventListener): void;
+
+  // 텍스트 포커스
+  focusParagraph(target, options?): boolean;
+  blurParagraph(target?): boolean;
+  deactivateAll(): void;
+
+  // 텍스트 편집 모드
+  get textEditMode: boolean;
+  set textEditMode(value: boolean): void;
+  setEditableTextRoles(roles: BoxRole[] | null): void;
+  get editableTextRoles: ReadonlySet<BoxRole> | null;
+  setEditableTextBoxIds(ids: string[] | null): void;
+  get editableTextBoxIds: ReadonlySet<string> | null;
+  setEditableParagraphIds(ids: string[] | null): void;
+  get editableParagraphIds: ReadonlySet<string> | null;
+  addEditableParagraph(id: string): void;
+  removeEditableParagraph(id: string): void;
+
+  // 레이아웃 편집 모드
+  get layoutEditMode: boolean;
+  set layoutEditMode(value: boolean): void;
+  setEditableRoles(roles: BoxRole[] | null): void;
+  get editableRoles: ReadonlySet<BoxRole> | null;
+  setEditableBoxIds(ids: string[] | null): void;
+  get editableBoxIds: ReadonlySet<string> | null;
+  addEditableBox(id: string): void;
+  removeEditableBox(id: string): void;
+  setEditableRootId(id: string | null): void;
+  get editableRootId: string | null;
+
+  // 레이아웃 선택
+  selectLayout(target): boolean;
+  clearLayoutSelection(): void;
+  get selectedLayouts: LayoutElement[];
+  get selectedLayoutIds: string[];
+
+  // 삽입 모드
+  get insertMode: InsertMode | null;
+  set insertMode(mode: InsertMode | null): void;
+  activateInsert(mode: InsertMode): void;
+  deactivateInsert(): void;
+  handleInsertMouseDown(event: MouseEvent): void;
+
+  // 상태 조회
+  get focusedParagraph: LayoutParagraphElement | null;
+  get focusedController: TextEditController | null;
+  get cursorOffset: number | null;
+  get selection: SelectionRange | null;
+  get currentStyle: CurrentStyle | null;
+  get controllers: Set<TextEditController>;
+
+  // 판별
+  isParagraphEditable(paragraph: LayoutParagraphElement): boolean;
+  isBoxEditable(box: LayoutBoxElement): boolean;
+}
+```
+
+#### 이벤트
+
+```ts
+type EditManagerEventType =
+  | 'focusChange'           // 포커스 변경
+  | 'textChange'            // 텍스트 변경
+  | 'styleChange'           // 스타일 변경
+  | 'selectionStart'        // 선택 시작
+  | 'selectionEnd'          // 선택 종료
+  | 'cursorMove'            // 커서 이동
+  | 'layoutSelectionChange' // 레이아웃 선택 변경
+  | 'layoutMove'            // 레이아웃 이동
+  | 'layoutResize'          // 레이아웃 리사이즈
+  | 'insert'                // 삽입 완료
+  | 'insertCancel';         // 삽입 취소
+
+interface EditManagerEvent {
+  type: EditManagerEventType;
+  paragraph: LayoutParagraphElement;
+  controller: TextEditController;
+  previousParagraph?: LayoutParagraphElement | null;
+  previousController?: TextEditController | null;
+  selectedLayouts?: LayoutElement[];
+  previousLayouts?: LayoutElement[];
+  layoutElement?: LayoutElement;
+  previousLeft?: number; top?: number; left?: number;
+  previousWidth?: number; width?: number; previousHeight?: number; height?: number;
+  canceled?: boolean;
+}
+
+type EditManagerEventListener = (event: EditManagerEvent) => void;
+```
+
+#### 텍스트 포커스
+
+```ts
+/**
+ * 단락에 포커스 설정.
+ *
+ * - `editableText = false`인 단락이면 자동으로 `true`로 만들어 컨트롤러를 생성.
+ * - `options.selection`이 있으면 우선 적용.
+ * - `options.cursorOffset`만 있으면 그 오프셋으로 커서 이동.
+ *
+ * @param target - 단락 요소 또는 ID
+ * @param options - { cursorOffset?, selection? }
+ * @returns 성공 여부
+ */
+focusParagraph(
+  target: LayoutParagraphElement | string,
+  options?: { cursorOffset?: number; selection?: SelectionRange },
+): boolean;
+```
+
+```ts
+/**
+ * 포커스 해제. `target` 생략 시 현재 포커스된 단락.
+ *
+ * @param target - 단락 요소 또는 ID (선택)
+ * @returns 성공 여부
+ */
+blurParagraph(target?: LayoutParagraphElement | string): boolean;
+```
+
+```ts
+/**
+ * 모든 단락의 편집 모드를 비활성화.
+ */
+deactivateAll(): void;
+```
+
+#### 텍스트 편집 모드
+
+```ts
+/**
+ * 텍스트 편집 모드 활성 여부.
+ *
+ * `true`이면 `isParagraphEditable()` 통과 시 단락 편집 가능.
+ * `false`이면 모든 단락이 편집 불가, 포커스 해제.
+ *
+ * @example
+ * const manager = EditManager.getInstance();
+ * manager.setEditableTextRoles(['body', 'title']);
+ * manager.textEditMode = true;
+ * // → 부모 box role이 'body' 또는 'title'인 paragraph만 편집 가능
+ */
+get textEditMode: boolean;
+set textEditMode(value: boolean): void;
+```
+
+```ts
+/**
+ * 텍스트 편집 허용 box role 집합. null이면 role 제한 없음.
+ *
+ * @param roles - 허용할 BoxRole 배열. null이면 제한 해제.
+ */
+setEditableTextRoles(roles: BoxRole[] | null): void;
+```
+
+```ts
+/**
+ * 텍스트 편집 허용 box id 집합. null이면 제한 없음.
+ */
+setEditableTextBoxIds(ids: string[] | null): void;
+```
+
+```ts
+/**
+ * 텍스트 편집 허용 paragraph id 집합. null이면 제한 없음.
+ */
+setEditableParagraphIds(ids: string[] | null): void;
+```
+
+```ts
+/**
+ * 단일 paragraph id를 허용 목록에 추가.
+ */
+addEditableParagraph(id: string): void;
+```
+
+```ts
+/**
+ * 단일 paragraph id를 허용 목록에서 제거.
+ */
+removeEditableParagraph(id: string): void;
+```
+
+```ts
+/**
+ * 해당 paragraph가 텍스트 편집 가능한지 판별.
+ *
+ * 판별 규칙 (AND):
+ * 1. textEditMode === true
+ * 2. 조상 box 중 lock 없음
+ * 3. editableRootId가 설정돼 있으면 root 내부에 있어야 함
+ * 4. editableTextRoles !== null이면 부모 box role이 포함돼야 함
+ * 5. editableTextBoxIds !== null이면 부모 box id가 포함돼야 함
+ * 6. editableParagraphIds !== null이면 paragraph id가 포함돼야 함
+ */
+isParagraphEditable(paragraph: LayoutParagraphElement): boolean;
+```
+
+#### 레이아웃 편집 모드
+
+```ts
+/**
+ * 레이아웃 편집 모드 활성 여부.
+ *
+ * `true`이면 `isBoxEditable()` 통과 시 박스 드래그/리사이즈 가능.
+ */
+get layoutEditMode: boolean;
+set layoutEditMode(value: boolean): void;
+```
+
+```ts
+/**
+ * 레이아웃 편집 허용 role 집합. null이면 role 제한 없음.
+ */
+setEditableRoles(roles: BoxRole[] | null): void;
+```
+
+```ts
+/**
+ * 레이아웃 편집 허용 box id 집합. null이면 제한 없음.
+ */
+setEditableBoxIds(ids: string[] | null): void;
+```
+
+```ts
+/**
+ * 단일 box id를 허용 목록에 추가.
+ */
+addEditableBox(id: string): void;
+```
+
+```ts
+/**
+ * 단일 box id를 허용 목록에서 제거.
+ */
+removeEditableBox(id: string): void;
+```
+
+```ts
+/**
+ * 편집 루트 box id.
+ *
+ * `null`이 아니면 해당 box 내부의 요소만 편집 가능, 루트 box 자체는 이동/리사이즈 불가.
+ *
+ * @example
+ * manager.setEditableRootId('box-1');
+ * manager.setEditableRoles(['body']);
+ * manager.layoutEditMode = true;
+ * // → box-1 내부의 role='body' box만 편집 가능
+ */
+setEditableRootId(id: string | null): void;
+```
+
+```ts
+/**
+ * 해당 box가 레이아웃 편집 가능한지 판별.
+ */
+isBoxEditable(box: LayoutBoxElement): boolean;
+```
+
+#### 레이아웃 선택
+
+```ts
+/**
+ * 레이아웃 요소를 선택.
+ *
+ * - `editableLayout`이 켜진 box만 선택 가능.
+ * - `target`은 단일/배열 모두 지원. ID 문자열도 가능.
+ *
+ * @param target - 단일 요소, ID, 또는 그 배열
+ * @returns 선택 성공 여부
+ */
+selectLayout(target: LayoutElement | string | (LayoutElement | string)[]): boolean;
+```
+
+```ts
+/**
+ * 레이아웃 선택 모두 해제.
+ */
+clearLayoutSelection(): void;
+```
+
+```ts
+/** 현재 선택된 레이아웃 요소들 */
+get selectedLayouts: LayoutElement[];
+
+/** 현재 선택된 레이아웃 요소들의 ID 배열 */
+get selectedLayoutIds: string[];
+```
+
+#### 삽입 모드
+
+```ts
+/**
+ * 삽입 모드. null이면 비활성.
+ *
+ * `null`이 아닌 값을 설정하면 드래그-삽입 모드가 활성화되어
+ * 문서 표면에서 드래그로 새 요소를 그릴 수 있다.
+ */
+get insertMode: InsertMode | null;
+set insertMode(mode: InsertMode | null): void;
+```
+
+```ts
+/** 삽입 모드 활성화. insertMode = mode와 동일. */
+activateInsert(mode: InsertMode): void;
+
+/** 삽입 모드 비활성화. insertMode = null과 동일. */
+deactivateInsert(): void;
+
+/** 레이아웃 편집 핸들러에서 mousedown 위임. */
+handleInsertMouseDown(event: MouseEvent): void;
+```
+
+#### 상태 조회 게터
+
+| 이름 | 타입 | 설명 |
+|---|---|---|
+| `focusedParagraph` | `LayoutParagraphElement \| null` | 포커스된 단락. |
+| `focusedController` | `TextEditController \| null` | 포커스된 컨트롤러. |
+| `cursorOffset` | `number \| null` | 현재 커서 오프셋 (소스 텍스트). |
+| `selection` | `SelectionRange \| null` | 현재 선택 영역. |
+| `currentStyle` | `CurrentStyle \| null` | 커서 위치의 유효 스타일. |
+| `controllers` | `Set<TextEditController>` | 등록된 모든 컨트롤러. |
+
+#### 예제
+
+```ts
+const manager = EditManager.getInstance();
+
+// 텍스트 포커스
+manager.focusParagraph('paragraph-1', { cursorOffset: 5 });
+
+// 편집 모드 + 허용 범위
+manager.setEditableTextRoles(['body', 'title']);
+manager.textEditMode = true;
+
+// 레이아웃 편집 모드 + 루트 제한
+manager.setEditableRootId('root-box');
+manager.setEditableRoles(['body']);
+manager.layoutEditMode = true;
+
+// 이벤트 구독
+manager.addEventListener('textChange', (e) => {
+  console.log('Text changed in', e.paragraph.id);
+});
+manager.addEventListener('layoutSelectionChange', (e) => {
+  console.log('Selected:', e.selectedLayouts?.map(b => b.id));
+});
+manager.addEventListener('insert', (e) => {
+  console.log('Inserted', e.layoutElement);
+});
+```
+
+### `TextEditController`
+
+단락 편집 상태(커서, 선택, IME 입력, 클립보드)를 관리하는 컨트롤러. `paragraph.editableText = true`
+설정 시 자동 생성됩니다.
+
+```ts
+class TextEditController {
+  constructor(paragraph: LayoutParagraphElement);
+
+  // 게터
+  get cursorOffset: number;
+  get selection: SelectionRange | null;
+  get currentStyle: CurrentStyle;
+
+  // 제어
+  focus(): void;
+  blur(): void;
+  setCursor(position: CursorPosition): void;
+  setSelection(range: SelectionRange): void;
+  destroy(): void;
+  postRender(_fullRebuild?: boolean): void;
+}
+
+type CurrentStyle = {
+  textStyle: TextStyle;
+  paragraphStyle: ParagraphStyle;
+};
+```
+
+#### 게터
+
+```ts
+/**
+ * 커서의 현재 소스 텍스트 오프셋 (0-based).
+ */
+get cursorOffset: number;
+```
+
+```ts
+/**
+ * 현재 선택 영역. 선택이 없으면 null.
+ */
+get selection: SelectionRange | null;
+```
+
+```ts
+/**
+ * 현재 커서 위치에서 유효한 TextStyle/ParagraphStyle.
+ *
+ * 단락의 기본 스타일 + InheritStyle + 커서 위치 블록의 textBlockStyle을 모두 병합.
+ *
+ * @returns 현재 스타일
+ */
+get currentStyle: CurrentStyle;
+```
+
+#### 메서드
+
+```ts
+/**
+ * 컨트롤러에 포커스. EditManager._requestFocus 호출.
+ */
+focus(): void;
+```
+
+```ts
+/**
+ * 컨트롤러 포커스 해제. EditManager._releaseFocus 호출.
+ */
+blur(): void;
+```
+
+```ts
+/**
+ * 외부에서 커서 위치 설정.
+ *
+ * @param position - { textOffset: number }
+ *
+ * @example
+ * controller.setCursor({ textOffset: 10 });
+ */
+setCursor(position: CursorPosition): void;
+```
+
+```ts
+/**
+ * 외부에서 선택 영역 설정.
+ *
+ * @param range - SelectionRange
+ */
+setSelection(range: SelectionRange): void;
+```
+
+```ts
+/**
+ * 컨트롤러 제거. 이벤트 리스너, DOM, EditManager 등록 모두 해제.
+ */
+destroy(): void;
+```
+
+```ts
+/**
+ * 단락 `render()` 직후 호출되어 좌표 매퍼를 재구축하고 커서/선택을 다시 배치.
+ *
+ * @param _fullRebuild - DOM이 새로 생성됐으면 true (현재는 항상 full rebuild)
+ */
+postRender(_fullRebuild?: boolean): void;
+```
+
+#### IME / Composition
+
+`compositionstart`, `compositionupdate`, `compositionend` 이벤트를 처리하여 한국어,
+일본어, 중국어 IME 입력을 지원합니다. composition 중에는 textarea와 렌더링된 텍스트가
+동기화되지 않으며, `compositionend` 시점에 적용됩니다.
+
+#### 마우스 인터랙션
+
+- **단일 클릭**: 가장 가까운 오프셋으로 커서 이동.
+- **드래그**: 선택 영역 설정.
+- **더블 클릭**: 단어 단위 선택.
+- **트리플 클릭**: 줄 단위 선택.
+
+#### 키보드 인터랙션
+
+| 키 | 동작 |
+|---|---|
+| `←` `→` `↑` `↓` | 단일 글자 이동 |
+| `Home` / `End` | 줄 시작/끝 |
+| `Shift + 화살표` | 선택 확장 |
+| `Ctrl/Cmd + A` | 전체 선택 |
+| `Backspace` / `Delete` | 삭제 |
+| `Enter` | 단락 분리 (`\n`) |
+| `Ctrl/Cmd + Z` / `Shift + Z` | Undo/Redo |
+| `Ctrl/Cmd + C/X/V` | 클립보드 |
+
+### `TextEditCoordinateMapper`
+
+소스 텍스트 오프셋 ↔ 렌더링된 DOM 좌표 간의 양방향 매핑.
+
+```ts
+class TextEditCoordinateMapper {
+  constructor(paragraph: LayoutParagraphElement);
+
+  rebuild(): void;
+  sourceOffset(renderedOffset: number): number | null;
+  renderedOffset(sourceOffset: number): number | null;
+  getCharRect(offset: number): DOMRect | null;
+  getCharOffsetFromPoint(x: number, y: number): CursorPosition | null;
+  getNearestOffsetFromPoint(x: number, y: number): CursorPosition | null;
+  getTextRange(startOffset: number, endOffset: number): { top, left, width, height }[];
+  getTextContent(startOffset: number, endOffset: number): string;
+  getFirstColumnRect(): { top, left, fontSize } | null;
+  findVisualLineBounds(sourceOffset: number): { start, end } | null;
+  getSpanByOffset(offset: number): HTMLSpanElement | null;
+}
+```
+
+#### 메서드
+
+```ts
+/**
+ * 매퍼를 다시 빌드. `postRender()`에서 호출.
+ */
+rebuild(): void;
+```
+
+```ts
+/**
+ * 렌더링 오프셋 → 소스 오프셋.
+ *
+ * @param renderedOffset - 화면에 보이는 글자 위치
+ * @returns 소스 텍스트의 문자 오프셋 또는 null
+ */
+sourceOffset(renderedOffset: number): number | null;
+```
+
+```ts
+/**
+ * 소스 오프셋 → 렌더링 오프셋.
+ *
+ * @param sourceOffset - 소스 텍스트의 문자 오프셋
+ * @returns 화면에 보이는 글자 위치 또는 null
+ */
+renderedOffset(sourceOffset: number): number | null;
+```
+
+```ts
+/**
+ * 소스 오프셋의 글자 사각형 좌표 (viewport 기준).
+ *
+ * @param offset - 소스 오프셋
+ * @returns DOMRect 또는 null
+ */
+getCharRect(offset: number): DOMRect | null;
+```
+
+```ts
+/**
+ * 화면 좌표 → 가장 가까운 소스 오프셋 (정확한 hit test).
+ *
+ * @param x - viewport X (px)
+ * @param y - viewport Y (px)
+ * @returns CursorPosition 또는 null
+ */
+getCharOffsetFromPoint(x: number, y: number): CursorPosition | null;
+```
+
+```ts
+/**
+ * 화면 좌표 → 가장 가까운 소스 오프셋 (대략적 hit test).
+ * 공백 영역(줄의 처음/끝)도 처리.
+ */
+getNearestOffsetFromPoint(x: number, y: number): CursorPosition | null;
+```
+
+```ts
+/**
+ * 텍스트 범위를 화면 사각형 배열로 변환 (선택 하이라이트용).
+ *
+ * @param startOffset - 시작 오프셋
+ * @param endOffset - 끝 오프셋
+ * @returns 단락 로컬 px 좌표 사각형 배열
+ */
+getTextRange(startOffset: number, endOffset: number): {
+  top: number; left: number; width: number; height: number;
+}[];
+```
+
+```ts
+/**
+ * 소스 오프셋 범위의 실제 텍스트 (공백·줄바꿈 포함).
+ */
+getTextContent(startOffset: number, endOffset: number): string;
+```
+
+```ts
+/**
+ * 첫 번째 컬럼의 위치/글자 크기.
+ */
+getFirstColumnRect(): { top: number; left: number; fontSize: number } | null;
+```
+
+```ts
+/**
+ * 특정 오프셋이 속한 시각적 줄의 시작/끝 오프셋.
+ */
+findVisualLineBounds(sourceOffset: number): { start: number; end: number } | null;
+```
+
+```ts
+/**
+ * 렌더링 오프셋에 해당하는 DOM span 요소.
+ */
+getSpanByOffset(offset: number): HTMLSpanElement | null;
+```
+
+### `InsertController`
+
+`EditManager.insertMode`가 활성화되었을 때 마우스 드래그로 새 요소를 그려서 삽입하는
+컨트롤러. 일반적으로 직접 인스턴스화하지 않습니다.
+
+```ts
+class InsertController {
+  constructor(document: LayoutDocumentElement);
+
+  get mode: InsertMode | null;
+  setMode(mode: InsertMode | null): void;
+  startDrag(event: MouseEvent): void;
+  destroy(): void;
+}
+```
+
+```ts
+/**
+ * 컨트롤러의 현재 모드.
+ */
+get mode: InsertMode | null;
+```
+
+```ts
+/**
+ * 모드 변경. null이면 비활성.
+ */
+setMode(mode: InsertMode | null): void;
+```
+
+```ts
+/**
+ * mousedown 이벤트 위임.
+ */
+startDrag(event: MouseEvent): void;
+```
+
+```ts
+/**
+ * 컨트롤러 제거.
+ */
+destroy(): void;
+```
+
+### `LayoutEditController`
+
+레이아웃 편집 모드에서 마우스/키보드 인터랙션을 처리하는 컨트롤러. `EditManager`가
+자동으로 생성/관리합니다.
+
+```ts
+class LayoutEditController {
+  constructor(doc: HTMLElement);
+
+  attach(): void;
+  detach(): void;
+  destroy(): void;
+}
+```
+
+```ts
+/**
+ * 이벤트 리스너를 등록하고 편집 모드를 활성화.
+ */
+attach(): void;
+```
+
+```ts
+/**
+ * 이벤트 리스너를 해제하고 편집 모드를 비활성.
+ */
+detach(): void;
+```
+
+```ts
+/**
+ * 컨트롤러 완전 제거.
+ */
+destroy(): void;
+```
+
+---
+
+## Types
+
+### Layout Types
+
+#### `DocumentData`
+
+```ts
+type DocumentData = {
+  width: number;                       // mm (필수)
+  height: number;                      // mm (필수)
+  paddingTop?: number;                 // 기본 0
+  paddingRight?: number;               // 기본 0
+  paddingBottom?: number;              // 기본 0
+  paddingLeft?: number;                // 기본 0
+  columns: number | number[];          // 균등 분할 또는 명시적 폭
+  gap: number | number[];              // 균등 간격 또는 명시적 간격
+  paragraphStyle: ParagraphStyle;      // 필수
+  textStyle: TextStyle;                // 필수
+  children?: BoxData[];
+};
+```
+
+#### `BoxData`
+
+```ts
+type BoxData = {
+  type: 'box';
+  id?: string;
+  left: number;        // mm (static: 컬럼 인덱스)
+  top: number;         // mm
+  width: number;       // mm (static: 컬럼 수)
+  height: number;      // mm (static: 줄 수)
+  position?: 'static' | 'absolute';  // 기본 'static'
+  zIndex?: number;
+  backgroundColor?: string;
+  borderTopWidth?: number;
+  borderRightWidth?: number;
+  borderBottomWidth?: number;
+  borderLeftWidth?: number;
+  borderColor?: string;
+  borderStyle?: 'solid' | 'dotted' | 'dashed';
+  paddingTop?: number;
+  paddingRight?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+  role?: BoxRole;
+  groupMember?: string;
+  priority?: number;
+  lock?: boolean;
+  children?: (BoxData | ParagraphData | TextData | ImageData)[];
+};
+
+type BoxPosition = 'static' | 'absolute';
+type BoxBorderStyle = 'solid' | 'dotted' | 'dashed';
+type BoxRole =
+  | 'group-article' | 'body' | 'image' | 'title' | 'caption'
+  | 'group-image' | 'header' | 'ad' | 'none';
+```
+
+#### `ParagraphData`
+
+```ts
+type ParagraphData = {
+  type: 'paragraph';
+  id?: string;
+  column?: number | number[];
+  gap?: number | number[];
+  content: string | (string | TextBlockData)[];
+  paragraphStyle?: ParagraphStyle;
+  textStyle?: TextStyle;
+  zIndex?: number;
+};
+```
+
+#### `TextData`
+
+```ts
+type TextData = {
+  type: 'text';
+  id?: string;
+  content: string;
+  paragraphStyle?: ParagraphStyle;
+  textStyle?: TextStyle;
+};
+```
+
+#### `TextBlockData` / `TextPartData` / `TextLineData`
+
+```ts
+type TextBlockData = {
+  content: string;
+  textBlockStyle?: TextBlockStyle;
+};
+
+type OverlapParts = { x1: number; x2: number };
+
+type TextPartData = {
+  content: string[];
+  left: number;     // mm (오버랩 회피 여백)
+  width: number;    // mm
+};
+
+type TextLineData = {
+  firstOfBlock?: boolean;
+  firstOfText?: boolean;
+  endOfBlock?: boolean;
+  endOfText?: boolean;
+  parts: TextPartData[];
+  textBlockStyle?: TextBlockStyle;
+};
+```
+
+`TextLineData`는 **내부 전용** — `TextLayoutEngine`이 자동 생성합니다.
+
+#### `ImageData`
+
+```ts
+type ImageData = {
+  type: 'image';
+  id?: string;
+  x: number;       // 원본 픽셀
+  y: number;       // 원본 픽셀
+  width: number;   // 원본 픽셀
+  height: number;  // 원본 픽셀
+  dpi: number;
+  url: string;
+  zIndex?: number;
+  overlapPadding?: number | {
+    top?: number; right?: number; bottom?: number; left?: number;
+  };
+};
+```
+
+#### `GuideColumnData`
+
+```ts
+type GuideColumnData = {
+  type: 'guide-column';
+  id?: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  visible: boolean;
+  fontSize: number;
+  lineHeight: number;
+};
+```
+
+### Style Types
+
+#### `TextStyle`
+
+```ts
+type TextStyle = {
+  color?: string;          // CSS 색상 또는 CMYK 이름
+  fontFamily?: string;
+  fontWeight?: number;     // 기본 400
+  fontStyle?: 'normal' | 'italic';
+  fontSize?: number;       // mm, 기본 4
+  letterSpacing?: number;  // em
+  widthRatio?: number;     // 장평, 기본 0.8
+  spaceRatio?: number;     // 공백 최소 너비 (em), 기본 0.25
+};
+```
+
+#### `ParagraphStyle`
+
+```ts
+type ParagraphStyle = {
+  lineGap?: number;        // lineHeight = fontSize × lineGap, 기본 1.25
+  verticalAlign?: 'top' | 'center' | 'bottom';  // 기본 'top'
+  textAlign?: 'left' | 'right' | 'center' | 'justify';  // 기본 'justify'
+};
+```
+
+#### `TextBlockStyle`
+
+```ts
+type TextBlockStyle = {
+  fontFamily?: string;
+  fontSize?: number;       // mm
+  fontWeight?: number;
+  color?: string;
+  textAlign?: 'left' | 'right' | 'center' | 'justify';
+};
+```
+
+#### `InheritStyle`
+
+```ts
+type InheritStyle = TextStyle & ParagraphStyle & {
+  parentWidth: number;     // mm
+  parentHeight: number;    // mm
+  paddingTop?: number;
+  paddingRight?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+};
+```
+
+### Print Types
+
+#### `PrintPostData`
+
+```ts
+type PrintPostData<T = BoxData | ImageData | ParagraphData> = {
+  color?: CMYKColor;       // 인쇄용 CMYK 색상
+  data: T;                 // 원본 데이터
+  rect: PrintPostDataRect;
+};
+
+type PrintPostDataRect = {
+  x: number;      // viewport 픽셀
+  y: number;
+  width: number;
+  height: number;
+};
+```
+
+#### `ColorMap`
+
+```ts
+type ColorMap = {
+  rgb: RGBColor;
+  cmyk: CMYKColor;
+};
+
+type RGBColor = { r: number; g: number; b: number };
+type CMYKColor = { c: number; m: number; y: number; k: number };
+type CMYKColorSet = { [name: string]: CMYKColor };
+```
+
+### Edit Types
+
+#### `CursorPosition`
+
+```ts
+type CursorPosition = {
+  textOffset: number;  // 0-based, '\n' 포함
+};
+```
+
+#### `SelectionRange`
+
+```ts
+class SelectionRange {
+  readonly anchor: CursorPosition;
+  readonly focus: CursorPosition;
+
+  constructor(anchor: CursorPosition, focus: CursorPosition);
+
+  /** 오프셋 두 개로 SelectionRange 생성 */
+  static fromOffsets(anchor: number, focus: number): SelectionRange;
+
+  /** anchor/focus를 문서 순서대로 정렬 */
+  normalized(): { start: CursorPosition; end: CursorPosition };
+}
+```
+
+#### `InsertMode` / `InsertEventDetail`
+
+```ts
+type InsertType = 'box' | 'text' | 'paragraph' | 'image';
+type InsertPosition = 'absolute' | 'static';
+
+interface InsertMode {
+  type: InsertType;
+  position: InsertPosition;
+}
+
+interface InsertEventDetail {
+  type: InsertType;
+  position: InsertPosition;
+  element: HTMLElement;    // 삽입된 박스
+  container: HTMLElement;  // 부모
+  left: number;            // static: 컬럼 인덱스, absolute: mm
+  top: number;             // static: 라인 인덱스, absolute: mm
+  width: number;
+  height: number;
+  zIndex: number;
+  canceled: boolean;       // ESC로 취소 시 true
+}
+```
+
+#### `LayoutElement` (EditManager 보조 타입)
+
+```ts
+type LayoutElement = LayoutBoxElement;
+```
+
+---
+
+## Constants
+
+`@/constants`에서 export되는 모든 상수:
+
+| 이름 | 값 | 단위 | 설명 |
+|---|---|---|---|
+| `DEFAULT_BORDER_STYLE` | `'solid'` | — | 박스 테두리 기본 스타일. |
+| `DEFAULT_FONT_SIZE` | `4` | mm | 글자 크기 기본값. |
+| `DEFAULT_FONT_STYLE` | `'normal'` | — | 폰트 스타일 기본값. |
+| `DEFAULT_FONT_WEIGHT` | `400` | — | 폰트 굵기 기본값. |
+| `DEFAULT_LINE_GAP` | `1.25` | — | `lineHeight = fontSize × lineGap`. |
+| `DEFAULT_PPM` | `96 / 25.4` | px/mm | 화면 DPI 기준 픽셀/mm 비율. |
+| `DEFAULT_IMAGE_DPI` | `72` | DPI | 이미지 기본 해상도. |
+| `DEFAULT_SPACE_RATIO` | `0.25` | em | 공백 최소 너비. |
+| `DEFAULT_LETTER_SPACING` | `-0.1` | em | 자간. |
+| `DEFAULT_WIDTH_RATIO` | `0.8` | — | 장평 (글자 가로폭 비율). |
+| `DEFAULT_TEXT_ALIGN` | `'justify'` | — | 양쪽 정렬. |
+| `DEFAULT_VERTICAL_ALIGN` | `'top'` | — | 상단 정렬. |
+
+---
+
+## Utilities
+
+### `checkOverlap(base, target)`
+
+```ts
+/**
+ * 두 요소의 화면 사각형이 교차하는지 검사.
+ *
+ * @param baseElement - 기준 요소
+ * @param targetElement - 대상 요소
+ * @returns 화면상 교차 여부
+ */
+const checkOverlap: (base: HTMLElement, target: HTMLElement) => boolean;
+```
+
+### `mergeOverlapParts(parts)`
+
+```ts
+/**
+ * 인접한 오버랩 구간을 병합.
+ *
+ * @param parts - 오버랩 구간 배열
+ * @returns 병합된 구간 배열
+ */
+const mergeOverlapParts: (parts: OverlapParts[]) => OverlapParts[];
+```
+
+### `getOverlapSizePX(base, target)`
+
+```ts
+/**
+ * 오버랩 크기 계산. 이미지 overlapPadding 적용 시 타원형 감지.
+ *
+ * @param baseElement - 기준 (보통 텍스트 라인)
+ * @param targetElement - LayoutBoxElement (보통 이미지 박스)
+ * @returns { direction: 'NONE' | 'COVERS' | 'PART', parts: OverlapParts[] }
+ */
+const getOverlapSizePX: (
+  base: HTMLElement,
+  target: LayoutBoxElement,
+) => { direction: 'NONE' | 'COVERS' | 'PART', parts: OverlapParts[] };
+```
+
+### `genUUID()`
+
+```ts
+/**
+ * 랜덤 ID 생성 (`Date.now()` 기반 BigInt → base36).
+ * 박스/단락/이미지 요소의 기본 id로 사용.
+ */
+const genUUID: () => string;
+```
+
+### `genRandom(min?, max?)`
+
+```ts
+/**
+ * `Math.random()` 기반 헬퍼. `@/utils/random`에 있지만
+ * `utils/index.ts`에서는 export되지 않음.
+ */
+const genRandom: (min?: number, max?: number) => number;
+```
+
+---
+
+## Examples
+
+`@/examples`에서 export되는 데모 데이터:
+
+```ts
+export const exampleData: DocumentData;  // 신문 1면 데모
+```
+
+`exampleData`는 5-컬럼 신문 레이아웃으로, 다음을 포함합니다:
+- 제목 (10mm 큰 글씨)
+- 3개 본문 단락 (이미지 오버랩 회피 포함)
+- 광고 박스 (외곽선)
+
+```ts
+import { exampleData } from 'layout-element';
+
+const doc = document.querySelector('x-layout-document')!;
+doc.data = exampleData;
+```
+
+---
+
+## 이벤트 레퍼런스
+
+| 이벤트 | 발생 시점 | 대상 | `detail` |
+|---|---|---|---|
+| `render-error` | 단락 오버플로우 시 | `<x-layout-paragraph>` | `{ id, type: 'text-overflow', overflow: number }` |
+| EditManager `focusChange` | 포커스 변경 | `EditManager` | `{ paragraph, controller, previousParagraph, previousController }` |
+| EditManager `textChange` | 텍스트 변경 | `EditManager` | `{ paragraph, controller }` |
+| EditManager `styleChange` | 스타일 변경 | `EditManager` | `{ paragraph, controller }` |
+| EditManager `selectionStart` | 선택 시작 | `EditManager` | `{ paragraph, controller }` |
+| EditManager `selectionEnd` | 선택 종료 | `EditManager` | `{ paragraph, controller }` |
+| EditManager `cursorMove` | 커서 이동 | `EditManager` | `{ paragraph, controller }` |
+| EditManager `layoutSelectionChange` | 레이아웃 선택 변경 | `EditManager` | `{ selectedLayouts, previousLayouts, ... }` |
+| EditManager `layoutMove` | 박스 이동 | `EditManager` | `{ layoutElement, previousLeft, left, previousTop, top, canceled }` |
+| EditManager `layoutResize` | 박스 리사이즈 | `EditManager` | `{ layoutElement, previousWidth, width, previousHeight, height }` |
+| EditManager `insert` | 삽입 완료 | `EditManager` | `InsertEventDetail` (extend with `type`, `paragraph`, `controller`) |
+| EditManager `insertCancel` | 삽입 취소 | `EditManager` | `{ type: 'insertCancel', ... }` |
+
+이벤트는 모두 `bubbles: true, composed: true` (DOM 표준)이며, Shadow DOM 경계를
+가로질러 전파됩니다.
+
+---
+
+## 인쇄 모드 가이드
+
+인쇄 모드(`window.matchMedia("print").matches === true`)에서는 다음이 달라집니다:
+
+1. **자동 로딩 비활성**: `ColorRegistry`와 `FontLoader`는 `fetch`를 호출하지 않음.
+2. **수동 데이터 주입**: `init({...})` 호출 시 `colorSet`/`fonts`를 명시.
+3. **렌더링 수동**: `<x-layout-document>`의 `connectedCallback`이 즉시 리턴하므로
+   `data` 설정 후 `layout()` + `render()`를 수동 호출.
+4. **이미지/가이드 숨김**: `@media print` CSS 규칙으로 `visibility: hidden`.
+5. **편집 차단**: `editableLayout`/`editableText` setter는 인쇄 모드에서 무시.
+6. **printPostData**: 각 요소의 화면상 위치/크기를 `printPostData` getter로 수집하여
+   후처리 시스템에 전달.
+
+```ts
+// 인쇄 모드 진입
+const colorSet = { black: { c:0, m:0, y:0, k:255 } };
+const fonts = [
+  { family: 'Myoungjo', weight: 400, style: 'normal' as const, base64Data: '...' },
+];
+await ColorRegistry.getInstance().init(colorSet);
+await FontLoader.getInstance().init(fonts);
+
+const doc = document.querySelector('x-layout-document')!;
+doc.data = printDocumentData;
+doc.layout();
+await doc.render();
+
+const postData = doc.printPostData;
+// → 외부 인쇄 시스템에 전달
+```
+
+---
+
+## 추가 참고
+
+- **렌더링 파이프라인**: `layout()` (동기, 모델/스타일/DOM 구축) → `render()` (비동기, 이미지/텍스트).
+- **단락 성능 최적화**: `data-source-offset` 키 기반 diff 렌더링. 변경이 없는 span은 재사용.
+- **이미지 오버랩**: `overlapPadding`이 설정되면 타원형(`ndx² + ndy² ≤ 1`)으로 텍스트 회피 영역 계산.
+- **lock 의미**: 박스 자신과 모든 자손이 drag/resize/text edit에서 제외됨.
+- **편집기 자동 생성**: `paragraph.editableText = true` 시 `TextEditController`가 자동 생성되고 `EditManager`에 등록.
+- **React 사용자**: [`REACT_COMPONENT.md`](./REACT_COMPONENT.md) 참고.
