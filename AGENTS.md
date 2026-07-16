@@ -4,7 +4,7 @@
 
 Newspaper layout engine implemented as Web Components (Custom Elements). Renders print-style document layouts in the browser — multi-column text, character-by-character text wrapping with overlap avoidance around images, and proportional font width (장평) control — features CSS cannot properly handle.
 
-**Editing support is under development.** Cursor, selection, and IME composition are implemented in `EditController` and `EditCoordinateMapper`. Global edit state (focus, events) is managed by the `EditManager` singleton.
+**Editing support is under development.** Cursor, selection, and IME composition are implemented in `TextEditController` and `TextEditCoordinateMapper`. Global edit state (focus, events) is managed by the `EditManager` singleton.
 
 ## Commands
 
@@ -26,10 +26,24 @@ Before working on any feature, you **must** read the corresponding documentation
 |---|---|---|
 | Paragraph text rendering | `docs/TEXT_ENGINE.md` | Any request, modification, or work involving TextLayoutEngine, text wrapping, column rendering, character layout, or overlap avoidance |
 | Font & color management | `docs/RESOURCE.md` | Any request, modification, or work involving FontLoader, ColorRegistry, CMYK/RGB conversion, CSS variable injection, or font registration |
-| Text editing mode | `docs/EDITING_TEXT.md` | Any request, modification, or work involving EditController, EditCoordinateMapper, EditManager, cursor, selection, IME composition, or keyboard shortcuts |
+| Text editing mode | `docs/EDITING_TEXT.md` | Any request, modification, or work involving TextEditController, TextEditCoordinateMapper, EditManager, cursor, selection, IME composition, or keyboard shortcuts |
 | Layout editing mode | `docs/EDITING_LAYOUT.md` | Any request, modification, or work involving layout editing, box positioning, interactive layout changes, or drag/resize |
 
 **Rule**: Load the doc → understand current state → implement changes → update the doc to reflect what changed.
+
+## Mandatory Documentation Updates
+
+When you make **any** of the following changes, you **must** update the corresponding `docs/` file(s) before completing the work:
+
+| Change Type | Examples | Must Update |
+|---|---|---|
+| **Feature added** | New property, method, event, mode, or capability | Relevant `docs/*.md` + `AGENTS.md` if architecture changed |
+| **Feature modified** | Behavior change, parameter/return type change, algorithm update | Relevant `docs/*.md` |
+| **Feature removed** | Deleted property, method, event, or capability | Relevant `docs/*.md` |
+| **Interface changed** | New/removed/renamed type, class, function signature, or export | Relevant `docs/*.md` + `AGENTS.md` if directory structure changed |
+| **Public API changed** | New/changed/removed `EditManager` API, `BoxData` field, `ParagraphData` field, custom element attribute/property | Relevant `docs/*.md` |
+
+**Rule**: If a user-visible behavior, API surface, or data shape changed, the docs **must** reflect it. "Should work the same" is not documentation — if the code changed, verify the docs still match.
 
 ## Build Output
 
@@ -53,7 +67,7 @@ Before working on any feature, you **must** read the corresponding documentation
 <x-layout-document>          ← Root. Owns GridCalculator, coordinates rendering pipeline
   <x-layout-guide-column>    ← Debug grid overlay (hidden in print mode; printPostData for post-processing)
   <x-layout-box>             ← Positioned container (static=column-grid | absolute=mm coords)
-    <x-layout-paragraph>     ← Multi-column text area with wrapping; owns EditController when editableText
+    <x-layout-paragraph>     ← Multi-column text area with wrapping; owns TextEditController when editableText
       <x-layout-column>      ← Individual text column (rendered text lines)
     <x-layout-image>         ← Canvas-based image crop element
   <x-layout-vcolumn>         ← Virtual column (temporary, used only during layoutText)
@@ -87,7 +101,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 
 - **`ColorRegistry`**: Loads `color.json` → CMYK→RGB conversion → injects CSS variables `--colorman-{name}`. In print mode, receives `CMYKColorSet` via `init()` instead of fetching.
 - **`FontLoader`**: Loads `fonts.json` → registers `FontFace` objects. In print mode, uses `base64Data` instead of `ttfFilename`. Hardcoded return value `getFontFamily()` → `'Myoungjo'`.
-- **`EditManager`**: Singleton (`src/edit/edit-manager.ts`) that manages global edit state. Tracks focused paragraph/controller, dispatches events (`focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`). Provides `focusParagraph()` / `blurParagraph()` API for programmatic focus control. `EditController` instances register/unregister with it.
+- **`EditManager`**: Singleton (`src/edit/edit-manager.ts`) that manages global edit state. Tracks focused paragraph/controller, dispatches events (`focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`). Provides `focusParagraph()` / `blurParagraph()` API for programmatic focus control. `TextEditController` instances register/unregister with it.
 
 ## Important Constraints
 
@@ -103,11 +117,11 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **No tests exist**: There is no test infrastructure. No `vitest`, no `jest`, no test files.
 - **ColorRegistry without stylesheet**: `ColorRegistry.init()` sets `_ready = true` even when no stylesheet is available (SSR, test environments). Color data is accessible via `colorMap` but CSS variables are not injected.
 - **Guide column printPostData**: `LayoutGuideColumnElement` has a `printPostData` getter that returns position/size data for print post-processing, matching the pattern of other layout elements.
-- **EditManager singleton**: `EditManager.getInstance()` manages focus across all editableText paragraphs. Only one paragraph can be focused at a time. `EditController` auto-registers on construction and auto-unregisters on `destroy()`.
+- **EditManager singleton**: `EditManager.getInstance()` manages focus across all editableText paragraphs. Only one paragraph can be focused at a time. `TextEditController` auto-registers on construction and auto-unregisters on `destroy()`.
 - **Key-based span rendering**: `column.element.ts` `renderText()` uses `data-source-offset` as the reconciliation key for span diff rendering. Existing spans are reused when content unchanged; only changed spans are updated. `data-offset` (rendered offset) is retained for `EditCoordinateMapper` compatibility.
-- **`data-source-offset` vs `data-offset`**: `data-source-offset` = source string position (used as diff key). `data-offset` = rendered position (used by EditCoordinateMapper for click-to-cursor mapping). Both attributes coexist on every span.
-- **Optimistic spans are temporary**: `data-temporary="true"` spans are stripped at the start of every `renderTextWithDiff()` call and recreated by `EditController` as needed.
-- **EditContextAdapter**: `src/edit/edit-context-adapter.ts` bridges the browser EditContext API (Chrome 121+) with the layout engine. `EditContextAdapter.create()` returns `null` if the API is not supported.
+- **`data-source-offset` vs `data-offset`**: `data-source-offset` = source string position (used as diff key). `data-offset` = rendered position (used by TextEditCoordinateMapper for click-to-cursor mapping). Both attributes coexist on every span.
+- **Optimistic spans are temporary**: `data-temporary="true"` spans are stripped at the start of every `renderTextWithDiff()` call and recreated by `TextEditController` as needed.
+- **TextEditContextAdapter**: `src/edit/text-edit-context-adapter.ts` bridges the browser EditContext API (Chrome 121+) with the layout engine. `TextEditContextAdapter.create()` returns `null` if the API is not supported.
 - **Box child DOM mutation detection**: `<x-layout-box>` uses a `MutationObserver` (`_childObserver`) with `{ childList: true }` to detect direct DOM additions/removals of children (`x-layout-box`, `x-layout-paragraph`, `x-layout-image`). When children are added or removed via DOM manipulation (not through the `data` setter), the observer triggers `layout()` + `render()` automatically, mirroring the behavior of the `data` setter. The `_rebuildingChildren` flag suppresses observer callbacks during `data` setter execution to avoid redundant layout passes.
 
 ## Directory Structure
@@ -134,10 +148,12 @@ src/
     text-layout-engine.ts    # TextLayoutEngine (text wrapping engine)
     index.ts
   edit/
-    edit-context-adapter.ts  # Browser EditContext API adapter
-    edit-controller.ts       # EditController (cursor, selection, IME composition)
-    edit-coordinate-mapper.ts # EditCoordinateMapper (click-to-offset mapping)
+    text-edit-context-adapter.ts  # TextEditContextAdapter (Browser EditContext API adapter)
+    text-edit-controller.ts       # TextEditController (cursor, selection, IME composition)
+    text-edit-coordinate-mapper.ts # TextEditCoordinateMapper (click-to-offset mapping)
     edit-manager.ts          # EditManager singleton (global edit state)
+    insert-controller.ts     # InsertController (drag-to-insert)
+    layout-edit-controller.ts # LayoutEditController (drag/resize/selection)
     index.ts
   resource/
     color-registry.ts        # ColorRegistry (CMYK→RGB singleton)
@@ -216,7 +232,7 @@ examples/
 - **TypeScript 7 RC**: `typescript: ^7.0.1-rc` is configured. The `noEmit: true` setting means `tsc` is type-check only; actual compilation is handled by Vite.
 - **`noUnusedLocals` and `noUnusedParameters`** are enabled in tsconfig — dead imports or unused params will cause build errors.
 - **Cursor width is 1px**: The `<x-edit-cursor>` element has a fixed width of 1px and does not blink.
-- **Korean IME composition**: EditController handles IME composition via `compositionstart`, `compositionupdate`, and `compositionend` events. This is essential for Korean text input on Windows (TSF), macOS, and Linux (IBus).
+- **Korean IME composition**: TextEditController handles IME composition via `compositionstart`, `compositionupdate`, and `compositionend` events. This is essential for Korean text input on Windows (TSF), macOS, and Linux (IBus).
 - **Mouse coordinate freshness**: `_onMouseMove` stores the latest `clientX`/`clientY` on every mousemove event and reads them from the `requestAnimationFrame` callback, ensuring drag selection follows the cursor accurately during fast movement.
 - **EditManager events**: Use `EditManager.getInstance().addEventListener(type, listener)` to subscribe to edit events. Types: `focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`. The old `selectionChange` event was removed.
 - **Programmatic focus**: Use `EditManager.getInstance().focusParagraph(target, options?)` and `blurParagraph(target?)` instead of calling `paragraph.editableText` or `controller.focus()` directly.
