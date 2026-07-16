@@ -361,6 +361,15 @@ export class LayoutParagraphElement extends HTMLElement {
 
   get zIndex() { return this._zIndex; }
 
+  /**
+   * 구조 변경 플래그를 설정하고 `render()`를 호출한다.
+   * 외부 컨트롤러가 단락의 재렌더링을 트리거할 때 사용한다.
+   */
+  markStructureChangedAndRender(): void {
+    this._perfStructureChanged = true;
+    this.render();
+  }
+
   get editableText(): boolean {
     return this._editableText;
   }

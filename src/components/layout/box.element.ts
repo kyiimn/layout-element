@@ -51,46 +51,19 @@ export class LayoutBoxElement extends HTMLElement {
   private _savedColumns: number | number[] = 1;
   private _savedGap: number | number[] = 0;
 
-  private _isDragging = false;
-  private _selectedOnMouseDown = false;
-  private _dragStartMouseX = 0;
-  private _dragStartMouseY = 0;
-  private _dragStartLeft = 0;
-  private _dragStartTop = 0;
-  private _dragOriginalLeft = 0;
-  private _dragOriginalTop = 0;
-  private _dragOriginalWidth = 0;
-  private _dragOriginalHeight = 0;
-  private _dragOriginalPosition: BoxPosition = 'static';
-  private _dragMoved = false;
-  private _dragRafId: number | null = null;
-  private _dragLastClientX = 0;
-  private _dragLastClientY = 0;
-
-  private _isResizing = false;
-  private _resizeHandle: 'top' | 'bottom' | 'left' | 'right' | null = null;
-  private _resizeStartMouseX = 0;
-  private _resizeStartMouseY = 0;
-  private _resizeStartLeft = 0;
-  private _resizeStartTop = 0;
-  private _resizeStartWidth = 0;
-  private _resizeStartHeight = 0;
-  private _resizeMoved = false;
-  private _resizeRafId: number | null = null;
-  private _resizeLastClientX = 0;
-  private _resizeLastClientY = 0;
   private _resizeHandles: HTMLDivElement[] = [];
-
-  /** Cached set of paragraphs affected during drag/resize — computed once at start. */
-  private _affectedParagraphs: Set<LayoutParagraphElement> | null = null;
-  /** rAF id for throttled paragraph rerender during drag/resize. */
-  private _rerenderRafId: number | null = null;
 
   /** DOM 자식 변경(추가/제거)을 감지하여 layout + render를 자동 수행하는 MutationObserver. */
   private _childObserver: MutationObserver | null = null;
 
   /** `data` 세터에서 자식을 재구축할 때 observer 중복 트리거를 방지하는 플래그. */
   private _rebuildingChildren = false;
+
+  /**
+   * `attributeChangedCallback`에서 property 세터를 호출할 때 true.
+   * property 세터가 다시 `setAttribute`를 호출하여 발생하는 무한 루프를 방지한다.
+   */
+  private _isSyncingAttribute = false;
 
   constructor() {
     super();
@@ -100,8 +73,6 @@ export class LayoutBoxElement extends HTMLElement {
   connectedCallback() {
     if (!this.id) this.id = genUUID();
     this._startChildObserver();
-    this.addEventListener('click', this._onLayoutClick);
-    this.addEventListener('mousedown', this._onLayoutMouseDown);
     this.addEventListener('mouseenter', this._onLayoutMouseEnter);
     this.addEventListener('mouseleave', this._onLayoutMouseLeave);
     this.layout();
@@ -109,8 +80,6 @@ export class LayoutBoxElement extends HTMLElement {
 
   disconnectedCallback() {
     this._stopChildObserver();
-    this.removeEventListener('click', this._onLayoutClick);
-    this.removeEventListener('mousedown', this._onLayoutMouseDown);
     this.removeEventListener('mouseenter', this._onLayoutMouseEnter);
     this.removeEventListener('mouseleave', this._onLayoutMouseLeave);
     EditManager.getInstance()._unregisterLayout(this);
@@ -121,12 +90,18 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   attributeChangedCallback(name: string, _oldVal: string | null, newVal: string | null) {
-    if (name === 'role') {
-      this._role = newVal as BoxRole | undefined;
-    } else if (name === 'group-member') {
-      this._groupMember = newVal ?? undefined;
-    } else if (name === 'priority') {
-      this._priority = newVal !== null ? Number(newVal) : undefined;
+    if (this._isSyncingAttribute) return;
+    this._isSyncingAttribute = true;
+    try {
+      if (name === 'role') {
+        this._role = newVal as BoxRole | undefined;
+      } else if (name === 'group-member') {
+        this._groupMember = newVal ?? undefined;
+      } else if (name === 'priority') {
+        this._priority = newVal !== null ? Number(newVal) : undefined;
+      }
+    } finally {
+      this._isSyncingAttribute = false;
     }
   }
 
@@ -211,9 +186,6 @@ export class LayoutBoxElement extends HTMLElement {
   private _ensureResizeHandles(): void {
     if (this._resizeHandles.length === 4) return;
 
-    for (const handle of this._resizeHandles) {
-      handle.removeEventListener('mousedown', this._onResizeMouseDown);
-    }
     this._resizeHandles = [];
     this._shadowRoot.querySelectorAll('.resize-handle').forEach((h) => h.remove());
 
@@ -222,7 +194,6 @@ export class LayoutBoxElement extends HTMLElement {
       handle.classList.add('resize-handle');
       handle.setAttribute('data-handle', dir);
       this._shadowRoot.appendChild(handle);
-      handle.addEventListener('mousedown', this._onResizeMouseDown);
       this._resizeHandles.push(handle);
     }
   }
@@ -419,9 +390,9 @@ export class LayoutBoxElement extends HTMLElement {
       if (data.paddingBottom !== undefined) this._paddingBottom = data.paddingBottom;
       if (data.paddingLeft !== undefined) this._paddingLeft = data.paddingLeft;
       if (data.paddingRight !== undefined) this._paddingRight = data.paddingRight;
-      if (data.role !== undefined) this._role = data.role;
-      if (data.groupMember !== undefined) this._groupMember = data.groupMember;
-      if (data.priority !== undefined) this._priority = data.priority;
+      if (data.role !== undefined) this.role = data.role;
+      if (data.groupMember !== undefined) this.groupMember = data.groupMember.split(',').filter(s => s.length > 0);
+      if (data.priority !== undefined) this.priority = data.priority;
 
       this._left = data.left;
       this._top = data.top;
@@ -622,12 +593,14 @@ export class LayoutBoxElement extends HTMLElement {
   get paddingBottom() { return this._paddingBottom; }
   get paddingLeft() { return this._paddingLeft; }
 
-  get role(): string | null { return this._role ?? null; }
-  set role(value: string | null) {
-    if (value === null) {
+  get role(): BoxRole { return this._role ?? 'none'; }
+  set role(value: BoxRole | null | undefined) {
+    if (value === null || value === undefined || value === 'none') {
       this._role = undefined;
+      this.removeAttribute('role');
     } else {
-      this._role = value as BoxRole;
+      this._role = value;
+      this.setAttribute('role', value);
     }
   }
 
@@ -636,11 +609,21 @@ export class LayoutBoxElement extends HTMLElement {
     return this._groupMember.split(',').filter(s => s.length > 0);
   }
   set groupMember(value: string[]) {
-    this._groupMember = value.length > 0 ? value.join(',') : undefined;
+    if (value.length > 0) {
+      const joined = value.join(',');
+      this._groupMember = joined;
+      this.setAttribute('group-member', joined);
+    } else {
+      this._groupMember = undefined;
+      this.removeAttribute('group-member');
+    }
   }
 
   get priority() { return this._priority ?? 0; }
-  set priority(value: number) { this._priority = value; }
+  set priority(value: number) {
+    this._priority = value;
+    this.setAttribute('priority', String(value));
+  }
 
   get inheritStyle() { return this._inheritStyle; }
   get model() { return this._model; }
@@ -794,29 +777,6 @@ export class LayoutBoxElement extends HTMLElement {
     }
   }
 
-  private _onLayoutClick = (event: MouseEvent): void => {
-    if (!this._editableLayout) return;
-    event.stopPropagation();
-    if (EditManager.getInstance().insertMode) return;
-    if (this._isEventFromDescendantLayout(event)) return;
-    if (this._isEventFromResizeHandle(event)) return;
-    this.removeAttribute('hovered');
-    if (this._dragMoved || this._resizeMoved) {
-      this._dragMoved = false;
-      this._resizeMoved = false;
-      this._selectedOnMouseDown = false;
-      return;
-    }
-    if (this._selectedOnMouseDown) {
-      this._selectedOnMouseDown = false;
-      return;
-    }
-    const manager = EditManager.getInstance();
-    manager._setMultiSelect(event.ctrlKey || event.metaKey);
-    manager.selectLayout(this);
-    manager._setMultiSelect(false);
-  }
-
   private _onLayoutMouseEnter = (): void => {
     if (!this._editableLayout) return;
     if (EditManager.getInstance().insertMode) return;
@@ -849,10 +809,6 @@ export class LayoutBoxElement extends HTMLElement {
     this._hoverNearestLayoutChild(event.clientX, event.clientY);
   }
 
-  /**
-   * 마우스가 자식 요소에서 부모 영역으로 돌아올 때,
-   * Shadow DOM 내부를 순회하며 마우스 위치 아래 가장 가까운 레이아웃 박스를 찾아 hover를 설정한다.
-   */
   private _hoverNearestLayoutChild(clientX: number, clientY: number): void {
     const root = this.shadowRoot;
     if (!root) return;
@@ -868,247 +824,28 @@ export class LayoutBoxElement extends HTMLElement {
     }
   }
 
-  private _isEventFromDescendantLayout(event: MouseEvent): boolean {
-    const path = event.composedPath();
-    for (const el of path) {
-      if (el === this) return false;
-      if (el instanceof LayoutBoxElement && el.editableLayout) return true;
-    }
-    return false;
-  }
-
-  private _isEventFromResizeHandle(event: MouseEvent): boolean {
-    for (const el of event.composedPath()) {
-      if (el instanceof HTMLElement && el.classList.contains('resize-handle')) return true;
-      if (el === this) return false;
-    }
-    return false;
-  }
-
-  private _onLayoutMouseDown = (event: MouseEvent) => {
-    if (!this._editableLayout) return;
-    if (event.button !== 0) return;
-    if (EditManager.getInstance().insertMode) {
-      EditManager.getInstance().handleInsertMouseDown(event);
-      return;
-    }
-    if (this._isEventFromResizeHandle(event)) return;
-    if (this._isEventFromDescendantLayout(event)) return;
-    this._selectedOnMouseDown = false;
-    if (!this.hasAttribute('selected')) {
-      const manager = EditManager.getInstance();
-      manager._setMultiSelect(event.ctrlKey || event.metaKey);
-      manager.selectLayout(this);
-      manager._setMultiSelect(false);
-      this._selectedOnMouseDown = true;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    this.removeAttribute('hovered');
-    this._isDragging = true;
-    this._dragMoved = false;
-    this._dragStartMouseX = event.clientX;
-    this._dragStartMouseY = event.clientY;
-    this._dragStartLeft = this.left;
-    this._dragStartTop = this.top;
-    this._dragOriginalLeft = this.left;
-    this._dragOriginalTop = this.top;
-    this._dragOriginalWidth = this.width;
-    this._dragOriginalHeight = this.height;
-    this._dragOriginalPosition = this.position;
-    this._dragLastClientX = event.clientX;
-    this._dragLastClientY = event.clientY;
-    this.style.cursor = 'grabbing';
-    EditManager.getInstance()._startLayoutDrag();
-    this._affectedParagraphs = this._collectAffectedParagraphs();
-
-    const dragTargets = EditManager.getInstance()._getDragTargets();
-    for (const target of dragTargets) {
-      if (target === this) continue;
-      target._dragStartLeft = target.left;
-      target._dragStartTop = target.top;
-      target._dragOriginalLeft = target.left;
-      target._dragOriginalTop = target.top;
-      target._dragOriginalWidth = target.width;
-      target._dragOriginalHeight = target.height;
-      target._dragOriginalPosition = target.position;
-    }
-
-    document.addEventListener('mousemove', this._onLayoutMouseMove);
-    document.addEventListener('mouseup', this._onLayoutMouseUp);
-    document.addEventListener('keydown', this._onLayoutKeyDown);
-  }
-
-  private _onLayoutKeyDown = (event: KeyboardEvent) => {
-    if (!this._isDragging) return;
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    if (this._dragRafId !== null) {
-      cancelAnimationFrame(this._dragRafId);
-      this._dragRafId = null;
-    }
-    document.removeEventListener('mousemove', this._onLayoutMouseMove);
-    document.removeEventListener('mouseup', this._onLayoutMouseUp);
-    document.removeEventListener('keydown', this._onLayoutKeyDown);
-    this._isDragging = false;
-    this._dragMoved = false;
-    this.flushRerenderAffectedParagraphs();
-    this.style.cursor = this._editableLayout ? 'grab' : '';
-
-    const manager = EditManager.getInstance();
-    const dragTargets = manager._getDragTargets();
-    const isTopLevel = dragTargets.includes(this);
-
-    if (isTopLevel) {
-      this._applyPositionConversion(
-        this._dragOriginalPosition,
-        this._dragOriginalLeft,
-        this._dragOriginalTop,
-        this._dragOriginalWidth,
-        this._dragOriginalHeight,
-      );
-      manager._dispatchLayoutMove(this, this._dragOriginalLeft, this._dragOriginalTop, this._dragOriginalLeft, this._dragOriginalTop, true);
-    }
-
-    for (const target of dragTargets) {
-      if (target === this) continue;
-      target._applyPositionConversion(
-        target._dragOriginalPosition,
-        target._dragOriginalLeft,
-        target._dragOriginalTop,
-        target._dragOriginalWidth,
-        target._dragOriginalHeight,
-      );
-      manager._dispatchLayoutMove(target, target._dragOriginalLeft, target._dragOriginalTop, target._dragOriginalLeft, target._dragOriginalTop, true);
-    }
-
-    manager._endLayoutDrag();
-  }
-
-  private _onLayoutMouseMove = (event: MouseEvent) => {
-    if (!this._isDragging) return;
-    this._dragLastClientX = event.clientX;
-    this._dragLastClientY = event.clientY;
-    const deltaX = event.clientX - this._dragStartMouseX;
-    const deltaY = event.clientY - this._dragStartMouseY;
-    if (!this._dragMoved && (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3)) {
-      this._dragMoved = true;
-    }
-    if (!this._dragMoved) return;
-    if (this._dragRafId !== null) return;
-    this._dragRafId = requestAnimationFrame(() => {
-      this._dragRafId = null;
-      const dx = this._dragLastClientX - this._dragStartMouseX;
-      const dy = this._dragLastClientY - this._dragStartMouseY;
-      const manager = EditManager.getInstance();
-      const dragTargets = manager._getDragTargets();
-      const isTopLevel = dragTargets.includes(this);
-
-      if (isTopLevel) {
-        const result = this._computeNewPosition(dx, dy);
-        if (result.converted) {
-          this._applyPositionConversion(
-            result.converted.position,
-            result.converted.left,
-            result.converted.top,
-            result.converted.width,
-            result.converted.height,
-          );
-          this._dragStartLeft = result.converted.left;
-          this._dragStartTop = result.converted.top;
-          this._dragStartMouseX = this._dragLastClientX;
-          this._dragStartMouseY = this._dragLastClientY;
-        } else {
-          if (this.left !== result.left) this.left = result.left;
-          if (this.top !== result.top) this.top = result.top;
-        }
-      }
-
-      for (const target of dragTargets) {
-        if (target === this) continue;
-        const result = target._computeNewPosition(dx, dy, target._dragStartLeft, target._dragStartTop);
-        if (result.converted) {
-          target._applyPositionConversion(
-            result.converted.position,
-            result.converted.left,
-            result.converted.top,
-            result.converted.width,
-            result.converted.height,
-          );
-          target._dragStartLeft = result.converted.left;
-          target._dragStartTop = result.converted.top;
-        } else {
-          if (result.left !== target.left) target.left = result.left;
-          if (result.top !== target.top) target.top = result.top;
-        }
-      }
-    });
-  }
-
-  private _onLayoutMouseUp = (event: MouseEvent) => {
-    if (!this._isDragging) return;
-    event.stopPropagation();
-    document.removeEventListener('mousemove', this._onLayoutMouseMove);
-    document.removeEventListener('mouseup', this._onLayoutMouseUp);
-    document.removeEventListener('keydown', this._onLayoutKeyDown);
-    if (this._dragRafId !== null) {
-      cancelAnimationFrame(this._dragRafId);
-      this._dragRafId = null;
-    }
-    this._isDragging = false;
-    this.flushRerenderAffectedParagraphs();
-    this.style.cursor = this._editableLayout ? 'grab' : '';
-
-    const manager = EditManager.getInstance();
-
-    if (!this._dragMoved) {
-      manager._endLayoutDrag();
-      return;
-    }
-
-    const dragTargets = manager._getDragTargets();
-    const isTopLevel = dragTargets.includes(this);
-    const deltaX = event.clientX - this._dragStartMouseX;
-    const deltaY = event.clientY - this._dragStartMouseY;
-
-    if (isTopLevel) {
-      const startLeft = this._dragStartLeft;
-      const startTop = this._dragStartTop;
-      const result = this._computeNewPosition(deltaX, deltaY);
-      if (result.converted) {
-        this._applyPositionConversion(
-          result.converted.position,
-          result.converted.left,
-          result.converted.top,
-          result.converted.width,
-          result.converted.height,
-        );
-      } else {
-        if (result.left !== this.left) this.left = result.left;
-        if (result.top !== this.top) this.top = result.top;
-      }
-      manager._dispatchLayoutMove(this, startLeft, startTop, this.left, this.top, false);
-    }
-
-    for (const target of dragTargets) {
-      if (target === this) continue;
-      const result = target._computeNewPosition(deltaX, deltaY, target._dragStartLeft, target._dragStartTop);
-      if (result.converted) {
-        target._applyPositionConversion(
-          result.converted.position,
-          result.converted.left,
-          result.converted.top,
-          result.converted.width,
-          result.converted.height,
-        );
-      } else {
-        if (result.left !== target.left) target.left = result.left;
-        if (result.top !== target.top) target.top = result.top;
-      }
-      manager._dispatchLayoutMove(target, target._dragStartLeft, target._dragStartTop, target.left, target.top, false);
-    }
-
-    manager._endLayoutDrag();
+  /**
+   * position 변환 시 모든 좌표 필드를 원자적으로 갱신하고 layout()을 한 번만 호출한다.
+   *
+   * setter를 개별 호출하면 position이 먼저 바뀐 상태에서 left/width가 아직 이전 좌표계 값인
+   * 상태로 layout()이 실행되어 columnWidth.slice(-122, ...) 같은 잘못된 인덱스가 발생한다.
+   * 이 메서드는 private 필드를 직접 설정한 후 layout()과 scheduleRerenderAffectedParagraphs()를
+   * 한 번씩만 호출하여 문제를 방지한다.
+   *
+   * @param position - 새 position 모드 ('static' | 'absolute')
+   * @param left - 새 left 값 (static: 컬럼 인덱스, absolute: mm)
+   * @param top - 새 top 값 (static: 라인 인덱스, absolute: mm)
+   * @param width - 새 width 값 (static: 컬럼 스팬 수, absolute: mm)
+   * @param height - 새 height 값 (static: 라인 수, absolute: mm)
+   */
+  applyPositionConversion(
+    position: BoxPosition,
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+  ): void {
+    this._applyPositionConversion(position, left, top, width, height);
   }
 
   /**
@@ -1227,327 +964,9 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   /**
-   * 픽셀 델타와 시작 위치를 받아 새 위치를 계산한다.
-   *
-   * 다중 선택 드래그에서 각 대상 요소의 시작 위치를 독립적으로 전달할 수 있다.
-   * `startLeft`/`startTop`을 생략하면 `this._dragStartLeft`/`this._dragStartTop`을 사용한다.
-   *
-   * - **static 모드**: 컬럼/라인 스냅과 클램핑을 적용한다. 편집 영역 밖으로 나갈 수 없다.
-   * - **absolute 모드 (문서 직계 자식)**: 클램핑 없이 자유 이동. 음수 좌표 허용.
-   * - **absolute 모드 (다른 박스 안)**: 부모 영역 내로 클램핑.
-   *
-   * position 자동 변환(static ↔ absolute)은 드래그 중 발생하지 않는다.
-   * position 변환이 필요하면 `convertPosition()`을 명시적으로 호출해야 한다.
-   *
-   * @param deltaPxX - 마우스 가로 이동량 (픽셀)
-   * @param deltaPxY - 마우스 세로 이동량 (픽셀)
-   * @param startLeft - 드래그 시작 left 값 (생략 시 this._dragStartLeft)
-   * @param startTop - 드래그 시작 top 값 (생략 시 this._dragStartTop)
-   * @returns 새 위치. `converted` 필드는 드래그 중 position 변환에서만 사용
-   */
-  private _computeNewPosition(
-    deltaPxX: number,
-    deltaPxY: number,
-    startLeft?: number,
-    startTop?: number,
-  ): { left: number; top: number; converted?: { position: BoxPosition; left: number; top: number; width: number; height: number } } {
-    const sLeft = startLeft ?? this._dragStartLeft;
-    const sTop = startTop ?? this._dragStartTop;
-    const deltaMmX = deltaPxX / GridCalculator.ppm;
-    const deltaMmY = deltaPxY / GridCalculator.ppm;
-
-    const isDocumentChild = this.parentElement?.type === 'document';
-
-    if (this.position === 'absolute') {
-      const padL = this.inheritStyle?.paddingLeft || 0;
-      const padR = this.inheritStyle?.paddingRight || 0;
-      const padT = this.inheritStyle?.paddingTop || 0;
-      const padB = this.inheritStyle?.paddingBottom || 0;
-
-      if (isDocumentChild) {
-        // absolute 요소는 position을 유지한다. 편집 영역 안으로 들어와도 static으로 변환하지 않는다.
-        return { left: sLeft + deltaMmX, top: sTop + deltaMmY };
-      }
-
-      const maxLeft = Math.max(0, (this.inheritStyle?.parentWidth || 0) - padL - padR - this.width);
-      const maxTop = Math.max(0, (this.inheritStyle?.parentHeight || 0) - padT - padB - this.height);
-      return {
-        left: Math.max(0, Math.min(maxLeft, sLeft + deltaMmX)),
-        top: Math.max(0, Math.min(maxTop, sTop + deltaMmY)),
-      };
-    }
-
-    // static mode
-    const parentModel = this.parentModel;
-    if (!parentModel) {
-      return { left: sLeft, top: sTop };
-    }
-
-    const { columnCoords, lineHeight, columnCount } = parentModel;
-    const editableTextHeight = parentModel.editableTextHeight;
-    const startX = columnCoords[sLeft].x1;
-    const startY = columnCoords[sLeft].y1 + lineHeight * sTop;
-    const newLeftMm = startX + deltaMmX;
-    const newTopMm = startY + deltaMmY;
-
-    let newLeft = 0;
-    let minDist = Infinity;
-    for (let i = 0; i <= columnCount - this.width; i++) {
-      const dist = Math.abs(newLeftMm - columnCoords[i].x1);
-      if (dist < minDist) {
-        minDist = dist;
-        newLeft = i;
-      }
-    }
-    newLeft = Math.max(0, Math.min(columnCount - this.width, newLeft));
-
-    const maxTop = Math.floor((editableTextHeight - (lineHeight * this.height - (lineHeight - parentModel.fontSize))) / lineHeight);
-    let newTop = Math.max(0, Math.min(maxTop, Math.round((newTopMm - columnCoords[newLeft].y1) / lineHeight)));
-
-    if (isDocumentChild) {
-      // static 요소는 편집 영역 밖으로 나갈 수 없다.
-      // 클램핑만 적용하고 absolute 변환은 수행하지 않는다.
-      // absolute 요소만 편집 영역 밖으로 자유롭게 이동할 수 있다.
-      return { left: newLeft, top: newTop };
-    }
-
-    return { left: newLeft, top: newTop };
-  }
-
-  private _onResizeMouseDown = (event: MouseEvent): void => {
-    if (!this._editableLayout) return;
-    if (event.button !== 0) return;
-    if (EditManager.getInstance().insertMode) return;
-    if (!this.hasAttribute('selected')) return;
-    event.preventDefault();
-    event.stopPropagation();
-
-    const handle = (event.target as HTMLElement).getAttribute('data-handle') as 'top' | 'bottom' | 'left' | 'right';
-    if (!handle) return;
-
-    this._isResizing = true;
-    this._resizeHandle = handle;
-    this._resizeMoved = false;
-    this._resizeStartMouseX = event.clientX;
-    this._resizeStartMouseY = event.clientY;
-    this._resizeStartLeft = this.left;
-    this._resizeStartTop = this.top;
-    this._resizeStartWidth = this.width;
-    this._resizeStartHeight = this.height;
-    this._resizeLastClientX = event.clientX;
-    this._resizeLastClientY = event.clientY;
-
-    EditManager.getInstance()._startLayoutResize();
-    this._affectedParagraphs = this._collectAffectedParagraphs();
-    document.addEventListener('mousemove', this._onResizeMouseMove);
-    document.addEventListener('mouseup', this._onResizeMouseUp);
-    document.addEventListener('keydown', this._onResizeKeyDown);
-  }
-
-  private _onResizeMouseMove = (event: MouseEvent): void => {
-    if (!this._isResizing) return;
-    this._resizeLastClientX = event.clientX;
-    this._resizeLastClientY = event.clientY;
-    const deltaX = event.clientX - this._resizeStartMouseX;
-    const deltaY = event.clientY - this._resizeStartMouseY;
-    if (!this._resizeMoved && (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3)) {
-      this._resizeMoved = true;
-    }
-    if (!this._resizeMoved) return;
-    if (this._resizeRafId !== null) return;
-    this._resizeRafId = requestAnimationFrame(() => {
-      this._resizeRafId = null;
-      const dx = this._resizeLastClientX - this._resizeStartMouseX;
-      const dy = this._resizeLastClientY - this._resizeStartMouseY;
-      const { left, top, width, height } = this._computeNewSize(dx, dy);
-      if (left !== this.left) this.left = left;
-      if (top !== this.top) this.top = top;
-      if (width !== this.width) this.width = width;
-      if (height !== this.height) this.height = height;
-    });
-  }
-
-  private _onResizeMouseUp = (event: MouseEvent): void => {
-    if (!this._isResizing) return;
-    event.stopPropagation();
-    document.removeEventListener('mousemove', this._onResizeMouseMove);
-    document.removeEventListener('mouseup', this._onResizeMouseUp);
-    document.removeEventListener('keydown', this._onResizeKeyDown);
-    if (this._resizeRafId !== null) {
-      cancelAnimationFrame(this._resizeRafId);
-      this._resizeRafId = null;
-    }
-    this._isResizing = false;
-    this.flushRerenderAffectedParagraphs();
-    EditManager.getInstance()._endLayoutResize();
-
-    if (!this._resizeMoved) {
-      this._resizeHandle = null;
-      return;
-    }
-
-    const deltaX = event.clientX - this._resizeStartMouseX;
-    const deltaY = event.clientY - this._resizeStartMouseY;
-    const { left, top, width, height } = this._computeNewSize(deltaX, deltaY);
-    this._resizeHandle = null;
-    if (left !== this.left) this.left = left;
-    if (top !== this.top) this.top = top;
-    if (width !== this.width) this.width = width;
-    if (height !== this.height) this.height = height;
-
-    EditManager.getInstance()._dispatchLayoutResize(
-      this,
-      this._resizeStartLeft,
-      this._resizeStartTop,
-      this._resizeStartWidth,
-      this._resizeStartHeight,
-      left,
-      top,
-      width,
-      height,
-      false,
-    );
-  }
-
-  private _onResizeKeyDown = (event: KeyboardEvent): void => {
-    if (!this._isResizing || event.key !== 'Escape') return;
-    event.preventDefault();
-    if (this._resizeRafId !== null) {
-      cancelAnimationFrame(this._resizeRafId);
-      this._resizeRafId = null;
-    }
-    document.removeEventListener('mousemove', this._onResizeMouseMove);
-    document.removeEventListener('mouseup', this._onResizeMouseUp);
-    document.removeEventListener('keydown', this._onResizeKeyDown);
-    this._isResizing = false;
-    this._resizeHandle = null;
-    this.flushRerenderAffectedParagraphs();
-    EditManager.getInstance()._endLayoutResize();
-
-    if (this.left !== this._resizeStartLeft) this.left = this._resizeStartLeft;
-    if (this.top !== this._resizeStartTop) this.top = this._resizeStartTop;
-    if (this.width !== this._resizeStartWidth) this.width = this._resizeStartWidth;
-    if (this.height !== this._resizeStartHeight) this.height = this._resizeStartHeight;
-
-    EditManager.getInstance()._dispatchLayoutResize(
-      this,
-      this._resizeStartLeft,
-      this._resizeStartTop,
-      this._resizeStartWidth,
-      this._resizeStartHeight,
-      this._resizeStartLeft,
-      this._resizeStartTop,
-      this._resizeStartWidth,
-      this._resizeStartHeight,
-      true,
-    );
-  }
-
-  /**
-   * 픽셀 델타를 받아 리사이즈 방향에 따라 새 크기와 위치를 계산한다.
-   *
-   * @param deltaPxX - 마우스 가로 이동량 (픽셀)
-   * @param deltaPxY - 마우스 세로 이동량 (픽셀)
-   * @returns 스냅/클램핑이 적용된 새 위치와 크기
-   */
-  private _computeNewSize(
-    deltaPxX: number,
-    deltaPxY: number,
-  ): { left: number; top: number; width: number; height: number } {
-    const handle = this._resizeHandle;
-    if (!handle) return { left: this._resizeStartLeft, top: this._resizeStartTop, width: this._resizeStartWidth, height: this._resizeStartHeight };
-
-    const sLeft = this._resizeStartLeft;
-    const sTop = this._resizeStartTop;
-    const sWidth = this._resizeStartWidth;
-    const sHeight = this._resizeStartHeight;
-
-    if (this.position === 'absolute') {
-      const deltaMmX = deltaPxX / GridCalculator.ppm;
-      const deltaMmY = deltaPxY / GridCalculator.ppm;
-      const padL = this.inheritStyle?.paddingLeft || 0;
-      const padR = this.inheritStyle?.paddingRight || 0;
-      const padT = this.inheritStyle?.paddingTop || 0;
-      const padB = this.inheritStyle?.paddingBottom || 0;
-      const parentW = this.inheritStyle?.parentWidth || 0;
-      const parentH = this.inheritStyle?.parentHeight || 0;
-
-      switch (handle) {
-        case 'right': {
-          const maxWidth = parentW - padL - padR - sLeft;
-          const width = Math.max(1, Math.min(maxWidth, sWidth + deltaMmX));
-          return { left: sLeft, top: sTop, width, height: sHeight };
-        }
-        case 'left': {
-          const maxWidth = sLeft + sWidth;
-          const width = Math.max(1, Math.min(maxWidth, sWidth - deltaMmX));
-          const left = Math.max(0, Math.min(sLeft + sWidth - 1, sLeft + deltaMmX));
-          return { left, top: sTop, width, height: sHeight };
-        }
-        case 'bottom': {
-          const maxHeight = parentH - padT - padB - sTop;
-          const height = Math.max(1, Math.min(maxHeight, sHeight + deltaMmY));
-          return { left: sLeft, top: sTop, width: sWidth, height };
-        }
-        case 'top': {
-          const maxHeight = sTop + sHeight;
-          const height = Math.max(1, Math.min(maxHeight, sHeight - deltaMmY));
-          const top = Math.max(0, Math.min(sTop + sHeight - 1, sTop + deltaMmY));
-          return { left: sLeft, top, width: sWidth, height };
-        }
-      }
-    }
-
-    const parentModel = this.parentModel;
-    if (!parentModel) return { left: sLeft, top: sTop, width: sWidth, height: sHeight };
-
-    const { columnCount, lineHeight } = parentModel;
-    const editableTextHeight = parentModel.editableTextHeight;
-    const avgColWidth = parentModel.editableWidth / parentModel.columnCount;
-    const deltaMmX = deltaPxX / GridCalculator.ppm;
-    const deltaMmY = deltaPxY / GridCalculator.ppm;
-    const deltaCols = Math.round(deltaMmX / avgColWidth);
-    const deltaLines = Math.round(deltaMmY / lineHeight);
-    const maxLines = Math.floor(editableTextHeight / lineHeight);
-
-    switch (handle) {
-      case 'right': {
-        const maxWidth = columnCount - sLeft;
-        const width = Math.max(1, Math.min(maxWidth, sWidth + deltaCols));
-        return { left: sLeft, top: sTop, width, height: sHeight };
-      }
-      case 'left': {
-        const maxWidth = sLeft + sWidth;
-        const width = Math.max(1, Math.min(maxWidth, sWidth - deltaCols));
-        const left = Math.max(0, Math.min(sLeft + sWidth - 1, sLeft + deltaCols));
-        return { left, top: sTop, width, height: sHeight };
-      }
-      case 'bottom': {
-        const maxHeightForBox = maxLines - sTop;
-        const height = Math.max(1, Math.min(maxHeightForBox, sHeight + deltaLines));
-        return { left: sLeft, top: sTop, width: sWidth, height };
-      }
-      case 'top': {
-        const maxHeight = sTop + sHeight;
-        const height = Math.max(1, Math.min(maxHeight, sHeight - deltaLines));
-        const top = Math.max(0, Math.min(sTop + sHeight - 1, sTop + deltaLines));
-        return { left: sLeft, top, width: sWidth, height };
-      }
-    }
-
-    return { left: sLeft, top: sTop, width: sWidth, height: sHeight };
-  }
-
-  /**
-   * 영향받는 단락 요소를 다시 렌더링하도록 예약한다.
-   * 드래그/리사이즈 중이면 rAF로 지연하고, 아니면 즉시 실행한다.
+   * 영향받는 단락 요소를 즉시 다시 렌더링한다.
    */
   private scheduleRerenderAffectedParagraphs(): void {
-    if (this._affectedParagraphs !== null) {
-      this._debounceRerenderAffectedParagraphs();
-      return;
-    }
-
     const affected = this._collectAffectedParagraphs();
     this._renderAffectedParagraphs(affected);
   }
@@ -1576,47 +995,12 @@ export class LayoutBoxElement extends HTMLElement {
 
   /**
    * 수집된 단락 요소들을 다시 렌더링한다.
-   * 각 단락의 `_perfStructureChanged`를 true로 설정하고 `render()`를 호출한다.
-   * 내부 전용.
    */
   private _renderAffectedParagraphs(affected: Set<LayoutParagraphElement>): void {
     for (const p of affected) {
       if (p.isConnected) {
-        (p as any)._perfStructureChanged = true;
-        p.render();
+        p.markStructureChangedAndRender();
       }
-    }
-  }
-
-  /**
-   * 성능 최적화: rAF로 단락 재렌더링을 지연시킨다.
-   * 내부 전용. `scheduleRerenderAffectedParagraphs()`에서만 호출된다.
-   */
-  private _debounceRerenderAffectedParagraphs(): void {
-    if (this._rerenderRafId !== null) return;
-
-    this._rerenderRafId = requestAnimationFrame(() => {
-      this._rerenderRafId = null;
-      const affected = this._affectedParagraphs;
-      if (affected) {
-        this._renderAffectedParagraphs(affected);
-      }
-    });
-  }
-
-  /**
-   * 대기 중인 rAF 재렌더링을 즉시 실행하고 취소한다.
-   * 드래그/리사이즈 종료 시 호출된다.
-   */
-  private flushRerenderAffectedParagraphs(): void {
-    if (this._rerenderRafId !== null) {
-      cancelAnimationFrame(this._rerenderRafId);
-      this._rerenderRafId = null;
-    }
-    const affected = this._affectedParagraphs;
-    this._affectedParagraphs = null;
-    if (affected) {
-      this._renderAffectedParagraphs(affected);
     }
   }
 
