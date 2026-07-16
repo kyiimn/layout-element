@@ -3,8 +3,10 @@ import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import type { EditController, CurrentStyle } from "./edit-controller";
 import { InsertController } from "./insert-controller";
+import { LayoutEditController } from "./layout-edit-controller";
 import type { SelectionRange } from "@/types/edit";
 import type { InsertMode, InsertEventDetail } from "@/types/edit";
+import type { BoxRole } from "@/types/layout";
 
 /** 레이아웃 편집 대상 요소 (box만 해당) */
 export type LayoutElement = LayoutBoxElement;
@@ -113,6 +115,11 @@ export class EditManager {
   private _isLayoutResizing = false;
   private _insertController: InsertController | null = null;
   private _insertMode: InsertMode | null = null;
+
+  private _layoutEditMode: boolean = false;
+  private _editableRoles: Set<BoxRole> | null = null;
+  private _editableBoxIds: Set<string> | null = null;
+  private _layoutEditController: LayoutEditController | null = null;
 
   private constructor() {}
 
@@ -417,6 +424,145 @@ export class EditManager {
   }
 
   /**
+   * 레이아웃 편집 모드 활성 여부.
+   *
+   * `true`이면 레이아웃 편집이 활성화되어 `isBoxEditable()` 통과 시 box 편집(드래그/리사이즈)이 가능하다.
+   * `false`이면 모든 box가 편집 불가이며 선택도 해제된다.
+   *
+   * 활성화 시 `editableRoles`/`editableBoxIds`를 명시적으로 지정하지 않으면
+   * 어떤 box도 편집 가능하지 않다 (모두 허용하지 않음 규칙).
+   *
+   * @example
+   * ```ts
+   * const manager = EditManager.getInstance();
+   * manager.setEditableRoles(['body', 'title']);
+   * manager.layoutEditMode = true;
+   * // → role이 'body' 또는 'title'인 box만 편집 가능
+   * ```
+   */
+  get layoutEditMode(): boolean { return this._layoutEditMode; }
+  set layoutEditMode(value: boolean) {
+    if (this._layoutEditMode === value) return;
+    this._layoutEditMode = value;
+    if (value) {
+      this._applyEditableLayoutToAllBoxes();
+      if (!this._layoutEditController) {
+        this._layoutEditController = new LayoutEditController(document.documentElement);
+      }
+      this._layoutEditController.attach();
+    } else {
+      if (this._layoutEditController) {
+        this._layoutEditController.detach();
+      }
+      this.clearLayoutSelection();
+      this._applyEditableLayoutToAllBoxes();
+    }
+  }
+
+  /**
+   * 편집 허용 role 집합. `null`이면 role 기반 제한 없음.
+   *
+   * @param roles - 허용할 BoxRole 배열. `null`이면 role 제한 해제.
+   *
+   * @example
+   * ```ts
+   * manager.setEditableRoles(['body', 'title', 'none']);  // 본문, 제목, 역할 없는 box 허용
+   * manager.setEditableRoles(null);                         // role 제한 없음
+   * ```
+   */
+  setEditableRoles(roles: BoxRole[] | null): void {
+    this._editableRoles = roles === null ? null : new Set(roles);
+    if (this._layoutEditMode) this._applyEditableLayoutToAllBoxes();
+  }
+
+  get editableRoles(): ReadonlySet<BoxRole> | null {
+    return this._editableRoles;
+  }
+
+  /**
+   * 편집 허용 box id 집합. `null`이면 id 기반 제한 없음.
+   *
+   * @param ids - 허용할 box id 배열. `null`이면 id 제한 해제.
+   *
+   * @example
+   * ```ts
+   * manager.setEditableBoxIds(['box-1', 'box-2']);
+   * manager.addEditableBox('box-3');       // 개별 추가
+   * manager.removeEditableBox('box-1');    // 개별 제거
+   * ```
+   */
+  setEditableBoxIds(ids: string[] | null): void {
+    this._editableBoxIds = ids === null ? null : new Set(ids);
+    if (this._layoutEditMode) this._applyEditableLayoutToAllBoxes();
+  }
+
+  get editableBoxIds(): ReadonlySet<string> | null {
+    return this._editableBoxIds;
+  }
+
+  /**
+   * 개별 box id를 편집 허용 목록에 추가한다.
+   * `_editableBoxIds`가 `null`이면 새 Set을 생성한다.
+   *
+   * @param id - 추가할 box id
+   */
+  addEditableBox(id: string): void {
+    if (this._editableBoxIds === null) {
+      this._editableBoxIds = new Set();
+    }
+    this._editableBoxIds.add(id);
+    if (this._layoutEditMode) this._applyEditableLayoutToAllBoxes();
+  }
+
+  /**
+   * 개별 box id를 편집 허용 목록에서 제거한다.
+   *
+   * @param id - 제거할 box id
+   */
+  removeEditableBox(id: string): void {
+    if (this._editableBoxIds === null) return;
+    this._editableBoxIds.delete(id);
+    if (this._layoutEditMode) this._applyEditableLayoutToAllBoxes();
+  }
+
+  /**
+   * 특정 box가 레이아웃 편집 가능한지 판별한다.
+   *
+   * 판별 규칙 (AND):
+   * 1. `_layoutEditMode`가 `true`여야 함
+   * 2. `_editableRoles`가 `null`이 아니면 box.role이 Set에 포함되어야 함
+   * 3. `_editableBoxIds`가 `null`이 아니면 box.id가 Set에 포함되어야 함
+   *
+   * `_editableRoles === null && _editableBoxIds === null`이면
+   * `_layoutEditMode`가 true여도 어떤 box도 편집 불가 (모두 허용하지 않음 규칙).
+   *
+   * @param box - 판별할 box 요소
+   * @returns 편집 가능 여부
+   */
+  isBoxEditable(box: LayoutBoxElement): boolean {
+    if (!this._layoutEditMode) return false;
+    if (this._editableRoles === null && this._editableBoxIds === null) return false;
+    const role = box.role;
+    if (this._editableRoles !== null && !this._editableRoles.has(role)) return false;
+    if (this._editableBoxIds !== null && !this._editableBoxIds.has(box.id)) return false;
+    return true;
+  }
+
+  /**
+   * 현재 편집 가능 상태에 따라 문서 내 모든 box의 `editableLayout` 속성을 갱신한다.
+   * `isBoxEditable()` 결과를 box별로 적용한다.
+   */
+  private _applyEditableLayoutToAllBoxes(): void {
+    const boxes = document.querySelectorAll<LayoutBoxElement>('x-layout-box');
+    boxes.forEach((box) => {
+      const editable = this.isBoxEditable(box);
+      if (box.editableLayout !== editable) {
+        box.editableLayout = editable;
+      }
+    });
+  }
+
+  /**
    * 레이아웃 요소를 선택한다.
    *
    * `editableLayout`이 켜진 box 요소만 선택할 수 있다.
@@ -434,7 +580,7 @@ export class EditManager {
     for (const t of targets) {
       const element = this._resolveLayoutElement(t);
       if (!element) continue;
-      if (!element.editableLayout) continue;
+      if (!this.isBoxEditable(element) && !element.editableLayout) continue;
       newSelections.push(element);
     }
 
@@ -519,15 +665,13 @@ export class EditManager {
     if (this._insertMode === mode) return;
 
     if (mode) {
-      // 레이아웃 편집 모드가 활성화된 box가 없으면 삽입 모드를 활성화하지 않는다.
-      const hasEditable = document.querySelector('x-layout-box[editable-layout]');
-      if (!hasEditable) return;
+      const allBoxes = document.querySelectorAll<LayoutBoxElement>('x-layout-box');
+      const editableBoxes = Array.from(allBoxes).filter(box => this.isBoxEditable(box));
+      if (editableBoxes.length === 0) return;
 
-      // 활성화 시 레이아웃 선택을 해제한다.
       this.clearLayoutSelection();
 
-      // 삽입 모드에서는 편집 가능한 box의 커서를 crosshair로 변경한다.
-      document.querySelectorAll<LayoutBoxElement>('x-layout-box[editable-layout]').forEach((box) => {
+      editableBoxes.forEach((box) => {
         box.style.cursor = 'crosshair';
       });
 
@@ -547,7 +691,6 @@ export class EditManager {
       }
       this._insertMode = null;
 
-      // 삽입 모드 해제 시 편집 가능한 box의 커서를 원래대로 복원한다.
       document.querySelectorAll<LayoutBoxElement>('x-layout-box[editable-layout]').forEach((box) => {
         box.style.cursor = 'grab';
       });
