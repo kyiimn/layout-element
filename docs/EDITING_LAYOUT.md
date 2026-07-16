@@ -575,9 +575,9 @@ const boxData: BoxData = {
   type: 'box',
   id: 'locked-group',
   lock: true,
+  // lock이 적용되어 있으므로 이 안의 모든 자식 요소도 편집 불가
   children: [
-    // lock이 적용되어 있으므로 이 안의 모든 자식 요소도 편집 불가
-    { type: 'paragraph', /* ... */ },
+    { type: 'box', /* ... */ },
     { type: 'box', /* ... */ },
   ],
 };
@@ -2101,9 +2101,9 @@ const boxData: BoxData = {
 | 삽입 타입 | `boxData.children` | 생성되는 내부 요소 |
 |-----------|-------------------|-------------------|
 | `box` | `undefined` | 자식 없음, 빈 박스 |
-| `text` | `[{ type: 'text', content: '' }]` | `<x-layout-paragraph>` (`type`을 `'paragraph'`으로 변환, `column`/`gap` 생략 → 부모 모델에서 상속) |
-| `paragraph` | `[{ type: 'paragraph', content: '' }]` | `<x-layout-paragraph>` (단락 데이터, `column`/`gap` 생략 → 부모 모델에서 상속) |
-| `image` | `[{ type: 'image', x: 0, y: 0, width: 100, height: 100, dpi: 72, url: '' }]` | `<x-layout-image>` (100×100px, 72dpi, 빈 url) |
+| `text` | `{ type: 'text', content: '' }` | `<x-layout-paragraph>` (`type`을 `'paragraph'`으로 변환, `column`/`gap` 생략 → 부모 모델에서 상속) |
+| `paragraph` | `{ type: 'paragraph', content: '' }` | `<x-layout-paragraph>` (단락 데이터, `column`/`gap` 생략 → 부모 모델에서 상속) |
+| `image` | `{ type: 'image', x: 0, y: 0, width: 100, height: 100, dpi: 72, url: '' }` | `<x-layout-image>` (100×100px, 72dpi, 빈 url) |
 
 > **`column`/`gap` 상속**: `text`와 `paragraph` 삽입 시 `ParagraphData`의 `column`과 `gap`을 명시적으로 설정하지 않는다. `LayoutParagraphElement._layoutStructure()`에서 `_column`과 `_gap`이 `undefined`이면 부모 `GridCalculator`의 `columnWidth`/`gaps`를 상속받아, static 모드에서는 부모 박스가 차지하는 컬럼 수와 동일한 컬럼 구성을 자동으로 갖게 된다.
 

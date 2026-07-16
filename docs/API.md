@@ -77,7 +77,7 @@
         {
           type: 'box',
           left: 0, top: 0, width: 3, height: 30,
-          children: [{ type: 'text', content: '제목', textStyle: { fontSize: 8 } }],
+          children: { type: 'text', content: '제목', textStyle: { fontSize: 8 } },
         },
       ],
     };
@@ -192,10 +192,10 @@ doc.paddingTop = 15;
 
 // 3. 자식 직접 추가
 const box = document.createElement('x-layout-box') as LayoutBoxElement;
-box.data = {
-  type: 'box', left: 0, top: 0, width: 2, height: 10,
-  children: [{ type: 'text', content: 'Hello' }],
-};
+  box.data = {
+    type: 'box', left: 0, top: 0, width: 2, height: 10,
+    children: { type: 'text', content: 'Hello' },
+  };
 doc.appendChild(box);
 
 // 4. 인쇄 모드 후처리 데이터 수집
@@ -207,7 +207,7 @@ const postData = doc.printPostData;
 ### `<x-layout-box>`
 
 **위치 지정 가능한 컨테이너**. 컬럼 그리드(`position: 'static'`) 또는 mm 좌표
-(`position: 'absolute'`)로 배치되며, 다른 박스/단락/이미지를 자식으로 가질 수 있습니다.
+(`position: 'absolute'`)로 배치되며, 자식으로 여러 박스(`BoxData[]`) 또는 하나의 콘텐츠 요소(`ParagraphData`, `TextData`, `ImageData`)를 가질 수 있습니다. 박스 자식과 콘텐츠 자식을 같은 배열에 섞을 수 없습니다.
 
 #### Class: `LayoutBoxElement`
 
@@ -224,7 +224,7 @@ const postData = doc.printPostData;
  * const box = document.createElement('x-layout-box') as LayoutBoxElement;
  * box.data = {
  *   type: 'box', position: 'static', left: 1, top: 0, width: 3, height: 10,
- *   children: [{ type: 'paragraph', content: '본문' }],
+ *   children: { type: 'paragraph', content: '본문' },
  * };
  */
 class LayoutBoxElement extends HTMLElement
@@ -303,9 +303,7 @@ box.data = {
   borderColor: 'black',
   borderBottomWidth: 0.5,
   paddingLeft: 5,
-  children: [
-    { type: 'text', content: '제목', textStyle: { fontSize: 8 } },
-  ],
+  children: { type: 'text', content: '제목', textStyle: { fontSize: 8 } },
 };
 parentBox.appendChild(box);
 
@@ -1929,7 +1927,7 @@ type BoxData = {
   groupMember?: string;
   priority?: number;
   lock?: boolean;
-  children?: (BoxData | ParagraphData | TextData | ImageData)[];
+  children?: BoxData[] | ParagraphData | TextData | ImageData;
 };
 
 type BoxPosition = 'static' | 'absolute';
