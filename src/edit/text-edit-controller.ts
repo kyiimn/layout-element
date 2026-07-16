@@ -3,7 +3,7 @@ import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { TextBlockStyle, ParagraphStyle, TextStyle } from "@/types/style";
 import { CursorPosition } from "@/types/edit/cursor.type";
 import { SelectionRange } from "@/types/edit/selection.type";
-import { EditCoordinateMapper } from "./edit-coordinate-mapper";
+import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
 import { DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN } from "@/constants";
 
@@ -24,11 +24,11 @@ export type CurrentStyle = {
  *
  * `LayoutParagraphElement`가 `editable = true`일 때 생성되며,
  * 단락의 shadow root에 숨겨진 `<textarea>`, 커서 요소, 선택 영역 요소를 추가한다.
- * 렌더링된 문자 위치와 소스 텍스트 오프셋 간의 매핑은 `EditCoordinateMapper`가 담당한다.
+ * 렌더링된 문자 위치와 소스 텍스트 오프셋 간의 매핑은 `TextEditCoordinateMapper`가 담당한다.
  */
-export class EditController {
+export class TextEditController {
   private _paragraph: LayoutParagraphElement;
-  private _mapper: EditCoordinateMapper;
+  private _mapper: TextEditCoordinateMapper;
 
   private _textarea: HTMLTextAreaElement;
   private _cursorEl: LayoutCursorElement;
@@ -79,7 +79,7 @@ export class EditController {
 
   constructor(paragraph: LayoutParagraphElement) {
     this._paragraph = paragraph;
-    this._mapper = new EditCoordinateMapper(paragraph);
+    this._mapper = new TextEditCoordinateMapper(paragraph);
 
     this._textarea = this._createTextarea();
     this._cursorEl = document.createElement("x-layout-cursor") as LayoutCursorElement;

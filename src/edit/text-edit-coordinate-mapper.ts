@@ -10,7 +10,7 @@ import { DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN } from "@/constants";
  * 소스 문자열에 포함된 `\n` 문자나 줄 앞뒤로 제거된 공백을 반영하지 않는다.
  * 이 클래스는 렌더링 오프셋과 소스 오프셋 간의 양방향 변환을 관리한다.
  */
-export class EditCoordinateMapper {
+export class TextEditCoordinateMapper {
   private _paragraph: LayoutParagraphElement;
 
   /** 렌더링 오프셋 → 소스 오프셋 */

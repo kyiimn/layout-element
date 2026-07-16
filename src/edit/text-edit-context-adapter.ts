@@ -1,15 +1,15 @@
-import type { EditCoordinateMapper } from "./edit-coordinate-mapper";
+import type { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 
 /**
  * Adapter that bridges the browser EditContext API with the layout engine.
  *
  * Uses EditContext (Chromium 122+) when available for native IME support.
  * Falls back gracefully — `create()` returns `null` on unsupported browsers,
- * allowing EditController to use its textarea-based fallback path.
+ * allowing TextEditController to use its textarea-based fallback path.
  */
-export class EditContextAdapter {
+export class TextEditContextAdapter {
   private _editContext: BrowserEditContext | null;
-  private _mapper: EditCoordinateMapper;
+  private _mapper: TextEditCoordinateMapper;
   private _callbacks: EditContextCallbacks;
 
   private _boundOnTextUpdate: (e: Event) => void;
@@ -19,7 +19,7 @@ export class EditContextAdapter {
 
   private constructor(
     editContext: BrowserEditContext,
-    mapper: EditCoordinateMapper,
+    mapper: TextEditCoordinateMapper,
     callbacks: EditContextCallbacks,
   ) {
     this._editContext = editContext;
@@ -45,21 +45,21 @@ export class EditContextAdapter {
   }
 
   /**
-   * Factory method. Creates an `EditContextAdapter` when the EditContext API
+   * Factory method. Creates an `TextEditContextAdapter` when the EditContext API
    * is available, otherwise returns `null`.
    */
   static create(
-    mapper: EditCoordinateMapper,
+    mapper: TextEditCoordinateMapper,
     callbacks: EditContextCallbacks,
-  ): EditContextAdapter | null {
-    if (!EditContextAdapter.isSupported()) {
+  ): TextEditContextAdapter | null {
+    if (!TextEditContextAdapter.isSupported()) {
       return null;
     }
 
     // EditContext is guaranteed to exist by isSupported() check above.
     const EditContextCtor = (globalThis as unknown as { EditContext: new () => BrowserEditContext }).EditContext;
     const editContext = new EditContextCtor();
-    return new EditContextAdapter(editContext, mapper, callbacks);
+    return new TextEditContextAdapter(editContext, mapper, callbacks);
   }
 
   /** Returns the underlying EditContext instance (for attaching to an element). */
