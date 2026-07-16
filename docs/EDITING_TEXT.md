@@ -1,6 +1,6 @@
 # layout-element 텍스트 편집 모드 상세 명세
 
-> 작성 기준: `src/edit/edit-controller.ts`, `src/edit/edit-coordinate-mapper.ts`, `src/edit/edit-manager.ts`, `src/types/edit/`, `src/components/edit/cursor.element.ts`, `src/components/edit/selection.element.ts`, `src/components/layout/paragraph.element.ts`
+> 작성 기준: `src/edit/text-edit-controller.ts`, `src/edit/text-edit-coordinate-mapper.ts`, `src/edit/edit-manager.ts`, `src/types/edit/`, `src/components/edit/cursor.element.ts`, `src/components/edit/selection.element.ts`, `src/components/layout/paragraph.element.ts`
 >
 > 본 문서는 `layout-element` 라이브러리의 텍스트 편집 모드 기능, 공개 API, 키보드/마우스 입력 처리, IME 조합, 렌더링 생명 주기, 글로벌 편집 관리(`EditManager`), 그리고 호스트 프로그램 연동 방법을 상세히 기술한다.
 
@@ -12,13 +12,15 @@
 
 ### 1.1 텍스트 편집 모드 아키텍처
 
-`EditController`는 `LayoutParagraphElement.editableText = true`로 활성화된다. 컨트롤러는 단락 요소의 `shadow root` 안에 다음 세 요소를 배치한다.
+`TextEditController`는 `LayoutParagraphElement.editableText = true`로 활성화된다. 단락 수준의 직접 활성화 외에, `EditManager`의 `textEditMode`와 3단계 필터(`editableTextRoles`, `editableTextBoxIds`, `editableParagraphIds`)를 통해 문서 전체에서 어떤 단락을 편집 가능하게 할지 중앙에서 관리할 수 있다. 실제 입력 처리(IME, 커서, 선택, 키보드)는 단락에 1:1로 소속된 `TextEditController`가 담당한다.
+
+컨트롤러는 단락 요소의 `shadow root` 안에 다음 세 요소를 배치한다.
 
 1. 숨겨진 `<textarea>`: 1x1 픽셀, 투명, `tabindex="-1"`, `opacity: 0`. 모든 키보드 이벤트, `input` 이벤트, IME 조합 이벤트, 붙여넣기 이벤트를 이 요소가 수신한다. 사용자에게 보이지 않지만 브라우저의 표준 입력기 동작을 그대로 활용한다.
-2. `<x-layout-cursor>`: 1px 너비의 수직 커서. 실제 DOM 위치는 `EditCoordinateMapper`가 반환하는 문자 rect 기준으로 계산한다.
+2. `<x-layout-cursor>`: 1px 너비의 수직 커서. 실제 DOM 위치는 `TextEditCoordinateMapper`가 반환하는 문자 rect 기준으로 계산한다.
 3. `<x-layout-selection>`: 선택된 텍스트 위에 반투명 사각형 오버레이를 렌더링한다.
 
-모든 `EditController` 인스턴스는 생성 시 `EditManager` 싱글톤에 등록된다. `EditManager`는 문서 전체의 편집 상태를 글로벌하게 관리하며, 한 번에 하나의 단락만 포커스를 가지도록 보장한다. 포커스가 다른 단락으로 이동하면 이전 단락의 선택 영역이 자동으로 해제된다.
+모든 `TextEditController` 인스턴스는 생성 시 `EditManager` 싱글톤에 등록된다. `EditManager`는 문서 전체의 편집 상태를 글로벌하게 관리하며, 한 번에 하나의 단락만 포커스를 가지도록 보장한다. 포커스가 다른 단락으로 이동하면 이전 단락의 선택 영역이 자동으로 해제된다.
 
 ```mermaid
 flowchart TD
@@ -37,20 +39,20 @@ flowchart TD
     end
 
     UserInput -->|이벤트| TA
-    TA -->|input/composition| EC["EditController"]
+    TA -->|input/composition| EC["TextEditController"]
     EC -->|model.inputContent 갱신| TLE["TextLayoutEngine"]
     TLE -->|columnContents| RENDER["paragraph.render()"]
     RENDER --> COL
     RENDER -->|postRender()| EC
-    EC -->|rebuild()| ECM["EditCoordinateMapper"]
+    EC -->|rebuild()| ECM["TextEditCoordinateMapper"]
     ECM -->|오프셋/좌표| EC
     EC -->|위치/보이기 갱신| CUR
     EC -->|ranges 갱신| SEL
 ```
 
-### 1.2 `EditCoordinateMapper`의 역할
+### 1.2 `TextEditCoordinateMapper`의 역할
 
-`EditCoordinateMapper`는 소스 오프셋과 렌더링 오프셋 사이의 양방향 매핑을 유지한다.
+`TextEditCoordinateMapper`는 소스 오프셋과 렌더링 오프셋 사이의 양방향 매핑을 유지한다.
 
 - 소스 오프셋: `model.inputContent` 문자열 내 0-based 인덱스. `\n`과 제거되지 않은 공백을 모두 포함한다.
 - 렌더링 오프셋: 실제 DOM span의 `data-offset` 값. `\n`과 줄 앞뒤로 제거된 공백은 매핑에서 제외된다.
@@ -64,7 +66,7 @@ flowchart TD
 ```mermaid
 flowchart LR
     A[사용자 입력] --> B["textarea 이벤트"]
-    B --> C[EditController 핸들러]
+    B --> C[TextEditController 핸들러]
     C -->|inputContent 변경| D["TextLayoutEngine.model"]
     D --> E[paragraph.render]
     E -->|needsFullRecreate| F[DOM 컬럼/span 갱신]
@@ -82,8 +84,8 @@ flowchart LR
 sequenceDiagram
     participant User as 사용자
     participant TA as textarea
-    participant EC as EditController
-    participant ECM as EditCoordinateMapper
+    participant EC as TextEditController
+    participant ECM as TextEditCoordinateMapper
     participant TLE as TextLayoutEngine
     paragraph P as LayoutParagraphElement
     participant DOM as x-layout-column/spans
@@ -139,14 +141,14 @@ paragraph.editableText = false;
 
 동작:
 
-- `editableText = true`를 처음 설정하면 `EditController` 인스턴스가 생성된다.
-- `editableText = false`를 설정하면 `EditController.destroy()`가 호출되며, 이벤트 리스너와 DOM 요소가 모두 제거된다.
-- 같은 단락에서 다시 `editableText = true`를 설정하면 새 `EditController`가 생성된다.
+- `editableText = true`를 처음 설정하면 `TextEditController` 인스턴스가 생성된다.
+- `editableText = false`를 설정하면 `TextEditController.destroy()`가 호출되며, 이벤트 리스너와 DOM 요소가 모두 제거된다.
+- 같은 단락에서 다시 `editableText = true`를 설정하면 새 `TextEditController`가 생성된다.
 - **인쇄 모드**에서는 `editableText` 설정이 무시된다. 인쇄 모드에서는 편집 기능을 활성화할 수 없다.
 
 ### 2.2 `editController` 게터
 
-활성화된 `EditController`에 접근할 때 사용한다.
+활성화된 `TextEditController`에 접근할 때 사용한다.
 
 ```ts
 const controller = paragraph.editController;
@@ -155,9 +157,9 @@ if (controller) {
 }
 ```
 
-### 2.3 `EditController` 생성 시 추가되는 DOM 요소
+### 2.3 `TextEditController` 생성 시 추가되는 DOM 요소
 
-`EditController` 생성자는 단락의 `shadow root`에 다음 세 가지 요소를 추가한다. 텍스트 편집을 위한 숨겨진 입력기, 커서, 선택 영역이다.
+`TextEditController` 생성자는 단락의 `shadow root`에 다음 세 가지 요소를 추가한다. 텍스트 편집을 위한 숨겨진 입력기, 커서, 선택 영역이다.
 
 | 요소 | 태그 | 설명 |
 |------|------|------|
@@ -167,9 +169,9 @@ if (controller) {
 
 ### 2.4 생성자 초기화 과정 상세
 
-`new EditController(paragraph)`는 다음 순서로 실행된다.
+`new TextEditController(paragraph)`는 다음 순서로 실행된다.
 
-1. `EditCoordinateMapper` 생성. `paragraph.model`이 있으면 `rebuild()`가 즉시 실행되어 초기 매핑을 구축한다.
+1. `TextEditCoordinateMapper` 생성. `paragraph.model`이 있으면 `rebuild()`가 즉시 실행되어 초기 매핑을 구축한다.
 2. `_createTextarea()`로 숨겨진 `<textarea>` 생성:
    - `position: absolute`
    - `opacity: 0`
@@ -192,8 +194,8 @@ if (controller) {
 
 ```mermaid
 flowchart LR
-    A[editableText = true] --> B[EditController 생성]
-    B --> C["EditCoordinateMapper 생성"]
+    A[editableText = true] --> B[TextEditController 생성]
+    B --> C["TextEditCoordinateMapper 생성"]
     C --> D["textarea + cursor + selection 생성"]
     D --> E[shadow root에 추가]
     E --> F[이벤트 리스너 등록]
@@ -201,17 +203,17 @@ flowchart LR
     G --> H["_updateCursorPosition()"]
     H --> I[편집 가능 상태]
 
-    J[editableText = false] --> K[EditController.destroy() 호출]
+    J[editableText = false] --> K[TextEditController.destroy() 호출]
     K --> L[이벤트 리스너 제거]
     L --> M[타이머 취소]
     M --> N[조합 상태 리셋]
     N --> O[DOM 요소 제거]
-    O --> P[EditController = null]
+    O --> P[TextEditController = null]
 ```
 
 ### 2.5 `destroy()`의 정리 과정 상세
 
-`EditController.destroy()`는 다음 작업을 순서대로 수행한다.
+`TextEditController.destroy()`는 다음 작업을 순서대로 수행한다.
 
 1. 단락에서 `click`, `mousedown`, `dblclick` 리스너 제거.
 2. document에서 `mouseup`, `mousemove` 리스너 제거.
@@ -233,12 +235,12 @@ flowchart LR
 
 | API | 타입 | 설명 |
 |-----|------|------|
-| `editableText` | `boolean` get/set | 텍스트 편집 모드를 활성화하거나 비활성화한다. `true` 설정 시 `EditController`가 생성되고, `false` 설정 시 제거된다. |
-| `editController` | `EditController \| null` get | 현재 연결된 `EditController` 인스턴스를 반환한다. 텍스트 편집 모드가 꺼져 있으면 `null`이다. |
+| `editableText` | `boolean` get/set | 텍스트 편집 모드를 활성화하거나 비활성화한다. `true` 설정 시 `TextEditController`가 생성되고, `false` 설정 시 제거된다. |
+| `editController` | `TextEditController \| null` get | 현재 연결된 `TextEditController` 인스턴스를 반환한다. 텍스트 편집 모드가 꺼져 있으면 `null`이다. |
 | `model` | `TextLayoutEngine \| null` get | 단락에 연결된 `TextLayoutEngine` 모델을 반환한다. |
 | `render()` | `void` | 단락을 다시 렌더링한다. 편집 중이면 `editController.postRender()`를 자동으로 호출한다. |
 
-### 3.2 `EditController`
+### 3.2 `TextEditController`
 
 | API | 타입 | 설명 |
 |-----|------|------|
@@ -306,9 +308,9 @@ const { textStyle, paragraphStyle } = controller.currentStyle;
 - `focus()`: `this._textarea.focus()`를 호출한다. 포커스를 받으면 `_onFocus()` 콜백이 실행되고, 선택 영역이 없을 때만 커서를 보이게 한다.
 - `blur()`: `this._textarea.blur()`를 호출한다. 포커스를 잃으면 `_onBlur()` 콜백이 실행되고, 진행 중인 IME 조합이 있으면 완료 처리한 뒤 커서를 숨긴다.
 
-### 3.4 `EditCoordinateMapper`
+### 3.4 `TextEditCoordinateMapper`
 
-`EditController` 내부에서 사용하는 좌표 매핑 객체이지만, 내부 상태를 직접 참조해야 하는 호스트 프로그램을 위해 다음 메서드를 문서화한다.
+`TextEditController` 내부에서 사용하는 좌표 매핑 객체이지만, 내부 상태를 직접 참조해야 하는 호스트 프로그램을 위해 다음 메서드를 문서화한다.
 
 | API | 타입 | 설명 |
 |-----|------|------|
@@ -389,6 +391,7 @@ InheritStyle (부모에서 상속)
 
 ### 3.6.1 역할
 
+- **텍스트 편집 모드 활성화 관리**: `textEditMode`와 3단계 필터(`editableTextRoles`, `editableTextBoxIds`, `editableParagraphIds`)를 통해 문서 전체에서 어떤 단락을 편집 가능하게 할지 중앙에서 제어한다.
 - **포커스 관리**: 한 번에 하나의 단락만 포커스를 가진다. 포커스가 B 단락으로 이동하면 A 단락의 선택 영역이 자동으로 해제된다.
 - **이벤트 시스템**: `focusChange`, `textChange`, `styleChange`, `cursorMove`, `selectionStart`, `selectionEnd` 이벤트를 외부 편집 UI에 전달한다.
 - **상태 조회**: 현재 포커스된 단락, 커서 위치, 선택 영역, 스타일을 조회할 수 있다.
@@ -400,16 +403,26 @@ InheritStyle (부모에서 상속)
 |-----|------|------|
 | `getInstance()` | `EditManager` static | 싱글톤 인스턴스를 반환한다. |
 | `focusedParagraph` | `LayoutParagraphElement \| null` get | 현재 포커스된 단락 요소. 없으면 `null`. |
-| `focusedController` | `EditController \| null` get | 현재 포커스된 편집 컨트롤러. 없으면 `null`. |
+| `focusedController` | `TextEditController \| null` get | 현재 포커스된 편집 컨트롤러. 없으면 `null`. |
 | `cursorOffset` | `number \| null` get | 현재 커서 위치. 포커스된 단락이 없으면 `null`. |
 | `selection` | `SelectionRange \| null` get | 현재 선택 영역. 선택이 없거나 포커스된 단락이 없으면 `null`. DOM `Selection` API와 유사하게 현재 selection 객체를 직접 조회. |
 | `currentStyle` | `CurrentStyle \| null` get | 현재 커서 위치의 유효 스타일. 포커스된 단락이 없으면 `null`. |
-| `controllers` | `Set<EditController>` get | 등록된 모든 편집 컨트롤러. |
+| `controllers` | `Set<TextEditController>` get | 등록된 모든 편집 컨트롤러. |
 | `focusParagraph(target, options?)` | `boolean` | 단락 요소 또는 ID로 포커스를 설정한다. 텍스트 편집 모드가 아니면 자동 활성화. `options.cursorOffset`으로 커서 위치, `options.selection`으로 선택 영역을 지정할 수 있다. 성공 시 `true`, 실패 시 `false`. |
 | `blurParagraph(target?)` | `boolean` | 단락 요소, ID, 또는 생략으로 포커스를 해제한다. 생략하면 현재 포커스된 단락을 blur. 성공 시 `true`, 실패 시 `false`. |
 | `addEventListener(type, listener)` | `void` | 이벤트 리스너를 등록한다. |
 | `removeEventListener(type, listener)` | `void` | 이벤트 리스너를 제거한다. |
-| `deactivateAll()` | `void` | 모든 단락의 텍스트 편집 모드를 비활성화한다. |
+| `textEditMode` | `boolean` get/set | 전역 텍스트 편집 모드 토글. `false`이면 모든 단락의 편집을 비활성화하고 포커스를 해제한다. |
+| `editableTextRoles` | `ReadonlySet<BoxRole> \| null` get | 부모 상자의 `role` 필터. `null`이면 역할 필터가 없다. |
+| `setEditableTextRoles(roles)` | `void` | `BoxRole[] \| null`을 받아 `editableTextRoles` 필터를 설정한다. `null`이면 역할 필터를 해제한다. |
+| `editableTextBoxIds` | `ReadonlySet<string> \| null` get | 부모 상자의 `id` 필터. `null`이면 상자 ID 필터가 없다. |
+| `setEditableTextBoxIds(ids)` | `void` | `string[] \| null`을 받아 `editableTextBoxIds` 필터를 설정한다. `null`이면 상자 ID 필터를 해제한다. |
+| `editableParagraphIds` | `ReadonlySet<string> \| null` get | 단락 자체의 `id` 필터. `null`이면 단락 ID 필터가 없다. |
+| `setEditableParagraphIds(ids)` | `void` | `string[] \| null`을 받아 `editableParagraphIds` 필터를 설정한다. `null`이면 단락 ID 필터를 해제한다. |
+| `addEditableParagraph(id)` | `void` | 개별 단락 ID를 `editableParagraphIds` 필터에 추가한다. |
+| `removeEditableParagraph(id)` | `void` | 개별 단락 ID를 `editableParagraphIds` 필터에서 제거한다. |
+| `isParagraphEditable(paragraph)` | `boolean` | 3단계 AND 필터를 적용해 단락이 편집 가능한지 판정한다. `textEditMode`가 `false`이면 `false`를 반환하고, 세 필터가 모두 `null`이면 `false`를 반환한다. 그 외에는 `editableTextRoles`로 부모 상자 역할, `editableTextBoxIds`로 부모 상자 ID, `editableParagraphIds`로 단락 ID를 각각 검사한다. |
+| `deactivateAll()` | `void` | `textEditMode`를 `false`로 설정한 뒤, 모든 단락의 텍스트 편집 모드를 비활성화한다. |
 
 ### 3.6.3 이벤트 시스템
 
@@ -434,15 +447,99 @@ type EditManagerEventType =
 interface EditManagerEvent {
   type: EditManagerEventType;
   paragraph: LayoutParagraphElement;
-  controller: EditController;
+  controller: TextEditController;
   previousParagraph?: LayoutParagraphElement | null;
-  previousController?: EditController | null;
+  previousController?: TextEditController | null;
 }
 
 type EditManagerEventListener = (event: EditManagerEvent) => void;
 ```
 
-### 3.6.4 포커스 이동 메커니즘
+### 3.6.4 텍스트 편집 모드 활성화 API 상세
+
+`EditManager`는 레이아웃 편집 모드와 유사한 방식으로 텍스트 편집 활성화를 중앙에서 관리한다. 단, 실제 입력 처리(IME, 커서, 선택, 키보드)는 여전히 단락에 종속된 `TextEditController`가 담당한다.
+
+#### `textEditMode`
+
+전역 텍스트 편집 모드 스위치이다.
+
+- `true`로 설정하면 `_applyEditableTextToAllParagraphs()`가 호출되어 조건에 맞는 단락의 `editableText`가 `true`로 설정된다.
+- `false`로 설정하면 포커스를 해제하고, 모든 단락의 `editableText`를 `false`로 설정한다.
+- 현재 포커스된 단락이 비활성화 대상이면 `blurParagraph()`로 포커스를 먼저 해제한다.
+
+```ts
+const manager = EditManager.getInstance();
+manager.textEditMode = true;  // 조건에 맞는 단락만 편집 가능
+manager.textEditMode = false; // 모든 단락 비활성화 + 포커스 해제
+```
+
+#### `setEditableTextRoles(roles)` / `editableTextRoles`
+
+부모 상자의 `role`(`BoxRole`)로 편집 가능 단락을 제한한다. 예를 들어 본문(`'body'`)과 캡션(`'caption'`) 영역만 편집 가능하게 할 수 있다.
+
+```ts
+manager.setEditableTextRoles(['body', 'caption']);
+console.log(manager.editableTextRoles); // ReadonlySet { 'body', 'caption' }
+
+manager.setEditableTextRoles(null); // 역할 필터 해제
+```
+
+#### `setEditableTextBoxIds(ids)` / `editableTextBoxIds`
+
+부모 상자의 `id`로 편집 가능 단락을 제한한다. 특정 기사 상자나 광고 상자 안의 단락만 편집 가능하게 할 때 사용한다.
+
+```ts
+manager.setEditableTextBoxIds(['article-1', 'article-2']);
+console.log(manager.editableTextBoxIds); // ReadonlySet { 'article-1', 'article-2' }
+
+manager.setEditableTextBoxIds(null); // 상자 ID 필터 해제
+```
+
+#### `setEditableParagraphIds(ids)` / `editableParagraphIds`
+
+단락의 `id`로 직접 편집 가능 집합을 제한한다. 가장 세밀한 필터이다.
+
+```ts
+manager.setEditableParagraphIds(['p-1', 'p-2', 'p-3']);
+console.log(manager.editableParagraphIds); // ReadonlySet { 'p-1', 'p-2', 'p-3' }
+
+manager.setEditableParagraphIds(null); // 단락 ID 필터 해제
+```
+
+#### `addEditableParagraph(id)` / `removeEditableParagraph(id)`
+
+`editableParagraphIds`에 개별 단락 ID를 추가하거나 제거한다. ID 기반 필터가 `null`이면 `addEditableParagraph(id)` 호출 시 자동으로 새 집합이 생성된다.
+
+```ts
+manager.addEditableParagraph('p-new');    // editableParagraphIds에 추가
+manager.removeEditableParagraph('p-old'); // editableParagraphIds에서 제거
+```
+
+#### `isParagraphEditable(paragraph)`
+
+세 단계 AND 필터를 적용해 단락이 현재 편집 가능한지 판정한다.
+
+**반환 규칙:**
+
+1. `textEditMode === false`이면 `false`.
+2. `editableTextRoles`, `editableTextBoxIds`, `editableParagraphIds`가 모두 `null`이면 `false` (아무것도 허용하지 않는 규칙).
+3. 각 필터가 `null`이 아니면 해당 조건을 AND로 검사:
+   - `editableTextRoles`: 단락의 부모 상자 `role`이 집합에 포함되어야 한다.
+   - `editableTextBoxIds`: 단락의 부모 상자 `id`가 집합에 포함되어야 한다.
+   - `editableParagraphIds`: 단락의 `id`가 집합에 포함되어야 한다.
+
+```ts
+const paragraph = document.getElementById('p-1') as LayoutParagraphElement;
+if (manager.isParagraphEditable(paragraph)) {
+  manager.focusParagraph(paragraph);
+}
+```
+
+#### `_applyEditableTextToAllParagraphs()`
+
+`textEditMode`나 필터가 변경될 때 내부적으로 호출된다. 문서의 모든 `x-layout-paragraph`를 순회하며 `isParagraphEditable(paragraph)` 결과에 따라 `paragraph.editableText`를 갱신한다. 이 메서드는 직접 호출할 필요는 없지만, 호스트 프로그램이 동적으로 단락을 추가한 뒤에는 `textEditMode`를 다시 할당하거나 `_applyEditableTextToAllParagraphs()`를 호출해 새 단락에 필터를 적용해야 한다.
+
+### 3.6.5 포커스 이동 메커니즘
 
 포커스가 B 단락으로 이동할 때의 내부 처리 순서:
 
@@ -462,11 +559,11 @@ type EditManagerEventListener = (event: EditManagerEvent) => void;
 
 `_onBlur`에서 `_releaseFocus`를 호출하지 않는 이유: `controllerB.focus()`를 호출하면 브라우저가 `controllerA`의 textarea blur를 먼저 처리하고, 그 후 `controllerB`의 textarea focus를 처리한다. 만약 `_onBlur`에서 `_releaseFocus`를 호출하면, `_requestFocus`가 호출될 때 `_focusedController`가 이미 null이 되어 `previousController`를 잡지 못한다.
 
-### 3.6.5 `focusParagraph()` / `blurParagraph()` 동작 상세
+### 3.6.6 `focusParagraph()` / `blurParagraph()` 동작 상세
 
 #### `focusParagraph(target, options?)`
 
-단락 요소 또는 ID로 포커스를 설정한다. `EditController`를 직접 다룰 필요 없이 `EditManager` 레벨에서 포커스를 제어할 수 있다.
+단락 요소 또는 ID로 포커스를 설정한다. `TextEditController`를 직접 다룰 필요 없이 `EditManager` 레벨에서 포커스를 제어할 수 있다.
 
 **시그니처:**
 
@@ -491,7 +588,7 @@ focusParagraph(
 
 1. `target`이 문자열이면 `document.getElementById()`로 요소를 찾고 `localName === 'x-layout-paragraph'`인지 확인한다.
 2. `target`이 `LayoutParagraphElement`이면 그대로 사용한다.
-3. 단락이 텍스트 편집 모드가 아니면 `editableText = true`로 설정하여 `EditController`를 생성한다.
+3. 단락이 텍스트 편집 모드가 아니면 `editableText = true`로 설정하여 `TextEditController`를 생성한다.
 4. 등록된 컨트롤러 중 해당 단락의 컨트롤러를 찾는다.
 5. `controller.focus()`로 textarea에 포커스를 준다.
 6. `options.selection`이 있으면 `controller.setSelection(selection)`을 호출한다. `setSelection`은 내부적으로 커서 위치를 `focus.textOffset`으로 이동시킨다.
@@ -527,12 +624,21 @@ blurParagraph(target?: LayoutParagraphElement | string): boolean
 - `target`을 지정하면 현재 포커스된 단락과 일치하는 경우에만 blur한다. 다른 단락이면 `false`를 반환한다.
 - `_blurInternal()`은 textarea에서 포커스를 해제하고, 커서를 숨기고, `_releaseFocus()`를 호출하여 `focusChange` 이벤트를 발생시킨다.
 
-### 3.6.6 사용 예시
+### 3.6.7 사용 예시
 
 ```ts
-import { EditManager, SelectionRange } from 'layout-element';
+import {
+  EditManager,
+  SelectionRange,
+  LayoutParagraphElement,
+} from 'layout-element';
 
 const manager = EditManager.getInstance();
+
+// 텍스트 편집 모드 활성화 + 필터 적용
+manager.setEditableTextRoles(['body', 'caption']);
+manager.setEditableTextBoxIds(['article-1']);
+manager.textEditMode = true; // 위 역할/상자 ID 조건을 만족하는 단락만 editableText = true
 
 // 이벤트 리스너 등록
 manager.addEventListener('focusChange', (e) => {
@@ -569,13 +675,17 @@ const style = manager.currentStyle;
 // 포커스 제어
 manager.focusParagraph('paragraph-1');                          // ID로 포커스
 manager.focusParagraph('paragraph-1', { cursorOffset: 5 });    // ID + 커서 위치
-manager.focusParagraph('paragraph-1', {                         // ID + 선택 영역
+manager.focusParagraph('paragraph-1', {                          // ID + 선택 영역
   selection: SelectionRange.fromOffsets(3, 8),
 });
 
 const paragraph = document.querySelector('x-layout-paragraph') as LayoutParagraphElement;
 manager.focusParagraph(paragraph);                               // 요소로 포커스
 manager.focusParagraph(paragraph, { cursorOffset: 12 });        // 요소 + 커서 위치
+
+// 필터 세밀 조정
+manager.addEditableParagraph('paragraph-2');
+manager.removeEditableParagraph('paragraph-1');
 
 // 포커스 해제
 manager.blurParagraph();                // 현재 포커스된 단락 blur
@@ -586,7 +696,7 @@ manager.blurParagraph(paragraph);       // 요소로 지정
 manager.deactivateAll();
 ```
 
-### 3.6.7 `EditManager`와 `EditController`의 관계
+### 3.6.8 `EditManager`와 `TextEditController`의 관계
 
 ```mermaid
 flowchart TD
@@ -594,17 +704,24 @@ flowchart TD
         FC["_focusedController"]
         CS["_controllers (Set)"]
         LST["_listeners (Map)"]
+        TEM["_textEditMode"]
+        FIL["editableTextRoles/BoxIds/ParagraphIds"]
     end
 
     subgraph P1["Paragraph A"]
-        EC1["EditController A"]
+        EC1["TextEditController A"]
         TA1["textarea A"]
     end
 
     subgraph P2["Paragraph B"]
-        EC2["EditController B"]
+        EC2["TextEditController B"]
         TA2["textarea B"]
     end
+
+    TEM -->|"_applyEditableTextToAllParagraphs()"| P1
+    TEM -->|"_applyEditableTextToAllParagraphs()"| P2
+    FIL -->|"isParagraphEditable()"| P1
+    FIL -->|"isParagraphEditable()"| P2
 
     EC1 -->|"_register / _unregister"| CS
     EC2 -->|"_register / _unregister"| CS
@@ -617,17 +734,20 @@ flowchart TD
     LST -->|이벤트 디스패치| HOST["호스트 프로그램"]
 ```
 
-- `EditController` 생성자에서 `EditManager._register(this)` 호출.
-- `EditController.destroy()`에서 `EditManager._unregister(this)` 호출.
-- `EditController._onFocus()`에서 `EditManager._requestFocus(this)` 호출.
-- `EditController`의 텍스트/선택/스타일 변경 시 `EditManager._notify*()` 호출.
+- `EditManager`가 `textEditMode`와 필터를 통해 어떤 단락을 편집 가능하게 할지 결정한다.
+- `TextEditController`는 실제 입력 처리(IME, 커서, 선택, 키보드)를 담당하며 단락에 1:1로 소속된다.
+- `TextEditController` 생성자에서 `EditManager._register(this)` 호출.
+- `TextEditController.destroy()`에서 `EditManager._unregister(this)` 호출.
+- `TextEditController._onFocus()`에서 `EditManager._requestFocus(this)` 호출.
+- `TextEditController`의 텍스트/선택/스타일 변경 시 `EditManager._notify*()` 호출.
+- `paragraph.editableText = true/false`는 하위 호환을 위해 그대로 동작하며, `EditManager._applyEditableTextToAllParagraphs()`도 이 setter를 호출한다.
 - `EditManager`는 이벤트 리스너를 통해 호스트 프로그램에 변경을 알림.
 
 ---
 
 ## 4. 키보드 단축키
 
-`EditController`는 다음 키보드 단축키를 처리한다. 대부분은 `_onKeydown()` 메서드에서 처리하며, 인쇄 가능한 문자 입력은 숨겨진 `textarea`의 `input` 이벤트로 처리한다.
+`TextEditController`는 다음 키보드 단축키를 처리한다. 대부분은 `_onKeydown()` 메서드에서 처리하며, 인쇄 가능한 문자 입력은 숨겨진 `textarea`의 `input` 이벤트로 처리한다.
 
 | 키 | 보조키 | 동작 |
 |---|--------|------|
@@ -742,7 +862,7 @@ flowchart TD
 
 ## 5. 마우스 상호작용
 
-`EditController`는 단락 요소에서 발생하는 마우스 이벤트를 처리한다. `_onClick`, `_onMouseDown`, `_onMouseMove`, `_onMouseUp`, `_onDoubleClick`, `_onTripleClick` 메서드가 담당한다.
+`TextEditController`는 단락 요소에서 발생하는 마우스 이벤트를 처리한다. `_onClick`, `_onMouseDown`, `_onMouseMove`, `_onMouseUp`, `_onDoubleClick`, `_onTripleClick` 메서드가 담당한다.
 
 | 동작 | 동작 |
 |------|------|
@@ -856,7 +976,7 @@ IME 입력은 `compositionstart` → `compositionupdate` (여러 번) → `compo
 sequenceDiagram
     participant User as 사용자
     participant TA as textarea
-    participant EC as EditController
+    participant EC as TextEditController
     participant Span as 조합 span
     participant Model as TextLayoutEngine
 
@@ -975,7 +1095,7 @@ sequenceDiagram
 
 ---
 
-## 7. 렌더링 생명 주기와 `EditController`
+## 7. 렌더링 생명 주기와 `TextEditController`
 
 ### 7.1 `paragraph.render()` 호출 시 흐름
 
@@ -1023,7 +1143,7 @@ flowchart TD
 
 ### 7.2 `postRender()`의 전체 흐름
 
-`EditController.postRender()`는 렌더링된 DOM을 기준으로 편집 UI를 동기화한다.
+`TextEditController.postRender()`는 렌더링된 DOM을 기준으로 편집 UI를 동기화한다.
 
 1. `this._mapper.rebuild()` — 오프셋 매핑 재구축.
 2. `this._optimisticSpan = null` — 낙관적 span 참조 제거.
@@ -1168,7 +1288,7 @@ flowchart LR
 
 - 낙관적 span은 `data-temporary="true"` 속성을 가진다.
 - 삽입된 문자 바로 이전(또는 `\n` 위치라면 이전 문자 다음)에 생성된다.
-- `EditController._createOptimisticSpan()`은 `TextLayoutEngine.genCharStyle()`로 스타일을 적용한다.
+- `TextEditController._createOptimisticSpan()`은 `TextLayoutEngine.genCharStyle()`로 스타일을 적용한다.
 - 다음 `postRender()` 호출 시 낙관적 span은 제거되고, 실제 렌더링된 span으로 대체된다.
 
 이 메커니즘은 키 입력과 화면 갱신 사이의 지연을 줄여, 사용자가 입력 지연을 덜 느끼도록 한다.
@@ -1187,7 +1307,7 @@ flowchart LR
 1. `model.genCharStyle(char)`로 스타일 객체를 얻는다.
 2. `Object.assign`로 span의 style에 적용.
 3. `dataset.offset = String(sourceOffset)`: 임시 오프셋. 재렌더링 시 실제 오프셋으로 교정된다.
-4. `dataset.temporary = "true"`: 임시 span 표시. `EditCoordinateMapper`는 이 속성이 있는 span을 매핑 대상에서 제외.
+4. `dataset.temporary = "true"`: 임시 span 표시. `TextEditCoordinateMapper`는 이 속성이 있는 span을 매핑 대상에서 제외.
 5. `innerText = char`.
 
 ### 8.3 낙관적 span이 있는 경우의 커서 위치 처리
@@ -1208,7 +1328,7 @@ flowchart LR
 ### 9.1 뷰포트 좌표와 단락 로컬 좌표
 
 - 마우스 이벤트의 `clientX`/`clientY`는 뷰포트 좌표이다.
-- `EditCoordinateMapper`는 `paragraph.getBoundingClientRect()`를 빼서 단락 로컬 좌표로 변환한다.
+- `TextEditCoordinateMapper`는 `paragraph.getBoundingClientRect()`를 빼서 단락 로컬 좌표로 변환한다.
 - `getCharRect()`와 `getTextRange()`는 단락 로컬 좌표를 반환한다.
 - `getCharOffsetFromPoint()`와 `getNearestOffsetFromPoint()`는 뷰포트 좌표를 인자로 받는다.
 
@@ -1270,14 +1390,14 @@ flowchart TD
 
 ## 10. 소스 오프셋 vs 렌더링 오프셋
 
-`EditCoordinateMapper`는 두 종류의 오프셋을 관리한다.
+`TextEditCoordinateMapper`는 두 종류의 오프셋을 관리한다.
 
 | 종류 | 정의 | 사용 위치 |
 |------|------|-----------|
 | 소스 오프셋 (source offset) | 원본 입력 문자열 내 위치. `\n` 문자와 제거되지 않은 공백을 모두 포함한다. | `cursorOffset`, `selection`, `setCursor`, `setSelection`, `getTextContent` |
 | 렌더링 오프셋 (rendered offset) | 실제 DOM에 렌더링된 문자 위치. `\n`과 줄 앞뒤로 제거된 공백은 제외된다. | `getCharRect`, `getSpanByOffset`, `getTextRange` 내부 계산 |
 
-`EditCoordinateMapper.sourceOffset()`과 `renderedOffset()`으로 양방향 변환이 가능한다.
+`TextEditCoordinateMapper.sourceOffset()`과 `renderedOffset()`으로 양방향 변환이 가능한다.
 
 ### 10.1 `_rebuildMappings()`의 매핑 구축 과정
 
@@ -1406,7 +1526,7 @@ flowchart TD
 
 - 기본 색상은 `rgba(0, 100, 200, 0.3)`이다.
 - `setRanges(rects: Rect[])`로 시각적 선택 영역을 갱신한다.
-- `rects`는 `EditCoordinateMapper.getTextRange()`에서 반환된 단락 로컬 좌표이다.
+- `rects`는 `TextEditCoordinateMapper.getTextRange()`에서 반환된 단락 로컬 좌표이다.
 - 선택 영역이 있을 때는 커서를 숨긴다.
 
 ### 12.1 `_updateSelection()` 로직
@@ -1585,7 +1705,7 @@ function redo() {
 | 제약 | 설명 | 이유 및 향후 개선 방향 |
 |------|------|------------------------|
 | 평문 텍스트만 지원 | 굵게, 기울임, 글자 색상 등 서식 있는 텍스트 편집은 지원하지 않는다. | `model.inputContent`는 단일 문자열이며 span 스타일은 `genCharStyle()`에서 일괄 생성. 향후 inline style range나 TextBlockData 기반 편집을 추가해야 한다. |
-| 단일 단락 편집 | 단락을 넘어가는 선택이나 여러 단락 동시 편집은 지원하지 않는다. | `_cursorModel`과 `_selectionAnchor`가 하나의 `LayoutParagraphElement`에만 연결. 향후 문서 전역 `EditController`와 paragraph 간 매핑이 필요하다. |
+| 단일 단락 편집 | 단락을 넘어가는 선택이나 여러 단락 동시 편집은 지원하지 않는다. | `_cursorModel`과 `_selectionAnchor`가 하나의 `LayoutParagraphElement`에만 연결. 향후 문서 전역 `TextEditController`와 paragraph 간 매핑이 필요하다. |
 | undo/redo 없음 | 실행 취소/다시 실행 스택은 호스트 프로그램이 직접 구현해야 한다. | 텍스트 변경 이력을 보관하면 메모리/복잡도 증가. 라이브러리는 최소한의 상태만 유지하고, 호스트가 정책을 결정하도록 설계되었다. |
 | 드래그 앤 드롭 없음 | 텍스트를 마우스로 끌어 이동하는 기능은 지원하지 않는다. | 선택 핸들과 drop target 계산이 추가로 필요. 클립보드 기반 잘라내기/붙여넣기로 대체 가능하다. |
 | 모바일 키보드 제한 | `_computeTextChange`가 모든 모바일 입력 패턴을 처리하지 못할 수 있다. | 모바일 IME는 composition 없이도 `beforeinput`/`input` 데이터를 변형. 더 많은 입력 이벤트를 수집하고 테스트해야 한다. |
