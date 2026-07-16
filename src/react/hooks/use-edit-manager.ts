@@ -6,7 +6,7 @@ import {
   type LayoutElement,
 } from '@/edit/edit-manager';
 import { LayoutParagraphElement } from '@/components/layout/paragraph.element';
-import type { EditController, CurrentStyle } from '@/edit/edit-controller';
+import type { TextEditController, CurrentStyle } from '@/edit/text-edit-controller';
 import type { SelectionRange } from '@/types/edit';
 
 export interface UseEditManagerOptions {
@@ -22,7 +22,7 @@ export interface UseEditManagerOptions {
 
 export interface UseEditManagerReturn {
   focusedParagraph: LayoutParagraphElement | null;
-  focusedController: EditController | null;
+  focusedController: TextEditController | null;
   cursorOffset: number | null;
   selection: SelectionRange | null;
   currentStyle: CurrentStyle | null;
@@ -58,7 +58,7 @@ export function useEditManager(
   const [focusedParagraph, setFocusedParagraph] =
     useState<LayoutParagraphElement | null>(manager.focusedParagraph);
   const [focusedController, setFocusedController] =
-    useState<EditController | null>(manager.focusedController);
+    useState<TextEditController | null>(manager.focusedController);
   const [cursorOffset, setCursorOffset] = useState<number | null>(manager.cursorOffset);
   const [selection, setSelection] = useState<SelectionRange | null>(manager.selection);
   const [currentStyle, setCurrentStyle] = useState<CurrentStyle | null>(manager.currentStyle);

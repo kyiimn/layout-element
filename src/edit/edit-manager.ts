@@ -1,7 +1,7 @@
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
-import type { EditController, CurrentStyle } from "./edit-controller";
+import type { TextEditController, CurrentStyle } from "./text-edit-controller";
 import { InsertController } from "./insert-controller";
 import { LayoutEditController } from "./layout-edit-controller";
 import type { SelectionRange } from "@/types/edit";
@@ -36,11 +36,11 @@ export interface EditManagerEvent {
   /** 이벤트가 발생한 단락 요소 (포커스된 단락) */
   paragraph: LayoutParagraphElement;
   /** 이벤트가 발생한 편집 컨트롤러 */
-  controller: EditController;
+  controller: TextEditController;
   /** 이전 포커스 단락 (focusChange 이벤트에서만) */
   previousParagraph?: LayoutParagraphElement | null;
   /** 이전 편집 컨트롤러 (focusChange 이벤트에서만) */
-  previousController?: EditController | null;
+  previousController?: TextEditController | null;
   /** 레이아웃 선택 변경 시 선택된 요소들 (layoutSelectionChange 이벤트에서만) */
   selectedLayouts?: LayoutElement[];
   /** 레이아웃 선택 변경 시 이전 선택 요소들 (layoutSelectionChange 이벤트에서만) */
@@ -75,7 +75,7 @@ export type EditManagerEventListener = (event: EditManagerEvent) => void;
 /**
  * 글로벌 편집 관리자 (싱글톤).
  *
- * 문서 내 모든 `EditController` 인스턴스를 중앙에서 관리한다.
+ * 문서 내 모든 `TextEditController` 인스턴스를 중앙에서 관리한다.
  * 한 번에 하나의 단락만 포커스를 가질 수 있으며, 포커스가 이동하면
  * 이전 단락의 선택 영역이 자동으로 해제된다.
  *
@@ -106,8 +106,8 @@ export type EditManagerEventListener = (event: EditManagerEvent) => void;
  */
 export class EditManager {
   private static _instance: EditManager | null = null;
-  private _controllers: Set<EditController> = new Set();
-  private _focusedController: EditController | null = null;
+  private _controllers: Set<TextEditController> = new Set();
+  private _focusedController: TextEditController | null = null;
   private _listeners: Map<EditManagerEventType, Set<EditManagerEventListener>> = new Map();
   private _dispatching = false;
   private _selectedLayouts: LayoutElement[] = [];
@@ -135,20 +135,20 @@ export class EditManager {
 
   /**
    * 편집 컨트롤러를 등록한다.
-   * `EditController` 생성자에서 호출된다.
+   * `TextEditController` 생성자에서 호출된다.
    * @internal
    */
-  _register(controller: EditController): void {
+  _register(controller: TextEditController): void {
     this._controllers.add(controller);
   }
 
   /**
    * 편집 컨트롤러를 해제한다.
-   * `EditController.destroy()`에서 호출된다.
+   * `TextEditController.destroy()`에서 호출된다.
    * 포커스된 컨트롤러가 해제되면 포커스를 null로 설정한다.
    * @internal
    */
-  _unregister(controller: EditController): void {
+  _unregister(controller: TextEditController): void {
     this._controllers.delete(controller);
     if (this._focusedController === controller) {
       const previousParagraph = controller['_paragraph'] as LayoutParagraphElement;
@@ -159,12 +159,12 @@ export class EditManager {
 
   /**
    * 포커스를 요청한다.
-   * `EditController._onFocus()`에서 호출된다.
+   * `TextEditController._onFocus()`에서 호출된다.
    * 다른 컨트롤러가 포커스를 가지고 있으면 해당 컨트롤러의 선택 영역을 해제하고
    * blur 처리한 후, 새 컨트롤러에게 포커스를 부여한다.
    * @internal
    */
-  _requestFocus(controller: EditController): void {
+  _requestFocus(controller: TextEditController): void {
     if (this._focusedController === controller) return;
 
     const previousController = this._focusedController;
@@ -185,10 +185,10 @@ export class EditManager {
 
   /**
    * 포커스를 해제한다.
-   * `EditController._onBlur()`에서 호출된다.
+   * `TextEditController._onBlur()`에서 호출된다.
    * @internal
    */
-  _releaseFocus(controller: EditController): void {
+  _releaseFocus(controller: TextEditController): void {
     if (this._focusedController !== controller) return;
     const previousParagraph = controller['_paragraph'] as LayoutParagraphElement;
     this._focusedController = null;
@@ -197,37 +197,37 @@ export class EditManager {
 
   /**
    * 텍스트 변경 이벤트를 발생시킨다.
-   * `EditController`에서 텍스트가 변경될 때 호출된다.
+   * `TextEditController`에서 텍스트가 변경될 때 호출된다.
    * @internal
    */
-  _notifyTextChange(controller: EditController): void {
+  _notifyTextChange(controller: TextEditController): void {
     this._dispatch('textChange', controller);
   }
 
   /**
    * 스타일 변경 이벤트를 발생시킨다.
-   * `EditController`에서 스타일이 변경될 때 호출된다.
+   * `TextEditController`에서 스타일이 변경될 때 호출된다.
    * @internal
    */
-  _notifyStyleChange(controller: EditController): void {
+  _notifyStyleChange(controller: TextEditController): void {
     this._dispatch('styleChange', controller);
   }
 
   /**
    * 선택 시작 이벤트를 발생시킨다.
-   * `EditController`에서 선택이 시작될 때 호출된다.
+   * `TextEditController`에서 선택이 시작될 때 호출된다.
    * @internal
    */
-  _notifySelectionStart(controller: EditController): void {
+  _notifySelectionStart(controller: TextEditController): void {
     this._dispatch('selectionStart', controller);
   }
 
   /**
    * 선택 종료 이벤트를 발생시킨다.
-   * `EditController`에서 선택이 종료될 때 호출된다.
+   * `TextEditController`에서 선택이 종료될 때 호출된다.
    * @internal
    */
-  _notifySelectionEnd(controller: EditController): void {
+  _notifySelectionEnd(controller: TextEditController): void {
     this._dispatch('selectionEnd', controller);
   }
 
@@ -237,7 +237,7 @@ export class EditManager {
    * 키보드 연속 입력 시 최초 KeyDown과 마지막 KeyUp에만 발생한다.
    * @internal
    */
-  _notifyCursorMove(controller: EditController): void {
+  _notifyCursorMove(controller: TextEditController): void {
     this._dispatch('cursorMove', controller);
   }
 
@@ -270,7 +270,7 @@ export class EditManager {
    * 현재 포커스된 편집 컨트롤러를 반환한다.
    * 포커스된 컨트롤러가 없으면 `null`이다.
    */
-  get focusedController(): EditController | null {
+  get focusedController(): TextEditController | null {
     return this._focusedController;
   }
 
@@ -302,7 +302,7 @@ export class EditManager {
   /**
    * 등록된 모든 편집 컨트롤러를 반환한다.
    */
-  get controllers(): Set<EditController> {
+  get controllers(): Set<TextEditController> {
     return new Set(this._controllers);
   }
 
@@ -310,7 +310,7 @@ export class EditManager {
    * 단락 요소 또는 ID로 포커스를 설정한다.
    *
    * 지정된 단락이 편집 모드가 아니면 `editable = true`로 설정하여
-   * `EditController`를 생성한 뒤 포커스를 부여한다.
+   * `TextEditController`를 생성한 뒤 포커스를 부여한다.
    * 단락을 찾을 수 없거나 등록되지 않은 경우 `false`를 반환한다.
    *
    * @param target - 포커스를 설정할 단락 요소 또는 단락 요소의 ID
@@ -365,7 +365,7 @@ export class EditManager {
   /**
    * 단락 요소에 해당하는 편집 컨트롤러를 찾는다.
    */
-  private _findControllerByParagraph(paragraph: LayoutParagraphElement): EditController | null {
+  private _findControllerByParagraph(paragraph: LayoutParagraphElement): TextEditController | null {
     for (const controller of this._controllers) {
       if ((controller as unknown as { _paragraph: LayoutParagraphElement })._paragraph === paragraph) {
         return controller;
@@ -417,10 +417,180 @@ export class EditManager {
    * 모든 단락의 편집 모드를 비활성화한다.
    */
   deactivateAll(): void {
+    this._textEditMode = false;
     for (const controller of this._controllers) {
       const paragraph = controller['_paragraph'] as LayoutParagraphElement;
       paragraph.editableText = false;
     }
+  }
+
+  // ─── Text Edit Mode ───────────────────────────────────────────
+
+  private _textEditMode: boolean = false;
+  private _editableTextRoles: Set<BoxRole> | null = null;
+  private _editableTextBoxIds: Set<string> | null = null;
+  private _editableParagraphIds: Set<string> | null = null;
+
+  /**
+   * 텍스트 편집 모드 활성 여부.
+   *
+   * `true`이면 `isParagraphEditable()` 통과 시 paragraph 편집(커서, 선택, IME 입력)이 가능하다.
+   * `false`이면 모든 paragraph가 편집 불가이며 포커스가 해제된다.
+   *
+   * 활성화 시 `editableTextRoles`/`editableTextBoxIds`/`editableParagraphIds`를
+   * 명시적으로 지정하지 않으면 어떤 paragraph도 편집 가능하지 않다 (모두 허용하지 않음 규칙).
+   *
+   * @example
+   * ```ts
+   * const manager = EditManager.getInstance();
+   * manager.setEditableTextRoles(['body', 'title']);
+   * manager.textEditMode = true;
+   * // → 부모 box role이 'body' 또는 'title'인 paragraph만 편집 가능
+   * ```
+   */
+  get textEditMode(): boolean { return this._textEditMode; }
+  set textEditMode(value: boolean) {
+    if (this._textEditMode === value) return;
+    this._textEditMode = value;
+    if (!value) {
+      this._blurFocusedParagraph();
+      this._applyEditableTextToAllParagraphs();
+    } else {
+      this._applyEditableTextToAllParagraphs();
+    }
+  }
+
+  /**
+   * 편집 허용 box role 집합 (텍스트 편집용). `null`이면 role 기반 제한 없음.
+   *
+   * paragraph의 부모 box role이 이 집합에 포함되어야 편집 가능하다.
+   *
+   * @param roles - 허용할 BoxRole 배열. `null`이면 role 제한 해제.
+   *
+   * @example
+   * ```ts
+   * manager.setEditableTextRoles(['body', 'title', 'none']);
+   * manager.setEditableTextRoles(null);  // role 제한 없음
+   * ```
+   */
+  setEditableTextRoles(roles: BoxRole[] | null): void {
+    this._editableTextRoles = roles === null ? null : new Set(roles);
+    if (this._textEditMode) this._applyEditableTextToAllParagraphs();
+  }
+
+  get editableTextRoles(): ReadonlySet<BoxRole> | null {
+    return this._editableTextRoles;
+  }
+
+  /**
+   * 편집 허용 box id 집합 (텍스트 편집용). `null`이면 box id 기반 제한 없음.
+   *
+   * paragraph의 부모 box id가 이 집합에 포함되어야 편집 가능하다.
+   *
+   * @param ids - 허용할 box id 배열. `null`이면 box id 제한 해제.
+   */
+  setEditableTextBoxIds(ids: string[] | null): void {
+    this._editableTextBoxIds = ids === null ? null : new Set(ids);
+    if (this._textEditMode) this._applyEditableTextToAllParagraphs();
+  }
+
+  get editableTextBoxIds(): ReadonlySet<string> | null {
+    return this._editableTextBoxIds;
+  }
+
+  /**
+   * 편집 허용 paragraph id 집합. `null`이면 paragraph id 기반 제한 없음.
+   *
+   * paragraph 자체의 id가 이 집합에 포함되어야 편집 가능하다.
+   *
+   * @param ids - 허용할 paragraph id 배열. `null`이면 paragraph id 제한 해제.
+   */
+  setEditableParagraphIds(ids: string[] | null): void {
+    this._editableParagraphIds = ids === null ? null : new Set(ids);
+    if (this._textEditMode) this._applyEditableTextToAllParagraphs();
+  }
+
+  get editableParagraphIds(): ReadonlySet<string> | null {
+    return this._editableParagraphIds;
+  }
+
+  /**
+   * 개별 paragraph id를 텍스트 편집 허용 목록에 추가한다.
+   *
+   * @param id - 추가할 paragraph id
+   */
+  addEditableParagraph(id: string): void {
+    if (this._editableParagraphIds === null) {
+      this._editableParagraphIds = new Set();
+    }
+    this._editableParagraphIds.add(id);
+    if (this._textEditMode) this._applyEditableTextToAllParagraphs();
+  }
+
+  /**
+   * 개별 paragraph id를 텍스트 편집 허용 목록에서 제거한다.
+   *
+   * @param id - 제거할 paragraph id
+   */
+  removeEditableParagraph(id: string): void {
+    if (this._editableParagraphIds === null) return;
+    this._editableParagraphIds.delete(id);
+    if (this._textEditMode) this._applyEditableTextToAllParagraphs();
+  }
+
+  /**
+   * 특정 paragraph가 텍스트 편집 가능한지 판별한다.
+   *
+   * 판별 규칙 (AND):
+   * 1. `_textEditMode`가 `true`여야 함
+   * 2. 세 필터가 모두 `null`이면 편집 불가 (모두 허용하지 않음 규칙)
+   * 3. `_editableTextRoles`가 `null`이 아니면 부모 box의 role이 Set에 포함되어야 함
+   * 4. `_editableTextBoxIds`가 `null`이 아니면 부모 box의 id가 Set에 포함되어야 함
+   * 5. `_editableParagraphIds`가 `null`이 아니면 paragraph 자체 id가 Set에 포함되어야 함
+   *
+   * @param paragraph - 판별할 paragraph 요소
+   * @returns 편집 가능 여부
+   */
+  isParagraphEditable(paragraph: LayoutParagraphElement): boolean {
+    if (!this._textEditMode) return false;
+    if (this._editableTextRoles === null
+        && this._editableTextBoxIds === null
+        && this._editableParagraphIds === null) return false;
+
+    const parentBox = paragraph.parentElement;
+    if (this._editableTextRoles !== null) {
+      if (!parentBox || !this._editableTextRoles.has(parentBox.role)) return false;
+    }
+    if (this._editableTextBoxIds !== null) {
+      if (!parentBox || !this._editableTextBoxIds.has(parentBox.id)) return false;
+    }
+    if (this._editableParagraphIds !== null) {
+      if (!this._editableParagraphIds.has(paragraph.id)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * 현재 포커스된 단락의 포커스를 해제한다.
+   */
+  private _blurFocusedParagraph(): void {
+    if (this._focusedController) {
+      (this._focusedController as unknown as { _blurInternal(): void })._blurInternal();
+    }
+  }
+
+  /**
+   * 현재 편집 가능 상태에 따라 문서 내 모든 paragraph의 `editableText` 속성을 갱신한다.
+   * `isParagraphEditable()` 결과를 paragraph별로 적용한다.
+   */
+  private _applyEditableTextToAllParagraphs(): void {
+    const paragraphs = document.querySelectorAll<LayoutParagraphElement>('x-layout-paragraph');
+    paragraphs.forEach((paragraph) => {
+      const editable = this.isParagraphEditable(paragraph);
+      if (paragraph.editableText !== editable) {
+        paragraph.editableText = editable;
+      }
+    });
   }
 
   /**
@@ -737,7 +907,7 @@ export class EditManager {
             ...detail,
             type: 'insert',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as EditController,
+            controller: null as unknown as TextEditController,
           });
         } catch (e) {
           console.error(e);
@@ -764,7 +934,7 @@ export class EditManager {
           listener({
             type: 'insertCancel',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as EditController,
+            controller: null as unknown as TextEditController,
           });
         } catch (e) {
           console.error(e);
@@ -947,7 +1117,7 @@ export class EditManager {
           listener({
             type: 'layoutMove',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as EditController,
+            controller: null as unknown as TextEditController,
             layoutElement: element,
             previousLeft,
             previousTop,
@@ -991,7 +1161,7 @@ export class EditManager {
           listener({
             type: 'layoutResize',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as EditController,
+            controller: null as unknown as TextEditController,
             layoutElement: element,
             previousLeft,
             previousTop,
@@ -1035,7 +1205,7 @@ export class EditManager {
           listener({
             type: 'layoutSelectionChange',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as EditController,
+            controller: null as unknown as TextEditController,
             selectedLayouts: [...this._selectedLayouts],
             previousLayouts,
           });
@@ -1053,9 +1223,9 @@ export class EditManager {
    */
   private _dispatch(
     type: EditManagerEventType,
-    controller: EditController,
+    controller: TextEditController,
     previousParagraph?: LayoutParagraphElement | null,
-    previousController?: EditController | null,
+    previousController?: TextEditController | null,
   ): void {
     if (this._dispatching) return;
     const listeners = this._listeners.get(type);

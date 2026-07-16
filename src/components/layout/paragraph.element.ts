@@ -1,5 +1,5 @@
 import { TextLayoutEngine } from "@/core";
-import { EditController } from "@/edit/edit-controller";
+import { TextEditController } from "@/edit/text-edit-controller";
 import { ColorRegistry } from "@/resource";
 import { InheritStyle, ParagraphData, ParagraphStyle, TextBlockData, TextStyle } from "@/types";
 import { checkOverlap, genUUID } from "@/utils";
@@ -32,7 +32,7 @@ export class LayoutParagraphElement extends HTMLElement {
   private _zIndex: number;
 
   private _editableText: boolean = false;
-  private _editController: EditController | null = null;
+  private _editController: TextEditController | null = null;
   private _isPrint: boolean = window.matchMedia("print").matches;
 
   /** 성능 최적화: 구조 변경 여부 플래그. true면 다음 render()에서 전체 재생성을 수행한다. */
@@ -53,7 +53,7 @@ export class LayoutParagraphElement extends HTMLElement {
     if (!this.id) this.id = genUUID();
     this.layout();
     if (this._editableText && !this._editController) {
-      this._editController = new EditController(this);
+      this._editController = new TextEditController(this);
     }
   }
 
@@ -377,7 +377,7 @@ export class LayoutParagraphElement extends HTMLElement {
   set editableText(value: boolean) {
     if (this._isPrint) return;
     if (value && !this._editController) {
-      this._editController = new EditController(this);
+      this._editController = new TextEditController(this);
     } else if (!value && this._editController) {
       this._editController.destroy();
       this._editController = null;

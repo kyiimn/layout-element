@@ -164,7 +164,7 @@ export class LayoutColumnElement extends HTMLElement {
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(rule.style, colStyle);
     }
 
-    // Remove data-temporary spans (created by EditController) before collecting existing lines
+    // Remove data-temporary spans (created by TextEditController) before collecting existing lines
     const temporarySpans = this._shadowRoot.querySelectorAll('span[data-temporary]');
     for (const span of temporarySpans) span.remove();
 
