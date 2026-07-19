@@ -161,6 +161,9 @@ export class EditManager {
       throw new Error(`EditManager.setScale: scale은 0보다 커야 합니다 (입력값: ${scale}).`);
     }
     this._scale = scale;
+    document.querySelectorAll<LayoutParagraphElement>('x-layout-paragraph').forEach((p) => {
+      p.markStructureChangedAndRender();
+    });
   }
 
   /** scale 보정 계수를 1로 원복한다. 컴포넌트 unmount 시 호출한다. */

@@ -554,6 +554,8 @@ manager.addEventListener('layoutResize', (event) => {
 
 텍스트 편집(`TextEditController`/`TextEditCoordinateMapper`)은 `getBoundingClientRect()`만으로 좌표를 비교하므로 scale 보정과 무관하게 정확하다 (입력 clientX와 비교 대상 rect 모두 같은 viewport 픽셀 좌표계).
 
+**scale 변경 시 paragraph 재렌더링**: `setScale(s)`는 보정 계수를 설정한 뒤, 문서 내 모든 `<x-layout-paragraph>`에 대해 `markStructureChangedAndRender()`를 호출한다. 이는 `TextLayoutEngine._columnPpm`(컬럼 픽셀/mm 비율)이 `layoutStructure()` 시점의 scale을 반영하여 측정되기 때문이다. scale이 변경되어도 `paragraph.render()`가 `_perfStructureChanged = false` 상태로 호출되면 `layoutText()`만 실행되어 이전 scale 기준의 `_columnPpm`이 재사용되고, `partWidths`(현재 scale의 viewport 픽셀)와 `_charWidthPx`(이전 scale ppm 기반)가 불일치하여 컬럼에 들어가는 문자 수가 잘못 계산된다. `markStructureChangedAndRender()`가 `_perfStructureChanged = true`를 설정하여 다음 `render()`에서 `layoutStructure()`가 호출되도록 보장함으로써 `_columnPpm`이 새 scale 기준으로 재측정된다.
+
 ```typescript
 const manager = EditManager.getInstance();
 
@@ -570,7 +572,7 @@ React.useEffect(() => {
 
 | 메서드 | 시그니처 | 설명 |
 |--------|---------|------|
-| `EditManager.setScale(s)` | `(scale: number) => void` | 보정 계수 설정. `s > 0`. 이후 `screenPxToMm`/`screenDeltaToMm`이 `originalPpm * s`로 환산 |
+| `EditManager.setScale(s)` | `(scale: number) => void` | 보정 계수 설정. `s > 0`. 이후 `screenPxToMm`/`screenDeltaToMm`이 `originalPpm * s`로 환산. 또한 문서 내 모든 `<x-layout-paragraph>`에 대해 `markStructureChangedAndRender()`를 호출하여 `_columnPpm`이 새 scale 기준으로 재측정되도록 한다 |
 | `EditManager.resetScale()` | `() => void` | 보정 계수를 `1`로 원복 |
 | `EditManager.scale` | getter | 현재 보정 계수 |
 | `EditManager.screenPxToMm(px)` | `(px: number) => number` | 화면 픽셀 → mm 환산 (`px / (ppm * scale)`) |
