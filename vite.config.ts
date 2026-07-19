@@ -22,11 +22,11 @@ export default defineConfig({
     },
     outDir: 'dist',
     emptyOutDir: true,
+    sourcemap: true,
   },
   plugins: [
     dts({
       insertTypesEntry: true,
-      rollupTypes: true,
     }),
   ],
   server: {
