@@ -3,6 +3,7 @@ import { DocumentData, ParagraphStyle, PrintPostData, TextStyle } from "@/types"
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
+import { genUUID } from "@/utils";
 
 /**
  * 문서 루트 요소. `<x-layout-document>` 커스텀 엘리먼트.
@@ -50,13 +51,14 @@ export class LayoutDocumentElement extends HTMLElement {
   }
 
   connectedCallback() {
+    if (!this.id) this.id = genUUID();
     if (this._isPrint) return;
 
     this.layout();
     this.render();
   }
 
-  disconnectedCallback() {}
+  disconnectedCallback() { }
 
   /**
    * 구조 계산: GridCalculator 데이터 할당 및 모델 생성.
@@ -209,6 +211,7 @@ export class LayoutDocumentElement extends HTMLElement {
   }
 
   set data(data: DocumentData) {
+    if (data.id !== undefined) this.id = data.id;
     if (data.paddingTop !== undefined) this._paddingTop = data.paddingTop;
     if (data.paddingBottom !== undefined) this._paddingBottom = data.paddingBottom;
     if (data.paddingLeft !== undefined) this._paddingLeft = data.paddingLeft;
@@ -307,6 +310,7 @@ export class LayoutDocumentElement extends HTMLElement {
 
   get data() {
     return {
+      id: this.id,
       width: this.width,
       height: this.height,
       paddingTop: this.paddingTop,

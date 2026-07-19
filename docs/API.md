@@ -143,7 +143,8 @@ class LayoutDocumentElement extends HTMLElement
 
 | 이름 | 타입 | 단위 | 설명 |
 |---|---|---|---|
-| `data` | `DocumentData` | — | 한 번에 모든 필드 갱신. `setter`는 자식을 재생성하고 layout+render. |
+| `data` | `DocumentData` | — | 한 번에 모든 필드 갱신. `setter`는 자식을 재생성하고 layout+render. `data.id`가 전달되면 요소의 `id`에 반영. |
+| `id` | `string` | — | 요소 고유 식별자. `connectedCallback` 시점에 `id`가 없으면 `genUUID()`로 자동 할당. `data.id` setter로도 갱신 가능. |
 | `width` | `number` | mm | 문서 너비. |
 | `height` | `number` | mm | 문서 높이. |
 | `paddingTop` | `number` | mm | 상단 여백. |
@@ -176,7 +177,7 @@ class LayoutDocumentElement extends HTMLElement
 
 #### 인쇄 모드 동작
 
-- `window.matchMedia("print").matches`가 `true`이면 `connectedCallback`이 즉시 리턴.
+- `window.matchMedia("print").matches`가 `true`이면 `connectedCallback`은 `id` 자동 할당 직후 즉시 리턴 (`layout()`/`render()` 생략).
 - 사용자가 `data`를 직접 주입한 뒤 `layout()`과 `render()`를 수동 호출해야 함.
 - 편집 기능(`editableLayout`, `editableText`)은 인쇄 모드에서 완전히 차단됨.
 
@@ -1886,6 +1887,7 @@ destroy(): void;
 
 ```ts
 type DocumentData = {
+  id?: string;                         // 고유 식별자 (선택). 미지정 시 connectedCallback에서 genUUID()로 자동 생성.
   width: number;                       // mm (필수)
   height: number;                      // mm (필수)
   paddingTop?: number;                 // 기본 0

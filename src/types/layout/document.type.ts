@@ -21,6 +21,9 @@ import { BoxData } from "./box.type";
  * };
  */
 export type DocumentData = {
+  /** 고유 식별자 (선택) */
+  id?: string;
+
   /** 용지 너비. 기본값 없음 (필수) */
   width: number;
 
