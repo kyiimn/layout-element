@@ -22,6 +22,7 @@
    - [`<LayoutParagraph>`](#layoutparagraph)
    - [`<LayoutImage>`](#layoutimage)
    - [`<LayoutGuideColumn>`](#layoutguidecolumn)
+   - [`<Logo>`](#logo)
 5. [Hooks](#hooks)
    - [`useEditManager`](#useeditmanager)
    - [`useLayoutElement`](#uselayoutelement)
@@ -464,6 +465,30 @@ import type { LayoutGuideColumnProps } from 'layout-element/react';
 
 ---
 
+### `<Logo>`
+
+라이브러리 식별용 로고 SVG 컴포넌트. 레이아웃 엔진과 무관한 순수 표시용
+컴포넌트로, `currentColor`를 따라 색이 결정됩니다.
+
+```tsx
+import { Logo } from 'layout-element/react';
+import type { LogoProps } from 'layout-element/react';
+```
+
+#### Props: `LogoProps`
+
+| Prop | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `className` | `string` | 선택 | SVG에 전달할 CSS 클래스. |
+
+#### 예제
+
+```tsx
+<Logo className="text-slate-900" />
+```
+
+---
+
 ## Hooks
 
 ### `useEditManager`
@@ -750,12 +775,14 @@ export {
   DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN,
 };
 
-// Utils
+// Utils (`@/utils`를 `export *`로 재노출)
 export { checkOverlap, getOverlapSizePX, mergeOverlapParts, genUUID };
 ```
 
 > 위 트리는 단순화된 형태입니다. 정확한 export 목록은 패키지 진입점
-> (`src/react/index.ts`)을 참고하세요.
+> (`src/react/index.ts`)을 참고하세요. `@/utils`의 모든 export가
+> `export *`로 재노출되지만, `genRandom`은 `utils/index.ts`에서
+> export되지 않아 포함되지 않습니다.
 
 ---
 
@@ -961,6 +988,7 @@ function WithRefs() {
 | `<LayoutParagraph>` | `<x-layout-paragraph>` (LayoutParagraphElement) |
 | `<LayoutImage>` | `<x-layout-image>` (LayoutImageElement) |
 | `<LayoutGuideColumn>` | `<x-layout-guide-column>` (LayoutGuideColumnElement) |
+| `<Logo>` | (대응 없음 — React 전용 순수 SVG 컴포넌트) |
 | `LayoutProvider` | `ColorRegistry.init()` + `FontLoader.init()` |
 | `useLayoutContext` | `ColorRegistry.getInstance()` + `FontLoader.getInstance()` 직접 접근 |
 | `useEditManager` | `EditManager.getInstance().addEventListener(...)` |

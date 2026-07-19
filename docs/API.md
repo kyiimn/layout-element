@@ -1485,6 +1485,9 @@ get selectedLayoutIds: string[];
  *
  * `null`이 아닌 값을 설정하면 드래그-삽입 모드가 활성화되어
  * 문서 표면에서 드래그로 새 요소를 그릴 수 있다.
+ *
+ * 빈 문서(편집 가능 box가 0개)에서도 활성화된다. 이 경우 document가
+ * 삽입 컨테이너로 사용되어 첫 box를 그려 넣을 수 있다.
  */
 get insertMode: InsertMode | null;
 set insertMode(mode: InsertMode | null): void;
@@ -2196,6 +2199,12 @@ type LayoutElement = LayoutBoxElement;
 
 ## Utilities
 
+`@/utils`에서 export되는 함수들. 패키지 진입점(`src/index.ts`)이 `export * from './utils'`로
+재노출하므로 `import { genUUID, checkOverlap } from 'layout-element'`로 직접 가져올 수 있다.
+
+> `genRandom`은 `@/utils/random.ts`에 존재하지만 `utils/index.ts`에서 export되지 않으므로
+> 패키지 진입점에서도 사용할 수 없다.
+
 ### `checkOverlap(base, target)`
 
 ```ts
@@ -2250,10 +2259,7 @@ const genUUID: () => string;
 ### `genRandom(min?, max?)`
 
 ```ts
-/**
- * `Math.random()` 기반 헬퍼. `@/utils/random`에 있지만
- * `utils/index.ts`에서는 export되지 않음.
- */
+/** `Math.random()` 기반 헬퍼. 패키지 진입점에서 export되지 않음. */
 const genRandom: (min?: number, max?: number) => number;
 ```
 

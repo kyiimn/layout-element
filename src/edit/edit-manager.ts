@@ -441,7 +441,8 @@ export class EditManager {
    * `false`이면 모든 paragraph가 편집 불가이며 포커스가 해제된다.
    *
    * 활성화 시 `editableTextRoles`/`editableTextBoxIds`/`editableParagraphIds`를
-   * 명시적으로 지정하지 않으면 어떤 paragraph도 편집 가능하지 않다 (모두 허용하지 않음 규칙).
+   * 명시적으로 지정하지 않으면 lock과 `editableRootId` 제한을 제외한 모든
+   * paragraph가 편집 가능하다 (모두 허용 규칙).
    *
    * @example
    * ```ts
@@ -635,7 +636,7 @@ export class EditManager {
    * `false`이면 모든 box가 편집 불가이며 선택도 해제된다.
    *
    * 활성화 시 `editableRoles`/`editableBoxIds`를 명시적으로 지정하지 않으면
-   * 어떤 box도 편집 가능하지 않다 (모두 허용하지 않음 규칙).
+   * lock과 `editableRootId` 제한을 제외한 모든 box가 편집 가능하다 (모두 허용 규칙).
    *
    * @example
    * ```ts
