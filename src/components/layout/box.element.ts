@@ -154,13 +154,13 @@ export class LayoutBoxElement extends HTMLElement {
 
       styleEl.sheet.insertRule(":host {}", 0);
       styleEl.sheet.insertRule(":host(:not([border])) { box-shadow: #ccc 0px 0px 0px 1px inset; }", 1);
-      styleEl.sheet.insertRule(":host([selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 2);
-      styleEl.sheet.insertRule(":host([hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 3);
-      styleEl.sheet.insertRule(":host([editable-layout][selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 4);
-      styleEl.sheet.insertRule(":host([editable-layout][hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 5);
+      styleEl.sheet.insertRule(":host([hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 2);
+      styleEl.sheet.insertRule(":host([selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 3);
+      styleEl.sheet.insertRule(":host([editable-layout][hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 4);
+      styleEl.sheet.insertRule(":host([editable-layout][selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 5);
       styleEl.sheet.insertRule(`@media print { [border] { display: none; } }`, 6);
       styleEl.sheet.insertRule('.resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: 99999999; pointer-events: auto; display: none; }', 7);
-      styleEl.sheet.insertRule(':host([selected]) .resize-handle { display: block; }', 8);
+      styleEl.sheet.insertRule(':host([editable-layout][selected]) .resize-handle { display: block; }', 8);
       styleEl.sheet.insertRule('.resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 9);
       styleEl.sheet.insertRule('.resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 10);
       styleEl.sheet.insertRule('.resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 11);
@@ -818,10 +818,10 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   private _onLayoutMouseEnter = (): void => {
-    if (!this._editableLayout) return;
-    if (EditManager.getInstance().insertMode) return;
+    if (this._isPrint) return;
     const manager = EditManager.getInstance();
     if (manager._isDraggingLayout() || manager._isResizingLayout()) return;
+    if (manager._isInsertDragging()) return;
     let ancestor: Element | null = this.parentElement;
     while (ancestor) {
       if (ancestor.hasAttribute('hovered')) {
@@ -834,11 +834,11 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   private _onLayoutMouseLeave = (event: MouseEvent): void => {
-    if (!this._editableLayout) return;
-    if (EditManager.getInstance().insertMode) return;
+    if (this._isPrint) return;
     this.removeAttribute('hovered');
     const manager = EditManager.getInstance();
     if (manager._isDraggingLayout() || manager._isResizingLayout()) return;
+    if (manager._isInsertDragging()) return;
     const related = event.relatedTarget as Element | null;
     if (!related) return;
     let target: Element | null = related;
@@ -856,7 +856,7 @@ export class LayoutBoxElement extends HTMLElement {
     if (!hit) return;
     let el: Element | null = hit;
     while (el) {
-      if (el instanceof LayoutBoxElement && el.editableLayout && !el.hasAttribute('selected')) {
+      if (el instanceof LayoutBoxElement && !el.hasAttribute('selected')) {
         el._onLayoutMouseEnter();
         return;
       }

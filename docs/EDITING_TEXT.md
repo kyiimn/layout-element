@@ -579,11 +579,39 @@ if (manager.isParagraphEditable(paragraph)) {
    a. previousController = controllerA
    b. controllerA._clearSelection() ← A 단락의 selection 해제!
    c. controllerA._blurInternal() → textarea.blur() + _releaseFocus(controllerA)
-   d. _focusedController = controllerB
-   e. focusChange 이벤트 발생
+   d. _clearBoxSelectionForParagraph(previousParagraph) ← A 부모 box의 selected 제거
+   e. _selectBoxForParagraph(newParagraph) ← B 부모 box를 단일 selected로 설정
+   f. _focusedController = controllerB
+   g. focusChange + layoutSelectionChange 이벤트 발생
 ```
 
 `_onBlur`에서 `_releaseFocus`를 호출하지 않는 이유: `controllerB.focus()`를 호출하면 브라우저가 `controllerA`의 textarea blur를 먼저 처리하고, 그 후 `controllerB`의 textarea focus를 처리한다. 만약 `_onBlur`에서 `_releaseFocus`를 호출하면, `_requestFocus`가 호출될 때 `_focusedController`가 이미 null이 되어 `previousController`를 잡지 못한다.
+
+#### 포커스 시 부모 box 레이아웃 선택
+
+텍스트 편집 포커스가 들어온 paragraph의 부모 `<x-layout-box>`는 레이아웃 선택(`selected` 속성) 상태가 된다. 이는 시각적 하이라이트(빨간색 외곽선)를 표시함과 동시에, 실제 레이아웃 선택 상태로 관리된다.
+
+| 동작 | 부모 box 상태 | `_selectedLayouts` |
+|------|--------------|---------------------|
+| paragraph 포커스 | `selected` 설정 (단일 선택) | `[parentBox]` (기존 선택 모두 해제) |
+| 다른 paragraph로 포커스 이동 | 이전 부모 box `selected` 해제 → 새 부모 box `selected` 설정 | `[newParentBox]` |
+| `blurParagraph()` | 현재 부모 box `selected` 해제 | `[]` |
+| `textEditMode = false` | `_blurFocusedParagraph` → 부모 box `selected` 해제 | `[]` |
+| paragraph DOM에서 제거 | `destroy()` → `_unregister` → 부모 box `selected` 해제 | `[]` |
+
+**레이아웃 편집 모드로 전환 시**: 텍스트 편집으로 설정된 `selected`는 유지된다. `layoutEditMode = true`는 `clearLayoutSelection()`을 호출하지 않으므로, 사용자는 텍스트 편집 중이던 box가 그대로 레이아웃 선택된 상태로 레이아웃 편집을 이어갈 수 있다.
+
+**레이아웃 편집 모드에서 텍스트 편집 모드로 전환 시** (`textEditMode = true`): `_focusParagraphFromLayoutSelection()`이 호출되어 다음 규칙이 적용된다.
+
+1. 현재 `_selectedLayouts` 중 `contentType === 'paragraph'`인 box(직접 paragraph 자식을 가진 box)들을 후보로 삼는다.
+2. 후보들 중 중첩 관계의 하위 box를 제외하고 가장 상위 box 1개만 `selected`로 유지한다.
+3. 유지된 box의 첫 번째 paragraph 자식으로 텍스트 편집 포커스를 이동한다.
+4. 후보가 없으면 모든 레이아웃 선택을 해제한다.
+
+예시:
+- `selectedLayouts = [boxA(paragraph), boxB(image), boxC(paragraph)]`이고 boxA, boxC가 독립적이면 → boxA(첫 번째)만 유지, boxB·boxC `selected` 해제, boxA의 paragraph로 포커스.
+- `selectedLayouts = [parentBox(group, 하위에 boxA·boxB), boxA(paragraph)]`이면 → parentBox는 paragraph 자식이 없으므로 후보 아님, boxA만 유지.
+- `selectedLayouts = [boxA(image)]`이면 → 후보 없음, 모든 선택 해제.
 
 ### 3.6.6 `focusParagraph()` / `blurParagraph()` 동작 상세
 

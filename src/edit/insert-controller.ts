@@ -36,6 +36,11 @@ export class InsertController {
     return this._mode;
   }
 
+  /** 현재 삽입 드래그를 진행 중인지 반환한다. */
+  get isDragging(): boolean {
+    return this._isDragging;
+  }
+
   /** 삽입 모드를 설정한다. `null`이면 삽입 모드를 해제한다. */
   setMode(mode: InsertMode | null): void {
     if (this._mode && this._isDragging) {

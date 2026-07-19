@@ -203,7 +203,7 @@ element.editableLayout = false;
 
 | 속성 | 색상 | 적용 대상 | 조건 |
 |------|------|----------|------|
-| `selected` | 빨간색 (`red`) | box | 클릭으로 선택됨 |
+| `selected` | 빨간색 (`red`) | box | 레이아웃 편집 모드에서 클릭으로 선택됨, **또는** 텍스트 편집 모드에서 내부 paragraph가 포커스됨 |
 | `hovered` | 파란색 (`#4a90d9`) | box만 | 마우스 hover, 선택되지 않은 요소만 |
 
 - **inset shadow**: 요소 내부에 1px 테두리
@@ -213,19 +213,26 @@ element.editableLayout = false;
 
 **호버 동작 규칙**:
 
-1. `editableLayout`이 켜져 있고 `selected`가 없는 `<x-layout-box>`에만 `hovered`가 설정된다
-2. 이미 선택된 요소(`selected`)는 호버 표시가 나타나지 않는다
-3. 마우스가 요소에 진입하면 **조상 요소의 `hovered`를 모두 제거**하여, 가장 안쪽(최상위) 요소만 호버 표시가 보인다
-4. 마우스가 자식 요소에서 부모 영역으로 돌아갈 때, `elementFromPoint`를 사용하여 마우스 위치 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다
-5. **드래그 이동 중이거나 크기 조정 중에는 hover가 동작하지 않는다**. `EditManager._isDraggingLayout()` 또는 `_isResizingLayout()`이 `true`이면 `LayoutBoxElement._onLayoutMouseEnter`와 `_onLayoutMouseLeave`가 early return하여 hover 표시가 나타나지 않는다. 이로 인해 드래그/리사이즈 중에 마우스가 다른 박스 위로 이동해도 방해가 되지 않는다. 드래그/리사이즈가 종료되면 정상적으로 hover가 동작한다.
+1. 인쇄 모드가 아니고 `selected`가 없는 `<x-layout-box>`에 마우스가 올라가면 `hovered`가 설정된다. 레이아웃 편집 모드 여부와 관계없이 화면 렌더링 중에는 항상 동작한다.
+2. 이미 선택된 요소(`selected`)는 호버 표시가 나타나지 않는다. 텍스트 편집 포커스로 인해 `selected`가 설정된 box도 동일하게 호버가 억제된다.
+3. **paragraph 포커스로 인해 부모 box가 `selected`로 전환될 때, 해당 box의 기존 `hovered` 속성은 제거된다**. 이는 paragraph 위에 마우스가 있는 상태에서 클릭으로 포커스를 줄 때, 즉시 빨간색 `selected` 테두리가 파란색 `hovered` 테두리를 덮어쓰도록 보장한다.
+4. 마우스가 요소에 진입하면 **조상 요소의 `hovered`를 모두 제거**하여, 가장 안쪽(최상위) 요소만 호버 표시가 보인다
+5. 마우스가 자식 요소에서 부모 영역으로 돌아갈 때, `elementFromPoint`를 사용하여 마우스 위치 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다
+6. **드래그 이동 중이거나 크기 조정 중에는 hover가 동작하지 않는다**. `EditManager._isDraggingLayout()` 또는 `_isResizingLayout()`이 `true`이면 `LayoutBoxElement._onLayoutMouseEnter`와 `_onLayoutMouseLeave`가 early return하여 hover 표시가 나타나지 않는다. 이로 인해 드래그/리사이즈 중에 마우스가 다른 박스 위로 이동해도 방해가 되지 않는다. 드래그/리사이즈가 종료되면 정상적으로 hover가 동작한다. 비편집 모드에서는 드래그/리사이즈가 활성화되지 않으므로 이 제한이 적용되지 않는다.
+7. **삽입 드래그 중에도 hover가 동작하지 않는다**. `EditManager._isInsertDragging()`이 `true`인 동안(= 사용자가 드래그로 새 요소를 그리고 있는 동안) `_onLayoutMouseEnter`/`_onLayoutMouseLeave`가 early return한다. 단, 삽입 모드(`insertMode`)가 활성화되어 있더라도 드래그 중이 아니면 hover가 정상 동작한다. 요소 삽입 완료 후 `insertMode`를 유지한 채로 다른 box 위로 마우스를 올리면 파란색 hover 테두리가 표시된다.
+
+**CSS 우선순위**: `:host([hovered])` 규칙이 `:host([selected])` 규칙보다 먼저 정의되어, 동일 specificity일 때 `selected`가 시각적으로 우선 적용된다. `hovered`와 `selected`가 동시에 있으면 빨간색 `selected` 테두리가 표시된다.
 
 | 상태 | 커서 | 시각적 피드백 |
 |------|------|-------------|
+| 비편집 모드 (선택 안 됨, hover) | (기본값) | 파란색 테두리 (`hovered`) |
+| 비편집 모드 (선택 안 됨, 미호버) | (기본값) | 회색 기본 테두리 (`:host(:not([border]))`) |
+| 텍스트 편집 포커스 (내부 paragraph가 포커스) | (기본값) | 빨간색 테두리 (`selected`), 리사이즈 핸들은 미표시 |
 | `editableLayout = true` (선택 안 됨, hover) | `grab` | 파란색 테두리 (`hovered`) |
 | `editableLayout = true` (선택됨, 대기) | `grab` | 빨간색 테두리 (`selected`), 리사이즈 핸들 4개 표시 |
 | `editableLayout = true` (드래그 중) | `grabbing` | 빨간색 테두리 (`selected`) |
 | `editableLayout = true` (리사이즈 중) | 핸들 방향별 (`ns-resize`/`ew-resize`) | 빨간색 테두리 (`selected`) |
-| `editableLayout = false` | (기본값) | 없음 |
+| 인쇄 모드 | (해당 없음) | hover/선택 highlight 모두 억제 |
 
 #### 리사이즈 핸들 (Resize Handles)
 
@@ -247,9 +254,11 @@ element.editableLayout = false;
 | `right` | 우측 가장자리 중앙 | `ew-resize` | 좌우 리사이즈 |
 
 핸들은 CSS로 표시/숨김을 제어한다:
-- `:host([selected]) .resize-handle { display: block; }` — 선택 시 표시
+- `:host([editable-layout][selected]) .resize-handle { display: block; }` — 레이아웃 편집 모드(`editable-layout`)에서 선택(`selected`) 시 표시
 - `:host(:not([selected])) .resize-handle { display: none; }` — 미선택 시 숨김
 - 핸들의 `mousedown` 이벤트는 `stopPropagation()`으로 버블링을 차단하여, 드래그-이동이 함께 트리거되지 않도록 한다.
+
+> **참고**: `editable-layout` 속성은 `EditManager.layoutEditMode = true`일 때 `_applyEditableLayoutToAllBoxes()`를 통해 설정된다. 따라서 텍스트 편집 모드에서 paragraph 포커스로 인해 부모 box가 `selected`가 되더라도 `editable-layout`이 없으면 리사이즈 핸들은 표시되지 않는다. 레이아웃 편집 모드에서만 리사이즈 핸들이 노출된다.
 
 ### 2.2 `LayoutEditController` 중앙 이벤트 처리
 
@@ -385,6 +394,16 @@ manager.selectedLayoutIds; // string[]
 | 반환값 | `boolean` | 크기 조정 중이면 `true`, 아니면 `false` |
 
 `_startLayoutResize()`가 호출되면 `true`로 설정되고, `_endLayoutResize()`가 호출되면 `false`로 설정된다. 이 값은 `LayoutBoxElement._onLayoutMouseEnter`/`_onLayoutMouseLeave`에서 hover 표시를 차단하는 데 사용된다.
+
+#### `_isInsertDragging()`
+
+현재 삽입 드래그를 진행 중인지 반환한다.
+
+| 반환값 | 타입 | 설명 |
+|--------|------|------|
+| 반환값 | `boolean` | 삽입 드래그 중이면 `true`, 아니면 `false` |
+
+`InsertController.isDragging` 값을 위임하며, `InsertController.startDrag()`가 호출되면 `true`로, `_cleanup()`이 호출되면 `false`로 전환된다. `insertMode`가 활성화되어 있더라도 드래그 중이 아니면 `false`를 반환한다. 이 값은 `LayoutBoxElement._onLayoutMouseEnter`/`_onLayoutMouseLeave`에서 삽입 드래그 중 hover 표시를 차단하는 데 사용된다.
 
 #### `setEditableRootId(id)` / `editableRootId`
 

@@ -214,6 +214,7 @@ export class EditManager {
     this._controllers.delete(controller);
     if (this._focusedController === controller) {
       const previousParagraph = controller['_paragraph'] as LayoutParagraphElement;
+      this._clearBoxSelectionForParagraph(previousParagraph);
       this._focusedController = null;
       this._dispatch('focusChange', controller, previousParagraph, controller);
     }
@@ -241,6 +242,11 @@ export class EditManager {
       (previousController as unknown as { _blurInternal(): void })._blurInternal();
     }
 
+    if (previousParagraph) {
+      this._clearBoxSelectionForParagraph(previousParagraph);
+    }
+    const newParagraph = controller['_paragraph'] as LayoutParagraphElement;
+    this._selectBoxForParagraph(newParagraph);
     this._focusedController = controller;
     this._dispatch('focusChange', controller, previousParagraph ?? null, previousController);
   }
@@ -253,6 +259,7 @@ export class EditManager {
   _releaseFocus(controller: TextEditController): void {
     if (this._focusedController !== controller) return;
     const previousParagraph = controller['_paragraph'] as LayoutParagraphElement;
+    this._clearBoxSelectionForParagraph(previousParagraph);
     this._focusedController = null;
     this._dispatch('focusChange', controller, previousParagraph, controller);
   }
@@ -520,6 +527,40 @@ export class EditManager {
       this._applyEditableTextToAllParagraphs();
     } else {
       this._applyEditableTextToAllParagraphs();
+      this._focusParagraphFromLayoutSelection();
+    }
+  }
+
+  /**
+   * 현재 레이아웃 선택을 기반으로 텍스트 편집 포커스를 설정한다.
+   * 레이아웃 편집 → 텍스트 편집 전환 시 호출된다.
+   */
+  private _focusParagraphFromLayoutSelection(): void {
+    const candidates = this._selectedLayouts.filter(
+      (el): el is LayoutBoxElement => el instanceof LayoutBoxElement && el.contentType === 'paragraph'
+    );
+
+    if (candidates.length === 0) {
+      if (this._selectedLayouts.length > 0) {
+        this.clearLayoutSelection();
+      }
+      return;
+    }
+
+    const topLevel = this._filterTopLevelLayouts(candidates);
+    const target = topLevel[0] ?? null;
+
+    const previousLayouts = [...this._selectedLayouts];
+    for (const el of this._selectedLayouts) {
+      if (el !== target) el.removeAttribute('selected');
+    }
+    this._selectedLayouts = target ? [target] : [];
+    this._dispatchLayoutSelection(previousLayouts);
+
+    if (!target) return;
+    const paragraph = target.items.find(item => item.type === 'paragraph') as LayoutParagraphElement | undefined;
+    if (paragraph) {
+      this.focusParagraph(paragraph);
     }
   }
 
@@ -672,6 +713,56 @@ export class EditManager {
     if (this._focusedController) {
       (this._focusedController as unknown as { _blurInternal(): void })._blurInternal();
     }
+  }
+
+  /**
+   * 단락을 감싸는 부모 box를 레이아웃 선택(`selected`) 상태로 만든다.
+   *
+   * 텍스트 편집 포커스가 들어온 paragraph의 부모 box를 단일 레이아웃 선택으로 설정한다.
+   * 기존에 선택된 다른 box가 있으면 모두 해제하고, 부모 box만 `selected` 상태가 된다.
+   * 레이아웃 편집 모드로 전환하더라도 이 선택은 유지된다.
+   *
+   * @param paragraph - 포커스를 얻은 단락. null이면 아무 일도 하지 않는다.
+   */
+  private _selectBoxForParagraph(paragraph: LayoutParagraphElement | null): void {
+    if (!paragraph) return;
+    const parentBox = paragraph.parentElement;
+    if (!(parentBox instanceof LayoutBoxElement)) return;
+
+    const previousLayouts = [...this._selectedLayouts];
+    for (const el of this._selectedLayouts) {
+      if (el !== parentBox) {
+        el.removeAttribute('selected');
+        el.removeAttribute('hovered');
+      }
+    }
+    parentBox.removeAttribute('hovered');
+    parentBox.setAttribute('selected', '');
+    this._selectedLayouts = [parentBox];
+    this._dispatchLayoutSelection(previousLayouts);
+  }
+
+  /**
+   * 단락을 감싸는 부모 box의 레이아웃 선택(`selected`)을 해제한다.
+   *
+   * 텍스트 편집 포커스가 해제될 때 호출된다. 부모 box가 `_selectedLayouts`에 있으면
+   * 제거하고 `selected` 속성을 제거한다.
+   *
+   * @param paragraph - 포커스를 잃은 단락. null이면 아무 일도 하지 않는다.
+   */
+  private _clearBoxSelectionForParagraph(paragraph: LayoutParagraphElement | null): void {
+    if (!paragraph) return;
+    const parentBox = paragraph.parentElement;
+    if (!(parentBox instanceof LayoutBoxElement)) return;
+    if (!parentBox.hasAttribute('selected')) return;
+
+    const previousLayouts = [...this._selectedLayouts];
+    const idx = this._selectedLayouts.indexOf(parentBox);
+    if (idx >= 0) {
+      this._selectedLayouts.splice(idx, 1);
+    }
+    parentBox.removeAttribute('selected');
+    this._dispatchLayoutSelection(previousLayouts);
   }
 
   /**
@@ -1202,6 +1293,14 @@ export class EditManager {
    */
   _isResizingLayout(): boolean {
     return this._isLayoutResizing;
+  }
+
+  /**
+   * 현재 삽입 드래그를 진행 중인지 반환한다.
+   * @internal
+   */
+  _isInsertDragging(): boolean {
+    return this._insertController?.isDragging ?? false;
   }
 
   /**
