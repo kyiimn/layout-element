@@ -252,10 +252,7 @@ export class InsertController {
     let containerPaddingLeft = 0;
     let containerPaddingTop = 0;
 
-    if (container instanceof LayoutDocumentElement) {
-      containerPaddingLeft = container.paddingLeft;
-      containerPaddingTop = container.paddingTop;
-    } else if (container instanceof LayoutBoxElement) {
+    if (container instanceof LayoutBoxElement) {
       containerPaddingLeft = container.paddingLeft ?? 0;
       containerPaddingTop = container.paddingTop ?? 0;
     }
@@ -383,22 +380,21 @@ export class InsertController {
     }
 
     const ppm = GridCalculator.ppm;
-    const { lineHeight, editableWidth, columnCount } = model;
+    const { columnCoords, lineHeight, editableWidth, columnCount } = model;
     const avgColWidth = editableWidth / columnCount;
 
     const rect = container.getBoundingClientRect();
     let containerPaddingLeft = 0;
     let containerPaddingTop = 0;
-    if (container instanceof LayoutDocumentElement) {
-      containerPaddingLeft = container.paddingLeft;
-      containerPaddingTop = container.paddingTop;
-    } else if (container instanceof LayoutBoxElement) {
+    if (container instanceof LayoutBoxElement) {
       containerPaddingLeft = container.paddingLeft ?? 0;
       containerPaddingTop = container.paddingTop ?? 0;
     }
 
-    const editAreaLeftPx = rect.left + containerPaddingLeft * ppm;
-    const editAreaTopPx = rect.top + containerPaddingTop * ppm;
+    const editAreaLeftMm = columnCoords[0]?.x1 ?? 0;
+    const editAreaTopMm = columnCoords[0]?.y1 ?? 0;
+    const editAreaLeftPx = rect.left + editAreaLeftMm * ppm;
+    const editAreaTopPx = rect.top + editAreaTopMm * ppm;
 
     const leftMm = Math.max(0, (leftPx - rect.left) / ppm - containerPaddingLeft);
     const topMm = Math.max(0, (topPx - rect.top) / ppm - containerPaddingTop);
