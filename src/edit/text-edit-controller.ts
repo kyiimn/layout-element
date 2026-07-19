@@ -1603,14 +1603,15 @@ export class TextEditController {
     if (this._optimisticSpan && this._optimisticSpan.parentNode) {
       const spanRect = this._optimisticSpan.getBoundingClientRect();
       const paragraphRect = this._paragraph.getBoundingClientRect();
-      this._cursorEl.top = spanRect.top - paragraphRect.top;
-      this._cursorEl.left = spanRect.right - paragraphRect.left;
-      this._cursorEl.height = spanRect.height;
+      const scale = EditManager.getInstance().scale;
+      this._cursorEl.top = (spanRect.top - paragraphRect.top) / scale;
+      this._cursorEl.left = (spanRect.right - paragraphRect.left) / scale;
+      this._cursorEl.height = spanRect.height / scale;
       const hasVisibleSelection = this._cursorModel.selection !== null &&
         this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
       this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
-      this._textarea.style.top = `${spanRect.top - paragraphRect.top}px`;
-      this._textarea.style.left = `${spanRect.left - paragraphRect.left}px`;
+      this._textarea.style.top = `${(spanRect.top - paragraphRect.top) / scale}px`;
+      this._textarea.style.left = `${(spanRect.left - paragraphRect.left) / scale}px`;
       return;
     }
 

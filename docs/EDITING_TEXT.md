@@ -1372,13 +1372,18 @@ const localY = event.clientY - paragraphRect.top;
 ```ts
 const spanRect = span.getBoundingClientRect();
 const paragraphRect = paragraph.getBoundingClientRect();
+const scale = EditManager.getInstance().scale;
 return new DOMRect(
-  spanRect.left - paragraphRect.left,
-  spanRect.top - paragraphRect.top,
-  spanRect.width,
-  spanRect.height,
+  (spanRect.left - paragraphRect.left) / scale,
+  (spanRect.top - paragraphRect.top) / scale,
+  spanRect.width / scale,
+  spanRect.height / scale,
 );
 ```
+
+> **transform: scale 환경에서의 보정**: 부모 요소에 CSS `transform: scale(s)`가 적용되어 있으면 `getBoundingClientRect()`는 transform 적용 후의 viewport 픽셀을 반환한다. 그런데 커서/선택 DOM 요소는 paragraph의 shadow root 자식이라 paragraph local coordinate(transform 적용 전 픽셀)를 기대한다. 따라서 `getCharRect` / `getFirstColumnRect` / `getTextRange`가 반환하는 top/left/width/height는 모두 `EditManager.scale`로 나누어 local coordinate로 변환한다. 단 `fontSize`는 `getComputedStyle`에서 오므로 local coordinate와 동일하여 보정하지 않는다.
+>
+> EditContext API(`TextEditContextAdapter`)는 viewport coordinate를 요구하므로, adapter에서 `getCharRect` 결과에 다시 `scale`을 곱하고 `paragraphRect.left/top`을 더해 viewport 좌표로 복원한다.
 
 ### 9.2 `getCharOffsetFromPoint()`의 binary search 전략
 

@@ -1,4 +1,5 @@
 import type { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
+import { EditManager } from "./edit-manager";
 
 /**
  * Adapter that bridges the browser EditContext API with the layout engine.
@@ -110,6 +111,10 @@ export class TextEditContextAdapter {
     const start = event.updateRangeStart;
     const end = event.updateRangeEnd;
 
+    // getCharRect는 paragraph local coordinate(transform: scale 적용 전)를 반환하므로,
+    // EditContext API가 요구하는 viewport coordinate로 변환하기 위해 scale을 곱한다.
+    const scale = EditManager.getInstance().scale;
+    const paragraphRect = this._mapper.paragraph.getBoundingClientRect();
     const bounds: CharacterBoundsInfo[] = [];
 
     for (let i = start; i < end; i++) {
@@ -118,10 +123,10 @@ export class TextEditContextAdapter {
         bounds.push({
           start: i,
           end: i + 1,
-          left: rect.left,
-          top: rect.top,
-          width: rect.width,
-          height: rect.height,
+          left: rect.left * scale + paragraphRect.left,
+          top: rect.top * scale + paragraphRect.top,
+          width: rect.width * scale,
+          height: rect.height * scale,
         });
       }
     }

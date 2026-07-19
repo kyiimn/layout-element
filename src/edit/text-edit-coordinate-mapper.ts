@@ -2,6 +2,7 @@ import type { LayoutColumnElement } from "@/components/layout/column.element";
 import type { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import type { CursorPosition } from "@/types/edit/cursor.type";
 import { DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN } from "@/constants";
+import { EditManager } from "./edit-manager";
 
 /**
  * `<x-layout-paragraph>` 내부의 텍스트 오프셋과 픽셀 좌표를 매핑한다.
@@ -9,6 +10,14 @@ import { DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN } from "@/constants";
  * `data-offset`은 렌더링된 문자 위치(0, 1, 2, ...)를 나타내며,
  * 소스 문자열에 포함된 `\n` 문자나 줄 앞뒤로 제거된 공백을 반영하지 않는다.
  * 이 클래스는 렌더링 오프셋과 소스 오프셋 간의 양방향 변환을 관리한다.
+ *
+ * **좌표계 메모**: paragraph의 shadow root 자식 요소(cursor/selection)의
+ * `top`/`left`는 paragraph local coordinate(transform: scale 적용 전 픽셀)를
+ * 기대하지만, `getBoundingClientRect()`는 transform 적용 후 viewport 픽셀을
+ * 반환한다. 그래서 `getCharRect` / `getTextRange` / `getFirstColumnRect`가
+ * 반환하는 top/left/width/height는 모두 `EditManager.scale`로 나누어 local
+ * coordinate로 변환한다. 단 `fontSize`는 `getComputedStyle`에서 오므로
+ * local coordinate와 동일하여 보정하지 않는다.
  */
 export class TextEditCoordinateMapper {
   private _paragraph: LayoutParagraphElement;
@@ -26,6 +35,11 @@ export class TextEditCoordinateMapper {
   constructor(paragraph: LayoutParagraphElement) {
     this._paragraph = paragraph;
     this.rebuild();
+  }
+
+  /** 이 mapper가 바인딩된 paragraph 요소. */
+  get paragraph(): LayoutParagraphElement {
+    return this._paragraph;
   }
 
   /**
@@ -121,12 +135,13 @@ export class TextEditCoordinateMapper {
 
     const spanRect = span.getBoundingClientRect();
     const paragraphRect = this._paragraph.getBoundingClientRect();
+    const scale = EditManager.getInstance().scale;
 
     return new DOMRect(
-      spanRect.left - paragraphRect.left,
-      spanRect.top - paragraphRect.top,
-      spanRect.width,
-      spanRect.height,
+      (spanRect.left - paragraphRect.left) / scale,
+      (spanRect.top - paragraphRect.top) / scale,
+      spanRect.width / scale,
+      spanRect.height / scale,
     );
   }
 
@@ -350,6 +365,7 @@ export class TextEditCoordinateMapper {
     if (startOffset >= endOffset) return result;
 
     const paragraphRect = this._paragraph.getBoundingClientRect();
+    const scale = EditManager.getInstance().scale;
     const columns = this._getAllColumns();
 
     for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
@@ -373,10 +389,10 @@ export class TextEditCoordinateMapper {
         if (sourceOffset >= startOffset && sourceOffset < endOffset) {
           const spanRect = span.getBoundingClientRect();
           rects.push(new DOMRect(
-            spanRect.left - paragraphRect.left,
-            spanRect.top - paragraphRect.top,
-            spanRect.width,
-            spanRect.height,
+            (spanRect.left - paragraphRect.left) / scale,
+            (spanRect.top - paragraphRect.top) / scale,
+            spanRect.width / scale,
+            spanRect.height / scale,
           ));
         }
       }
@@ -478,26 +494,28 @@ export class TextEditCoordinateMapper {
     const firstColumn = columns[0];
     const colRect = firstColumn.getBoundingClientRect();
     const paraRect = this._paragraph.getBoundingClientRect();
+    // fontSize는 getComputedStyle에서 오므로 paragraph local coordinate와 동일 (transform 영향 없음).
     const fontSize = parseFloat(getComputedStyle(firstColumn).fontSize) || 16;
+    const scale = EditManager.getInstance().scale;
 
     const textAlign = this._paragraph.paragraphStyle?.textAlign || DEFAULT_TEXT_ALIGN;
     let left: number;
     if (textAlign === 'center') {
-      left = colRect.left - paraRect.left + colRect.width / 2;
+      left = (colRect.left - paraRect.left + colRect.width / 2) / scale;
     } else if (textAlign === 'right') {
-      left = colRect.right - paraRect.left;
+      left = (colRect.right - paraRect.left) / scale;
     } else {
-      left = colRect.left - paraRect.left;
+      left = (colRect.left - paraRect.left) / scale;
     }
 
     const verticalAlign = this._paragraph.paragraphStyle?.verticalAlign || this._paragraph.inheritStyle?.verticalAlign || DEFAULT_VERTICAL_ALIGN;
     let top: number;
     if (verticalAlign === 'center') {
-      top = colRect.top - paraRect.top + colRect.height / 2 - fontSize / 2;
+      top = (colRect.top - paraRect.top + colRect.height / 2 - fontSize / 2) / scale;
     } else if (verticalAlign === 'bottom') {
-      top = colRect.bottom - paraRect.top - fontSize;
+      top = (colRect.bottom - paraRect.top - fontSize) / scale;
     } else {
-      top = colRect.top - paraRect.top;
+      top = (colRect.top - paraRect.top) / scale;
     }
 
     return {
