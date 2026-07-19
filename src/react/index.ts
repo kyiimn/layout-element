@@ -2,6 +2,7 @@ export * from '@/types';
 export * from '@/core';
 export * from '@/resource';
 export * from '@/constants';
+export * from '@/utils';
 export * from '@/components';
 export * from '@/edit';
 export * from './context';
