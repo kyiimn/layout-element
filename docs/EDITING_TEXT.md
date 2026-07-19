@@ -1083,6 +1083,7 @@ sequenceDiagram
     - 실패하면 `_compositionStartOffset - 1`의 `renderedOffset`으로 이전 문자 다음에 삽입.
     - 둘 다 실패하고 `_compositionStartOffset === 0`이면 첫 컬럼의 첫 요소에 추가.
 11. `_positionCursorFromCompositionSpan()`으로 커서를 조합 span 오른쪽 끝에 배치. 실패하면 `_updateCursorPosition()` 폴백.
+    - `_positionCursorFromCompositionSpan()`은 `_updateCursorPosition()`의 낙관적 span 경로와 동일한 보정을 적용한다: `EditManager.scale`로 나누어 paragraph local 좌표로 변환하고, 시각적 right 대신 `visualWidth / widthRatio`로 복원한 레이아웃 right를 커서 left로 사용한다.
 
 ### 6.2 `compositionupdate` 내부 처리
 
@@ -1537,6 +1538,8 @@ flowchart LR
 ### 11.1 `_updateCursorPosition()` 전체 로직
 
 1. `_optimisticSpan`이 DOM에 있으면 낙관적 span rect 기준으로 커서 위치를 결정하고 종료.
+   - `getBoundingClientRect()`로 얻은 시각적 rect를 `EditManager.scale`로 나누어 paragraph local 좌표로 변환한다.
+   - **커서 left는 시각적 right(`spanRect.right`)가 아닌 레이아웃 right를 사용**한다. span은 `transform: scale(widthRatio, 1)` + `transform-origin: 0` 스타일을 가지므로, `getBoundingClientRect().width`는 `레이아웃 너비 × widthRatio`이다. `widthRatio < 1`(장평 축소)일 때 시각적 right가 레이아웃 right보다 작아 커서가 왼쪽으로 어긋난다. 따라서 `visualWidth / widthRatio`로 레이아웃 너비를 복원한 뒤 `localLeft + layoutWidth`를 커서 left로 사용한다.
 2. `renderedOffset(offset)`로 렌더링 오프셋을 찾는다.
 3. null이면 `offset > 0`이면 이전 문자의 `renderedOffset`으로 폴백(`atEndOfChar = true`). `offset < content.length`이면 다음 문자의 `renderedOffset`으로 폴백(`atEndOfChar = false`).
 4. `offset === 0`이고 빈 단락이면 `getFirstColumnRect()`로 커서 위치를 결정.

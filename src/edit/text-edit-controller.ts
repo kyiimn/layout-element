@@ -1427,9 +1427,15 @@ export class TextEditController {
     if (!this._compositionSpan || !this._compositionSpan.parentNode) return false;
     const spanRect = this._compositionSpan.getBoundingClientRect();
     const paragraphRect = this._paragraph.getBoundingClientRect();
-    this._cursorEl.top = spanRect.top - paragraphRect.top;
-    this._cursorEl.left = spanRect.right - paragraphRect.left;
-    this._cursorEl.height = spanRect.height;
+    const scale = EditManager.getInstance().scale;
+    const localLeft = (spanRect.left - paragraphRect.left) / scale;
+    const visualWidth = spanRect.width / scale;
+    const widthRatio = this._paragraph.model?.widthRatio ?? 1;
+    const layoutWidth = widthRatio > 0 ? visualWidth / widthRatio : visualWidth;
+    const layoutRight = localLeft + layoutWidth;
+    this._cursorEl.top = (spanRect.top - paragraphRect.top) / scale;
+    this._cursorEl.left = layoutRight;
+    this._cursorEl.height = spanRect.height / scale;
     this._cursorEl.visible = true;
     return true;
   }
@@ -1604,14 +1610,19 @@ export class TextEditController {
       const spanRect = this._optimisticSpan.getBoundingClientRect();
       const paragraphRect = this._paragraph.getBoundingClientRect();
       const scale = EditManager.getInstance().scale;
+      const localLeft = (spanRect.left - paragraphRect.left) / scale;
+      const visualWidth = spanRect.width / scale;
+      const widthRatio = this._paragraph.model?.widthRatio ?? 1;
+      const layoutWidth = widthRatio > 0 ? visualWidth / widthRatio : visualWidth;
+      const layoutRight = localLeft + layoutWidth;
       this._cursorEl.top = (spanRect.top - paragraphRect.top) / scale;
-      this._cursorEl.left = (spanRect.right - paragraphRect.left) / scale;
+      this._cursorEl.left = layoutRight;
       this._cursorEl.height = spanRect.height / scale;
       const hasVisibleSelection = this._cursorModel.selection !== null &&
         this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
       this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
       this._textarea.style.top = `${(spanRect.top - paragraphRect.top) / scale}px`;
-      this._textarea.style.left = `${(spanRect.left - paragraphRect.left) / scale}px`;
+      this._textarea.style.left = `${localLeft}px`;
       return;
     }
 
