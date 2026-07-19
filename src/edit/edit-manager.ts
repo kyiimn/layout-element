@@ -919,20 +919,19 @@ export class EditManager {
     if (this._insertMode === mode) return;
 
     if (mode) {
-      const allBoxes = document.querySelectorAll<LayoutBoxElement>('x-layout-box');
-      const editableBoxes = Array.from(allBoxes).filter(box => this.isBoxEditable(box));
-      if (editableBoxes.length === 0) return;
-
-      this.clearLayoutSelection();
-
-      editableBoxes.forEach((box) => {
-        box.style.cursor = 'crosshair';
-      });
-
       const docEl = document.querySelector('x-layout-document') as LayoutDocumentElement | null;
       if (!docEl) {
         throw new Error('EditManager.insertMode: 문서 요소(x-layout-document)를 찾을 수 없습니다.');
       }
+
+      this.clearLayoutSelection();
+
+      const editableBoxes = Array
+        .from(document.querySelectorAll<LayoutBoxElement>('x-layout-box'))
+        .filter(box => this.isBoxEditable(box));
+      editableBoxes.forEach((box) => {
+        box.style.cursor = 'crosshair';
+      });
 
       if (!this._insertController) {
         this._insertController = new InsertController(docEl);
