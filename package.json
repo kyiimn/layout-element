@@ -28,6 +28,7 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build && vite build --config vite.config.react.ts",
+    "build:obfuscate": "vite build && vite build --config vite.config.react.ts && node scripts/obfuscate.mjs",
     "preview": "vite preview"
   },
   "peerDependencies": {
@@ -37,6 +38,7 @@
     "@types/node": "^22.15.0",
     "@types/react": "^19.2.17",
     "@typescript/typescript6": "^6.0.2",
+    "javascript-obfuscator": "^5.5.0",
     "typescript": "^7.0.2",
     "vite": "^8",
     "vite-plugin-dts": "^5.0.3"
