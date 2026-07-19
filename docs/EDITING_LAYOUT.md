@@ -1887,7 +1887,7 @@ top handle:
 
 삽입 모드가 활성화되면 문서 요소의 커서가 `crosshair`로 바뀌고, 기존 레이아웃 선택은 자동으로 해제된다. 삽입 모드 중에는 레이아웃 선택과 드래그 이동이 동작하지 않아 삽입 동작과 충돌하지 않는다.
 
-> **사전 조건**: 삽입 모드는 `EditManager.isBoxEditable()`이 `true`인 `<x-layout-box>` 요소가 하나 이상 있어야만 활성화할 수 있다. `insertMode` setter에서 `isBoxEditable()`로 편집 가능한 box를 필터링하며, 없으면 설정이 무시된다. 비활성화 시에는 `editable-layout` DOM 속성이 있는 box의 커서를 `grab`으로 복원한다.
+> **사전 조건**: 삽입 모드는 `<x-layout-document>` 요소가 DOM에 존재해야 한다. 편집 가능 box가 없는 빈 문서에서도 활성화할 수 있으며, 이 경우 `InsertController`가 document를 삽입 컨테이너로 사용하여 첫 box를 그려 넣을 수 있다. 비활성화 시에는 `editable-layout` DOM 속성이 있는 box의 커서를 `grab`으로 복원한다.
 
 ### 12.2 EditManager API
 
@@ -1908,11 +1908,11 @@ const mode = manager.insertMode; // InsertMode | null
 
 | 동작 | 설명 |
 |------|------|
-| non-null 설정 | 삽입 모드 활성화, 기존 레이아웃 선택 해제, 문서 요소에 `crosshair` 커서 적용. `EditManager.isBoxEditable()`이 true인 box가 없으면 무시됨 |
+| non-null 설정 | 삽입 모드 활성화, 기존 레이아웃 선택 해제, 편집 가능 box의 커서를 `crosshair`로 변경. 빈 문서(편집 가능 box가 없음)에서도 활성화되어 document에 직접 삽입 가능 |
 | `null` 설정 | 삽입 모드 비활성화, 커서 복원 |
 | 반복 설정 | 동일한 모드로 다시 설정하면 무시된다 |
 
-`x-layout-document` 요소가 DOM에 없으면 `Error`가 throw된다. `EditManager.isBoxEditable()`이 true인 `<x-layout-box>`가 하나도 없으면 삽입 모드가 활성화되지 않는다.
+`x-layout-document` 요소가 DOM에 없으면 `Error`가 throw된다. 편집 가능 `<x-layout-box>`가 없어도 삽입 모드는 활성화되며, 이 경우 document가 삽입 컨테이너가 된다.
 
 #### `activateInsert(mode)`
 
@@ -2202,7 +2202,7 @@ private static readonly DRAG_THRESHOLD = 3;
 ### 12.13 주의사항
 
 - 삽입 모드는 `<x-layout-document>`가 DOM에 있을 때만 활성화할 수 있다. 없으면 `Error`가 발생한다.
-- 삽입 모드는 `EditManager.isBoxEditable()`이 true인 `<x-layout-box>`가 하나 이상 있어야만 활성화할 수 있다. 없으면 `insertMode` 설정이 무시된다. 비활성화 시에는 `x-layout-box[editable-layout]` DOM 속성이 있는 box들의 커서를 `grab`으로 복원한다.
+- 삽입 모드는 편집 가능 box가 없는 빈 문서에서도 활성화할 수 있다. 이 경우 `InsertController._findTargetContainer()`가 document를 삽입 컨테이너로 반환하여 첫 box를 document에 직접 그려 넣을 수 있다. 비활성화 시에는 `x-layout-box[editable-layout]` DOM 속성이 있는 box들의 커서를 `grab`으로 복원한다.
 - 삽입된 요소는 항상 `<x-layout-box>`로 감싸진다. `text`, `paragraph`, `image` 타입도 마찬가지이다.
 - `static` 모드로 삽입할 때 `model`이 없으면 `{ left: 0, top: 0, width: 1, height: 1 }` 기본값을 사용한다.
 - `image` 삽입 시 placeholder 이미지는 `100×100px`, `72dpi`, 빈 `url`로 생성된다. 실제 이미지를 표시하려면 삽입 후 `url`을 변경해야 한다.
