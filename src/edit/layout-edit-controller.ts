@@ -1,4 +1,3 @@
-import { GridCalculator } from "@/core";
 import { BoxPosition } from "@/types";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
@@ -935,8 +934,9 @@ export class LayoutEditController {
     const state = this._dragStates.get(box);
     const sLeft = startLeft ?? (state ? state.startLeft : box.left);
     const sTop = startTop ?? (state ? state.startTop : box.top);
-    const deltaMmX = deltaPxX / GridCalculator.ppm;
-    const deltaMmY = deltaPxY / GridCalculator.ppm;
+    const manager = EditManager.getInstance();
+    const deltaMmX = manager.screenDeltaToMm(deltaPxX);
+    const deltaMmY = manager.screenDeltaToMm(deltaPxY);
 
     const isDocumentChild = box.parentElement?.type === 'document';
 
@@ -1027,8 +1027,9 @@ export class LayoutEditController {
     if (!handle) return { left: sLeft, top: sTop, width: sWidth, height: sHeight };
 
     if (box.position === 'absolute') {
-      const deltaMmX = deltaPxX / GridCalculator.ppm;
-      const deltaMmY = deltaPxY / GridCalculator.ppm;
+      const manager = EditManager.getInstance();
+      const deltaMmX = manager.screenDeltaToMm(deltaPxX);
+      const deltaMmY = manager.screenDeltaToMm(deltaPxY);
       const padL = box.inheritStyle?.paddingLeft || 0;
       const padR = box.inheritStyle?.paddingRight || 0;
       const padT = box.inheritStyle?.paddingTop || 0;
@@ -1073,8 +1074,9 @@ export class LayoutEditController {
     const { columnCount, lineHeight } = parentModel;
     const editableTextHeight = parentModel.editableTextHeight;
     const avgColWidth = parentModel.editableWidth / parentModel.columnCount;
-    const deltaMmX = deltaPxX / GridCalculator.ppm;
-    const deltaMmY = deltaPxY / GridCalculator.ppm;
+    const manager = EditManager.getInstance();
+    const deltaMmX = manager.screenDeltaToMm(deltaPxX);
+    const deltaMmY = manager.screenDeltaToMm(deltaPxY);
 
     // 픽셀 단위 델타를 컬럼/라인 정수 단위로 변환 (스냅)
     const deltaCols = Math.round(deltaMmX / avgColWidth);

@@ -527,33 +527,37 @@ manager.addEventListener('layoutResize', (event) => {
 
 **주의**: 단순 클릭(리사이즈 이동 없음)에서는 `layoutResize` 이벤트가 발생하지 않는다. 이동 임계값(3px)을 초과한 경우에만 발생한다.
 
-#### 화면 scale 보정 (`GridCalculator.setScale`)
+#### 화면 scale 보정 (`EditManager.setScale`/`screenPxToMm`)
 
-미리보기 영역에 CSS `transform: scale(s)`이 적용된 환경에서는 `MouseEvent.clientX/clientY` 및 `Element.getBoundingClientRect()`가 변환된 픽셀 좌표를 반환한다. 이때 `GridCalculator.ppm`을 그대로 사용하면 `mm ↔ px` 환산이 어긋나 영역 그리기, 드래그 이동, 리사이즈의 좌표가 모두 어긋난다.
+미리보기 영역에 CSS `transform: scale(s)`이 적용된 환경에서는 `MouseEvent.clientX/clientY` 및 `Element.getBoundingClientRect()`가 변환된 픽셀 좌표를 반환한다. 이때 `GridCalculator.ppm`을 그대로 사용하면 `mm ↔ px` 환산이 어긋나 영역 그리기, 드래그 이동, 리사이즈의 좌표가 모두 어긋난다. 단 `GridCalculator.ppm` 자체를 보정하면 `text-layout-engine`의 `fontSizePx = fontSize * ppm` 계산까지 절반/두배로 줄어드는 부작용이 생긴다.
 
-`GridCalculator.setScale(s)`를 호출하면 `ppm` getter가 `originalPpm * s`를 반환하도록 보정 계수가 설정된다. 이 보정 덕분에 `InsertController`/`LayoutEditController`의 모든 좌표 계산(드래그 시작/끝, 컨테이너 기준 mm 환산, 그리드 스냅, 미리보기 픽셀 크기)이 화면에 보이는 그대로 정확하게 동작한다.
+해결: `EditManager`가 별도의 `_scale` 보정 계수를 보관하고, `screenPxToMm(px)` / `screenDeltaToMm(deltaPx)` 헬퍼가 `px / (GridCalculator.ppm * _scale)`로 환산한다. `GridCalculator.ppm`은 항상 `originalPpm`을 반환하므로 폰트 크기/column 폭 계산은 정상이다. `InsertController`/`LayoutEditController`의 모든 mm 환산은 이 헬퍼를 통해 정확하게 동작한다.
+
+텍스트 편집(`TextEditController`/`TextEditCoordinateMapper`)은 `getBoundingClientRect()`만으로 좌표를 비교하므로 scale 보정과 무관하게 정확하다 (입력 clientX와 비교 대상 rect 모두 같은 viewport 픽셀 좌표계).
 
 ```typescript
-import { GridCalculator } from 'layout-element';
+const manager = EditManager.getInstance();
 
 // 마운트 시: zoom 상태에 맞춰 보정 계수 적용
 React.useEffect(() => {
-  GridCalculator.setScale(previewScale);
+  manager.setScale(previewScale);
 }, [previewScale]);
 
 // 언마운트 시: 1로 원복 (다른 인스턴스에 영향 방지)
 React.useEffect(() => {
-  return () => GridCalculator.resetScale();
+  return () => manager.resetScale();
 }, []);
 ```
 
 | 메서드 | 시그니처 | 설명 |
 |--------|---------|------|
-| `GridCalculator.setScale(s)` | `(scale: number) => void` | 보정 계수 설정. `s > 0`. 다음 `ppm` 접근부터 `originalPpm * s` 반환 |
-| `GridCalculator.resetScale()` | `() => void` | 보정 계수를 `1`로 원복 |
-| `GridCalculator.ppm` | getter | 보정 계수가 적용된 `originalPpm * _scale` 반환 |
+| `EditManager.setScale(s)` | `(scale: number) => void` | 보정 계수 설정. `s > 0`. 이후 `screenPxToMm`/`screenDeltaToMm`이 `originalPpm * s`로 환산 |
+| `EditManager.resetScale()` | `() => void` | 보정 계수를 `1`로 원복 |
+| `EditManager.scale` | getter | 현재 보정 계수 |
+| `EditManager.screenPxToMm(px)` | `(px: number) => number` | 화면 픽셀 → mm 환산 (`px / (ppm * scale)`) |
+| `EditManager.screenDeltaToMm(deltaPx)` | `(deltaPx: number) => number` | 화면 픽셀 델타 → mm 델타 환산 |
 
-**주의**: `_scale`은 static이라 모든 `GridCalculator` 인스턴스가 공유한다. 한 번에 한 가지 scale만 적용 가능하므로, 미니맵·툴팁 등 다른 동시 렌더링이 있다면 보정 없이 `1`로 유지하거나, unmount 시 반드시 `resetScale()`을 호출해 다른 인스턴스에 영향이 없도록 해야 한다.
+**주의**: `_scale`은 `EditManager` 인스턴스에 종속된다. LayoutEditor는 단일 `EditManager` 인스턴스를 사용하므로 정상 동작하지만, 미니맵·툴팁 등 다른 동시 렌더링이 있다면 보정 없이 `1`로 유지하거나, unmount 시 반드시 `resetScale()`을 호출해 다른 인스턴스에 영향이 없도록 해야 한다.
 
 ### 2.4 LayoutElement 타입
 

@@ -54,14 +54,6 @@ type GridCalculatorOptions = {
 export class GridCalculator {
   private static _ppm: number | undefined;
 
-  /**
-   * 화면 scale 보정 계수. CSS transform `scale(s)`이 적용된 환경에서
-   * `clientX/clientY`가 변환된 픽셀 좌표이므로, `mm ↔ px` 변환 시
-   * `originalPpm * scale`을 사용해야 정확한 mm 값을 얻을 수 있다.
-   * 기본값 1.0. `setScale()`로 갱신, `resetScale()`로 원복.
-   */
-  private static _scale: number = 1;
-
   private _element!: LayoutBoxElement | LayoutDocumentElement;
 
   private _columnCoords: Rect[];
@@ -100,10 +92,6 @@ export class GridCalculator {
   /**
    * 브라우저 DPI를 측정하여 픽셀/mm 변환 비율(pixels-per-mm)을 반환한다.
    *
-   * CSS `transform: scale(s)`이 적용된 환경을 위해 `_scale`을 곱한 값을 반환한다.
-   * 화면 clientX/Y는 변환된 픽셀 좌표이므로, `mm ↔ px` 변환 시 `originalPpm * scale`이
-   * 정확한 변환 비율이다. `_scale`이 1이면 원본 ppm과 동일하다.
-   *
    * 성능 최적화: 최초 측정 후 `_ppm`에 캐싱하여 이후 호출 시 DOM 측정을 생략한다.
    * `resetPpm()` 호출 시 캐시가 무효화되어 다시 측정한다.
    * 줌, 인쇄, CSS transform 등으로 런타임 ppm이 변경될 수 있으므로
@@ -130,7 +118,7 @@ export class GridCalculator {
         throw new Error(`GridCalculator.ppm: 픽셀/mm 변환 비율이 ${this._ppm}입니다. 브라우저 렌더링 컨텍스트를 확인하세요.`);
       }
     }
-    return this._ppm * this._scale;
+    return this._ppm;
   }
 
   /**
@@ -139,34 +127,6 @@ export class GridCalculator {
    */
   static resetPpm() {
     this._ppm = undefined;
-  }
-
-  /**
-   * CSS `transform: scale(s)`이 적용된 환경을 위한 scale 보정 계수를 설정한다.
-   * 이후 `ppm` getter는 `originalPpm * scale`을 반환한다.
-   *
-   * 주의: `_scale`은 static이라 모든 `GridCalculator` 인스턴스가 공유한다.
-   * 한 번에 한 가지 scale만 적용 가능하다. 다른 동시 렌더링이 있을 경우
-   * 보정 없이 `1`로 유지해야 한다.
-   *
-   * @example
-   * // zoom 50% 환경
-   * GridCalculator.setScale(0.5);
-   *
-   * @example
-   * // zoom 100% (원본)
-   * GridCalculator.setScale(1);
-   */
-  static setScale(scale: number) {
-    if (scale <= 0) {
-      throw new Error(`GridCalculator.setScale: scale은 0보다 커야 합니다 (입력값: ${scale}).`);
-    }
-    this._scale = scale;
-  }
-
-  /** scale 보정 계수를 1로 원복한다. 컴포넌트 unmount 시 호출한다. */
-  static resetScale() {
-    this._scale = 1;
   }
 
   /**

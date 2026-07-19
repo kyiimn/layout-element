@@ -1,6 +1,7 @@
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
+import { GridCalculator } from "@/core";
 import type { TextEditController, CurrentStyle } from "./text-edit-controller";
 import { InsertController } from "./insert-controller";
 import { LayoutEditController } from "./layout-edit-controller";
@@ -121,6 +122,13 @@ export class EditManager {
   private _editableBoxIds: Set<string> | null = null;
   private _layoutEditController: LayoutEditController | null = null;
 
+  /**
+   * CSS `transform: scale(s)`이 적용된 환경을 위한 화면 scale 보정 계수.
+   * `screenPxToMm()`/`screenDeltaToMm()`이 `originalPpm * scale`을 사용해
+   * 변환된 픽셀 좌표를 mm으로 정확히 환산한다. 기본값 1.0.
+   */
+  private _scale: number = 1;
+
   /** 편집 루트 box id. null이면 제한 없음. 지정 시 해당 box 내부 요소만 편집 가능, Root 자체는 편집 불가. */
   private _editableRootId: string | null = null;
 
@@ -134,6 +142,57 @@ export class EditManager {
       EditManager._instance = new EditManager();
     }
     return EditManager._instance;
+  }
+
+  /**
+   * CSS `transform: scale(s)`이 적용된 환경을 위한 화면 scale 보정 계수를 설정한다.
+   * 이후 `screenPxToMm()`/`screenDeltaToMm()`이 `originalPpm * scale`을 사용해
+   * 변환된 픽셀 좌표를 mm으로 정확히 환산한다.
+   *
+   * @example
+   * ```ts
+   * const manager = EditManager.getInstance();
+   * manager.setScale(0.5);  // zoom 50% 환경
+   * manager.setScale(1);    // 원본
+   * ```
+   */
+  setScale(scale: number): void {
+    if (scale <= 0) {
+      throw new Error(`EditManager.setScale: scale은 0보다 커야 합니다 (입력값: ${scale}).`);
+    }
+    this._scale = scale;
+  }
+
+  /** scale 보정 계수를 1로 원복한다. 컴포넌트 unmount 시 호출한다. */
+  resetScale(): void {
+    this._scale = 1;
+  }
+
+  /** 현재 scale 보정 계수를 반환한다. */
+  get scale(): number {
+    return this._scale;
+  }
+
+  /**
+   * 화면 clientX/clientY 픽셀 좌표를 mm으로 환산한다.
+   * `transform: scale(s)` 환경에서 `getBoundingClientRect()`가 반환하는 픽셀과
+   * 같은 좌표계이므로 `originalPpm * s`로 나누어 정확하게 환산한다.
+   *
+   * @example
+   * ```ts
+   * const leftMm = manager.screenPxToMm(event.clientX - rect.left);
+   * ```
+   */
+  screenPxToMm(px: number): number {
+    return px / (GridCalculator.ppm * this._scale);
+  }
+
+  /**
+   * 화면 픽셀 델타(deltaX/deltaY)를 mm 델타로 환산한다.
+   * `screenPxToMm`의 델타 전용 wrapper.
+   */
+  screenDeltaToMm(deltaPx: number): number {
+    return deltaPx / (GridCalculator.ppm * this._scale);
   }
 
   /**

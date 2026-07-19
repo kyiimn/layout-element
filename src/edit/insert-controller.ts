@@ -144,9 +144,8 @@ export class InsertController {
     const widthPx = endX - startX;
     const heightPx = endY - startY;
 
-    const ppm = GridCalculator.ppm;
-    const widthMm = widthPx / ppm;
-    const heightMm = heightPx / ppm;
+    const widthMm = EditManager.getInstance().screenPxToMm(widthPx);
+    const heightMm = EditManager.getInstance().screenPxToMm(heightPx);
 
     const { left: leftMm, top: topMm } = this._screenToContainerMm(startX, startY, container);
 
@@ -247,7 +246,7 @@ export class InsertController {
   /** 화면 좌표를 컨테이너 내부 mm 좌표로 변환한다. */
   private _screenToContainerMm(clientX: number, clientY: number, container: LayoutDocumentElement | LayoutBoxElement): { left: number; top: number } {
     const rect = container.getBoundingClientRect();
-    const ppm = GridCalculator.ppm;
+    const manager = EditManager.getInstance();
 
     let containerPaddingLeft = 0;
     let containerPaddingTop = 0;
@@ -257,8 +256,8 @@ export class InsertController {
       containerPaddingTop = container.paddingTop ?? 0;
     }
 
-    const leftMm = Math.max(0, (clientX - rect.left) / ppm - containerPaddingLeft);
-    const topMm = Math.max(0, (clientY - rect.top) / ppm - containerPaddingTop);
+    const leftMm = Math.max(0, manager.screenPxToMm(clientX - rect.left) - containerPaddingLeft);
+    const topMm = Math.max(0, manager.screenPxToMm(clientY - rect.top) - containerPaddingTop);
 
     return { left: leftMm, top: topMm };
   }
@@ -376,10 +375,10 @@ export class InsertController {
   private _snapPreviewToGrid(leftPx: number, topPx: number, widthPx: number, heightPx: number, container: LayoutDocumentElement | LayoutBoxElement): { left: number; top: number; width: number; height: number } {
     const model = container.model;
     if (!model) {
-      return { left: leftPx, top: topPx, width: widthPx, height: heightPx };
+      return { left: leftPx, top: topPx, width: widthPx, height: widthPx };
     }
 
-    const ppm = GridCalculator.ppm;
+    const manager = EditManager.getInstance();
     const { columnCoords, lineHeight, editableWidth, columnCount } = model;
     const avgColWidth = editableWidth / columnCount;
 
@@ -393,20 +392,22 @@ export class InsertController {
 
     const editAreaLeftMm = columnCoords[0]?.x1 ?? 0;
     const editAreaTopMm = columnCoords[0]?.y1 ?? 0;
-    const editAreaLeftPx = rect.left + editAreaLeftMm * ppm;
-    const editAreaTopPx = rect.top + editAreaTopMm * ppm;
+    // mm → 화면 픽셀 (정확히는 ppm*scale)
+    const screenPpm = GridCalculator.ppm * manager.scale;
+    const editAreaLeftPx = rect.left + editAreaLeftMm * screenPpm;
+    const editAreaTopPx = rect.top + editAreaTopMm * screenPpm;
 
-    const leftMm = Math.max(0, (leftPx - rect.left) / ppm - containerPaddingLeft);
-    const topMm = Math.max(0, (topPx - rect.top) / ppm - containerPaddingTop);
-    const widthMm = widthPx / ppm;
-    const heightMm = heightPx / ppm;
+    const leftMm = Math.max(0, manager.screenPxToMm(leftPx - rect.left) - containerPaddingLeft);
+    const topMm = Math.max(0, manager.screenPxToMm(topPx - rect.top) - containerPaddingTop);
+    const widthMm = manager.screenPxToMm(widthPx);
+    const heightMm = manager.screenPxToMm(heightPx);
 
     const staticCoords = this._mmToStatic(leftMm, topMm, widthMm, heightMm, container);
 
-    const snapLeftPx = editAreaLeftPx + staticCoords.left * avgColWidth * ppm;
-    const snapTopPx = editAreaTopPx + staticCoords.top * lineHeight * ppm;
-    const snapWidthPx = staticCoords.width * avgColWidth * ppm;
-    const snapHeightPx = staticCoords.height * lineHeight * ppm;
+    const snapLeftPx = editAreaLeftPx + staticCoords.left * avgColWidth * screenPpm;
+    const snapTopPx = editAreaTopPx + staticCoords.top * lineHeight * screenPpm;
+    const snapWidthPx = staticCoords.width * avgColWidth * screenPpm;
+    const snapHeightPx = staticCoords.height * lineHeight * screenPpm;
 
     return {
       left: Math.round(snapLeftPx),
