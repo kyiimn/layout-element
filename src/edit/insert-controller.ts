@@ -41,23 +41,26 @@ export class InsertController {
     return this._isDragging;
   }
 
-  /** 삽입 모드를 설정한다. `null`이면 삽입 모드를 해제한다. */
+  /**
+   * 삽입 모드를 설정한다. `null`이면 삽입 모드를 해제한다.
+   *
+   * 드래그 중에 mode가 변경된 경우(예: position select로 static ↔ absolute 전환)
+   * 드래그를 취소하지 않고 `_mode`만 갱신하여 자연스럽게 이어지도록 한다.
+   * 미리보기는 다음 mousemove에서 새 mode의 position에 맞춰 갱신된다.
+   */
   setMode(mode: InsertMode | null): void {
-    if (this._mode && this._isDragging) {
+    if (this._mode && this._isDragging && !mode) {
+      // 드래그 중에 삽입 모드 해제 시에만 취소
       this._cancel();
     }
 
-    if (this._mode) {
+    if (this._mode && !this._isDragging) {
       this._document.removeEventListener('mousedown', this._boundStartDrag);
     }
 
     this._mode = mode;
 
-    if (mode) {
-      // 문서 빈 공간(box가 없는 영역)에서의 mousedown을 처리하기 위해
-      // 버블링 단계로 등록한다. box 위에서는 _onLayoutMouseDown이
-      // handleInsertMouseDown()을 통해 먼저 startDrag()를 호출하므로
-      // _isDragging 가드로 중복 실행을 방지한다.
+    if (mode && !this._isDragging) {
       this._document.addEventListener('mousedown', this._boundStartDrag);
     }
   }

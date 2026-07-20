@@ -1236,20 +1236,25 @@ export class EditManager {
     if (this._isPrint) return;
     if (this._insertMode === mode) return;
 
+    const isDragging = this._insertController?.isDragging ?? false;
+
     if (mode) {
-      this.layoutEditMode = false;
-      this.textEditMode = false;
+      if (!isDragging) {
+        this.layoutEditMode = false;
+        this.textEditMode = false;
+        this.clearLayoutSelection();
+      }
 
       const docEl = document.querySelector('x-layout-document') as LayoutDocumentElement | null;
       if (!docEl) {
         throw new Error('EditManager.insertMode: 문서 요소(x-layout-document)를 찾을 수 없습니다.');
       }
 
-      this.clearLayoutSelection();
-
-      document.querySelectorAll<LayoutBoxElement>('x-layout-box').forEach((box) => {
-        box.style.cursor = 'crosshair';
-      });
+      if (!isDragging) {
+        document.querySelectorAll<LayoutBoxElement>('x-layout-box').forEach((box) => {
+          box.style.cursor = 'crosshair';
+        });
+      }
 
       if (!this._insertController) {
         this._insertController = new InsertController(docEl);
