@@ -158,13 +158,14 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule(":host([selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 3);
       styleEl.sheet.insertRule(":host([editable-layout][hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 4);
       styleEl.sheet.insertRule(":host([editable-layout][selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 5);
-      styleEl.sheet.insertRule(`@media print { [border] { display: none; } }`, 6);
-      styleEl.sheet.insertRule('.resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: 99999999; pointer-events: auto; display: none; }', 7);
-      styleEl.sheet.insertRule(':host([editable-layout][selected]) .resize-handle { display: block; }', 8);
-      styleEl.sheet.insertRule('.resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 9);
-      styleEl.sheet.insertRule('.resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 10);
-      styleEl.sheet.insertRule('.resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 11);
-      styleEl.sheet.insertRule('.resize-handle[data-handle="right"] { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 12);
+      styleEl.sheet.insertRule(":host([reparent-target]) { box-shadow: #ff9800 0px 0px 0px 2px inset, #ff9800 0px 0px 0px 2px; }", 6);
+      styleEl.sheet.insertRule(`@media print { [border] { display: none; } }`, 7);
+      styleEl.sheet.insertRule('.resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: 99999999; pointer-events: auto; display: none; }', 8);
+      styleEl.sheet.insertRule(':host([editable-layout][selected]) .resize-handle { display: block; }', 9);
+      styleEl.sheet.insertRule('.resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 10);
+      styleEl.sheet.insertRule('.resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 11);
+      styleEl.sheet.insertRule('.resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 12);
+      styleEl.sheet.insertRule('.resize-handle[data-handle="right"] { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 13);
       this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));
@@ -429,6 +430,52 @@ export class LayoutBoxElement extends HTMLElement {
    *
    * @param child - BoxData | ParagraphData | TextData | ImageData
    */
+  /**
+   * 자식 데이터를 받아 적절한 커스텀 엘리먼트를 생성하여 추가하고, 생성된 요소를 반환한다.
+   *
+   * `_appendChildData`의 public 래퍼로, 외부(예: `LayoutEditController`의 reparent)에서
+   * 새 자식을 추가할 때 사용한다. `data` setter의 전체 초기화 파이프라인
+   * (`_layoutStructure` → `_applyStyle` → `_renderBorder` → `_propagateInheritStyle` → `render`)
+   * 가 실행되므로, 부모 컨텍스트에 맞춰 모델/상속 스타일이 올바르게 설정된다.
+   *
+   * @example
+   * ```ts
+   * const newBox = parentBox.appendChildData(childData) as LayoutBoxElement;
+   * // newBox는 parentBox의 자식으로 완전히 초기화됨
+   * ```
+   *
+   * @param child - 추가할 자식 데이터 (BoxData | ParagraphData | TextData | ImageData)
+   * @returns 생성된 커스텀 엘리먼트. 타입별로 LayoutBoxElement | LayoutParagraphElement | LayoutImageElement
+   */
+  appendChildData(child: BoxData | ParagraphData | TextData | ImageData): LayoutBoxElement | LayoutParagraphElement | LayoutImageElement {
+    if (child.type === 'box') {
+      const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
+      boxEl.data = child;
+      this.appendChild(boxEl);
+      return boxEl;
+    } else if (child.type === 'paragraph') {
+      const paragraphEl = document.createElement('x-layout-paragraph') as LayoutParagraphElement;
+      paragraphEl.data = child;
+      this.appendChild(paragraphEl);
+      return paragraphEl;
+    } else if (child.type === 'text') {
+      const paragraphEl = document.createElement('x-layout-paragraph') as LayoutParagraphElement;
+      paragraphEl.data = {
+        ...child,
+        type: 'paragraph',
+        column: 1,
+        gap: 0,
+      };
+      this.appendChild(paragraphEl);
+      return paragraphEl;
+    } else {
+      const imageEl = document.createElement('x-layout-image') as LayoutImageElement;
+      imageEl.data = child;
+      this.appendChild(imageEl);
+      return imageEl;
+    }
+  }
+
   private _appendChildData(child: BoxData | ParagraphData | TextData | ImageData): void {
     if (child.type === 'box') {
       const boxEl = document.createElement('x-layout-box');

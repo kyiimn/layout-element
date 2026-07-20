@@ -1,5 +1,5 @@
 import { GridCalculator } from "@/core";
-import { DocumentData, ParagraphStyle, PrintPostData, TextStyle } from "@/types";
+import { DocumentData, ParagraphStyle, PrintPostData, TextStyle, BoxData } from "@/types";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
@@ -98,6 +98,7 @@ export class LayoutDocumentElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
+      styleEl.sheet.insertRule(":host([reparent-target]) { box-shadow: #ff9800 0px 0px 0px 2px inset; }", 1);
       const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
       rule.style.setProperty('background-color', '#ffffff', 'important');
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
@@ -208,6 +209,23 @@ export class LayoutDocumentElement extends HTMLElement {
       };
     }
     return super.appendChild(node);
+  }
+
+  /**
+   * BoxData를 받아 `<x-layout-box>` 요소를 생성하여 추가하고, 생성된 요소를 반환한다.
+   *
+   * `data` setter의 전체 초기화 파이프라인이 실행되므로, document의
+   * `GridCalculator`에 맞춰 모델/상속 스타일이 올바르게 설정된다.
+   * 외부(예: `LayoutEditController`의 reparent)에서 새 box를 추가할 때 사용한다.
+   *
+   * @param child - 추가할 box 데이터
+   * @returns 생성된 LayoutBoxElement
+   */
+  appendChildData(child: BoxData): LayoutBoxElement {
+    const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
+    boxEl.data = child;
+    this.appendChild(boxEl);
+    return boxEl;
   }
 
   set data(data: DocumentData) {
