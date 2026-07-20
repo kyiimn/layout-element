@@ -2,6 +2,7 @@ import { BoxPosition } from "@/types";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
+import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { EditManager } from "./edit-manager";
 
 /**
@@ -43,6 +44,22 @@ interface BoxDragState {
   rafId: number | null;
   /** 드래그 시작 시 미리 수집된 영향받는 단락 집합. 드래그 종료 시 일괄 재렌더링에 사용 */
   affectedParagraphs: Set<LayoutParagraphElement> | null;
+  /**
+   * reparent 모드에서 부모 밖으로 나간 시점의 상태.
+   * 부모 안에서는 box.left/top으로 이동하고, 부모 밖으로 나가면
+   * box.left/top을 클램핑 위치로 고정하고 transform으로 추가 이동.
+   * null이면 아직 부모 안에 있음.
+   */
+  reparentOutside: {
+    /** 부모 밖 진입 시점의 마우스 clientX */
+    mouseStartX: number;
+    /** 부모 밖 진입 시점의 마우스 clientY */
+    mouseStartY: number;
+    /** 부모 밖 진입 시점의 box left (클램핑된 위치) */
+    left: number;
+    /** 부모 밖 진입 시점의 box top (클램핑된 위치) */
+    top: number;
+  } | null;
 }
 
 /**
@@ -102,6 +119,7 @@ function createDragState(): BoxDragState {
     lastClientY: 0,
     rafId: null,
     affectedParagraphs: null,
+    reparentOutside: null,
   };
 }
 
@@ -170,6 +188,13 @@ export class LayoutEditController {
   private _activeDragBox: LayoutBoxElement | null = null;
   /** 현재 리사이즈가 진행 중인 box. `null`이면 리사이즈 중이 아니다 */
   private _activeResizeBox: LayoutBoxElement | null = null;
+
+  /**
+   * reparent 모드 드래그 중 현재 하이라이트된 컨테이너.
+   * `null`이면 하이라이트 없음. 커서가 새 컨테이너로 이동하면 이전 하이라이트를 제거하고
+   * 새 컨테이너에 `reparent-target` 속성을 설정한다.
+   */
+  private _reparentHighlightTarget: LayoutBoxElement | LayoutDocumentElement | null = null;
 
   /**
    * @param doc - 이벤트 리스너가 등록될 루트 HTMLElement
@@ -466,20 +491,27 @@ export class LayoutEditController {
       const dragTargets = manager._getDragTargets();
       const isTopLevel = dragTargets.includes(box);
 
+      // reparent 모드: 커서 위치의 컨테이너 하이라이트
+      if (manager.layoutEditType === 'reparent') {
+        this._updateReparentHighlight(box, state.lastClientX, state.lastClientY);
+      }
+
       // 활성 box(최상위 선택) 위치 갱신
       if (isTopLevel) {
-        const result = this._computeNewPosition(box, dx, dy, state.startLeft, state.startTop);
-        if (result.converted) {
-          // position 변환이 발생한 경우 (static ↔ absolute)
-          this._applyPositionConversion(box, result.converted.position, result.converted.left, result.converted.top, result.converted.width, result.converted.height);
-          // 변환 후 시작 위치를 갱신하여 연속 드래그가 자연스럽게 이어지도록 한다
-          state.startLeft = result.converted.left;
-          state.startTop = result.converted.top;
-          state.startMouseX = state.lastClientX;
-          state.startMouseY = state.lastClientY;
+        if (manager.layoutEditType === 'reparent') {
+          this._applyReparentDragMove(box, dx, dy, state);
         } else {
-          if (box.left !== result.left) box.left = result.left;
-          if (box.top !== result.top) box.top = result.top;
+          const result = this._computeNewPosition(box, dx, dy, state.startLeft, state.startTop);
+          if (result.converted) {
+            this._applyPositionConversion(box, result.converted.position, result.converted.left, result.converted.top, result.converted.width, result.converted.height);
+            state.startLeft = result.converted.left;
+            state.startTop = result.converted.top;
+            state.startMouseX = state.lastClientX;
+            state.startMouseY = state.lastClientY;
+          } else {
+            if (box.left !== result.left) box.left = result.left;
+            if (box.top !== result.top) box.top = result.top;
+          }
         }
       }
 
@@ -487,14 +519,18 @@ export class LayoutEditController {
       for (const target of dragTargets) {
         if (target === box) continue;
         const targetState = this._getOrCreateDragState(target);
-        const result = this._computeNewPosition(target, dx, dy, targetState.startLeft, targetState.startTop);
-        if (result.converted) {
-          this._applyPositionConversion(target, result.converted.position, result.converted.left, result.converted.top, result.converted.width, result.converted.height);
-          targetState.startLeft = result.converted.left;
-          targetState.startTop = result.converted.top;
+        if (manager.layoutEditType === 'reparent') {
+          this._applyReparentDragMove(target, dx, dy, targetState);
         } else {
-          if (result.left !== target.left) target.left = result.left;
-          if (result.top !== target.top) target.top = result.top;
+          const result = this._computeNewPosition(target, dx, dy, targetState.startLeft, targetState.startTop);
+          if (result.converted) {
+            this._applyPositionConversion(target, result.converted.position, result.converted.left, result.converted.top, result.converted.width, result.converted.height);
+            targetState.startLeft = result.converted.left;
+            targetState.startTop = result.converted.top;
+          } else {
+            if (result.left !== target.left) target.left = result.left;
+            if (result.top !== target.top) target.top = result.top;
+          }
         }
       }
     });
@@ -528,6 +564,7 @@ export class LayoutEditController {
     document.removeEventListener('mousemove', this._onMouseMove);
     document.removeEventListener('mouseup', this._onMouseUp);
     document.removeEventListener('keydown', this._onKeyDown);
+    this._clearReparentHighlight();
     if (state.rafId !== null) {
       cancelAnimationFrame(state.rafId);
       state.rafId = null;
@@ -542,6 +579,7 @@ export class LayoutEditController {
 
     // 드래그 이동이 없었으면 (임계값 미충족 = 단순 클릭)
     if (!state.dragMoved) {
+      box.style.transform = '';
       manager._endLayoutDrag();
       return;
     }
@@ -555,28 +593,69 @@ export class LayoutEditController {
     if (isTopLevel) {
       const startLeft = state.startLeft;
       const startTop = state.startTop;
-      const result = this._computeNewPosition(box, deltaX, deltaY, state.startLeft, state.startTop);
-      if (result.converted) {
-        this._applyPositionConversion(box, result.converted.position, result.converted.left, result.converted.top, result.converted.width, result.converted.height);
+      const previousContainer = box.parentElement as HTMLElement | null;
+
+      // reparent 모드: transform이 유지된 상태에서 _tryReparent 호출.
+      // box의 left/top은 원래 값이고, transform으로 화면 이동한 상태이므로
+      // getBoundingClientRect()가 transform 반영 위치를 반환 → 새 컨테이너 기준 좌표 계산.
+      const reparentResult = manager.layoutEditType === 'reparent' && state.dragMoved
+        ? this._tryReparent(box, event.clientX, event.clientY, state)
+        : null;
+
+      if (reparentResult) {
+        // box가 제거되고 newBox로 교체됨 → 선택 갱신
+        box.style.transform = '';
+        manager.selectLayout(reparentResult.newBox);
+        manager._dispatchLayoutMove(
+          reparentResult.newBox, startLeft, startTop, reparentResult.newBox.left, reparentResult.newBox.top, false,
+          reparentResult.container,
+          previousContainer ?? undefined,
+        );
       } else {
-        if (result.left !== box.left) box.left = result.left;
-        if (result.top !== box.top) box.top = result.top;
+        // reparent 실패 (부모 변경 없음): transform 초기화 후 일반 move 처리
+        box.style.transform = '';
+        const result = this._computeNewPosition(box, deltaX, deltaY, state.startLeft, state.startTop);
+        if (result.converted) {
+          this._applyPositionConversion(box, result.converted.position, result.converted.left, result.converted.top, result.converted.width, result.converted.height);
+        } else {
+          if (box.left !== result.left) box.left = result.left;
+          if (box.top !== result.top) box.top = result.top;
+        }
+        manager._dispatchLayoutMove(box, startLeft, startTop, box.left, box.top, false);
       }
-      manager._dispatchLayoutMove(box, startLeft, startTop, box.left, box.top, false);
+    } else {
+      box.style.transform = '';
     }
 
     // 다중 선택된 다른 box들의 최종 위치 확정 및 이동 이벤트 발생
     for (const target of dragTargets) {
       if (target === box) continue;
       const targetState = this._getOrCreateDragState(target);
-      const result = this._computeNewPosition(target, deltaX, deltaY, targetState.startLeft, targetState.startTop);
-      if (result.converted) {
-        this._applyPositionConversion(target, result.converted.position, result.converted.left, result.converted.top, result.converted.width, result.converted.height);
+      const targetPreviousContainer = target.parentElement as HTMLElement | null;
+
+      const targetReparentResult = manager.layoutEditType === 'reparent' && targetState.dragMoved
+        ? this._tryReparent(target, event.clientX, event.clientY, targetState)
+        : null;
+
+      if (targetReparentResult) {
+        target.style.transform = '';
+        manager.selectLayout(targetReparentResult.newBox);
+        manager._dispatchLayoutMove(
+          targetReparentResult.newBox, targetState.startLeft, targetState.startTop, targetReparentResult.newBox.left, targetReparentResult.newBox.top, false,
+          targetReparentResult.container,
+          targetPreviousContainer ?? undefined,
+        );
       } else {
-        if (result.left !== target.left) target.left = result.left;
-        if (result.top !== target.top) target.top = result.top;
+        target.style.transform = '';
+        const result = this._computeNewPosition(target, deltaX, deltaY, targetState.startLeft, targetState.startTop);
+        if (result.converted) {
+          this._applyPositionConversion(target, result.converted.position, result.converted.left, result.converted.top, result.converted.width, result.converted.height);
+        } else {
+          if (result.left !== target.left) target.left = result.left;
+          if (result.top !== target.top) target.top = result.top;
+        }
+        manager._dispatchLayoutMove(target, targetState.startLeft, targetState.startTop, target.left, target.top, false);
       }
-      manager._dispatchLayoutMove(target, targetState.startLeft, targetState.startTop, target.left, target.top, false);
     }
 
     manager._endLayoutDrag();
@@ -612,10 +691,12 @@ export class LayoutEditController {
     document.removeEventListener('mousemove', this._onMouseMove);
     document.removeEventListener('mouseup', this._onMouseUp);
     document.removeEventListener('keydown', this._onKeyDown);
+    this._clearReparentHighlight();
     state.isDragging = false;
     state.dragMoved = false;
     this._flushRerenderAffectedParagraphs(box, state);
     box.style.cursor = this._isBoxEditable(box) ? 'grab' : '';
+    box.style.transform = '';
 
     const manager = EditManager.getInstance();
     const dragTargets = manager._getDragTargets();
@@ -1189,6 +1270,243 @@ export class LayoutEditController {
    * @param box - 상태를 조회/생성할 box 요소
    * @returns box의 `BoxDragState`
    */
+  /**
+   * reparent 모드에서 box를 커서 위치의 컨테이너로 이동시킨다.
+   *
+   * `box.data`로 현재 상태(자손 트리 포함)를 추출한 뒤, 새 컨테이너 내부 좌표계로
+   * `left`/`top`/`width`/`height`/`position`을 변환하고 `zIndex`를 새 컨테이너의
+   * 최대값 + 1로 설정한다. 기존 box를 제거하고 `newContainer.appendChildData()`로
+   * 새 box를 생성하여, `data` setter의 전체 초기화 파이프라인이 실행되도록 한다.
+   *
+   * @param box - reparenting할 box
+   * @param clientX - 마우스 업 시점의 화면 x 좌표
+   * @param clientY - 마우스 업 시점의 화면 y 좌표
+   * @param state - box의 드래그 상태
+   * @returns `{ container: 새 부모, newBox: 생성된 새 box }`. 부모 변경이 없으면 `null`.
+   */
+  private _tryReparent(
+    box: LayoutBoxElement,
+    clientX: number,
+    clientY: number,
+    _state: BoxDragState,
+  ): { container: LayoutBoxElement | LayoutDocumentElement; newBox: LayoutBoxElement } | null {
+    const newContainer = this._findReparentContainer(box, clientX, clientY);
+
+    if (!newContainer || newContainer === box.parentElement) return null;
+
+    // box의 현재 화면 위치를 새 컨테이너 내부 mm 좌표로 변환
+    const boxRect = box.getBoundingClientRect();
+    const containerRect = newContainer.getBoundingClientRect();
+    const manager = EditManager.getInstance();
+
+    let containerPaddingLeft = 0;
+    let containerPaddingTop = 0;
+    if (newContainer instanceof LayoutBoxElement) {
+      containerPaddingLeft = newContainer.paddingLeft ?? 0;
+      containerPaddingTop = newContainer.paddingTop ?? 0;
+    }
+
+    const leftMm = Math.max(0, manager.screenPxToMm(boxRect.left - containerRect.left) - containerPaddingLeft);
+    const topMm = Math.max(0, manager.screenPxToMm(boxRect.top - containerRect.top) - containerPaddingTop);
+
+    // 새 컨테이너 내에서 가장 높은 z-index + 1
+    const siblings = newContainer.items;
+    const maxZ = siblings.length === 0 ? 0 : Math.max(...siblings.map(i => i.zIndex ?? 0));
+    const newZIndex = maxZ + 1;
+
+    // box.data 추출 (자손 트리 포함). width/height는 원래 값(static: 컬럼/라인 수, absolute: mm)을 그대로 유지
+    const boxData = box.data;
+
+    // 원래 position 유지: static은 static으로 스냅, absolute는 absolute로 좌표 변환
+    if (boxData.position === 'static' && newContainer.model) {
+      const { columnCoords, lineHeight, editableWidth, columnCount } = newContainer.model;
+      const avgColWidth = editableWidth / columnCount;
+      const editAreaLeft = columnCoords[0]?.x1 ?? 0;
+      const editAreaTop = columnCoords[0]?.y1 ?? 0;
+
+      const nearestColumn = Math.round((leftMm - editAreaLeft) / avgColWidth);
+      const clampedColumn = Math.max(0, Math.min(columnCount - boxData.width, nearestColumn));
+      const nearestLine = Math.round((topMm - editAreaTop) / lineHeight);
+      const clampedLine = Math.max(0, nearestLine);
+
+      // width/height는 원래 static 값(컬럼/라인 수) 유지
+      boxData.left = clampedColumn;
+      boxData.top = clampedLine;
+    } else {
+      // absolute 요소는 absolute 좌표로 변환. width/height는 원래 mm 값 유지
+      boxData.position = 'absolute';
+      boxData.left = Math.round(leftMm * 100) / 100;
+      boxData.top = Math.round(topMm * 100) / 100;
+    }
+    boxData.zIndex = newZIndex;
+
+    // 기존 box 제거
+    box.remove();
+
+    // 새 컨테이너에 데이터 주입하여 새 box 생성
+    const newBox = newContainer.appendChildData(boxData) as LayoutBoxElement;
+
+    return { container: newContainer, newBox };
+  }
+
+  /**
+   * 커서 위치에서 reparent 대상 컨테이너를 찾는다.
+   *
+   * `_tryReparent`와 `_updateReparentHighlight`에서 공유하는 컨테이너 탐지 로직.
+   * box 자신/자손, lock된 box, 비-box 자식이 있는 box는 제외한다.
+   * 적합한 컨테이너가 없으면 EditManager 루트로 폴백한다.
+   */
+  private _findReparentContainer(box: LayoutBoxElement, clientX: number, clientY: number): LayoutBoxElement | LayoutDocumentElement | null {
+    const elements = document.elementsFromPoint(clientX, clientY);
+
+    // 후보 컨테이너: box 자신과 box의 자손이 아닌 첫 번째 box 또는 document
+    let newContainer: LayoutBoxElement | LayoutDocumentElement | null = null;
+    for (const el of elements) {
+      if (el === box) continue;
+      if (box.contains(el)) continue;
+      if (el instanceof LayoutBoxElement) {
+        if (el.lock) continue;
+        const hasNonBoxChild = el.items.some(item => item.type !== 'box');
+        if (hasNonBoxChild) continue;
+        newContainer = el;
+        break;
+      }
+      if (el instanceof LayoutDocumentElement) {
+        newContainer = el;
+        break;
+      }
+    }
+
+    if (!newContainer) {
+      // 커서 위치에 적합한 컨테이너가 없으면 EditManager 루트로 폴백
+      const manager = EditManager.getInstance();
+      const rootId = manager.editableRootId;
+      if (rootId) {
+        const rootBox = document.getElementById(rootId) as LayoutBoxElement | null;
+        if (rootBox && !rootBox.contains(box) && rootBox !== box) {
+          newContainer = rootBox;
+        }
+      }
+      if (!newContainer) {
+        newContainer = box.closest('x-layout-document') as LayoutDocumentElement | null;
+      }
+    }
+
+    return newContainer;
+  }
+
+  /**
+   * reparent 모드 드래그 중 커서 위치의 컨테이너에 하이라이트를 토글한다.
+   *
+   * 이전 하이라이트 대상과 새 대상이 다르면 이전 `reparent-target` 속성을 제거하고
+   * 새 대상에 설정한다. 현재 부모와 동일한 컨테이너이거나 드래그 중인 box 자신이면
+   * 하이라이트를 제거한다.
+   */
+  private _updateReparentHighlight(box: LayoutBoxElement, clientX: number, clientY: number): void {
+    const candidate = this._findReparentContainer(box, clientX, clientY);
+    const target = candidate && candidate !== box.parentElement ? candidate : null;
+
+    if (this._reparentHighlightTarget === target) return;
+
+    if (this._reparentHighlightTarget) {
+      this._reparentHighlightTarget.removeAttribute('reparent-target');
+    }
+    if (target) {
+      target.setAttribute('reparent-target', '');
+    }
+    this._reparentHighlightTarget = target;
+  }
+
+  /**
+   * reparent 하이라이트를 제거한다.
+   * 드래그 종료(mouseup/ESC) 시 호출된다.
+   */
+  private _clearReparentHighlight(): void {
+    if (this._reparentHighlightTarget) {
+      this._reparentHighlightTarget.removeAttribute('reparent-target');
+      this._reparentHighlightTarget = null;
+    }
+  }
+
+  /**
+   * reparent 모드 드래그 중 box 위치 갱신.
+   *
+   * 부모 안에서는 `_computeNewPosition`(클램핑) 결과로 `box.left`/`box.top`을 설정하여
+   * 일반 이동(텍스트 회피 등)과 동일하게 동작한다.
+   * 클램핑이 걸려 부모 밖으로 나가면 `box.left`/`box.top`을 클램핑 위치로 고정하고
+   * `box.style.transform`으로 초과분만 추가 이동하여 부모 렌더링 크기를 유지한다.
+   * 다시 부모 안으로 돌아오면 transform을 해제하고 일반 이동으로 복귀한다.
+   */
+  private _applyReparentDragMove(box: LayoutBoxElement, dx: number, dy: number, state: BoxDragState): void {
+    const manager = EditManager.getInstance();
+
+    // 클램핑된 위치 계산 (부모 안에서의 최대 이동 가능 위치)
+    const clamped = this._computeNewPosition(box, dx, dy, state.startLeft, state.startTop);
+
+    // 클램핑 없는 자유 이동 위치 계산 (부모 밖으로 나가는 경우)
+    const deltaMmX = manager.screenDeltaToMm(dx);
+    const deltaMmY = manager.screenDeltaToMm(dy);
+    let freeLeft: number;
+    let freeTop: number;
+    if (box.position === 'static') {
+      const parentModel = box.parentModel;
+      if (parentModel) {
+        const { columnCoords, lineHeight, editableWidth, columnCount } = parentModel;
+        const avgColWidth = editableWidth / columnCount;
+        const editAreaLeft = columnCoords[0]?.x1 ?? 0;
+        const editAreaTop = columnCoords[0]?.y1 ?? 0;
+        const startAbsLeft = columnCoords[state.startLeft]?.x1 ?? 0;
+        const startAbsTop = editAreaTop + lineHeight * state.startTop;
+        freeLeft = Math.round((startAbsLeft + deltaMmX - editAreaLeft) / avgColWidth);
+        freeTop = Math.round((startAbsTop + deltaMmY - editAreaTop) / lineHeight);
+      } else {
+        freeLeft = state.startLeft;
+        freeTop = state.startTop;
+      }
+    } else {
+      freeLeft = state.startLeft + deltaMmX;
+      freeTop = state.startTop + deltaMmY;
+    }
+
+    const isInside = Math.abs(clamped.left - freeLeft) < 0.01 && Math.abs(clamped.top - freeTop) < 0.01;
+
+    if (isInside) {
+      // 부모 안: box.left/top으로 이동, transform 해제
+      box.style.transform = '';
+      if (clamped.converted) {
+        this._applyPositionConversion(box, clamped.converted.position, clamped.converted.left, clamped.converted.top, clamped.converted.width, clamped.converted.height);
+        state.startLeft = clamped.converted.left;
+        state.startTop = clamped.converted.top;
+        state.startMouseX = state.lastClientX;
+        state.startMouseY = state.lastClientY;
+      } else {
+        if (box.left !== clamped.left) box.left = clamped.left;
+        if (box.top !== clamped.top) box.top = clamped.top;
+      }
+      state.reparentOutside = null;
+    } else {
+      // 부모 밖: box.left/top을 클램핑 위치로 고정, transform으로 초과분 이동
+      if (!state.reparentOutside) {
+        state.reparentOutside = {
+          mouseStartX: state.lastClientX,
+          mouseStartY: state.lastClientY,
+          left: clamped.left,
+          top: clamped.top,
+        };
+        if (clamped.converted) {
+          this._applyPositionConversion(box, clamped.converted.position, clamped.converted.left, clamped.converted.top, clamped.converted.width, clamped.converted.height);
+        } else {
+          if (box.left !== clamped.left) box.left = clamped.left;
+          if (box.top !== clamped.top) box.top = clamped.top;
+        }
+      }
+      // 진입 시점부터의 마우스 delta를 transform으로 적용
+      const outsideDx = state.lastClientX - state.reparentOutside.mouseStartX;
+      const outsideDy = state.lastClientY - state.reparentOutside.mouseStartY;
+      box.style.transform = `translate(${outsideDx}px, ${outsideDy}px)`;
+    }
+  }
+
   private _getOrCreateDragState(box: LayoutBoxElement): BoxDragState {
     let state = this._dragStates.get(box);
     if (!state) {
@@ -1277,5 +1595,6 @@ export class LayoutEditController {
     document.removeEventListener('mousemove', this._onResizeMouseMove);
     document.removeEventListener('mouseup', this._onResizeMouseUp);
     document.removeEventListener('keydown', this._onResizeKeyDown);
+    this._clearReparentHighlight();
   }
 }
