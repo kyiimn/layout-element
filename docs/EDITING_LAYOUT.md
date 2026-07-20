@@ -1,8 +1,13 @@
 # layout-element 레이아웃 편집 모드 상세 명세
 
-> 작성 기준: `src/edit/edit-manager.ts`, `src/components/layout/box.element.ts`, `src/react/hooks/use-edit-manager.ts`
+> 작성 기준: `src/edit/edit-manager.ts`, `src/edit/layout-edit-controller.ts`, `src/edit/layout-selection-controller.ts`, `src/components/layout/box.element.ts`, `src/react/hooks/use-edit-manager.ts`
 >
 > 본 문서는 `layout-element` 라이브러리의 레이아웃 편집 모드 기능, 공개 API, 선택 동작, 드래그-이동, 스냅-그리드, 경계 클램핑, 텍스트 회피(리플로우), ESC 취소, 시각적 피드백, React 연동 방법을 상세히 기술한다.
+>
+> **관련 문서**:
+> - **`EDITING_INSERT.md`**: 삽입 모드(`InsertController`) 상세 명세 — API, 대상 컨테이너 찾기 알고리즘, 요소 생성, 좌표 변환, 미리보기, ESC 취소
+> - **`EDITING_EVENTS.md`**: `EditManager` 이벤트 상세 명세 — 모든 11개 이벤트 타입의 payload, 발생 트리거, 재진입 보호, 클릭 억제 플래그
+> - **`EDITING_TEXT.md`**: 텍스트 편집 모드 상세 명세
 
 ---
 
@@ -564,125 +569,14 @@ manager.setEditableRootId(null);
 
 `setEditableRootId`는 레이아웃 편집 모드와 텍스트 편집 모드 모두에 동시에 적용된다. 값이 변경되면 두 모드에 대해 각각 `_applyEditableLayoutToAllBoxes()`와 `_applyEditableTextToAllParagraphs()`가 호출되어, 활성화된 모드의 요소 상태를 갱신한다.
 
-#### 이벤트: `layoutSelectionChange`
+#### 이벤트: `layoutSelectionChange` / `layoutMove` / `layoutResize` / `insert` / `insertCancel`
 
-```typescript
-manager.addEventListener('layoutSelectionChange', (event) => {
-  console.log(event.selectedLayouts);  // LayoutElement[]
-  console.log(event.previousLayouts);  // LayoutElement[]
-});
-```
+레이이아웃 편집 및 삽입 관련 이벤트의 payload 필드, 발생 시점, 발생 조건, 사용 예시는 **`EDITING_EVENTS.md`**를 참조한다. 본 문서에서는 이벤트 발생과 관련된 동작 흐름만 기술한다.
 
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `type` | `'layoutSelectionChange'` | 이벤트 타입 |
-| `selectedLayouts` | `LayoutElement[]` | 현재 선택된 레이아웃 요소들 |
-| `previousLayouts` | `LayoutElement[]` | 이전에 선택되어 있던 요소들 |
-| `paragraph` | `null` | 레이아웃 이벤트에서는 항상 `null` |
-| `controller` | `null` | 레이아웃 이벤트에서는 항상 `null` |
-
-#### 이벤트: `insert`
-
-새 요소가 성공적으로 삽입되었을 때 발생한다. 자세한 내용은 [12. 삽입 모드 (Insert Mode)](#12-삽입-모드-insert-mode)를 참조한다.
-
-```typescript
-manager.addEventListener('insert', (event) => {
-  console.log(event.type);        // 'insert'
-  console.log(event.position);    // 'absolute' | 'static'
-  console.log(event.element);     // 생성된 <x-layout-box> 요소
-  console.log(event.container);   // 부모 컨테이너
-  console.log(event.left);        // left 좌표
-  console.log(event.top);         // top 좌표
-  console.log(event.width);       // 너비
-  console.log(event.height);      // 높이
-  console.log(event.zIndex);      // z-index
-  console.log(event.canceled);    // false
-});
-```
-
-#### 이벤트: `insertCancel`
-
-삽입 모드에서 드래그가 ESC 키로 취소되었을 때 발생한다. 자세한 내용은 [12. 삽입 모드 (Insert Mode)](#12-삽입-모드-insert-mode)를 참조한다.
-
-```typescript
-manager.addEventListener('insertCancel', (event) => {
-  console.log('Insert canceled');
-});
-```
-
-#### 이벤트: `layoutMove`
-
-드래그 이동이 완료되거나 ESC로 취소될 때 발생한다.
-
-```typescript
-manager.addEventListener('layoutMove', (event) => {
-  console.log(event.layoutElement);  // 이동된 LayoutBoxElement
-  console.log(event.previousLeft);   // 이동 전 left 값
-  console.log(event.previousTop);    // 이동 전 top 값
-  console.log(event.left);           // 이동 후 left 값 (ESC 취소 시 previousLeft와 동일)
-  console.log(event.top);            // 이동 후 top 값 (ESC 취소 시 previousTop와 동일)
-  console.log(event.canceled);       // ESC 취소 여부
-});
-```
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `type` | `'layoutMove'` | 이벤트 타입 |
-| `layoutElement` | `LayoutElement` | 이동된 레이아웃 요소 |
-| `previousLeft` | `number` | 이동 전 `left` 값 (드래그 시작 위치) |
-| `previousTop` | `number` | 이동 전 `top` 값 (드래그 시작 위치) |
-| `left` | `number` | 이동 후 `left` 값. ESC 취소 시 `previousLeft`와 동일 |
-| `top` | `number` | 이동 후 `top` 값. ESC 취소 시 `previousTop`와 동일 |
-| `canceled` | `boolean` | ESC 키로 드래그가 취소되었으면 `true`, 정상 완료되었으면 `false` |
-| `paragraph` | `null` | 레이아웃 이벤트에서는 항상 `null` |
-| `controller` | `null` | 레이아웃 이벤트에서는 항상 `null` |
-
-**발생 시점**:
-- **mouseup (드래그 완료)**: `canceled = false`. `left`/`top`은 스냅/클램핑이 적용된 최종 위치.
-- **ESC (드래그 취소)**: `canceled = true`. `left`/`top`은 `previousLeft`/`previousTop`와 동일 (시작 위치로 복원됨).
-
-**주의**: 단순 클릭(드래그 이동 없음)에서는 `layoutMove` 이벤트가 발생하지 않는다. 이동 임계값(3px)을 초과한 경우에만 발생한다.
-
-#### 이벤트: `layoutResize`
-
-리사이즈가 완료되거나 ESC로 취소될 때 발생한다.
-
-```typescript
-manager.addEventListener('layoutResize', (event) => {
-  console.log(event.layoutElement);  // 리사이즈된 LayoutBoxElement
-  console.log(event.previousLeft);   // 리사이즈 전 left 값
-  console.log(event.previousTop);    // 리사이즈 전 top 값
-  console.log(event.previousWidth);  // 리사이즈 전 width 값
-  console.log(event.previousHeight); // 리사이즈 전 height 값
-  console.log(event.left);           // 리사이즈 후 left 값
-  console.log(event.top);            // 리사이즈 후 top 값
-  console.log(event.width);           // 리사이즈 후 width 값
-  console.log(event.height);          // 리사이즈 후 height 값
-  console.log(event.canceled);       // ESC 취소 여부
-});
-```
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `type` | `'layoutResize'` | 이벤트 타입 |
-| `layoutElement` | `LayoutElement` | 리사이즈된 레이아웃 요소 |
-| `previousLeft` | `number` | 리사이즈 전 `left` 값 |
-| `previousTop` | `number` | 리사이즈 전 `top` 값 |
-| `previousWidth` | `number` | 리사이즈 전 `width` 값 |
-| `previousHeight` | `number` | 리사이즈 전 `height` 값 |
-| `left` | `number` | 리사이즈 후 `left` 값. ESC 취소 시 `previousLeft`와 동일 |
-| `top` | `number` | 리사이즈 후 `top` 값. ESC 취소 시 `previousTop`와 동일 |
-| `width` | `number` | 리사이즈 후 `width` 값. ESC 취소 시 `previousWidth`와 동일 |
-| `height` | `number` | 리사이즈 후 `height` 값. ESC 취소 시 `previousHeight`와 동일 |
-| `canceled` | `boolean` | ESC 키로 리사이즈가 취소되었으면 `true`, 정상 완료되었으면 `false` |
-| `paragraph` | `null` | 레이아웃 이벤트에서는 항상 `null` |
-| `controller` | `null` | 레이아웃 이벤트에서는 항상 `null` |
-
-**발생 시점**:
-- **mouseup (리사이즈 완료)**: `canceled = false`. `left`/`top`/`width`/`height`은 스냅/클램핑이 적용된 최종 값.
-- **ESC (리사이즈 취소)**: `canceled = true`. `left`/`top`/`width`/`height`은 `previousLeft`/`previousTop`/`previousWidth`/`previousHeight`와 동일 (시작 상태로 복원됨).
-
-**주의**: 단순 클릭(리사이즈 이동 없음)에서는 `layoutResize` 이벤트가 발생하지 않는다. 이동 임계값(3px)을 초과한 경우에만 발생한다.
+- `layoutSelectionChange`: box 선택이 변경될 때 발생. [3.1 요소 선택 흐름](#31-요소-선택-흐름)과 [6.4 `layoutMove` 이벤트 흐름](#64-layoutmove-이벤트-흐름) 참조.
+- `layoutMove`: 드래그 이동 완료/취소 시 발생. [6.4 `layoutMove` 이벤트 흐름](#64-layoutmove-이벤트-흐름) 참조.
+- `layoutResize`: 리사이즈 완료/취소 시 발생. [11.5 `layoutResize` 이벤트](#115-layoutresize-이벤트) 참조.
+- `insert` / `insertCancel`: 삽입 완료/취소 시 발생. **`EDITING_INSERT.md`** 및 **`EDITING_EVENTS.md`** 참조.
 
 #### 화면 scale 보정 (`EditManager.setScale`/`screenPxToMm`)
 
@@ -2093,336 +1987,22 @@ top handle:
 
 ## 12. 삽입 모드 (Insert Mode)
 
-### 12.1 개요
-
-삽입 모드는 문서 표면에서 마우스로 드래그하여 새 요소를 생성하는 기능이다. 사용자가 삽입할 요소의 종류와 배치 모드를 선택하면, `<x-layout-document>` 위에서 드래그한 영역만큼 새 요소가 만들어진다.
-
-- **삽입 가능한 요소**: `box`, `text`, `paragraph`, `image`
-- **배치 모드**: `absolute`(mm 좌표) 또는 `static`(컬럼/라인 그리드)
-- **취소**: 드래그 중 `ESC` 키를 누르면 미리보기 사각형이 제거되고 `insertCancel` 이벤트가 발생한다.
-
-삽입 모드가 활성화되면 문서 요소의 커서가 `crosshair`로 바뀌고, 기존 레이아웃 선택은 자동으로 해제된다. 삽입 모드 중에는 레이아웃 선택과 드래그 이동이 동작하지 않아 삽입 동작과 충돌하지 않는다.
-
-> **사전 조건**: 삽입 모드는 `<x-layout-document>` 요소가 DOM에 존재해야 한다. 편집 가능 box가 없는 빈 문서에서도 활성화할 수 있으며, 이 경우 `InsertController`가 document를 삽입 컨테이너로 사용하여 첫 box를 그려 넣을 수 있다. 비활성화 시에는 `editable-layout` DOM 속성이 있는 box의 커서를 `grab`으로 복원한다.
-
-### 12.2 EditManager API
-
-#### `insertMode` getter / setter
-
-```typescript
-const manager = EditManager.getInstance();
-
-// 삽입 모드 활성화
-manager.insertMode = { type: 'box', position: 'absolute' };
-
-// 삽입 모드 비활성화
-manager.insertMode = null;
-
-// 현재 삽입 모드 조회
-const mode = manager.insertMode; // InsertMode | null
-```
-
-| 동작 | 설명 |
-|------|------|
-| non-null 설정 | 삽입 모드 활성화, 기존 레이아웃 선택 해제, 편집 가능 box의 커서를 `crosshair`로 변경. 빈 문서(편집 가능 box가 없음)에서도 활성화되어 document에 직접 삽입 가능 |
-| `null` 설정 | 삽입 모드 비활성화, 커서 복원 |
-| 반복 설정 | 동일한 모드로 다시 설정하면 무시된다 |
-
-`x-layout-document` 요소가 DOM에 없으면 `Error`가 throw된다. 편집 가능 `<x-layout-box>`가 없어도 삽입 모드는 활성화되며, 이 경우 document가 삽입 컨테이너가 된다.
-
-#### `activateInsert(mode)`
-
-```typescript
-manager.activateInsert({ type: 'image', position: 'static' });
-```
-
-`insertMode = mode`와 동일한 편의 메서드이다.
-
-#### `deactivateInsert()`
-
-```typescript
-manager.deactivateInsert();
-```
-
-`insertMode = null`과 동일한 편의 메서드이다.
-
-### 12.3 InsertMode 타입
-
-```typescript
-import type { InsertMode } from 'layout-element';
-
-interface InsertMode {
-  type: 'box' | 'text' | 'paragraph' | 'image';
-  position: 'absolute' | 'static';
-}
-```
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `type` | `'box' \| 'text' \| 'paragraph' \| 'image'` | 삽입할 요소의 종류 |
-| `position` | `'absolute' \| 'static'` | 새 요소의 배치 모드 |
-
-`text`와 `paragraph`는 모두 `<x-layout-paragraph>`를 내부에 생성하지만, `text`는 `type: 'text'` 데이터로, `paragraph`는 `type: 'paragraph'` 데이터로 변환된다. `text` 타입은 `box.element.ts`의 `data` 세터에서 `{ ...child, type: 'paragraph' }`로 변환되며, 이때 `column`/`gap`을 명시적으로 설정하지 않아 부모 모델에서 상속받는다. 실제 렌더링에서는 둘 다 단락 요소로 표시된다.
-
-### 12.4 이벤트
-
-#### `insert` 이벤트
-
-삽입이 정상적으로 완료되면 `EditManager`에서 `insert` 이벤트가 발생한다.
-
-```typescript
-manager.addEventListener('insert', (event) => {
-  console.log(event.type);        // 'insert'
-  console.log(event.position);    // 'absolute' | 'static'
-  console.log(event.element);       // 생성된 최상위 <x-layout-box> 요소
-  console.log(event.container);     // 부모 컨테이너 요소
-  console.log(event.left);        // left 좌표 (static: 컬럼 인덱스, absolute: mm)
-  console.log(event.top);         // top 좌표 (static: 라인 인덱스, absolute: mm)
-  console.log(event.width);       // 너비 (static: 컬럼 수, absolute: mm)
-  console.log(event.height);      // 높이 (static: 라인 수, absolute: mm)
-  console.log(event.zIndex);      // 할당된 z-index
-  console.log(event.canceled);    // false
-});
-```
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `type` | `'insert'` | 이벤트 타입 |
-| `position` | `'absolute' \| 'static'` | 요소의 배치 모드 |
-| `element` | `HTMLElement` | 생성된 최상위 요소. 항상 `<x-layout-box>`이다 |
-| `container` | `HTMLElement` | 요소가 삽입된 부모 컨테이너 |
-| `left` | `number` | static 모드면 컬럼 인덱스, absolute 모드면 mm |
-| `top` | `number` | static 모드면 라인 인덱스, absolute 모드면 mm |
-| `width` | `number` | static 모드면 컬럼 개수, absolute 모드면 mm |
-| `height` | `number` | static 모드면 라인 수, absolute 모드면 mm |
-| `zIndex` | `number` | 컨테이너 내 기존 자식 z-index의 최대값 + 1, 자식이 없으면 1 |
-| `canceled` | `boolean` | 정상 삽입 시 `false` |
-
-#### `insertCancel` 이벤트
-
-`ESC` 키로 드래그를 취소하면 `insertCancel` 이벤트가 발생한다.
-
-```typescript
-manager.addEventListener('insertCancel', (event) => {
-  console.log('Insert canceled');
-});
-```
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `type` | `'insertCancel'` | 이벤트 타입 |
-| `paragraph` | `null` | 레이아웃/삽입 이벤트에서는 항상 `null` |
-| `controller` | `null` | 레이아웃/삽입 이벤트에서는 항상 `null` |
-
-### 12.5 드래그-삽입 흐름
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    삽입 모드 생명주기                         │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ① 삽입 모드 활성화                                          │
-│     │                                                        │
-│     ├── EditManager.insertMode = { type, position }          │
-│     ├── 기존 레이아웃 선택 해제                               │
-│     ├── InsertController 생성/재사용                         │
-│     ├── document에 mousedown 리스너 등록(버블링)             │
-│     │   (문서 빈 공간에서의 mousedown 처리)                  │
-│     └── 편집 가능한 box의 커서를 crosshair로 변경             │
-│                                                             │
-│  ② mousedown (box 위에서)                                    │
-│     │                                                        │
-│     ├── LayoutEditController._onMouseDown (document capture) │
-│     ├── insertMode 가드 → EditManager.handleInsertMouseDown  │
-│     │   └── InsertController.startDrag(event)                │
-│     │       ├── button !== 0? → 무시                        │
-│     │       ├── _isDragging? → 무시 (중복 실행 방지)         │
-│     │       ├── event.preventDefault() + stopPropagation()   │
-│     │       ├── _createPreview()                             │
-│     │       ├── _isDragging = true                           │
-│     │       └── document에 mousemove, mouseup, keydown 등록  │
-│     └── return (이후 레이아웃 선택/드래그 로직 건너뜀)      │
-│                                                             │
-│  ②' mousedown (문서 빈 공간에서)                              │
-│     │                                                        │
-│     ├── InsertController._boundStartDrag 실행               │
-│     │   (box 핸들러가 먼저 startDrag()를 호출하지 않았으므로)  │
-│     └── InsertController.startDrag(event)                    │
-│         ├── _isDragging 가드로 중복 방지                     │
-│         └── (이후 동일)                                     │
-│                                                             │
-│  ③ mousemove (드래그 중)                                      │
-│     │                                                        │
-│     ├── _currentClientX/Y 업데이트                            │
-│     └── _updatePreview()                                     │
-│         → 점선 테두리 반투명 파란색 사각형 위치/크기 갱신     │
-│                                                             │
-│  ④ mouseup (드래그 완료)                                      │
-│     │                                                        │
-│     ├── 이동 거리 < 3px? → _cleanup(), return (클릭으로 간주) │
-│     ├── 드래그 영역 중심점 계산: centerX, centerY             │
-│     ├── _findTargetContainer(centerX, centerY)               │
-│     │   → nearest x-layout-box 또는 x-layout-document        │
-│     │   → 상위로 거슬러 올라가 유효한 컨테이너 결정           │
-│     ├── screen 픽셀 → container 내부 mm 변환                 │
-│     ├── mm → static 좌표 변환 (static 모드인 경우)            │
-│     ├── _createElement()                                     │
-│     │   → <x-layout-box> 생성, children 설정, data 할당       │
-│     ├── container.appendChild(boxEl)                         │
-│     ├── _cleanup()                                           │
-│     └── EditManager._dispatchInsert(detail)                  │
-│         → insert 이벤트 발생 (canceled = false)               │
-│                                                             │
-│  ④' ESC 키 (드래그 취소)                                      │
-│     │                                                        │
-│     ├── _cancel()                                            │
-│     ├── _cleanup()                                           │
-│     └── EditManager._dispatchInsertCancel()                   │
-│         → insertCancel 이벤트 발생                            │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### 12.6 대상 컨테이너 찾기
-
-드래그 영역의 중심점에서 `document.elementsFromPoint(centerX, centerY)`로 마우스 아래의 모든 요소를 조회한다. 그중 처음 만나는 `<x-layout-box>` 또는 `<x-layout-document>`를 시작점으로 삼는다.
-
-찾은 요소에서 DOM 트리를 따라 위로 올라가며 유효한 컨테이너를 결정한다:
-
-| 현재 요소 | 조건 | 결과 |
-|-----------|------|------|
-| `<x-layout-document>` | 항상 | 유효한 컨테이너로 반환 |
-| `<x-layout-box>` | 자식이 없거나 모든 자식이 `type === 'box'` | 유효한 컨테이너로 반환 |
-| `<x-layout-box>` | 자식 중 `paragraph`나 `image`가 있음 | 상위 요소로 계속 이동 |
-
-이 로직은 모든 삽입 타입(`box`, `text`, `paragraph`, `image`)에 동일하게 적용된다. 단락이나 이미지가 이미 들어 있는 박스 안에 새 박스를 추가하면 기존 콘텐츠와의 모순이 생길 수 있으므로, 그 경우 상위 컨테이너로 거슬러 올라간다.
-
-### 12.7 요소 생성
-
-삽입이 완료되면 항상 `<x-layout-box>` 요소를 최상위로 생성한다. 삽입 타입에 따라 박스 내부에 다른 자식 요소를 추가한다.
-
-```typescript
-const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
-const boxData: BoxData = {
-  type: 'box',
-  left,
-  top,
-  width,
-  height,
-  position: mode.position,
-  zIndex,
-};
-```
-
-| 삽입 타입 | `boxData.children` | 생성되는 내부 요소 |
-|-----------|-------------------|-------------------|
-| `box` | `undefined` | 자식 없음, 빈 박스 |
-| `text` | `{ type: 'text', content: '' }` | `<x-layout-paragraph>` (`type`을 `'paragraph'`으로 변환, `column`/`gap` 생략 → 부모 모델에서 상속) |
-| `paragraph` | `{ type: 'paragraph', content: '' }` | `<x-layout-paragraph>` (단락 데이터, `column`/`gap` 생략 → 부모 모델에서 상속) |
-| `image` | `{ type: 'image', x: 0, y: 0, width: 100, height: 100, dpi: 72, url: '' }` | `<x-layout-image>` (100×100px, 72dpi, 빈 url) |
-
-> **`column`/`gap` 상속**: `text`와 `paragraph` 삽입 시 `ParagraphData`의 `column`과 `gap`을 명시적으로 설정하지 않는다. `LayoutParagraphElement._layoutStructure()`에서 `_column`과 `_gap`이 `undefined`이면 부모 `GridCalculator`의 `columnWidth`/`gaps`를 상속받아, static 모드에서는 부모 박스가 차지하는 컬럼 수와 동일한 컬럼 구성을 자동으로 갖게 된다.
-
-중요한 구현 순서:
-
-1. `boxEl.data = boxData`를 먼저 설정
-2. 그 다음 `container.appendChild(boxEl)` 호출
-
-`data`를 먼저 설정하면 `connectedCallback`이 실행되기 전에 모든 속성이 준비되어 있어, 요소가 DOM에 연결될 때 초기 레이아웃이 올바르게 계산된다.
-
-### 12.8 좌표 변환
-
-#### absolute 모드
-
-화면 좌표(픽셀)를 컨테이너 내부의 mm 좌표로 변환한다. 컨테이너의 `paddingLeft`/`paddingTop`을 고려하며, 음수 좌표는 0으로 클램핑한다.
-
-```
-leftMm = max(0, (clientX - containerRect.left) / ppm - containerPaddingLeft)
-topMm  = max(0, (clientY - containerRect.top)  / ppm - containerPaddingTop)
-widthMm  = (endClientX - startClientX) / ppm
-heightMm = (endClientY - startClientY) / ppm
-```
-
-최종 값은 소수점 둘째 자리까지 반올림한다.
-
-#### static 모드
-
-mm 좌표를 컬럼/라인 그리드 좌표로 변환한다.
-
-```
-avgColWidth = editableWidth / columnCount
-editAreaLeft = columnCoords[0].x1
-editAreaTop  = columnCoords[0].y1
-
-nearestColumn = round((leftMm - editAreaLeft) / avgColWidth)
-left = clamp(nearestColumn, 0, columnCount - max(1, round(widthMm / avgColWidth)))
-
-top = max(0, round((topMm - editAreaTop) / lineHeight))
-
-width  = max(1, round(widthMm / avgColWidth))
-height = max(1, round(heightMm / lineHeight))
-```
-
-- `left`: 가장 가까운 컬럼 인덱스로 스냅, `[0, columnCount - width]` 범위로 클램핑
-- `top`: 가장 가까운 라인 인덱스로 스냅, 최소 0
-- `width`: 최소 1컬럼
-- `height`: 최소 1라인
-
-### 12.9 드래그 임계값
-
-이동 거리가 3px 미만이면 클릭으로 간주하여 요소를 생성하지 않는다. 이 값은 레이아웃 드래그 이동과 동일하다.
-
-```typescript
-private static readonly DRAG_THRESHOLD = 3;
-```
-
-### 12.10 레이아웃 편집 모드와의 상호작용
-
-삽입 모드가 활성화되면 다음 핸들러가 `EditManager.getInstance().insertMode` 가드로 early return하여 레이아웃 선택/드래그/리사이즈가 방해되지 않는다.
-
-- `LayoutEditController._onClick` — 삽입 모드 중 클릭 이벤트 무시
-- `LayoutEditController._onMouseDown` — 삽입 모드 중 `EditManager.handleInsertMouseDown()` 위임 후 return
-- `LayoutEditController._startResize`가 호출되지 않음 — 삽입 모드 중 리사이즈 시작 차단
-- `<x-layout-box>`의 `_onLayoutMouseEnter`/`_onLayoutMouseLeave` — 삽입 모드 중 호버 표시 차단
-
-**`_onMouseDown`에서의 삽입 위임**: 삽입 모드 중 box에서 mousedown하면 `LayoutEditController._onMouseDown`이 `EditManager.handleInsertMouseDown(event)`를 호출한다. 이 메서드는 `InsertController.startDrag(event)`를 위임 호출하며, `startDrag()`는 `event.preventDefault()` + `event.stopPropagation()`을 호출하여 이후 레이아웃 선택/드래그 로직이 실행되지 않도록 한다.
-
-**문서 빈 공간 처리**: `InsertController`는 `_document`에 버블링 단계로 `mousedown` 리스너를 등록하여, box가 없는 문서 빈 공간에서도 삽입 드래그가 시작되도록 한다. box 위에서는 `LayoutEditController._onMouseDown`이 먼저 `startDrag()`를 호출하며, `_isDragging` 가드로 중복 실행을 방지한다.
-
-**커서 변경**: 삽입 모드 활성화 시 `EditManager.isBoxEditable()`이 true이거나 `editableLayout` DOM 속성이 있는 모든 `<x-layout-box>`의 커서가 `crosshair`로 변경된다. 비활성화 시 `grab`으로 복원된다.
-
-### 12.11 미리보기 사각형
-
-드래그 중 문서 위에 반투명한 점선 파란색 사각형이 표시된다.
-
-| 속성 | 값 |
-|------|-----|
-| `position` | `fixed` |
-| `border` | `2px dashed #1a73e8` |
-| `backgroundColor` | `rgba(26, 115, 232, 0.1)` |
-| `pointerEvents` | `none` |
-| `zIndex` | `999999` |
-
-너비나 높이가 1px 이하면 사각형은 보이지 않는다. 드래그가 끝나거나 취소되면 DOM에서 제거된다.
-
-**static 모드 스냅**: `position: 'static'`으로 삽입할 때, 미리보기 사각형이 컬럼/라인 그리드에 스냅되어 실제 생성될 영역과 정확히 일치하게 표시된다. 픽셀 단위로 자유롭게 그리는 대신, 드래그한 영역을 컬럼과 라인 단위로 반올림하여 컨테이너의 편집 영역 내에 클램핑된 위치와 크기로 미리보기가 표시된다.
-
-### 12.12 삽입 모드 관련 핵심 파일
-
-| 파일 | 역할 |
-|------|------|
-| `src/edit/insert-controller.ts` | `InsertController`: 삽입 모드의 드래그, 좌표 변환, 요소 생성, 미리보기 관리 |
-| `src/edit/edit-manager.ts` | `insertMode` getter/setter, `activateInsert`, `deactivateInsert`, `insert`/`insertCancel` 이벤트 발송 |
-| `src/types/edit/insert.type.ts` | `InsertType`, `InsertPosition`, `InsertMode`, `InsertEventDetail` 타입 정의 |
-
-### 12.13 주의사항
-
-- 삽입 모드는 `<x-layout-document>`가 DOM에 있을 때만 활성화할 수 있다. 없으면 `Error`가 발생한다.
-- 삽입 모드는 편집 가능 box가 없는 빈 문서에서도 활성화할 수 있다. 이 경우 `InsertController._findTargetContainer()`가 document를 삽입 컨테이너로 반환하여 첫 box를 document에 직접 그려 넣을 수 있다. 비활성화 시에는 `x-layout-box[editable-layout]` DOM 속성이 있는 box들의 커서를 `grab`으로 복원한다.
-- 삽입된 요소는 항상 `<x-layout-box>`로 감싸진다. `text`, `paragraph`, `image` 타입도 마찬가지이다.
-- `static` 모드로 삽입할 때 `model`이 없으면 `{ left: 0, top: 0, width: 1, height: 1 }` 기본값을 사용한다.
-- `image` 삽입 시 placeholder 이미지는 `100×100px`, `72dpi`, 빈 `url`로 생성된다. 실제 이미지를 표시하려면 삽입 후 `url`을 변경해야 한다.
-- 삽입 모드 중에는 레이아웃 선택과 드래그 이동, 리사이즈가 모두 비활성화된다.
-- `boxData.children` 설정은 `appendChild`보다 먼저 이루어져야 `connectedCallback` 시점에 올바른 초기 상태를 갖는다.
-- **mousedown 캡처/버블링**: `LayoutEditController`의 `mousedown` 리스너는 캡처 단계로 `document.documentElement`에 등록된다. box 위에서 mousedown하면 먼저 `LayoutEditController._onMouseDown`이 `EditManager.handleInsertMouseDown()`을 호출하여 `InsertController.startDrag()`를 위임 실행하고, `startDrag()` 내부의 `_isDragging` 가드로 중복 실행을 방지한다. `InsertController`의 `mousedown` 리스너는 문서(document)에 버블링 단계로 등록되어, box가 없는 문서 빈 공간에서도 삽입 드래그가 시작되도록 한다.
-- **커스텀 속성명**: `selected`, `hovered`, `editable-layout`, `border`는 모두 커스텀 엘리먼트의 전용 속성이므로 `data-` 접두사 없이 사용한다. HTML 표준 `data-*` 속성과 달리, 커스텀 엘리먼트의 내부 상태 표시용 속성은 접두사가 필요 없다.
+삽입 모드(`InsertController`)의 상세 명세는 **`EDITING_INSERT.md`**를 참조한다. 본 절에서는 레이아웃 편집 모드와의 관계만 요약한다.
+
+### 12.1 요약
+
+- 삽입 모드는 `EditManager.insertMode = { type, position }`로 활성화한다.
+- 활성화 시 `layoutEditMode = false`, `textEditMode = false`로 자동 전환된다 (모드 스위칭).
+- 삽입 모드 중에는 레이아웃 선택/드래그/리사이즈가 비활성화된다.
+- 삽입 완료 시 `insert` 이벤트, ESC 취소 시 `insertCancel` 이벤트가 발생한다 (이벤트 명세는 `EDITING_EVENTS.md` 참조).
+- 대상 컨테이너는 드래그 영역의 **네 꼭짓점**을 기준으로 결정된다 — 드래그 사각형을 완전히 포함하는 가장 안쪽 유효 컨테이너를 선택하며, 없으면 `EditManager.editableRootId`의 루트 box 또는 document 루트로 폴백한다.
+
+자세한 내용:
+
+- API (`insertMode` getter/setter, `activateInsert`, `deactivateInsert`, `InsertMode` 타입)
+- 대상 컨테이너 찾기 알고리즘 (4-point hit test + 포함 검사 + 루트 폴백)
+- 요소 생성 (`_createElement`, `column`/`gap` 상속, `zIndex` 계산)
+- 좌표 변환 (`_screenToContainerMm`, `_mmToStatic`, absolute/static 모드)
+- 미리보기 사각형 (`_createPreview`, `_updatePreview`, static 모드 스냅)
+- ESC 취소, 드래그 임계값, mousedown 위임, 빈 공간 처리
+- 핵심 파일, 주의사항

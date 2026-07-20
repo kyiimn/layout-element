@@ -26,8 +26,10 @@ Before working on any feature, you **must** read the corresponding documentation
 |---|---|---|
 | Paragraph text rendering | `docs/TEXT_ENGINE.md` | Any request, modification, or work involving TextLayoutEngine, text wrapping, column rendering, character layout, or overlap avoidance |
 | Font & color management | `docs/RESOURCE.md` | Any request, modification, or work involving FontLoader, ColorRegistry, CMYK/RGB conversion, CSS variable injection, or font registration |
-| Text editing mode | `docs/EDITING_TEXT.md` | Any request, modification, or work involving TextEditController, TextEditCoordinateMapper, EditManager, cursor, selection, IME composition, or keyboard shortcuts |
-| Layout editing mode | `docs/EDITING_LAYOUT.md` | Any request, modification, or work involving layout editing, box positioning, interactive layout changes, or drag/resize |
+| Text editing mode | `docs/EDITING_TEXT.md` | Any request, modification, or work involving TextEditController, TextEditCoordinateMapper, EditManager text-mode API, cursor, selection, IME composition, or keyboard shortcuts |
+| Layout editing mode | `docs/EDITING_LAYOUT.md` | Any request, modification, or work involving layout editing, box positioning, interactive layout changes, drag/resize, or selection (LayoutEditController, LayoutSelectionController) |
+| Insert mode | `docs/EDITING_INSERT.md` | Any request, modification, or work involving InsertController, insert mode activation, drag-to-insert, target container selection, or element creation during insert |
+| EditManager events | `docs/EDITING_EVENTS.md` | Any request, modification, or work involving EditManager event types, payload fields, event dispatch, `addEventListener`/`removeEventListener`, `_dispatching` reentrancy guard, or `_suppressNextClick` click suppression |
 
 **Rule**: Load the doc → understand current state → implement changes → update the doc to reflect what changed.
 
