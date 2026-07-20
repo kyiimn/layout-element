@@ -1403,8 +1403,7 @@ export class LayoutEditController {
    * 하이라이트를 제거한다.
    */
   private _updateReparentHighlight(box: LayoutBoxElement, clientX: number, clientY: number): void {
-    const candidate = this._findReparentContainer(box, clientX, clientY);
-    const target = candidate && candidate !== box.parentElement ? candidate : null;
+    const target = this._findReparentContainer(box, clientX, clientY);
 
     if (this._reparentHighlightTarget === target) return;
 
