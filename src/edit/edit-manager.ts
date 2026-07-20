@@ -5,8 +5,9 @@ import { GridCalculator } from "@/core";
 import type { TextEditController, CurrentStyle } from "./text-edit-controller";
 import { InsertController } from "./insert-controller";
 import { LayoutEditController } from "./layout-edit-controller";
+import { LayoutSelectionController } from "./layout-selection-controller";
 import type { SelectionRange } from "@/types/edit";
-import type { InsertMode, InsertEventDetail } from "@/types/edit";
+import type { InsertMode, InsertEventDetail, InsertPosition } from "@/types/edit";
 import type { BoxRole } from "@/types/layout";
 
 /** 레이아웃 편집 대상 요소 (box만 해당) */
@@ -48,24 +49,32 @@ export interface EditManagerEvent {
   previousLayouts?: LayoutElement[];
   /** 레이아웃 이동 이벤트에서 이동된 요소 (layoutMove 이벤트에서만) */
   layoutElement?: LayoutElement;
+  /** 삽입 완료 시 삽입된 요소 (insert 이벤트에서만) */
+  element?: HTMLElement;
+  /** 삽입 완료 시 부모 컨테이너 (insert 이벤트에서만) */
+  container?: HTMLElement;
   /** 이동 전 left 값 (layoutMove 이벤트에서만) */
   previousLeft?: number;
   /** 이동 전 top 값 (layoutMove 이벤트에서만) */
   previousTop?: number;
-  /** 이동 후 left 값 (layoutMove 이벤트에서만) */
+  /** 이동 후 left 값 (layoutMove, insert 이벤트에서만) */
   left?: number;
-  /** 이동 후 top 값 (layoutMove 이벤트에서만) */
+  /** 이동 후 top 값 (layoutMove, insert 이벤트에서만) */
   top?: number;
-  /** 이동이 취소되었는지 여부 (ESC 취소 시 true) (layoutMove 이벤트에서만) */
+  /** 이동이 취소되었는지 여부 (ESC 취소 시 true) (layoutMove, insert 이벤트에서만) */
   canceled?: boolean;
   /** 리사이즈 전 width 값 (layoutResize 이벤트에서만) */
   previousWidth?: number;
   /** 리사이즈 전 height 값 (layoutResize 이벤트에서만) */
   previousHeight?: number;
-  /** 리사이즈 후 width 값 (layoutResize 이벤트에서만) */
+  /** 리사이즈 후 width 값 (layoutResize, insert 이벤트에서만) */
   width?: number;
-  /** 리사이즈 후 height 값 (layoutResize 이벤트에서만) */
+  /** 리사이즈 후 height 값 (layoutResize, insert 이벤트에서만) */
   height?: number;
+  /** 삽입 요소의 배치 모드 (insert 이벤트에서만) */
+  position?: InsertPosition;
+  /** 삽입 요소의 zIndex (insert 이벤트에서만) */
+  zIndex?: number;
 }
 
 /**
@@ -112,15 +121,21 @@ export class EditManager {
   private _listeners: Map<EditManagerEventType, Set<EditManagerEventListener>> = new Map();
   private _dispatching = false;
   private _selectedLayouts: LayoutElement[] = [];
+  private _isPrint: boolean = window.matchMedia("print").matches;
   private _isLayoutDragging = false;
   private _isLayoutResizing = false;
   private _insertController: InsertController | null = null;
   private _insertMode: InsertMode | null = null;
-
+  private _suppressNextClick = false;
   private _layoutEditMode: boolean = false;
+  private _selectableMode: boolean = true;
   private _editableRoles: Set<BoxRole> | null = null;
   private _editableBoxIds: Set<string> | null = null;
+  private _selectableRoles: Set<BoxRole> | null = null;
+  private _selectableBoxIds: Set<string> | null = null;
+  private _selectableRootId: string | null = null;
   private _layoutEditController: LayoutEditController | null = null;
+  private _selectionController: LayoutSelectionController | null = null;
 
   /**
    * CSS `transform: scale(s)`이 적용된 환경을 위한 화면 scale 보정 계수.
@@ -398,6 +413,7 @@ export class EditManager {
     target: LayoutParagraphElement | string,
     options?: { cursorOffset?: number; selection?: SelectionRange },
   ): boolean {
+    if (this._isPrint) return false;
     let paragraph: LayoutParagraphElement | null;
 
     if (typeof target === 'string') {
@@ -523,49 +539,22 @@ export class EditManager {
    */
   get textEditMode(): boolean { return this._textEditMode; }
   set textEditMode(value: boolean) {
+    if (this._isPrint) return;
     if (this._textEditMode === value) return;
+    if (value) {
+      this.layoutEditMode = false;
+      this.insertMode = null;
+    }
     this._textEditMode = value;
     if (!value) {
       this._blurFocusedParagraph();
       this._applyEditableTextToAllParagraphs();
     } else {
       this._applyEditableTextToAllParagraphs();
-      this._focusParagraphFromLayoutSelection();
     }
   }
 
-  /**
-   * 현재 레이아웃 선택을 기반으로 텍스트 편집 포커스를 설정한다.
-   * 레이아웃 편집 → 텍스트 편집 전환 시 호출된다.
-   */
-  private _focusParagraphFromLayoutSelection(): void {
-    const candidates = this._selectedLayouts.filter(
-      (el): el is LayoutBoxElement => el instanceof LayoutBoxElement && el.contentType === 'paragraph'
-    );
 
-    if (candidates.length === 0) {
-      if (this._selectedLayouts.length > 0) {
-        this.clearLayoutSelection();
-      }
-      return;
-    }
-
-    const topLevel = this._filterTopLevelLayouts(candidates);
-    const target = topLevel[0] ?? null;
-
-    const previousLayouts = [...this._selectedLayouts];
-    for (const el of this._selectedLayouts) {
-      if (el !== target) el.removeAttribute('selected');
-    }
-    this._selectedLayouts = target ? [target] : [];
-    this._dispatchLayoutSelection(previousLayouts);
-
-    if (!target) return;
-    const paragraph = target.items.find(item => item.type === 'paragraph') as LayoutParagraphElement | undefined;
-    if (paragraph) {
-      this.focusParagraph(paragraph);
-    }
-  }
 
   /**
    * 편집 허용 box role 집합 (텍스트 편집용). `null`이면 role 기반 제한 없음.
@@ -719,11 +708,8 @@ export class EditManager {
   }
 
   /**
-   * 단락을 감싸는 부모 box를 레이아웃 선택(`selected`) 상태로 만든다.
-   *
-   * 텍스트 편집 포커스가 들어온 paragraph의 부모 box를 단일 레이아웃 선택으로 설정한다.
-   * 기존에 선택된 다른 box가 있으면 모두 해제하고, 부모 box만 `selected` 상태가 된다.
-   * 레이아웃 편집 모드로 전환하더라도 이 선택은 유지된다.
+   * 텍스트 편집 포커스가 들어온 paragraph의 부모 box를 레이아웃 선택에 추가한다.
+   * 기존에 선택된 다른 box의 선택은 유지되며, 부모 box가 아직 선택되지 않았으면 추가한다.
    *
    * @param paragraph - 포커스를 얻은 단락. null이면 아무 일도 하지 않는다.
    */
@@ -732,40 +718,21 @@ export class EditManager {
     const parentBox = paragraph.parentElement;
     if (!(parentBox instanceof LayoutBoxElement)) return;
 
+    if (parentBox.hasAttribute('selected')) return;
+
     const previousLayouts = [...this._selectedLayouts];
-    for (const el of this._selectedLayouts) {
-      if (el !== parentBox) {
-        el.removeAttribute('selected');
-        el.removeAttribute('hovered');
-      }
-    }
-    parentBox.removeAttribute('hovered');
     parentBox.setAttribute('selected', '');
-    this._selectedLayouts = [parentBox];
+    this._selectedLayouts.push(parentBox);
     this._dispatchLayoutSelection(previousLayouts);
   }
 
   /**
-   * 단락을 감싸는 부모 box의 레이아웃 선택(`selected`)을 해제한다.
-   *
-   * 텍스트 편집 포커스가 해제될 때 호출된다. 부모 box가 `_selectedLayouts`에 있으면
-   * 제거하고 `selected` 속성을 제거한다.
+   * 텍스트 편집 포커스가 해제되어도 레이아웃 선택은 유지된다.
    *
    * @param paragraph - 포커스를 잃은 단락. null이면 아무 일도 하지 않는다.
    */
-  private _clearBoxSelectionForParagraph(paragraph: LayoutParagraphElement | null): void {
-    if (!paragraph) return;
-    const parentBox = paragraph.parentElement;
-    if (!(parentBox instanceof LayoutBoxElement)) return;
-    if (!parentBox.hasAttribute('selected')) return;
-
-    const previousLayouts = [...this._selectedLayouts];
-    const idx = this._selectedLayouts.indexOf(parentBox);
-    if (idx >= 0) {
-      this._selectedLayouts.splice(idx, 1);
-    }
-    parentBox.removeAttribute('selected');
-    this._dispatchLayoutSelection(previousLayouts);
+  private _clearBoxSelectionForParagraph(_paragraph: LayoutParagraphElement | null): void {
+    // 선택 유지: 텍스트 포커스가 떠나도 레이아웃 선택은 해제되지 않는다.
   }
 
   /**
@@ -801,10 +768,63 @@ export class EditManager {
    */
   get layoutEditMode(): boolean { return this._layoutEditMode; }
   set layoutEditMode(value: boolean) {
+    if (this._isPrint) return;
     if (this._layoutEditMode === value) return;
+    if (value) {
+      this.textEditMode = false;
+      this.insertMode = null;
+    }
     this._layoutEditMode = value;
     if (value) {
       this._applyEditableLayoutToAllBoxes();
+    } else {
+      this._applyEditableLayoutToAllBoxes();
+      if (!this._selectableMode) {
+        this.clearLayoutSelection();
+      }
+    }
+    this._updateControllers();
+  }
+
+  /**
+   * 선택 모드 활성화 상태.
+   *
+   * `true`면 `layoutEditMode` 여부와 무관하게 box 클릭으로 선택할 수 있다.
+   * 편집 모드가 꺼진 상태에서도 클릭 선택이 가능하며, 선택 시 시각적
+   * 피드백(`selected` 속성)이 제공된다.
+   * 이동/리사이즈는 여전히 편집 모드에서만 동작한다.
+   *
+   * @example
+   * ```ts
+   * const manager = EditManager.getInstance();
+   * manager.selectableMode = true;   // 편집 모드 없이도 클릭 선택 가능
+   * manager.layoutEditMode = false;  // 이동/리사이즈는 불가하지만 선택은 가능
+   * ```
+   */
+  get selectableMode(): boolean { return this._selectableMode; }
+  set selectableMode(value: boolean) {
+    if (this._isPrint) return;
+    if (this._selectableMode === value) return;
+    this._selectableMode = value;
+    this._updateControllers();
+    if (!value) {
+      this.clearLayoutSelection();
+    }
+  }
+
+  private _updateControllers(): void {
+    if (this._selectableMode) {
+      if (!this._selectionController) {
+        this._selectionController = new LayoutSelectionController(document.documentElement);
+      }
+      this._selectionController.attach();
+    } else {
+      if (this._selectionController) {
+        this._selectionController.detach();
+      }
+    }
+
+    if (this._layoutEditMode) {
       if (!this._layoutEditController) {
         this._layoutEditController = new LayoutEditController(document.documentElement);
       }
@@ -813,9 +833,56 @@ export class EditManager {
       if (this._layoutEditController) {
         this._layoutEditController.detach();
       }
-      this.clearLayoutSelection();
-      this._applyEditableLayoutToAllBoxes();
     }
+  }
+
+  /**
+   * 선택 허용 role 집합. `null`이면 role 기반 제한 없음.
+   * 선택 전용 필터가 설정되면 편집 필터 대신 사용된다.
+   *
+   * @param roles - 선택 허용할 BoxRole 배열. `null`이면 role 제한 해제.
+   *
+   * @example
+   * ```ts
+   * manager.setSelectableRoles(['body', 'title']);
+   * manager.selectableMode = true;  // body, title box만 선택 가능
+   * ```
+   */
+  setSelectableRoles(roles: BoxRole[] | null): void {
+    this._selectableRoles = roles === null ? null : new Set(roles);
+  }
+
+  get selectableRoles(): ReadonlySet<BoxRole> | null {
+    return this._selectableRoles;
+  }
+
+  /**
+   * 선택 허용 box id 집합. `null`이면 id 기반 제한 없음.
+   * 선택 전용 필터가 설정되면 편집 필터 대신 사용된다.
+   *
+   * @param ids - 선택 허용할 box id 배열. `null`이면 id 제한 해제.
+   */
+  setSelectableBoxIds(ids: string[] | null): void {
+    this._selectableBoxIds = ids === null ? null : new Set(ids);
+  }
+
+  get selectableBoxIds(): ReadonlySet<string> | null {
+    return this._selectableBoxIds;
+  }
+
+  /**
+   * 선택 루트 box id. `null`이면 제한 없음.
+   * 지정 시 해당 box 내부 요소만 선택 가능, Root 자체는 선택 불가.
+   * 선택 전용 루트가 설정되면 편집 루트 대신 사용된다.
+   *
+   * @param id - 선택 루트 box id. `null`이면 제한 해제.
+   */
+  setSelectableRootId(id: string | null): void {
+    this._selectableRootId = id;
+  }
+
+  get selectableRootId(): string | null {
+    return this._selectableRootId;
   }
 
   /**
@@ -914,6 +981,29 @@ export class EditManager {
   }
 
   /**
+   * 요소가 지정된 선택 루트 box의 내부(자손)에 있는지 확인한다.
+   *
+   * 선택 전용 루트(`_selectableRootId`)가 설정되면 그것을 사용하고,
+   * 아니면 편집 루트(`_editableRootId`)를 사용한다.
+   * 둘 다 null이면 제한 없이 `true`를 반환한다.
+   *
+   * @param element - 확인할 요소
+   * @returns 루트가 지정되지 않았거나, 요소가 루트의 자손이면 `true`.
+   *           요소가 루트 자체이거나 루트 외부이면 `false`.
+   */
+  private _isWithinSelectableRoot(element: Element): boolean {
+    const rootId = this._selectableRootId ?? this._editableRootId;
+    if (rootId === null) return true;
+    if (element.id === rootId) return false;
+    let current: Element | null = element.parentElement;
+    while (current) {
+      if (current.id === rootId) return true;
+      current = current.parentElement;
+    }
+    return false;
+  }
+
+  /**
    * 요소가 지정된 루트 box의 내부(자손)에 있는지 확인한다.
    *
    * @param element - 확인할 요소
@@ -955,6 +1045,38 @@ export class EditManager {
   }
 
   /**
+   * 특정 box가 선택 가능한지 판별한다.
+   *
+   * `isBoxEditable()`과 달리 `_layoutEditMode` 여부와 무관하게 동작한다.
+   * 선택 전용 필터(`_selectableRoles`, `_selectableBoxIds`)가 설정되면 그에 따르고,
+   * 설정이 없으면 편집 필터(`_editableRoles`, `_editableBoxIds`)를 대신 사용한다.
+   * 루트 제한은 선택 전용 `_selectableRootId`를 우선하되, 없으면 `_editableRootId`를 사용한다.
+   * lock 상태의 box는 선택할 수 없다.
+   *
+   * @param box - 판별할 box 요소
+   * @returns 선택 가능 여부
+   */
+  isBoxSelectable(box: LayoutBoxElement): boolean {
+    if (this._isBoxOrAncestorLocked(box)) return false;
+    const rootId = this._selectableRootId ?? this._editableRootId;
+    if (rootId !== null) {
+      if (box.id === rootId) return false;
+      let parent: Element | null = box.parentElement;
+      let found = false;
+      while (parent) {
+        if (parent.id === rootId) { found = true; break; }
+        parent = parent.parentElement;
+      }
+      if (!found) return false;
+    }
+    const roles = this._selectableRoles ?? this._editableRoles;
+    if (roles !== null && !roles.has(box.role)) return false;
+    const ids = this._selectableBoxIds ?? this._editableBoxIds;
+    if (ids !== null && !ids.has(box.id)) return false;
+    return true;
+  }
+
+  /**
    * 현재 편집 가능 상태에 따라 문서 내 모든 box의 `editableLayout` 속성을 갱신한다.
    * `isBoxEditable()` 결과를 box별로 적용한다.
    */
@@ -971,15 +1093,16 @@ export class EditManager {
   /**
    * 레이아웃 요소를 선택한다.
    *
-   * `editableLayout`이 켜진 box 요소만 선택할 수 있다.
+   * `isBoxSelectable()`을 통과한 box 요소만 선택할 수 있다.
+   * 편집 모드가 꺼져 있어도 선택은 가능하다 (lock/root/role/id 필터만 적용).
    * `multi`가 `false`(기본값)이면 기존 선택을 모두 해제하고 지정된 요소만 선택한다.
    * `multi`가 `true`이면 기존 선택에 지정된 요소를 추가/토글한다.
    *
    * @param target - 선택할 레이아웃 요소, 요소의 ID, 또는 그 배열
-   * @param multi - 다중 선택 모드. `true`면 기존 선택에 추가/토글
    * @returns 선택 성공 여부. 하나도 선택하지 못하면 `false`
    */
   selectLayout(target: LayoutElement | string | (LayoutElement | string)[]): boolean {
+    if (this._isPrint) return false;
     const targets = Array.isArray(target) ? target : [target];
     const newSelections: LayoutElement[] = [];
 
@@ -987,8 +1110,8 @@ export class EditManager {
       const element = this._resolveLayoutElement(t);
       if (!element) continue;
       if (this._isBoxOrAncestorLocked(element)) continue;
-      if (!this._isWithinEditableRoot(element)) continue;
-      if (!this.isBoxEditable(element) && !element.editableLayout) continue;
+      if (!this._isWithinSelectableRoot(element)) continue;
+      if (!this.isBoxSelectable(element)) continue;
       newSelections.push(element);
     }
 
@@ -1070,9 +1193,13 @@ export class EditManager {
    * `null`을 설정하면 삽입 모드가 비활성화된다.
    */
   set insertMode(mode: InsertMode | null) {
+    if (this._isPrint) return;
     if (this._insertMode === mode) return;
 
     if (mode) {
+      this.layoutEditMode = false;
+      this.textEditMode = false;
+
       const docEl = document.querySelector('x-layout-document') as LayoutDocumentElement | null;
       if (!docEl) {
         throw new Error('EditManager.insertMode: 문서 요소(x-layout-document)를 찾을 수 없습니다.');
@@ -1080,10 +1207,7 @@ export class EditManager {
 
       this.clearLayoutSelection();
 
-      const editableBoxes = Array
-        .from(document.querySelectorAll<LayoutBoxElement>('x-layout-box'))
-        .filter(box => this.isBoxEditable(box));
-      editableBoxes.forEach((box) => {
+      document.querySelectorAll<LayoutBoxElement>('x-layout-box').forEach((box) => {
         box.style.cursor = 'crosshair';
       });
 
@@ -1098,8 +1222,8 @@ export class EditManager {
       }
       this._insertMode = null;
 
-      document.querySelectorAll<LayoutBoxElement>('x-layout-box[editable-layout]').forEach((box) => {
-        box.style.cursor = 'grab';
+      document.querySelectorAll<LayoutBoxElement>('x-layout-box').forEach((box) => {
+        box.style.cursor = '';
       });
     }
   }
@@ -1136,6 +1260,7 @@ export class EditManager {
     const listeners = this._listeners.get('insert');
     if (!listeners || listeners.size === 0) return;
 
+    this._suppressNextClick = true;
     this._dispatching = true;
     try {
       for (const listener of listeners) {
@@ -1164,6 +1289,7 @@ export class EditManager {
     const listeners = this._listeners.get('insertCancel');
     if (!listeners || listeners.size === 0) return;
 
+    this._suppressNextClick = true;
     this._dispatching = true;
     try {
       for (const listener of listeners) {
@@ -1188,6 +1314,20 @@ export class EditManager {
    */
   _setMultiSelect(value: boolean): void {
     this._multiSelect = value;
+  }
+
+  /**
+   * 삽입 완료/취소 직후 발생하는 클릭 이벤트를 무시하기 위한 플래그를 소비한다.
+   * `_dispatchInsert` 또는 `_dispatchInsertCancel`에서 `true`로 설정되며,
+   * `LayoutSelectionController._onClick`에서 한 번만 소비된다.
+   * @internal
+   */
+  _consumeSuppressNextClick(): boolean {
+    if (this._suppressNextClick) {
+      this._suppressNextClick = false;
+      return true;
+    }
+    return false;
   }
 
   /**
