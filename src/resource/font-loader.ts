@@ -34,7 +34,7 @@ export class FontLoader {
   private static _instance?: FontLoader;
   private static _customLoader?: FontLoaderFn;
 
-  private _fontFaces: FontFace[] = [];
+  private _fontFaces: { name: string, fontFace: FontFace; }[] = [];
   private _ready: boolean = false;
   private _isPrint: boolean = false;
 
@@ -114,7 +114,7 @@ export class FontLoader {
             );
             globalThis.document?.fonts.add(fontFace);
 
-            return await fontFace.load();
+            return { name: f.family, fontFace: await fontFace.load() };
           })
         );
       } else {
@@ -131,7 +131,7 @@ export class FontLoader {
             );
             globalThis.document?.fonts.add(fontFace);
 
-            return await fontFace.load();
+            return { name: f.family, fontFace: await fontFace.load() };
           })
         );
       }
@@ -146,12 +146,12 @@ export class FontLoader {
 
   /**
    * 폰트 패밀리명 반환.
-   * @param _fontFamily 요청된 폰트 패밀리명 (현재 미사용)
+   * @param fontName 요청된 폰트명
    * @returns 기본 폰트 패밀리명
    */
-  public getFontFamily(_fontFamily?: string) {
+  public getFontFamily(fontName: string) {
     if (!this.ready) throw new Error('font map is not ready');
-    return 'Myoungjo';
+    return this._fontFaces.find(f => f.name === fontName)?.fontFace.family;
   }
 
   get fontFaces() {
