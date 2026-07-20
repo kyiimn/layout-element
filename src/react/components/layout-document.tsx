@@ -4,7 +4,7 @@ import type { DocumentData, ParagraphStyle, TextStyle } from '@/types';
 import { useLayoutElement } from '@/react/hooks';
 
 export interface LayoutDocumentProps {
-  data: DocumentData;
+  data?: DocumentData;
   width?: number;
   height?: number;
   paddingTop?: number;
@@ -48,7 +48,7 @@ export const LayoutDocument = forwardRef<LayoutDocumentElement, LayoutDocumentPr
 
     useEffect(() => {
       const element = innerRef.current;
-      if (!element) return;
+      if (!element || data === undefined) return;
       element.data = data;
     }, [innerRef, data]);
 
