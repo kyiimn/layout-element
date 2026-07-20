@@ -189,7 +189,6 @@ export class LayoutEditController {
     if (this._attached) return;
     this._attached = true;
     this._document.addEventListener('mousedown', this._onMouseDown, true);
-    this._document.addEventListener('click', this._onClick, true);
   }
 
   /**
@@ -202,7 +201,6 @@ export class LayoutEditController {
     if (!this._attached) return;
     this._attached = false;
     this._document.removeEventListener('mousedown', this._onMouseDown, true);
-    this._document.removeEventListener('click', this._onClick, true);
     this._cancelAllDrags();
   }
 
@@ -302,57 +300,6 @@ export class LayoutEditController {
   }
 
   // ─── Click Handling ───────────────────────────────────────────
-
-  /**
-   * 클릭 이벤트 핸들러.
-   *
-   * 편집 가능한 box에서 발생한 클릭을 처리하여 선택한다.
-   * 드래그/리사이즈 직후의 클릭은 무시된다 (의도치 않은 선택 변경 방지).
-   *
-   * 처리 순서:
-   * 1. 편집 가능한 box를 찾지 못하면 무시
-   * 2. 삽입 모드이면 무시 (InsertController가 처리)
-   * 3. 자손 box에서 발생한 이벤트면 무시 (자손이 자체 처리)
-   * 4. 리사이즈 핸들에서 발생한 이벤트면 무시
-   * 5. 드래그/리사이즈가 방금 발생했으면 무시 (dragMoved/moved 플래그 리셋)
-   * 6. mousedown에서 새로 선택된 box면 무시 (중복 선택 방지)
-   * 7. 그 외의 경우 `EditManager.selectLayout()` 호출로 box 선택
-   *
-   * @param event - 클릭 마우스 이벤트
-   */
-  private _onClick = (event: MouseEvent): void => {
-    const box = this._findEditableBoxFromEvent(event);
-    if (!box) return;
-    const manager = EditManager.getInstance();
-    if (manager.insertMode) return;
-
-    event.stopPropagation();
-    if (this._isEventFromDescendantLayout(event, box)) return;
-    if (this._isEventFromResizeHandle(event, box)) return;
-
-    box.removeAttribute('hovered');
-
-    const dragState = this._dragStates.get(box);
-    const resizeState = this._resizeStates.get(box);
-
-    // 드래그/리사이즈 직후의 클릭은 무시 (드래그로 인한 의도치 않은 선택 변경 방지)
-    if ((dragState && dragState.dragMoved) || (resizeState && resizeState.moved)) {
-      if (dragState) dragState.dragMoved = false;
-      if (resizeState) resizeState.moved = false;
-      if (dragState) dragState.selectedOnMouseDown = false;
-      return;
-    }
-
-    // mousedown에서 새로 선택된 box는 click에서 다시 선택하지 않음
-    if (dragState && dragState.selectedOnMouseDown) {
-      dragState.selectedOnMouseDown = false;
-      return;
-    }
-
-    manager._setMultiSelect(event.ctrlKey || event.metaKey);
-    manager.selectLayout(box);
-    manager._setMultiSelect(false);
-  }
 
   // ─── Mouse Down (Drag Start + Resize Handle) ─────────────────
 

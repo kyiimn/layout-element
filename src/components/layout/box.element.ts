@@ -809,7 +809,6 @@ export class LayoutBoxElement extends HTMLElement {
       this.style.cursor = 'grab';
       this.setAttribute('editable-layout', '');
     } else {
-      this.removeAttribute('selected');
       this.removeAttribute('hovered');
       this.removeAttribute('editable-layout');
       this.style.cursor = '';
