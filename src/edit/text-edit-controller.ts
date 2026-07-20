@@ -1070,14 +1070,17 @@ export class TextEditController {
       return null;
     }
 
+		    // cursorRect는 paragraph-local(스케일 보정된) 좌표이므로,
+		    // viewport 좌표계로 변환하기 위해 scale을 곱한다.
+		    const scale = EditManager.getInstance().scale;
 		    let lineHeight = cursorRect.height;
 		    if (!lineHeight) {
 		      lineHeight = this._mapper.getFirstColumnRect()?.fontSize ?? 0;
 		      if (!lineHeight) return null;
 		    }
 		    const paragraphRect = this._paragraph.getBoundingClientRect();
-		    const targetX = cursorRect.left + paragraphRect.left;
-		    const baseY = cursorRect.top + paragraphRect.top + direction * lineHeight;
+		    const targetX = cursorRect.left * scale + paragraphRect.left;
+		    const baseY = cursorRect.top * scale + paragraphRect.top + direction * lineHeight * scale;
 
 	    // Helper: verify that a candidate offset is on a visually different line
 	    // than the current cursor. getNearestOffsetFromPoint can snap back to
@@ -1092,9 +1095,11 @@ export class TextEditController {
 
 	    // Probe strategy: line spacing can exceed font height, placing targetY
 	    // in the gap between lines where no span exists. Try multiple Y positions.
+	    // lineHeight는 paragraph-local(스케일 보정된) 픽셀이므로 viewport 픽셀로 변환한다.
+	    const lineHeightVP = lineHeight * scale;
 	    const probeOffsets = [
 	      0,                                                // exact target
-	      direction * lineHeight * 0.5,                     // half a line further
+	      direction * lineHeightVP * 0.5,                   // half a line further
 	    ];
 
 	    for (const probeY of probeOffsets) {
@@ -1107,7 +1112,7 @@ export class TextEditController {
 
 	    // Scan in small increments until a character is found or we exceed one line height
 	    const step = 2;
-	    for (let scanOffset = step; scanOffset <= lineHeight; scanOffset += step) {
+	    for (let scanOffset = step; scanOffset <= lineHeightVP; scanOffset += step) {
 	      const result = this._mapper.getCharOffsetFromPoint(targetX, baseY + direction * scanOffset);
 	      if (result?.textOffset != null && result.textOffset !== offset && isOnDifferentLine(result.textOffset)) return result.textOffset;
 	    }
