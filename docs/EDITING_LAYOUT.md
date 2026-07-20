@@ -16,9 +16,10 @@
 
 `EditManager.layoutEditMode = true`로 설정되면:
 
-1. **전역 필터 활성화**: `editableRoles`와 `editableBoxIds`에 맞는 box가 편집 가능 상태로 전환된다.
-2. **중앙 집중형 이벤트 처리**: `LayoutEditController`가 문서(document) 수준에서 `mousedown`과 `click`을 캡처 단계로 감지하여, 편집 가능한 box에 한해 선택, 드래그, 리사이즈를 처리한다.
-3. **선택 처리**: `LayoutEditController`는 클릭 시 `EditManager.selectLayout()`을 호출하여 요소를 선택한다.
+1. **모드 스위칭**: `layoutEditMode = true`는 `textEditMode`를 `false`로, `insertMode`를 `null`로 전환한다. 반대로 `textEditMode = true`는 `layoutEditMode`를 `false`로, `insertMode`를 `null`로 전환한다. `insertMode`가 활성화되면 `layoutEditMode`와 `textEditMode` 모두 `false`가 된다. `selectableMode`는 항상 독립적으로 동작하며 스위칭 대상이 아니다.
+2. **전역 필터 활성화**: `editableRoles`와 `editableBoxIds`에 맞는 box가 편집 가능 상태로 전환된다.
+3. **중앙 집중형 이벤트 처리**: `LayoutEditController`가 문서(document) 수준에서 `mousedown`을 캡처 단계로 감지하여, 편집 가능한 box에 한해 선택, 드래그, 리사이즈를 처리한다.
+4. **선택 처리**: `LayoutSelectionController`가 문서(document) 수준에서 `click`을 캡처 단계로 감지하여 선택 가능한 box의 클릭 선택을 처리한다. 레이아웃 편집 모드에서 편집 가능한 box의 `click`은 `LayoutEditController`가 `mousedown`에서 이미 처리하므로 중복 선택을 방지하기 위해 건너뛴다.
 4. **시각적 피드백**: 선택된 요소에 `selected` 속성이 설정되고, Shadow DOM의 `:host([selected])` 규칙에 의해 빨간색 `box-shadow`가 표시된다. `editableLayout` 속성이 켜진 box에는 `hovered` 상태로 파란색 외곽선이 표시된다.
 5. **드래그 이동**: 선택된 요소를 마우스로 드래그하여 이동할 수 있다.
 6. **크기 조정**: 선택된 요소의 가장자리 중앙에 4개의 리사이즈 핸들이 표시되며, 핸들을 드래그하여 크기를 조정할 수 있다.
@@ -38,19 +39,30 @@
 │                                                                      │
 │  EditManager (singleton)                                             │
 │  ├── layoutEditMode: boolean                                         │
+│  ├── selectableMode: boolean                                         │
 │  ├── editableRoles: ReadonlySet<BoxRole> | null                      │
 │  ├── editableBoxIds: ReadonlySet<string> | null                      │
 │  ├── editableRootId: string | null                                    │
-│  ├── setEditableRootId(id)                                           │
-│  ├── isBoxEditable(box)                                              │
+│  ├── selectableRoles: ReadonlySet<BoxRole> | null                     │
+│  ├── selectableBoxIds: ReadonlySet<string> | null                     │
+│  ├── selectableRootId: string | null                                   │
+│  ├── setEditableRootId(id) / setSelectableRootId(id)                  │
+│  ├── isBoxEditable(box) / isBoxSelectable(box)                        │
 │  ├── selectedLayouts: LayoutElement[]                               │
 │  ├── selectLayout()                                                  │
 │  ├── clearLayoutSelection()                                          │
-│  ├── setEditableRoles(roles) / setEditableBoxIds(ids)                │
+│  ├── setEditableRoles(roles) / setSelectableRoles(roles)              │
+│  ├── setEditableBoxIds(ids) / setSelectableBoxIds(ids)                │
 │  └── layoutSelectionChange event                                     │
 │                                                                      │
-│  LayoutEditController                                                  │
-│  ├── document-level mousedown / click (capture)                      │
+│  LayoutSelectionController (선택 전용)                                  │
+│  ├── document-level click (capture)                                    │
+│  ├── isBoxSelectable → 선택 가능 box 클릭 시 selectLayout 호출          │
+│  ├── 빈 영역 클릭 → clearLayoutSelection (모든 선택 해제)                │
+│  └── 편집 모드 + 편집 가능 box 클릭 → 건너뜀 (mousedown에서 이미 처리)   │
+│                                                                      │
+│  LayoutEditController (편집 전용)                                        │
+│  ├── document-level mousedown (capture)                                │
 │  ├── drag state per box: Map<LayoutBoxElement, BoxDragState>          │
 │  ├── resize state per box: Map<LayoutBoxElement, BoxResizeState>    │
 │  ├── _computeNewPosition() / _computeNewSize()                        │
@@ -79,7 +91,7 @@ manager.layoutEditMode = true;
 manager.layoutEditMode = false;
 ```
 
-`layoutEditMode`가 `true`가 되면 `EditManager`는 문서 안의 모든 `<x-layout-box>`를 순회하며, `isBoxEditable(box)` 결과에 따라 각 box의 `editableLayout` 속성을 갱신한다. `false`로 설정되면 모든 선택이 해제되고 모든 box의 `editableLayout` 속성이 `false`가 된다.
+`layoutEditMode`가 `true`가 되면 `EditManager`는 문서 안의 모든 `<x-layout-box>`를 순회하며, `isBoxEditable(box)` 결과에 따라 각 box의 `editableLayout` 속성을 갱신한다. `false`로 설정되면 모든 box의 `editableLayout` 속성이 `false`가 된다. **선택은 `selectableMode`가 `true`면 유지된다.** `selectableMode`가 `false`이고 `layoutEditMode`도 `false`가 되면 선택이 해제된다.
 
 **기본적으로 모든 box가 허용된다.** `layoutEditMode`만 켜고 `editableRoles`와 `editableBoxIds`를 모두 `null`로 두면 Root 제한(`setEditableRootId`)과 lock을 제외한 모든 box가 편집 가능하다. 편집을 막으려면 `layoutEditMode`를 `false`로 설정하거나, `editableRoles`/`editableBoxIds`를 지정해 허용 범위를 좁혀야 한다. box의 `lock` 속성이 `true`이거나 조상 box 중 하나라도 lock이면 해당 box와 하위 요소는 항상 편집 불가이다.
 
@@ -143,6 +155,88 @@ const editable = manager.isBoxEditable(box); // boolean
 | true | unlocked | inside Root | `['body']` | `['b1']` | `'body'` | `'b1'` | `true` |
 | true | unlocked | inside Root | `['body']` | `['b1']` | `'body'` | `'b2'` | `false` |
 
+#### 선택 모드 (`EditManager.selectableMode`)
+
+편집 모드(`layoutEditMode`)가 꺼져 있어도 box 클릭으로 선택할 수 있는 모드이다. 이동/리사이즈/텍스트 수정은 여전히 편집 모드에서만 동작하지만, **선택 자체**는 선택 모드만 켜면 동작한다.
+
+```typescript
+const manager = EditManager.getInstance();
+
+// 편집 모드 없이도 클릭 선택 가능
+manager.selectableMode = true;
+
+// 편집 모드도 켜면 선택 + 이동/리사이즈 모두 가능
+manager.layoutEditMode = true;
+
+// 선택 모드만 끄면 선택도 해제됨
+manager.selectableMode = false;
+```
+
+| `selectableMode` | `layoutEditMode` | 선택 | 이동/리사이즈 |
+|---|---|---|---|
+| `false` | `false` | ✗ | ✗ |
+| `true` | `false` | ✓ | ✗ |
+| `false` | `true` | ✓ (편집 필터) | ✓ |
+| `true` | `true` | ✓ (선택 필터 우선) | ✓ |
+
+선택 모드가 켜지면 `LayoutSelectionController`가 부착되어 클릭 이벤트를 처리한다. 편집 모드가 꺼진 상태에서는 드래그/리사이즈는 시작되지 않고 클릭 선택만 처리된다. 문서의 빈 영역(box가 아닌 곳)을 클릭하면 모든 선택이 해제된다.
+
+#### 모드 스위칭
+
+각 모드의 setter는 활성화 시 다른 모드를 자동으로 비활성화한다. `selectableMode`는 항상 독립적으로 동작하며 스위칭 대상이 아니다.
+
+| 설정 | 자동 전환 |
+|------|-----------|
+| `layoutEditMode = true` | `textEditMode = false`, `insertMode = null` |
+| `textEditMode = true` | `layoutEditMode = false`, `insertMode = null` |
+| `insertMode = (non-null)` | `layoutEditMode = false`, `textEditMode = false` |
+| `selectableMode` | (변경 없음, 항상 독립) |
+
+전환은 setter 호출을 통해 이루어지므로, 각 모드의 정리 로직(속성 해제, 커서 초기화, 컨트롤러 분리 등)이 자동으로 실행된다. 가드 `if (this._field === value) return`에 의해 무한 루프는 발생하지 않는다.
+
+#### 선택 필터: `setSelectableRoles(roles)` / `setSelectableBoxIds(ids)` / `setSelectableRootId(id)`
+
+선택 전용 필터는 편집 필터와 독립적으로 동작한다. 선택 전용 필터가 설정되지 않으면(`null`) 편집 필터를 대신 사용한다.
+
+```typescript
+// 선택 전용 role 필터 설정
+manager.setSelectableRoles(['body', 'title']);
+manager.selectableMode = true;
+
+// 선택 전용 box id 필터 설정
+manager.setSelectableBoxIds(['box-1', 'box-2']);
+
+// 선택 전용 root 설정
+manager.setSelectableRootId('root-box');
+
+// 제한 해제 (편집 필터를 따름)
+manager.setSelectableRoles(null);
+manager.setSelectableBoxIds(null);
+manager.setSelectableRootId(null);
+```
+
+| 매개변수 | 타입 | 설명 |
+|----------|------|------|
+| `roles` | `BoxRole[] \| null` | 선택 허용할 역할 목록. `null`이면 편집 필터(`editableRoles`)를 따름 |
+| `ids` | `string[] \| null` | 선택 허용할 box ID 목록. `null`이면 편집 필터(`editableBoxIds`)를 따름 |
+| `id` | `string \| null` | 선택 루트 box ID. `null`이면 편집 루트(`editableRootId`)를 따름 |
+
+#### `isBoxSelectable(box)` — 선택 가능 판별 함수
+
+```typescript
+const selectable = manager.isBoxSelectable(box); // boolean
+```
+
+`isBoxEditable()`과 달리 `layoutEditMode` 여부와 무관하게 동작한다.
+
+판별 규칙:
+
+1. box 자체 또는 조상 box 중 lock이 설정된 것이 있으면 `false`를 반환한다.
+2. 선택 전용 루트(`selectableRootId`)가 지정된 경우, box가 해당 루트 내부의 자손이어야 한다. `null`이면 편집 루트(`editableRootId`)를 따른다.
+3. 선택 전용 role 필터(`selectableRoles`)가 설정되어 있으면 box의 `role`이 그 안에 포함되어야 한다. `null`이면 편집 필터(`editableRoles`)를 따른다.
+4. 선택 전용 ID 필터(`selectableBoxIds`)가 설정되어 있으면 box의 `id`가 그 안에 포함되어야 한다. `null`이면 편집 필터(`editableBoxIds`)를 따른다.
+5. 모든 필터가 `null`이면 lock/루트 제한을 제외한 모든 box가 선택 가능하다.
+
 #### `editableLayout` 속성 (하위 호환)
 
 **지원 요소**: `<x-layout-box>` (document는 레이아웃 편집 대상이 아님)
@@ -158,7 +252,7 @@ element.editableLayout = false;
 | 동작 | `<x-layout-box>` |
 |------|-------------------|
 | `true` 설정 | `cursor: grab`, `editable-layout` DOM 속성 추가, 호버/선택 시각적 피드백 활성화 |
-| `false` 설정 | `selected`·`hovered`·`editable-layout` 제거, `cursor` 초기화, `EditManager._unregisterLayout()` 호출 |
+| `false` 설정 | `hovered`·`editable-layout` 제거, `cursor` 초기화, `EditManager._unregisterLayout()` 호출. **`selected`는 제거되지 않는다** — 선택은 `selectableMode`에 의해 독립적으로 관리된다 |
 | 인쇄 모드 | `editableLayout` 설정 무시 |
 
 > **설계**: `editableLayout` 속성은 더 이상 이벤트 리스너를 직접 등록하지 않는다. `connectedCallback`은 `mouseenter`와 `mouseleave`만 등록하고, `click`/`mousedown`/리사이즈 핸들 이벤트는 `LayoutEditController`가 문서 수준에서 처리한다. 개별 box에 `editableLayout = true`를 설정하면 `EditManager.isBoxEditable()`은 아니지만 `LayoutEditController`가 이전 버전과의 호환을 위해 여전히 편집 가능한 것으로 간주한다.
@@ -171,6 +265,7 @@ element.editableLayout = false;
 |------|------|
 | **클릭** | 기존 선택을 모두 해제하고 클릭한 요소만 선택 |
 | **Ctrl+클릭** (또는 **Cmd+클릭**) | 기존 선택에 추가. 이미 선택된 요소를 다시 클릭하면 선택 해제(토글) |
+| **빈 영역 클릭** (box가 아닌 문서 여백) | 모든 선택 해제 (`clearLayoutSelection()`) |
 | **클릭** (이벤트 전파) | `stopPropagation()`으로 부모 요소의 클릭 이벤트 차단. 중첩된 box를 클릭해도 상위 box가 함께 선택되지 않음 |
 | **하위 요소 클릭** | 이벤트가 하위 레이아웃 요소(box)에서 발생한 경우, 상위 요소의 `LayoutEditController._onClick`/`LayoutEditController._onMouseDown`은 `_isEventFromDescendantLayout()` 검사로 해당 이벤트를 무시한다. 이를 통해 상위 요소가 선택된 상태에서도 하위 요소를 클릭하여 선택할 수 있다 |
 | **선택되지 않은 요소 mousedown** | 선택되지 않은 요소를 mousedown하면 기존 선택을 해제하고 해당 요소를 선택한 후 드래그를 시작한다. `BoxDragState.selectedOnMouseDown` 플래그로 click에서 중복 선택을 방지한다 |
@@ -226,6 +321,7 @@ element.editableLayout = false;
 | 상태 | 커서 | 시각적 피드백 |
 |------|------|-------------|
 | 비편집 모드 (선택 안 됨, hover) | (기본값) | 파란색 테두리 (`hovered`) |
+| 비편집 모드 (선택 됨, selectableMode) | (기본값) | 빨간색 테두리 (`selected`), 리사이즈 핸들은 미표시 |
 | 비편집 모드 (선택 안 됨, 미호버) | (기본값) | 회색 기본 테두리 (`:host(:not([border]))`) |
 | 텍스트 편집 포커스 (내부 paragraph가 포커스) | (기본값) | 빨간색 테두리 (`selected`), 리사이즈 핸들은 미표시 |
 | `editableLayout = true` (선택 안 됨, hover) | `grab` | 파란색 테두리 (`hovered`) |
@@ -279,9 +375,51 @@ this._layoutEditController.attach();
 | 이벤트 | 단계 | 콜백 | 목적 |
 |--------|------|------|------|
 | `mousedown` | capture | `_onMouseDown` | 드래그 시작, 리사이즈 핸들 감지, 삽입 모드 위임 |
-| `click` | capture | `_onClick` | 단일/다중 선택, 드래그 직후 클릭 무시 |
 
 `detach()`는 위 리스너를 제거하고 진행 중인 모든 드래그/리사이즈를 취소한다.
+
+### 2.3 `LayoutSelectionController` 클릭 선택 처리
+
+`LayoutSelectionController`는 `EditManager.selectableMode`가 활성화될 때 생성되어 문서(document) 수준에서 `click` 이벤트를 캡처 단계로 처리한다. 편집 모드(`layoutEditMode`)와 무관하게 동작하며, **선택만** 처리한다. 드래그/리사이즈는 `LayoutEditController`가 담당한다.
+
+```typescript
+// EditManager.selectableMode = true 일 때
+this._selectionController = new LayoutSelectionController(document.documentElement);
+this._selectionController.attach();
+```
+
+`attach()`는 다음 리스너를 등록한다:
+
+| 이벤트 | 단계 | 콜백 | 목적 |
+|--------|------|------|------|
+| `click` | capture | `_onClick` | 단일/다중 선택 |
+
+`detach()`는 위 리스너를 제거한다.
+
+#### `_onClick` 처리 흐름
+
+```
+클릭 이벤트 (capture phase)
+    │
+    ▼
+LayoutSelectionController._onClick(event)
+    ├── _findSelectableBoxFromEvent(event) → box
+    ├── EditManager.insertMode? → return (삽입 모드에서는 선택 무시)
+    ├── box === null? → clearLayoutSelection(); return (빈 영역 클릭 → 모든 선택 해제)
+    ├── layoutEditMode && isBoxEditable(box)? → return (편집 모드에서는 mousedown이 이미 선택 처리)
+    ├── event.stopPropagation()
+    ├── _isEventFromDescendantLayout(event, box)? → return
+    ├── box.removeAttribute('hovered')
+    ├── _setMultiSelect(event.ctrlKey || event.metaKey)
+    ├── selectLayout(box)
+    └── _setMultiSelect(false)
+```
+
+**빈 영역 클릭**: 선택 가능한 box가 아닌 곳(문서 여백, 텍스트 등)을 클릭하면 `clearLayoutSelection()`이 호출되어 모든 선택이 해제된다.
+
+**편집 모드 가드**: `layoutEditMode`가 `true`이고 클릭한 box가 `isBoxEditable()`을 통과하면, `mousedown`에서 `LayoutEditController`가 이미 선택을 처리했으므로 `click`에서 중복 실행을 건너뛴다. 편집 가능하지 않은 box(필터링된 role 등)는 `click`에서 선택 처리된다.
+
+> **참고**: `LayoutSelectionController`는 드래그/리사이즈 상태를 관리하지 않으므로, 드래그 직후 클릭 무시 로직이 없다. 이는 `LayoutEditController`의 `_onClick`에만 존재했는데, 선택 컨트롤러가 클릭만 처리하므로 드래그 후 클릭 무시가 필요 없다.
 
 #### 상태 저장 방식
 
@@ -719,27 +857,52 @@ function MyComponent() {
 
 ### 3.1 요소 선택 흐름
 
+선택은 두 개의 독립적인 컨트롤러가 처리한다:
+
+**`LayoutSelectionController._onClick`** (선택 전용, `click` capture):
 ```
-사용자 클릭
+클릭 이벤트
     │
     ▼
-LayoutEditController._onClick(event)
-    ├── _findEditableBoxFromEvent(event)  ← composedPath에서 가장 안쪽 편집 가능 box 반환
+LayoutSelectionController._onClick(event)
+    ├── _findSelectableBoxFromEvent(event) ← composedPath에서 가장 안쪽 선택 가능 box 반환
+    ├── insertMode? → return
+    ├── box === null? → clearLayoutSelection(); return (빈 영역 클릭)
+    ├── layoutEditMode && isBoxEditable(box)? → return (편집 모드에서는 mousedown이 이미 처리)
     ├── event.stopPropagation()             ← 부모 요소로의 이벤트 전파 차단
-    ├── _isEventFromDescendantLayout(event, box)?  ← 하위 레이아웃 요소에서 온 이벤트면 무시
+    ├── _isEventFromDescendantLayout(event, box)? ← 하위 레이아웃 요소에서 온 이벤트면 무시
     │   └── return (하위 요소가 자체적으로 처리)
-    ├── BoxDragState.dragMoved === true?   ← 드래그 직후 클릭이면 무시
-    │   └── dragMoved = false; selectedOnMouseDown = false; return
-    ├── BoxDragState.selectedOnMouseDown === true?  ← mousedown에서 이미 선택한 요소면 중복 선택 방지
-    │   └── selectedOnMouseDown = false; return
-    ├── EditManager._setMultiSelect(event.ctrlKey || event.metaKey)
+    ├── _setMultiSelect(event.ctrlKey || event.metaKey)
     ├── EditManager.selectLayout(box)
-    │   ├── isBoxEditable(box) || box.editableLayout 검증
+    │   ├── isBoxSelectable(box) 검증
     │   ├── 기존 선택 해제 (단일 선택 모드)
     │   │   또는 토글 (다중 선택 모드)
     │   ├── selected 속성 설정/해제
     │   └── layoutSelectionChange 이벤트 발생
-    └── EditManager._setMultiSelect(false)
+    └── _setMultiSelect(false)
+```
+
+**`LayoutEditController._onMouseDown`** (드래그/리사이즈, `mousedown` capture):
+```
+mousedown 이벤트
+    │
+    ▼
+LayoutEditController._onMouseDown(event)
+    ├── _findEditableBoxFromEvent(event) ← composedPath에서 가장 안쪽 편집 가능 box 반환
+    ├── box === null? → return
+    ├── insertMode? → handleInsertMouseDown(event); return
+    ├── button !== 0? → return
+    ├── _isEventFromResizeHandle(event, box)? → _startResize(event, box); return
+    ├── _isEventFromDescendantLayout(event, box)? → return
+    └── _startDrag(event, box)
+        ├── !box.hasAttribute('selected')?
+        │   ├── _setMultiSelect(event.ctrlKey || event.metaKey)
+        │   ├── selectLayout(box)          ← 기존 선택 해제 + 이 요소 선택
+        │   ├── _setMultiSelect(false)
+        │   └── BoxDragState.selectedOnMouseDown = true
+        ├── event.preventDefault()
+        ├── event.stopPropagation()
+        └── ... (드래그 상태 초기화)
 ```
 
 ### 3.1.1 mousedown에서의 자동 선택
@@ -750,7 +913,7 @@ LayoutEditController._onClick(event)
 
 ```
 LayoutEditController._onMouseDown(event)
-    ├── _findEditableBoxFromEvent(event)
+    ├── _findSelectableBoxFromEvent(event)
     ├── button !== 0? → return
     ├── _isEventFromResizeHandle(event, box)? → _startResize(event, box); return
     ├── _isEventFromDescendantLayout(event, box)? → return (하위 요소가 처리)
@@ -779,12 +942,12 @@ LayoutEditController._onMouseDown(event)
     │
     ├── mousedown 이벤트 (document capture)
     │   ├── LayoutEditController._onMouseDown
-    │   │   └── _findEditableBoxFromEvent → 가장 안쪽 편집 가능 box 반환
+    │   │   └── _findSelectableBoxFromEvent → 가장 안쪽 선택 가능 box 반환
     │   └── _isEventFromDescendantLayout(event, 상위 box) === true → return (상위는 무시)
     │
     └── click 이벤트 (document capture)
         └── LayoutEditController._onClick
-            ├── _findEditableBoxFromEvent → 하위 box
+            ├── _findSelectableBoxFromEvent → 하위 box
             ├── event.stopPropagation()
             ├── selectedOnMouseDown === true → return (중복 선택 방지)
             └── (selectLayout 생략, 이미 mousedown에서 선택 완료)
@@ -842,7 +1005,7 @@ LayoutEditController._onMouseDown(event)
 │  ① mousedown (선택된 box 위에서)                                     │
 │     │                                                               │
 │     ├── LayoutEditController._onMouseDown (document capture)         │
-│     ├── _findEditableBoxFromEvent(event)                             │
+│     ├── _findSelectableBoxFromEvent(event)                             │
 │     ├── button !== 0? → 무시                                        │
 │     ├── _isEventFromResizeHandle(event, box)? → _startResize(); return│
 │     ├── _isEventFromDescendantLayout(event, box)? → return            │
@@ -1780,7 +1943,7 @@ mouseup
 │  ① mousedown on resize handle                                       │
 │     │                                                               │
 │     ├── LayoutEditController._onMouseDown (document capture)         │
-│     ├── _findEditableBoxFromEvent(event) → box                       │
+│     ├── _findSelectableBoxFromEvent(event) → box                       │
 │     ├── _isEventFromResizeHandle(event, box)? → _startResize(event, box)│
 │     ├── button !== 0? → 무시                                        │
 │     ├── !box.hasAttribute('selected')? → 무시                        │

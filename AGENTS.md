@@ -101,7 +101,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 
 - **`ColorRegistry`**: Loads `color.json` → CMYK→RGB conversion → injects CSS variables `--colorman-{name}`. In print mode, receives `CMYKColorSet` via `init()` instead of fetching.
 - **`FontLoader`**: Loads `fonts.json` → registers `FontFace` objects. In print mode, uses `base64Data` instead of `ttfFilename`. Hardcoded return value `getFontFamily()` → `'Myoungjo'`.
-- **`EditManager`**: Singleton (`src/edit/edit-manager.ts`) that manages global edit state. Tracks focused paragraph/controller, dispatches events (`focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`). Provides `focusParagraph()` / `blurParagraph()` API for programmatic focus control. `TextEditController` instances register/unregister with it.
+- **`EditManager`**: Singleton (`src/edit/edit-manager.ts`) that manages global edit state. Tracks focused paragraph/controller, dispatches events (`focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`, `layoutSelectionChange`). Provides `focusParagraph()` / `blurParagraph()` API for programmatic focus control. `TextEditController` instances register/unregister with it. **Mode switching**: Each mode setter deactivates other modes when activated — `layoutEditMode = true` switches `textEditMode = false` and `insertMode = null`; `textEditMode = true` switches `layoutEditMode = false` and `insertMode = null`; `insertMode = (non-null)` switches both `layoutEditMode = false` and `textEditMode = false`. `selectableMode` is always independent. **Selection mode**: `selectableMode` property enables box selection (click to select) independently from `layoutEditMode` (drag/resize). `selectLayout()` uses `isBoxSelectable()` which checks lock/root/role/id filters without requiring `layoutEditMode`. Drag/resize still require `layoutEditMode = true`. **Selection controller**: `LayoutSelectionController` handles click-to-select independently from `LayoutEditController` which handles drag/resize. Clicking empty space (no box) clears all selection.
 
 ## Important Constraints
 
@@ -152,8 +152,9 @@ src/
     text-edit-controller.ts       # TextEditController (cursor, selection, IME composition)
     text-edit-coordinate-mapper.ts # TextEditCoordinateMapper (click-to-offset mapping)
     edit-manager.ts          # EditManager singleton (global edit state)
+    layout-edit-controller.ts # LayoutEditController (drag/resize/select in edit mode)
+    layout-selection-controller.ts # LayoutSelectionController (click-to-select in selectable mode)
     insert-controller.ts     # InsertController (drag-to-insert)
-    layout-edit-controller.ts # LayoutEditController (drag/resize/selection)
     index.ts
   resource/
     color-registry.ts        # ColorRegistry (CMYK→RGB singleton)
