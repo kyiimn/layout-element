@@ -453,8 +453,7 @@ export class InsertController {
     }
 
     const manager = EditManager.getInstance();
-    const { columnCoords, lineHeight, editableWidth, columnCount } = model;
-    const avgColWidth = editableWidth / columnCount;
+    const { columnCoords, lineHeight, columnCount } = model;
 
     const rect = container.getBoundingClientRect();
     let containerPaddingLeft = 0;
@@ -464,11 +463,8 @@ export class InsertController {
       containerPaddingTop = container.paddingTop ?? 0;
     }
 
-    const editAreaLeftMm = columnCoords[0]?.x1 ?? 0;
     const editAreaTopMm = columnCoords[0]?.y1 ?? 0;
-    // mm → 화면 픽셀 (정확히는 ppm*scale)
     const screenPpm = GridCalculator.ppm * manager.scale;
-    const editAreaLeftPx = rect.left + editAreaLeftMm * screenPpm;
     const editAreaTopPx = rect.top + editAreaTopMm * screenPpm;
 
     const leftMm = Math.max(0, manager.screenPxToMm(leftPx - rect.left) - containerPaddingLeft);
@@ -478,9 +474,14 @@ export class InsertController {
 
     const staticCoords = this._mmToStatic(leftMm, topMm, widthMm, heightMm, container);
 
-    const snapLeftPx = editAreaLeftPx + staticCoords.left * avgColWidth * screenPpm;
+    // columnCoords를 직접 사용하여 gap을 정확히 반영
+    const startCol = staticCoords.left;
+    const endCol = Math.min(columnCount - 1, startCol + staticCoords.width - 1);
+    const snapLeftMm = columnCoords[startCol]?.x1 ?? 0;
+    const snapRightMm = columnCoords[endCol]?.x2 ?? 0;
+    const snapLeftPx = rect.left + (snapLeftMm + containerPaddingLeft) * screenPpm;
+    const snapWidthPx = (snapRightMm - snapLeftMm) * screenPpm;
     const snapTopPx = editAreaTopPx + staticCoords.top * lineHeight * screenPpm;
-    const snapWidthPx = staticCoords.width * avgColWidth * screenPpm;
     const snapHeightPx = staticCoords.height * lineHeight * screenPpm;
 
     return {
