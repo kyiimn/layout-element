@@ -1500,9 +1500,11 @@ export class LayoutEditController {
           if (box.top !== clamped.top) box.top = clamped.top;
         }
       }
-      // 진입 시점부터의 마우스 delta를 transform으로 적용
-      const outsideDx = state.lastClientX - state.reparentOutside.mouseStartX;
-      const outsideDy = state.lastClientY - state.reparentOutside.mouseStartY;
+      // 진입 시점부터의 마우스 delta를 transform으로 적용.
+      // 부모에 CSS transform: scale(s)이 적용되어 있으면 자식의 transform도
+      // scale의 영향을 받으므로, scale로 나누어 보정한다.
+      const outsideDx = (state.lastClientX - state.reparentOutside.mouseStartX) / manager.scale;
+      const outsideDy = (state.lastClientY - state.reparentOutside.mouseStartY) / manager.scale;
       box.style.transform = `translate(${outsideDx}px, ${outsideDy}px)`;
     }
   }
