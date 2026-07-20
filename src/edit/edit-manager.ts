@@ -7,7 +7,7 @@ import { InsertController } from "./insert-controller";
 import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
 import type { SelectionRange } from "@/types/edit";
-import type { InsertMode, InsertEventDetail, InsertPosition } from "@/types/edit";
+import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput } from "@/types/edit";
 import type { BoxRole } from "@/types/layout";
 
 /** 레이아웃 편집 대상 요소 (box만 해당) */
@@ -53,6 +53,10 @@ export interface EditManagerEvent {
   element?: HTMLElement;
   /** 삽입 완료 시 부모 컨테이너 (insert 이벤트에서만) */
   container?: HTMLElement;
+  /** reparent 모드에서 이동 후 부모 컨테이너 (layoutMove 이벤트에서만, reparent 시에만) */
+  newContainer?: HTMLElement;
+  /** reparent 모드에서 이동 전 부모 컨테이너 (layoutMove 이벤트에서만, reparent 시에만) */
+  previousContainer?: HTMLElement;
   /** 이동 전 left 값 (layoutMove 이벤트에서만) */
   previousLeft?: number;
   /** 이동 전 top 값 (layoutMove 이벤트에서만) */
@@ -128,6 +132,7 @@ export class EditManager {
   private _insertMode: InsertMode | null = null;
   private _suppressNextClick = false;
   private _layoutEditMode: boolean = false;
+  private _layoutEditType: LayoutEditType = 'move';
   private _selectableMode: boolean = true;
   private _editableRoles: Set<BoxRole> | null = null;
   private _editableBoxIds: Set<string> | null = null;
@@ -764,18 +769,42 @@ export class EditManager {
    * manager.setEditableRoles(['body', 'title']);
    * manager.layoutEditMode = true;
    * // → role이 'body' 또는 'title'인 box만 편집 가능
+   *
+   * // 부모 변경(reparent) 모드: box를 다른 컨테이너로 옮기거나 빼낼 수 있다
+   * manager.layoutEditMode = { type: 'reparent' };
    * ```
+   *
+   * @param value - `true`/`false` 또는 `{ type: 'move' | 'reparent' }`.
+   *                `true`는 `{ type: 'move' }`와 동일.
    */
   get layoutEditMode(): boolean { return this._layoutEditMode; }
-  set layoutEditMode(value: boolean) {
+  set layoutEditMode(value: LayoutEditModeInput) {
     if (this._isPrint) return;
-    if (this._layoutEditMode === value) return;
-    if (value) {
+
+    // 입력 정규화: boolean → { type: 'move' | (비활성) }
+    let nextActive: boolean;
+    let nextType: LayoutEditType;
+    if (value === false) {
+      nextActive = false;
+      nextType = this._layoutEditType; // 유지 (다시 켤 때 복원)
+    } else if (value === true) {
+      nextActive = true;
+      nextType = 'move';
+    } else {
+      nextActive = true;
+      nextType = value.type;
+    }
+
+    // 동일 상태면 no-op
+    if (this._layoutEditMode === nextActive && this._layoutEditType === nextType) return;
+
+    if (nextActive) {
       this.textEditMode = false;
       this.insertMode = null;
     }
-    this._layoutEditMode = value;
-    if (value) {
+    this._layoutEditMode = nextActive;
+    this._layoutEditType = nextType;
+    if (nextActive) {
       this._applyEditableLayoutToAllBoxes();
     } else {
       this._applyEditableLayoutToAllBoxes();
@@ -785,6 +814,17 @@ export class EditManager {
     }
     this._updateControllers();
   }
+
+  /**
+   * 현재 레이아웃 편집 모드의 동작 타입.
+   *
+   * - `'move'`: 기본 이동 모드. 부모 내부에서만 이동 (경계 클램핑 적용).
+   * - `'reparent'`: 부모 변경 모드. 드래그로 box를 자유롭게 이동하고
+   *   mouseup 시 커서 위치의 컨테이너로 reparenting.
+   *
+   * `layoutEditMode`가 `false`일 때도 이전 타입을 유지하여 반환한다.
+   */
+  get layoutEditType(): LayoutEditType { return this._layoutEditType; }
 
   /**
    * 선택 모드 활성화 상태.
@@ -1481,6 +1521,9 @@ export class EditManager {
 
   /**
    * 레이아웃 요소의 이동 완료/취소 이벤트를 발생시킨다.
+   *
+   * reparent 모드에서 부모가 변경된 경우 `newContainer`와 `previousContainer`를 전달한다.
+   * 일반 move 모드에서는 두 필드 모두 `undefined`이다.
    * @internal
    */
   _dispatchLayoutMove(
@@ -1490,6 +1533,8 @@ export class EditManager {
     left: number,
     top: number,
     canceled: boolean,
+    newContainer?: HTMLElement,
+    previousContainer?: HTMLElement,
   ): void {
     if (this._dispatching) return;
     const listeners = this._listeners.get('layoutMove');
@@ -1509,6 +1554,8 @@ export class EditManager {
             left,
             top,
             canceled,
+            newContainer,
+            previousContainer,
           });
         } catch (e) {
           console.error(e);

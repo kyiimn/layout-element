@@ -1,3 +1,4 @@
 export * from "./cursor.type";
 export * from "./selection.type";
 export * from "./insert.type";
+export * from "./layout.type";
