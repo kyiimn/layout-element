@@ -149,14 +149,14 @@ export class FontLoader {
    * @param fontName 요청된 폰트명
    * @returns 기본 폰트 패밀리명
    */
-  public getFontFamily(fontName: string) {
+  public getFontFamily(fontName?: string) {
     if (!this.ready) throw new Error('font map is not ready');
-    return this._fontFaces.find(f => f.name === fontName)?.fontFace.family;
+    return this._fontFaces.find(f => f.name === fontName)?.fontFace.family || this._fontFaces[0].fontFace.family;
   }
 
   get fontFaces() {
     if (!this.ready) throw new Error('font map is not ready');
-    return this._fontFaces;
+    return this._fontFaces.map(f => f.fontFace);
   }
 
   /** 초기화 완료 여부 */

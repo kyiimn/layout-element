@@ -153,7 +153,7 @@ export class LayoutBoxElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
-      styleEl.sheet.insertRule(":host(:not([border])) { box-shadow: #ccc 0px 0px 0px 1px inset; }", 1);
+      styleEl.sheet.insertRule(":host(:not([border])) { box-shadow: #999 0px 0px 0px 1px inset; }", 1);
       styleEl.sheet.insertRule(":host([hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 2);
       styleEl.sheet.insertRule(":host([selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; }", 3);
       styleEl.sheet.insertRule(":host([editable-layout][hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; }", 4);
@@ -211,7 +211,7 @@ export class LayoutBoxElement extends HTMLElement {
 
     this._shadowRoot.querySelectorAll(':scope > :not(slot):not(style):not(.resize-handle)').forEach(node => node.remove());
 
-    const colorManager = ColorRegistry.getInstance();
+    const colorRegistry = ColorRegistry.getInstance();
     if (this.borderColor) {
       this.setAttribute('border', '');
       const borderStyle: Partial<CSSStyleDeclaration> = {
@@ -220,7 +220,7 @@ export class LayoutBoxElement extends HTMLElement {
         zIndex: '99999999',
       };
       const borderInsideStyle: Partial<CSSStyleDeclaration> = {
-        borderColor: colorManager.getCSSColor(this.borderColor),
+        borderColor: colorRegistry.getCSSColor(this.borderColor),
         borderStyle: this.borderStyle || DEFAULT_BORDER_STYLE,
         borderWidth: '0',
       };
@@ -819,10 +819,10 @@ export class LayoutBoxElement extends HTMLElement {
     this.items.forEach(c => {
       data.push(...c.printPostData)
     });
-    const colorManager = ColorRegistry.getInstance();
+    const colorRegistry = ColorRegistry.getInstance();
 
     data.push({
-      color: this.borderColor ? colorManager.get(this.borderColor) : undefined,
+      color: this.borderColor ? colorRegistry.get(this.borderColor) : undefined,
       data: {
         ...this.data,
         borderStyle: this.borderStyle || DEFAULT_BORDER_STYLE,
