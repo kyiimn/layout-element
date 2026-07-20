@@ -55,6 +55,11 @@
         color: #fff;
         border-color: #1a7e3a;
       }
+      #toolbar button.active-layout-reparent {
+        background: #7a1ae8;
+        color: #fff;
+        border-color: #7a1ae8;
+      }
       #toolbar select {
         padding: 8px 12px;
         border: 1px solid #ccc;
@@ -141,7 +146,8 @@
       >
         <button id="btn-read" class="active">📄 읽기 모드</button>
         <button id="btn-edit">✏️ 텍스트 편집 모드</button>
-        <button id="btn-layout">📐 레이아웃 편집 모드</button>
+        <button id="btn-layout">📐 레이아웃 편집 (move)</button>
+        <button id="btn-layout-reparent">🔀 레이아웃 편집 (reparent)</button>
       </div>
       <div
         style="
@@ -210,6 +216,9 @@
         const btnRead = document.getElementById("btn-read");
         const btnEdit = document.getElementById("btn-edit");
         const btnLayout = document.getElementById("btn-layout");
+        const btnLayoutReparent = document.getElementById(
+          "btn-layout-reparent",
+        );
         const btnInsert = document.getElementById("btn-insert");
         const insertType = document.getElementById("insert-type");
         const insertPosition = document.getElementById("insert-position");
@@ -220,6 +229,11 @@
         function clearAllEditMode() {
           em.textEditMode = false;
           em.layoutEditMode = false;
+        }
+
+        function clearLayoutActiveButtons() {
+          btnLayout.classList.remove("active-layout");
+          btnLayoutReparent.classList.remove("active-layout-reparent");
         }
 
         function clearInsertMode() {
@@ -236,7 +250,7 @@
           clearAllEditMode();
           btnRead.classList.add("active");
           btnEdit.classList.remove("active");
-          btnLayout.classList.remove("active-layout");
+          clearLayoutActiveButtons();
           hint.textContent = "";
         }
 
@@ -248,7 +262,7 @@
           em.textEditMode = true;
           btnRead.classList.remove("active");
           btnEdit.classList.add("active");
-          btnLayout.classList.remove("active-layout");
+          clearLayoutActiveButtons();
           hint.textContent = "단락을 클릭하여 텍스트를 편집할 수 있습니다.";
         }
 
@@ -257,12 +271,27 @@
           currentMode = "layout";
           clearAllEditMode();
           em.setEditableRoles(["none"]);
-          em.layoutEditMode = true;
+          em.layoutEditMode = true; // { type: 'move' }와 동일
           btnRead.classList.remove("active");
           btnEdit.classList.remove("active");
+          clearLayoutActiveButtons();
           btnLayout.classList.add("active-layout");
           hint.textContent =
-            "레이아웃 요소(box)를 클릭하여 선택하세요. Ctrl+클릭으로 다중 선택.";
+            "레이아웃 요소(box)를 드래그하여 이동할 수 있습니다. 클릭으로 선택, Ctrl+클릭으로 다중 선택.";
+        }
+
+        function setLayoutReparentMode() {
+          clearInsertMode();
+          currentMode = "layout-reparent";
+          clearAllEditMode();
+          em.setEditableRoles(["none"]);
+          em.layoutEditMode = { type: "reparent" };
+          btnRead.classList.remove("active");
+          btnEdit.classList.remove("active");
+          clearLayoutActiveButtons();
+          btnLayoutReparent.classList.add("active-layout-reparent");
+          hint.textContent =
+            "reparent 모드: box를 드래그하여 다른 컨테이너로 옮기거나 빼낼 수 있습니다. mouseup 시 커서 위치의 컨테이너로 부모가 변경됩니다.";
         }
 
         function toggleInsertMode() {
@@ -277,6 +306,7 @@
             em.layoutEditMode = true;
             btnRead.classList.remove("active");
             btnEdit.classList.remove("active");
+            clearLayoutActiveButtons();
             btnLayout.classList.add("active-layout");
             btnInsert.classList.add("active-insert");
             em.insertMode = {
@@ -291,6 +321,7 @@
         btnRead.addEventListener("click", setReadMode);
         btnEdit.addEventListener("click", setTextEditMode);
         btnLayout.addEventListener("click", setLayoutEditMode);
+        btnLayoutReparent.addEventListener("click", setLayoutReparentMode);
         btnInsert.addEventListener("click", toggleInsertMode);
 
         insertType.addEventListener("change", () => {
@@ -351,6 +382,9 @@
 
         // 레이아웃 이동 이벤트
         em.addEventListener("layoutMove", (event) => {
+          const reparentInfo = event.newContainer
+            ? ` (reparent: ${event.previousContainer?.id ?? "(null)"} → ${event.newContainer.id})`
+            : "";
           if (event.canceled) {
             console.log("[EditManager] layoutMove CANCELED", {
               element: {
@@ -362,19 +396,26 @@
               left: event.left,
               top: event.top,
               canceled: event.canceled,
+              newContainer: event.newContainer?.id,
+              previousContainer: event.previousContainer?.id,
             });
           } else {
-            console.log("[EditManager] layoutMove", {
-              element: {
-                id: event.layoutElement?.id,
-                type: event.layoutElement?.type,
+            console.log(
+              `[EditManager] layoutMove${reparentInfo}`,
+              {
+                element: {
+                  id: event.layoutElement?.id,
+                  type: event.layoutElement?.type,
+                },
+                previousLeft: event.previousLeft,
+                previousTop: event.previousTop,
+                left: event.left,
+                top: event.top,
+                canceled: event.canceled,
+                newContainer: event.newContainer?.id,
+                previousContainer: event.previousContainer?.id,
               },
-              previousLeft: event.previousLeft,
-              previousTop: event.previousTop,
-              left: event.left,
-              top: event.top,
-              canceled: event.canceled,
-            });
+            );
           }
           updateInfoPanel();
         });
