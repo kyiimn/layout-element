@@ -205,6 +205,12 @@ export class InsertController {
       canceled: false,
     };
     manager._dispatchInsert(detail);
+
+    manager._dispatchLayoutAdd({
+      element,
+      container,
+      source: 'insert',
+    });
   }
 
   /**

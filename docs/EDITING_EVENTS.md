@@ -105,6 +105,8 @@ export type EditManagerEventType =
   | 'layoutSelectionChange'
   | 'layoutMove'
   | 'layoutResize'
+  | 'layoutAdd'
+  | 'layoutRemove'
   | 'insert'
   | 'insertCancel';
 ```
@@ -138,6 +140,10 @@ export interface EditManagerEvent {
   height?: number;
   position?: InsertPosition;
   zIndex?: number;
+  /** 레이아웃 요소 추가 상세 정보 (layoutAdd 이벤트에서만) */
+  layoutAddDetail?: LayoutAddEventDetail;
+  /** 레이아웃 요소 제거 상세 정보 (layoutRemove 이벤트에서만) */
+  layoutRemoveDetail?: LayoutRemoveEventDetail;
 }
 ```
 
@@ -156,7 +162,7 @@ export type EditManagerEventListener = (event: EditManagerEvent) => void;
 | 카테고리 | 이벤트 타입 | 발생 주체 |
 |----------|------------|----------|
 | **텍스트 편집** | `focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove` | `TextEditController` |
-| **레이아웃 편집** | `layoutSelectionChange`, `layoutMove`, `layoutResize` | `LayoutEditController`, `LayoutSelectionController`, `EditManager.selectLayout` |
+| **레이아웃 편집** | `layoutSelectionChange`, `layoutMove`, `layoutResize`, `layoutAdd`, `layoutRemove` | `LayoutEditController`, `LayoutSelectionController`, `InsertController`, `EditManager.selectLayout` |
 | **삽입 모드** | `insert`, `insertCancel` | `InsertController` |
 
 ---
@@ -473,7 +479,9 @@ manager.addEventListener('insert', (event) => {
 
 **발생 트리거**: `InsertController._finishInsert()`에서 `EditManager._dispatchInsert(detail)`를 호출한다. 드래그 거리가 3px 미만이거나, width/height가 1 미만이면 `_cleanup()` 후 return하여 이벤트가 발생하지 않는다.
 
-**`_suppressNextClick` 설정**: `_dispatchInsert`는 `_suppressNextClick = true`를 설정하여, 삽입 직후 발생하는 클릭 이벤트가 `LayoutSelectionController._onClick`에서 무시되도록 한다. 자세한 내용은 [8. 삽입 직후 클릭 억제](#8-삽입-직후-클릭-억제)를 참조한다.
+**`layoutAdd` 이벤트 동시 발생**: `_dispatchInsert` 호출 직후 `_dispatchLayoutAdd`도 함께 발생한다. `insert` 이벤트의 리스너에서 `layoutAdd` 이벤트도 함께 처리해야 하는 경우, 별도 리스너로 `layoutAdd`를 구독하면 된다.
+
+**`_suppressNextClick` 설정**: `_dispatchInsert`는 `_suppressNextClick = true`를 설정하여, 삽입 직후 발생하는 클릭 이벤트가 `LayoutSelectionController._onClick`에서 무시되도록 한다. 자세한 내용은 [9. 삽입 직후 클릭 억제](#9-삽입-직후-클릭-억제)를 참조한다.
 
 ### 7.2 `insertCancel`
 
@@ -497,7 +505,100 @@ manager.addEventListener('insertCancel', (event) => {
 
 ---
 
-## 8. 삽입 직후 클릭 억제
+## 8. 레이아웃 추가/제거 이벤트
+
+레이아웃 요소(box, paragraph, image)가 DOM에 추가되거나 제거될 때 발생하는 이벤트이다. 삽입 모드, reparent, 프로그래밍 방식(`appendChildData`) 모두 포함한다.
+
+### 8.1 `layoutAdd`
+
+레이아웃 요소가 DOM에 추가될 때 발생한다.
+
+```typescript
+manager.addEventListener('layoutAdd', (event) => {
+  console.log(event.type);               // 'layoutAdd'
+  console.log(event.layoutAddDetail?.element);    // 추가된 요소
+  console.log(event.layoutAddDetail?.container);  // 부모 컨테이너
+  console.log(event.layoutAddDetail?.source);     // 'insert' | 'reparent' | 'programmatic'
+});
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `type` | `'layoutAdd'` | 이벤트 타입 |
+| `paragraph` | `null` | 항상 `null` |
+| `controller` | `null` | 항상 `null` |
+| `layoutAddDetail.element` | `HTMLElement` | 추가된 요소 (`LayoutBoxElement` \| `LayoutParagraphElement` \| `LayoutImageElement`) |
+| `layoutAddDetail.container` | `HTMLElement` | 부모 컨테이너 (`LayoutDocumentElement` \| `LayoutBoxElement`) |
+| `layoutAddDetail.source` | `'insert' \| 'reparent' \| 'programmatic'` | 추가 방식 |
+
+**발생 트리거**:
+
+| source | 트리거 | 호출 경로 |
+|--------|--------|----------|
+| `'insert'` | 삽입 모드로 새 요소 생성 | `InsertController._finishInsert()` → `EditManager._dispatchLayoutAdd({ source: 'insert' })` |
+| `'reparent'` | reparent 모드에서 box 이동 | `LayoutEditController._tryReparent()` → `EditManager._dispatchLayoutAdd({ source: 'reparent' })` |
+
+**재진입 보호**: 다른 이벤트 디스패치 중에는 `layoutAdd` 이벤트가 발생하지 않는다 (`_dispatching` 플래그).
+
+### 8.2 `layoutRemove`
+
+레이아웃 요소가 DOM에서 제거될 때 발생한다.
+
+```typescript
+manager.addEventListener('layoutRemove', (event) => {
+  console.log(event.type);                    // 'layoutRemove'
+  console.log(event.layoutRemoveDetail?.element);          // 제거된 요소
+  console.log(event.layoutRemoveDetail?.previousContainer);// 이전 부모 컨테이너
+  console.log(event.layoutRemoveDetail?.source);           // 'reparent' | 'programmatic'
+});
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `type` | `'layoutRemove'` | 이벤트 타입 |
+| `paragraph` | `null` | 항상 `null` |
+| `controller` | `null` | 항상 `null` |
+| `layoutRemoveDetail.element` | `HTMLElement` | 제거된 요소 (`LayoutBoxElement` \| `LayoutParagraphElement` \| `LayoutImageElement`) |
+| `layoutRemoveDetail.previousContainer` | `HTMLElement` | 제거되기 전 부모 컨테이너 (`LayoutDocumentElement` \| `LayoutBoxElement`) |
+| `layoutRemoveDetail.source` | `'reparent' \| 'programmatic'` | 제거 방식 |
+
+**발생 트리거**:
+
+| source | 트리거 | 호출 경로 |
+|--------|--------|----------|
+| `'reparent'` | reparent 모드에서 이전 컨테이너로부터 box 제거 | `LayoutEditController._tryReparent()` → `box.remove()` → `EditManager._dispatchLayoutRemove({ source: 'reparent' })` |
+
+**재진입 보호**: 다른 이벤트 디스패치 중에는 `layoutRemove` 이벤트가 발생하지 않는다 (`_dispatching` 플래그).
+
+### 8.3 `LayoutAddEventDetail` 타입
+
+```typescript
+interface LayoutAddEventDetail {
+  element: HTMLElement;        // 추가된 요소
+  container: HTMLElement;      // 부모 컨테이너
+  source: 'insert' | 'reparent' | 'programmatic';  // 추가 방식
+}
+```
+
+### 8.4 `LayoutRemoveEventDetail` 타입
+
+```typescript
+interface LayoutRemoveEventDetail {
+  element: HTMLElement;        // 제거된 요소
+  previousContainer: HTMLElement;  // 이전 부모 컨테이너
+  source: 'reparent' | 'programmatic';  // 제거 방식
+}
+```
+
+### 8.5 렌더링 보장
+
+`layoutAdd` 이벤트는 요소가 DOM에 추가되고 전체 초기화 파이프라인(`_layoutStructure` → `_applyStyle` → `_renderBorder` → `_propagateInheritStyle` → `render`)이 완료된 **후**에 발생한다. 이벤트 리스너에서 요소의 위치, 크기, 자식 상태에 접근할 수 있다.
+
+`layoutRemove` 이벤트는 요소가 DOM에서 제거되기 **직전**에 발생한다. 이벤트 리스너에서 제거될 요소의 `data` 속성 등에 여전히 접근할 수 있다.
+
+---
+
+## 9. 삽입 직후 클릭 억제
 
 ### 8.1 `_suppressNextClick` 플래그
 
@@ -546,7 +647,7 @@ _consumeSuppressNextClick(): boolean
 
 ---
 
-## 9. 재진입 보호
+## 10. 재진입 보호
 
 ### 9.1 `_dispatching` 플래그
 
@@ -582,7 +683,7 @@ _dispatchInsert(detail: InsertEventDetail): void {
 
 ---
 
-## 10. 전체 이벤트 발생 흐름
+## 11. 전체 이벤트 발생 흐름
 
 ### 10.1 텍스트 편집
 
@@ -687,7 +788,7 @@ LayoutSelectionController._onClick
 
 ---
 
-## 11. 이벤트 요약 표
+## 12. 이벤트 요약 표
 
 | 이벤트 | 카테고리 | payload 핵심 필드 | 발생 조건 |
 |--------|---------|-------------------|-----------|
@@ -700,25 +801,28 @@ LayoutSelectionController._onClick
 | `layoutSelectionChange` | 레이아웃 | `selectedLayouts`, `previousLayouts` | box 선택 변경 |
 | `layoutMove` | 레이아웃 | `layoutElement`, `previousLeft/Top`, `left/top`, `canceled`, `newContainer?`, `previousContainer?` | 드래그 이동 완료/취소 (reparent 모드 시 부모 정보 포함) |
 | `layoutResize` | 레이아웃 | `layoutElement`, `previous*`, `left/top/width/height`, `canceled` | 리사이즈 완료/취소 |
+| `layoutAdd` | 레이아웃 | `layoutAddDetail.element`, `layoutAddDetail.container`, `layoutAddDetail.source` | 레이아웃 요소 DOM 추가 (삽입/reparent) |
+| `layoutRemove` | 레이아웃 | `layoutRemoveDetail.element`, `layoutRemoveDetail.previousContainer`, `layoutRemoveDetail.source` | 레이아웃 요소 DOM 제거 (reparent) |
 | `insert` | 삽입 | `position`, `element`, `container`, `left/top/width/height`, `zIndex`, `canceled` | 요소 삽입 완료 |
 | `insertCancel` | 삽입 | (없음) | 삽입 드래그 ESC 취소 |
 
 ---
 
-## 12. 핵심 파일
+## 13. 핵심 파일
 
 | 파일 | 역할 |
 |------|------|
 | `src/edit/edit-manager.ts` | `EditManager`: 이벤트 시스템, `addEventListener`/`removeEventListener`, `_dispatch*` 디스패처, `_dispatching` 재진입 보호, `_suppressNextClick` 클릭 억제 |
 | `src/edit/text-edit-controller.ts` | `TextEditController`: 텍스트 편집 이벤트 발생 (`_notifyTextChange`, `_notifyStyleChange`, `_notifySelectionStart`, `_notifySelectionEnd`, `_notifyCursorMove`, `_requestFocus`, `_releaseFocus`) |
-| `src/edit/layout-edit-controller.ts` | `LayoutEditController`: `layoutMove`, `layoutResize` 이벤트 발생 (`_dispatchLayoutMove`, `_dispatchLayoutResize` 호출) |
+| `src/edit/layout-edit-controller.ts` | `LayoutEditController`: `layoutMove`, `layoutResize` 이벤트 발생 (`_dispatchLayoutMove`, `_dispatchLayoutResize` 호출), `layoutAdd`/`layoutRemove` 이벤트 발생 (reparent 시 `_dispatchLayoutAdd`/`_dispatchLayoutRemove` 호출) |
 | `src/edit/layout-selection-controller.ts` | `LayoutSelectionController`: `_consumeSuppressNextClick` 소비, `layoutSelectionChange` 간접 발생 (`selectLayout` 호출) |
-| `src/edit/insert-controller.ts` | `InsertController`: `insert`, `insertCancel` 이벤트 발생 (`_dispatchInsert`, `_dispatchInsertCancel` 호출) |
+| `src/edit/insert-controller.ts` | `InsertController`: `insert`, `insertCancel` 이벤트 발생 (`_dispatchInsert`, `_dispatchInsertCancel` 호출), `layoutAdd` 이벤트 발생 (`_dispatchLayoutAdd` 호출) |
 | `src/types/edit/insert.type.ts` | `InsertEventDetail` 타입 정의 (`insert` 이벤트 payload) |
+| `src/types/edit/layout.type.ts` | `LayoutEditModeConfig`, `LayoutAddEventDetail`, `LayoutRemoveEventDetail` 타입 정의 |
 
 ---
 
-## 13. 주의사항
+## 14. 주의사항
 
 - **재진입 금지**: 리스너 내에서 `EditManager` 상태를 변경하여 동일한 이벤트를 다시 발생시키려 하면 무시된다 (`_dispatching` 가드). 다른 타입의 이벤트도 동일 플래그를 공유하므로, 리스너 내에서 다른 이벤트를 발생시키는 것도 차단된다.
 - **예외 격리**: 리스너에서 예외가 발생해도 `console.error`로만 출력되고 다른 리스너나 `EditManager` 상태에는 영향을 주지 않는다.
@@ -733,7 +837,7 @@ LayoutSelectionController._onClick
 
 ---
 
-## 14. 사용 예시
+## 15. 사용 예시
 
 ### 14.1 텍스트 편집 UI 연동
 

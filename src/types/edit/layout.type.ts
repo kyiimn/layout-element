@@ -28,3 +28,33 @@ export interface LayoutEditModeConfig {
  * - `{ type: 'move' | 'reparent' }` → 지정한 타입으로 활성화
  */
 export type LayoutEditModeInput = boolean | LayoutEditModeConfig;
+
+/**
+ * 레이아웃 요소 추가 이벤트 상세 정보.
+ *
+ * `layoutAdd` 이벤트는 레이아웃 요소(box, paragraph, image)가 DOM에 추가될 때 발생한다.
+ * 삽입 모드, reparent, 프로그래밍 방식(`appendChildData`) 모두 포함한다.
+ */
+export interface LayoutAddEventDetail {
+  /** 추가된 요소 (LayoutBoxElement | LayoutParagraphElement | LayoutImageElement) */
+  element: HTMLElement;
+  /** 추가된 요소의 부모 컨테이너 (LayoutDocumentElement | LayoutBoxElement) */
+  container: HTMLElement;
+  /** 추가 방식 */
+  source: 'insert' | 'reparent' | 'programmatic';
+}
+
+/**
+ * 레이아웃 요소 제거 이벤트 상세 정보.
+ *
+ * `layoutRemove` 이벤트는 레이아웃 요소(box, paragraph, image)가 DOM에서 제거될 때 발생한다.
+ * reparent 시 이전 컨테이너에서 제거되는 경우와 프로그래밍 방식 제거 모두 포함한다.
+ */
+export interface LayoutRemoveEventDetail {
+  /** 제거된 요소 (LayoutBoxElement | LayoutParagraphElement | LayoutImageElement) */
+  element: HTMLElement;
+  /** 제거되기 전 부모 컨테이너 (LayoutDocumentElement | LayoutBoxElement) */
+  previousContainer: HTMLElement;
+  /** 제거 방식 */
+  source: 'reparent' | 'programmatic';
+}

@@ -1341,10 +1341,27 @@ export class LayoutEditController {
     boxData.zIndex = newZIndex;
 
     // 기존 box 제거
+    const previousContainer = box.parentElement;
     box.remove();
 
     // 새 컨테이너에 데이터 주입하여 새 box 생성
     const newBox = newContainer.appendChildData(boxData) as LayoutBoxElement;
+
+    // layoutRemove 이벤트: 이전 컨테이너에서 제거됨
+    if (previousContainer) {
+      manager._dispatchLayoutRemove({
+        element: box,
+        previousContainer: previousContainer as HTMLElement,
+        source: 'reparent',
+      });
+    }
+
+    // layoutAdd 이벤트: 새 컨테이너에 추가됨
+    manager._dispatchLayoutAdd({
+      element: newBox,
+      container: newContainer as HTMLElement,
+      source: 'reparent',
+    });
 
     return { container: newContainer, newBox };
   }

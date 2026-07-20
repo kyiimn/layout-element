@@ -7,7 +7,7 @@ import { InsertController } from "./insert-controller";
 import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
 import type { SelectionRange } from "@/types/edit";
-import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput } from "@/types/edit";
+import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail } from "@/types/edit";
 import type { BoxRole } from "@/types/layout";
 
 /** 레이아웃 편집 대상 요소 (box만 해당) */
@@ -26,6 +26,8 @@ export type EditManagerEventType =
   | 'layoutSelectionChange'
   | 'layoutMove'
   | 'layoutResize'
+  | 'layoutAdd'
+  | 'layoutRemove'
   | 'insert'
   | 'insertCancel';
 
@@ -79,6 +81,10 @@ export interface EditManagerEvent {
   position?: InsertPosition;
   /** 삽입 요소의 zIndex (insert 이벤트에서만) */
   zIndex?: number;
+  /** 레이아웃 요소 추가 상세 정보 (layoutAdd 이벤트에서만) */
+  layoutAddDetail?: LayoutAddEventDetail;
+  /** 레이아웃 요소 제거 상세 정보 (layoutRemove 이벤트에서만) */
+  layoutRemoveDetail?: LayoutRemoveEventDetail;
 }
 
 /**
@@ -1628,6 +1634,64 @@ export class EditManager {
       return null;
     }
     return target;
+  }
+
+  /**
+   * 레이아웃 요소 추가 이벤트를 발생시킨다.
+   * 삽입 모드, reparent, 프로그래밍 방식 모두 포함한다.
+   * @internal
+   */
+  _dispatchLayoutAdd(detail: LayoutAddEventDetail): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('layoutAdd');
+    if (!listeners || listeners.size === 0) return;
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'layoutAdd',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null as unknown as TextEditController,
+            layoutAddDetail: detail,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
+
+  /**
+   * 레이아웃 요소 제거 이벤트를 발생시킨다.
+   * reparent 시 이전 컨테이너에서 제거, 프로그래밍 방식 제거 모두 포함한다.
+   * @internal
+   */
+  _dispatchLayoutRemove(detail: LayoutRemoveEventDetail): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('layoutRemove');
+    if (!listeners || listeners.size === 0) return;
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'layoutRemove',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null as unknown as TextEditController,
+            layoutRemoveDetail: detail,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
   }
 
   private _dispatchLayoutSelection(previousLayouts: LayoutElement[]): void {

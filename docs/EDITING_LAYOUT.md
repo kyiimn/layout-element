@@ -1287,6 +1287,8 @@ _tryReparent(box, clientX, clientY, state)
 
 **`appendChildData`**: `LayoutBoxElement`와 `LayoutDocumentElement`의 public 메서드로, `BoxData`를 받아 `<x-layout-box>` 요소를 생성하고 `data` setter의 전체 초기화 파이프라인(`_layoutStructure` → `_applyStyle` → `_renderBorder` → `_propagateInheritStyle` → `render`)을 실행하여 반환한다.
 
+**레이아웃 추가/제거 이벤트**: `_tryReparent`는 기존 box 제거 후 `_dispatchLayoutRemove`, 새 box 생성 후 `_dispatchLayoutAdd`를 호출하여 레이아웃 변경을 외부에 알린다. `source` 필드는 `'reparent'`로 설정된다.
+
 #### 4.5.5 `_onMouseUp`에서의 reparent 처리
 
 reparent 모드에서 `_onMouseUp`은 transform이 유지된 상태에서 `_tryReparent`를 먼저 호출한다:
