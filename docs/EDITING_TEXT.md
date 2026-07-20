@@ -1693,7 +1693,20 @@ paragraph.render(); // postRender() 자동 호출
 
 `render()`가 실행되면 내부에서 `postRender()`를 호출하므로, 호스트는 별도로 `postRender()`를 호출할 필요가 없다.
 
-### 13.3 커서/선택 프로그래밍 방식 제어
+### 13.3 편집된 텍스트 읽기
+
+`paragraph.data`의 `content` 필드는 렌더링된 실제 텍스트를 반환한다.
+편집 모드에서 텍스트가 수정된 경우, `model.inputContent`의 값이 반영되며,
+모델이 아직 없는 초기 상태에서는 setter로 전달된 원본 콘텐츠를 반환한다.
+
+```ts
+const currentText = paragraph.data.content; // 편집 반영된 실제 텍스트
+```
+
+편집 중인 텍스트를 읽을 때 `paragraph._content`가 아닌 `paragraph.data.content`를 사용해야
+최신 렌더링 상태를 가져올 수 있다.
+
+### 13.4 커서/선택 프로그래밍 방식 제어
 
 ```ts
 controller.setCursor({ textOffset: 5 });
@@ -1703,7 +1716,7 @@ controller.focus(); // 커서/선택 표시
 
 `setCursor`와 `setSelection`은 `_cursorModel`만 갱신하고 시각적 업데이트를 수행한다. 실제로 보이게 하려면 `focus()`를 호출해 textarea에 포커스를 줘야 한다.
 
-### 13.4 오버플로우 처리
+### 13.5 오버플로우 처리
 
 ```ts
 paragraph.addEventListener('render-error', (e) => {
@@ -1716,7 +1729,7 @@ paragraph.addEventListener('render-error', (e) => {
 
 `render-error` 이벤트는 `paragraph.render()` 내부에서 overflow가 0보다 클 때 `bubbles: true`, `composed: true`로 디스패치된다. 호스트는 이 이벤트를 받아 사용자에게 경고하거나 단락 높이를 조정할 수 있다.
 
-### 13.5 undo/redo 구현 가이드
+### 13.6 undo/redo 구현 가이드
 
 - 호스트 프로그램이 `model.inputContent` 변경 이력을 스택으로 관리한다.
 - undo: 이전 `inputContent`를 복원한 후 `paragraph.render()` 호출.

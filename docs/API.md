@@ -370,7 +370,7 @@ class LayoutParagraphElement extends HTMLElement
 
 | 이름 | 타입 | 단위 | 설명 |
 |---|---|---|---|
-| `data` | `ParagraphData` | — | 한 번에 갱신. |
+| `data` | `ParagraphData` | — | 한 번에 갱신. `content` 필드는 렌더링된 실제 텍스트를 반환 (편집 반영). |
 | `column` | `number \| number[]` (via `data`) | — | 하위 컬럼 그리드 (생략 시 부모 상속). |
 | `gap` | `number \| number[]` (via `data`) | mm | 하위 컬럼 간격. |
 | `zIndex` | `number` (via `data`) | — | 렌더링 순서. |
@@ -399,6 +399,13 @@ paragraph.addEventListener('render-error', (e) => {
   console.warn(`Paragraph ${detail.id} 오버플로우 ${detail.overflow}자`);
 });
 ```
+
+#### `data` getter 동작
+
+- `content` 필드는 렌더링된 실제 텍스트를 반환한다.
+  - 모델이 생성된 후(렌더링 완료)에는 `model.inputContent` 값을 사용한다.
+  - 편집 모드에서 텍스트가 수정된 경우, 수정된 내용이 `content`에 반영된다.
+  - 모델이 아직 없는 초기 상태에서는 setter로 전달된 원본 콘텐츠를 반환한다.
 
 #### `data` setter 동작
 

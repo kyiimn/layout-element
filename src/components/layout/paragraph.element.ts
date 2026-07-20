@@ -1,6 +1,6 @@
 import { TextLayoutEngine } from "@/core";
 import { TextEditController } from "@/edit/text-edit-controller";
-import { ColorRegistry } from "@/resource";
+import { ColorRegistry, FontLoader } from "@/resource";
 import { InheritStyle, ParagraphData, ParagraphStyle, TextBlockData, TextStyle } from "@/types";
 import { checkOverlap, genUUID } from "@/utils";
 import { LayoutBoxElement } from "./box.element";
@@ -110,7 +110,9 @@ export class LayoutParagraphElement extends HTMLElement {
     const lineHeight = this.parentModel.lineHeight;
     const paddingTop = this._inheritStyle.paddingTop || 0;
 
-    const colorManager = ColorRegistry.getInstance();
+    const colorRegistry = ColorRegistry.getInstance();
+    const fontLoader = FontLoader.getInstance();
+
     if (!this._styleRule) {
       const styleEl = document.createElement('style');
       this._shadowRoot.appendChild(styleEl);
@@ -134,8 +136,8 @@ export class LayoutParagraphElement extends HTMLElement {
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
       this._styleRule.style,
       {
-        color: color !== undefined ? colorManager.getCSSColor(color) : undefined,
-        fontFamily,
+        color: color !== undefined ? colorRegistry.getCSSColor(color) : undefined,
+        fontFamily: fontFamily !== undefined ? fontLoader.getFontFamily(fontFamily) : undefined,
         fontStyle,
         fontWeight: fontWeight ? String(fontWeight) : undefined,
         fontSize: `${fontSize}mm`,
@@ -267,11 +269,20 @@ export class LayoutParagraphElement extends HTMLElement {
     this._perfStructureChanged = true;
   }
 
+  /**
+   * 단락의 현재 데이터를 반환한다.
+   * `content`는 렌더링된 실제 텍스트를 기반으로 한다.
+   * 편집 모드에서 텍스트가 수정된 경우 `model.inputContent`에서
+   * 현재 렌더링된 텍스트를 가져오며, 모델이 아직 생성되지 않은
+   * 초기 상태에서는 세터로 전달된 원본 콘텐츠를 반환한다.
+   *
+   * @returns 렌더링된 텍스트가 반영된 단락 데이터
+   */
   get data() {
     return {
       id: this.id,
       column: this._column,
-      content: this._content,
+      content: this._model?.inputContent ?? this._content,
       gap: this._gap,
       paragraphStyle: this._paragraphStyle,
       textStyle: this._textStyle,
