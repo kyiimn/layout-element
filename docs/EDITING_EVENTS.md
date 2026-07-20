@@ -123,6 +123,10 @@ export interface EditManagerEvent {
   layoutElement?: LayoutElement;
   element?: HTMLElement;
   container?: HTMLElement;
+  /** reparent 모드에서 이동 후 부모 컨테이너 (layoutMove 이벤트에서만) */
+  newContainer?: HTMLElement;
+  /** reparent 모드에서 이동 전 부모 컨테이너 (layoutMove 이벤트에서만) */
+  previousContainer?: HTMLElement;
   previousLeft?: number;
   previousTop?: number;
   left?: number;
@@ -332,7 +336,7 @@ manager.addEventListener('layoutSelectionChange', (event) => {
 
 ### 6.2 `layoutMove`
 
-드래그 이동이 완료되거나 ESC로 취소될 때 발생한다.
+드래그 이동이 완료되거나 ESC로 취소될 때 발생한다. reparent 모드(`layoutEditType === 'reparent'`)에서 부모가 변경된 경우 `newContainer`/`previousContainer` 필드가 추가로 전달된다.
 
 ```typescript
 manager.addEventListener('layoutMove', (event) => {
@@ -342,6 +346,9 @@ manager.addEventListener('layoutMove', (event) => {
   console.log(event.left);           // 이동 후 left 값 (ESC 취소 시 previousLeft와 동일)
   console.log(event.top);            // 이동 후 top 값 (ESC 취소 시 previousTop와 동일)
   console.log(event.canceled);       // ESC 취소 여부
+  // reparent 모드에서만:
+  console.log(event.newContainer);      // 새 부모 컨테이너 (부모 변경 시에만)
+  console.log(event.previousContainer); // 이전 부모 컨테이너 (부모 변경 시에만)
 });
 ```
 
@@ -356,19 +363,25 @@ manager.addEventListener('layoutMove', (event) => {
 | `left` | `number` | 이동 후 `left` 값. ESC 취소 시 `previousLeft`와 동일 |
 | `top` | `number` | 이동 후 `top` 값. ESC 취소 시 `previousTop`와 동일 |
 | `canceled` | `boolean` | ESC 키로 드래그가 취소되었으면 `true`, 정상 완료되었으면 `false` |
+| `newContainer?` | `HTMLElement \| undefined` | reparent 모드에서 부모가 변경된 경우 새 부모 컨테이너. 부모 변경이 없거나 일반 move 모드이면 `undefined` |
+| `previousContainer?` | `HTMLElement \| undefined` | reparent 모드에서 부모가 변경된 경우 이전 부모 컨테이너. `newContainer`가 있을 때만 설정됨 |
 
 **발생 시점**:
 
-| 시점 | `canceled` | `left`/`top` |
-|------|-----------|--------------|
-| **mouseup (드래그 완료)** | `false` | 스냅/클램핑이 적용된 최종 위치 |
-| **ESC (드래그 취소)** | `true` | `previousLeft`/`previousTop`와 동일 (시작 위치로 복원됨) |
+| 시점 | `canceled` | `left`/`top` | `newContainer`/`previousContainer` |
+|------|-----------|--------------|-----------------------------------|
+| **mouseup (드래그 완료, move 모드)** | `false` | 스냅/클램핑 적용 최종 위치 | `undefined` |
+| **mouseup (드래그 완료, reparent 모드, 부모 변경)** | `false` | 새 컨테이너 기준 좌표 | 새 부모/이전 부모 |
+| **mouseup (드래그 완료, reparent 모드, 부모 유지)** | `false` | 최종 위치 | `undefined` |
+| **ESC (드래그 취소)** | `true` | `previousLeft`/`previousTop`와 동일 | `undefined` (reparent는 mouseup 시에만 발생) |
 
-**발생 트리거**: `LayoutEditController`의 `_onMouseUp` 또는 `_onKeyDown(ESC)`에서 `EditManager._dispatchLayoutMove(element, previousLeft, previousTop, left, top, canceled)`를 호출한다.
+**발생 트리거**: `LayoutEditController`의 `_onMouseUp` 또는 `_onKeyDown(ESC)`에서 `EditManager._dispatchLayoutMove(element, previousLeft, previousTop, left, top, canceled, newContainer?, previousContainer?)`를 호출한다.
 
-**다중 선택 드래그**: 다중 선택 상태에서 드래그하면 선택된 각 최상위 요소마다 별도의 `layoutMove` 이벤트가 발생한다.
+**다중 선택 드래그**: 다중 선택 상태에서 드래그하면 선택된 각 최상위 요소마다 별도의 `layoutMove` 이벤트가 발생한다. reparent 모드에서는 각 box가 mouseup 위치의 컨테이너로 독립적으로 reparenting된다.
 
 **발생 조건**: `BoxDragState.dragMoved === true`일 때만 발생한다. 3px 이하의 이동(클릭으로 간주)에서는 `layoutMove` 이벤트가 발생하지 않는다.
+
+**reparent 모드 감지**: `event.newContainer !== undefined`이면 reparent가 발생했음을 나타낸다. `event.previousContainer`는 항상 `newContainer`와 함께 설정된다.
 
 ### 6.3 `layoutResize`
 
@@ -685,7 +698,7 @@ LayoutSelectionController._onClick
 | `selectionEnd` | 텍스트 | `paragraph`, `controller` | 텍스트 드래그 선택 종료 |
 | `cursorMove` | 텍스트 | `paragraph`, `controller` | 커서 위치 변경 (쓰로틀링) |
 | `layoutSelectionChange` | 레이아웃 | `selectedLayouts`, `previousLayouts` | box 선택 변경 |
-| `layoutMove` | 레이아웃 | `layoutElement`, `previousLeft/Top`, `left/top`, `canceled` | 드래그 이동 완료/취소 |
+| `layoutMove` | 레이아웃 | `layoutElement`, `previousLeft/Top`, `left/top`, `canceled`, `newContainer?`, `previousContainer?` | 드래그 이동 완료/취소 (reparent 모드 시 부모 정보 포함) |
 | `layoutResize` | 레이아웃 | `layoutElement`, `previous*`, `left/top/width/height`, `canceled` | 리사이즈 완료/취소 |
 | `insert` | 삽입 | `position`, `element`, `container`, `left/top/width/height`, `zIndex`, `canceled` | 요소 삽입 완료 |
 | `insertCancel` | 삽입 | (없음) | 삽입 드래그 ESC 취소 |

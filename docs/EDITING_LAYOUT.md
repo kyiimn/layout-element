@@ -84,21 +84,29 @@
 
 #### 글로벌 레이아웃 편집 모드 (`EditManager.layoutEditMode`)
 
-레이아웃 편집 모드는 이제 `EditManager`의 글로벌 상태로 제어한다.
+레이아웃 편집 모드는 `EditManager`의 글로벌 상태로 제어한다.
 
 ```typescript
 const manager = EditManager.getInstance();
 
-// 활성화
+// 기본 이동 모드(move): 부모 내부에서만 이동 (경계 클램핑 적용)
 manager.layoutEditMode = true;
+
+// 부모 변경 모드(reparent): box를 다른 컨테이너로 옮기거나 부모 밖으로 빼낼 수 있음
+manager.layoutEditMode = { type: 'reparent' };
 
 // 비활성화
 manager.layoutEditMode = false;
+
+// 현재 편집 타입 조회
+console.log(manager.layoutEditType); // 'move' | 'reparent'
 ```
 
-`layoutEditMode`가 `true`가 되면 `EditManager`는 문서 안의 모든 `<x-layout-box>`를 순회하며, `isBoxEditable(box)` 결과에 따라 각 box의 `editableLayout` 속성을 갱신한다. `false`로 설정되면 모든 box의 `editableLayout` 속성이 `false`가 된다. **선택은 `selectableMode`가 `true`면 유지된다.** `selectableMode`가 `false`이고 `layoutEditMode`도 `false`가 되면 선택이 해제된다.
+`layoutEditMode`가 `true`(또는 `{ type: ... }`)가 되면 `EditManager`는 문서 안의 모든 `<x-layout-box>`를 순회하며, `isBoxEditable(box)` 결과에 따라 각 box의 `editableLayout` 속성을 갱신한다. `false`로 설정되면 모든 box의 `editableLayout` 속성이 `false`가 된다. **선택은 `selectableMode`가 `true`면 유지된다.** `selectableMode`가 `false`이고 `layoutEditMode`도 `false`가 되면 선택이 해제된다.
 
 **기본적으로 모든 box가 허용된다.** `layoutEditMode`만 켜고 `editableRoles`와 `editableBoxIds`를 모두 `null`로 두면 Root 제한(`setEditableRootId`)과 lock을 제외한 모든 box가 편집 가능하다. 편집을 막으려면 `layoutEditMode`를 `false`로 설정하거나, `editableRoles`/`editableBoxIds`를 지정해 허용 범위를 좁혀야 한다. box의 `lock` 속성이 `true`이거나 조상 box 중 하나라도 lock이면 해당 box와 하위 요소는 항상 편집 불가이다.
+
+**하위 호환**: `true`는 `{ type: 'move' }`와 동일하다. 기존 `boolean` API를 그대로 사용할 수 있다.
 
 #### 역할 기반 필터: `setEditableRoles(roles)` / `editableRoles`
 
@@ -192,10 +200,13 @@ manager.selectableMode = false;
 
 | 설정 | 자동 전환 |
 |------|-----------|
-| `layoutEditMode = true` | `textEditMode = false`, `insertMode = null` |
+| `layoutEditMode = true` (또는 `{ type: 'move' }`) | `textEditMode = false`, `insertMode = null` |
+| `layoutEditMode = { type: 'reparent' }` | `textEditMode = false`, `insertMode = null` |
 | `textEditMode = true` | `layoutEditMode = false`, `insertMode = null` |
 | `insertMode = (non-null)` | `layoutEditMode = false`, `textEditMode = false` |
 | `selectableMode` | (변경 없음, 항상 독립) |
+
+**편집 타입 전환**: `layoutEditMode = { type: 'reparent' }` → `layoutEditMode = true`(`{ type: 'move' }`) 처럼 타입만 변경할 때는 이미 편집 모드가 활성화되어 있으므로 다른 모드를 비활성화하지 않는다. `layoutEditType` getter로 현재 타입을 조회할 수 있다.
 
 전환은 setter 호출을 통해 이루어지므로, 각 모드의 정리 로직(속성 해제, 커서 초기화, 컨트롤러 분리 등)이 자동으로 실행된다. 가드 `if (this._field === value) return`에 의해 무한 루프는 발생하지 않는다.
 
@@ -1168,6 +1179,159 @@ box.convertPosition('static');    // absolute → static
 | `static` | 모든 경우 | 컬럼/라인 스냅 + 클램핑. 편집 영역 밖으로 나갈 수 없음. 변환 없음 |
 | `absolute` (문서 직계 자식) | 모든 경우 | 클램핑 없이 자유 이동 (음수 좌표 가능). 변환 없음 |
 | `absolute` (다른 박스 안) | 모든 경우 | 부모 padding 영역 내로 클램핑. 변환 없음 |
+
+### 4.5 부모 변경 모드 (Reparent Mode)
+
+`layoutEditType`이 `'reparent'`인 경우의 드래그 동작. `layoutEditMode = { type: 'reparent' }`로 활성화한다.
+
+#### 4.5.1 개요
+
+reparent 모드에서는 box를 드래그하여 다른 컨테이너로 옮기거나 부모 밖으로 빼낼 수 있다. 일반 `move` 모드와 달리 부모 경계를 벗어날 수 있으며, mouseup 시점의 커서 위치로 새 부모를 결정한다.
+
+```typescript
+manager.layoutEditMode = { type: 'reparent' };
+```
+
+#### 4.5.2 드래그 중 동작: 부모 안/밖 자동 전환
+
+reparent 모드에서는 부모 안과 밖을 자동으로 전환하며 동작한다:
+
+| 상태 | 조건 | 동작 |
+|------|------|------|
+| **부모 안** | 클램핑 위치 = 자유 이동 위치 | `box.left`/`box.top` 설정 (일반 이동), `transform = ''` |
+| **부모 밖** | 클램핑 위치 ≠ 자유 이동 위치 | `box.left`/`box.top`을 클램핑 위치로 고정, `transform`으로 초과분 이동 |
+
+매 rAF 프레임마다 `_applyReparentDragMove`가 호출되어:
+
+1. `_computeNewPosition`(클램핑 포함)으로 부모 안에서의 최대 이동 위치 계산 → `clamped`
+2. 클램핑 없는 자유 이동 위치 계산 → `free`
+   - static box: 시작 위치를 absolute mm로 변환 + delta → 다시 컬럼/라인 인덱스로 변환
+   - absolute box: `startLeft + deltaMm`
+3. `clamped == free` → **부모 안**: `box.left`/`box.top` 설정, `transform = ''`
+4. `clamped != free` → **부모 밖**:
+   - 처음 진입 시: `reparentOutside`에 마우스 위치와 클램핑된 box 위치 기록
+   - `box.left`/`box.top`을 클램핑 위치로 고정 (box 렌더링 크기 유지)
+   - 진입 시점부터의 마우스 delta를 `box.style.transform`으로 적용
+
+이 방식으로 부모 안에서는 텍스트 회피 등 일반 렌더링이 동작하고, 부모 밖으로 나가면 box의 렌더링 크기가 찌그러지지 않는다.
+
+#### 4.5.3 드래그 중 컨테이너 하이라이트
+
+reparent 모드 드래그 중, 커서 위치의 들어갈 수 있는 컨테이너에 **주황색(`#ff9800`) 2px 테두리**가 표시된다.
+
+```
+_onMouseMove rAF 콜백
+    │
+    ▼
+_updateReparentHighlight(box, clientX, clientY)
+    │
+    ├── _findReparentContainer(box, clientX, clientY) → candidate
+    ├── candidate === box.parentElement? → target = null (하이라이트 없음)
+    ├── target === _reparentHighlightTarget? → no-op (동일 컨테이너)
+    ├── 이전 하이라이트 제거: _reparentHighlightTarget.removeAttribute('reparent-target')
+    └── 새 하이라이트 설정: target.setAttribute('reparent-target', '')
+```
+
+| 속성 | 색상 | 적용 대상 | 조건 |
+|------|------|----------|------|
+| `reparent-target` | 주황 (`#ff9800`, 2px) | box 또는 document | reparent 드래그 중 들어갈 수 있는 컨테이너 |
+
+하이라이트는 `_onMouseUp`, `_onKeyDown`(ESC), `_cancelAllDrags`(detach)에서 `_clearReparentHighlight()`로 제거된다.
+
+#### 4.5.4 mouseup 시 부모 변경 (`_tryReparent`)
+
+mouseup 시점에 `_tryReparent`가 호출된다. 이 메서드는 **data 추출 → 좌표 변환 → 기존 box 제거 → 새 box 생성** 방식으로 동작한다.
+
+```
+_onMouseUp (reparent 모드, dragMoved === true)
+    │
+    ▼
+_tryReparent(box, clientX, clientY, state)
+    │
+    ├── 1. _findReparentContainer(box, clientX, clientY) → newContainer
+    │   ├── elementsFromPoint로 후보 수집
+    │   ├── box 자신/자손, lock, 비-box 자식이 있는 box 제외
+    │   └── 없으면 EditManager 루트(editableRootId 또는 document)로 폴백
+    │
+    ├── 2. newContainer === box.parentElement? → return null (부모 변경 없음)
+    │
+    ├── 3. box의 화면 위치(getBoundingClientRect)를 새 컨테이너 내부 mm 좌표로 변환
+    │   ├── containerPaddingLeft/Top 고려
+    │   └── screenPxToMm() 사용 (scale 보정 적용)
+    │
+    ├── 4. 새 컨테이너 내 최대 z-index + 1 계산
+    │
+    ├── 5. box.data 추출 (자손 트리 포함, 원래 position/width/height 유지)
+    │
+    ├── 6. boxData 좌표 변환 (position 유지):
+    │   ├── static + newContainer.model → 컬럼/라인 스냅 (left/top만 변환, width/height 유지)
+    │   └── absolute (또는 모델 없음) → absolute mm 좌표 (left/top만 변환, width/height 유지)
+    │
+    ├── 7. boxData.zIndex = 새 컨테이너 최대 z-index + 1
+    │
+    ├── 8. box.remove() — 기존 box 제거
+    │
+    ├── 9. newContainer.appendChildData(boxData) — 새 box 생성
+    │   └── data setter 전체 파이프라인 실행 (layout + render)
+    │
+    └── 10. return { container: newContainer, newBox }
+```
+
+**position 유지**: 원래 `static`인 box는 새 컨테이너에서도 `static`으로 유지되며, 컬럼/라인 스냅이 적용된다. 원래 `absolute`인 box는 `absolute`로 유지되며 mm 좌표로 변환된다.
+
+**width/height 보존**: `box.data`에서 추출한 원래 `width`/`height`가 그대로 유지된다. 화면 위치(`getBoundingClientRect`)에서 다시 계산하지 않으므로, 부모 밖으로 드래그하여 box 렌더링 크기가 찌그러진 상태에서도 올바른 크기로 새 box가 생성된다.
+
+**zIndex**: 새 컨테이너 내 기존 자식들의 최대 z-index + 1로 설정되어, 옮겨간 box가 최상위에 표시된다.
+
+**id 보존**: `box.data`의 `id`가 그대로 전달되므로, 새 box도 동일한 `id`를 갖는다.
+
+**`appendChildData`**: `LayoutBoxElement`와 `LayoutDocumentElement`의 public 메서드로, `BoxData`를 받아 `<x-layout-box>` 요소를 생성하고 `data` setter의 전체 초기화 파이프라인(`_layoutStructure` → `_applyStyle` → `_renderBorder` → `_propagateInheritStyle` → `render`)을 실행하여 반환한다.
+
+#### 4.5.5 `_onMouseUp`에서의 reparent 처리
+
+reparent 모드에서 `_onMouseUp`은 transform이 유지된 상태에서 `_tryReparent`를 먼저 호출한다:
+
+```
+_onMouseUp (reparent 모드)
+    │
+    ├── transform 초기화하지 않은 상태에서 _tryReparent 호출
+    │   └── getBoundingClientRect()가 transform 반영된 화면 위치 반환
+    │
+    ├── reparent 성공 시:
+    │   ├── box.style.transform = '' (box가 제거되었으므로 의미 없지만 일관성)
+    │   ├── manager.selectLayout(newBox) — 새 box로 선택 갱신
+    │   └── _dispatchLayoutMove(newBox, ..., newContainer, previousContainer)
+    │
+    └── reparent 실패 시 (부모 변경 없음):
+        ├── box.style.transform = '' — 원위치 복원
+        ├── _computeNewPosition → box.left/top 설정 (일반 move 처리)
+        └── _dispatchLayoutMove(box, ...)
+```
+
+#### 4.5.6 `layoutMove` 이벤트에 reparent 정보 포함
+
+reparent가 발생하면 `layoutMove` 이벤트에 `newContainer`와 `previousContainer` 필드가 추가된다. 부모 변경이 없으면 두 필드 모두 `undefined`이다.
+
+```typescript
+manager.addEventListener('layoutMove', (event) => {
+  if (event.newContainer) {
+    console.log('Reparented:', event.previousContainer?.id, '→', event.newContainer.id);
+  } else {
+    console.log('Moved within same parent');
+  }
+});
+```
+
+이벤트 payload의 자세한 명세는 `EDITING_EVENTS.md`를 참조한다.
+
+#### 4.5.7 제한 사항
+
+- **자기 자신/자손 안으로 넣을 수 없음**: `elementsFromPoint` 결과에서 box 자신과 box의 자손을 제외한다.
+- **lock된 box 안으로 넣을 수 없음**: lock된 컨테이너는 후보에서 제외된다.
+- **비-box 자식이 있는 box 안으로 넣을 수 없음**: 단락이나 이미지가 이미 들어 있는 박스는 컨테이너로 부적합 (삽입 모드와 동일한 규칙).
+- **다중 선택 reparent**: 다중 선택 상태에서 reparent 모드 드래그 시 각 box가 mouseup 위치의 컨테이너로 독립적으로 reparenting된다.
+- **ESC 취소 시 원래 부모로 복원**: ESC는 `box.style.transform = ''`로 초기화하고 position/좌표를 원래 상태로 복원한다. reparenting 자체는 mouseup 시에만 발생하므로 ESC 시점에는 부모가 변경되지 않은 상태이다.
+- **새 box 참조**: reparent 성공 시 기존 box는 제거되고 새 box가 생성되므로, 외부에서 기존 box 참조를 보유하고 있으면 무효화된다. `layoutMove` 이벤트의 `layoutElement`는 새 box를 가리킨다.
 
 ---
 
