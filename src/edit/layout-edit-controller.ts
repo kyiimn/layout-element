@@ -969,19 +969,15 @@ export class LayoutEditController {
     const isDocumentChild = box.parentElement?.type === 'document';
 
     if (box.position === 'absolute') {
-      const padL = box.inheritStyle?.paddingLeft || 0;
-      const padR = box.inheritStyle?.paddingRight || 0;
-      const padT = box.inheritStyle?.paddingTop || 0;
-      const padB = box.inheritStyle?.paddingBottom || 0;
-
       // 문서 직계 자식 absolute 요소는 편집 영역 밖으로 자유롭게 이동 가능
       if (isDocumentChild) {
         return { left: sLeft + deltaMmX, top: sTop + deltaMmY };
       }
 
-      // 다른 박스 안의 absolute 요소는 부모 편집 영역 내로 클램핑
-      const maxLeft = Math.max(0, (box.inheritStyle?.parentWidth || 0) - padL - padR - box.width);
-      const maxTop = Math.max(0, (box.inheritStyle?.parentHeight || 0) - padT - padB - box.height);
+      // parentWidth/parentHeight는 editableWidth/editableHeight로부터 온 값으로
+      // 이미 부모의 padding이 차감되어 있다. 따라서 padding을 다시 빼면 이중 차감이 된다.
+      const maxLeft = Math.max(0, (box.inheritStyle?.parentWidth || 0) - box.width);
+      const maxTop = Math.max(0, (box.inheritStyle?.parentHeight || 0) - box.height);
       return {
         left: Math.max(0, Math.min(maxLeft, sLeft + deltaMmX)),
         top: Math.max(0, Math.min(maxTop, sTop + deltaMmY)),
@@ -1058,17 +1054,15 @@ export class LayoutEditController {
       const manager = EditManager.getInstance();
       const deltaMmX = manager.screenDeltaToMm(deltaPxX);
       const deltaMmY = manager.screenDeltaToMm(deltaPxY);
-      const padL = box.inheritStyle?.paddingLeft || 0;
-      const padR = box.inheritStyle?.paddingRight || 0;
-      const padT = box.inheritStyle?.paddingTop || 0;
-      const padB = box.inheritStyle?.paddingBottom || 0;
+      // parentWidth/parentHeight는 editableWidth/editableHeight로부터 온 값으로
+      // 이미 부모의 padding이 차감되어 있다. 따라서 padding을 다시 빼면 이중 차감이 된다.
       const parentW = box.inheritStyle?.parentWidth || 0;
       const parentH = box.inheritStyle?.parentHeight || 0;
 
       switch (handle) {
         case 'right': {
           // 우측 핸들: width만 변경, left/top/height 유지
-          const maxWidth = parentW - padL - padR - sLeft;
+          const maxWidth = parentW - sLeft;
           const width = Math.max(1, Math.min(maxWidth, sWidth + deltaMmX));
           return { left: sLeft, top: sTop, width, height: sHeight };
         }
@@ -1081,7 +1075,7 @@ export class LayoutEditController {
         }
         case 'bottom': {
           // 하단 핸들: height만 변경, left/top/width 유지
-          const maxHeight = parentH - padT - padB - sTop;
+          const maxHeight = parentH - sTop;
           const height = Math.max(1, Math.min(maxHeight, sHeight + deltaMmY));
           return { left: sLeft, top: sTop, width: sWidth, height };
         }
