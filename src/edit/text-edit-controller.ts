@@ -140,9 +140,9 @@ export class TextEditController {
 
         if (wasComposing) {
           const model = this._paragraph.model;
-          if (model && typeof model.inputContent === "string") {
+          if (model && typeof model.textContent === "string") {
             const after = this._textarea.value;
-            model.inputContent = after;
+            model.textContent = after;
             const composedLength = after.length - this._compositionBeforeContent.length;
             this._cursorModel.offset = this._compositionStartOffset + composedLength;
             this._updateCursorPosition();
@@ -160,8 +160,8 @@ export class TextEditController {
 
     // Sync textarea value with model content so _onInput can compute correct diffs
     const model = paragraph.model;
-    if (model && typeof model.inputContent === "string") {
-      this._textarea.value = model.inputContent;
+    if (model && typeof model.textContent === "string") {
+      this._textarea.value = model.textContent;
     }
 
     this._updateCursorPosition();
@@ -302,9 +302,9 @@ export class TextEditController {
     this._mapper.rebuild();
     this._optimisticSpan = null;
     const model = this._paragraph.model;
-    if (model && typeof model.inputContent === "string") {
+    if (model && typeof model.textContent === "string") {
       if (!this._isComposing) {
-        this._textarea.value = model.inputContent;
+        this._textarea.value = model.textContent;
         this._syncTextareaSelection();
       }
     }
@@ -433,7 +433,7 @@ export class TextEditController {
         event.clientY >= rect.top &&
         event.clientY <= rect.bottom
       ) {
-        const content = this._paragraph.model?.inputContent;
+        const content = this._paragraph.model?.textContent;
         if (content !== undefined) {
           // 빈 공간 클릭 시 가장 가까운 텍스트 위치 찾기
           const nearest = this._mapper.getNearestOffsetFromPoint(event.clientX, event.clientY);
@@ -499,7 +499,7 @@ export class TextEditController {
     const spanRect = targetSpan.getBoundingClientRect();
     const midpoint = spanRect.left + spanRect.width / 2;
     if (event.clientX >= midpoint) {
-      const content = this._paragraph.model?.inputContent as string | undefined;
+      const content = this._paragraph.model?.textContent as string | undefined;
       if (content !== undefined && sourceOffset < content.length) {
         return sourceOffset + 1;
       }
@@ -523,7 +523,7 @@ export class TextEditController {
         event.clientY >= rect.top &&
         event.clientY <= rect.bottom
       ) {
-        const content = this._paragraph.model?.inputContent;
+        const content = this._paragraph.model?.textContent;
         if (content !== undefined) {
           const nearest = this._mapper.getNearestOffsetFromPoint(event.clientX, event.clientY);
           const targetOffset = nearest ? nearest.textOffset : 0;
@@ -629,9 +629,9 @@ export class TextEditController {
 
     const model = this._paragraph.model;
     if (!model) return;
-    if (typeof model.inputContent !== "string") return;
+    if (typeof model.textContent !== "string") return;
 
-    const content = model.inputContent;
+    const content = model.textContent;
     const { start, end } = this._findWordBoundaries(content, sourceOffset);
     this._cursorModel.selection = SelectionRange.fromOffsets(start, end);
     this._cursorModel.offset = end;
@@ -684,9 +684,9 @@ export class TextEditController {
 
     if (wasComposing) {
       const model = this._paragraph.model;
-      if (model && typeof model.inputContent === "string") {
+      if (model && typeof model.textContent === "string") {
         const after = this._textarea.value;
-        model.inputContent = after;
+        model.textContent = after;
         const composedLength = after.length - this._compositionBeforeContent.length;
         this._cursorModel.offset = this._compositionStartOffset + composedLength;
         this._updateCursorPosition();
@@ -717,9 +717,9 @@ export class TextEditController {
     const model = this._paragraph.model;
     if (!model) return;
 
-    if (typeof model.inputContent !== "string") return;
+    if (typeof model.textContent !== "string") return;
 
-    const content = model.inputContent;
+    const content = model.textContent;
     const offset = this._cursorModel.offset;
     const hasShortcut = event.ctrlKey || event.metaKey;
 
@@ -861,7 +861,7 @@ export class TextEditController {
         this._replaceSelection("");
       } else if (offset > 0) {
         const newContent = content.slice(0, offset - 1) + content.slice(offset);
-        model.inputContent = newContent;
+        model.textContent = newContent;
         this._textarea.value = newContent;
         this._cursorModel.offset = offset - 1;
         this._textarea.setSelectionRange(offset - 1, offset - 1);
@@ -880,7 +880,7 @@ export class TextEditController {
         this._replaceSelection("");
       } else if (offset < content.length) {
         const newContent = content.slice(0, offset) + content.slice(offset + 1);
-        model.inputContent = newContent;
+        model.textContent = newContent;
         this._textarea.value = newContent;
         this._textarea.setSelectionRange(offset, offset);
         this._updateCursorPosition();
@@ -899,7 +899,7 @@ export class TextEditController {
         const replaceEnd = end?.textOffset ?? offset;
 
     const newContent = content.slice(0, replaceStart) + "\n" + content.slice(replaceEnd);
-    model.inputContent = newContent;
+    model.textContent = newContent;
     this._textarea.value = newContent;
     this._cursorModel.offset = replaceStart + 1;
     this._textarea.setSelectionRange(replaceStart + 1, replaceStart + 1);
@@ -975,13 +975,13 @@ export class TextEditController {
     const selection = this._cursorModel.selection;
     if (!selection) return;
 
-    if (typeof model.inputContent !== "string") return;
+    if (typeof model.textContent !== "string") return;
 
-    const content = model.inputContent;
+    const content = model.textContent;
     const { start, end } = selection.normalized();
     const newContent = content.slice(0, start.textOffset) + content.slice(end.textOffset);
 
-    model.inputContent = newContent;
+    model.textContent = newContent;
     this._textarea.value = newContent;
     this._cursorModel.offset = start.textOffset;
     this._cursorModel.selection = null;
@@ -1001,9 +1001,9 @@ export class TextEditController {
     const pastedText = event.clipboardData?.getData("text/plain") ?? "";
     if (pastedText.length === 0) return;
 
-    if (typeof model.inputContent !== "string") return;
+    if (typeof model.textContent !== "string") return;
 
-    const content = model.inputContent;
+    const content = model.textContent;
     let startOffset = this._cursorModel.offset;
     let endOffset = this._cursorModel.offset;
 
@@ -1017,7 +1017,7 @@ export class TextEditController {
     const newContent = content.slice(0, startOffset) + pastedText + content.slice(endOffset);
     const newOffset = startOffset + pastedText.length;
 
-    model.inputContent = newContent;
+    model.textContent = newContent;
     this._textarea.value = newContent;
     this._cursorModel.offset = newOffset;
     this._cursorModel.selection = null;
@@ -1033,9 +1033,9 @@ export class TextEditController {
     const model = this._paragraph.model;
     if (!model) return;
 
-    if (typeof model.inputContent !== "string") return;
+    if (typeof model.textContent !== "string") return;
 
-    const content = model.inputContent;
+    const content = model.textContent;
     this._cursorModel.selection = SelectionRange.fromOffsets(0, content.length);
     this._cursorModel.offset = content.length;
     this._textarea.setSelectionRange(0, content.length);
@@ -1053,9 +1053,9 @@ export class TextEditController {
   private _computeVerticalOffset(direction: -1 | 1): number | null {
     const model = this._paragraph.model;
     if (!model) return null;
-    if (typeof model.inputContent !== "string") return null;
+    if (typeof model.textContent !== "string") return null;
 
-    const content = model.inputContent;
+    const content = model.textContent;
     const offset = this._cursorModel.offset;
 
     const cursorRect = this._getCursorLocalRect(offset);
@@ -1119,7 +1119,7 @@ export class TextEditController {
   }
 
   private _getCursorLocalRect(offset: number): DOMRect | null {
-    const content = this._paragraph.model?.inputContent as string | undefined;
+    const content = this._paragraph.model?.textContent as string | undefined;
     if (content === undefined) return null;
 
     const renderedOffset = this._mapper.renderedOffset(offset);
@@ -1225,9 +1225,9 @@ export class TextEditController {
 
     const model = this._paragraph.model;
     if (!model) return;
-    if (typeof model.inputContent !== "string") return;
+    if (typeof model.textContent !== "string") return;
 
-    const before = model.inputContent;
+    const before = model.textContent;
     let after = this._textarea.value;
     let newOffset: number;
 
@@ -1245,7 +1245,7 @@ export class TextEditController {
       const replaced = before.slice(0, startOffset) + inserted + before.slice(endOffset);
       newOffset = startOffset + inserted.length;
 
-      model.inputContent = replaced;
+      model.textContent = replaced;
       this._textarea.value = replaced;
       this._textarea.setSelectionRange(newOffset, newOffset);
       this._cursorModel.offset = newOffset;
@@ -1267,7 +1267,7 @@ export class TextEditController {
 
     const change = this._computeTextChange(before, after, this._cursorModel.offset);
 
-    model.inputContent = after;
+    model.textContent = after;
     newOffset = change.newOffset;
     this._cursorModel.offset = newOffset;
 
@@ -1288,16 +1288,16 @@ export class TextEditController {
     const model = this._paragraph.model;
     if (!model) return;
 
-    if (typeof model.inputContent !== "string") return;
+    if (typeof model.textContent !== "string") return;
 
-    const content = model.inputContent;
+    const content = model.textContent;
     const activeSelection = this._cursorModel.selection;
     if (!activeSelection) return;
 
     const { start, end } = activeSelection.normalized();
     const newContent = content.slice(0, start.textOffset) + replacement + content.slice(end.textOffset);
 
-    model.inputContent = newContent;
+    model.textContent = newContent;
     this._textarea.value = newContent;
     this._cursorModel.offset = start.textOffset + replacement.length;
     this._textarea.setSelectionRange(this._cursorModel.offset, this._cursorModel.offset);
@@ -1330,10 +1330,10 @@ export class TextEditController {
       this._compositionStartOffset = normalized.start.textOffset;
 
       // 조합 시작 시 선택 영역을 모델에서 삭제하여 일관성 유지
-      if (model && typeof model.inputContent === "string") {
-        const content = model.inputContent;
-        model.inputContent = content.slice(0, normalized.start.textOffset) + content.slice(normalized.end.textOffset);
-        this._textarea.value = model.inputContent;
+      if (model && typeof model.textContent === "string") {
+        const content = model.textContent;
+        model.textContent = content.slice(0, normalized.start.textOffset) + content.slice(normalized.end.textOffset);
+        this._textarea.value = model.textContent;
         this._textarea.setSelectionRange(normalized.start.textOffset, normalized.start.textOffset);
       }
     } else {
@@ -1343,8 +1343,8 @@ export class TextEditController {
     // _compositionBeforeContent must be captured AFTER selection deletion
     // so that composedLength = after.length - beforeContent.length
     // correctly represents the composed text length
-    if (model && typeof model.inputContent === "string") {
-      this._compositionBeforeContent = model.inputContent;
+    if (model && typeof model.textContent === "string") {
+      this._compositionBeforeContent = model.textContent;
     } else {
       this._compositionBeforeContent = "";
     }
@@ -1446,8 +1446,8 @@ export class TextEditController {
     this._removeCompositionSpan();
 
     const model = this._paragraph.model;
-    if (model && typeof model.inputContent === "string") {
-      model.inputContent = this._compositionBeforeContent;
+    if (model && typeof model.textContent === "string") {
+      model.textContent = this._compositionBeforeContent;
       this._textarea.value = this._compositionBeforeContent;
       this._cursorModel.offset = this._compositionStartOffset;
       this._textarea.setSelectionRange(this._compositionStartOffset, this._compositionStartOffset);
@@ -1473,13 +1473,13 @@ export class TextEditController {
 
     const model = this._paragraph.model;
     if (!model) return;
-    if (typeof model.inputContent !== "string") return;
+    if (typeof model.textContent !== "string") return;
 
     const startOffset = this._compositionStartOffset;
     const beforeContent = this._compositionBeforeContent;
 
     const after = this._textarea.value;
-    model.inputContent = after;
+    model.textContent = after;
 
     const composedLength = after.length - beforeContent.length;
     this._cursorModel.offset = startOffset + composedLength;
@@ -1603,7 +1603,7 @@ export class TextEditController {
   }
 
   private _updateCursorPosition(): void {
-    const content = this._paragraph.model?.inputContent as string | undefined;
+    const content = this._paragraph.model?.textContent as string | undefined;
     const offset = this._cursorModel.offset;
 
     if (this._optimisticSpan && this._optimisticSpan.parentNode) {

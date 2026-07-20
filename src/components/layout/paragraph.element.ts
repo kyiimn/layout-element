@@ -22,7 +22,7 @@ export class LayoutParagraphElement extends HTMLElement {
 
   private _shadowRoot: ShadowRoot;
 
-  private _content: string | (string | TextBlockData)[];
+  private _sourceContent: string | (string | TextBlockData)[];
   private _column?: number | number[];
   private _gap?: number | number[];
 
@@ -43,7 +43,7 @@ export class LayoutParagraphElement extends HTMLElement {
 
     this._shadowRoot = this.attachShadow({ mode: "open" });
 
-    this._content = "";
+    this._sourceContent = "";
     this._paragraphStyle = {};
     this._textStyle = {};
     this._zIndex = 0;
@@ -73,7 +73,7 @@ export class LayoutParagraphElement extends HTMLElement {
       column: this._column !== undefined && this._gap !== undefined ? this._column : this.parentModel.columnWidth,
       gap: this._column !== undefined && this._gap !== undefined ? this._gap : this.parentModel.gaps,
 
-      content: this._content,
+      content: this._model?.textContent ?? this._sourceContent,
       paragraphStyle: this.paragraphStyle,
       textStyle: this.textStyle,
 
@@ -263,7 +263,7 @@ export class LayoutParagraphElement extends HTMLElement {
     if (data.paragraphStyle !== undefined) this._paragraphStyle = data.paragraphStyle;
     if (data.zIndex !== undefined) this._zIndex = data.zIndex;
 
-    this._content = data.content;
+    this._sourceContent = data.content;
 
     this.layout();
     this._perfStructureChanged = true;
@@ -272,7 +272,7 @@ export class LayoutParagraphElement extends HTMLElement {
   /**
    * 단락의 현재 데이터를 반환한다.
    * `content`는 렌더링된 실제 텍스트를 기반으로 한다.
-   * 편집 모드에서 텍스트가 수정된 경우 `model.inputContent`에서
+   * 편집 모드에서 텍스트가 수정된 경우 `model.textContent`에서
    * 현재 렌더링된 텍스트를 가져오며, 모델이 아직 생성되지 않은
    * 초기 상태에서는 세터로 전달된 원본 콘텐츠를 반환한다.
    *
@@ -282,7 +282,7 @@ export class LayoutParagraphElement extends HTMLElement {
     return {
       id: this.id,
       column: this._column,
-      content: this._model?.inputContent ?? this._content,
+      content: this._model?.textContent ?? this._sourceContent,
       gap: this._gap,
       paragraphStyle: this._paragraphStyle,
       textStyle: this._textStyle,

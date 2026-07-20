@@ -158,18 +158,18 @@ public resetIncrementalState() {
 }
 ```
 
-### 4.2 `inputContent` 변경 흐름
+### 4.2 `textContent` 변경 흐름
 
 ```mermaid
 flowchart TD
-    Start([inputContent = value]) --> SetValue[_inputContent 갱신]
+    Start([textContent = value]) --> SetValue[_textContent 갱신]
     SetValue --> Caller[호출자가 layoutStructure + layoutText 호출]
     Caller --> InitStruct[_initStructureAndMeasureColumns<br/>컬럼/ppm 재측정]
     InitStruct --> LayoutText[_layoutTextIntoColumns<br/>전체 재래핑]
     LayoutText --> Render[LayoutColumnElement.renderText]
 ```
 
-`inputContent` 세터는 값만 갱신하고, 실제 래핑은 호출자가 `layoutStructure()`와 `layoutText()`를 명시적으로 호출할 때 수행된다.
+`textContent` 세터는 값만 갱신하고, 실제 래핑은 호출자가 `layoutStructure()`와 `layoutText()`를 명시적으로 호출할 때 수행된다.
 
 ---
 
@@ -756,7 +756,7 @@ const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColu
 | ------ | ------ | ------ |
 | `data` | `TextLayoutEngineOptions` | 모델 전체 데이터 설정. 컬럼, 스타일, 콘텐츠 갱신. `_initLayoutMetrics()` 호출 |
 | `inheritStyle` | `InheritStyle` | 상속 스타일 설정. `_initLayoutMetrics()` 호출 |
-| `inputContent` | `string \| (string \| TextBlockData)[]` | 텍스트 콘텐츠 갱신. 래핑은 호출자가 직접 실행 |
+| `textContent` | `string \| (string \| TextBlockData)[]` | 텍스트 콘텐츠 갱신. 래핑은 호출자가 직접 실행 |
 
 ### 13.4 게터
 
@@ -774,7 +774,7 @@ const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColu
 | `widthRatio` | `number` | 장평 비율 |
 | `spaceRatio` | `number` | 공백 너비 비율 (em 단위). 기본값: 0.15 |
 | `columnWidths` | `number[]` | 컬럼별 너비(mm) 배열 |
-| `inputContent` | `string \| (string \| TextBlockData)[]` | 현재 입력 콘텐츠 |
+| `textContent` | `string \| (string \| TextBlockData)[]` | 현재 입력 콘텐츠 |
 | `previousLineCount` | `number` | 이전 렌더링 사이클의 총 줄 수 |
 | `previousOverflow` | `number` | 이전 렌더링 사이클의 오버플로우 문자 수 |
 
@@ -853,7 +853,7 @@ console.log(model.overflow);
 ### 16.2 텍스트 갱신
 
 ```ts
-model.inputContent = "새로운 텍스트입니다.";
+model.textContent = "새로운 텍스트입니다.";
 model.layoutStructure();
 model.layoutText();
 ```

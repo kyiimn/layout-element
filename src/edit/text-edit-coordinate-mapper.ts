@@ -328,7 +328,7 @@ export class TextEditCoordinateMapper {
       const rightmostOffset = parseInt(rightmostSpan.dataset.offset ?? '', 10);
       const rightmostSource = this.sourceOffset(rightmostOffset);
       if (rightmostSource !== null) {
-        const content = this._paragraph.model?.inputContent;
+        const content = this._paragraph.model?.textContent;
         if (content !== undefined && rightmostSource < content.length) {
           return { textOffset: rightmostSource + 1 };
         }
@@ -347,7 +347,7 @@ export class TextEditCoordinateMapper {
     const spanRect = spanRects.get(bestSpan)!;
     const midpoint = spanRect.left + spanRect.width / 2;
     if (x >= midpoint) {
-      const content = this._paragraph.model?.inputContent;
+      const content = this._paragraph.model?.textContent;
       if (content !== undefined && sourceOffset < content.length) {
         return { textOffset: sourceOffset + 1 };
       }
@@ -465,8 +465,8 @@ export class TextEditCoordinateMapper {
         // Fill the gap from the source string. Gaps contain either \n
         // characters (from block splits) or stripped spaces.
         const model = this._paragraph.model;
-        if (model && typeof model.inputContent === 'string') {
-          const content = model.inputContent;
+        if (model && typeof model.textContent === 'string') {
+          const content = model.textContent;
           for (let i = lastSourceOffset + 1; i < sourceOffset; i++) {
             if (i < content.length) {
               result += content[i];

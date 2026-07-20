@@ -50,7 +50,7 @@ export class TextLayoutEngine {
   private _columnWidths: number[] = [];
   private _inheritStyle: InheritStyle = undefined!;
 
-  private _inputContent: string | (string | TextBlockData)[] = "";
+  private _textContent: string | (string | TextBlockData)[] = "";
 
   private _textStyle: TextStyle = {};
   private _paragraphStyle: ParagraphStyle = {};
@@ -355,7 +355,7 @@ export class TextLayoutEngine {
    * 구조 측정 및 컬럼 ppm 측정.
    * 컬럼 폭/간격/lineHeight를 계산하고, 가상 컬럼을 생성해
    * 픽셀/mm 비율(`_columnPpm`)을 측정한 뒤 제거한다.
-   * `_overlayRects`를 null로 리셋하고 `_inputContent`를 파싱한다.
+   * `_overlayRects`를 null로 리셋하고 `_textContent`를 파싱한다.
    * 내부 전용. `layoutStructure()`에서만 호출된다.
    */
   private _initStructureAndMeasureColumns() {
@@ -365,9 +365,9 @@ export class TextLayoutEngine {
     this._overflow = 0;
     this._overlayRects = null;
 
-    const rawContents = !Array.isArray(this._inputContent) ? [{
-      content: this._inputContent
-    }] : this._inputContent;
+    const rawContents = !Array.isArray(this._textContent) ? [{
+      content: this._textContent
+    }] : this._textContent;
 
     this._contents = [];
     rawContents.forEach(c => {
@@ -400,15 +400,15 @@ export class TextLayoutEngine {
   }
 
   /**
-   * `inputContent`를 `_contents`로 파싱한다.
-   * `layoutText()` 호출 시 `inputContent`가 변경되었을 수 있으므로
+   * `textContent`를 `_contents`로 파싱한다.
+   * `layoutText()` 호출 시 `textContent`가 변경되었을 수 있으므로
    * 매번 다시 파싱하여 최신 텍스트를 반영한다.
    * 단일 문자열은 `{ content }`로 래핑하고, `\n`으로 블록을 분리한다.
    */
   private _parseContents() {
-    const rawContents = !Array.isArray(this._inputContent) ? [{
-      content: this._inputContent
-    }] : this._inputContent;
+    const rawContents = !Array.isArray(this._textContent) ? [{
+      content: this._textContent
+    }] : this._textContent;
 
     this._contents = [];
     rawContents.forEach(c => {
@@ -421,7 +421,7 @@ export class TextLayoutEngine {
   /**
    * 문자 단위 줄바꿈 루프. `initStructureAndMeasureColumns()`가 먼저 실행되어
    * `_columnWidths`, `_gaps`, `_lineHeight`, `_columnPpm`이 준비되어 있어야 한다.
-   * `inputContent` 변경을 반영하기 위해 `_contents`를 다시 파싱한다.
+   * `textContent` 변경을 반영하기 위해 `_contents`를 다시 파싱한다.
    * 결과는 `_columnContents`와 `_overflow`에 저장된다.
    *
    * 무한 루프 방지: 문자가 모든 파트 폭보다 클 경우 첫 번째 파트에 강제 배치한다.
@@ -898,7 +898,7 @@ export class TextLayoutEngine {
     this._rootNode = options.rootNode;
     this._inheritStyle = options.inheritStyle;
 
-    this._inputContent = options.content;
+    this._textContent = options.content;
 
     this._paragraphStyle = options.paragraphStyle;
     this._textStyle = options.textStyle;
@@ -919,12 +919,12 @@ export class TextLayoutEngine {
     this._initLayoutMetrics();
   }
 
-  public set inputContent(value: string | (string | TextBlockData)[]) {
-    this._inputContent = value;
+  public set textContent(value: string | (string | TextBlockData)[]) {
+    this._textContent = value;
   }
 
-  public get inputContent() {
-    return this._inputContent;
+  public get textContent() {
+    return this._textContent;
   }
 
   /** 텍스트 블록 배열 (`\n`으로 분리된) */

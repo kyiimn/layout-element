@@ -403,7 +403,7 @@ paragraph.addEventListener('render-error', (e) => {
 #### `data` getter 동작
 
 - `content` 필드는 렌더링된 실제 텍스트를 반환한다.
-  - 모델이 생성된 후(렌더링 완료)에는 `model.inputContent` 값을 사용한다.
+  - 모델이 생성된 후(렌더링 완료)에는 `model.textContent` 값을 사용한다.
   - 편집 모드에서 텍스트가 수정된 경우, 수정된 내용이 `content`에 반영된다.
   - 모델이 아직 없는 초기 상태에서는 setter로 전달된 원본 콘텐츠를 반환한다.
 
@@ -787,7 +787,7 @@ class TextLayoutEngine {
   genCharStyle(char: string): Partial<CSSStyleDeclaration>;
 
   // 게터
-  get inputContent: string | (string | TextBlockData)[];
+  get textContent: string | (string | TextBlockData)[];
   get contents: TextBlockData[];
   get inheritStyle: InheritStyle;
   get textStyle: TextStyle;
@@ -806,7 +806,7 @@ class TextLayoutEngine {
   // 세터
   set inheritStyle(value: InheritStyle): void;
   set data(options: TextLayoutEngineOptions): void;
-  set inputContent(value: string | (string | TextBlockData)[]): void;
+  set textContent(value: string | (string | TextBlockData)[]): void;
 }
 ```
 

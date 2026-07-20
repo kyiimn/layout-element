@@ -40,7 +40,7 @@ flowchart TD
 
     UserInput -->|이벤트| TA
     TA -->|input/composition| EC["TextEditController"]
-    EC -->|model.inputContent 갱신| TLE["TextLayoutEngine"]
+    EC -->|model.textContent 갱신| TLE["TextLayoutEngine"]
     TLE -->|columnContents| RENDER["paragraph.render()"]
     RENDER --> COL
     RENDER -->|postRender()| EC
@@ -54,7 +54,7 @@ flowchart TD
 
 `TextEditCoordinateMapper`는 소스 오프셋과 렌더링 오프셋 사이의 양방향 매핑을 유지한다.
 
-- 소스 오프셋: `model.inputContent` 문자열 내 0-based 인덱스. `\n`과 제거되지 않은 공백을 모두 포함한다.
+- 소스 오프셋: `model.textContent` 문자열 내 0-based 인덱스. `\n`과 제거되지 않은 공백을 모두 포함한다.
 - 렌더링 오프셋: 실제 DOM span의 `data-offset` 값. `\n`과 줄 앞뒤로 제거된 공백은 매핑에서 제외된다.
 
 매퍼는 `rebuild()` 호출 시 `TextLayoutEngine.columnContents`를 순회하며 두 Map(`_renderedToSource`, `_sourceToRendered`)을 재구축한다. 이 매핑은 커서/선택 위치 계산, 마우스 클릭 처리, 클립보드 복사 등 거의 모든 편집 동작의 기반이 된다.
@@ -67,7 +67,7 @@ flowchart TD
 flowchart LR
     A[사용자 입력] --> B["textarea 이벤트"]
     B --> C[TextEditController 핸들러]
-    C -->|inputContent 변경| D["TextLayoutEngine.model"]
+    C -->|textContent 변경| D["TextLayoutEngine.model"]
     D --> E[paragraph.render]
     E -->|needsFullRecreate| F[DOM 컬럼/span 갱신]
     E --> G["editController.postRender()"]
@@ -92,7 +92,7 @@ sequenceDiagram
 
     User->>TA: 키/마우스/IME 입력
     TA->>EC: input / compositionupdate
-    EC->>TLE: model.inputContent = newContent
+    EC->>TLE: model.textContent = newContent
     EC->>EC: _debouncedRender()
     EC->>P: requestAnimationFrame -> render()
     P->>TLE: layoutText()
@@ -190,7 +190,7 @@ if (controller) {
    - document: `mouseup`
    - textarea: `focus`, `blur`, `input`, `compositionstart`, `compositionupdate`, `compositionend`, `compositioncancel`, `keydown`, `paste`
    - document: `visibilitychange`
-7. `textarea.value`를 `model.inputContent`로 초기화한다. 이렇게 해야 이후 `_onInput`에서 올바른 텍스트 diff를 계산할 수 있다.
+7. `textarea.value`를 `model.textContent`로 초기화한다. 이렇게 해야 이후 `_onInput`에서 올바른 텍스트 diff를 계산할 수 있다.
 8. `_updateCursorPosition()`을 초기 호출하여 커서를 첫 번째 문자 위치 또는 빈 단락의 첫 컬럼 위치로 배치한다.
 
 ```mermaid
@@ -263,7 +263,7 @@ flowchart LR
 
 1. `this._mapper.rebuild()` — 오프셋 매핑을 새 DOM 기준으로 재구축.
 2. `this._optimisticSpan = null` — 낙관적 span 참조 제거. 실제 렌더링된 span으로 대체된다.
-3. 조합 중이 아닌 경우 `textarea.value`를 `model.inputContent`로 동기화.
+3. 조합 중이 아닌 경우 `textarea.value`를 `model.textContent`로 동기화.
 4. `_syncTextareaSelection()` — textarea의 선택 영역을 `_cursorModel` 상태에 맞춘다.
 5. `_updateCursorPosition()` — 커서를 새 DOM 위치에 재배치.
 6. `_updateSelection()` — 선택 영역을 새 DOM 위치에 재배치.
@@ -895,7 +895,7 @@ flowchart TD
 
 1. 활성 선택 영역이 있으면 그 시작/끝을 `replaceStart`/`replaceEnd`로 사용한다. 없으면 현재 offset을 사용한다.
 2. `content.slice(0, replaceStart) + "\n" + content.slice(replaceEnd)`로 새 콘텐츠를 만든다.
-3. `model.inputContent`와 `textarea.value`를 동기화.
+3. `model.textContent`와 `textarea.value`를 동기화.
 4. 커서 offset을 `replaceStart + 1`로 이동.
 5. `_updateCursorPosition()`, `_updateSelection()`, `_debouncedRender()` 호출.
 
@@ -1050,7 +1050,7 @@ sequenceDiagram
 
     alt 정상 완료
         TA->>EC: compositionend
-        EC->>Model: inputContent 갱신
+        EC->>Model: textContent 갱신
         EC->>EC: 조합 span 제거
         EC->>Model: paragraph.render() 호출
     else 취소
@@ -1068,10 +1068,10 @@ sequenceDiagram
 4. 활성 선택 영역이 있으면:
    - `selection.normalized()`로 시작/끝을 구한다.
    - `_compositionStartOffset = normalized.start.textOffset`.
-   - 모델에서 선택 영역을 삭제: `model.inputContent = content.slice(0, start) + content.slice(end)`.
+   - 모델에서 선택 영역을 삭제: `model.textContent = content.slice(0, start) + content.slice(end)`.
    - `textarea.value`를 갱신하고 선택 영역을 초기화.
 5. 활성 선택 영역이 없으면 `_compositionStartOffset = _cursorModel.offset`.
-6. `_compositionBeforeContent`를 선택 삭제 후의 `model.inputContent`로 캡처. 이 값은 나중 `compositionend`에서 조합된 길이를 계산하는 기준이 된다.
+6. `_compositionBeforeContent`를 선택 삭제 후의 `model.textContent`로 캡처. 이 값은 나중 `compositionend`에서 조합된 길이를 계산하는 기준이 된다.
 7. `_cursorModel.selection = null`, `_updateSelection()`.
 8. 만약 선택 영역을 삭제했다면 `paragraph.render()`를 호출.
 9. 조합 span 생성: `_createOptimisticSpan("", _compositionStartOffset)`.
@@ -1101,7 +1101,7 @@ sequenceDiagram
 1. `_isComposing = false`.
 2. `_debounceTimer`가 있으면 취소.
 3. `_removeCompositionSpan()`으로 조합 span 제거.
-4. `model.inputContent = this._textarea.value`.
+4. `model.textContent = this._textarea.value`.
 5. `composedLength = after.length - _compositionBeforeContent.length`로 커서 offset 계산: `_cursorModel.offset = _compositionStartOffset + composedLength`.
 6. `paragraph.render()` 호출로 전체 재래핑.
 7. `_updateCursorPosition()` 호출.
@@ -1110,7 +1110,7 @@ sequenceDiagram
 
 1. `_isComposing = false`.
 2. `_removeCompositionSpan()`으로 조합 span 제거.
-3. `model.inputContent = _compositionBeforeContent`.
+3. `model.textContent = _compositionBeforeContent`.
 4. `textarea.value = _compositionBeforeContent`.
 5. `_cursorModel.offset = _compositionStartOffset`.
 6. `textarea.setSelectionRange(_compositionStartOffset, _compositionStartOffset)`.
@@ -1123,7 +1123,7 @@ sequenceDiagram
 조합 중에 포커스를 잃거나(`blur`) 탭을 전환(`visibilitychange`, `document.hidden`)하면 조합은 **취소되지 않고 완료**로 처리된다.
 
 - `_resetCompositionState()`로 조합 상태를 초기화.
-- `model.inputContent = textarea.value`.
+- `model.textContent = textarea.value`.
 - `composedLength = after.length - _compositionBeforeContent.length`로 커서 offset 갱신.
 - `_debounceTimer`가 있으면 취소.
 - `paragraph.render()` 호출.
@@ -1147,7 +1147,7 @@ sequenceDiagram
 - 커서 위치에 임시 `span`을 삽입한다. 이 span은 `text-decoration: underline` 스타일을 가진다.
 - `compositionupdate`가 발생할 때마다 span의 `innerText`를 갱신하고, `TextLayoutEngine.genCharStyle()`로 글자 스타일을 적용한 뒤 밑줄을 다시 적용한다.
 - 조합 중에 화살표 키를 누르면, 조합을 시각적으로 취소하고 `textarea` 커서를 조합 시작 위치로 되돌린다.
-- `Escape` 키를 누르면 조합 span을 제거하고 조합 상태를 해제한다. `model.inputContent`는 조합 전 내용으로 복원된다.
+- `Escape` 키를 누르면 조합 span을 제거하고 조합 상태를 해제한다. `model.textContent`는 조합 전 내용으로 복원된다.
 
 ---
 
@@ -1203,7 +1203,7 @@ flowchart TD
 
 1. `this._mapper.rebuild()` — 오프셋 매핑 재구축.
 2. `this._optimisticSpan = null` — 낙관적 span 참조 제거.
-3. 조합 중이 아닌 경우 `textarea.value`를 `model.inputContent`로 동기화.
+3. 조합 중이 아닌 경우 `textarea.value`를 `model.textContent`로 동기화.
 4. `this._syncTextareaSelection()` — textarea 선택 영역 동기화.
 5. `this._updateCursorPosition()` — 커서 재배치.
 6. `this._updateSelection()` — 선택 영역 재배치.
@@ -1231,11 +1231,11 @@ flowchart TD
 
 ### 7.3 호스트 프로그램의 책임
 
-호스트 프로그램은 외부에서 `model.inputContent`를 변경한 후, 반드시 `paragraph.render()`를 호출해야 한다. `postRender()`는 `render()` 내부에서 자동으로 호출되므로 별도로 호출할 필요는 없다.
+호스트 프로그램은 외부에서 `model.textContent`를 변경한 후, 반드시 `paragraph.render()`를 호출해야 한다. `postRender()`는 `render()` 내부에서 자동으로 호출되므로 별도로 호출할 필요는 없다.
 
 ```ts
 // 외부에서 텍스트 변경
-paragraph.model!.inputContent = "변경된 텍스트";
+paragraph.model!.textContent = "변경된 텍스트";
 
 // 렌더링 + postRender 자동 호출
 paragraph.render();
@@ -1687,7 +1687,7 @@ paragraph.editableText = false;
 호스트 프로그램이 단락의 텍스트를 코드로 변경할 때는 반드시 `paragraph.render()`를 호출해야 한다.
 
 ```ts
-paragraph.model!.inputContent = "새 텍스트";
+paragraph.model!.textContent = "새 텍스트";
 paragraph.render(); // postRender() 자동 호출
 ```
 
@@ -1696,7 +1696,7 @@ paragraph.render(); // postRender() 자동 호출
 ### 13.3 편집된 텍스트 읽기
 
 `paragraph.data`의 `content` 필드는 렌더링된 실제 텍스트를 반환한다.
-편집 모드에서 텍스트가 수정된 경우, `model.inputContent`의 값이 반영되며,
+편집 모드에서 텍스트가 수정된 경우, `model.textContent`의 값이 반영되며,
 모델이 아직 없는 초기 상태에서는 setter로 전달된 원본 콘텐츠를 반환한다.
 
 ```ts
@@ -1731,9 +1731,9 @@ paragraph.addEventListener('render-error', (e) => {
 
 ### 13.6 undo/redo 구현 가이드
 
-- 호스트 프로그램이 `model.inputContent` 변경 이력을 스택으로 관리한다.
-- undo: 이전 `inputContent`를 복원한 후 `paragraph.render()` 호출.
-- redo: 다음 `inputContent`를 복원한 후 `paragraph.render()` 호출.
+- 호스트 프로그램이 `model.textContent` 변경 이력을 스택으로 관리한다.
+- undo: 이전 `textContent`를 복원한 후 `paragraph.render()` 호출.
+- redo: 다음 `textContent`를 복원한 후 `paragraph.render()` 호출.
 - 커서 위치도 함께 저장/복원해야 사용자 경험이 자연스럽다.
 
 ```ts
@@ -1750,7 +1750,7 @@ function undo() {
   if (historyIndex <= 0) return;
   historyIndex--;
   const state = history[historyIndex];
-  paragraph.model!.inputContent = state.content;
+  paragraph.model!.textContent = state.content;
   paragraph.render();
   paragraph.editController?.setCursor({ textOffset: state.cursor });
   paragraph.editController?.focus();
@@ -1760,7 +1760,7 @@ function redo() {
   if (historyIndex >= history.length - 1) return;
   historyIndex++;
   const state = history[historyIndex];
-  paragraph.model!.inputContent = state.content;
+  paragraph.model!.textContent = state.content;
   paragraph.render();
   paragraph.editController?.setCursor({ textOffset: state.cursor });
   paragraph.editController?.focus();
@@ -1780,7 +1780,7 @@ function redo() {
 
 | 제약 | 설명 | 이유 및 향후 개선 방향 |
 |------|------|------------------------|
-| 평문 텍스트만 지원 | 굵게, 기울임, 글자 색상 등 서식 있는 텍스트 편집은 지원하지 않는다. | `model.inputContent`는 단일 문자열이며 span 스타일은 `genCharStyle()`에서 일괄 생성. 향후 inline style range나 TextBlockData 기반 편집을 추가해야 한다. |
+| 평문 텍스트만 지원 | 굵게, 기울임, 글자 색상 등 서식 있는 텍스트 편집은 지원하지 않는다. | `model.textContent`는 단일 문자열이며 span 스타일은 `genCharStyle()`에서 일괄 생성. 향후 inline style range나 TextBlockData 기반 편집을 추가해야 한다. |
 | 단일 단락 편집 | 단락을 넘어가는 선택이나 여러 단락 동시 편집은 지원하지 않는다. | `_cursorModel`과 `_selectionAnchor`가 하나의 `LayoutParagraphElement`에만 연결. 향후 문서 전역 `TextEditController`와 paragraph 간 매핑이 필요하다. |
 | undo/redo 없음 | 실행 취소/다시 실행 스택은 호스트 프로그램이 직접 구현해야 한다. | 텍스트 변경 이력을 보관하면 메모리/복잡도 증가. 라이브러리는 최소한의 상태만 유지하고, 호스트가 정책을 결정하도록 설계되었다. |
 | 드래그 앤 드롭 없음 | 텍스트를 마우스로 끌어 이동하는 기능은 지원하지 않는다. | 선택 핸들과 drop target 계산이 추가로 필요. 클립보드 기반 잘라내기/붙여넣기로 대체 가능하다. |
