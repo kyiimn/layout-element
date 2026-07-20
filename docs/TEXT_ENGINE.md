@@ -981,7 +981,7 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 ### 18.3 `LayoutVirtualColumnElement`
 
 - `_initStructureAndMeasureColumns()`와 `_layoutTextIntoColumns()`에서 임시로 생성
-- `isOverflow`로 컬럼 높이 초과 여부 감지
+- `isOverflow`로 컬럼 높이 초과 여부 감지. `scrollHeight`(정수 px) 대신 `getBoundingClientRect().height`(소수점 px)를 합산하여 서브픽셀 정밀도를 보존한다. `scrollHeight`는 정수로 반올림되어 `lineHeight`가 픽셀 단위로 나누어떨어지지 않을 때(예: 5mm ≈ 18.9px → scrollHeight=19px) 거짓 오버플로우를 유발할 수 있다.
 - 측정 완료 후 제거됨
 
 ---
