@@ -3,7 +3,7 @@ import { EditManager } from "./edit-manager";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { BoxData } from "@/types";
-import type { InsertMode, InsertType, InsertEventDetail } from "@/types/edit";
+import type { InsertMode, InsertEventDetail } from "@/types/edit";
 
 /** 드래그-삽입을 통한 새 요소 생성을 관리하는 컨트롤러. */
 export class InsertController {
@@ -76,7 +76,7 @@ export class InsertController {
     this._currentClientX = event.clientX;
     this._currentClientY = event.clientY;
 
-    this._startContainer = this._findTargetContainer(event.clientX, event.clientY, this._mode.type);
+    this._startContainer = this._findTargetContainer(event.clientX, event.clientY, event.clientX, event.clientY);
 
     this._previewEl = this._createPreview();
     this._updatePreview(this._startClientX, this._startClientY, this._startClientX, this._startClientY);
@@ -137,10 +137,8 @@ export class InsertController {
     const endX = Math.max(this._startClientX, endClientX);
     const endY = Math.max(this._startClientY, endClientY);
 
-    // 드래그 영역의 중심점을 기준으로 타겟 컨테이너를 찾는다
-    const centerX = (startX + endX) / 2;
-    const centerY = (startY + endY) / 2;
-    const container = this._findTargetContainer(centerX, centerY, mode.type);
+    // 드래그 영역을 완전히 포함하는 가장 안쪽 컨테이너를 찾는다
+    const container = this._findTargetContainer(startX, startY, endX, endY);
     if (!container) {
       this._cleanup();
       return;
@@ -206,46 +204,114 @@ export class InsertController {
     manager._dispatchInsert(detail);
   }
 
-  /** 클릭 지점에서 유효한 삽입 대상 컨테이너를 찾는다. */
-  private _findTargetContainer(clientX: number, clientY: number, _type: InsertType): LayoutDocumentElement | LayoutBoxElement | null {
-    const elements = document.elementsFromPoint(clientX, clientY);
+  /**
+   * 드래그 영역을 완전히 포함하는 가장 안쪽 유효 컨테이너를 찾는다.
+   *
+   * 드래그 사각형의 네 꼭짓점이 모두 포함되는 가장 깊이 중첩된 컨테이너를 반환한다.
+   * 어떤 컨테이너도 영역을 완전히 포함하지 못하면 EditManager의 루트 요소를 반환한다.
+   *
+   * @param startX - 드래그 영역 왼쪽 화면 x좌표 (px)
+   * @param startY - 드래그 영역 위쪽 화면 y좌표 (px)
+   * @param endX - 드래그 영역 오른쪽 화면 x좌표 (px)
+   * @param endY - 드래그 영역 아래쪽 화면 y좌표 (px)
+   * @returns 유효한 컨테이너 요소, 또는 루트 요소
+   */
+  private _findTargetContainer(startX: number, startY: number, endX: number, endY: number): LayoutDocumentElement | LayoutBoxElement {
+    const corners = [
+      { x: startX, y: startY },
+      { x: endX, y: startY },
+      { x: startX, y: endY },
+      { x: endX, y: endY },
+    ];
 
-    let target: HTMLElement | null = null;
-    for (const el of elements) {
-      if (el instanceof LayoutBoxElement || el instanceof LayoutDocumentElement) {
-        target = el;
-        break;
-      }
-    }
-
-    if (!target) {
-      target = document.querySelector('x-layout-document') as LayoutDocumentElement | null;
-    }
-
-    if (!target) return null;
-
-    // Walk up to find a valid container, skipping locked boxes
-    let current: HTMLElement | null = target;
-    while (current) {
-      if (current instanceof LayoutDocumentElement) {
-        return current;
-      }
-      if (current instanceof LayoutBoxElement) {
-        if (current.lock) {
-          current = current.parentElement;
-          continue;
+    // 네 꼭짓점에서 hit test하여 후보 컨테이너 수집
+    const candidates = new Map<LayoutDocumentElement | LayoutBoxElement, number>();
+    for (const corner of corners) {
+      const elements = document.elementsFromPoint(corner.x, corner.y);
+      for (const el of elements) {
+        if (el instanceof LayoutBoxElement || el instanceof LayoutDocumentElement) {
+          const existing = candidates.get(el) ?? 0;
+          candidates.set(el, existing + 1);
+          break;
         }
-        const items = current.items;
+      }
+    }
+
+    // 네 꼭짓점 모두에서 hit된 후보만 필터링
+    const fullyHit: (LayoutDocumentElement | LayoutBoxElement)[] = [];
+    for (const [el, count] of candidates) {
+      if (count === 4) {
+        fullyHit.push(el);
+      }
+    }
+
+    // 사각형이 각 후보의 경계 내에 완전히 포함되는지 확인
+    // 가장 안쪽(깊이 중첩된) 유효 컨테이너를 찾는다
+    for (const el of fullyHit) {
+      if (el instanceof LayoutDocumentElement) {
+        // Document는 항상 포함하므로, 더 안쪽 box가 없을 때의 대상
+        continue;
+      }
+      if (el instanceof LayoutBoxElement) {
+        if (el.lock) continue;
+        const items = el.items;
         const hasNonBoxChild = items.some(item => item.type !== 'box');
-        if (!hasNonBoxChild) {
-          return current;
+        if (hasNonBoxChild) continue; // 비-box 자식이 있으면 삽입 불가
+
+        const rect = el.getBoundingClientRect();
+        if (
+          startX >= rect.left && endX <= rect.right &&
+          startY >= rect.top && endY <= rect.bottom
+        ) {
+          return el;
         }
       }
-      current = current.parentElement;
     }
 
-    // Fallback to document
-    return document.querySelector('x-layout-document') as LayoutDocumentElement | null;
+    // Document 요소도 포함 여부 확인
+    const docRect = this._document.getBoundingClientRect();
+    if (
+      startX >= docRect.left && endX <= docRect.right &&
+      startY >= docRect.top && endY <= docRect.bottom
+    ) {
+      // Document 내부에서 box를 찾지 못한 경우 — editableRootId가 있으면 해당 루트 box 확인
+      const manager = EditManager.getInstance();
+      const rootId = manager.editableRootId;
+      if (rootId) {
+        const rootBox = this._document.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null;
+        if (rootBox && !rootBox.lock) {
+          const rootRect = rootBox.getBoundingClientRect();
+          if (
+            startX >= rootRect.left && endX <= rootRect.right &&
+            startY >= rootRect.top && endY <= rootRect.bottom
+          ) {
+            return rootBox;
+          }
+        }
+      }
+      return this._document;
+    }
+
+    // 드래그 영역이 어느 컨테이너보다 크면 EditManager 루트로 폴백
+    return this._getRootContainer();
+  }
+
+  /**
+   * EditManager에 설정된 루트 컨테이너를 반환한다.
+   *
+   * `editableRootId`가 설정되어 있으면 해당 ID의 box를 찾고,
+   * 없으면 문서 루트(`_document`)를 반환한다.
+   *
+   * @returns 루트 컨테이너 요소
+   */
+  private _getRootContainer(): LayoutDocumentElement | LayoutBoxElement {
+    const manager = EditManager.getInstance();
+    const rootId = manager.editableRootId;
+    if (rootId) {
+      const rootBox = this._document.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null;
+      if (rootBox) return rootBox;
+    }
+    return this._document;
   }
 
   /** 화면 좌표를 컨테이너 내부 mm 좌표로 변환한다. */
