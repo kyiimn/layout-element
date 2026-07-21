@@ -431,7 +431,7 @@ LayoutSelectionController._onClick(event)
 
 **편집 모드 가드**: `layoutEditMode`가 `true`이고 클릭한 box가 `isBoxEditable()`을 통과하면, `mousedown`에서 `LayoutEditController`가 이미 선택을 처리했으므로 `click`에서 중복 실행을 건너뛴다. 편집 가능하지 않은 box(필터링된 role 등)는 `click`에서 선택 처리된다.
 
-> **드래그/리사이즈 후 클릭 억제**: 마우스가 box 밖에서 mouseup되면 후속 `click` 이벤트가 발생하여 `LayoutSelectionController._onClick`가 빈 영역 클릭으로 처리, 선택이 해제되는 문제가 있다. 이를 방지하기 위해 `LayoutEditController`는 드래그 이동(`dragMoved`) 또는 리사이즈(`moved`) 완료 시 `EditManager._suppressLayoutClick()`를 호출하여 `_suppressNextClick` 플래그를 설정한다. `LayoutSelectionController._onClick`는 `_consumeSuppressNextClick()`으로 이 플래그를 소비하여 해당 `click` 이벤트를 무시한다.
+> **드래그/리사이즈 후 클릭 억제**: 마우스가 box 밖에서 mouseup되면 후속 `click` 이벤트가 발생하여 `LayoutSelectionController._onClick`가 빈 영역 클릭으로 처리, 선택이 해제되는 문제가 있다. 이를 방지하기 위해 `LayoutEditController`는 드래그 이동(`dragMoved`) 또는 리사이즈(`moved`) 완료 시 `EditManager._suppressLayoutClick()`를 호출한다. 이 메서드는 window capture phase에 일회성 `click` 리스너를 등록하여 `LayoutSelectionController._onClick`보다 먼저 실행되어 click 이벤트를 소비(`stopPropagation()` + `preventDefault()`)한다. click이 발생하지 않으면 200ms 타임아웃으로 리스너가 자동 제거된다. 기존 `_suppressNextClick` 플래그 방식은 mousedown의 `preventDefault()`로 인해 브라우저가 click 이벤트를 발생시키지 않을 때 플래그가 소비되지 않고 남아 다음 정상 클릭을 잘못 무시하는 문제가 있었으나, window capture 리스너 방식으로 해결되었다.
 
 #### 상태 저장 방식
 
@@ -1775,7 +1775,7 @@ private _onKeyDown = (event: KeyboardEvent): void => {
 - **시각적 피드백**: 선택 표시는 `box-shadow`를 사용하므로 요소의 레이아웃에 영향을 주지 않는다. `outline`은 기존 `border`와 충돌할 수 있어 사용하지 않는다.
 - **rAF 쓰로틀링**: 드래그 중 위치 업데이트는 `requestAnimationFrame`으로 60fps로 제한된다. 중복 rAF 요청은 무시된다.
 - **이동 임계값**: mousedown 후 3px 이하의 이동은 클릭으로 간주하며, 드래그로 인식되지 않는다.
-- **`BoxDragState.dragMoved` / `BoxResizeState.moved` 플래그**: 드래그/리사이즈 후 `click` 이벤트가 발생하면 빈 영역 클릭으로 처리되어 선택이 해제되는 것을 방지하기 위해, `LayoutEditController`는 실제 이동이 있었을 때(`dragMoved` 또는 `moved`가 `true`) `EditManager._suppressLayoutClick()`를 호출하여 후속 `click` 이벤트를 억제한다.
+- **`BoxDragState.dragMoved` / `BoxResizeState.moved` 플래그**: 드래그/리사이즈 후 `click` 이벤트가 발생하면 빈 영역 클릭으로 처리되어 선택이 해제되는 것을 방지하기 위해, `LayoutEditController`는 실제 이동이 있었을 때(`dragMoved` 또는 `moved`가 `true`) `EditManager._suppressLayoutClick()`를 호출하여 후속 `click` 이벤트를 억제한다. 이 메서드는 window capture phase에 일회성 click 리스너를 등록하여 `LayoutSelectionController._onClick`보다 먼저 click을 소비한다. click이 발생하지 않으면 200ms 타임아웃으로 자동 제거된다.
 - **`parentModel` 필수**: `LayoutEditController._computeNewPosition`에서 `position: 'static'` 모드는 `parentModel`(부모의 `GridCalculator`)이 필요하다. 없으면 시작 위치를 그대로 반환한다.
 - **`maxTop` 계산**: static 모드에서 박스의 하단이 편집 영역 하단을 넘지 않도록 `editableTextHeight`와 `absHeight`를 사용하여 `maxTop`을 계산한다. `editableHeight`만 사용하면 마지막 줄의 leading 공간이 무시되어 박스가 하단에 딱 붙지 않는다.
 - **문서 영역 밖 드래그**: 문서 직계 자식 박스(`this.parentElement?.type === 'document'`)만 위치 변환 대상이다. 다른 박스 안에 중첩된 박스는 이 동작의 대상이 아니다.

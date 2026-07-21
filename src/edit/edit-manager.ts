@@ -138,6 +138,8 @@ export class EditManager {
   private _insertController: InsertController | null = null;
   private _insertMode: InsertMode | null = null;
   private _suppressNextClick = false;
+  private _clickConsumeHandler: ((e: MouseEvent) => void) | null = null;
+  private _clickConsumeTimer: ReturnType<typeof setTimeout> | null = null;
   private _layoutEditMode: boolean = false;
   private _layoutEditType: LayoutEditType = 'move';
   private _selectionController: LayoutSelectionController | null = null;
@@ -1401,21 +1403,56 @@ export class EditManager {
    * 드래그/리사이즈 완료 직후 발생하는 클릭 이벤트를 억제한다.
    *
    * 마우스가 box 밖에서 mouseup되면 후속 click 이벤트가 빈 영역 클릭으로
-   * 처리되어 선택이 해제되는 것을 방지한다.
-   * `LayoutSelectionController._onClick`에서 `_consumeSuppressNextClick()`로
-   * 한 번만 소비된다.
+   * 처리되어 선택이 해제되는 것을 방지한다. window capture phase에
+   * 일회성 click 리스너를 등록하여 `LayoutSelectionController._onClick`보다
+   * 먼저 실행되어 click을 소비한다. click이 발생하지 않으면 타임아웃(200ms) 후
+   * 자동 제거된다.
    * @internal
    */
   _suppressLayoutClick(): void {
-    this._suppressNextClick = true;
+    if (this._clickConsumeHandler !== null) {
+      window.removeEventListener('click', this._clickConsumeHandler, true);
+      if (this._clickConsumeTimer !== null) {
+        clearTimeout(this._clickConsumeTimer);
+      }
+    }
+
+    this._clickConsumeHandler = (e: MouseEvent): void => {
+      e.stopPropagation();
+      e.preventDefault();
+      this._removeClickConsumeHandler();
+    };
+
+    window.addEventListener('click', this._clickConsumeHandler, true);
+
+    this._clickConsumeTimer = setTimeout(() => {
+      this._removeClickConsumeHandler();
+    }, 200);
+  }
+
+  /**
+   * 등록된 click 소비 리스너와 타이머를 정리한다.
+   * @internal
+   */
+  private _removeClickConsumeHandler(): void {
+    if (this._clickConsumeHandler !== null) {
+      window.removeEventListener('click', this._clickConsumeHandler, true);
+      this._clickConsumeHandler = null;
+    }
+    if (this._clickConsumeTimer !== null) {
+      clearTimeout(this._clickConsumeTimer);
+      this._clickConsumeTimer = null;
+    }
   }
 
   /**
    * 삽입 완료/취소 및 드래그/리사이즈 완료 직후 발생하는 클릭 이벤트를
    * 무시하기 위한 플래그를 소비한다.
    *
-   * `_dispatchInsert`, `_dispatchInsertCancel`, `_suppressLayoutClick`에서
-   * `true`로 설정되며, `LayoutSelectionController._onClick`에서 한 번만 소비된다.
+   * `_dispatchInsert`, `_dispatchInsertCancel`에서 `true`로 설정되며,
+   * `LayoutSelectionController._onClick`에서 한 번만 소비된다.
+   * 드래그/리사이즈 완료 후 클릭 억제는 `_suppressLayoutClick()`이
+   * 별도의 window capture 리스너로 처리하므로 이 플래그를 사용하지 않는다.
    * @internal
    */
   _consumeSuppressNextClick(): boolean {
