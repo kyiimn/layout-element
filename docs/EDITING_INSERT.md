@@ -252,7 +252,7 @@ export interface InsertEventDetail {
 |------|-----------|
 | `insertMode = (non-null)` | `layoutEditMode = false`, `textEditMode = false` |
 
-`selectableMode`는 항상 독립적으로 동작하며 스위칭 대상이 아니다. 자세한 내용은 `EDITING_LAYOUT.md`의 모드 스위칭 표를 참조한다.
+선택은 인쇄 모드와 인서트 모드를 제외하면 항상 활성이다.
 
 ---
 

@@ -140,14 +140,13 @@ export class EditManager {
   private _suppressNextClick = false;
   private _layoutEditMode: boolean = false;
   private _layoutEditType: LayoutEditType = 'move';
-  private _selectableMode: boolean = true;
+  private _selectionController: LayoutSelectionController | null = null;
+  private _layoutEditController: LayoutEditController | null = null;
   private _editableRoles: Set<BoxRole> | null = null;
   private _editableBoxIds: Set<string> | null = null;
   private _selectableRoles: Set<BoxRole> | null = null;
   private _selectableBoxIds: Set<string> | null = null;
   private _selectableRootId: string | null = null;
-  private _layoutEditController: LayoutEditController | null = null;
-  private _selectionController: LayoutSelectionController | null = null;
 
   /**
    * CSS `transform: scale(s)`이 적용된 환경을 위한 화면 scale 보정 계수.
@@ -560,6 +559,7 @@ export class EditManager {
     if (value) {
       this.layoutEditMode = false;
       this.insertMode = null;
+      this._reduceSelectionToSingleForTextMode();
     }
     this._textEditMode = value;
     if (!value) {
@@ -752,6 +752,33 @@ export class EditManager {
   }
 
   /**
+   * 텍스트 편집 모드 진입 시 멀티 선택을 단일 선택으로 줄인다.
+   *
+   * 선택된 항목 중 `contentType === 'paragraph'`인 box가 있으면
+   * 그중 DOM 순서상 가장 위에 있는 항목만 남기고 모두 선택 해제한다.
+   * 그렇지 않으면 가장 위에 있는 항목만 남기고 모두 선택 해제한다.
+   */
+  private _reduceSelectionToSingleForTextMode(): void {
+    if (this._selectedLayouts.length <= 1) return;
+
+    const paragraphBoxes = this._selectedLayouts.filter(
+      (el): el is LayoutBoxElement => el instanceof LayoutBoxElement && el.contentType === 'paragraph'
+    );
+
+    const target = paragraphBoxes.length > 0 ? paragraphBoxes[0] : this._selectedLayouts[0];
+    if (!target) return;
+
+    const previousLayouts = [...this._selectedLayouts];
+    for (const el of this._selectedLayouts) {
+      if (el !== target) {
+        el.removeAttribute('selected');
+      }
+    }
+    this._selectedLayouts = [target];
+    this._dispatchLayoutSelection(previousLayouts);
+  }
+
+  /**
    * 현재 편집 가능 상태에 따라 문서 내 모든 paragraph의 `editableText` 속성을 갱신한다.
    * `isParagraphEditable()` 결과를 paragraph별로 적용한다.
    */
@@ -815,14 +842,7 @@ export class EditManager {
     }
     this._layoutEditMode = nextActive;
     this._layoutEditType = nextType;
-    if (nextActive) {
-      this._applyEditableLayoutToAllBoxes();
-    } else {
-      this._applyEditableLayoutToAllBoxes();
-      if (!this._selectableMode) {
-        this.clearLayoutSelection();
-      }
-    }
+    this._applyEditableLayoutToAllBoxes();
     this._updateControllers();
   }
 
@@ -837,43 +857,11 @@ export class EditManager {
    */
   get layoutEditType(): LayoutEditType { return this._layoutEditType; }
 
-  /**
-   * 선택 모드 활성화 상태.
-   *
-   * `true`면 `layoutEditMode` 여부와 무관하게 box 클릭으로 선택할 수 있다.
-   * 편집 모드가 꺼진 상태에서도 클릭 선택이 가능하며, 선택 시 시각적
-   * 피드백(`selected` 속성)이 제공된다.
-   * 이동/리사이즈는 여전히 편집 모드에서만 동작한다.
-   *
-   * @example
-   * ```ts
-   * const manager = EditManager.getInstance();
-   * manager.selectableMode = true;   // 편집 모드 없이도 클릭 선택 가능
-   * manager.layoutEditMode = false;  // 이동/리사이즈는 불가하지만 선택은 가능
-   * ```
-   */
-  get selectableMode(): boolean { return this._selectableMode; }
-  set selectableMode(value: boolean) {
-    if (this._isPrint) return;
-    if (this._selectableMode === value) return;
-    this._selectableMode = value;
-    this._updateControllers();
-    if (!value) {
-      this.clearLayoutSelection();
-    }
-  }
-
   private _updateControllers(): void {
-    if (this._selectableMode) {
-      if (!this._selectionController) {
-        this._selectionController = new LayoutSelectionController(document.documentElement);
-      }
-      this._selectionController.attach();
-    } else {
-      if (this._selectionController) {
-        this._selectionController.detach();
-      }
+    if (!this._selectionController) {
+      this._selectionController = new LayoutSelectionController(document.documentElement);
     }
+    this._selectionController.attach();
 
     if (this._layoutEditMode) {
       if (!this._layoutEditController) {
@@ -896,7 +884,7 @@ export class EditManager {
    * @example
    * ```ts
    * manager.setSelectableRoles(['body', 'title']);
-   * manager.selectableMode = true;  // body, title box만 선택 가능
+   * // body, title box만 선택 가능
    * ```
    */
   setSelectableRoles(roles: BoxRole[] | null): void {
@@ -1200,8 +1188,9 @@ export class EditManager {
    *
    * 단, 텍스트 편집 포커스가 있는 paragraph의 부모 box는
    * 포커스가 다른 paragraph로 이동하지 않는 한 선택 상태를 유지한다.
-   * 모드 전환(layoutEditMode, insertMode, selectableMode) 시에도
-   * 포커스된 paragraph의 부모 box 선택은 보존된다.
+   * 모드 전환(layoutEditMode) 시에도 포커스된 paragraph의 부모 box 선택은 보존된다.
+   * 인서트 모드 진입 시에는 _lastFocusedBox를 null로 초기화하여
+   * 모든 선택을 해제한다.
    */
   clearLayoutSelection(): void {
     if (this._selectedLayouts.length === 0) return;
@@ -1270,6 +1259,7 @@ export class EditManager {
       if (!isDragging) {
         this.layoutEditMode = false;
         this.textEditMode = false;
+        this._lastFocusedBox = null;
         this.clearLayoutSelection();
       }
 

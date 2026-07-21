@@ -21,7 +21,7 @@
 
 `EditManager.layoutEditMode = true`로 설정되면:
 
-1. **모드 스위칭**: `layoutEditMode = true`는 `textEditMode`를 `false`로, `insertMode`를 `null`로 전환한다. 반대로 `textEditMode = true`는 `layoutEditMode`를 `false`로, `insertMode`를 `null`로 전환한다. `insertMode`가 활성화되면 `layoutEditMode`와 `textEditMode` 모두 `false`가 된다. `selectableMode`는 항상 독립적으로 동작하며 스위칭 대상이 아니다.
+1. **모드 스위칭**: `layoutEditMode = true`는 `textEditMode`를 `false`로, `insertMode`를 `null`로 전환한다. 반대로 `textEditMode = true`는 `layoutEditMode`를 `false`로, `insertMode`를 `null`로 전환한다. `insertMode`가 활성화되면 `layoutEditMode`와 `textEditMode` 모두 `false`가 된다.
 2. **전역 필터 활성화**: `editableRoles`와 `editableBoxIds`에 맞는 box가 편집 가능 상태로 전환된다.
 3. **중앙 집중형 이벤트 처리**: `LayoutEditController`가 문서(document) 수준에서 `mousedown`을 캡처 단계로 감지하여, 편집 가능한 box에 한해 선택, 드래그, 리사이즈를 처리한다.
 4. **선택 처리**: `LayoutSelectionController`가 문서(document) 수준에서 `click`을 캡처 단계로 감지하여 선택 가능한 box의 클릭 선택을 처리한다. 레이아웃 편집 모드에서 편집 가능한 box의 `click`은 `LayoutEditController`가 `mousedown`에서 이미 처리하므로 중복 선택을 방지하기 위해 건너뛴다.
@@ -44,7 +44,6 @@
 │                                                                      │
 │  EditManager (singleton)                                             │
 │  ├── layoutEditMode: boolean                                         │
-│  ├── selectableMode: boolean                                         │
 │  ├── editableRoles: ReadonlySet<BoxRole> | null                      │
 │  ├── editableBoxIds: ReadonlySet<string> | null                      │
 │  ├── editableRootId: string | null                                    │
@@ -102,7 +101,7 @@ manager.layoutEditMode = false;
 console.log(manager.layoutEditType); // 'move' | 'reparent'
 ```
 
-`layoutEditMode`가 `true`(또는 `{ type: ... }`)가 되면 `EditManager`는 문서 안의 모든 `<x-layout-box>`를 순회하며, `isBoxEditable(box)` 결과에 따라 각 box의 `editableLayout` 속성을 갱신한다. `false`로 설정되면 모든 box의 `editableLayout` 속성이 `false`가 된다. **선택은 `selectableMode`가 `true`면 유지된다.** `selectableMode`가 `false`이고 `layoutEditMode`도 `false`가 되면 선택이 해제된다.
+`layoutEditMode`가 `true`(또는 `{ type: ... }`)가 되면 `EditManager`는 문서 안의 모든 `<x-layout-box>`를 순회하며, `isBoxEditable(box)` 결과에 따라 각 box의 `editableLayout` 속성을 갱신한다. `false`로 설정되면 모든 box의 `editableLayout` 속성이 `false`가 된다. **선택은 레이아웃 편집 모드와 무관하게 항상 유지된다.**
 
 **기본적으로 모든 box가 허용된다.** `layoutEditMode`만 켜고 `editableRoles`와 `editableBoxIds`를 모두 `null`로 두면 Root 제한(`setEditableRootId`)과 lock을 제외한 모든 box가 편집 가능하다. 편집을 막으려면 `layoutEditMode`를 `false`로 설정하거나, `editableRoles`/`editableBoxIds`를 지정해 허용 범위를 좁혀야 한다. box의 `lock` 속성이 `true`이거나 조상 box 중 하나라도 lock이면 해당 box와 하위 요소는 항상 편집 불가이다.
 
@@ -168,35 +167,32 @@ const editable = manager.isBoxEditable(box); // boolean
 | true | unlocked | inside Root | `['body']` | `['b1']` | `'body'` | `'b1'` | `true` |
 | true | unlocked | inside Root | `['body']` | `['b1']` | `'body'` | `'b2'` | `false` |
 
-#### 선택 모드 (`EditManager.selectableMode`)
+#### 선택 (항상 활성)
 
-편집 모드(`layoutEditMode`)가 꺼져 있어도 box 클릭으로 선택할 수 있는 모드이다. 이동/리사이즈/텍스트 수정은 여전히 편집 모드에서만 동작하지만, **선택 자체**는 선택 모드만 켜면 동작한다.
+레이아웃 선택은 기본적으로 항상 활성이다. `LayoutSelectionController`는 처음부터 부착되어 있으며, 인쇄 모드와 삽입 모드를 제외하면 항상 동작한다. 선택은 `layoutEditMode`와 독립적으로 동작한다.
 
 ```typescript
 const manager = EditManager.getInstance();
 
-// 편집 모드 없이도 클릭 선택 가능
-manager.selectableMode = true;
+// 항상 클릭 선택 가능 (인쇄/삽입 모드 제외)
+manager.selectLayout(box);
 
-// 편집 모드도 켜면 선택 + 이동/리사이즈 모두 가능
+// 레이아웃 편집 모드도 켜면 선택 + 이동/리사이즈 모두 가능
 manager.layoutEditMode = true;
-
-// 선택 모드만 끄면 선택도 해제됨
-manager.selectableMode = false;
 ```
 
-| `selectableMode` | `layoutEditMode` | 선택 | 이동/리사이즈 |
-|---|---|---|---|
-| `false` | `false` | ✗ | ✗ |
-| `true` | `false` | ✓ | ✗ |
-| `false` | `true` | ✓ (편집 필터) | ✓ |
-| `true` | `true` | ✓ (선택 필터 우선) | ✓ |
+| 조건 | 선택 | 이동/리사이즈 |
+|---|---|---|
+| 인쇄 모드 | ✗ | ✗ |
+| 삽입 모드 | ✗ | ✗ |
+| 기본 상태 | ✓ | ✗ |
+| `layoutEditMode = true` | ✓ (편집 필터) | ✓ |
 
-선택 모드가 켜지면 `LayoutSelectionController`가 부착되어 클릭 이벤트를 처리한다. 편집 모드가 꺼진 상태에서는 드래그/리사이즈는 시작되지 않고 클릭 선택만 처리된다. 문서의 빈 영역(box가 아닌 곳)을 클릭하면 모든 선택이 해제된다.
+`LayoutSelectionController`가 항상 부착되어 있으므로 선택을 위해 별도의 모드를 켤 필요가 없다. 편집 모드가 꺼진 상태에서는 드래그/리사이즈는 시작되지 않고 클릭 선택만 처리된다. 문서의 빈 영역(box가 아닌 곳)을 클릭하면 포커스된 box를 제외한 선택이 해제된다.
 
 #### 모드 스위칭
 
-각 모드의 setter는 활성화 시 다른 모드를 자동으로 비활성화한다. `selectableMode`는 항상 독립적으로 동작하며 스위칭 대상이 아니다.
+각 모드의 setter는 활성화 시 다른 모드를 자동으로 비활성화한다.
 
 | 설정 | 자동 전환 |
 |------|-----------|
@@ -204,7 +200,6 @@ manager.selectableMode = false;
 | `layoutEditMode = { type: 'reparent' }` | `textEditMode = false`, `insertMode = null` |
 | `textEditMode = true` | `layoutEditMode = false`, `insertMode = null` |
 | `insertMode = (non-null)` | `layoutEditMode = false`, `textEditMode = false` |
-| `selectableMode` | (변경 없음, 항상 독립) |
 
 **편집 타입 전환**: `layoutEditMode = { type: 'reparent' }` → `layoutEditMode = true`(`{ type: 'move' }`) 처럼 타입만 변경할 때는 이미 편집 모드가 활성화되어 있으므로 다른 모드를 비활성화하지 않는다. `layoutEditType` getter로 현재 타입을 조회할 수 있다.
 
@@ -217,7 +212,7 @@ manager.selectableMode = false;
 ```typescript
 // 선택 전용 role 필터 설정
 manager.setSelectableRoles(['body', 'title']);
-manager.selectableMode = true;
+
 
 // 선택 전용 box id 필터 설정
 manager.setSelectableBoxIds(['box-1', 'box-2']);
@@ -268,7 +263,7 @@ element.editableLayout = false;
 | 동작 | `<x-layout-box>` |
 |------|-------------------|
 | `true` 설정 | `cursor: grab`, `editable-layout` DOM 속성 추가, 호버/선택 시각적 피드백 활성화 |
-| `false` 설정 | `hovered`·`editable-layout` 제거, `cursor` 초기화, `EditManager._unregisterLayout()` 호출. **`selected`는 제거되지 않는다** — 선택은 `selectableMode`에 의해 독립적으로 관리된다 |
+| `false` 설정 | `hovered`·`editable-layout` 제거, `cursor` 초기화, `EditManager._unregisterLayout()` 호출. **`selected`는 제거되지 않는다** — 선택은 항상 활성 상태로 별도 토글이 없으므로 `editableLayout` 속성 변경과 무관하게 관리된다 |
 | 인쇄 모드 | `editableLayout` 설정 무시 |
 
 > **설계**: `editableLayout` 속성은 더 이상 이벤트 리스너를 직접 등록하지 않는다. `connectedCallback`은 `mouseenter`와 `mouseleave`만 등록하고, `click`/`mousedown`/리사이즈 핸들 이벤트는 `LayoutEditController`가 문서 수준에서 처리한다. 개별 box에 `editableLayout = true`를 설정하면 `EditManager.isBoxEditable()`은 아니지만 `LayoutEditController`가 이전 버전과의 호환을 위해 여전히 편집 가능한 것으로 간주한다.
@@ -337,7 +332,7 @@ element.editableLayout = false;
 | 상태 | 커서 | 시각적 피드백 |
 |------|------|-------------|
 | 비편집 모드 (선택 안 됨, hover) | (기본값) | 파란색 테두리 (`hovered`) |
-| 비편집 모드 (선택 됨, selectableMode) | (기본값) | 빨간색 테두리 (`selected`), 리사이즈 핸들은 미표시 |
+| 비편집 모드 (선택 됨) | (기본값) | 빨간색 테두리 (`selected`), 리사이즈 핸들은 미표시 |
 | 비편집 모드 (선택 안 됨, 미호버) | (기본값) | 회색 기본 테두리 (`:host(:not([border]))`) |
 | 텍스트 편집 포커스 (내부 paragraph가 포커스) | (기본값) | 빨간색 테두리 (`selected`), 리사이즈 핸들은 미표시 |
 | `editableLayout = true` (선택 안 됨, hover) | `grab` | 파란색 테두리 (`hovered`) |
@@ -396,10 +391,9 @@ this._layoutEditController.attach();
 
 ### 2.3 `LayoutSelectionController` 클릭 선택 처리
 
-`LayoutSelectionController`는 `EditManager.selectableMode`가 활성화될 때 생성되어 문서(document) 수준에서 `click` 이벤트를 캡처 단계로 처리한다. 편집 모드(`layoutEditMode`)와 무관하게 동작하며, **선택만** 처리한다. 드래그/리사이즈는 `LayoutEditController`가 담당한다.
-
+`LayoutSelectionController`는 처음부터 문서(document) 수준에서 `click` 이벤트를 캡처 단계로 처리한다. 편집 모드(`layoutEditMode`)와 무관하게 동작하며, **선택만** 처리한다. 드래그/리사이즈는 `LayoutEditController`가 담당한다.
 ```typescript
-// EditManager.selectableMode = true 일 때
+// LayoutSelectionController는 항상 부착됨
 this._selectionController = new LayoutSelectionController(document.documentElement);
 this._selectionController.attach();
 ```

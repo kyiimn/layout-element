@@ -4,11 +4,11 @@ import { EditManager } from "./edit-manager";
 /**
  * 레이아웃 선택 컨트롤러.
  *
- * `EditManager.selectableMode`가 활성화되면 문서 레벨에서 `click` 이벤트를
- * 캡처 단계로 감지하여 선택 가능한 box의 **선택**을 처리한다.
+ * 인쇄 모드와 인서트 모드를 제외하면 항상 활성화되어
+ * 클릭으로 box를 선택할 수 있다.
  *
- * `LayoutEditController`가 드래그 이동/리사이즈/편집 모드 선택을 담당한다면,
- * 이 컨트롤러는 편집 모드 여부와 무관하게 **선택만** 처리한다.
+ * `LayoutEditController`가 드래그 이동/리사이즈를 담당한다면,
+ * 이 컨트롤러는 모드와 무관하게 **선택만** 처리한다.
  * 이동/리사이즈는 여전히 편집 모드(`layoutEditMode`)에서만 동작한다.
  *
  * ## 아키텍처
@@ -18,14 +18,6 @@ import { EditManager } from "./edit-manager";
  * - **선택 전용**: 드래그/리사이즈 상태를 관리하지 않고 오직 선택만 처리한다.
  * - **필터링**: `EditManager.isBoxSelectable()`로 선택 가능 여부를 판별한다.
  *   lock, root, role, id 필터를 적용하되 `layoutEditMode` 여부는 확인하지 않는다.
- *
- * @example
- * ```ts
- * const manager = EditManager.getInstance();
- * manager.selectableMode = true;
- * // → LayoutSelectionController가 attach()되어 클릭으로 box 선택 가능
- * // → layoutEditMode 없이도 선택 동작
- * ```
  */
 export class LayoutSelectionController {
   /** 이벤트 리스너가 등록되는 루트 요소 (일반적으로 `document.documentElement`) */
