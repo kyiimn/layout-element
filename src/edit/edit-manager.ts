@@ -128,6 +128,7 @@ export class EditManager {
   private static _instance: EditManager | null = null;
   private _controllers: Set<TextEditController> = new Set();
   private _focusedController: TextEditController | null = null;
+  private _lastFocusedBox: LayoutBoxElement | null = null;
   private _listeners: Map<EditManagerEventType, Set<EditManagerEventListener>> = new Map();
   private _dispatching = false;
   private _selectedLayouts: LayoutElement[] = [];
@@ -244,6 +245,7 @@ export class EditManager {
     if (this._focusedController === controller) {
       const previousParagraph = controller['_paragraph'] as LayoutParagraphElement;
       this._clearBoxSelectionForParagraph(previousParagraph);
+      this._lastFocusedBox = null;
       this._focusedController = null;
       this._dispatch('focusChange', controller, previousParagraph, controller);
     }
@@ -276,6 +278,9 @@ export class EditManager {
     }
     const newParagraph = controller['_paragraph'] as LayoutParagraphElement;
     this._selectBoxForParagraph(newParagraph);
+    this._lastFocusedBox = newParagraph.parentElement instanceof LayoutBoxElement
+      ? newParagraph.parentElement
+      : null;
     this._focusedController = controller;
     this._dispatch('focusChange', controller, previousParagraph ?? null, previousController);
   }
@@ -1192,14 +1197,31 @@ export class EditManager {
 
   /**
    * 레이아웃 선택을 모두 해제한다.
+   *
+   * 단, 텍스트 편집 포커스가 있는 paragraph의 부모 box는
+   * 포커스가 다른 paragraph로 이동하지 않는 한 선택 상태를 유지한다.
+   * 모드 전환(layoutEditMode, insertMode, selectableMode) 시에도
+   * 포커스된 paragraph의 부모 box 선택은 보존된다.
    */
   clearLayoutSelection(): void {
     if (this._selectedLayouts.length === 0) return;
     const previousLayouts = [...this._selectedLayouts];
+
+    const focusedParagraph = this._focusedController?.['_paragraph'] as LayoutParagraphElement | undefined;
+    const focusedParentBox = focusedParagraph?.parentElement;
+    const preserveBox = (focusedParentBox instanceof LayoutBoxElement ? focusedParentBox : null)
+      ?? this._lastFocusedBox;
+
     for (const el of this._selectedLayouts) {
+      if (el === preserveBox) continue;
       el.removeAttribute('selected');
     }
-    this._selectedLayouts = [];
+
+    if (preserveBox) {
+      this._selectedLayouts = [preserveBox];
+    } else {
+      this._selectedLayouts = [];
+    }
     this._dispatchLayoutSelection(previousLayouts);
   }
 
