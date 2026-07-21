@@ -595,13 +595,15 @@ if (manager.isParagraphEditable(paragraph)) {
 |------|--------------|---------------------|
 | paragraph 포커스 | `selected` 설정 (단일 선택) | `[parentBox]` (기존 선택 모두 해제) |
 | 다른 paragraph로 포커스 이동 | 이전 부모 box `selected` 해제 → 새 부모 box `selected` 설정 | `[newParentBox]` |
-| `blurParagraph()` | 현재 부모 box `selected` 해제 | `[]` |
-| `textEditMode = false` | `_blurFocusedParagraph` → 부모 box `selected` 해제 | `[]` |
+| `blurParagraph()` | 부모 box `selected` 유지 (`_clearBoxSelectionForParagraph`는 no-op) | `[parentBox]` (유지) |
+| `textEditMode = false` | 포커스 해제되지만 부모 box `selected` 유지 (`_lastFocusedBox`로 보존) | `[parentBox]` (유지) |
 | paragraph DOM에서 제거 | `destroy()` → `_unregister` → 부모 box `selected` 해제 | `[]` |
 
-**레이아웃 편집 모드로 전환 시**: 텍스트 편집으로 설정된 `selected`는 유지된다. `layoutEditMode = true`는 `clearLayoutSelection()`을 호출하지 않으므로, 사용자는 텍스트 편집 중이던 box가 그대로 레이아웃 선택된 상태로 레이아웃 편집을 이어갈 수 있다.
+**레이아웃 편집 모드로 전환 시**: 텍스트 편집으로 설정된 `selected`는 유지된다. `layoutEditMode = true`는 `clearLayoutSelection()`을 호출하지 않으므로, 사용자는 텍스트 편집 중이던 box가 그대로 레이아웃 선택된 상태로 레이아웃 편집을 이어갈 수 있다. `editableLayout = false` 설정도 `_unregisterLayout()`을 호출하지 않으므로 선택이 유지된다.
 
-**레이아웃 편집 모드에서 텍스트 편집 모드로 전환 시** (`textEditMode = true`): `_focusParagraphFromLayoutSelection()`이 호출되어 다음 규칙이 적용된다.
+**포커스 상실 시 선택 유지**: 포커스가 다른 단락으로 이동하지 않고 blur되는 경우(예: 툴바 클릭), `_lastFocusedBox`를 통해 부모 box의 선택이 유지된다. `_clearBoxSelectionForParagraph`은 의도적으로 no-op으로 구현되어 있어, 포커스 해제만으로는 선택이 해제되지 않는다.
+
+**레이아웃 편집 모드에서 텍스트 편집 모드로 전환 시** (`textEditMode = true`): `_reduceSelectionToSingleForTextMode()`가 호출되어 다음 규칙이 적용된다.
 
 1. 현재 `_selectedLayouts` 중 `contentType === 'paragraph'`인 box(직접 paragraph 자식을 가진 box)들을 후보로 삼는다.
 2. 후보들 중 중첩 관계의 하위 box를 제외하고 가장 상위 box 1개만 `selected`로 유지한다.

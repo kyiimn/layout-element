@@ -584,6 +584,10 @@ export class LayoutEditController {
       return;
     }
 
+    // 드래그 이동이 있었으면 후속 click 이벤트가 빈 영역 클릭으로
+    // 처리되어 선택이 해제되는 것을 방지한다.
+    manager._suppressLayoutClick();
+
     // 최종 위치 계산 및 적용
     const dragTargets = manager._getDragTargets();
     const isTopLevel = dragTargets.includes(box);
@@ -865,6 +869,10 @@ export class LayoutEditController {
       state.handle = null;
       return;
     }
+
+    // 리사이즈 이동이 있었으면 후속 click 이벤트가 빈 영역 클릭으로
+    // 처리되어 선택이 해제되는 것을 방지한다.
+    EditManager.getInstance()._suppressLayoutClick();
 
     // 최종 크기 계산 및 적용
     const deltaX = event.clientX - state.startMouseX;

@@ -317,8 +317,36 @@ export class LayoutParagraphElement extends HTMLElement {
     return this._inheritStyle;
   }
 
+  /**
+   * 단락의 글자 스타일을 설정한다.
+   * 스타일이 변경되면 단락의 구조 재계산과 텍스트 재렌더링을 수행한다.
+   *
+   * @param value - 새로운 TextStyle 객체. 기존 값과 같으면 아무 작업도 수행하지 않는다.
+   */
+  set textStyle(value: TextStyle) {
+    if (this._textStyle === value) return;
+    this._textStyle = value;
+    this.layout();
+    this._perfStructureChanged = true;
+    this.render();
+  }
+
   get textStyle(): TextStyle {
     return this._textStyle;
+  }
+
+  /**
+   * 단락의 문단 스타일을 설정한다.
+   * 스타일이 변경되면 단락의 구조 재계산과 텍스트 재렌더링을 수행한다.
+   *
+   * @param value - 새로운 ParagraphStyle 객체. 기존 값과 같으면 아무 작업도 수행하지 않는다.
+   */
+  set paragraphStyle(value: ParagraphStyle) {
+    if (this._paragraphStyle === value) return;
+    this._paragraphStyle = value;
+    this.layout();
+    this._perfStructureChanged = true;
+    this.render();
   }
 
   get paragraphStyle(): ParagraphStyle {

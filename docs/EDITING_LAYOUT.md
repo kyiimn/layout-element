@@ -54,7 +54,7 @@
 │  ├── isBoxEditable(box) / isBoxSelectable(box)                        │
 │  ├── selectedLayouts: LayoutElement[]                               │
 │  ├── selectLayout()                                                  │
-│  ├── clearLayoutSelection()                                          │
+│  ├── clearLayoutSelection(preserveFocusedBox?)                        │
 │  ├── setEditableRoles(roles) / setSelectableRoles(roles)              │
 │  ├── setEditableBoxIds(ids) / setSelectableBoxIds(ids)                │
 │  └── layoutSelectionChange event                                     │
@@ -62,7 +62,7 @@
 │  LayoutSelectionController (선택 전용)                                  │
 │  ├── document-level click (capture)                                    │
 │  ├── isBoxSelectable → 선택 가능 box 클릭 시 selectLayout 호출          │
-│  ├── 빈 영역 클릭 → clearLayoutSelection (모든 선택 해제)                │
+│  ├── 빈 영역 클릭(문서 내부) → clearLayoutSelection(false) (모든 선택 해제) │
 │  └── 편집 모드 + 편집 가능 box 클릭 → 건너뜀 (mousedown에서 이미 처리)   │
 │                                                                      │
 │  LayoutEditController (편집 전용)                                        │
@@ -263,7 +263,7 @@ element.editableLayout = false;
 | 동작 | `<x-layout-box>` |
 |------|-------------------|
 | `true` 설정 | `cursor: grab`, `editable-layout` DOM 속성 추가, 호버/선택 시각적 피드백 활성화 |
-| `false` 설정 | `hovered`·`editable-layout` 제거, `cursor` 초기화, `EditManager._unregisterLayout()` 호출. **`selected`는 제거되지 않는다** — 선택은 항상 활성 상태로 별도 토글이 없으므로 `editableLayout` 속성 변경과 무관하게 관리된다 |
+| `false` 설정 | `hovered`·`editable-layout` 제거, `cursor` 초기화. **`selected`는 제거되지 않는다** — 선택은 항상 활성 상태로 별도 토글이 없으므로 `editableLayout` 속성 변경과 무관하게 관리된다. `_unregisterLayout()`은 더 이상 호출되지 않는다 |
 | 인쇄 모드 | `editableLayout` 설정 무시 |
 
 > **설계**: `editableLayout` 속성은 더 이상 이벤트 리스너를 직접 등록하지 않는다. `connectedCallback`은 `mouseenter`와 `mouseleave`만 등록하고, `click`/`mousedown`/리사이즈 핸들 이벤트는 `LayoutEditController`가 문서 수준에서 처리한다. 개별 box에 `editableLayout = true`를 설정하면 `EditManager.isBoxEditable()`은 아니지만 `LayoutEditController`가 이전 버전과의 호환을 위해 여전히 편집 가능한 것으로 간주한다.
@@ -276,7 +276,8 @@ element.editableLayout = false;
 |------|------|
 | **클릭** | 기존 선택을 모두 해제하고 클릭한 요소만 선택 |
 | **Ctrl+클릭** (또는 **Cmd+클릭**) | 기존 선택에 추가. 이미 선택된 요소를 다시 클릭하면 선택 해제(토글) |
-| **빈 영역 클릭** (box가 아닌 문서 여백) | 모든 선택 해제 (`clearLayoutSelection()`) |
+| **빈 영역 클릭** (문서 내부, box가 아닌 영역) | 모든 선택 해제 (`clearLayoutSelection(false)`), 포커스 박스도 해제, 텍스트 포커스도 blur |
+| **문서 외부 클릭** (툴바 등) | 선택 유지, 포커스 유지 |
 | **클릭** (이벤트 전파) | `stopPropagation()`으로 부모 요소의 클릭 이벤트 차단. 중첩된 box를 클릭해도 상위 box가 함께 선택되지 않음 |
 | **하위 요소 클릭** | 이벤트가 하위 레이아웃 요소(box)에서 발생한 경우, 상위 요소의 `LayoutEditController._onClick`/`LayoutEditController._onMouseDown`은 `_isEventFromDescendantLayout()` 검사로 해당 이벤트를 무시한다. 이를 통해 상위 요소가 선택된 상태에서도 하위 요소를 클릭하여 선택할 수 있다 |
 | **선택되지 않은 요소 mousedown** | 선택되지 않은 요소를 mousedown하면 기존 선택을 해제하고 해당 요소를 선택한 후 드래그를 시작한다. `BoxDragState.selectedOnMouseDown` 플래그로 click에서 중복 선택을 방지한다 |
@@ -415,7 +416,8 @@ this._selectionController.attach();
 LayoutSelectionController._onClick(event)
     ├── _findSelectableBoxFromEvent(event) → box
     ├── EditManager.insertMode? → return (삽입 모드에서는 선택 무시)
-    ├── box === null? → clearLayoutSelection(); return (빈 영역 클릭 → 모든 선택 해제)
+    ├── box === null? → 문서 내부 클릭? → clearLayoutSelection(false); blurParagraph(); return (빈 영역 클릭 → 모든 선택 해제 + 포커스 박스도 해제)
+    │                └── 문서 외부 클릭? → return (툴바 등 → 선택 유지)
     ├── layoutEditMode && isBoxEditable(box)? → return (편집 모드에서는 mousedown이 이미 선택 처리)
     ├── event.stopPropagation()
     ├── _isEventFromDescendantLayout(event, box)? → return
@@ -425,11 +427,11 @@ LayoutSelectionController._onClick(event)
     └── _setMultiSelect(false)
 ```
 
-**빈 영역 클릭**: 선택 가능한 box가 아닌 곳(문서 여백, 텍스트 등)을 클릭하면 `clearLayoutSelection()`이 호출되어 모든 선택이 해제된다.
+**빈 영역 클릭**: 선택 가능한 box가 아닌 곳을 클릭하면 문서 영역 내부인지 확인한다. 문서 내부의 빈 공간이면 `clearLayoutSelection(false)` + `blurParagraph()`로 모든 선택과 포커스를 해제한다. 문서 외부(툴바 등)의 클릭은 무시하며 선택과 포커스를 유지한다.
 
 **편집 모드 가드**: `layoutEditMode`가 `true`이고 클릭한 box가 `isBoxEditable()`을 통과하면, `mousedown`에서 `LayoutEditController`가 이미 선택을 처리했으므로 `click`에서 중복 실행을 건너뛴다. 편집 가능하지 않은 box(필터링된 role 등)는 `click`에서 선택 처리된다.
 
-> **참고**: `LayoutSelectionController`는 드래그/리사이즈 상태를 관리하지 않으므로, 드래그 직후 클릭 무시 로직이 없다. 이는 `LayoutEditController`의 `_onClick`에만 존재했는데, 선택 컨트롤러가 클릭만 처리하므로 드래그 후 클릭 무시가 필요 없다.
+> **드래그/리사이즈 후 클릭 억제**: 마우스가 box 밖에서 mouseup되면 후속 `click` 이벤트가 발생하여 `LayoutSelectionController._onClick`가 빈 영역 클릭으로 처리, 선택이 해제되는 문제가 있다. 이를 방지하기 위해 `LayoutEditController`는 드래그 이동(`dragMoved`) 또는 리사이즈(`moved`) 완료 시 `EditManager._suppressLayoutClick()`를 호출하여 `_suppressNextClick` 플래그를 설정한다. `LayoutSelectionController._onClick`는 `_consumeSuppressNextClick()`으로 이 플래그를 소비하여 해당 `click` 이벤트를 무시한다.
 
 #### 상태 저장 방식
 
@@ -493,8 +495,9 @@ manager.selectLayout(element);              // 단일 요소 선택 (기존 선�
 manager.selectLayout('element-id');          // ID로 선택
 manager.selectLayout([element1, element2]);  // 여러 요소 선택
 
-// 모든 선택 해제
-manager.clearLayoutSelection();
+// 모든 선택 해제 (포커스 박스도 해제하려면 false 전달)
+manager.clearLayoutSelection();            // preserveFocusedBox=true (기본값)
+manager.clearLayoutSelection(false);        // 포커스 박스 포함 전체 해제
 
 // 현재 선택된 요소들
 manager.selectedLayouts;   // LayoutElement[]
@@ -692,7 +695,7 @@ function MyComponent() {
     selectedLayouts,        // LayoutElement[]
     selectedLayoutIds,      // string[]
     selectLayout,           // (target) => boolean
-    clearLayoutSelection,   // () => void
+    clearLayoutSelection,   // (preserveFocusedBox?: boolean) => void
     layoutEditMode,         // boolean
     setLayoutEditMode,      // (value: boolean) => void
     setEditableRoles,       // (roles: BoxRole[] | null) => void
@@ -723,7 +726,7 @@ function MyComponent() {
 | `selectedLayouts` | `LayoutElement[]` | 현재 선택된 레이아웃 요소 배열 |
 | `selectedLayoutIds` | `string[]` | 선택된 요소의 ID 배열 |
 | `selectLayout` | `(target) => boolean` | 레이아웃 선택 |
-| `clearLayoutSelection` | `() => void` | 모든 레이아웃 선택 해제 |
+| `clearLayoutSelection` | `(preserveFocusedBox?: boolean) => void` | 레이아웃 선택 해제. `preserveFocusedBox=true`(기본값)면 포커스 박스 선택 유지, `false`면 전체 해제 |
 | `layoutEditMode` | `boolean` | 현재 글로벌 레이아웃 편집 모드 상태 |
 | `setLayoutEditMode` | `(value: boolean) => void` | 글로벌 레이아웃 편집 모드 설정 |
 | `setEditableRoles` | `(roles: BoxRole[] \| null) => void` | 편집 허용 역할 집합 설정 |
@@ -766,7 +769,8 @@ function MyComponent() {
 LayoutSelectionController._onClick(event)
     ├── _findSelectableBoxFromEvent(event) ← composedPath에서 가장 안쪽 선택 가능 box 반환
     ├── insertMode? → return
-    ├── box === null? → clearLayoutSelection(); return (빈 영역 클릭)
+    ├── box === null? → 문서 내부? → clearLayoutSelection(false); blurParagraph(); return (빈 영역 → 모든 선택 + 포커스 해제)
+    │                └── 문서 외부? → return (선택 유지)
     ├── layoutEditMode && isBoxEditable(box)? → return (편집 모드에서는 mousedown이 이미 처리)
     ├── event.stopPropagation()             ← 부모 요소로의 이벤트 전파 차단
     ├── _isEventFromDescendantLayout(event, box)? ← 하위 레이아웃 요소에서 온 이벤트면 무시
@@ -868,11 +872,11 @@ LayoutEditController._onMouseDown(event)
 `editableLayout`을 `false`로 설정하면:
 
 **`<x-layout-box>`**:
-1. `selected` 속성 제거 (선택 시각적 피드백 해제)
-2. `hovered` 속성 제거 (호버 시각적 피드백 해제)
-3. `editable-layout` DOM 속성 제거
-4. `cursor` 스타일 초기화
-5. `EditManager._unregisterLayout()` 호출 (선택 목록에서 제거, `layoutSelectionChange` 이벤트 발생)
+1. `hovered` 속성 제거 (호버 시각적 피드백 해제)
+2. `editable-layout` DOM 속성 제거
+3. `cursor` 스타일 초기화
+
+> **참고**: `editableLayout = false` 설정 시 `selected` 속성은 제거되지 않으며 `_unregisterLayout()`도 호출되지 않는다. 선택은 항상 활성 상태로 관리되므로 모드 전환과 무관하게 유지된다.
 
 이벤트 리스너는 box에서 직접 등록하지 않으므로 제거할 `click`/`mousedown` 리스너도 없다.
 
@@ -882,7 +886,13 @@ LayoutEditController._onMouseDown(event)
 
 ### 3.5 EditManager의 텍스트 편집과 레이아웃 선택의 관계
 
-텍스트 편집(`focusParagraph`)과 레이아웃 선택(`selectLayout`)은 독립적으로 동작한다. 단락 포커스 변경이 레이아웃 선택에 영향을 주지 않으며, 반대도 마찬가지다.
+텍스트 편집(`focusParagraph`)과 레이아웃 선택(`selectLayout`)은 부분적으로 연동된다.
+
+- **포커스 → 선택 연동**: 단락이 텍스트 편집 포커스를 받으면 부모 `<x-layout-box>`가 자동으로 선택된다(`_selectBoxForParagraph()`).
+- **모드 전환 시 선택 유지**: 레이아웃 편집 모드 ↔ 텍스트 편집 모드 전환 시 기존 선택은 해제되지 않는다. `editableLayout = false` 설정이 `_unregisterLayout()`을 호출하지 않으므로 선택이 유지된다.
+- **텍스트 편집 모드 진입 시 선택 축소**: `textEditMode = true` 진입 시 다중 선택이 단일 선택으로 축소된다. 단락 box가 있으면 가장 위의 단락 box가 남고, 없으면 가장 위의 선택 요소가 남는다. 남은 단락은 `focusParagraph()`로 포커스를 받는다.
+- **삽입 모드 진입 시 전체 해제**: `insertMode` 진입 시 `clearLayoutSelection(false)`로 포커스 box 포함 모든 선택이 해제된다.
+- **포커스 상실 시 선택 유지**: 포커스가 다른 단락으로 이동하지 않고 blur되는 경우, `_lastFocusedBox`를 통해 부모 box의 선택이 유지된다.
 
 ---
 
@@ -1765,7 +1775,7 @@ private _onKeyDown = (event: KeyboardEvent): void => {
 - **시각적 피드백**: 선택 표시는 `box-shadow`를 사용하므로 요소의 레이아웃에 영향을 주지 않는다. `outline`은 기존 `border`와 충돌할 수 있어 사용하지 않는다.
 - **rAF 쓰로틀링**: 드래그 중 위치 업데이트는 `requestAnimationFrame`으로 60fps로 제한된다. 중복 rAF 요청은 무시된다.
 - **이동 임계값**: mousedown 후 3px 이하의 이동은 클릭으로 간주하며, 드래그로 인식되지 않는다.
-- **`BoxDragState.dragMoved` 플래그**: 드래그 후 `click` 이벤트가 발생하면 `LayoutEditController._onClick`에서 `dragMoved`를 확인하여 드래그 중 클릭을 무시한다.
+- **`BoxDragState.dragMoved` / `BoxResizeState.moved` 플래그**: 드래그/리사이즈 후 `click` 이벤트가 발생하면 빈 영역 클릭으로 처리되어 선택이 해제되는 것을 방지하기 위해, `LayoutEditController`는 실제 이동이 있었을 때(`dragMoved` 또는 `moved`가 `true`) `EditManager._suppressLayoutClick()`를 호출하여 후속 `click` 이벤트를 억제한다.
 - **`parentModel` 필수**: `LayoutEditController._computeNewPosition`에서 `position: 'static'` 모드는 `parentModel`(부모의 `GridCalculator`)이 필요하다. 없으면 시작 위치를 그대로 반환한다.
 - **`maxTop` 계산**: static 모드에서 박스의 하단이 편집 영역 하단을 넘지 않도록 `editableTextHeight`와 `absHeight`를 사용하여 `maxTop`을 계산한다. `editableHeight`만 사용하면 마지막 줄의 leading 공간이 무시되어 박스가 하단에 딱 붙지 않는다.
 - **문서 영역 밖 드래그**: 문서 직계 자식 박스(`this.parentElement?.type === 'document'`)만 위치 변환 대상이다. 다른 박스 안에 중첩된 박스는 이 동작의 대상이 아니다.
@@ -1780,7 +1790,7 @@ private _onKeyDown = (event: KeyboardEvent): void => {
 | 파일 | 역할 |
 |------|------|
 | `src/components/layout/box.element.ts` | 박스 렌더링, 위치/크기 setter, `convertPosition()`, `applyPositionConversion()`, `requestRerenderAffectedParagraphs()`, `editableLayout` 속성(DOM 속성/커서/시각적 피드백), `_onLayoutMouseEnter`/`_onLayoutMouseLeave` |
-| `src/edit/edit-manager.ts` | 레이아웃 편집 모드/필터(`layoutEditMode`, `editableRoles`, `editableBoxIds`, `isBoxEditable`), 레이아웃 선택 상태 관리, `selectLayout`, `clearLayoutSelection`, `_startLayoutDrag`, `_endLayoutDrag`, `_startLayoutResize`, `_endLayoutResize`, `_isDraggingLayout`, `_isResizingLayout`, `getTopLevelDragTargets`, `_unregisterLayout`, `layoutSelectionChange` 이벤트, `_dispatchLayoutResize`, `insertMode`, `activateInsert`, `deactivateInsert`, `insert`/`insertCancel` 이벤트 |
+| `src/edit/edit-manager.ts` | 레이아웃 편집 모드/필터(`layoutEditMode`, `editableRoles`, `editableBoxIds`, `isBoxEditable`), 레이아웃 선택 상태 관리, `selectLayout`, `clearLayoutSelection(preserveFocusedBox?)`, `_lastFocusedBox`, `_reduceSelectionToSingleForTextMode`, `_startLayoutDrag`, `_endLayoutDrag`, `_startLayoutResize`, `_endLayoutResize`, `_isDraggingLayout`, `_isResizingLayout`, `getTopLevelDragTargets`, `_unregisterLayout`, `layoutSelectionChange` 이벤트, `_dispatchLayoutResize`, `insertMode`, `activateInsert`, `deactivateInsert`, `insert`/`insertCancel` 이벤트 |
 | `src/edit/layout-edit-controller.ts` | 문서 수준 이벤트 처리, 드래그/리사이즈 상태(`Map` 기반), `_computeNewPosition`, `_computeNewSize`, ESC 취소, `applyPositionConversion` 호출, 영향받는 단락 재렌더링 |
 | `src/react/hooks/use-edit-manager.ts` | React 훅: `selectedLayouts`, `selectLayout`, `clearLayoutSelection`, `layoutEditMode`, `setLayoutEditMode`, `setEditableRoles`, `setEditableBoxIds`, `onLayoutSelectionChange` |
 | `src/core/text-layout-engine.ts` | `_layoutTextIntoColumns`, 오버랩 회피, COVER 라인, PART 분할 |
@@ -2131,11 +2141,11 @@ top handle:
 ### 11.7 `editableLayout` 비활성화 시 정리
 
 `editableLayout`을 `false`로 설정하면:
-1. `selected` 속성 제거
-2. `hovered` 속성 제거
-3. `editable-layout` DOM 속성 제거
-4. `cursor` 스타일 초기화
-5. `EditManager._unregisterLayout()` 호출
+1. `hovered` 속성 제거
+2. `editable-layout` DOM 속성 제거
+3. `cursor` 스타일 초기화
+
+> **참고**: `selected` 속성은 제거되지 않으며 `_unregisterLayout()`도 호출되지 않는다. 선택은 모드 전환과 무관하게 항상 유지된다.
 
 `LayoutEditController`는 문서에 계속 부착되어 있으며, 다음 이벤트에서 `isBoxEditable()`/`editableLayout` 조건을 만족하지 않는 box는 무시한다.
 

@@ -374,6 +374,8 @@ class LayoutParagraphElement extends HTMLElement
 | `column` | `number \| number[]` (via `data`) | — | 하위 컬럼 그리드 (생략 시 부모 상속). |
 | `gap` | `number \| number[]` (via `data`) | mm | 하위 컬럼 간격. |
 | `zIndex` | `number` (via `data`) | — | 렌더링 순서. |
+| `textStyle` (set) | `TextStyle` | — | 글자 스타일. 변경 시 구조 재계산 + 재렌더링. 기존 값과 같으면 no-op. |
+| `paragraphStyle` (set) | `ParagraphStyle` | — | 문단 스타일. 변경 시 구조 재계산 + 재렌더링. 기존 값과 같으면 no-op. |
 | `editableText` (set) | `boolean` | — | 텍스트 편집 모드. 인쇄 모드에서는 무시됨. |
 | `inheritStyle` (set) | `InheritStyle \| undefined` | — | 상위 캐스케이드 스타일. |
 
@@ -383,6 +385,8 @@ class LayoutParagraphElement extends HTMLElement
 |---|---|---|
 | `model` | `TextLayoutEngine \| undefined` | 텍스트 래핑 엔진. |
 | `columnEl` | `LayoutColumnElement[]` | 렌더링된 컬럼 요소들. |
+| `textStyle` | `TextStyle` | 단락의 글자 스타일. |
+| `paragraphStyle` | `ParagraphStyle` | 단락의 문단 스타일. |
 | `relLeft` / `relTop` | `number` (mm) | 부모 기준 상대 위치. |
 | `absLeft` / `absTop` | `number` (mm) | 루트 기준 절대 위치. |
 | `absWidth` / `absHeight` | `number` (mm) | 절대 크기 (InheritStyle 기준). |
@@ -1226,7 +1230,7 @@ class EditManager {
 
   // 레이아웃 선택
   selectLayout(target): boolean;
-  clearLayoutSelection(): void;
+  clearLayoutSelection(preserveFocusedBox?: boolean): void;
   get selectedLayouts: LayoutElement[];
   get selectedLayoutIds: string[];
 
@@ -1472,8 +1476,9 @@ selectLayout(target: LayoutElement | string | (LayoutElement | string)[]): boole
 ```ts
 /**
  * 레이아웃 선택 모두 해제.
+ * @param preserveFocusedBox - true(기본값)면 포커스 박스 선택 유지, false면 전체 해제
  */
-clearLayoutSelection(): void;
+clearLayoutSelection(preserveFocusedBox?: boolean): void;
 ```
 
 ```ts

@@ -1398,9 +1398,24 @@ export class EditManager {
   }
 
   /**
-   * 삽입 완료/취소 직후 발생하는 클릭 이벤트를 무시하기 위한 플래그를 소비한다.
-   * `_dispatchInsert` 또는 `_dispatchInsertCancel`에서 `true`로 설정되며,
-   * `LayoutSelectionController._onClick`에서 한 번만 소비된다.
+   * 드래그/리사이즈 완료 직후 발생하는 클릭 이벤트를 억제한다.
+   *
+   * 마우스가 box 밖에서 mouseup되면 후속 click 이벤트가 빈 영역 클릭으로
+   * 처리되어 선택이 해제되는 것을 방지한다.
+   * `LayoutSelectionController._onClick`에서 `_consumeSuppressNextClick()`로
+   * 한 번만 소비된다.
+   * @internal
+   */
+  _suppressLayoutClick(): void {
+    this._suppressNextClick = true;
+  }
+
+  /**
+   * 삽입 완료/취소 및 드래그/리사이즈 완료 직후 발생하는 클릭 이벤트를
+   * 무시하기 위한 플래그를 소비한다.
+   *
+   * `_dispatchInsert`, `_dispatchInsertCancel`, `_suppressLayoutClick`에서
+   * `true`로 설정되며, `LayoutSelectionController._onClick`에서 한 번만 소비된다.
    * @internal
    */
   _consumeSuppressNextClick(): boolean {

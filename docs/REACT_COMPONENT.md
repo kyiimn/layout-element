@@ -539,7 +539,7 @@ const {
 | `focusParagraph` | `(target, options?) => boolean` | 단락 포커스. |
 | `blurParagraph` | `(target?) => boolean` | 포커스 해제. |
 | `selectLayout` | `(target) => boolean` | 레이아웃 선택. |
-| `clearLayoutSelection` | `() => void` | 레이아웃 선택 해제. |
+| `clearLayoutSelection` | `(preserveFocusedBox?: boolean) => void` | 레이아웃 선택 해제. `preserveFocusedBox=false`면 포커스 박스도 해제. |
 
 #### 메서드 시그니처
 
@@ -555,7 +555,7 @@ selectLayout(
   target: LayoutElement | string | (LayoutElement | string)[]
 ): boolean;
 
-clearLayoutSelection(): void;
+clearLayoutSelection(preserveFocusedBox?: boolean): void;
 ```
 
 #### 내부 동작
