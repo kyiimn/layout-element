@@ -3,6 +3,7 @@ import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { TextBlockStyle, ParagraphStyle, TextStyle } from "@/types/style";
 import { CursorPosition } from "@/types/edit/cursor.type";
 import { SelectionRange } from "@/types/edit/selection.type";
+import type { TextLineData } from "@/types/layout/text/text-line.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
 import { DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN } from "@/constants";
@@ -1055,100 +1056,98 @@ export class TextEditController {
     if (!model) return null;
     if (typeof model.textContent !== "string") return null;
 
-    const content = model.textContent;
     const offset = this._cursorModel.offset;
 
-    const cursorRect = this._getCursorLocalRect(offset);
-    if (!cursorRect) {
-      let newOffset = offset + direction;
-      while (newOffset >= 0 && newOffset <= content.length) {
-        if (newOffset === content.length || content[newOffset] !== "\n") {
-          return newOffset;
-        }
-        newOffset += direction;
-      }
+    // 라인 인덱스 기반 이동: 현재 offset이 속한 라인을 찾고, 인접 라인으로 이동.
+    const currentLineInfo = this._mapper.getLineInfoBySourceOffset(offset);
+    if (currentLineInfo === null) return null;
+
+    const flatIndex = this._toFlatLineIndex(currentLineInfo.columnIndex, currentLineInfo.lineIndex);
+    const targetFlatIndex = flatIndex + direction;
+    if (targetFlatIndex < 0 || targetFlatIndex >= this._mapper.totalLineCount) {
       return null;
     }
 
-		    // cursorRect는 paragraph-local(스케일 보정된) 좌표이므로,
-		    // viewport 좌표계로 변환하기 위해 scale을 곱한다.
-		    const scale = EditManager.getInstance().scale;
-		    let lineHeight = cursorRect.height;
-		    if (!lineHeight) {
-		      lineHeight = this._mapper.getFirstColumnRect()?.fontSize ?? 0;
-		      if (!lineHeight) return null;
-		    }
-		    const paragraphRect = this._paragraph.getBoundingClientRect();
-		    const targetX = cursorRect.left * scale + paragraphRect.left;
-		    const baseY = cursorRect.top * scale + paragraphRect.top + direction * lineHeight * scale;
+    const targetInfo = this._fromFlatLineIndex(targetFlatIndex);
+    if (targetInfo === null) return null;
 
-	    // Helper: verify that a candidate offset is on a visually different line
-	    // than the current cursor. getNearestOffsetFromPoint can snap back to
-	    // the current line when the target Y lands between lines.
-	    const isOnDifferentLine = (candidateOffset: number): boolean => {
-	      const rendered = this._mapper.renderedOffset(candidateOffset);
-	      if (rendered === null) return true;
-	      const candidateRect = this._mapper.getCharRect(rendered);
-	      if (!candidateRect) return true;
-	      return Math.abs(candidateRect.top - cursorRect.top) > 1;
-	    };
+    const targetLineStart = this._mapper.getLineStartSourceOffset(targetInfo.columnIndex, targetInfo.lineIndex);
+    if (targetLineStart === null) return null;
 
-	    // Probe strategy: line spacing can exceed font height, placing targetY
-	    // in the gap between lines where no span exists. Try multiple Y positions.
-	    // lineHeight는 paragraph-local(스케일 보정된) 픽셀이므로 viewport 픽셀로 변환한다.
-	    const lineHeightVP = lineHeight * scale;
-	    const probeOffsets = [
-	      0,                                                // exact target
-	      direction * lineHeightVP * 0.5,                   // half a line further
-	    ];
+    // 현재 라인 내 상대 위치를 계산하여 target 라인에서 같은 위치 유지 시도
+    const currentLineStart = this._mapper.getLineStartSourceOffset(currentLineInfo.columnIndex, currentLineInfo.lineIndex) ?? 0;
+    const offsetInLine = offset - currentLineStart;
+    const targetLineEnd = this._getLineEndSourceOffset(targetInfo.columnIndex, targetInfo.lineIndex);
 
-	    for (const probeY of probeOffsets) {
-	      const result = this._mapper.getCharOffsetFromPoint(targetX, baseY + probeY);
-	      if (result?.textOffset != null && result.textOffset !== offset && isOnDifferentLine(result.textOffset)) return result.textOffset;
-	      // Fallback: getCharOffsetFromPoint returns null in whitespace/between spans
-	      const nearest = this._mapper.getNearestOffsetFromPoint(targetX, baseY + probeY);
-	      if (nearest?.textOffset != null && nearest.textOffset !== offset && isOnDifferentLine(nearest.textOffset)) return nearest.textOffset;
-	    }
-
-	    // Scan in small increments until a character is found or we exceed one line height
-	    const step = 2;
-	    for (let scanOffset = step; scanOffset <= lineHeightVP; scanOffset += step) {
-	      const result = this._mapper.getCharOffsetFromPoint(targetX, baseY + direction * scanOffset);
-	      if (result?.textOffset != null && result.textOffset !== offset && isOnDifferentLine(result.textOffset)) return result.textOffset;
-	    }
-
-	    const finalNearest = this._mapper.getNearestOffsetFromPoint(targetX, baseY);
-	    if (finalNearest?.textOffset != null && finalNearest.textOffset !== offset && isOnDifferentLine(finalNearest.textOffset)) return finalNearest.textOffset;
-
-	    return null;
+    return Math.min(targetLineStart + offsetInLine, targetLineEnd);
   }
 
-  private _getCursorLocalRect(offset: number): DOMRect | null {
-    const content = this._paragraph.model?.textContent as string | undefined;
-    if (content === undefined) return null;
-
-    const renderedOffset = this._mapper.renderedOffset(offset);
-    if (renderedOffset !== null) {
-      return this._mapper.getCharRect(renderedOffset);
+  /**
+   * 컬럼/라인 인덱스를 전체 라인 기준 평탄화 인덱스로 변환한다.
+   */
+  private _toFlatLineIndex(columnIndex: number, lineIndex: number): number {
+    let flat = 0;
+    const columnContents = this._paragraph.model?.columnContents ?? [];
+    for (let c = 0; c < columnIndex && c < columnContents.length; c++) {
+      flat += columnContents[c].length;
     }
+    return flat + lineIndex;
+  }
 
-    if (offset > 0) {
-      const prevRendered = this._mapper.renderedOffset(offset - 1);
-      if (prevRendered !== null) {
-        const rect = this._mapper.getCharRect(prevRendered);
-        if (rect) {
-          return new DOMRect(rect.left + rect.width, rect.top, 0, rect.height);
-        }
+  /**
+   * 전체 라인 기준 평탄화 인덱스를 컬럼/라인 인덱스로 변환한다.
+   */
+  private _fromFlatLineIndex(flatIndex: number): { columnIndex: number; lineIndex: number } | null {
+    const columnContents = this._paragraph.model?.columnContents ?? [];
+    let remaining = flatIndex;
+    for (let c = 0; c < columnContents.length; c++) {
+      if (remaining < columnContents[c].length) {
+        return { columnIndex: c, lineIndex: remaining };
       }
+      remaining -= columnContents[c].length;
     }
+    return null;
+  }
 
-    if (offset < content.length) {
-      const nextRendered = this._mapper.renderedOffset(offset + 1);
-      if (nextRendered !== null) {
-        return this._mapper.getCharRect(nextRendered);
-      }
+  /**
+   * 주어 라인의 끝 source offset(다음 라인 시작 또는 텍스트 끝)을 반환한다.
+   */
+  /**
+   * 주어 라인에서 커서가 위치할 수 있는 최대 source offset을 반환한다.
+   * 빈 줄은 라인 시작 자체가 끝이며, 일반 라인은 다음 라인 시작 - 1(\\n 위치),
+   * 마지막 라인은 텍스트 끝(content.length)이다.
+   */
+  private _getLineEndSourceOffset(columnIndex: number, lineIndex: number): number {
+    const model = this._paragraph.model;
+    if (!model) return 0;
+    const content = model.textContent;
+    if (typeof content !== "string") return 0;
+
+    const lineStart = this._mapper.getLineStartSourceOffset(columnIndex, lineIndex) ?? 0;
+    const columnContents = model.columnContents;
+    const nextStart = this._findNextLineStart(columnContents, columnIndex, lineIndex);
+
+    if (nextStart === null) {
+      // 마지막 라인: 텍스트 끝
+      return content.length;
     }
+    // 일반/빈 라인: 다음 라인 시작 - 1 (\n 위치 = 이 라인의 마지막 커서 위치)
+    // 빈 줄의 경우 nextStart - 1 = lineStart (라인 시작 = 끝)
+    return Math.max(lineStart, nextStart - 1);
+  }
 
+  /**
+   * 다음 라인의 시작 source offset을 반환한다.
+   */
+  private _findNextLineStart(columnContents: TextLineData[][], columnIndex: number, lineIndex: number): number | null {
+    // 같은 컬럼 내 다음 라인
+    if (lineIndex + 1 < columnContents[columnIndex]?.length) {
+      return this._mapper.getLineStartSourceOffset(columnIndex, lineIndex + 1);
+    }
+    // 다음 컬럼의 첫 라인
+    if (columnIndex + 1 < columnContents.length && columnContents[columnIndex + 1].length > 0) {
+      return this._mapper.getLineStartSourceOffset(columnIndex + 1, 0);
+    }
     return null;
   }
 
@@ -1632,22 +1631,51 @@ export class TextEditController {
     }
 
     let renderedOffset = this._mapper.renderedOffset(offset);
-    let atEndOfChar = false; // Cursor at left edge of the rendered char (offset N = before char N)
+    let atEndOfChar = false;
 
     if (renderedOffset === null && content !== undefined) {
-      // Offset is at a \n position or end-of-string — fallback to adjacent chars
+      // \n 위치: 먼저 인접 문자로 폴백하여 이전 라인 끝 또는 다음 라인 시작에 표시.
+      // offset이 \n 위치이면 이전 문자의 오른쪽(atEndOfChar=true)이 이전 라인 끝에 해당.
       if (offset > 0) {
         const prevRendered = this._mapper.renderedOffset(offset - 1);
         if (prevRendered !== null) {
           renderedOffset = prevRendered;
-          atEndOfChar = true; // Show at end of previous line
+          atEndOfChar = true;
         }
       }
       if (renderedOffset === null && offset < content.length) {
         const nextRendered = this._mapper.renderedOffset(offset + 1);
         if (nextRendered !== null) {
           renderedOffset = nextRendered;
-          atEndOfChar = false; // Show at start of next line
+          atEndOfChar = false;
+        }
+      }
+      // 인접 문자도 없는 경우(빈 줄 시작): line rect 사용
+      if (renderedOffset === null) {
+        const lineInfo = this._mapper.getLineInfoBySourceOffset(offset);
+        if (lineInfo !== null) {
+          const lineRect = this._mapper.getLineRect(lineInfo.columnIndex, lineInfo.lineIndex);
+          if (lineRect) {
+            const textAlign = this._paragraph.paragraphStyle?.textAlign || DEFAULT_TEXT_ALIGN;
+            let left: number;
+            if (textAlign === 'center') {
+              left = lineRect.left + lineRect.width / 2;
+            } else if (textAlign === 'right') {
+              left = lineRect.left + lineRect.width;
+            } else {
+              left = lineRect.left;
+            }
+            const fontSize = this._mapper.getFirstColumnRect()?.fontSize ?? lineRect.height;
+            this._cursorEl.top = lineRect.top + (lineRect.height - fontSize) / 2;
+            this._cursorEl.left = left;
+            this._cursorEl.height = fontSize;
+            const hasVisibleSelection = this._cursorModel.selection !== null &&
+              this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
+            this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
+            this._textarea.style.top = `${lineRect.top}px`;
+            this._textarea.style.left = `${left}px`;
+            return;
+          }
         }
       }
     }

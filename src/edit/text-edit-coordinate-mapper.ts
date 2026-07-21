@@ -32,6 +32,18 @@ export class TextEditCoordinateMapper {
   private _columnRanges: { start: number; end: number }[] = [];
   private _columnStartOffsets: number[] = [];
 
+  /**
+   * 모든 라인의 시작 source offset을 컬럼순·라인순으로 평탄화한 배열.
+   * `_lineSourceOffsets[columnIndex][lineIndex]` = 해당 라인의 시작 source offset.
+   * 빈 줄(endOfBlock 직전 \n 위치)도 포함된다.
+   */
+  private _lineSourceOffsets: number[][] = [];
+
+  /**
+   * 모든 라인의 개수(컬럼 전체 합).
+   */
+  private _totalLineCount = 0;
+
   constructor(paragraph: LayoutParagraphElement) {
     this._paragraph = paragraph;
     this.rebuild();
@@ -53,6 +65,8 @@ export class TextEditCoordinateMapper {
     this._columnSpansCache.clear();
     this._columnRanges = [];
     this._columnStartOffsets = [];
+    this._lineSourceOffsets = [];
+    this._totalLineCount = 0;
 
     this._rebuildMappings();
   }
@@ -66,11 +80,18 @@ export class TextEditCoordinateMapper {
     let renderedOffset = 0;
     let sourceOffset = 0;
 
-    for (const lines of columnContents) {
+    for (let columnIndex = 0; columnIndex < columnContents.length; columnIndex++) {
+      const lines = columnContents[columnIndex];
       const columnStart = renderedOffset;
       this._columnStartOffsets.push(columnStart);
 
-      for (const line of lines) {
+      const lineStartOffsets: number[] = [];
+
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        const line = lines[lineIndex];
+        // 라인의 시작 source offset을 기록. 빈 줄도 포함.
+        lineStartOffsets.push(sourceOffset);
+
         for (let p = 0; p < line.parts.length; p++) {
           const part = line.parts[p];
           let content = part.content.join('');
@@ -105,6 +126,8 @@ export class TextEditCoordinateMapper {
         }
       }
 
+      this._lineSourceOffsets.push(lineStartOffsets);
+      this._totalLineCount += lines.length;
       this._columnRanges.push({ start: columnStart, end: renderedOffset });
     }
   }
@@ -123,6 +146,99 @@ export class TextEditCoordinateMapper {
    */
   renderedOffset(sourceOffset: number): number | null {
     return this._sourceToRendered.get(sourceOffset) ?? null;
+  }
+
+  /**
+   * 주어진 source 오프셋이 속한 라인의 컬럼 인덱스와 라인 인덱스를 반환한다.
+   *
+   * `columnContents`의 각 라인 시작 source offset과 비교하여 source 오프셋이
+   * 어느 라인에 속하는지 이진 탐색으로 찾는다. \n 위치(빈 줄)도 해당 라인으로
+   * 반환된다.
+   *
+   * @param sourceOffset 소스 텍스트 오프셋
+   * @returns `{ columnIndex, lineIndex }` 또는 `null`(모델이 없거나 범위 밖)
+   * @example
+   *   // "hello\n\nworld"에서 sourceOffset 6(빈 줄) → { columnIndex: 0, lineIndex: 1 }
+   */
+  getLineInfoBySourceOffset(sourceOffset: number): { columnIndex: number; lineIndex: number } | null {
+    for (let columnIndex = 0; columnIndex < this._lineSourceOffsets.length; columnIndex++) {
+      const lineStarts = this._lineSourceOffsets[columnIndex];
+      if (lineStarts.length === 0) continue;
+
+      // 이 컬럼의 마지막 라인의 끝 source offset 계산
+      const columnEnd = columnIndex < this._lineSourceOffsets.length - 1
+        ? this._lineSourceOffsets[columnIndex + 1][0]  // 다음 컬럼 시작
+        : sourceOffset + 1;  // 마지막 컬럼은 범위를 넓게
+
+      if (sourceOffset < lineStarts[0] || sourceOffset >= columnEnd) continue;
+
+      // 이진 탐색: sourceOffset이 속한 라인 찾기
+      let low = 0;
+      let high = lineStarts.length - 1;
+      while (low < high) {
+        const mid = Math.floor((low + high + 1) / 2);
+        if (lineStarts[mid] <= sourceOffset) {
+          low = mid;
+        } else {
+          high = mid - 1;
+        }
+      }
+      return { columnIndex, lineIndex: low };
+    }
+    return null;
+  }
+
+  /**
+   * 주어진 컬럼/라인 인덱스의 시작 source 오프셋을 반환한다.
+   *
+   * @param columnIndex 컬럼 인덱스
+   * @param lineIndex 라인 인덱스
+   * @returns 시작 source 오프셋 또는 `null`(범위 밖)
+   */
+  getLineStartSourceOffset(columnIndex: number, lineIndex: number): number | null {
+    const lineStarts = this._lineSourceOffsets[columnIndex];
+    if (!lineStarts || lineIndex < 0 || lineIndex >= lineStarts.length) return null;
+    return lineStarts[lineIndex];
+  }
+
+  /**
+   * 전체 라인 수(모든 컬럼 합)를 반환한다.
+   *
+   * @returns 라인 수
+   */
+  get totalLineCount(): number {
+    return this._totalLineCount;
+  }
+
+  /**
+   * 주어진 컬럼/라인 인덱스에 해당하는 line div의 paragraph-local rect를 반환한다.
+   * 빈 줄도 line div가 존재하므로 rect를 반환한다.
+   *
+   * @param columnIndex 컬럼 인덱스
+   * @param lineIndex 라인 인덱스
+   * @returns `{ top, left, width, height }` 또는 `null`(line div가 없거나 범위 밖)
+   */
+  getLineRect(columnIndex: number, lineIndex: number): { top: number; left: number; width: number; height: number } | null {
+    const columns = this._getAllColumns();
+    const column = columns[columnIndex];
+    if (!column || !column.shadowRoot) return null;
+
+    const lineEls = Array.from(column.shadowRoot.children).filter(
+      (child): child is HTMLDivElement => child.tagName === 'DIV',
+    );
+    if (lineIndex < 0 || lineIndex >= lineEls.length) return null;
+
+    const lineEl = lineEls[lineIndex];
+    const rect = lineEl.getBoundingClientRect();
+    const paraRect = this._paragraph.getBoundingClientRect();
+    const scale = EditManager.getInstance().scale;
+
+    return {
+      top: (rect.top - paraRect.top) / scale,
+      left: (rect.left - paraRect.left) / scale,
+      width: rect.width / scale,
+      height: rect.height / scale,
+    };
   }
 
   /**
@@ -233,7 +349,37 @@ export class TextEditCoordinateMapper {
     }
     if (!nearestColumn) return null;
 
-    const spans = this._getColumnSpans(nearestColumn);
+    // line div 기반 라인 감지: 빈 줄(span 없는 줄)을 포함하여 클릭한 y가
+    // 어느 라인에 속하는지 찾는다. 컬럼 내 line div들을 순회하며 y가 라인 범위
+    // 내에 있으면 해당 라인의 시작 source offset을 반환한다.
+    const columnIndex = this._getAllColumns().indexOf(nearestColumn);
+    if (columnIndex >= 0) {
+      const lineInfo = this._getLineAtPoint(nearestColumn, columnIndex, y);
+      if (lineInfo !== null) {
+        return { textOffset: lineInfo };
+      }
+    }
+
+    let spans = this._getColumnSpans(nearestColumn);
+    // 클릭한 컬럼에 span이 없으면(빈 컬럼) 가장 가까운 텍스트가 있는 컬럼으로 폴백
+    if (spans.length === 0) {
+      let bestCol: LayoutColumnElement | null = null;
+      let bestColDist = Infinity;
+      for (const col of columns) {
+        const colSpans = this._getColumnSpans(col);
+        if (colSpans.length === 0) continue;
+        const colRect = col.getBoundingClientRect();
+        const dist = x < colRect.left ? colRect.left - x : (x > colRect.right ? x - colRect.right : 0);
+        if (dist < bestColDist) {
+          bestColDist = dist;
+          bestCol = col;
+        }
+      }
+      if (bestCol) {
+        nearestColumn = bestCol;
+        spans = this._getColumnSpans(bestCol);
+      }
+    }
     if (spans.length === 0) return null;
 
     const spanRects = new Map<HTMLSpanElement, DOMRect>();
@@ -354,6 +500,70 @@ export class TextEditCoordinateMapper {
     }
 
     return { textOffset: sourceOffset };
+  }
+
+  /**
+   * 컬럼 내에서 클릭한 y 좌표가 속한 빈 줄(span 없는 라인)의 시작 source offset을 반환한다.
+   * 일반 라인(문자가 있는 라인)은 null을 반환하여 span 기반 로직이 가장 가까운
+   * 글자 위치를 찾도록 위임한다.
+   *
+   * @param column 컬럼 요소
+   * @param columnIndex 컬럼 인덱스
+   * @param y 뷰포트 y 좌표
+   * @returns 빈 줄의 시작 source offset 또는 `null`(일반 라인이거나 라인 div가 없음)
+   */
+  private _getLineAtPoint(
+    column: LayoutColumnElement,
+    columnIndex: number,
+    y: number,
+  ): number | null {
+    if (!column.shadowRoot) return null;
+    const model = this._paragraph.model;
+    if (!model) return null;
+    const lines = model.columnContents[columnIndex] || [];
+    if (lines.length === 0) return null;
+
+    const lineEls = Array.from(column.shadowRoot.children).filter(
+      (child): child is HTMLDivElement => child.tagName === 'DIV',
+    );
+    if (lineEls.length === 0) return null;
+
+    // 클릭한 y가 속한 라인 찾기
+    let hitLine = -1;
+    for (let i = 0; i < lineEls.length; i++) {
+      const rect = lineEls[i].getBoundingClientRect();
+      const isLast = i === lineEls.length - 1;
+      const inRange = isLast
+        ? (y >= rect.top && y <= rect.bottom)
+        : (y >= rect.top && y < rect.bottom);
+      if (inRange) {
+        hitLine = i;
+        break;
+      }
+    }
+    // y가 라인들 사이 빈 공간이면 가장 가까운 라인 선택
+    if (hitLine === -1) {
+      let bestDist = Infinity;
+      for (let i = 0; i < lineEls.length; i++) {
+        const rect = lineEls[i].getBoundingClientRect();
+        const centerY = (rect.top + rect.bottom) / 2;
+        const dist = Math.abs(y - centerY);
+        if (dist < bestDist) {
+          bestDist = dist;
+          hitLine = i;
+        }
+      }
+    }
+    if (hitLine < 0) return null;
+
+    // 빈 줄(문자가 없는 라인)인 경우에만 line start offset 반환.
+    const line = lines[hitLine];
+    const lineCharCount = line.parts.reduce((sum, p) => sum + p.content.length, 0);
+    if (lineCharCount === 0) {
+      return this.getLineStartSourceOffset(columnIndex, hitLine);
+    }
+    // 일반 라인은 span 기반 로직에 위임
+    return null;
   }
 
   /**
