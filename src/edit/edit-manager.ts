@@ -168,6 +168,8 @@ export class EditManager {
   static getInstance(): EditManager {
     if (!EditManager._instance) {
       EditManager._instance = new EditManager();
+      EditManager._instance._selectionController = new LayoutSelectionController(document.documentElement);
+      EditManager._instance._selectionController.attach();
     }
     return EditManager._instance;
   }
