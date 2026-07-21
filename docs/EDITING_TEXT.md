@@ -319,9 +319,13 @@ const { textStyle, paragraphStyle } = controller.currentStyle;
 | `sourceOffset(renderedOffset: number)` | `number \| null` | 렌더링 오프셋을 소스 텍스트 오프셋으로 변환한다. |
 | `renderedOffset(sourceOffset: number)` | `number \| null` | 소스 텍스트 오프셋을 렌더링 오프셋으로 변환한다. |
 | `getCharOffsetFromPoint(x, y)` | `CursorPosition \| null` | 뷰포트 좌표(x, y) 위치의 문자에 해당하는 소스 오프셋을 반환한다. 컬럼 범위 기준 binary search를 사용한다. |
-| `getNearestOffsetFromPoint(x, y)` | `CursorPosition \| null` | 뷰포트 좌표(x, y)에서 가장 가까운 텍스트 위치를 반환한다. 행간, 선행/후행 공백 클릭을 처리한다. |
+| `getNearestOffsetFromPoint(x, y)` | `CursorPosition \| null` | 뷰포트 좌표(x, y)에서 가장 가까운 텍스트 위치를 반환한다. 행간, 선행/후행 공백 클릭, 빈 줄(span 없는 행) 클릭을 처리한다. |
 | `getCharRect(offset: number)` | `DOMRect \| null` | 렌더링 오프셋에 해당하는 문자 span의 위치를 단락 로컬 좌표로 반환한다. |
 | `getFirstColumnRect()` | `{ top, left, fontSize } \| null` | 첫 번째 컬럼의 단락 로컬 좌표와 폰트 크기를 반환한다. 빈 단락에서 커서를 배치할 때 사용한다. |
+| `getLineInfoBySourceOffset(sourceOffset)` | `{ columnIndex, lineIndex } \| null` | 소스 오프셋이 속한 라인의 컬럼 인덱스와 라인 인덱스를 반환한다. 빈 줄(\\n 위치)도 해당 라인으로 반환한다. |
+| `getLineStartSourceOffset(columnIndex, lineIndex)` | `number \| null` | 주어진 컬럼/라인 인덱스의 시작 source 오프셋을 반환한다. |
+| `getLineRect(columnIndex, lineIndex)` | `{ top, left, width, height } \| null` | 주어진 컬럼/라인 인덱스에 해당하는 line div의 단락 로컬 rect를 반환한다. 빈 줄도 line div가 존재하므로 rect를 반환한다. |
+| `totalLineCount` | `number` | 전체 라인 수(모든 컬럼 합)를 반환한다. |
 | `getTextRange(start, end)` | `Rect[]` | `start`부터 `end`까지(끝 제외)의 선택 사각형 배열을 단락 로컬 좌표로 반환한다. 같은 행의 연속된 span은 병합한다. |
 | `getTextContent(start, end)` | `string` | `start`부터 `end`까지(끝 제외)의 소스 텍스트를 반환한다. span의 `innerText`를 읽고 블록 사이의 `\n`을 복원한다. |
 | `findVisualLineBounds(offset)` | `{ start, end } \| null` | 소스 오프셋이 속한 시각적 라인의 시작/끝 오프셋을 반환한다. `Home`/`End` 키 처리에 사용한다. |
@@ -848,12 +852,14 @@ flowchart TD
 #### `ArrowUp` / `ArrowDown`
 
 - `_computeVerticalOffset(direction)` 메서드를 호출한다. `direction`은 위쪽이 `-1`, 아래쪽이 `1`이다.
-- 내부 로직:
-  1. 현재 커서 offset의 로컬 rect를 `_getCursorLocalRect(offset)`로 구한다.
-  2. rect를 얻지 못하면 인접 문자를 스캔하여 폴백 offset을 반환한다.
-  3. `lineHeight = rect.height`, `targetX = cursorRect.left + paragraphRect.left`, `baseY = cursorRect.top + paragraphRect.top + direction * lineHeight`를 계산한다.
-  4. probe 전략으로 세 위치를 시도한다: 정확한 `baseY`, `baseY + direction * lineHeight * 0.5` (반 라인 더 이동), 그리고 2px 단위 스캔. 라인 간격이 글자 높이보다 클 때 생기는 틈에서도 문자를 찾기 위함이다.
+- 내부 로직 (라인 인덱스 기반):
+  1. 현재 커서 offset이 속한 라인을 `getLineInfoBySourceOffset(offset)`으로 찾는다.
+  2. 전체 라인을 평탄화한 인덱스로 변환하여 인접 라인(±1)을 찾는다.
+  3. target 라인의 시작 source offset을 `getLineStartSourceOffset()`으로 구한다.
+  4. 현재 라인 내에서의 상대 offset(offsetInLine = offset - currentLineStart)을 계산하여 target 라인에서 같은 위치를 유지하려 시도한다.
+  5. target 라인의 끝 offset(다음 라인 시작 - 1, 마지막 라인은 텍스트 끝)으로 clamp한다. 빈 줄의 경우 라인 시작 = 끝이므로 커서는 빈 줄 시작에 위치한다.
 - 보조키에 따라 커서 이동 또는 선택 확장 후 동기화.
+- **빈 줄 처리**: `columnContents`의 각 라인(빈 줄 포함)이 라인 인덱스 기반 이동에 사용되므로, 빈 줄(span 없는 라인)도 정확히 통과한다.
 
 #### `Home` / `End`
 
@@ -1440,7 +1446,9 @@ flowchart TD
     A[getNearestOffsetFromPoint] --> B["getCharOffsetFromPoint 시도"]
     B -->|성공| C[반환]
     B -->|실패| D["가장 가까운 컬럼 찾기"]
-    D --> E["가장 가까운 행 찾기"]
+    D --> D2["_getLineAtPoint 시도: line div rect 기반 라인 감지"]
+    D2 -->|빈 줄 적중| C2["빈 줄 offset 반환"]
+    D2 -->|빈 줄 아님| E["가장 가까운 행 찾기"]
     E --> F["가장 가까운 span 찾기"]
     F --> G{후행 공백?}
     G -->|Yes| H["마지막 글자 뒤"]
@@ -1448,6 +1456,37 @@ flowchart TD
     I -->|Yes| J["첫 글자 앞"]
     I -->|No| K["중점 로직"]
 ```
+
+### 9.4 빈 줄(엔터만 있는 줄) 처리
+
+텍스트에 연속된 빈 줄이 있을 때, 빈 줄은 span을 가지지 않으므로 일반적인 span 기반 탐지로는 커서를 이동시킬 수 없다. 라인 인덱스 기반 접근으로 이를 해결한다.
+
+#### 9.4.1 라인별 source offset 기록
+
+`_rebuildMappings()`는 `columnContents`의 각 라인 시작 source offset을 `_lineSourceOffsets[columnIndex][lineIndex]`에 기록한다. 빈 줄도 라인으로 존재하므로 빈 줄의 시작 offset도 기록된다.
+
+#### 9.4.2 ArrowUp / ArrowDown — 라인 인덱스 기반 이동
+
+`_computeVerticalOffset()`는 픽셀 좌표 기반 탐지 대신 라인 인덱스를 사용한다:
+
+1. `getLineInfoBySourceOffset(offset)`으로 현재 라인 찾기
+2. 전체 라인을 평탄화한 인덱스로 변환하여 인접 라인(±1) 찾기
+3. target 라인의 시작 source offset을 구하고, 현재 라인 내 상대 위치를 유지하려 시도
+4. target 라인의 끝 offset으로 clamp (빈 줄은 시작 = 끝)
+
+#### 9.4.3 마우스 클릭 — line div rect 기반 라인 감지
+
+`getNearestOffsetFromPoint()`는 컬럼을 찾은 후 `_getLineAtPoint()`로 line div rect를 직접 측정하여 클릭한 y가 어느 라인에 속하는지 찾는다. 빈 줄의 line div도 높이를 가지므로 정확히 감지된다.
+
+#### 9.4.4 커서 표시 — 3단계 폴백
+
+`_updateCursorPosition()`는 `renderedOffset()`이 null인 offset(\\n 위치)에서 다음 순서로 커서 위치를 결정한다.
+
+1. **이전 문자 폴백**: `renderedOffset(offset - 1)`이 존재하면 `atEndOfChar = true`로 설정하여 이전 문자 rect의 오른쪽 끝에 커서를 표시한다. 일반 라인 끝의 \\n 위치(line2 마지막 글자 다음)에서 커서가 라인 끝에 표시되는 것은 이 경로이다.
+2. **다음 문자 폴백**: 이전 문자도 없으면 `renderedOffset(offset + 1)`이 존재하면 다음 문자 rect의 왼쪽에 커서를 표시한다.
+3. **line rect 폴백**: 인접 문자가 모두 없는 경우(빈 줄 시작)에만 `getLineInfoBySourceOffset()` + `getLineRect()`로 line div rect를 구하여 빈 줄의 시각적 위치에 커서를 표시한다. 커서 높이는 line div 높이가 아닌 폰트 크기(`getFirstColumnRect().fontSize`)를 사용하고, `top`은 line div 내 수직 중앙 정렬(`lineRect.top + (lineRect.height - fontSize) / 2`)로 배치한다.
+
+빈 줄 자체(\\n이 연속하는 영역)에서는 인접 문자가 없으므로 3단계 line rect 폴백이 사용된다.
 
 ---
 
@@ -1543,7 +1582,10 @@ flowchart LR
    - `getBoundingClientRect()`로 얻은 시각적 rect를 `EditManager.scale`로 나누어 paragraph local 좌표로 변환한다.
    - **커서 left는 시각적 right(`spanRect.right`)가 아닌 레이아웃 right를 사용**한다. span은 `transform: scale(widthRatio, 1)` + `transform-origin: 0` 스타일을 가지므로, `getBoundingClientRect().width`는 `레이아웃 너비 × widthRatio`이다. `widthRatio < 1`(장평 축소)일 때 시각적 right가 레이아웃 right보다 작아 커서가 왼쪽으로 어긋난다. 따라서 `visualWidth / widthRatio`로 레이아웃 너비를 복원한 뒤 `localLeft + layoutWidth`를 커서 left로 사용한다.
 2. `renderedOffset(offset)`로 렌더링 오프셋을 찾는다.
-3. null이면 `offset > 0`이면 이전 문자의 `renderedOffset`으로 폴백(`atEndOfChar = true`). `offset < content.length`이면 다음 문자의 `renderedOffset`으로 폴백(`atEndOfChar = false`).
+3. null이면 3단계 폴백:
+   a. **이전 문자 폴백** (`atEndOfChar = true`): `renderedOffset(offset - 1)`이 존재하면 이전 문자 rect의 오른쪽 끝에 커서 표시. \\n 위치(일반 라인 끝)에서 커서가 라인 끝에 표시되는 경로.
+   b. **다음 문자 폴백** (`atEndOfChar = false`): 이전 문자도 없으면 `renderedOffset(offset + 1)`로 다음 문자 rect의 왼쪽에 커서 표시.
+   c. **line rect 폴백**: 인접 문자가 모두 없으면(빈 줄 시작) `getLineInfoBySourceOffset()` + `getLineRect()`로 line div rect를 사용. 커서 높이는 폰트 크기, top은 line div 내 수직 중앙 정렬. 종료.
 4. `offset === 0`이고 빈 단락이면 `getFirstColumnRect()`로 커서 위치를 결정.
 5. `getCharRect(renderedOffset)`로 문자 rect 획득.
 6. `rect.height <= 1`이면(공백 문자 등):
@@ -1559,9 +1601,12 @@ flowchart TD
     B -->|Yes| C[낙관적 span 기준 위치]
     B -->|No| D["renderedOffset(offset)"]
     D --> E{null?}
-    E -->|Yes| F["이전/다음 문자 폴백"]
+    E -->|Yes| F1["이전 문자 폴백 atEndOfChar=true"]
+    F1 -->|실패| F2["다음 문자 폴백 atEndOfChar=false"]
+    F2 -->|실패| F3["line rect 폴백: 빈 줄, 종료"]
+    F1 -->|성공| G
+    F2 -->|성공| G
     E -->|No| G[getCharRect]
-    F --> G
     G --> H{height <= 1?}
     H -->|Yes| I["fontSize 높이 폴백"]
     H -->|No| J[rect.height 사용]
