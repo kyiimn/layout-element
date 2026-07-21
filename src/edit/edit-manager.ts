@@ -759,7 +759,7 @@ export class EditManager {
    * 그렇지 않으면 가장 위에 있는 항목만 남기고 모두 선택 해제한다.
    */
   private _reduceSelectionToSingleForTextMode(): void {
-    if (this._selectedLayouts.length <= 1) return;
+    if (this._selectedLayouts.length === 0) return;
 
     const paragraphBoxes = this._selectedLayouts.filter(
       (el): el is LayoutBoxElement => el instanceof LayoutBoxElement && el.contentType === 'paragraph'
@@ -768,14 +768,23 @@ export class EditManager {
     const target = paragraphBoxes.length > 0 ? paragraphBoxes[0] : this._selectedLayouts[0];
     if (!target) return;
 
-    const previousLayouts = [...this._selectedLayouts];
-    for (const el of this._selectedLayouts) {
-      if (el !== target) {
-        el.removeAttribute('selected');
+    if (this._selectedLayouts.length > 1) {
+      const previousLayouts = [...this._selectedLayouts];
+      for (const el of this._selectedLayouts) {
+        if (el !== target) {
+          el.removeAttribute('selected');
+        }
+      }
+      this._selectedLayouts = [target];
+      this._dispatchLayoutSelection(previousLayouts);
+    }
+
+    if (target instanceof LayoutBoxElement) {
+      const paragraph = target.querySelector('x-layout-paragraph');
+      if (paragraph instanceof LayoutParagraphElement) {
+        this.focusParagraph(paragraph);
       }
     }
-    this._selectedLayouts = [target];
-    this._dispatchLayoutSelection(previousLayouts);
   }
 
   /**

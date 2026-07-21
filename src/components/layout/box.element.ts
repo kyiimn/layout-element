@@ -859,7 +859,6 @@ export class LayoutBoxElement extends HTMLElement {
       this.removeAttribute('hovered');
       this.removeAttribute('editable-layout');
       this.style.cursor = '';
-      EditManager.getInstance()._unregisterLayout(this);
     }
   }
 
