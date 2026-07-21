@@ -138,11 +138,6 @@ export class LayoutSelectionController {
 
     if (manager.layoutEditMode && manager.isBoxEditable(box)) return;
 
-    // 텍스트 편집 모드: mousedown에서 _requestFocus가 부모 box를 선택했으므로
-    // 후속 click의 ctrl 토글이 그 선택을 되돌리지 않도록 건너뛴다.
-    const focusedParagraph = manager.focusedParagraph;
-    if (manager.textEditMode && focusedParagraph?.parentElement === box) return;
-
     event.stopPropagation();
     if (this._isEventFromDescendantLayout(event, box)) return;
 
