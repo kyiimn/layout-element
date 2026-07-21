@@ -726,8 +726,9 @@ export class EditManager {
   }
 
   /**
-   * 텍스트 편집 포커스가 들어온 paragraph의 부모 box를 레이아웃 선택에 추가한다.
-   * 기존에 선택된 다른 box의 선택은 유지되며, 부모 box가 아직 선택되지 않았으면 추가한다.
+   * 텍스트 편집 포커스가 들어온 paragraph의 부모 box를 레이아웃 선택한다.
+   * 기존 선택은 모두 해제하고 부모 box만 단일 선택으로 설정한다.
+   * 텍스트 편집 모드는 단일 paragraph 포커스만 허용하므로 멀티선택을 허용하지 않는다.
    *
    * @param paragraph - 포커스를 얻은 단락. null이면 아무 일도 하지 않는다.
    */
@@ -736,11 +737,14 @@ export class EditManager {
     const parentBox = paragraph.parentElement;
     if (!(parentBox instanceof LayoutBoxElement)) return;
 
-    if (parentBox.hasAttribute('selected')) return;
+    if (this._selectedLayouts.length === 1 && this._selectedLayouts[0] === parentBox) return;
 
     const previousLayouts = [...this._selectedLayouts];
+    for (const prev of this._selectedLayouts) {
+      prev.removeAttribute('selected');
+    }
+    this._selectedLayouts = [parentBox];
     parentBox.setAttribute('selected', '');
-    this._selectedLayouts.push(parentBox);
     this._dispatchLayoutSelection(previousLayouts);
   }
 
