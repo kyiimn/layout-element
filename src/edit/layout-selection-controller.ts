@@ -1,4 +1,5 @@
 import { LayoutBoxElement } from "@/components/layout/box.element";
+import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { EditManager } from "./edit-manager";
 
 /**
@@ -123,8 +124,15 @@ export class LayoutSelectionController {
     if (manager._consumeSuppressNextClick()) return;
 
     if (!box) {
-      manager.clearLayoutSelection(false);
-      manager.blurParagraph();
+      // 문서 영역 내부의 빈 공간 클릭만 선택 해제로 처리한다.
+      // 툴바 버튼 등 문서 영역 밖의 클릭은 무시한다.
+      const isInsideDocument = event.composedPath().some(
+        (el) => el instanceof LayoutDocumentElement
+      );
+      if (isInsideDocument) {
+        manager.clearLayoutSelection(false);
+        manager.blurParagraph();
+      }
       return;
     }
 
