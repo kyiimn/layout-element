@@ -123,7 +123,8 @@ export class LayoutSelectionController {
     if (manager._consumeSuppressNextClick()) return;
 
     if (!box) {
-      manager.clearLayoutSelection();
+      manager.clearLayoutSelection(false);
+      manager.blurParagraph();
       return;
     }
 
