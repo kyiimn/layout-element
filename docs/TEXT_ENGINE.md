@@ -1005,6 +1005,12 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 - `genColumnStyle()`, `genLineStyle()`, `genPartStyle()`, `genCharStyle()` 사용
 - 마지막 파트 + `endOfBlock`이면 `justify-content: flex-start`로 조정
 - 양 끝 공백 제거
+- **오버플로우 라인 `display: none` 처리**:
+  - `renderText()`에서 각 라인의 누적 높이(mm)를 계산하여 컬럼 높이(`model.inheritStyle.parentHeight`, mm)를 초과하는 라인을 감지한다
+  - 라인 높이는 `_getLineHeightMm()` 헬퍼로 `lineEl.style.height`에서 추출 (폴백: `model.lineHeight`)
+  - 초과한 라인에는 `lineEl.style.display = 'none'`을 적용하여 시각적으로 숨긴다
+  - `columnHeightMm`이 0이면(부모 높이 미설정) 오버플로우 판정을 생략한다
+  - mm 기반 계산이므로 scale에 무관하게 동작한다
 - **key 기반 증분 렌더링** (commit cec32e4):
   - `data-source-offset` 속성을 key로 사용하여 기존 span 재사용
   - `data-offset` (rendered offset)은 `EditCoordinateMapper` 호환성을 위해 유지
@@ -1015,7 +1021,7 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
   - `<style>` 요소는 재사용, CSS 룰만 갱신
   - COVER 라인(`parts: []`)은 라인 div의 자식을 모두 제거
   - 헬퍼 메서드: `computePerfSourceOffsets()`, `_stripSpaces()`,
-    `_createLineElement()`, `_applyLineStyle()`,
+    `_createLineElement()`, `_applyLineStyle()`, `_getLineHeightMm()`,
     `_createPartElement()`, `_applyPartStyle()`,
     `_createSpanElement()`, `_applySpanStyle()`
   - `innerHTML = ''`는 더 이상 발생하지 않음
@@ -1034,7 +1040,7 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 - `layoutText()`는 `layoutStructure()`가 먼저 호출되어 `_columnWidths`, `_gaps`, `_columnPpm`, `_lineHeight`가 준비된 상태에서 실행해야 한다.
 - 이미지 오버랩 탐지는 `LayoutImageElement.canvas`가 존재할 때만 픽셀 수준으로 수행한다.
 - `overlapPadding`이 설정된 이미지는 타원 기반 감지를 사용한다. 캔버스가 없으면 기하학적 확장 사각형으로 폴백하며, 이 경우 투명 영역 구분이 불가능하다.
-- 텍스트 오버플로우는 마지막 컬럼에서 `_overflow`로 집계되며 `render-error` 이벤트로 통지된다.
+- 텍스트 오버플로우는 마지막 컬럼에서 `_overflow`로 집계되며 `render-error` 이벤트로 통지된다. 오버플로우된 라인은 `renderText()`에서 `display: none` 처리되어 시각적으로 숨겨진다.
 - Canvas 폰트 측정은 실제 DOM 렌더링과 약간 다를 수 있으나, `widthRatio`와 `minWidth` 보정으로 대부분의 경우 일치한다.
 
 ---

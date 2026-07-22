@@ -89,6 +89,25 @@ export class LayoutColumnElement extends HTMLElement {
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(lineEl.style, curLineStyle);
   }
 
+  /**
+   * 줄 요소의 실제 렌더링 높이(mm)를 반환한다.
+   * `genLineStyle()`이 `textBlockStyle`에 의해 height를 오버라이드할 수 있으므로
+   * `model.lineHeight`가 아닌 실제 적용된 스타일에서 추출한다.
+   * @param lineEl - 높이를 측정할 줄 DOM 요소
+   * @returns 줄 높이(mm). 추출 실패 시 `model.lineHeight` 폴백
+   * @example
+   * // lineEl.style.height === '4mm' → 4 반환
+   * const h = this._getLineHeightMm(lineEl); // 4
+   */
+  private _getLineHeightMm(lineEl: HTMLDivElement): number {
+    const heightStr = lineEl.style.height;
+    if (heightStr) {
+      const parsed = parseFloat(heightStr);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+    return this.model!.lineHeight;
+  }
+
   /** 파트(part) DOM 요소를 생성하고 `genPartStyle()` 결과를 적용한다. */
   private _createPartElement(part: TextPartData, lineData: TextLineData, curPartStyle: Record<string, string>, partJustify: string | undefined): HTMLDivElement {
     const partEl = document.createElement('div');
@@ -176,6 +195,9 @@ export class LayoutColumnElement extends HTMLElement {
     let curRenderedOffset = renderedOffset;
     let curSourceOffset = sourceOffset;
 
+    const columnHeightMm = this.model.inheritStyle?.parentHeight ?? 0;
+    let accumulatedHeightMm = 0;
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const { endOfBlock, textBlockStyle } = line;
@@ -188,6 +210,14 @@ export class LayoutColumnElement extends HTMLElement {
         this._applyLineStyle(lineEl, line, textBlockStyle);
       } else {
         this._shadowRoot.appendChild(lineEl);
+      }
+
+      const lineHeightMm = this._getLineHeightMm(lineEl);
+      const isOverflow = columnHeightMm > 0 && accumulatedHeightMm + lineHeightMm > columnHeightMm + 1e-6;
+      lineEl.style.display = isOverflow ? 'none' : '';
+
+      if (!isOverflow) {
+        accumulatedHeightMm += lineHeightMm;
       }
 
       if (line.parts.length === 0) {
