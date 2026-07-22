@@ -266,9 +266,11 @@ private _createLineWithParts(
 2. `_detectOverlapWithCache()`으로 오버랩 감지
 3. COVER면 빈 `TextLineData` 반환
 4. OVERFLOW면 플래그만 반환 (lineEl은 DOM에 유지)
-5. `_computeFreeRegions()`로 자유 영역 계산
-6. 자유 영역별 `TextPartData`, `partEls`, `partWidths` 생성
-7. 파트 사이 간격은 `marginLeft`로 설정
+5. `lineWidth`를 px에서 mm로 변환 (`getBoundingClientRect().width / ppm`)
+6. `overlapParts`를 px에서 mm로 변환 (`x1 / ppm`, `x2 / ppm`)
+7. `_computeFreeRegions()`로 자유 영역 계산 (mm 단위)
+8. 자유 영역별 `TextPartData`, `partEls`, `partWidths` 생성 (모두 mm 단위)
+9. 파트 사이 간격은 `marginLeft`로 설정 (mm 단위 CSS)
 
 ### 5.5 COVER vs PART 시각적 예시
 
@@ -323,33 +325,33 @@ freeRegions = [
 
 ---
 
-## 6. 글자 폭 측정 (`_charWidthPx()`)
+## 6. 글자 폭 측정 (`_charWidthMm()`)
 
 ### 6.1 개요
 
-`_charWidthPx()`는 Canvas 2D `measureText()`를 사용해 문자의 **advance width**를 측정한다.
+`_charWidthMm()`는 Canvas 2D `measureText()`를 사용해 문자의 **advance width**를 측정한 뒤 **mm 단위**로 반환한다.
 
 ```ts
-private _charWidthPx(char: string, textBlockStyle?: TextBlockStyle, ppm?: number): number {
+private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle, ppm?: number): number {
   const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
   this._ctx.font = this._getCachedFontString(textBlockStyle, effectivePpm);
   const metrics = this._ctx.measureText(char);
-  const rawWidth = metrics.width;
+  const rawWidthMm = metrics.width / effectivePpm;
   const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-  const fontSizePx = fontSize * effectivePpm;
-  const maxWidthPx = this.widthRatio * fontSizePx;
+  const maxWidthMm = this.widthRatio * fontSize;
   const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
   const minWidthEm = (char === ' ') ? this.spaceRatio : (!isHalfWidth ? 0.15 : 0.35);
-  const minWidthPx = minWidthEm * fontSizePx;
-  return Math.round(Math.min(Math.max(rawWidth, minWidthPx), maxWidthPx));
+  const minWidthMm = minWidthEm * fontSize;
+  return Math.min(Math.max(rawWidthMm, minWidthMm), maxWidthMm);
 }
 ```
 
 ### 6.2 핵심 포인트
 
-- `metrics.width`(advance width)를 사용한다. `actualBoundingBoxLeft + actualBoundingBoxRight`는 사용하지 않는다.
-- `maxWidthPx = widthRatio * fontSizePx`로 상한 클램프 — 장평 비율 반영.
-- `minWidthPx` 바닥값을 두어 0 폭 문자가 되는 것을 방지한다.
+- `metrics.width`(advance width, px)를 `ppm`으로 나누어 mm로 변환한다. Canvas `measureText().width`는 폰트 메트릭에 의해 `fontSizePx`에 정확히 선형 비례하므로, `measureText().width / ppm`은 **scale(ppm)에 완전히 무관**한 mm 값을 반환한다.
+- **`Math.round()`를 사용하지 않는다.** 부동소수점 정밀도를 보존하여 서로 다른 scale에서 동일한 줄바꿈 결과를 보장한다.
+- `maxWidthMm = widthRatio * fontSize`(mm)로 상한 클램프 — 장평 비율 반영.
+- `minWidthMm` 바닥값을 두어 0 폭 문자가 되는 것을 방지한다.
   - 공백 문자: `spaceRatio` em (기본값 0.15, `TextStyle.spaceRatio`로 설정 가능)
   - 반각이 아닌 문자: `0.15em`
   - 반각 문자: `0.35em`
@@ -420,11 +422,11 @@ if (idxBlock !== beforeIdxBlock) idxContentOfBlock = 0;
 ```ts
 const letterSpacingEm = this._textStyle?.letterSpacing || this._inheritStyle?.letterSpacing || 0;
 const letterSpacingFontSize = block.textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-const letterSpacingPx = letterSpacingEm * letterSpacingFontSize * ppm;
+const letterSpacingMm = letterSpacingEm * letterSpacingFontSize;
 ```
 
-`letterSpacing`은 em 단위로 지정되며, 실제 픽셀 폭은 `letterSpacing * fontSize * ppm`으로 계산된다.
-각 문자 폭에 `letterSpacingPx`를 더해 파트 가용 폭과 비교한다.
+`letterSpacing`은 em 단위로 지정되며, 실제 mm 폭은 `letterSpacing * fontSize`로 계산된다 (mm 단위).
+각 문자 폭에 `letterSpacingMm`를 더해 파트 가용 폭(mm)과 비교한다.
 
 ### 7.4 오버플로우 처리
 
@@ -723,7 +725,7 @@ public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
 ### 12.1 mm와 px의 관계
 
 - 모든 레이아웃 크기는 **mm** 단위이다.
-- DOM 요소의 `getBoundingClientRect()`는 **px** 단위이다.
+- DOM 요소의 `getBoundingClientRect()`는 **px** 단위이므로, ppm으로 나누어 mm로 변환한다.
 - `ppm`(pixels-per-mm) = px / mm
 
 ### 12.2 ppm 측정
@@ -745,9 +747,15 @@ const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColu
 ### 12.4 데이터 단위
 
 - `TextPartData.left`, `TextPartData.width`: **mm**
-- `FreeRegion.start`, `FreeRegion.end`: **px**
-- `OverlapParts.x1`, `OverlapParts.x2`: **px**
-- DOM 파트 요소의 `width`, `marginLeft`: **px**
+- `FreeRegion.start`, `FreeRegion.end`: **mm**
+- `OverlapParts.x1`, `OverlapParts.x2`: **px** (`getOverlapSizePX()` 반환값. `_createLineWithParts()`에서 mm로 변환하여 사용)
+- DOM 파트 요소의 `width`, `marginLeft`: **mm** (CSS `Nmm` 형식)
+- `_charWidthMm()` 반환값: **mm**
+- `_layoutTextIntoColumns()` 내 `partWidths`, `cumulativeWidths`, `charWidth`, `letterSpacingMm`: **mm**
+
+### 12.5 scale 무관성
+
+텍스트 래핑 계산의 모든 산술은 mm 단위로 수행된다. mm는 CSS `transform: scale(s)`의 영향을 받지 않는 절대 단위이므로, scale이 변경되어도 줄바꿈 결과(줄당 문자 수, 컬럼당 줄 수)가 동일하게 보장된다. DOM에서 px로 측정한 값은 ppm으로 나누어 mm로 변환하며, Canvas `measureText().width`도 동일하게 ppm으로 나누어 mm로 변환한다. 두 변환 모두 ppm에 비례하므로 scale에 무관한 결과를 보장한다.
 
 ---
 
@@ -811,11 +819,11 @@ const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColu
 | `_layoutTextIntoColumns()` | 메인 래핑 메서드. 라인 생성, 오버랩 적용, 글자 배치를 한 번에 수행 |
 | `_createLineWithParts(...)` | 라인 DOM 생성 + 오버랩 감지 + 파트/데이터 생성 |
 | `_createLineElement(textBlockStyle?)` | 줄 DOM 요소 생성 |
-| `_createPartElement(widthPx, marginLeftPx)` | 파트 DOM 요소 생성 |
 | `_computeFreeRegions(lineWidth, overlapParts)` | 오버랩 영역의 여집합으로 자유 영역 계산 |
 | `_detectOverlapWithCache(lineEl)` | 오버랩 요소와의 겹침 계산. COVER/PART 판정. `_overlayRects` 캐시 사용 |
-| `_charWidthPx(char, textBlockStyle?, ppm?)` | Canvas `measureText()`로 문자 advance width 측정. `widthRatio` 및 minWidth 적용 |
+| `_charWidthMm(char, textBlockStyle?, ppm?)` | Canvas `measureText()`로 문자 advance width를 측정 후 ppm으로 나누어 mm 반환. `widthRatio` 및 minWidth 적용. `Math.round()` 없음 |
 | `_getCachedFontString(textBlockStyle?, ppm?)` | Canvas 폰트 문자열 생성. 단일 항목 캐시 사용 |
+| `_createPartElement(widthMm, marginLeftMm)` | 파트 DOM 요소 생성. mm 단위 CSS 적용 |
 | `_removeTrailingEmptyLine(columnContent)` | 빈 파트만 있는 마지막 줄 제거 |
 
 ---
@@ -1015,7 +1023,7 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 ### 18.3 `LayoutVirtualColumnElement`
 
 - `_initStructureAndMeasureColumns()`와 `_layoutTextIntoColumns()`에서 임시로 생성
-- `isOverflow`로 컬럼 높이 초과 여부 감지. `scrollHeight`(정수 px) 대신 `getBoundingClientRect().height`(소수점 px)를 합산하여 서브픽셀 정밀도를 보존한다. `scrollHeight`는 정수로 반올림되어 `lineHeight`가 픽셀 단위로 나누어떨어지지 않을 때(예: 5mm ≈ 18.9px → scrollHeight=19px) 거짓 오버플로우를 유발할 수 있다.
+- `isOverflow`로 컬럼 높이 초과 여부 감지. **mm 기반 판정**: children 수 × `model.lineHeight`(mm)와 `model.inheritStyle.parentHeight`(mm)를 직접 비교하여 scale에 무관한 오버플로우 판정을 보장한다.
 - 측정 완료 후 제거됨
 
 ---
@@ -1196,35 +1204,34 @@ textAlign = 'justify' (space-between)
 
 ### 21.1 Canvas `measureText()` 기반 문자 폭 측정
 
-**대상:** `_charWidthPx()` (`src/core/text-layout-engine.ts:189`)
+**대상:** `_charWidthMm()` (`src/core/text-layout-engine.ts:229`)
 
 **문제:** DOM 기반 문자 폭 측정(`scrollWidth > clientWidth`)은 강제 리플로우를 유발한다. 문자마다 span을 생성하고 측정하면 O(n)번의 리플로우가 발생한다.
 
-**해결:** Canvas 2D Context의 `measureText().width`(advance width)를 사용하여 DOM 조작 없이 순수 계산으로 문자 폭을 구한다.
+**해결:** Canvas 2D Context의 `measureText().width`(advance width)를 사용하여 DOM 조작 없이 순수 계산으로 문자 폭을 구한다. 측정값을 ppm으로 나누어 **mm 단위**로 반환한다.
 
 ```ts
-private _charWidthPx(char: string, textBlockStyle?: TextBlockStyle, ppm?: number): number {
+private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle, ppm?: number): number {
   const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
   this._ctx.font = this._getCachedFontString(textBlockStyle, effectivePpm);
   const metrics = this._ctx.measureText(char);
-  const rawWidth = metrics.width;
+  const rawWidthMm = metrics.width / effectivePpm;
   const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-  const fontSizePx = fontSize * effectivePpm;
-  const maxWidthPx = this.widthRatio * fontSizePx;
+  const maxWidthMm = this.widthRatio * fontSize;
   const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
   const minWidthEm = (char === ' ') ? this.spaceRatio : (!isHalfWidth ? 0.15 : 0.35);
-  const minWidthPx = minWidthEm * fontSizePx;
-  return Math.round(Math.min(Math.max(rawWidth, minWidthPx), maxWidthPx));
+  const minWidthMm = minWidthEm * fontSize;
+  return Math.min(Math.max(rawWidthMm, minWidthMm), maxWidthMm);
 }
 ```
 
 **핵심 포인트:**
-- `metrics.width` (advance width)를 사용 — `actualBoundingBoxLeft + actualBoundingBoxRight`는 잉크 영역만 측정하여 좁은 문자(i, l, j)를 과소측정한다.
-- `maxWidthPx = widthRatio * fontSizePx`로 상한 클램프 — 장평 비율 반영.
-- `minWidthPx` 바닥값 — 0폭 문자 방지 (공백 `spaceRatio`em 기본 0.15, 전각 `0.15em`, 반각 `0.35em`).
-- 측정값에 `widthRatio`를 직접 곱하지 않음 — `maxWidthPx` 클램프가 장평을 반영.
+- `metrics.width` (advance width)를 ppm으로 나누어 mm로 변환 — `measureText().width / ppm`은 scale에 무관한 mm 값을 반환한다.
+- `Math.round()`를 사용하지 않음 — 부동소수점 정밀도를 보존하여 서로 다른 scale에서 동일한 줄바꿈 결과를 보장.
+- `maxWidthMm = widthRatio * fontSize`(mm)로 상한 클램프 — 장평 비율 반영.
+- `minWidthMm` 바닥값 — 0폭 문자 방지 (공백 `spaceRatio`em 기본 0.15, 전각 `0.15em`, 반각 `0.35em`).
 
-**효과:** 텍스트 래핑 계산 시 DOM 조작 없이 순수 계산으로 처리. O(n)번의 강제 리플로우 제거.
+**효과:** 텍스트 래핑 계산 시 DOM 조작 없이 순수 계산으로 처리. O(n)번의 강제 리플로우 제거. scale에 무관한 줄바꿈 보장.
 
 > **참고:** 문자 폭 측정의 상세한 규칙은 섹션 6을 참조.
 
@@ -1467,7 +1474,7 @@ for (const s of spans) {
 
 | 전략 | 대상 | 문제 | 해결 | 효과 |
 |------|------|------|------|------|
-| Canvas `measureText()` | `_charWidthPx()` | DOM 기반 측정의 O(n) 리플로우 | Canvas 2D `measureText().width` 사용 | DOM 조작 없이 순수 계산 |
+| Canvas `measureText()` | `_charWidthMm()` | DOM 기반 측정의 O(n) 리플로우 | Canvas 2D `measureText().width / ppm`로 mm 단위 측정 | DOM 조작 없이 순수 계산, scale 무관 |
 | 폰트 문자열 캐시 | `_getCachedFontString()` | `ctx.font` 설정 비용 | 단일 항목 캐시 (히트율 99%) | `ctx.font` 설정을 사이클당 1회로 통합 |
 | 오버랩 rect 캐시 | `_detectOverlapWithCache()` | 라인×오버랩 요소 수의 리플로우 | `Map`에 오버랩 요소 rect 캐싱 | 리플로우를 사이클당 1번으로 통합 |
 | 배치 vcolumn 측정 | `_initStructureAndMeasureColumns()` | 컬럼마다 개별 측정 | 모든 컬럼을 한 번에 생성/측정/제거 | O(columns)번 리플로우를 1번으로 통합 |

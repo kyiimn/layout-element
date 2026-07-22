@@ -86,19 +86,12 @@ export class LayoutVirtualColumnElement extends HTMLElement {
   }
 
   get isOverflow() {
-    // Use getBoundingClientRect().height instead of scrollHeight to preserve
-    // sub-pixel precision. scrollHeight is always an integer (rounded up),
-    // which causes false overflow detection when lineHeight doesn't divide
-    // evenly into pixels (e.g. 5mm ≈ 18.9px → scrollHeight rounds to 19px).
-    // With 15 such lines the accumulated integer sum (285px) exceeds the
-    // column's clientHeight (283px) even though the true sub-pixel total
-    // (283.5px) fits within 283.5px — dropping the last line incorrectly.
-    const children = Array.from(this._shadowRoot.children)
-      .filter((el): el is HTMLElement => el instanceof HTMLElement);
-    const contentHeight = children.reduce<number>(
-      (sum, el) => sum + el.getBoundingClientRect().height, 0,
-    );
-    return contentHeight > this.getBoundingClientRect().height;
+    if (!this._model) return false;
+    const lineCount = Array.from(this._shadowRoot.children)
+      .filter((el): el is HTMLDivElement => el instanceof HTMLDivElement).length;
+    const contentHeightMm = lineCount * this._model.lineHeight;
+    const containerHeightMm = this._model.inheritStyle?.parentHeight ?? 0;
+    return contentHeightMm > containerHeightMm;
   }
 
   set model(model: TextLayoutEngine | undefined) {

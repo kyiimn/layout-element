@@ -135,16 +135,22 @@ export class TextLayoutEngine {
     return lineEl;
   }
 
-  /** 파트 요소 생성 (줄 내부 수평 세그먼트). `marginLeft`로 파트 간 간격을 설정한다. */
-  private _createPartElement(widthPx: number, marginLeftPx: number) {
+  /**
+   * 파트 요소 생성 (줄 내부 수평 세그먼트). `marginLeft`로 파트 간 간격을 설정한다.
+   *
+   * @param widthMm - 파트 너비 (mm)
+   * @param marginLeftMm - 좌측 여백 (mm)
+   * @returns 파트 div 요소
+   */
+  private _createPartElement(widthMm: number, marginLeftMm: number) {
     const partEl = document.createElement('div');
     Object.assign(partEl.style, {
       display: 'inline-flex',
       flexDirection: 'row',
       flexWrap: 'nowrap',
       overflow: 'hidden',
-      width: `${widthPx}px`,
-      marginLeft: `${marginLeftPx}px`,
+      width: `${widthMm}mm`,
+      marginLeft: `${marginLeftMm}mm`,
       alignItems: 'baseline',
     });
     return partEl;
@@ -202,18 +208,40 @@ export class TextLayoutEngine {
     return fontString;
   }
 
-  private _charWidthPx(char: string, textBlockStyle?: TextBlockStyle, ppm?: number): number {
-    const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
-    this._ctx.font = this._getCachedFontString(textBlockStyle, effectivePpm);
+  /**
+   * 문자의 레이아웃 폭을 mm 단위로 측정한다.
+   *
+   * Canvas `measureText().width`는 폰트 메트릭에 의해 `fontSizePx`에 정확히 선형 비례하므로,
+   * `measureText().width / ppm`은 항상 scale(ppm)에 무관한 mm 값을 반환한다.
+   * `Math.round()`를 사용하지 않아 부동소수점 정밀도를 보존하며,
+   * 이로 인해 서로 다른 scale에서 동일한 줄바꿈 결과를 보장한다.
+   *
+   * **단일 ppm 사용**: 모든 컬럼에서 동일한 기준 ppm(`_columnPpm[0]`)을 사용하여
+   * 문자 폭을 측정한다. 컬럼마다 ppm을 개별 측정하면 `getBoundingClientRect()`의
+   * 서브픽셀 정밀도 차이로 인해 같은 문자가 컬럼마다 미세하게 다른 mm 폭을 갖게 되어,
+   * scale 변경 시 줄바꿈이 어긋나는 원인이 된다. 단일 ppm을 사용하면 모든 컬럼에서
+   * 동일한 문자 폭을 보장하여 컬럼 간 일관성과 scale 무관성을 동시에 달성한다.
+   *
+   * @param char - 측정할 문자
+   * @param textBlockStyle - 블록 레벨 스타일 오버라이드
+   * @returns 문자 폭 (mm). scale 및 컬럼에 무관.
+   *
+   * @example
+   * // scale=1 (ppm=3.78): measureText('한') = 15.12px → 15.12/3.78 = 4.0mm
+   * // scale=2 (ppm=7.56): measureText('한') = 30.24px → 30.24/7.56 = 4.0mm
+   * // 두 경우 모두 4.0mm를 반환하여 동일한 줄바꿈 결과를 보장한다.
+   */
+  private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle): number {
+    const ppm = this._columnPpm[0] || GridCalculator.ppm;
+    this._ctx.font = this._getCachedFontString(textBlockStyle, ppm);
     const metrics = this._ctx.measureText(char);
-    const rawWidth = metrics.width;
+    const rawWidthMm = metrics.width / ppm;
     const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-    const fontSizePx = fontSize * effectivePpm;
-    const maxWidthPx = this.widthRatio * fontSizePx;
+    const maxWidthMm = this.widthRatio * fontSize;
     const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
     const minWidthEm = (char === ' ') ? this.spaceRatio : (!isHalfWidth ? 0.15 : 0.35);
-    const minWidthPx = minWidthEm * fontSizePx;
-    return Math.round(Math.min(Math.max(rawWidth, minWidthPx), maxWidthPx));
+    const minWidthMm = minWidthEm * fontSize;
+    return Math.min(Math.max(rawWidthMm, minWidthMm), maxWidthMm);
   }
 
   /** 마지막 줄의 모든 파트가 비어 있으면 해당 줄을 제거한다. */
@@ -268,16 +296,25 @@ export class TextLayoutEngine {
    * `_detectOverlapWithCache()`로 겹침을 감지하고, `_computeFreeRegions()`로
    * 자유 영역을 계산한 뒤, 각 자유 영역에 대한 파트 요소와 TextPartData를 생성한다.
    *
+   * 모든 측정값과 산술은 **mm 단위**로 수행된다. 라인 너비는 DOM 측정
+   * (`getBoundingClientRect().width / ppm`) 대신 `_columnWidths[columnIndex]`를
+   * 직접 사용하여 브라우저 렌더링 정밀도 오차를 원천 제거한다.
+   * `getOverlapSizePX()`가 반환하는 px 단위 OverlapParts는 ppm으로 나누어 mm로 변환한다.
+   * 이로 인해 scale에 완전히 무관한 줄바꿈 결과를 보장한다.
+   *
    * @param vColumnEl - 가상 컬럼 요소 (DOM에 삽입되어 있어야 함)
    * @param textBlockStyle - 이 라인에 적용할 블록 스타일
    * @param ppm - 픽셀/mm 변환 비율
+   * @param columnIndex - 현재 컬럼 인덱스 (`_columnWidths` 조회용)
    * @param isFirstInColumn - 첫 번째 라인 여부 (firstOfText/firstOfBlock 플래그 설정용)
-   * @returns cover=true면 라인 전체가 덮임, overflow=true면 컬럼 높이 초과
+   * @returns cover=true면 라인 전체가 덮임, overflow=true면 컬럼 높이 초과.
+   *          `partWidths`는 mm 단위.
    */
   private _createLineWithParts(
     vColumnEl: HTMLElement,
     textBlockStyle: TextBlockStyle | undefined,
     ppm: number,
+    columnIndex: number,
     isFirstInColumn: boolean,
   ): {
     cover: boolean;
@@ -307,8 +344,14 @@ export class TextLayoutEngine {
     // 오버플로우 플래그는 최종 반환값에 반영한다.
     const isOverflow = (vColumnEl as LayoutVirtualColumnElement).isOverflow;
 
-    const lineWidth = lineEl.getBoundingClientRect().width;
-    const freeRegions = this._computeFreeRegions(lineWidth, overlapParts);
+    const lineWidthMm = this._columnWidths[columnIndex];
+
+    const overlapPartsMm: OverlapParts[] = overlapParts.map(p => ({
+      x1: p.x1 / ppm,
+      x2: p.x2 / ppm,
+    }));
+
+    const freeRegions = this._computeFreeRegions(lineWidthMm, overlapPartsMm);
 
     // 자유 영역이 없으면 라인 전체가 오버랩으로 덮인 것.
     // 호출자에서는 이미지가 영역을 덮든 COVER든 freeRegions가 없든 상관없이
@@ -325,8 +368,8 @@ export class TextLayoutEngine {
 
     const parts: TextPartData[] = freeRegions.map((region, i) => ({
       content: [],
-      left: i === 0 ? region.start / ppm : (region.start - freeRegions[i - 1].end) / ppm,
-      width: (region.end - region.start) / ppm,
+      left: i === 0 ? region.start : (region.start - freeRegions[i - 1].end),
+      width: region.end - region.start,
     }));
 
     const partWidths = freeRegions.map(r => r.end - r.start);
@@ -336,8 +379,8 @@ export class TextLayoutEngine {
       0,
     ));
     partEls.forEach((partEl, i) => {
-      const gapPx = i === 0 ? freeRegions[0].start : freeRegions[i].start - freeRegions[i - 1].end;
-      if (gapPx > 0) partEl.style.marginLeft = `${gapPx}px`;
+      const gapMm = i === 0 ? freeRegions[0].start : freeRegions[i].start - freeRegions[i - 1].end;
+      if (gapMm > 0) partEl.style.marginLeft = `${gapMm}mm`;
       lineEl.appendChild(partEl);
     });
 
@@ -470,7 +513,7 @@ export class TextLayoutEngine {
           let isFirstLineInLoop = true;
           while (true) {
             const isFirstInColumn = curColumn === 0 && columnContent.length < 1 && isFirstLineInLoop;
-            const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, isFirstInColumn);
+            const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, curColumn, isFirstInColumn);
 
             // M2: COVER 라인은 실제 텍스트가 없으므로 이전 라인에 endOfBlock을 설정하지 않음
             if (columnContent.length > 0 && !result.cover) {
@@ -516,11 +559,11 @@ export class TextLayoutEngine {
 
         const letterSpacingEm = this._textStyle?.letterSpacing || this._inheritStyle?.letterSpacing || DEFAULT_LETTER_SPACING;
         const letterSpacingFontSize = block.textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-        const letterSpacingPx = letterSpacingEm * letterSpacingFontSize * ppm;
+        const letterSpacingMm = letterSpacingEm * letterSpacingFontSize;
 
         for (; idxContentOfBlock < block.content.length; idxContentOfBlock++) {
           const char = block.content[idxContentOfBlock];
-          const charWidth = this._charWidthPx(char, block.textBlockStyle, ppm) + letterSpacingPx;
+          const charWidth = this._charWidthMm(char, block.textBlockStyle) + letterSpacingMm;
 
           const placeChar = (): boolean => {
             if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
@@ -580,7 +623,7 @@ export class TextLayoutEngine {
           }
 
           while (true) {
-            const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, false);
+            const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, curColumn, false);
 
             if (result.cover) {
               columnContent.push(result.lineData);
