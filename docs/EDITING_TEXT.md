@@ -930,19 +930,20 @@ flowchart TD
 
 - **보조키 없음 (3단계 스틱 동작)**: ArrowLeft/Right와 동일한 `none` → `sticking` → `crossed` → `none` 상태 머신을 사용한다. 라인 시작/끝은 `findVisualLineBounds`가 아닌 **논리적 라인 정보**(`_getLogicalLineStart`/`_getLogicalLineEnd`)에서 가져온다. `findVisualLineBounds`는 선행/후행 공백 제거와 폴백으로 인해 잘못된 라인 경계를 반환할 수 있기 때문이다.
   - `End` (`_crossRightState`):
-    1. `_getLogicalLineEnd(offset)`으로 현재 라인의 끝 source offset 계산.
+    1. `_getEndKeyOffset(offset)`으로 라인 끝 offset 계산. `_getLogicalLineEnd`가 반환하는 값이 렌더링된 문자이면 +1(문자 오른쪽), `\n` 위치나 `content.length`이면 그대로.
     2. `atLineEnd = offset === lineEnd`.
-    3. `sticking` + `atLineEnd`: 제자리, `crossed` 설정. 커서는 다음 라인 시작에 그려짐.
-    4. `crossed`: `_getLogicalLineEnd(offset + 1)`로 다음 라인 끝 계산 후 이동, `none` 리셋.
+    3. `sticking`: 제자리, `crossed` 설정. 커서는 다음 라인 시작에 그려짐.
+    4. `crossed`: `_getEndKeyOffset(offset + 1)`로 다음 라인 끝 계산 후 이동, `none` 리셋.
     5. `atLineEnd`: 제자리, `sticking` 설정.
     6. 그 외: `lineEnd`로 이동, `sticking` 설정.
   - `Home` (`_crossLeftState`):
     1. `_getLogicalLineStart(offset)`으로 현재 라인의 시작 source offset 계산.
     2. `atLineStart = offset === lineStart`.
-    3. `sticking` + `atLineStart`: 제자리, `crossed` 설정. 커서는 이전 라인 끝에 그려짐.
-    4. `crossed`: `_getLogicalLineStart(offset - 1)`로 이전 라인 시작 계산 후 이동, `none` 리셋.
-    5. `atLineStart`: 제자리, `sticking` 설정.
-    6. 그 외: `lineStart`로 이동, `sticking` 설정.
+    3. **블록 시작 무시**: `atLineStart && offset === 0`이면 Home을 무시하고 break (스틱 상태 변경 없음).
+    4. `sticking`: 제자리, `crossed` 설정. 커서는 이전 라인 끝에 그려짐.
+    5. `crossed`: `_getLogicalLineStart(offset - 1)`로 이전 라인 시작 계산 후 이동, `none` 리셋.
+    6. `atLineStart`: 제자리, `sticking` 설정.
+    7. 그 외: `lineStart`로 이동, `sticking` 설정.
   - 방향 전환 시 반대 상태 리셋: Home 시작 시 `_crossRightState = 'none'`, End 시작 시 `_crossLeftState = 'none'`.
   - `Ctrl`/`Cmd`: 문서 전체 시작/끝으로 이동 (`_findLineStart`/`_findLineEnd`), 스틱 없음.
   - `Shift`: 스틱 없이 선택 영역 확장 (`_getLogicalLineStart`/`_getLogicalLineEnd` 사용).
@@ -950,6 +951,8 @@ flowchart TD
 **`_getLogicalLineStart(offset)`**: `getLineInfoBySourceOffset(offset)`으로 `{columnIndex, lineIndex}`를 찾고, `getLineStartSourceOffset()`으로 라인 시작 source offset을 반환한다. `findVisualLineBounds`와 달리 선행/후행 공백 제거에 영향받지 않는다.
 
 **`_getLogicalLineEnd(offset)`**: `getLineInfoBySourceOffset(offset)`으로 `{columnIndex, lineIndex}`를 찾고, `_getLineEndSourceOffset()`으로 라인 끝 source offset(`\n` 위치 또는 텍스트 끝)을 반환한다. `findVisualLineBounds.end`는 마지막 visible 문자 다음 위치를 반환하므로, 커서가 위치할 수 있는 마지막 offset과 1 차이가 난다. `_getLogicalLineEnd`는 이를 보정한다.
+
+**`_getEndKeyOffset(offset)`**: End 키가 이동해야 할 실제 offset을 반환한다. `_getLogicalLineEnd`가 반환한 값이 렌더링된 문자(`renderedOffset !== null`)이면 +1을 반환하여 커서가 마지막 문자의 오른쪽에 표시되도록 한다. `\n` 위치나 `content.length`이면 그대로 반환한다.
 
 #### `Ctrl`+`ArrowLeft` / `Ctrl`+`ArrowRight` (단어 이동)
 

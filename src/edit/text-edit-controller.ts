@@ -896,7 +896,10 @@ export class TextEditController {
       } else {
         const lineStart = this._getLogicalLineStart(offset);
         const atLineStart = offset === lineStart;
-        if (this._crossLeftState === 'sticking' && atLineStart) {
+        if (atLineStart && offset === 0) {
+          break;
+        }
+        if (this._crossLeftState === 'sticking') {
           this._cursorModel.offset = offset;
           this._cursorModel.selection = null;
           this._crossLeftState = 'crossed';
@@ -930,18 +933,18 @@ export class TextEditController {
         if (isShift) { this._extendSelection(lineEnd); } else { this._cursorModel.offset = lineEnd; this._cursorModel.selection = null; }
         this._crossRightState = 'none';
       } else if (isShift) {
-        const lineEnd = this._getLogicalLineEnd(offset);
+        const lineEnd = this._getEndKeyOffset(offset);
         this._extendSelection(lineEnd);
         this._crossRightState = 'none';
       } else {
-        const lineEnd = this._getLogicalLineEnd(offset);
+        const lineEnd = this._getEndKeyOffset(offset);
         const atLineEnd = offset === lineEnd;
-        if (this._crossRightState === 'sticking' && atLineEnd) {
+        if (this._crossRightState === 'sticking') {
           this._cursorModel.offset = offset;
           this._cursorModel.selection = null;
           this._crossRightState = 'crossed';
         } else if (this._crossRightState === 'crossed') {
-          const nextEnd = this._getLogicalLineEnd(Math.min(content.length, offset + 1));
+          const nextEnd = this._getEndKeyOffset(Math.min(content.length, offset + 1));
           this._cursorModel.offset = nextEnd;
           this._cursorModel.selection = null;
           this._crossRightState = 'none';
@@ -1312,6 +1315,19 @@ export class TextEditController {
     const info = this._mapper.getLineInfoBySourceOffset(offset);
     if (!info) return 0;
     return this._getLineEndSourceOffset(info.columnIndex, info.lineIndex);
+  }
+
+  /**
+   * End 키로 이동해야 할 라인 끝 offset을 반환한다.
+   * `_getLogicalLineEnd`가 \n 위치나 content.length이면 그대로 반환하고,
+   * 렌더링된 마지막 문자 위치이면 +1을 반환하여 커서가 문자 오른쪽에 표시되도록 한다.
+   */
+  private _getEndKeyOffset(offset: number): number {
+    const lineEnd = this._getLogicalLineEnd(offset);
+    if (this._mapper.renderedOffset(lineEnd) !== null) {
+      return lineEnd + 1;
+    }
+    return lineEnd;
   }
 
   /** Ctrl+ArrowLeft: 이전 단어의 시작 위치로 이동 */
