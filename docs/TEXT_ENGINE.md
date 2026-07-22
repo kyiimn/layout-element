@@ -757,6 +757,18 @@ const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColu
 
 텍스트 래핑 계산의 모든 산술은 mm 단위로 수행된다. mm는 CSS `transform: scale(s)`의 영향을 받지 않는 절대 단위이므로, scale이 변경되어도 줄바꿈 결과(줄당 문자 수, 컬럼당 줄 수)가 동일하게 보장된다. DOM에서 px로 측정한 값은 ppm으로 나누어 mm로 변환하며, Canvas `measureText().width`도 동일하게 ppm으로 나누어 mm로 변환한다. 두 변환 모두 ppm에 비례하므로 scale에 무관한 결과를 보장한다.
 
+#### 12.5.1 `getBoundingClientRect()` 정규화
+
+CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는 scale이 곱해진 viewport 픽셀을 반환한다. 서브픽셀 렌더링 정밀도는 scale에 비례하므로(예: scale=0.5면 반픽셀 단위, scale=2면 2배 정밀도), scale마다 측정값이 미세하게 달라져 텍스트 배치가 어긋나는 원인이 된다.
+
+이를 방지하기 위해 모든 `getBoundingClientRect()` 결과는 `EditManager.scale`로 나누어 **scale=1 기준 픽셀 좌표**로 정규화한 뒤 사용한다. 정규화는 다음 세 경로에 적용된다:
+
+1. **ppm 측정** (`_initStructureAndMeasureColumns`): 가상 컬럼의 렌더링 폭을 scale로 나누어 ppm을 계산한다. ppm이 scale에 무관해지면 `_charWidthMm()`의 `measureText().width / ppm`도 scale 무관한 mm 값을 반환하여, 오버랩이 없는 라인의 글자 배치도 일관된다.
+2. **오버랩 rect 캐시** (`_detectOverlapWithCache`): 오버랩 요소의 rect를 scale로 나누어 캐싱한다. 라인 rect도 동일한 scale로 나누어 비교하므로, 모든 scale에서 동일한 겹침 판정 결과를 보장한다.
+3. **`getOverlapSizePX()`**: 내부에서 `getBoundingClientRect()`를 다시 호출하므로, scale 파라미터를 받아 r1/r2를 정규화한다. canvas 픽셀 매핑(`canvas.width / r2.width`)도 정규화된 r2.width 기준으로 수행되어 scale 무관하다.
+
+`TextLayoutEngine.scale` 프로퍼티를 통해 scale 값을 받으며, `LayoutParagraphElement.render()`가 `EditManager.getInstance().scale`을 읽어 `model.scale`에 설정한 후 `layoutStructure()`/`layoutText()`를 호출한다. `EditManager.setScale()`은 모든 paragraph의 `markStructureChangedAndRender()`를 호출하므로, scale 변경 시 자동으로 재렌더링되어 새 scale이 반영된다.
+
 ---
 
 ## 13. 공개 API 참조
@@ -787,7 +799,14 @@ const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColu
 | `inheritStyle` | `InheritStyle` | 상속 스타일 설정. `_initLayoutMetrics()` 호출 |
 | `textContent` | `string \| (string \| TextBlockData)[]` | 텍스트 콘텐츠 갱신. 래핑은 호출자가 직접 실행 |
 
-### 13.4 게터
+### 13.4 게터/세터 (scale)
+
+| 멤버 | 타입 | 설명 |
+| ------ | ----------- | ------ |
+| `scale` (get) | `number` | 현재 화면 배율. `getBoundingClientRect()` 결과를 scale=1 기준으로 정규화하는 데 사용 |
+| `scale` (set) | `number` | 화면 배율 설정. `layoutStructure()`/`layoutText()` 호출 전에 설정해야 scale 무관한 래핑이 보장됨. 0 이하이면 1로 취급 |
+
+### 13.5 게터
 
 | 게터 | 반환 타입 | 설명 |
 | ------ | ----------- | ------ |
