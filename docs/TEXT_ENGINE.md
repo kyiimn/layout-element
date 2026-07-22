@@ -269,8 +269,9 @@ private _createLineWithParts(
 5. `lineWidth`를 px에서 mm로 변환 (`getBoundingClientRect().width / ppm`)
 6. `overlapParts`를 px에서 mm로 변환 (`x1 / ppm`, `x2 / ppm`)
 7. `_computeFreeRegions()`로 자유 영역 계산 (mm 단위)
-8. 자유 영역별 `TextPartData`, `partEls`, `partWidths` 생성 (모두 mm 단위)
-9. 파트 사이 간격은 `marginLeft`로 설정 (mm 단위 CSS)
+8. **좁은 자유 영역 필터링**: 글자 하나가 들어갈 수 없는 좁은 자유 영역은 제외한다. 기준은 전각 문자 폭 상한(`widthRatio × fontSize + letterSpacing × fontSize`). 이 필터링이 없으면 무한 루프 가드가 좁은 틈에 글자를 강제 배치하여 파트 폭을 넘어 렌더링되는 현상이 발생한다. 필터링 후 남은 자유 영역이 없으면 COVER로 처리된다.
+9. 자유 영역별 `TextPartData`, `partEls`, `partWidths` 생성 (모두 mm 단위)
+10. 파트 사이 간격은 `marginLeft`로 설정 (mm 단위 CSS)
 
 ### 5.5 COVER vs PART 시각적 예시
 
