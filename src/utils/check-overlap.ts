@@ -34,19 +34,75 @@ export const mergeOverlapParts = (parts: OverlapParts[]): OverlapParts[] => {
 };
 
 /**
+ * scale=1 기준으로 정규화된 DOMRect를 나타내는 타입.
+ * `getBoundingClientRect()`의 viewport 픽셀 값을 `EditManager.scale`로 나누어,
+ * CSS `transform: scale(s)`의 영향을 제거한 좌표계에서 오버랩을 판정한다.
+ */
+type NormalizedRect = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  width: number;
+  height: number;
+};
+
+export type { NormalizedRect };
+
+/**
+ * `getBoundingClientRect()` 결과를 scale=1 기준으로 정규화한다.
+ *
+ * CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
+ * scale이 곱해진 viewport 픽셀을 반환한다. 서브픽셀 렌더링 정밀도는 scale에
+ * 비례하므로(예: scale=0.5면 반픽셀 단위), scale마다 겹침 판정이 미세하게
+ * 달라져 텍스트 배치가 어긋나는 원인이 된다.
+ *
+ * 모든 rect를 scale로 나누어 scale=1 기준 픽셀 좌표계로 변환하면, 모든 scale에서
+ * 동일한 정밀도와 동일한 겹침 판정 결과를 보장한다.
+ *
+ * @param rect - `getBoundingClientRect()` 반환값 (viewport 픽셀, scale 적용됨)
+ * @param scale - `EditManager.scale` 값. 0 이하이면 1로 취급하여 안전하게 처리
+ * @returns scale=1 기준 픽셀 좌표로 정규화된 rect
+ *
+ * @example
+ * // scale=0.5: r1.left=100(viewport px) → 정규화 r1.left=200(scale=1 기준)
+ * // scale=2:   r1.left=400(viewport px) → 정규화 r1.left=200(scale=1 기준)
+ * // 두 경우 모두 동일한 200을 반환하여 일관된 비교 기준을 제공한다.
+ */
+export const normalizeRect = (rect: DOMRect, scale: number): NormalizedRect => {
+  const s = scale > 0 ? scale : 1;
+  return {
+    left: rect.left / s,
+    right: rect.right / s,
+    top: rect.top / s,
+    bottom: rect.bottom / s,
+    width: rect.width / s,
+    height: rect.height / s,
+  };
+};
+
+/**
  * 오버랩 크기 계산.
  *
  * `targetElement`는 항상 `LayoutBoxElement`이다:
  * 유일한 호출처인 `detectOverlapWithCache()`이 `overlayElements`에서 요소를 가져오며,
  * `overlayElements`는 `LayoutBoxElement[]` 타입이므로
  * `as LayoutBoxElement` 캐스트는 런타임에 결코 실패하지 않는다.
+ *
+ * @param baseElement - 라인 요소 (겹침의 기준)
+ * @param targetElement - 오버랩 요소 (이미지 박스 등)
+ * @param scale - `EditManager.scale` 값. 모든 `getBoundingClientRect()` 결과를
+ *                scale=1 기준으로 정규화하여 scale 무관한 겹침 판정을 보장.
+ *                생략 시 1 (scale 미적용 환경 호환).
+ * @returns 겹침 방향(NONE/COVERS/PART)과 겹침 구간(scale=1 기준 픽셀 좌표)
  */
-export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: LayoutBoxElement): {
+export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: LayoutBoxElement, scale: number = 1): {
   direction: "NONE" | "COVERS" | "PART",
   parts: OverlapParts[],
 } => {
-  const r1 = baseElement.getBoundingClientRect();
-  const r2 = targetElement.getBoundingClientRect();
+  // scale=1 기준으로 정규화된 rect — 모든 후속 연산은 이 좌표계에서 수행된다.
+  const r1 = normalizeRect(baseElement.getBoundingClientRect(), scale);
+  const r2 = normalizeRect(targetElement.getBoundingClientRect(), scale);
 
   let padTop = 0, padRight = 0, padBottom = 0, padLeft = 0;
   let hasOverlapPadding = false;
@@ -91,6 +147,7 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
         const canvas = imageEl.canvas;
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
         if (ctx) {
+          // r2.width는 정규화된(scale=1 기준) 픽셀 폭이므로, canvas 픽셀 매핑도 scale=1 기준
           const scaleX = canvas.width / r2.width;
           const scaleY = canvas.height / r2.height;
 
