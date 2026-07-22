@@ -458,10 +458,10 @@ export class TextLayoutEngine {
     }
 
     for (let i = 0; i < vColumnEls.length; i++) {
-      // vcolumn의 렌더링 폭(viewport px)을 scale로 나누어 scale=1 기준 픽셀 폭으로 정규화한다.
+      // viewport px를 scale로 나누어 scale=1 기준 픽셀 폭으로 정규화한다.
       // 정규화된 px / columnWidths[i](mm) = scale 무관한 ppm을 보장한다.
-      const rect = normalizeRect(vColumnEls[i].getBoundingClientRect(), this._scale);
-      const ppm = rect.width / this._columnWidths[i];
+      const widthPx = vColumnEls[i].getBoundingClientRect().width / this._scale;
+      const ppm = widthPx / this._columnWidths[i];
       this._columnPpm.push(ppm);
     }
 

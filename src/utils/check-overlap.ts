@@ -38,7 +38,7 @@ export const mergeOverlapParts = (parts: OverlapParts[]): OverlapParts[] => {
  * `getBoundingClientRect()`의 viewport 픽셀 값을 `EditManager.scale`로 나누어,
  * CSS `transform: scale(s)`의 영향을 제거한 좌표계에서 오버랩을 판정한다.
  */
-type NormalizedRect = {
+export type NormalizedRect = {
   left: number;
   right: number;
   top: number;
@@ -46,8 +46,6 @@ type NormalizedRect = {
   width: number;
   height: number;
 };
-
-export type { NormalizedRect };
 
 /**
  * `getBoundingClientRect()` 결과를 scale=1 기준으로 정규화한다.
