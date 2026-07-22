@@ -71,8 +71,8 @@ const obfuscatorOptions = {
   sourceMap: false,
 
   // ── 디버그 방지 ──
-  debugProtection: false, // 켜면 DevTools 사용 시 무한 debugger; 로 클라이언트 성능 저하 → 끔 (성능 우선)
-  disableConsoleOutput: false, // console 출력을 막으면 런타임 디버깅 불가 → 끔
+  debugProtection: true, // 켜면 DevTools 사용 시 무한 debugger; 로 클라이언트 성능 저하 → 끔 (성능 우선)
+  disableConsoleOutput: true, // console 출력을 막으면 런타임 디버깅 불가 → 끔
 
   // ── 타겟 ──
   target: 'browser',
