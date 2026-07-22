@@ -368,10 +368,20 @@ export class TextLayoutEngine {
 
     const freeRegions = this._computeFreeRegions(lineWidthMm, overlapPartsMm);
 
+    // 좁은 자유 영역 필터링: 글자 하나가 들어갈 수 없는 좁은 자유 영역은 제외한다.
+    // 이 필터링이 없으면 무한 루프 가드가 좁은 틈에 글자를 강제 배치하여
+    // 파트 폭을 넘어 렌더링되는 현상이 발생한다.
+    // 기준: 전각 문자 폭 상한(widthRatio × fontSize) + letterSpacing.
+    // 반각 문자는 더 좁지만, 안전하게 전각 기준으로 필터링한다.
+    const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+    const letterSpacingEm = this._textStyle?.letterSpacing || this._inheritStyle?.letterSpacing || DEFAULT_LETTER_SPACING;
+    const minCharWidthMm = this.widthRatio * fontSize + letterSpacingEm * fontSize;
+    const usableRegions = freeRegions.filter(r => (r.end - r.start) >= minCharWidthMm);
+
     // 자유 영역이 없으면 라인 전체가 오버랩으로 덮인 것.
     // 호출자에서는 이미지가 영역을 덮든 COVER든 freeRegions가 없든 상관없이
     // 텍스트를 배치할 공간이 없다는 점에서 동일하게 처리된다.
-    if (freeRegions.length === 0) {
+    if (usableRegions.length === 0) {
       const lineData: TextLineData = {
         firstOfText: isFirstInColumn,
         firstOfBlock: isFirstInColumn,
@@ -381,20 +391,20 @@ export class TextLayoutEngine {
       return { cover: true, overflow: (vColumnEl as LayoutVirtualColumnElement).isOverflow, lineEl: null, partEls: [], partWidths: [], lineData };
     }
 
-    const parts: TextPartData[] = freeRegions.map((region, i) => ({
+    const parts: TextPartData[] = usableRegions.map((region, i) => ({
       content: [],
-      left: i === 0 ? region.start : (region.start - freeRegions[i - 1].end),
+      left: i === 0 ? region.start : (region.start - usableRegions[i - 1].end),
       width: region.end - region.start,
     }));
 
-    const partWidths = freeRegions.map(r => r.end - r.start);
+    const partWidths = usableRegions.map(r => r.end - r.start);
 
-    const partEls = freeRegions.map(region => this._createPartElement(
+    const partEls = usableRegions.map(region => this._createPartElement(
       region.end - region.start,
       0,
     ));
     partEls.forEach((partEl, i) => {
-      const gapMm = i === 0 ? freeRegions[0].start : freeRegions[i].start - freeRegions[i - 1].end;
+      const gapMm = i === 0 ? usableRegions[0].start : usableRegions[i].start - usableRegions[i - 1].end;
       if (gapMm > 0) partEl.style.marginLeft = `${gapMm}mm`;
       lineEl.appendChild(partEl);
     });
