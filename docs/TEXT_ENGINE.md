@@ -956,6 +956,19 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 - `render()`에서 `columnContents` 길이만큼 `<x-layout-column>` 생성
 - `overlayElements` 게터가 `_detectOverlapWithCache()`에 사용될 오버랩 요소 제공
 
+#### Public API (셋터/게터)
+
+| 프로퍼티 | 타입 | 셋터 동작 | 설명 |
+|---|---|---|---|
+| `column` | `number \| number[] \| undefined` | 값 변경 시 `layout()` + `_perfStructureChanged = true` + `render()` | 하위 컬럼 그리드 정의. `undefined`면 부모 컬럼 상속 |
+| `gap` | `number \| number[] \| undefined` | 값 변경 시 `layout()` + `_perfStructureChanged = true` + `render()` | 하위 컬럼 간격. `undefined`면 부모 간격 상속 |
+| `textStyle` | `TextStyle` | 값 변경 시 `layout()` + `_perfStructureChanged = true` + `render()` | 글자 스타일 |
+| `paragraphStyle` | `ParagraphStyle` | 값 변경 시 `layout()` + `_perfStructureChanged = true` + `render()` | 문단 스타일 |
+| `inheritStyle` | `InheritStyle \| undefined` | 값 변경 시 `layout()` | 상속 스타일 |
+| `editableText` | `boolean` | `true` → `TextEditController` 생성, `false` → 제거 | 편집 모드 활성화 |
+
+`column`과 `gap` 셋터는 `ParagraphData`의 `column`/`gap` 필드와 동일한 타입을 사용한다. 각 프로퍼티는 독립적으로 부모 상속 여부를 판단한다: `_column !== undefined`면 자체 컬럼 값을 사용하고, `_gap !== undefined`면 자체 간격 값을 사용한다. 어느 하나가 `undefined`이면 해당 값만 부모에서 상속받는다.
+
 ### 18.2 `LayoutColumnElement`
 
 - `connectedCallback()`에서 `renderText()` 호출

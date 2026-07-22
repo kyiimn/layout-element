@@ -2,7 +2,7 @@ import { TextLayoutEngine } from "@/core";
 import { TextEditController } from "@/edit/text-edit-controller";
 import { ColorRegistry, FontLoader } from "@/resource";
 import { InheritStyle, ParagraphData, ParagraphStyle, TextBlockData, TextStyle } from "@/types";
-import { checkOverlap, genUUID } from "@/utils";
+import { checkOverlap, genUUID, valueEqual } from "@/utils";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutColumnElement } from "./column.element";
 
@@ -70,8 +70,8 @@ export class LayoutParagraphElement extends HTMLElement {
     if (!this.isConnected || !this.parentModel || !this._inheritStyle) return;
 
     const paragraphData = {
-      column: this._column !== undefined && this._gap !== undefined ? this._column : this.parentModel.columnWidth,
-      gap: this._column !== undefined && this._gap !== undefined ? this._gap : this.parentModel.gaps,
+      column: this._column !== undefined ? this._column : this.parentModel.columnWidth,
+      gap: this._gap !== undefined ? this._gap : this.parentModel.gaps,
 
       content: this._model?.textContent ?? this._sourceContent,
       paragraphStyle: this.paragraphStyle,
@@ -351,6 +351,72 @@ export class LayoutParagraphElement extends HTMLElement {
 
   get paragraphStyle(): ParagraphStyle {
     return this._paragraphStyle;
+  }
+
+  /**
+   * 단락의 하위 컬럼 그리드 정의를 설정한다.
+   * `number`는 동일 너비 컬럼 수, `number[]`는 컬럼별 명시적 너비 배열이다.
+   * 값이 변경되면 단락의 구조 재계산과 텍스트 재렌더링을 수행한다.
+   *
+   * @param value - 새로운 컬럼 정의. `undefined`로 설정하면 부모의 컬럼 설정을 상속받는다.
+   *
+   * @example
+   * // 3개 동일 너비 컬럼
+   * paragraph.column = 3;
+   *
+   * @example
+   * // 컬럼별 명시적 너비 (mm)
+   * paragraph.column = [30, 40, 30];
+   */
+  set column(value: number | number[] | undefined) {
+    if (valueEqual(this._column, value)) return;
+    this._column = value;
+    this.layout();
+    this._perfStructureChanged = true;
+    this.render();
+  }
+
+  /**
+   * 단락의 하위 컬럼 그리드 정의를 반환한다.
+   * `undefined`이면 부모의 컬럼 설정을 상속받는다.
+   *
+   * @returns 컬럼 정의. `number`는 동일 너비 컬럼 수, `number[]`는 명시적 너비 배열.
+   */
+  get column(): number | number[] | undefined {
+    return this._column;
+  }
+
+  /**
+   * 단락의 하위 컬럼 간격을 설정한다.
+   * `number`는 균일 간격, `number[]`는 컬럼 사이별 명시적 간격 배열이다.
+   * 값이 변경되면 단락의 구조 재계산과 텍스트 재렌더링을 수행한다.
+   *
+   * @param value - 새로운 간격. `undefined`로 설정하면 부모의 간격 설정을 상속받는다.
+   *
+   * @example
+   * // 모든 컬럼 사이에 3mm 간격
+   * paragraph.gap = 3;
+   *
+   * @example
+   * // 컬럼 사이별 명시적 간격 (mm)
+   * paragraph.gap = [2, 4, 2];
+   */
+  set gap(value: number | number[] | undefined) {
+    if (valueEqual(this._gap, value)) return;
+    this._gap = value;
+    this.layout();
+    this._perfStructureChanged = true;
+    this.render();
+  }
+
+  /**
+   * 단락의 하위 컬럼 간격을 반환한다.
+   * `undefined`이면 부모의 간격 설정을 상속받는다.
+   *
+   * @returns 컬럼 간격. `number`는 균일 간격, `number[]`는 명시적 간격 배열.
+   */
+  get gap(): number | number[] | undefined {
+    return this._gap;
   }
 
   get relLeft() {
