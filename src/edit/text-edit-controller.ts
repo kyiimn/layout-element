@@ -1173,28 +1173,18 @@ export class TextEditController {
     const visualBoundsPrev = offset > 0 ? this._mapper.findVisualLineBounds(offset - 1) : null;
     const atVisualLineEnd = visualBoundsPrev !== null && offset === visualBoundsPrev.end;
     const atVisualLineStart = visualBounds !== null && offset === visualBounds.start;
-    const atBoundary = atVisualLineEnd && atVisualLineStart;
 
-    const stickRight = this._crossRightState === 'sticking';
-    const stickLeft = this._crossLeftState === 'sticking' || this._crossLeftState === 'crossed';
-
-    const isAtLineStart = atVisualLineStart && (!atBoundary || stickLeft);
-    const isAtLineEnd = atVisualLineEnd && !atBoundary;
+    // \n 위치나 trailing space처럼 renderedOffset이 null인 offset은 커서가 직접
+    // 위치할 수 없으므로, 마지막 visible 문자(offset === visualBounds.end - 1)를
+    // 라인 끝으로 취급한다.
+    const isAtLineStart = atVisualLineStart;
+    const isAtLineEnd = atVisualLineEnd
+      || (visualBounds !== null
+        && offset === visualBounds.end - 1
+        && this._mapper.renderedOffset(offset + 1) === null);
 
     let currentLineInfo = this._mapper.getLineInfoBySourceOffset(offset);
     if (currentLineInfo === null) return null;
-
-    if (isAtLineEnd && currentLineInfo.lineIndex > 0) {
-      const currentLineStart = this._mapper.getLineStartSourceOffset(currentLineInfo.columnIndex, currentLineInfo.lineIndex) ?? 0;
-      if (offset === currentLineStart) {
-        currentLineInfo = { columnIndex: currentLineInfo.columnIndex, lineIndex: currentLineInfo.lineIndex - 1 };
-      }
-    }
-    if (atBoundary && direction === 1 && !stickLeft) {
-      if (currentLineInfo.lineIndex > 0) {
-        currentLineInfo = { columnIndex: currentLineInfo.columnIndex, lineIndex: currentLineInfo.lineIndex - 1 };
-      }
-    }
 
     const flatIndex = this._toFlatLineIndex(currentLineInfo.columnIndex, currentLineInfo.lineIndex);
     const targetFlatIndex = flatIndex + direction;
@@ -1209,7 +1199,9 @@ export class TextEditController {
     if (targetLineStart === null) return null;
     const targetLineEnd = this._getLineEndSourceOffset(targetInfo.columnIndex, targetInfo.lineIndex);
     const targetVisualBounds = this._mapper.findVisualLineBounds(targetLineStart);
-    const targetVisualEnd = targetVisualBounds ? targetVisualBounds.end - 1 : targetLineEnd;
+    const targetVisualEnd = targetVisualBounds && targetVisualBounds.start === targetLineStart
+      ? targetVisualBounds.end - 1
+      : targetLineEnd;
 
     if (isAtLineStart) {
       return targetLineStart;

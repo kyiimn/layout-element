@@ -89,35 +89,34 @@ export class TextEditCoordinateMapper {
 
       for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const line = lines[lineIndex];
-        // 라인의 시작 source offset을 기록. 빈 줄도 포함.
         lineStartOffsets.push(sourceOffset);
 
         for (let p = 0; p < line.parts.length; p++) {
           const part = line.parts[p];
-          let content = part.content.join('');
+          const original = part.content;
+          const isFirst = p === 0;
+          const isLast = p === line.parts.length - 1;
 
-          if (p === 0) {
-            while (content.length > 0 && content[0] === ' ') {
-              sourceOffset++;
-              content = content.slice(1);
-            }
+          let leadingSpaces = 0;
+          if (isFirst) {
+            for (let k = 0; k < original.length && original[k] === ' '; k++) leadingSpaces++;
+            sourceOffset += leadingSpaces;
           }
-          if (p === line.parts.length - 1) {
-            let trailingSpaces = 0;
-            for (let i = content.length - 1; i >= 0 && content[i] === ' '; i--) {
-              trailingSpaces++;
-            }
-            sourceOffset += trailingSpaces;
-            while (content.length > 0 && content[content.length - 1] === ' ') {
-              content = content.slice(0, content.length - 1);
-            }
-          }
+
+          const content = this._stripSpaces(original, isFirst, isLast);
 
           for (let i = 0; i < content.length; i++) {
             this._renderedToSource.set(renderedOffset, sourceOffset);
             this._sourceToRendered.set(sourceOffset, renderedOffset);
             renderedOffset++;
             sourceOffset++;
+          }
+
+          if (isLast) {
+            const afterLeading = isFirst ? original.slice(leadingSpaces) : original;
+            let trailingSpaces = 0;
+            for (let k = afterLeading.length - 1; k >= 0 && afterLeading[k] === ' '; k++) trailingSpaces++;
+            sourceOffset += trailingSpaces;
           }
         }
 
@@ -130,6 +129,17 @@ export class TextEditCoordinateMapper {
       this._totalLineCount += lines.length;
       this._columnRanges.push({ start: columnStart, end: renderedOffset });
     }
+  }
+
+  private _stripSpaces(content: string[], isFirst: boolean, isLast: boolean): string[] {
+    let result = content;
+    if (isFirst) {
+      while (result.length > 0 && result[0] === ' ') { result = result.slice(1); }
+    }
+    if (isLast) {
+      while (result.length > 0 && result[result.length - 1] === ' ') { result = result.slice(0, result.length - 1); }
+    }
+    return result;
   }
 
   /**
@@ -740,14 +750,12 @@ export class TextEditCoordinateMapper {
    * Home/End 키에서 사용 — \n 기준이 아닌 렌더링된 줄 기준.
    */
   findVisualLineBounds(sourceOffset: number): { start: number; end: number } | null {
-    // renderedOffset이 null이면 인접 오프셋으로 폴백
     let renderedOffset = this.renderedOffset(sourceOffset);
     if (renderedOffset === null) {
       if (sourceOffset > 0) {
         renderedOffset = this.renderedOffset(sourceOffset - 1);
       }
       if (renderedOffset === null && sourceOffset === 0) {
-        // 빈 단락이거나 오프셋 0이 렌더링되지 않은 경우
         return { start: 0, end: 0 };
       }
       if (renderedOffset === null) return null;
