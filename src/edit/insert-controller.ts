@@ -226,6 +226,33 @@ export class InsertController {
    * @returns 유효한 컨테이너 요소, 또는 루트 요소
    */
   private _findTargetContainer(startX: number, startY: number, endX: number, endY: number): LayoutDocumentElement | LayoutBoxElement {
+    // static 모드에서는 마우스 픽셀 위치가 그리드 스냅 후 의미가 없으므로,
+    // 드래그 영역의 중심점으로 컨테이너를 식별한다. 꼭짓점은 box 경계선 밖에
+    // 놓일 수 있지만 중심점은 box 내부에 있으므로 box를 컨테이너로 찾을 수 있다.
+    // absolute 모드에서는 mm 좌표가 정확하므로 기존 4꼭짓점 containment를 사용한다.
+    if (this._mode?.position === 'static') {
+      const centerX = (startX + endX) / 2;
+      const centerY = (startY + endY) / 2;
+
+      const centerElements = document.elementsFromPoint(centerX, centerY);
+      let centerBox: LayoutBoxElement | null = null;
+      for (const el of centerElements) {
+        if (el instanceof LayoutBoxElement) {
+          centerBox = el;
+          break;
+        }
+      }
+      if (centerBox) {
+        if (!centerBox.lock) {
+          const items = centerBox.items;
+          const hasNonBoxChild = items.some(item => item.type !== 'box');
+          if (!hasNonBoxChild) {
+            return centerBox;
+          }
+        }
+      }
+    }
+
     const corners = [
       { x: startX, y: startY },
       { x: endX, y: startY },
