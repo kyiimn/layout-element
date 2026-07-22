@@ -814,21 +814,21 @@ flowchart TD
 
 | 키 | 보조키 | 동작 |
 |---|--------|------|
-| `ArrowLeft` | 없음 | 커서를 왼쪽으로 한 문자 이동 |
+| `ArrowLeft` | 없음 | 커서를 왼쪽으로 한 문자 이동. 시각적 라인 시작에 도달하면 2단계로 멈추고(sticking→crossed), 세 번째 누름에서 이전 라인 끝으로 이동 |
 | `ArrowLeft` | `Shift` | 선택 영역을 왼쪽으로 한 문자 확장 |
 | `ArrowLeft` | `Ctrl`/`Cmd` | 이전 단어의 시작으로 이동 |
 | `ArrowLeft` | `Shift`+`Ctrl`/`Cmd` | 선택 영역을 이전 단어의 시작까지 확장 |
-| `ArrowRight` | 없음 | 커서를 오른쪽으로 한 문자 이동 |
+| `ArrowRight` | 없음 | 커서를 오른쪽으로 한 문자 이동. 시각적 라인 끝에 도달하면 2단계로 멈추고(sticking→crossed), 세 번째 누름에서 다음 라인 시작으로 이동 |
 | `ArrowRight` | `Shift` | 선택 영역을 오른쪽으로 한 문자 확장 |
 | `ArrowRight` | `Ctrl`/`Cmd` | 다음 단어의 시작으로 이동 |
 | `ArrowRight` | `Shift`+`Ctrl`/`Cmd` | 선택 영역을 다음 단어의 시작까지 확장 |
-| `ArrowUp` | 없음 | 커서를 위 시각적 라인으로 이동 |
+| `ArrowUp` | 없음 | 커서를 위 시각적 라인으로 이동. 라인 시작에서는 target 라인 시작으로, 라인 끝에서는 상대 위치를 유지하며 이동 |
 | `ArrowUp` | `Shift` | 선택 영역을 위 시각적 라인으로 확장 |
-| `ArrowDown` | 없음 | 커서를 아래 시각적 라인으로 이동 |
+| `ArrowDown` | 없음 | 커서를 아래 시각적 라인으로 이동. 라인 시작에서는 target 라인 시작으로, 라인 끝에서는 상대 위치를 유지하며 이동 |
 | `ArrowDown` | `Shift` | 선택 영역을 아래 시각적 라인으로 확장 |
-| `Home` | 없음 | 현재 시각적 라인의 시작으로 이동 |
+| `Home` | 없음 | 현재 시각적 라인의 시작으로 이동. 라인 시작에 도달하면 2단계로 멈추고(sticking→crossed), 세 번째 누름에서 이전 라인 시작으로 이동 |
 | `Home` | `Shift` | 선택 영역을 현재 시각적 라인의 시작까지 확장 |
-| `End` | 없음 | 현재 시각적 라인의 끝으로 이동 |
+| `End` | 없음 | 현재 시각적 라인의 끝으로 이동. 라인 끝에 도달하면 2단계로 멈추고(sticking→crossed), 세 번째 누름에서 다음 라인 끝으로 이동 |
 | `End` | `Shift` | 선택 영역을 현재 시각적 라인의 끝까지 확장 |
 | `Backspace` | 없음 | 커서 앞 문자를 삭제. 선택 영역이 있으면 선택 영역을 삭제 |
 | `Delete` | 없음 | 커서 뒤 문자를 삭제. 선택 영역이 있으면 선택 영역을 삭제 |
@@ -847,27 +847,64 @@ flowchart TD
 
 #### `ArrowLeft` / `ArrowRight`
 
-- 보조키가 없으면 `_cursorModel.offset`을 `offset ± 1`로 조정하고 선택 영역을 해제한다.
-- `Shift`가 눌려 있으면 `_extendSelection(offset ± 1)`로 선택 영역을 확장한다.
+- **보조키 없음 (3단계 스틱 동작)**: 라인 경계에서 2단계로 멈추고, 세 번째 누름에서 라인을 넘어간다. 상태 머신: `none` → `sticking` → `crossed` → `none`.
+  - `ArrowRight` (`_crossRightState`):
+    - `none` + 마지막 문자(`offset === lineEnd - 1`): `offset + 1`로 이동(라인 끝), `sticking` 설정. 커서는 현재 라인 끝에 그려짐.
+    - `sticking` + 라인 끝(`offset === lineEnd`): 제자리, `crossed` 설정. 커서는 다음 라인 시작에 그려짐.
+    - `crossed`: `offset + 1`로 이동(다음 라인 두 번째 문자), `none`으로 리셋.
+    - 그 외: `offset + 1`로 일반 이동, `none` 유지.
+  - `ArrowLeft` (`_crossLeftState`):
+    - `none` + 두 번째 문자(`offset === lineStart + 1`): `offset - 1`로 이동(라인 시작), `sticking` 설정. 커서는 현재 라인 시작에 그려짐.
+    - `sticking` + 라인 시작(`offset === lineStart`): 제자리, `crossed` 설정. 커서는 이전 라인 끝에 그려짐.
+    - `crossed`: `offset - 1`로 이동(이전 라인 마지막 문자), `none`으로 리셋.
+    - 그 외: `offset - 1`로 일반 이동, `none` 유지.
+  - `findVisualLineBounds`가 `null`을 반환하면 기존 동작(`offset ± 1`)으로 폴백한다.
+  - 방향 전환 시 반대 상태 리셋: ArrowLeft 시작 시 `_crossRightState = 'none'`, ArrowRight 시작 시 `_crossLeftState = 'none'`.
+  - `_crossRightState`/`_crossLeftState`는 다른 키(ArrowUp/Down, Home, End, Backspace, Delete, Enter), 마우스 클릭, Ctrl/Cmd 단어 이동, Shift 선택 확장 시 `none`으로 리셋된다.
+- **커서 시각적 위치**: `_updateCursorPosition()`에서 `sticking`/`crossed` 상태에 따라 커서 위치를 보정한다.
+  - `_crossRightState === 'sticking'`: `renderedOffset(offset - 1)` + `atEndOfChar = true` → 이전 문자의 오른쪽(현재 라인 끝)에 커서 표시.
+  - `_crossRightState === 'crossed'`: `renderedOffset(offset)` + `atEndOfChar = false` → 다음 라인 첫 번째 문자 왼쪽에 커서 표시. `renderedOffset(offset)`이 null이면 `renderedOffset(offset + 1)`로 폴백.
+  - `_crossLeftState === 'crossed'`: `renderedOffset(offset - 1)` + `atEndOfChar = true` → 이전 라인 마지막 문자의 오른쪽에 커서 표시.
+  - `_crossLeftState === 'sticking'`: `renderedOffset(offset)` + `atEndOfChar = false` → 현재 라인 첫 번째 문자 왼쪽에 커서 표시.
+- **`Shift`**: 스틱 동작 없이 `offset ± 1`로 선택 영역을 확장한다.
+- **`Ctrl`/`Cmd`**: 단어 단위 이동 (`_findWordStart` / `_findWordEnd`). 스틱 동작 없음.
 - 마지막으로 `_syncTextareaSelection()`으로 textarea의 선택 영역을 동기화하고, `_updateCursorPosition()`과 `_updateSelection()`을 호출한다.
 
 #### `ArrowUp` / `ArrowDown`
 
 - `_computeVerticalOffset(direction)` 메서드를 호출한다. `direction`은 위쪽이 `-1`, 아래쪽이 `1`이다.
+- **스틱 상태 참조**: `_computeVerticalOffset`은 ArrowUp/ArrowDown에서 스틱 상태가 리셋되기 **전에** 호출된다. 자동 래핑에서 offset이 라인 시작(= 이전 라인 끝)일 때, `_crossLeftState`가 `sticking`/`crossed`이면 라인 시작으로, 그렇지 않으면 라인 끝으로 취급한다.
+- **라인 경계 처리**:
+  - 라인 시작에서 ↓/↑ → target 라인 **시작**으로 이동 (`isAtLineStart` 판정 시 `targetLineStart` 반환).
+  - 라인 끝에서 ↓/↑ → 상대 위치를 유지하며 target 라인으로 이동. clamp 시 `targetVisualEnd`(`visualBounds.end - 1`)를 사용하여 `\n` 위치가 아닌 마지막 문자로 이동.
+  - `atBoundary`(자동 래핑에서 offset이 라인 시작=끝)에서는 스틱 상태(`stickLeft`)로 라인 시작/끝을 구분: `stickLeft`이면 라인 시작, 아니면 라인 끝으로 취급.
 - 내부 로직 (라인 인덱스 기반):
-  1. 현재 커서 offset이 속한 라인을 `getLineInfoBySourceOffset(offset)`으로 찾는다.
-  2. 전체 라인을 평탄화한 인덱스로 변환하여 인접 라인(±1)을 찾는다.
-  3. target 라인의 시작 source offset을 `getLineStartSourceOffset()`으로 구한다.
-  4. 현재 라인 내에서의 상대 offset(offsetInLine = offset - currentLineStart)을 계산하여 target 라인에서 같은 위치를 유지하려 시도한다.
-  5. target 라인의 끝 offset(다음 라인 시작 - 1, 마지막 라인은 텍스트 끝)으로 clamp한다. 빈 줄의 경우 라인 시작 = 끝이므로 커서는 빈 줄 시작에 위치한다.
-- 보조키에 따라 커서 이동 또는 선택 확장 후 동기화.
+  1. `findVisualLineBounds`로 `atVisualLineStart`, `atVisualLineEnd`, `atBoundary`를 판정한다.
+  2. 스틱 상태(`_crossRightState`, `_crossLeftState`)를 확인하여 `isAtLineStart`/`isAtLineEnd`를 결정한다.
+  3. `isAtLineEnd`이고 현재 라인 시작과 일치하면, 현재 라인을 이전 라인으로 조정한다.
+  4. `atBoundary` + Down + `!stickLeft`이면 현재 라인을 이전 라인으로 조정한다.
+  5. 전체 라인을 평탄화한 인덱스로 변환하여 인접 라인(±1)을 찾는다.
+  6. `isAtLineStart`이면 `targetLineStart` 반환.
+  7. `isAtLineEnd`이면 상대 위치(`offsetInLine`)를 계산하여 `Math.min(targetLineStart + offsetInLine, targetVisualEnd)` 반환.
+  8. 그 외: 상대 위치를 유지하며 `targetVisualEnd`로 clamp.
+- 보조키에 따라 커서 이동 또는 선택 확장 후 동기화. 스틱 상태는 `_computeVerticalOffset` 호출 **후** 리셋된다.
 - **빈 줄 처리**: `columnContents`의 각 라인(빈 줄 포함)이 라인 인덱스 기반 이동에 사용되므로, 빈 줄(span 없는 라인)도 정확히 통과한다.
 
 #### `Home` / `End`
 
-- `Home`: `findVisualLineBounds(offset)?.start`를 우선 사용하고, 실패하면 `_findLineStart(content, offset)`로 폴백한다.
-- `End`: `findVisualLineBounds(offset)?.end`를 우선 사용하고, 실패하면 `_findLineEnd(content, offset)`로 폴백한다.
-- 보조키가 눌려 있으면 선택 영역을 해당 위치까지 확장한다.
+- **보조키 없음 (3단계 스틱 동작)**: ArrowLeft/Right와 동일한 `none` → `sticking` → `crossed` → `none` 상태 머신을 사용한다.
+  - `End` (`_crossRightState`):
+    - `none` + 라인 내부: 현재 라인 끝(`findVisualLineBounds(offset-1).end`)으로 이동, `sticking` 설정.
+    - `sticking` + 라인 끝: 제자리, `crossed` 설정. 커서는 다음 라인 시작에 그려짐.
+    - `crossed`: 다음 라인 끝(`findVisualLineBounds(offset + 1).end`)으로 이동, `none` 리셋. `\n` 텍스트에서 offset과 다음 라인 시작이 다르므로 `offset + 1`을 사용.
+  - `Home` (`_crossLeftState`):
+    - `none` + 라인 내부: 현재 라인 시작(`findVisualLineBounds(offset).start`)으로 이동, `sticking` 설정.
+    - `sticking` + 라인 시작: 제자리, `crossed` 설정. 커서는 이전 라인 끝에 그려짐.
+    - `crossed`: 이전 라인 시작(`findVisualLineBounds(offset-1).start`)으로 이동, `none` 리셋.
+  - 방향 전환 시 반대 상태 리셋: Home 시작 시 `_crossRightState = 'none'`, End 시작 시 `_crossLeftState = 'none'`.
+  - `Ctrl`/`Cmd`: 문서 전체 시작/끝으로 이동 (`_findLineStart`/`_findLineEnd`), 스틱 없음.
+  - `Shift`: 스틱 없이 선택 영역 확장.
+- `findVisualLineBounds`가 `null`이면 `_findLineStart`/`_findLineEnd`로 폴백한다.
 
 #### `Ctrl`+`ArrowLeft` / `Ctrl`+`ArrowRight` (단어 이동)
 
@@ -899,7 +936,7 @@ flowchart TD
 1. 활성 선택 영역이 있으면 `_replaceSelection("")`을 호출해 선택 영역을 삭제한다.
 2. 선택 영역이 없고 `Backspace`라면 offset이 0보다 클 때 `content.slice(0, offset - 1) + content.slice(offset)`로 모델을 갱신하고 offset을 1 감소시킨다.
 3. 선택 영역이 없고 `Delete`라면 offset이 콘텐츠 길이보다 작을 때 `content.slice(0, offset) + content.slice(offset + 1)`로 모델을 갱신한다.
-4. `textarea.value`를 동기화하고, `_updateCursorPosition()`, `_updateSelection()`을 호출한 뒤 `_debouncedRender()`로 지연 렌더링을 예약한다.
+4. `textarea.value`를 동기화하고 `_debouncedRender()`로 지연 렌더링을 예약한다. 커서 위치는 `postRender()`에서 최신 DOM 기준으로 갱신된다 (즉시 `_updateCursorPosition()`을 호출하지 않음).
 
 #### `Enter`
 
@@ -907,7 +944,7 @@ flowchart TD
 2. `content.slice(0, replaceStart) + "\n" + content.slice(replaceEnd)`로 새 콘텐츠를 만든다.
 3. `model.textContent`와 `textarea.value`를 동기화.
 4. 커서 offset을 `replaceStart + 1`로 이동.
-5. `_updateCursorPosition()`, `_updateSelection()`, `_debouncedRender()` 호출.
+5. `_debouncedRender()` 호출. 커서 위치는 `postRender()`에서 최신 DOM 기준으로 갱신된다.
 
 #### `Ctrl+A`
 
@@ -1261,6 +1298,8 @@ paragraph.render();
 - 타이머가 이미 있으면 `cancelAnimationFrame`으로 취소하고 새로 설정.
 - `_wasFocused = this._isFocused` 플래그로 렌더링 후 포커스 복원.
 - 효과: 빠른 타이핑 시 프레임당 최대 1회 렌더링.
+- **커서 위치 갱신 시점**: 텍스트 변경(Backspace, Delete, Enter, 붙여넣기, 문자 입력) 후에는 `_updateCursorPosition()`을 즉시 호출하지 않고 `_debouncedRender()`만 예약한다. 커서 위치는 `paragraph.render()` → `postRender()` → `_updateCursorPosition()` 흐름에서 **최신 DOM 기준**으로 갱신된다. 이는 이전 DOM 기준으로 커서를 잘못된 위치에 그리는 문제를 방지한다.
+  - 예외: `_onInput`에서 `_optimisticSpan`이 생성된 경우(단일 문자 입력)에는 즉시 `_updateCursorPosition()`을 호출하여 사용자에게 즉각적인 피드백을 제공한다.
 
 ```ts
 private _debouncedRender(): void {
@@ -1471,10 +1510,13 @@ flowchart TD
 
 `_computeVerticalOffset()`는 픽셀 좌표 기반 탐지 대신 라인 인덱스를 사용한다:
 
-1. `getLineInfoBySourceOffset(offset)`으로 현재 라인 찾기
-2. 전체 라인을 평탄화한 인덱스로 변환하여 인접 라인(±1) 찾기
-3. target 라인의 시작 source offset을 구하고, 현재 라인 내 상대 위치를 유지하려 시도
-4. target 라인의 끝 offset으로 clamp (빈 줄은 시작 = 끝)
+1. `findVisualLineBounds`로 `atVisualLineStart`, `atVisualLineEnd`, `atBoundary`를 판정한다.
+2. 스틱 상태(`_crossRightState`, `_crossLeftState`)를 확인하여 `isAtLineStart`/`isAtLineEnd`를 결정한다. 자동 래핑에서 offset이 라인 시작=끝(`atBoundary`)일 때, 스틱 상태로 라인 시작인지 끝인지 구분한다.
+3. `getLineInfoBySourceOffset(offset)`으로 현재 라인 찾기. `isAtLineEnd`이면 이전 라인으로 조정.
+4. 전체 라인을 평탄화한 인덱스로 변환하여 인접 라인(±1) 찾기.
+5. `isAtLineStart`이면 target 라인 시작으로 이동. 라인 첫 번째 칸에서 ↑/↓는 무조건 target 라인 시작으로 간다.
+6. `isAtLineEnd`이면 상대 위치(`offsetInLine`)를 유지하며 `targetVisualEnd`(`visualBounds.end - 1`)로 clamp. `\n` 위치가 아닌 마지막 문자로 이동.
+7. 그 외: 상대 위치를 유지하며 `targetVisualEnd`로 clamp.
 
 #### 9.4.3 마우스 클릭 — line div rect 기반 라인 감지
 
