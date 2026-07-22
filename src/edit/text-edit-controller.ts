@@ -890,20 +890,18 @@ export class TextEditController {
         if (isShift) { this._extendSelection(lineStart); } else { this._cursorModel.offset = lineStart; this._cursorModel.selection = null; }
         this._crossLeftState = 'none';
       } else if (isShift) {
-        const visualHome = this._mapper.findVisualLineBounds(offset);
-        const lineStart = visualHome ? visualHome.start : this._findLineStart(content, offset);
+        const lineStart = this._getLogicalLineStart(offset);
         this._extendSelection(lineStart);
         this._crossLeftState = 'none';
       } else {
-        const lineBounds = this._mapper.findVisualLineBounds(offset);
-        const atLineStart = lineBounds && offset === lineBounds.start;
+        const lineStart = this._getLogicalLineStart(offset);
+        const atLineStart = offset === lineStart;
         if (this._crossLeftState === 'sticking' && atLineStart) {
           this._cursorModel.offset = offset;
           this._cursorModel.selection = null;
           this._crossLeftState = 'crossed';
         } else if (this._crossLeftState === 'crossed') {
-          const prevBounds = offset > 0 ? this._mapper.findVisualLineBounds(offset - 1) : null;
-          const prevStart = prevBounds ? prevBounds.start : 0;
+          const prevStart = this._getLogicalLineStart(Math.max(0, offset - 1));
           this._cursorModel.offset = prevStart;
           this._cursorModel.selection = null;
           this._crossLeftState = 'none';
@@ -912,7 +910,6 @@ export class TextEditController {
           this._cursorModel.selection = null;
           this._crossLeftState = 'sticking';
         } else {
-          const lineStart = lineBounds ? lineBounds.start : this._findLineStart(content, offset);
           this._cursorModel.offset = lineStart;
           this._cursorModel.selection = null;
           this._crossLeftState = 'sticking';
@@ -933,22 +930,18 @@ export class TextEditController {
         if (isShift) { this._extendSelection(lineEnd); } else { this._cursorModel.offset = lineEnd; this._cursorModel.selection = null; }
         this._crossRightState = 'none';
       } else if (isShift) {
-        const visualEnd = offset > 0 ? this._mapper.findVisualLineBounds(offset - 1) : this._mapper.findVisualLineBounds(offset);
-        const lineEnd = visualEnd ? visualEnd.end : this._findLineEnd(content, offset);
+        const lineEnd = this._getLogicalLineEnd(offset);
         this._extendSelection(lineEnd);
         this._crossRightState = 'none';
       } else {
-        const lineBounds = offset > 0 ? this._mapper.findVisualLineBounds(offset - 1) : this._mapper.findVisualLineBounds(offset);
-        const atLineEnd = lineBounds && offset === lineBounds.end;
+        const lineEnd = this._getLogicalLineEnd(offset);
+        const atLineEnd = offset === lineEnd;
         if (this._crossRightState === 'sticking' && atLineEnd) {
           this._cursorModel.offset = offset;
           this._cursorModel.selection = null;
           this._crossRightState = 'crossed';
         } else if (this._crossRightState === 'crossed') {
-          const nextBounds = offset < content.length
-            ? this._mapper.findVisualLineBounds(offset + 1)
-            : null;
-          const nextEnd = nextBounds ? nextBounds.end : this._findLineEnd(content, offset);
+          const nextEnd = this._getLogicalLineEnd(Math.min(content.length, offset + 1));
           this._cursorModel.offset = nextEnd;
           this._cursorModel.selection = null;
           this._crossRightState = 'none';
@@ -957,7 +950,6 @@ export class TextEditController {
           this._cursorModel.selection = null;
           this._crossRightState = 'sticking';
         } else {
-          const lineEnd = lineBounds ? lineBounds.end : this._findLineEnd(content, offset);
           this._cursorModel.offset = lineEnd;
           this._cursorModel.selection = null;
           this._crossRightState = 'sticking';
@@ -1300,6 +1292,26 @@ export class TextEditController {
       pos++;
     }
     return pos;
+  }
+
+  /**
+   * 주어진 source offset이 속한 논리적 라인의 시작 source offset을 반환한다.
+   * `findVisualLineBounds`와 달리 선행/후행 공백 제거에 영향받지 않는다.
+   */
+  private _getLogicalLineStart(offset: number): number {
+    const info = this._mapper.getLineInfoBySourceOffset(offset);
+    if (!info) return 0;
+    return this._mapper.getLineStartSourceOffset(info.columnIndex, info.lineIndex) ?? 0;
+  }
+
+  /**
+   * 주어진 source offset이 속한 논리적 라인의 끝 source offset을 반환한다.
+   * 커서가 위치할 수 있는 마지막 offset(\n 위치 또는 텍스트 끝)이다.
+   */
+  private _getLogicalLineEnd(offset: number): number {
+    const info = this._mapper.getLineInfoBySourceOffset(offset);
+    if (!info) return 0;
+    return this._getLineEndSourceOffset(info.columnIndex, info.lineIndex);
   }
 
   /** Ctrl+ArrowLeft: 이전 단어의 시작 위치로 이동 */
