@@ -254,6 +254,42 @@ export class InsertController {
       }
     }
 
+    // elementsFromPoint hit test가 경계선 위 점에서 신뢰할 수 없는 경우
+    // (드래그 영역이 박스 경계에 딱 맞아떨어질 때 꼭짓점이 경계선 위에 놓임),
+    // 기하학적 rect containment로 후보를 보충한다.
+    // _document 내의 모든 x-layout-box를 순회하며 드래그 영역을 완전히 포함하는
+    // 가장 안쪽 박스를 찾는다.
+    if (fullyHit.length === 0 || !fullyHit.some(el => el instanceof LayoutBoxElement)) {
+      const allBoxes = this._document.querySelectorAll<LayoutBoxElement>('x-layout-box');
+      for (const box of allBoxes) {
+        if (candidates.has(box)) continue; // 이미 hit test에서 처리됨
+        if (box.lock) continue;
+        const items = box.items;
+        const hasNonBoxChild = items.some(item => item.type !== 'box');
+        if (hasNonBoxChild) continue;
+
+        const rect = box.getBoundingClientRect();
+        // 작은 허용 오차(1px)로 경계선 위 점의 서브픽셀 문제를 흡수한다.
+        if (
+          startX >= rect.left - 1 && endX <= rect.right + 1 &&
+          startY >= rect.top - 1 && endY <= rect.bottom + 1
+        ) {
+          // 이 박스를 포함하는 다른 후보 박스가 있으면 더 안쪽이므로 우선순위가 낮다.
+          // fullyHit에 이미 있는 박스가 이 박스를 포함하는지 확인.
+          let isOuter = false;
+          for (const hitEl of fullyHit) {
+            if (hitEl instanceof LayoutBoxElement && hitEl !== box && hitEl.contains(box)) {
+              isOuter = true;
+              break;
+            }
+          }
+          if (!isOuter) {
+            fullyHit.push(box);
+          }
+        }
+      }
+    }
+
     // 사각형이 각 후보의 경계 내에 완전히 포함되는지 확인
     // 가장 안쪽(깊이 중첩된) 유효 컨테이너를 찾는다
     for (const el of fullyHit) {

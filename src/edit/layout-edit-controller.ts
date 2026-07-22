@@ -1396,6 +1396,43 @@ export class LayoutEditController {
       }
     }
 
+    // elementsFromPoint가 커서가 박스 경계선 위에 있을 때 신뢰할 수 없는 경우
+    // (드래그한 박스가 대상 박스 경계에 딱 맞아떨어질 때),
+    // 기하학적 rect containment로 후보를 보충한다.
+    // 드래그 중인 box의 rect를 완전히 포함하는 가장 안쪽 박스를 찾는다.
+    if (!newContainer || newContainer === box.parentElement) {
+      const boxRect = box.getBoundingClientRect();
+      const docEl = box.closest('x-layout-document') as LayoutDocumentElement | null;
+      if (docEl) {
+        const allBoxes = docEl.querySelectorAll<LayoutBoxElement>('x-layout-box');
+        let bestCandidate: LayoutBoxElement | null = null;
+        let bestArea = Infinity;
+        for (const candidate of allBoxes) {
+          if (candidate === box) continue;
+          if (box.contains(candidate)) continue;
+          if (candidate.lock) continue;
+          const hasNonBoxChild = candidate.items.some(item => item.type !== 'box');
+          if (hasNonBoxChild) continue;
+
+          const rect = candidate.getBoundingClientRect();
+          // 1px 허용 오차로 서브픽셀 경계 문제를 흡수한다.
+          if (
+            boxRect.left >= rect.left - 1 && boxRect.right <= rect.right + 1 &&
+            boxRect.top >= rect.top - 1 && boxRect.bottom <= rect.bottom + 1
+          ) {
+            const area = (rect.right - rect.left) * (rect.bottom - rect.top);
+            if (area < bestArea) {
+              bestArea = area;
+              bestCandidate = candidate;
+            }
+          }
+        }
+        if (bestCandidate) {
+          newContainer = bestCandidate;
+        }
+      }
+    }
+
     if (!newContainer) {
       // 커서 위치에 적합한 컨테이너가 없으면 EditManager 루트로 폴백
       const manager = EditManager.getInstance();

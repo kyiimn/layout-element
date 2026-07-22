@@ -200,6 +200,27 @@ private _detectOverlapWithCache(lineEl: HTMLElement): { cover: boolean; overlapP
 
 이미지 픽셀 탐색이 먼저 수행된다. `getOverlapSizePX`가 `COVERS`를 반환해야 기하학적 COVER 판정으로 이어진다. 투명 영역만 겹치면 COVER로 처리되지 않는다.
 
+### 5.2.1 오버랩 요소 변경 시 단락 재렌더링 트리거
+
+`overlayElements` 게터는 호출 시점에 평가되므로, 오버랩 요소(형제 박스/이미지)가 추가·제거·zIndex 변경되면 기존 단락들이 새 오버랩 관계를 반영하도록 재렌더링되어야 한다.
+
+`LayoutBoxElement`는 `requestRerenderAffectedParagraphs()` 메커니즘을 통해 이를 처리한다. 다음 경로에서 호출된다:
+
+| 경로 | 메서드 | 호출 시점 |
+|------|--------|----------|
+| 박스 zIndex 변경 | `LayoutBoxElement.zIndex` setter | `layout()` 후 |
+| 박스/단락/이미지 추가 (public API) | `LayoutBoxElement.appendChildData()` | `appendChild()` 후 |
+| 박스 `data` setter (자식 일괄 구축) | `LayoutBoxElement.data` setter | `render()` 후 |
+| 이미지 zIndex 변경 | `LayoutImageElement.zIndex` setter | `render()` 후 |
+| 이미지 overlapPadding 변경 | `LayoutImageElement.overlapPadding` setter | `render()` 후 |
+
+`requestRerenderAffectedParagraphs()` → `scheduleRerenderAffectedParagraphs()` → `_collectAffectedParagraphs()` → `_renderAffectedParagraphs()` 흐름으로 동작한다:
+
+1. **`_collectAffectedParagraphs()`**: 자식 박스를 재귀 탐색하여 모든 단락 수집 + 형제 박스의 자식 단락도 수집 (오버랩 영향 반영)
+2. **`_renderAffectedParagraphs()`**: 수집된 단락의 `markStructureChangedAndRender()` 호출 → `_perfStructureChanged = true` + `render()` → `TextLayoutEngine`이 새 `overlayElements`로 재평가
+
+> **주의**: `appendChildData()`는 각 자식 추가마다 `requestRerenderAffectedParagraphs()`를 호출한다. `data` setter는 자식을 일괄 추가한 후 마지막에 한 번만 호출하여 중복 렌더링을 방지한다. `_appendChildData()` (private)는 `data` setter에서만 호출되므로 별도로 호출하지 않는다.
+
 ### 5.3 `_computeFreeRegions()`
 
 오버랩 영역의 여집합으로부터 텍스트가 배치될 수 있는 자유 영역을 계산한다.

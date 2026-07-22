@@ -420,6 +420,7 @@ export class LayoutBoxElement extends HTMLElement {
       }
 
       this.render();
+      this.requestRerenderAffectedParagraphs();
     } finally {
       this._rebuildingChildren = false;
     }
@@ -444,19 +445,25 @@ export class LayoutBoxElement extends HTMLElement {
    * // newBox는 parentBox의 자식으로 완전히 초기화됨
    * ```
    *
-   * @param child - 추가할 자식 데이터 (BoxData | ParagraphData | TextData | ImageData)
-   * @returns 생성된 커스텀 엘리먼트. 타입별로 LayoutBoxElement | LayoutParagraphElement | LayoutImageElement
-   */
+    * @param child - 추가할 자식 데이터 (BoxData | ParagraphData | TextData | ImageData)
+    * @returns 생성된 커스텀 엘리먼트. 타입별로 LayoutBoxElement | LayoutParagraphElement | LayoutImageElement
+    *
+    * 자식 추가 후 형제 박스/단락의 오버랩 회피 재계산을 위해
+    * `requestRerenderAffectedParagraphs()`를 호출한다. 새 자식이 높은 zIndex를 가지면
+    * 기존 단락들이 새 자식과 겹치는 영역을 회피하도록 재렌더링된다.
+    */
   appendChildData(child: BoxData | ParagraphData | TextData | ImageData): LayoutBoxElement | LayoutParagraphElement | LayoutImageElement {
     if (child.type === 'box') {
       const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
       boxEl.data = child;
       this.appendChild(boxEl);
+      this.requestRerenderAffectedParagraphs();
       return boxEl;
     } else if (child.type === 'paragraph') {
       const paragraphEl = document.createElement('x-layout-paragraph') as LayoutParagraphElement;
       paragraphEl.data = child;
       this.appendChild(paragraphEl);
+      this.requestRerenderAffectedParagraphs();
       return paragraphEl;
     } else if (child.type === 'text') {
       const paragraphEl = document.createElement('x-layout-paragraph') as LayoutParagraphElement;
@@ -467,11 +474,13 @@ export class LayoutBoxElement extends HTMLElement {
         gap: 0,
       };
       this.appendChild(paragraphEl);
+      this.requestRerenderAffectedParagraphs();
       return paragraphEl;
     } else {
       const imageEl = document.createElement('x-layout-image') as LayoutImageElement;
       imageEl.data = child;
       this.appendChild(imageEl);
+      this.requestRerenderAffectedParagraphs();
       return imageEl;
     }
   }
@@ -550,6 +559,7 @@ export class LayoutBoxElement extends HTMLElement {
     if (this._zIndex === value) return;
     this._zIndex = value;
     this.layout();
+    this.requestRerenderAffectedParagraphs();
   }
 
   set backgroundColor(value: string | undefined) {

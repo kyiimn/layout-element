@@ -262,6 +262,8 @@ export interface InsertEventDetail {
 
 드래그 영역(사각형)을 완전히 포함하는 가장 안쪽 유효 컨테이너를 찾는다. 이전에는 드래그 영역의 중심점을 기준으로 컨테이너를 찾았으나, 현재는 **네 꼭짓점 모두**가 포함되는 컨테이너를 선택하여 작은 컨테이너가 큰 삽입을 받아들여 크기가 조정되는 문제를 해결한다.
 
+> **경계 일치 폴백**: 드래그 영역이 박스 경계에 딱 맞아떨어지면 `elementsFromPoint`가 경계선 위 꼭짓점을 hit하지 못할 수 있다. 이 경우 기하학적 rect containment(1px 허용 오차)로 후보를 보충하여, 경계에 정확히 맞춘 드래그도 의도한 박스 내부로 들어간다.
+
 ### 5.2 선택 알고리즘
 
 ```
@@ -280,6 +282,18 @@ _findTargetContainer(startX, startY, endX, endY)
     │
     ├── 3. 네 꼭짓점 모두에서 hit된 후보만 필터링
     │   fullyHit = [el for (el, count) in candidates if count === 4]
+    │
+    ├── 3b. 기하학적 rect containment 폴백 (hit test가 박스를 찾지 못한 경우)
+    │   if fullyHit에 LayoutBoxElement가 없음:
+    │     allBoxes = _document.querySelectorAll('x-layout-box')
+    │     for each box in allBoxes:
+    │       if box.lock → skip
+    │       if box.items has non-box child → skip
+    │       rect = box.getBoundingClientRect()
+    │       if startX >= rect.left-1 && endX <= rect.right+1 &&
+    │          startY >= rect.top-1 && endY <= rect.bottom+1:
+    │         if fullyHit의 다른 박스가 이 box를 포함하지 않음:
+    │           fullyHit.push(box)
     │
     ├── 4. 사각형이 각 후보의 경계 내에 완전히 포함되는지 확인
     │   for each el in fullyHit (box 우선, document는 후순위):
