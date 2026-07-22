@@ -112,7 +112,8 @@ export type EditManagerEventType =
   | 'layoutAdd'
   | 'layoutRemove'
   | 'insert'
-  | 'insertCancel';
+  | 'insertCancel'
+  | 'modeChange';
 ```
 
 ### 3.2 `EditManagerEvent`
@@ -148,6 +149,10 @@ export interface EditManagerEvent {
   layoutAddDetail?: LayoutAddEventDetail;
   /** 레이아웃 요소 제거 상세 정보 (layoutRemove 이벤트에서만) */
   layoutRemoveDetail?: LayoutRemoveEventDetail;
+  /** 모드 전환 전 상태 (modeChange 이벤트에서만) */
+  previousMode?: EditModeState;
+  /** 모드 전환 후 상태 (modeChange 이벤트에서만) */
+  mode?: EditModeState;
 }
 ```
 
@@ -168,6 +173,7 @@ export type EditManagerEventListener = (event: EditManagerEvent) => void;
 | **텍스트 편집** | `focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove` | `TextEditController` |
 | **레이아웃 편집** | `layoutSelectionChange`, `layoutMove`, `layoutResize`, `layoutAdd`, `layoutRemove` | `LayoutEditController`, `LayoutSelectionController`, `InsertController`, `EditManager.selectLayout` |
 | **삽입 모드** | `insert`, `insertCancel` | `InsertController` |
+| **모드 전환** | `modeChange` | `EditManager` (textEditMode/layoutEditMode/insertMode setter) |
 
 ---
 
@@ -602,9 +608,59 @@ interface LayoutRemoveEventDetail {
 
 ---
 
-## 9. 클릭 억제 (`_suppressNextClick` / `_suppressLayoutClick`)
+## 9. 모드 전환 이벤트
 
-### 8.1 `_suppressNextClick` 플래그 (삽입 완료/취소용)
+모드 전환 이벤트는 `EditManager`의 `textEditMode`/`layoutEditMode`/`insertMode` setter에서 모드가 실제로 변경된 후 `_dispatchModeChange()`를 통해 발생한다. `paragraph`와 `controller`는 항상 `null as unknown as ...`이다.
+
+### 9.1 `modeChange`
+
+편집 모드가 전환될 때 발생한다. `textEditMode`, `layoutEditMode`, `insertMode` 중 하나가 변경되면 발생한다.
+
+```typescript
+manager.addEventListener('modeChange', (event) => {
+  console.log(event.previousMode); // 전환 전 모드 상태
+  console.log(event.mode);         // 전환 후 모드 상태
+});
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `type` | `'modeChange'` | 이벤트 타입 |
+| `paragraph` | `null` | 항상 `null` |
+| `controller` | `null` | 항상 `null` |
+| `previousMode` | `EditModeState` | 전환 전 모드 상태 스냅샷 |
+| `mode` | `EditModeState` | 전환 후 모드 상태 스냅샷 |
+
+**`EditModeState` 타입:**
+
+```typescript
+interface EditModeState {
+  textEditMode: boolean;
+  layoutEditMode: boolean;
+  layoutEditType: LayoutEditType; // 'move' | 'reparent'
+  insertMode: InsertMode | null;
+}
+```
+
+**발생 트리거:**
+
+| 트리거 | 호출 경로 |
+|--------|----------|
+| `textEditMode = true/false` | setter → `_dispatchModeChange(prevMode)` |
+| `layoutEditMode = true/false/{ type }` | setter → `_dispatchModeChange(prevMode)` |
+| `insertMode = mode/null` | setter → `_dispatchModeChange(prevMode)` |
+| `deactivateAll()` | `textEditMode = false` → setter → `_dispatchModeChange(prevMode)` |
+| paragraph 더블클릭 | `LayoutSelectionController._onDblClick` → `textEditMode = true` → setter → `_dispatchModeChange(prevMode)` |
+
+**중간 상태 이벤트 억제**: 모드 setter가 내부적으로 다른 모드 setter를 호출할 때(예: `textEditMode = true`가 `layoutEditMode = false`와 `insertMode = null`을 호출), `_modeChangeSuppressed` 플래그로 중간 상태의 이벤트를 억제한다. 최종적으로 모드가 확정된 후 한 번만 `modeChange` 이벤트가 발생한다.
+
+**동일 상태 no-op**: setter가 현재 값과 동일한 값을 받으면 `_dispatchModeChange`를 호출하지 않는다. 예: `textEditMode`가 이미 `true`일 때 `textEditMode = true`를 호출하면 이벤트가 발생하지 않는다.
+
+---
+
+## 10. 클릭 억제 (`_suppressNextClick` / `_suppressLayoutClick`)
+
+### 10.1 `_suppressNextClick` 플래그 (삽입 완료/취소용)
 
 브라우저는 `mouseup` 이후 자동으로 `click` 이벤트를 발생시킨다. 삽입 완료/취소 직후 이 클릭이 `LayoutSelectionController._onClick`에 의해 레이아웃 선택을 해제하는 것을 방지하기 위해, `EditManager`는 `_suppressNextClick` 플래그를 사용한다.
 
@@ -705,13 +761,13 @@ _consumeSuppressNextClick(): boolean
 
 ---
 
-## 10. 재진입 보호
+## 11. 재진입 보호
 
-### 9.1 `_dispatching` 플래그
+### 11.1 `_dispatching` 플래그
 
 `EditManager`는 `_dispatching` 플래그로 이벤트 디스패치 중 재진입을 방지한다. 리스너가 이벤트 핸들러 내에서 다시 `EditManager` 상태를 변경하여 또 다른 이벤트를 발생시키려 해도, `_dispatching === true`이면 디스패치가 무시된다.
 
-### 9.2 적용 범위
+### 11.2 적용 범위
 
 모든 디스패처(`_dispatch`, `_dispatchLayoutSelection`, `_dispatchLayoutMove`, `_dispatchLayoutResize`, `_dispatchInsert`, `_dispatchInsertCancel`)가 `if (this._dispatching) return;` 가드로 시작한다.
 
@@ -731,19 +787,19 @@ _dispatchInsert(detail: InsertEventDetail): void {
 }
 ```
 
-### 9.3 리스너 예외 격리
+### 11.3 리스너 예외 격리
 
 각 리스너 호출은 개별 `try/catch`로 감싸져 있어, 하나의 리스너에서 예외가 발생해도 다른 리스너와 `EditManager` 상태에 영향을 주지 않는다. 예외는 `console.error(e)`로 출력된다.
 
-### 9.4 리스너 없는 경우
+### 11.4 리스너 없는 경우
 
 등록된 리스너가 없거나 `Set`이 비어 있으면 디스패처는 즉시 return한다 (`if (!listeners || listeners.size === 0) return;`). 이 경우 `_dispatching`은 `true`로 설정되지 않는다.
 
 ---
 
-## 11. 전체 이벤트 발생 흐름
+## 12. 전체 이벤트 발생 흐름
 
-### 10.1 텍스트 편집
+### 12.1 텍스트 편집
 
 ```
 사용자가 단락 클릭
@@ -774,7 +830,7 @@ EditManager._notifyTextChange(controller)
             └── 외부 UI: undo 스택 갱신
 ```
 
-### 10.2 레이아웃 선택
+### 12.2 레이아웃 선택
 
 ```
 사용자가 box 클릭
@@ -794,7 +850,7 @@ EditManager.selectLayout(box)
         └── _dispatching = false
 ```
 
-### 10.3 레이아웃 드래그 이동
+### 12.3 레이아웃 드래그 이동
 
 ```
 (드래그 완료 - mouseup)
@@ -821,7 +877,7 @@ LayoutEditController._onKeyDown(ESC)
         └── layoutMove 리스너 호출 (canceled = true)
 ```
 
-### 10.4 요소 삽입
+### 12.4 요소 삽입
 
 ```
 (드래그 삽입 완료 - mouseup)
@@ -849,7 +905,7 @@ LayoutSelectionController._onClick
 
 ---
 
-## 12. 이벤트 요약 표
+## 13. 이벤트 요약 표
 
 | 이벤트 | 카테고리 | payload 핵심 필드 | 발생 조건 |
 |--------|---------|-------------------|-----------|
@@ -866,24 +922,25 @@ LayoutSelectionController._onClick
 | `layoutRemove` | 레이아웃 | `layoutRemoveDetail.element`, `layoutRemoveDetail.previousContainer`, `layoutRemoveDetail.source` | 레이아웃 요소 DOM 제거 (reparent) |
 | `insert` | 삽입 | `position`, `element`, `container`, `left/top/width/height`, `zIndex`, `canceled` | 요소 삽입 완료 |
 | `insertCancel` | 삽입 | (없음) | 삽입 드래그 ESC 취소 |
+| `modeChange` | 모드 전환 | `previousMode`, `mode` | textEditMode/layoutEditMode/insertMode 변경 |
 
 ---
 
-## 13. 핵심 파일
+## 14. 핵심 파일
 
 | 파일 | 역할 |
 |------|------|
-| `src/edit/edit-manager.ts` | `EditManager`: 이벤트 시스템, `addEventListener`/`removeEventListener`, `_dispatch*` 디스패처, `_dispatching` 재진입 보호, `_suppressNextClick` 삽입 후 클릭 억제, `_suppressLayoutClick` 드래그/리사이즈 후 window capture 클릭 소비, `_clickConsumeHandler`/`_clickConsumeTimer` |
-| `src/edit/text-edit-controller.ts` | `TextEditController`: 텍스트 편집 이벤트 발생 (`_notifyTextChange`, `_notifyStyleChange`, `_notifySelectionStart`, `_notifySelectionEnd`, `_notifyCursorMove`, `_requestFocus`, `_releaseFocus`) |
+| `src/edit/edit-manager.ts` | `EditManager`: 이벤트 시스템, `addEventListener`/`removeEventListener`, `_dispatch*` 디스패처, `_dispatching` 재진입 보호, `_suppressNextClick` 삽입 후 클릭 억제, `_suppressLayoutClick` 드래그/리사이즈 후 window capture 클릭 소비, `_clickConsumeHandler`/`_clickConsumeTimer`, `modeChange` 이벤트 발생 (`_dispatchModeChange` 호출), `_modeChangeSuppressed` 중간 상태 이벤트 억제 |
+| `src/edit/text-edit-controller.ts` | `TextEditController`: 텍스트 편집 이벤트 발생 (`_notifyTextChange`, `_notifyStyleChange`, `_notifySelectionStart`, `_notifySelectionEnd`, `_notifyCursorMove`, `_requestFocus`, `_releaseFocus`), `getOffsetFromPoint` 좌표→오프셋 변환 |
 | `src/edit/layout-edit-controller.ts` | `LayoutEditController`: `layoutMove`, `layoutResize` 이벤트 발생 (`_dispatchLayoutMove`, `_dispatchLayoutResize` 호출), `layoutAdd`/`layoutRemove` 이벤트 발생 (reparent 시 `_dispatchLayoutAdd`/`_dispatchLayoutRemove` 호출), `_suppressLayoutClick` 호출 (드래그/리사이즈 완료 후 클릭 억제) |
-| `src/edit/layout-selection-controller.ts` | `LayoutSelectionController`: `_consumeSuppressNextClick` 소비 (삽입 후 클릭 억제), `layoutSelectionChange` 간접 발생 (`selectLayout` 호출). 드래그/리사이즈 후 클릭은 `_suppressLayoutClick`의 window capture 리스너가 먼저 소비하여 `_onClick`이 호출되지 않음 |
+| `src/edit/layout-selection-controller.ts` | `LayoutSelectionController`: `_consumeSuppressNextClick` 소비 (삽입 후 클릭 억제), `layoutSelectionChange` 간접 발생 (`selectLayout` 호출). 드래그/리사이즈 후 클릭은 `_suppressLayoutClick`의 window capture 리스너가 먼저 소비하여 `_onClick`이 호출되지 않음. 더블클릭 시 텍스트 편집 모드 전환 + 포커스 부여 (`_onDblClick`) |
 | `src/edit/insert-controller.ts` | `InsertController`: `insert`, `insertCancel` 이벤트 발생 (`_dispatchInsert`, `_dispatchInsertCancel` 호출), `layoutAdd` 이벤트 발생 (`_dispatchLayoutAdd` 호출) |
 | `src/types/edit/insert.type.ts` | `InsertEventDetail` 타입 정의 (`insert` 이벤트 payload) |
-| `src/types/edit/layout.type.ts` | `LayoutEditModeConfig`, `LayoutAddEventDetail`, `LayoutRemoveEventDetail` 타입 정의 |
+| `src/types/edit/layout.type.ts` | `LayoutEditModeConfig`, `LayoutAddEventDetail`, `LayoutRemoveEventDetail`, `EditModeState` 타입 정의 |
 
 ---
 
-## 14. 주의사항
+## 15. 주의사항
 
 - **재진입 금지**: 리스너 내에서 `EditManager` 상태를 변경하여 동일한 이벤트를 다시 발생시키려 하면 무시된다 (`_dispatching` 가드). 다른 타입의 이벤트도 동일 플래그를 공유하므로, 리스너 내에서 다른 이벤트를 발생시키는 것도 차단된다.
 - **예외 격리**: 리스너에서 예외가 발생해도 `console.error`로만 출력되고 다른 리스너나 `EditManager` 상태에는 영향을 주지 않는다.
@@ -895,12 +952,14 @@ LayoutSelectionController._onClick
 - **`_suppressNextClick` 일회성**: 삽입/취소 직후의 첫 번째 클릭만 억제된다. 이후 클릭은 정상적으로 처리된다. 드래그/리사이즈 완료 후 클릭 억제는 `_suppressLayoutClick()`의 window capture 리스너로 처리되며, click 소비 후 즉시 제거되거나 200ms 타임아웃으로 자동 제거된다.
 - **리스너 등록 순서**: 동일 `type`에 여러 리스너를 등록하면 등록 순서대로 호출된다 (`Set`의 삽입 순서 보장).
 - **리스너 제거 시점**: 리스너를 제거하면 현재 디스패치 중인 `Set`에서도 즉시 제외되지만, 이미 실행 중인 리스너는 완료된다.
+- **`modeChange` 중간 상태 억제**: 모드 setter가 내부적으로 다른 모드 setter를 호출할 때 `_modeChangeSuppressed` 플래그로 중간 상태의 이벤트가 억제된다. 최종적으로 모드가 확정된 후 한 번만 `modeChange` 이벤트가 발생한다. 예: `textEditMode = true` 호출 시 내부적으로 `layoutEditMode = false`와 `insertMode = null`이 호출되지만, `modeChange` 이벤트는 최종적으로 `textEditMode = true`가 확정된 후 한 번만 발생한다.
+- **`modeChange` 동일 상태 no-op**: setter가 현재 값과 동일한 값을 받으면 `_dispatchModeChange`를 호출하지 않아 `modeChange` 이벤트가 발생하지 않는다.
 
 ---
 
-## 15. 사용 예시
+## 16. 사용 예시
 
-### 14.1 텍스트 편집 UI 연동
+### 16.1 텍스트 편집 UI 연동
 
 ```typescript
 const manager = EditManager.getInstance();
@@ -927,7 +986,7 @@ manager.addEventListener('cursorMove', (event) => {
 });
 ```
 
-### 14.2 레이아웃 편집 UI 연동
+### 16.2 레이아웃 편집 UI 연동
 
 ```typescript
 // 선택 변경 → 속성 패널 표시/숨김
@@ -968,7 +1027,7 @@ manager.addEventListener('layoutResize', (event) => {
 });
 ```
 
-### 14.3 삽입 모드 UI 연동
+### 16.3 삽입 모드 UI 연동
 
 ```typescript
 // 삽입 완료 → 새 요소 정보 표시 + undo 스택
@@ -992,7 +1051,7 @@ manager.addEventListener('insertCancel', () => {
 });
 ```
 
-### 14.4 React 통합
+### 16.4 React 통합
 
 ```tsx
 import { useEditManager } from 'layout-element/react';
@@ -1023,3 +1082,35 @@ function EditorPanel() {
 ```
 
 `useEditManager` 훅은 마운트 시 리스너를 등록하고 언마운트 시 해제한다. 자세한 훅 API는 `EDITING_TEXT.md`와 `EDITING_LAYOUT.md`를 참조한다.
+
+### 16.5 모드 전환 UI 연동
+
+```typescript
+const manager = EditManager.getInstance();
+
+manager.addEventListener('modeChange', (event) => {
+  const { previousMode, mode } = event;
+  console.log('모드 전환:');
+  console.log('  이전:', previousMode);
+  console.log('  이후:', mode);
+
+  // 툴바 버튼 활성 상태 갱신
+  updateToolbar({
+    textEditMode: mode.textEditMode,
+    layoutEditMode: mode.layoutEditMode,
+    layoutEditType: mode.layoutEditType,
+    insertMode: mode.insertMode,
+  });
+
+  // 모드별 UI 패널 표시/숨김
+  if (mode.textEditMode) {
+    showTextEditingPanel();
+  } else if (mode.layoutEditMode) {
+    showLayoutEditingPanel();
+  } else if (mode.insertMode) {
+    showInsertPanel();
+  } else {
+    showReadOnlyPanel();
+  }
+});
+```

@@ -147,7 +147,38 @@ paragraph.editableText = false;
 - **인쇄 모드**에서는 `editableText` 설정이 무시된다. 인쇄 모드에서는 편집 기능을 활성화할 수 없다.
 - **lock 제한**: 조상 box 중 하나라도 `lock`이 `true`이면, `EditManager.isParagraphEditable()`은 이 단락에 대해 `false`를 반환하므로 `EditManager`를 통해 `editableText = true`로 강제할 수 없다. 단, 호스트 프로그램이 paragraph 요소에 직접 `editableText = true`를 설정하면 `TextEditController`는 생성되지만, `EditManager`의 전역 필터와 독립적으로 동작하며 이벤트/상태가 달라질 수 있으므로 권장하지 않는다.
 
-### 2.2 `editController` 게터
+### 2.2 더블클릭으로 텍스트 편집 모드 전환
+
+현재 모드(읽기 모드, 레이아웃 편집 모드 등)에 상관없이 paragraph를 더블클릭하면 텍스트 편집 모드로 전환되고 해당 paragraph에 포커스가 부여된다. `LayoutSelectionController`가 `document.documentElement` capture phase에 `dblclick` 리스너를 등록하여 처리한다.
+
+**동작 순서:**
+
+1. `LayoutSelectionController._onDblClick`가 `composedPath()`에서 `LayoutParagraphElement`를 찾는다. 부모 box가 `isBoxSelectable()`을 통과해야 한다 (lock된 box 내부의 paragraph는 무시된다).
+2. `EditManager.textEditMode = true`로 설정하여 다른 모드를 모두 끄고 문서 전체의 paragraph 편집 가능 여부를 갱신한다. 이때 `modeChange` 이벤트가 발생한다.
+3. `EditManager.focusParagraph(paragraph)`로 해당 paragraph에 포커스를 부여한다. 이 호출은 `editableText = true` 설정과 `TextEditController` 생성을 내부적으로 수행한다.
+4. `TextEditController.getOffsetFromPoint(event.clientX, event.clientY)`로 더블클릭한 위치의 소스 오프셋을 구한다.
+5. `controller.setCursor({ textOffset: offset })`로 커서를 더블클릭한 위치로 이동한다.
+
+**제약:**
+
+- **삽입 모드**: 삽입 모드(`insertMode !== null`)에서는 더블클릭이 무시된다.
+- **lock**: 조상 box 중 하나라도 `lock`이 `true`이면 더블클릭이 무시된다.
+- **인쇄 모드**: 인쇄 모드에서는 `textEditMode` 설정이 무시되므로 더블클릭이 무시된다.
+
+```ts
+// 사용자가 paragraph를 더블클릭하면:
+// 1. 텍스트 편집 모드로 자동 전환
+// 2. 해당 paragraph에 포커스
+// 3. 커서가 더블클릭한 위치로 이동
+// 4. modeChange 이벤트 발생
+
+manager.addEventListener('modeChange', (event) => {
+  console.log('모드 전환:', event.previousMode, '→', event.mode);
+  // 툴바 UI 갱신 등
+});
+```
+
+### 2.3 `editController` 게터
 
 활성화된 `TextEditController`에 접근할 때 사용한다.
 
@@ -158,7 +189,7 @@ if (controller) {
 }
 ```
 
-### 2.3 `TextEditController` 생성 시 추가되는 DOM 요소
+### 2.4 `TextEditController` 생성 시 추가되는 DOM 요소
 
 `TextEditController` 생성자는 단락의 `shadow root`에 다음 세 가지 요소를 추가한다. 텍스트 편집을 위한 숨겨진 입력기, 커서, 선택 영역이다.
 
@@ -168,7 +199,7 @@ if (controller) {
 | 커서 | `<x-layout-cursor>` | 1px 너비의 수직 커서를 렌더링한다. |
 | 선택 영역 | `<x-layout-selection>` | 선택된 텍스트 위에 반투명 사각형 오버레이를 렌더링한다. |
 
-### 2.4 생성자 초기화 과정 상세
+### 2.5 생성자 초기화 과정 상세
 
 `new TextEditController(paragraph)`는 다음 순서로 실행된다.
 
@@ -212,7 +243,7 @@ flowchart LR
     O --> P[TextEditController = null]
 ```
 
-### 2.5 `destroy()`의 정리 과정 상세
+### 2.6 `destroy()`의 정리 과정 상세
 
 `TextEditController.destroy()`는 다음 작업을 순서대로 수행한다.
 
@@ -252,6 +283,7 @@ flowchart LR
 | `blur()` | `void` | 숨겨진 `textarea`에서 포커스를 해제하여 커서를 숨긴다. |
 | `setCursor(position: CursorPosition)` | `void` | 프로그래밍 방식으로 커서 위치를 설정한다. |
 | `setSelection(range: SelectionRange)` | `void` | 프로그래밍 방식으로 선택 영역을 설정한다. |
+| `getOffsetFromPoint(x: number, y: number)` | `number \| null` | 뷰포트 좌표(x, y)에서 가장 가까운 텍스트 위치의 소스 오프셋을 반환한다. 더블클릭 등 외부 이벤트에서 클릭 위치를 커서 오프셋으로 변환할 때 사용한다. 매핑할 수 없으면 `null`을 반환한다. |
 | `postRender(fullRebuild?: boolean)` | `void` | 렌더링 이후 호출한다. 좌표 매퍼를 재구축하고 커서/선택 영역을 다시 배치한다. **호스트 프로그램은 편집 중인 단락에 영향을 주는 모든 렌더링 후에 이 메서드를 호출해야 한다.** `paragraph.render()`가 자동으로 호출한다. |
 | `destroy()` | `void` | 모든 이벤트 리스너와 DOM 요소를 정리하고 컨트롤러를 제거한다. |
 

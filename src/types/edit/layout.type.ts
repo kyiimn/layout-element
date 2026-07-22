@@ -1,3 +1,5 @@
+import type { InsertMode } from "./insert.type";
+
 /**
  * 레이아웃 편집 모드의 동작 타입.
  *
@@ -28,6 +30,24 @@ export interface LayoutEditModeConfig {
  * - `{ type: 'move' | 'reparent' }` → 지정한 타입으로 활성화
  */
 export type LayoutEditModeInput = boolean | LayoutEditModeConfig;
+
+/**
+ * 편집 모드 상태 스냅샷.
+ *
+ * `modeChange` 이벤트의 payload로 전달되며, 전환 전후의 모드 상태를 담는다.
+ * 세 모드(text/layout/insert)는 동시에 하나만 활성화될 수 있으며,
+ * 나머지는 항상 비활성화 상태이다.
+ */
+export interface EditModeState {
+  /** 텍스트 편집 모드 활성 여부 */
+  textEditMode: boolean;
+  /** 레이아웃 편집 모드 활성 여부 */
+  layoutEditMode: boolean;
+  /** 레이아웃 편집 모드의 동작 타입 (layoutEditMode가 false여도 유지됨) */
+  layoutEditType: LayoutEditType;
+  /** 삽입 모드. `null`이면 비활성화 */
+  insertMode: InsertMode | null;
+}
 
 /**
  * 레이아웃 요소 추가 이벤트 상세 정보.

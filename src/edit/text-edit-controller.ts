@@ -1954,11 +1954,36 @@ export class TextEditController {
   }
 
   /**
+   * 뷰포트 좌표(x, y)에서 가장 가까운 텍스트 위치의 소스 오프셋을 반환한다.
+   *
+   * 더블클릭 등 외부 이벤트에서 클릭 위치를 커서 오프셋으로 변환할 때 사용한다.
+   * 내부적으로 `TextEditCoordinateMapper.getNearestOffsetFromPoint()`를 호출한다.
+   *
+   * @param x - 뷰포트 기준 x 좌표 (clientX)
+   * @param y - 뷰포트 기준 y 좌표 (clientY)
+   * @returns 가장 가까운 텍스트 위치의 소스 오프셋. 매핑할 수 없으면 `null`
+   *
+   * @example
+   * ```ts
+   * const offset = controller.getOffsetFromPoint(event.clientX, event.clientY);
+   * if (offset !== null) {
+   *   controller.setCursor({ textOffset: offset });
+   *   controller.focus();
+   * }
+   * ```
+   */
+  getOffsetFromPoint(x: number, y: number): number | null {
+    const result = this._mapper.getNearestOffsetFromPoint(x, y);
+    return result ? result.textOffset : null;
+  }
+
+  /**
    * 외부에서 커서 위치를 설정할 때 사용한다.
    * T10 이후 입력 핸들러에서 사용될 예정.
    */
   setCursor(position: CursorPosition): void {
     this._cursorModel.offset = position.textOffset;
+    this._syncTextareaSelection();
     this._updateCursorPosition();
     this._emitStyleChange();
     EditManager.getInstance()._notifyCursorMove(this);
@@ -1970,6 +1995,7 @@ export class TextEditController {
    */
   setSelection(range: SelectionRange): void {
     this._cursorModel.selection = range;
+    this._syncTextareaSelection();
     this._updateSelection();
     this._emitStyleChange();
     EditManager.getInstance()._notifyCursorMove(this);

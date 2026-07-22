@@ -1,5 +1,6 @@
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
+import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { EditManager } from "./edit-manager";
 
 /**
@@ -44,6 +45,7 @@ export class LayoutSelectionController {
     if (this._attached) return;
     this._attached = true;
     this._document.addEventListener('click', this._onClick, true);
+    this._document.addEventListener('dblclick', this._onDblClick, true);
   }
 
   /**
@@ -53,6 +55,7 @@ export class LayoutSelectionController {
     if (!this._attached) return;
     this._attached = false;
     this._document.removeEventListener('click', this._onClick, true);
+    this._document.removeEventListener('dblclick', this._onDblClick, true);
   }
 
   /**
@@ -107,6 +110,33 @@ export class LayoutSelectionController {
     return false;
   }
 
+  /**
+   * 이벤트 경로에서 가장 안쪽의 `LayoutParagraphElement`를 찾는다.
+   *
+   * `composedPath()`를 순회하며 `LayoutParagraphElement` 인스턴스 중
+   * 부모 box가 `EditManager.isBoxSelectable()`을 통과하는 첫 번째 요소를 반환한다.
+   * 부모 box가 선택 가능하지 않으면(예: lock) 더 이상 탐색하지 않고 `null`을 반환한다.
+   * shadow DOM 내부의 paragraph도 `composedPath()`를 통해 추적할 수 있다.
+   *
+   * @param event - 마우스 이벤트
+   * @returns 선택 가능한 부모 box를 가진 paragraph 요소. 없으면 `null`
+   */
+  private _findParagraphFromEvent(event: MouseEvent): LayoutParagraphElement | null {
+    const path = event.composedPath();
+    const manager = EditManager.getInstance();
+    for (const el of path) {
+      if (el instanceof LayoutParagraphElement) {
+        const parentBox = el.parentElement;
+        if (parentBox instanceof LayoutBoxElement && manager.isBoxSelectable(parentBox)) {
+          return el;
+        }
+        // 부모 box가 선택 불가능하면 더 이상 위로 탐색하지 않는다.
+        return null;
+      }
+    }
+    return null;
+  }
+
   // ─── Click Handling ───────────────────────────────────────────
 
   /**
@@ -146,5 +176,50 @@ export class LayoutSelectionController {
     manager._setMultiSelect(event.ctrlKey || event.metaKey);
     manager.selectLayout(box);
     manager._setMultiSelect(false);
+  }
+
+  // ─── Double-Click Handling ─────────────────────────────────────
+
+  /**
+   * 더블클릭 이벤트 핸들러.
+   *
+   * paragraph 위에서 더블클릭 시 현재 모드에 상관없이 텍스트 편집 모드로 전환하고
+   * 해당 paragraph에 포커스를 부여한다. 삽입 모드이거나 편집 가능하지 않은
+   * paragraph(예: lock된 box 내부)에서는 무시한다.
+   *
+   * 동작 순서:
+   * 1. 삽입 모드(`insertMode`)이면 무시한다.
+   * 2. `composedPath()`에서 `LayoutParagraphElement`를 찾는다.
+   * 3. `EditManager.textEditMode = true`로 설정하여 다른 모드를 모두 끄고
+   *    문서 전체의 paragraph 편집 가능 여부를 갱신한다.
+   * 4. `EditManager.focusParagraph(paragraph)`로 해당 paragraph에 포커스를 준다.
+   *    이 호출은 `editableText = true` 설정과 `TextEditController` 생성을
+   *    내부적으로 수행한다.
+   * 5. 더블클릭한 위치의 소스 오프셋을 구하여 커서를 해당 위치로 이동한다.
+   *    `TextEditController.getOffsetFromPoint()`로 뷰포트 좌표를 오프셋으로 변환 후
+   *    `setCursor()`로 커서 위치를 설정한다.
+   *
+   * @param event - 더블클릭 마우스 이벤트
+   */
+  private _onDblClick = (event: MouseEvent): void => {
+    const manager = EditManager.getInstance();
+    if (manager.insertMode) return;
+
+    const paragraph = this._findParagraphFromEvent(event);
+    if (!paragraph) return;
+
+    event.stopPropagation();
+    event.preventDefault();
+
+    manager.textEditMode = true;
+    manager.focusParagraph(paragraph);
+
+    const controller = manager.focusedController;
+    if (controller) {
+      const offset = controller.getOffsetFromPoint(event.clientX, event.clientY);
+      if (offset !== null) {
+        controller.setCursor({ textOffset: offset });
+      }
+    }
   }
 }

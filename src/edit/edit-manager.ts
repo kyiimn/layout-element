@@ -7,7 +7,7 @@ import { InsertController } from "./insert-controller";
 import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
 import type { SelectionRange } from "@/types/edit";
-import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail } from "@/types/edit";
+import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState } from "@/types/edit";
 import type { BoxRole } from "@/types/layout";
 
 /** 레이아웃 편집 대상 요소 (box만 해당) */
@@ -29,7 +29,8 @@ export type EditManagerEventType =
   | 'layoutAdd'
   | 'layoutRemove'
   | 'insert'
-  | 'insertCancel';
+  | 'insertCancel'
+  | 'modeChange';
 
 /**
  * 글로벌 편집 관리 이벤트.
@@ -85,6 +86,10 @@ export interface EditManagerEvent {
   layoutAddDetail?: LayoutAddEventDetail;
   /** 레이아웃 요소 제거 상세 정보 (layoutRemove 이벤트에서만) */
   layoutRemoveDetail?: LayoutRemoveEventDetail;
+  /** 모드 전환 전 상태 (modeChange 이벤트에서만) */
+  previousMode?: EditModeState;
+  /** 모드 전환 후 상태 (modeChange 이벤트에서만) */
+  mode?: EditModeState;
 }
 
 /**
@@ -157,10 +162,71 @@ export class EditManager {
    */
   private _scale: number = 1;
 
+  /**
+   * 모드 전환 이벤트 억제 플래그.
+   *
+   * 모드 setter가 내부에서 다른 모드 setter를 호출할 때 중간 상태의
+   * `modeChange` 이벤트가 발생하는 것을 방지한다.
+   * 최종적으로 모드가 확정된 후 한 번만 이벤트가 발생한다.
+   */
+  private _modeChangeSuppressed: boolean = false;
+
   /** 편집 루트 box id. null이면 제한 없음. 지정 시 해당 box 내부 요소만 편집 가능, Root 자체는 편집 불가. */
   private _editableRootId: string | null = null;
 
   private constructor() {}
+
+  /**
+   * 현재 편집 모드 상태 스냅샷을 반환한다.
+   *
+   * `modeChange` 이벤트의 payload 생성에 사용된다.
+   *
+   * @returns 현재 모드 상태
+   */
+  private _getModeState(): EditModeState {
+    return {
+      textEditMode: this._textEditMode,
+      layoutEditMode: this._layoutEditMode,
+      layoutEditType: this._layoutEditType,
+      insertMode: this._insertMode,
+    };
+  }
+
+  /**
+   * 모드 전환 이벤트를 발생시킨다.
+   *
+   * `textEditMode`/`layoutEditMode`/`insertMode` setter에서 모드가 실제로 변경된 후 호출된다.
+   * 이전 모드 상태와 새 모드 상태를 payload로 전달한다.
+   *
+   * @param previousMode - 전환 전 모드 상태
+   * @internal
+   */
+  _dispatchModeChange(previousMode: EditModeState): void {
+    if (this._dispatching) return;
+    if (this._modeChangeSuppressed) return;
+    const listeners = this._listeners.get('modeChange');
+    if (!listeners || listeners.size === 0) return;
+
+    const mode = this._getModeState();
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'modeChange',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null as unknown as TextEditController,
+            previousMode,
+            mode,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
 
   /**
    * 싱글톤 인스턴스를 반환한다.
@@ -524,11 +590,7 @@ export class EditManager {
    * 모든 단락의 편집 모드를 비활성화한다.
    */
   deactivateAll(): void {
-    this._textEditMode = false;
-    for (const controller of this._controllers) {
-      const paragraph = controller['_paragraph'] as LayoutParagraphElement;
-      paragraph.editableText = false;
-    }
+    this.textEditMode = false;
   }
 
   // ─── Text Edit Mode ───────────────────────────────────────────
@@ -560,9 +622,12 @@ export class EditManager {
   set textEditMode(value: boolean) {
     if (this._isPrint) return;
     if (this._textEditMode === value) return;
+    const prevMode = this._getModeState();
     if (value) {
+      this._modeChangeSuppressed = true;
       this.layoutEditMode = false;
       this.insertMode = null;
+      this._modeChangeSuppressed = false;
       this._reduceSelectionToSingleForTextMode();
     }
     this._textEditMode = value;
@@ -572,6 +637,7 @@ export class EditManager {
     } else {
       this._applyEditableTextToAllParagraphs();
     }
+    this._dispatchModeChange(prevMode);
   }
 
 
@@ -853,14 +919,18 @@ export class EditManager {
     // 동일 상태면 no-op
     if (this._layoutEditMode === nextActive && this._layoutEditType === nextType) return;
 
+    const prevMode = this._getModeState();
     if (nextActive) {
+      this._modeChangeSuppressed = true;
       this.textEditMode = false;
       this.insertMode = null;
+      this._modeChangeSuppressed = false;
     }
     this._layoutEditMode = nextActive;
     this._layoutEditType = nextType;
     this._applyEditableLayoutToAllBoxes();
     this._updateControllers();
+    this._dispatchModeChange(prevMode);
   }
 
   /**
@@ -1281,11 +1351,14 @@ export class EditManager {
     if (this._insertMode === mode) return;
 
     const isDragging = this._insertController?.isDragging ?? false;
+    const prevMode = this._getModeState();
 
     if (mode) {
       if (!isDragging) {
+        this._modeChangeSuppressed = true;
         this.layoutEditMode = false;
         this.textEditMode = false;
+        this._modeChangeSuppressed = false;
         this.clearLayoutSelection(false);
       }
 
@@ -1315,6 +1388,7 @@ export class EditManager {
         box.style.cursor = '';
       });
     }
+    this._dispatchModeChange(prevMode);
   }
 
   /**
