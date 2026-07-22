@@ -406,6 +406,7 @@ private _getCachedFontString(textBlockStyle?: TextBlockStyle, ppm?: number): str
    - 새 라인에서도 안 되면 무한 루프 방지 처리
 5. 컬럼이 꽉 차면 다음 컬럼으로 이동. 마지막 컬럼이면 `_overflow` 증가
 6. 마지막 컬럼 처리 후 `endOfText` 플래그 설정
+7. **`_applyLineBreakRules()` 후처리** — 한글 조판 금칙문자 규칙 적용 (§22 참조)
 
 ### 7.2 블록 경계 처리
 
@@ -836,7 +837,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `_initLayoutMetrics()` | 레이아웃 상태 초기화. `_lineHeight` 계산, `_columnContents`/`_overflow` 리셋 |
 | `_initStructureAndMeasureColumns()` | 컬럼 폭/간격/lineHeight 계산, 가상 컬럼 생성 후 ppm 측정 및 제거 |
 | `_parseContents()` | 입력 콘텐츠를 `\n` 단위로 분리하여 `_contents` 생성 |
-| `_layoutTextIntoColumns()` | 메인 래핑 메서드. 라인 생성, 오버랩 적용, 글자 배치를 한 번에 수행 |
+| `_layoutTextIntoColumns()` | 메인 래핑 메서드. 라인 생성, 오버랩 적용, 글자 배치를 한 번에 수행. 종료 시 `_applyLineBreakRules()` 호출 |
 | `_createLineWithParts(...)` | 라인 DOM 생성 + 오버랩 감지 + 파트/데이터 생성 |
 | `_createLineElement(textBlockStyle?)` | 줄 DOM 요소 생성 |
 | `_computeFreeRegions(lineWidth, overlapParts)` | 오버랩 영역의 여집합으로 자유 영역 계산 |
@@ -845,6 +846,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `_getCachedFontString(textBlockStyle?, ppm?)` | Canvas 폰트 문자열 생성. 단일 항목 캐시 사용 |
 | `_createPartElement(widthMm, marginLeftMm)` | 파트 DOM 요소 생성. mm 단위 CSS 적용 |
 | `_removeTrailingEmptyLine(columnContent)` | 빈 파트만 있는 마지막 줄 제거 |
+| `_applyLineBreakRules()` | 한글 조판 금칙문자(행두/행말 금지) 후처리. 인접 줄 경계의 금칙 위반 교정 (§22 참조) |
 
 ---
 
@@ -1560,3 +1562,97 @@ flowchart TD
 | 라인 rect 측정 | `_detectOverlapWithCache()` | `_overlayRects`는 오버랩 요소만 캐싱, 라인 자체의 rect는 라인마다 측정 |
 | `getImageData` 캐싱 | `getOverlapSizePX()` | 동일 이미지에 대해 라인마다 `getImageData()` 재호출 |
 | `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산 |
+
+---
+
+## 22. 한글 조판 금칙문자 줄바꿈 규칙
+
+한글과 CJK 조판에는 서양의 hyphenation 개념 대신 **금칙(禁則)** 규칙이 있다. 줄의 시작(행두)이나 끝(행말)에 특정 문자가 오는 것을 금지하는 규칙이다. `TextLayoutEngine`은 `_layoutTextIntoColumns()`가 폭 기준으로 글자를 배치한 뒤, **후처리 패스** `_applyLineBreakRules()`로 이 규칙을 적용한다.
+
+### 22.1 금칙문자 테이블
+
+상수 테이블은 `src/constants/line-break.ts`에 정의되어 있으며 `@/constants`에서 재export된다.
+
+```ts
+export const LINE_START_FORBIDDEN: ReadonlySet<string>;  // 행두 금지
+export const LINE_END_FORBIDDEN: ReadonlySet<string>;     // 행말 금지
+export function isLineStartForbidden(char: string): boolean;
+export function isLineEndForbidden(char: string): boolean;
+```
+
+| 분류 | 문자 |
+|------|------|
+| **행두 금지** (줄 시작 X) | `. , ) ] } ） ］ ｝ 〕 』 」 】 》 ’ ” ' "` |
+| **행말 금지** (줄 끝 X) | `( [ { （ ［ ｛ 〔 『 「 【 《 ‘ “ ' "` |
+
+> 따옴표(`'` `"`)는 곡선(`’ ” ‘ “`)과 직선(`' "`) 모두 양쪽에 포함된다.
+
+### 22.2 후처리 알고리즘 (`_applyLineBreakRules`)
+
+`_layoutTextIntoColumns()` 종료 직전, `_previousLineCount`/`_previousOverflow` 계산 전에 호출된다.
+
+```mermaid
+flowchart TD
+    Start([_applyLineBreakRules]) --> ColLoop{각 컬럼}
+    ColLoop --> LineLoop{각 인접 줄 쌍<br/>curLine, nextLine}
+    LineLoop --> SkipCheck{COVER 또는 빈 라인?}
+    SkipCheck -->|Yes| LineLoop
+    SkipCheck -->|No| GetChars[curLastChar<br/>nextFirstChar]
+    GetChars --> StartCheck{nextFirstChar<br/>행두 금지?}
+    StartCheck -->|Yes| Conflict1{curLastChar<br/>행말 금지?}
+    Conflict1 -->|Yes, 충돌| LineLoop
+    Conflict1 -->|No, 안전| MoveDown[위 줄 마지막 →<br/>아래 줄 앞으로]
+    MoveDown --> LineLoop
+    StartCheck -->|No| EndCheck{curLastChar<br/>행말 금지?}
+    EndCheck -->|Yes| Conflict2{nextFirstChar<br/>행두 금지?}
+    Conflict2 -->|Yes, 충돌| LineLoop
+    Conflict2 -->|No, 안전| MoveUp[아래 줄 첫 글자 →<br/>위 줄 뒤로]
+    MoveUp --> LineLoop
+    EndCheck -->|No| LineLoop
+    LineLoop -->|완료| ColLoop
+    ColLoop -->|완료| End([end])
+```
+
+#### 교정 규칙
+
+1. **행두 금지 위반** (아래 줄의 첫 글자가 행두 금지):
+   - 위 줄의 마지막 글자를 아래 줄 앞으로 이동
+   - 단, 위 줄 마지막 글자 자체가 행말 금지면 **이동하지 않음** (두 금칙 충돌 시 안전 쪽 택함)
+   - 단, 위 줄 마지막 파트에 글자가 2개 이상 있어야 함 (1개면 이동 후 빈 줄 방지)
+
+2. **행말 금지 위반** (위 줄의 마지막 글자가 행말 금지):
+   - 아래 줄의 첫 글자를 위 줄 뒤로 이동
+   - 단, 아래 줄 첫 글자 자체가 행두 금지면 **이동하지 않음** (충돌 회피)
+
+3. **스킵 조건**:
+   - COVER 라인 (`parts: []`)
+   - 빈 라인 (모든 파트의 `content`가 빈 배열)
+   - 마지막 파트 또는 첫 파트가 빈 배열
+
+4. **단일 패스**: 한 번의 순회로 처리. 이동으로 인해 새로 발생하는 위반은 추가 패스 없이 허용한다. 시각적으로 1글자 어긋남이 전체 깨짐보다 낫기 때문이다.
+
+### 22.3 설계 결정: 후처리 방식 채택 이유
+
+`_layoutTextIntoColumns()`는 이미 매우 복잡한 문자 배치 로직을 가진다:
+
+- 3곳에서 줄바꿈 발생 (첫 라인, 다음 파트 시도, 새 라인 생성)
+- 무한 루프 방지 가드 (charWidth > maxPartWidth 시 강제 배치)
+- COVER/PART/오버플로우 분기 처리
+- `endOfBlock`/`endOfText` 플래그 설정
+
+이 로직에 직접 금칙 검사를 끼워넣으면:
+- 분기가 기하급수적으로 늘어남
+- 무한 루프 가드와 금칙 이동이 충돌할 위험
+- 기존 동작 회귀 가능성
+
+후처리 방식은:
+- 기존 배치 로직 변경 없음 (회귀 위험 최소)
+- 금칙 검사 로직 독립 (테스트/수정 용이)
+- 단일 패스로 성능 영향 미미 (O(라인 수))
+
+### 22.4 한계
+
+- **컬럼 경계 미처리**: 마지막 컬럼의 마지막 줄과 첫 컬럼의 첫 줄은 다른 컬럼이므로 검사하지 않는다. (컬럼 간 텍스트 흐름은 없으므로 올바름)
+- **블록 경계 미처리**: `\n`으로 분리된 블록 경계에서는 금칙을 검사하지 않는다. 블록은 독립적인 단락이므로, 블록 끝의 행말 금지 문자는 의도된 것이다.
+- **넘침 허용**: 이동한 글자가 파트 폭을 초과해도 허용한다. 래핑 재계산을 하지 않으므로 시각적으로 1글자 정도 넘칠 수 있다.
+- **동일 문자 양쪽 포함**: 따옴표(`'` `"`)는 행두·행말 양쪽에 포함된다. 이 경우 충돌 회피 규칙이 적용되어 이동하지 않는다.
