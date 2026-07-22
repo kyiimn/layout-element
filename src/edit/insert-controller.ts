@@ -441,6 +441,8 @@ export class InsertController {
 
     container.appendChild(boxEl);
 
+    boxEl.requestRerenderAffectedParagraphs();
+
     return boxEl;
   }
 

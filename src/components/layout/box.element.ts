@@ -454,19 +454,19 @@ export class LayoutBoxElement extends HTMLElement {
     */
   appendChildData(child: BoxData | ParagraphData | TextData | ImageData): LayoutBoxElement | LayoutParagraphElement | LayoutImageElement {
     if (child.type === 'box') {
-      const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
+      const boxEl = document.createElement('x-layout-box');
       boxEl.data = child;
       this.appendChild(boxEl);
       this.requestRerenderAffectedParagraphs();
       return boxEl;
     } else if (child.type === 'paragraph') {
-      const paragraphEl = document.createElement('x-layout-paragraph') as LayoutParagraphElement;
+      const paragraphEl = document.createElement('x-layout-paragraph');
       paragraphEl.data = child;
       this.appendChild(paragraphEl);
       this.requestRerenderAffectedParagraphs();
       return paragraphEl;
     } else if (child.type === 'text') {
-      const paragraphEl = document.createElement('x-layout-paragraph') as LayoutParagraphElement;
+      const paragraphEl = document.createElement('x-layout-paragraph');
       paragraphEl.data = {
         ...child,
         type: 'paragraph',
@@ -477,7 +477,7 @@ export class LayoutBoxElement extends HTMLElement {
       this.requestRerenderAffectedParagraphs();
       return paragraphEl;
     } else {
-      const imageEl = document.createElement('x-layout-image') as LayoutImageElement;
+      const imageEl = document.createElement('x-layout-image');
       imageEl.data = child;
       this.appendChild(imageEl);
       this.requestRerenderAffectedParagraphs();

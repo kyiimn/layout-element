@@ -225,6 +225,7 @@ export class LayoutDocumentElement extends HTMLElement {
     const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
     boxEl.data = child;
     this.appendChild(boxEl);
+    boxEl.requestRerenderAffectedParagraphs();
     return boxEl;
   }
 
