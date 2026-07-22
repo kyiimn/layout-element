@@ -37,6 +37,9 @@ export class TextEditController {
 
   private _cursorModel: CursorModel = { offset: 0, selection: null };
 
+  private _crossRightState: 'none' | 'sticking' | 'crossed' = 'none';
+  private _crossLeftState: 'none' | 'sticking' | 'crossed' = 'none';
+
   private _handleClick: (event: MouseEvent) => void;
   private _handleFocus: () => void;
   private _handleBlur: () => void;
@@ -400,6 +403,8 @@ export class TextEditController {
   }
 
   private _onClick(event: MouseEvent): void {
+    this._crossRightState = 'none';
+    this._crossLeftState = 'none';
     if (this._wasDragged) {
       this._wasDragged = false;
       return;
@@ -752,7 +757,38 @@ export class TextEditController {
     switch (event.key) {
       case "ArrowLeft": {
       event.preventDefault();
-      const targetLeft = hasShortcut ? this._findWordStart(content, offset) : (offset > 0 ? offset - 1 : offset);
+      let targetLeft: number;
+      if (this._crossRightState === 'crossed') {
+        this._crossRightState = 'none';
+        this._crossLeftState = 'none';
+        targetLeft = offset;
+      } else if (hasShortcut) {
+        this._crossRightState = 'none';
+        targetLeft = this._findWordStart(content, offset);
+        this._crossLeftState = 'none';
+      } else if (isShift) {
+        this._crossRightState = 'none';
+        targetLeft = offset > 0 ? offset - 1 : offset;
+        this._crossLeftState = 'none';
+      } else {
+        this._crossRightState = 'none';
+        const lineBounds = this._mapper.findVisualLineBounds(offset);
+        const atLineStart = lineBounds && offset === lineBounds.start;
+        const atSecondChar = lineBounds && offset === lineBounds.start + 1;
+        if (this._crossLeftState === 'sticking' && atLineStart) {
+          targetLeft = offset;
+          this._crossLeftState = 'crossed';
+        } else if (this._crossLeftState === 'crossed') {
+          targetLeft = offset > 0 ? offset - 1 : offset;
+          this._crossLeftState = 'none';
+        } else if (atSecondChar) {
+          targetLeft = offset - 1;
+          this._crossLeftState = 'sticking';
+        } else {
+          targetLeft = offset > 0 ? offset - 1 : offset;
+          this._crossLeftState = 'none';
+        }
+      }
       if (isShift) {
         this._extendSelection(targetLeft);
       } else {
@@ -772,7 +808,38 @@ export class TextEditController {
     }
     case "ArrowRight": {
       event.preventDefault();
-      const targetRight = hasShortcut ? this._findWordEnd(content, offset) : (offset < content.length ? offset + 1 : offset);
+      let targetRight: number;
+      if (this._crossLeftState === 'crossed') {
+        this._crossLeftState = 'none';
+        this._crossRightState = 'none';
+        targetRight = offset;
+      } else if (hasShortcut) {
+        this._crossLeftState = 'none';
+        targetRight = this._findWordEnd(content, offset);
+        this._crossRightState = 'none';
+      } else if (isShift) {
+        this._crossLeftState = 'none';
+        targetRight = offset < content.length ? offset + 1 : offset;
+        this._crossRightState = 'none';
+      } else {
+        this._crossLeftState = 'none';
+        const lineBounds = offset > 0 ? this._mapper.findVisualLineBounds(offset - 1) : null;
+        const atLineEnd = lineBounds && offset === lineBounds.end;
+        const atLastChar = lineBounds && offset === lineBounds.end - 1;
+        if (this._crossRightState === 'sticking' && atLineEnd) {
+          targetRight = offset;
+          this._crossRightState = 'crossed';
+        } else if (this._crossRightState === 'crossed') {
+          targetRight = offset < content.length ? offset + 1 : offset;
+          this._crossRightState = 'none';
+        } else if (atLastChar) {
+          targetRight = offset + 1;
+          this._crossRightState = 'sticking';
+        } else {
+          targetRight = offset < content.length ? offset + 1 : offset;
+          this._crossRightState = 'none';
+        }
+      }
       if (isShift) {
         this._extendSelection(targetRight);
       } else {
@@ -794,6 +861,8 @@ export class TextEditController {
     case "ArrowDown": {
       event.preventDefault();
       const newOffset = this._computeVerticalOffset(event.key === "ArrowUp" ? -1 : 1);
+      this._crossRightState = 'none';
+      this._crossLeftState = 'none';
       if (isShift) {
         this._extendSelection(newOffset ?? offset);
       } else {
@@ -815,48 +884,96 @@ export class TextEditController {
     }
     case "Home": {
       event.preventDefault();
-      const visualHome = this._mapper.findVisualLineBounds(offset);
-      const lineStart = visualHome ? visualHome.start : this._findLineStart(content, offset);
-      if (isShift) {
+      this._crossRightState = 'none';
+      if (hasShortcut) {
+        const lineStart = this._findLineStart(content, offset);
+        if (isShift) { this._extendSelection(lineStart); } else { this._cursorModel.offset = lineStart; this._cursorModel.selection = null; }
+        this._crossLeftState = 'none';
+      } else if (isShift) {
+        const visualHome = this._mapper.findVisualLineBounds(offset);
+        const lineStart = visualHome ? visualHome.start : this._findLineStart(content, offset);
         this._extendSelection(lineStart);
+        this._crossLeftState = 'none';
       } else {
-        this._cursorModel.offset = lineStart;
-        this._cursorModel.selection = null;
+        const lineBounds = this._mapper.findVisualLineBounds(offset);
+        const atLineStart = lineBounds && offset === lineBounds.start;
+        if (this._crossLeftState === 'sticking' && atLineStart) {
+          this._cursorModel.offset = offset;
+          this._cursorModel.selection = null;
+          this._crossLeftState = 'crossed';
+        } else if (this._crossLeftState === 'crossed') {
+          const prevBounds = offset > 0 ? this._mapper.findVisualLineBounds(offset - 1) : null;
+          const prevStart = prevBounds ? prevBounds.start : 0;
+          this._cursorModel.offset = prevStart;
+          this._cursorModel.selection = null;
+          this._crossLeftState = 'none';
+        } else if (atLineStart) {
+          this._cursorModel.offset = offset;
+          this._cursorModel.selection = null;
+          this._crossLeftState = 'sticking';
+        } else {
+          const lineStart = lineBounds ? lineBounds.start : this._findLineStart(content, offset);
+          this._cursorModel.offset = lineStart;
+          this._cursorModel.selection = null;
+          this._crossLeftState = 'sticking';
+        }
       }
       this._syncTextareaSelection();
       this._updateCursorPosition();
       this._updateSelection();
-      if (!isShift) {
-        this._emitStyleChange();
-      }
-      if (!event.repeat && isCursorKey) {
-        EditManager.getInstance()._notifyCursorMove(this);
-      }
+      if (!isShift) { this._emitStyleChange(); }
+      if (!event.repeat && isCursorKey) { EditManager.getInstance()._notifyCursorMove(this); }
       break;
     }
     case "End": {
       event.preventDefault();
-      const visualEnd = this._mapper.findVisualLineBounds(offset);
-      const lineEnd = visualEnd ? visualEnd.end : this._findLineEnd(content, offset);
-      if (isShift) {
+      this._crossLeftState = 'none';
+      if (hasShortcut) {
+        const lineEnd = this._findLineEnd(content, offset);
+        if (isShift) { this._extendSelection(lineEnd); } else { this._cursorModel.offset = lineEnd; this._cursorModel.selection = null; }
+        this._crossRightState = 'none';
+      } else if (isShift) {
+        const visualEnd = offset > 0 ? this._mapper.findVisualLineBounds(offset - 1) : this._mapper.findVisualLineBounds(offset);
+        const lineEnd = visualEnd ? visualEnd.end : this._findLineEnd(content, offset);
         this._extendSelection(lineEnd);
+        this._crossRightState = 'none';
       } else {
-        this._cursorModel.offset = lineEnd;
-        this._cursorModel.selection = null;
+        const lineBounds = offset > 0 ? this._mapper.findVisualLineBounds(offset - 1) : this._mapper.findVisualLineBounds(offset);
+        const atLineEnd = lineBounds && offset === lineBounds.end;
+        if (this._crossRightState === 'sticking' && atLineEnd) {
+          this._cursorModel.offset = offset;
+          this._cursorModel.selection = null;
+          this._crossRightState = 'crossed';
+        } else if (this._crossRightState === 'crossed') {
+          const nextBounds = offset < content.length
+            ? this._mapper.findVisualLineBounds(offset + 1)
+            : null;
+          const nextEnd = nextBounds ? nextBounds.end : this._findLineEnd(content, offset);
+          this._cursorModel.offset = nextEnd;
+          this._cursorModel.selection = null;
+          this._crossRightState = 'none';
+        } else if (atLineEnd) {
+          this._cursorModel.offset = offset;
+          this._cursorModel.selection = null;
+          this._crossRightState = 'sticking';
+        } else {
+          const lineEnd = lineBounds ? lineBounds.end : this._findLineEnd(content, offset);
+          this._cursorModel.offset = lineEnd;
+          this._cursorModel.selection = null;
+          this._crossRightState = 'sticking';
+        }
       }
       this._syncTextareaSelection();
       this._updateCursorPosition();
       this._updateSelection();
-      if (!isShift) {
-        this._emitStyleChange();
-      }
-      if (!event.repeat && isCursorKey) {
-        EditManager.getInstance()._notifyCursorMove(this);
-      }
+      if (!isShift) { this._emitStyleChange(); }
+      if (!event.repeat && isCursorKey) { EditManager.getInstance()._notifyCursorMove(this); }
       break;
     }
       case "Backspace": {
       event.preventDefault();
+      this._crossRightState = 'none';
+      this._crossLeftState = 'none';
       const activeSelection = this._cursorModel.selection;
       if (activeSelection) {
         this._replaceSelection("");
@@ -866,8 +983,6 @@ export class TextEditController {
         this._textarea.value = newContent;
         this._cursorModel.offset = offset - 1;
         this._textarea.setSelectionRange(offset - 1, offset - 1);
-        this._updateCursorPosition();
-        this._updateSelection();
         this._debouncedRender();
         EditManager.getInstance()._notifyTextChange(this);
         EditManager.getInstance()._notifyCursorMove(this);
@@ -876,6 +991,8 @@ export class TextEditController {
     }
     case "Delete": {
       event.preventDefault();
+      this._crossRightState = 'none';
+      this._crossLeftState = 'none';
       const activeSelection = this._cursorModel.selection;
       if (activeSelection) {
         this._replaceSelection("");
@@ -884,8 +1001,6 @@ export class TextEditController {
         model.textContent = newContent;
         this._textarea.value = newContent;
         this._textarea.setSelectionRange(offset, offset);
-        this._updateCursorPosition();
-        this._updateSelection();
         this._debouncedRender();
         EditManager.getInstance()._notifyTextChange(this);
         EditManager.getInstance()._notifyCursorMove(this);
@@ -894,6 +1009,8 @@ export class TextEditController {
     }
   case "Enter": {
         event.preventDefault();
+        this._crossRightState = 'none';
+        this._crossLeftState = 'none';
         const activeSelection = this._cursorModel.selection;
         const { start, end } = activeSelection?.normalized() ?? { start: null, end: null };
         const replaceStart = start?.textOffset ?? offset;
@@ -905,8 +1022,6 @@ export class TextEditController {
     this._cursorModel.offset = replaceStart + 1;
     this._textarea.setSelectionRange(replaceStart + 1, replaceStart + 1);
     this._cursorModel.selection = null;
-    this._updateCursorPosition();
-    this._updateSelection();
     this._debouncedRender();
     EditManager.getInstance()._notifyTextChange(this);
     EditManager.getInstance()._notifyCursorMove(this);
@@ -987,8 +1102,6 @@ export class TextEditController {
     this._cursorModel.offset = start.textOffset;
     this._cursorModel.selection = null;
     this._textarea.setSelectionRange(start.textOffset, start.textOffset);
-    this._updateCursorPosition();
-    this._updateSelection();
     this._debouncedRender();
   }
 
@@ -1023,8 +1136,6 @@ export class TextEditController {
     this._cursorModel.offset = newOffset;
     this._cursorModel.selection = null;
     this._textarea.setSelectionRange(newOffset, newOffset);
-    this._updateCursorPosition();
-    this._updateSelection();
     this._debouncedRender();
     EditManager.getInstance()._notifyTextChange(this);
     EditManager.getInstance()._notifyCursorMove(this);
@@ -1058,9 +1169,32 @@ export class TextEditController {
 
     const offset = this._cursorModel.offset;
 
-    // 라인 인덱스 기반 이동: 현재 offset이 속한 라인을 찾고, 인접 라인으로 이동.
-    const currentLineInfo = this._mapper.getLineInfoBySourceOffset(offset);
+    const visualBounds = this._mapper.findVisualLineBounds(offset);
+    const visualBoundsPrev = offset > 0 ? this._mapper.findVisualLineBounds(offset - 1) : null;
+    const atVisualLineEnd = visualBoundsPrev !== null && offset === visualBoundsPrev.end;
+    const atVisualLineStart = visualBounds !== null && offset === visualBounds.start;
+    const atBoundary = atVisualLineEnd && atVisualLineStart;
+
+    const stickRight = this._crossRightState === 'sticking';
+    const stickLeft = this._crossLeftState === 'sticking' || this._crossLeftState === 'crossed';
+
+    const isAtLineStart = atVisualLineStart && (!atBoundary || stickLeft);
+    const isAtLineEnd = atVisualLineEnd && !atBoundary;
+
+    let currentLineInfo = this._mapper.getLineInfoBySourceOffset(offset);
     if (currentLineInfo === null) return null;
+
+    if (isAtLineEnd && currentLineInfo.lineIndex > 0) {
+      const currentLineStart = this._mapper.getLineStartSourceOffset(currentLineInfo.columnIndex, currentLineInfo.lineIndex) ?? 0;
+      if (offset === currentLineStart) {
+        currentLineInfo = { columnIndex: currentLineInfo.columnIndex, lineIndex: currentLineInfo.lineIndex - 1 };
+      }
+    }
+    if (atBoundary && direction === 1 && !stickLeft) {
+      if (currentLineInfo.lineIndex > 0) {
+        currentLineInfo = { columnIndex: currentLineInfo.columnIndex, lineIndex: currentLineInfo.lineIndex - 1 };
+      }
+    }
 
     const flatIndex = this._toFlatLineIndex(currentLineInfo.columnIndex, currentLineInfo.lineIndex);
     const targetFlatIndex = flatIndex + direction;
@@ -1073,13 +1207,22 @@ export class TextEditController {
 
     const targetLineStart = this._mapper.getLineStartSourceOffset(targetInfo.columnIndex, targetInfo.lineIndex);
     if (targetLineStart === null) return null;
+    const targetLineEnd = this._getLineEndSourceOffset(targetInfo.columnIndex, targetInfo.lineIndex);
+    const targetVisualBounds = this._mapper.findVisualLineBounds(targetLineStart);
+    const targetVisualEnd = targetVisualBounds ? targetVisualBounds.end - 1 : targetLineEnd;
 
-    // 현재 라인 내 상대 위치를 계산하여 target 라인에서 같은 위치 유지 시도
+    if (isAtLineStart) {
+      return targetLineStart;
+    }
+    if (isAtLineEnd) {
+      const currentLineStart = this._mapper.getLineStartSourceOffset(currentLineInfo.columnIndex, currentLineInfo.lineIndex) ?? 0;
+      const offsetInLine = offset - currentLineStart;
+      return Math.min(targetLineStart + offsetInLine, targetVisualEnd);
+    }
+
     const currentLineStart = this._mapper.getLineStartSourceOffset(currentLineInfo.columnIndex, currentLineInfo.lineIndex) ?? 0;
     const offsetInLine = offset - currentLineStart;
-    const targetLineEnd = this._getLineEndSourceOffset(targetInfo.columnIndex, targetInfo.lineIndex);
-
-    return Math.min(targetLineStart + offsetInLine, targetLineEnd);
+    return Math.min(targetLineStart + offsetInLine, targetVisualEnd);
   }
 
   /**
@@ -1259,8 +1402,10 @@ export class TextEditController {
         this._optimisticSpanUpdate(newOffset - 1, inserted);
       }
 
-      this._updateCursorPosition();
-      this._updateSelection();
+      if (this._optimisticSpan) {
+        this._updateCursorPosition();
+        this._updateSelection();
+      }
       this._debouncedRender();
       EditManager.getInstance()._notifyTextChange(this);
       EditManager.getInstance()._notifyCursorMove(this);
@@ -1281,7 +1426,9 @@ export class TextEditController {
       this._optimisticSpanUpdate(newOffset - 1, change.text);
     }
 
-    this._updateCursorPosition();
+    if (this._optimisticSpan) {
+      this._updateCursorPosition();
+    }
     this._debouncedRender();
     this._emitStyleChange();
     EditManager.getInstance()._notifyTextChange(this);
@@ -1307,8 +1454,6 @@ export class TextEditController {
     this._textarea.setSelectionRange(this._cursorModel.offset, this._cursorModel.offset);
     this._cursorModel.selection = null;
 
-    this._updateCursorPosition();
-    this._updateSelection();
     this._debouncedRender();
     EditManager.getInstance()._notifyTextChange(this);
     EditManager.getInstance()._notifyCursorMove(this);
@@ -1632,6 +1777,44 @@ export class TextEditController {
 
     let renderedOffset = this._mapper.renderedOffset(offset);
     let atEndOfChar = false;
+
+    if (this._crossRightState === 'sticking' && offset > 0) {
+      const prevRendered = this._mapper.renderedOffset(offset - 1);
+      if (prevRendered !== null) {
+        renderedOffset = prevRendered;
+        atEndOfChar = true;
+      }
+    }
+
+    if (this._crossRightState === 'crossed') {
+      const rendered = this._mapper.renderedOffset(offset);
+      if (rendered !== null) {
+        renderedOffset = rendered;
+        atEndOfChar = false;
+      } else {
+        const nextRendered = this._mapper.renderedOffset(offset + 1);
+        if (nextRendered !== null) {
+          renderedOffset = nextRendered;
+          atEndOfChar = false;
+        }
+      }
+    }
+
+    if (this._crossLeftState === 'crossed' && offset > 0) {
+      const prevRendered = this._mapper.renderedOffset(offset - 1);
+      if (prevRendered !== null) {
+        renderedOffset = prevRendered;
+        atEndOfChar = true;
+      }
+    }
+
+    if (this._crossLeftState === 'sticking') {
+      const rendered = this._mapper.renderedOffset(offset);
+      if (rendered !== null) {
+        renderedOffset = rendered;
+        atEndOfChar = false;
+      }
+    }
 
     if (renderedOffset === null && content !== undefined) {
       // \n 위치: 먼저 인접 문자로 폴백하여 이전 라인 끝 또는 다음 라인 시작에 표시.
