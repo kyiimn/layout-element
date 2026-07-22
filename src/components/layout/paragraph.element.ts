@@ -1,5 +1,6 @@
 import { TextLayoutEngine } from "@/core";
 import { TextEditController } from "@/edit/text-edit-controller";
+import { EditManager } from "@/edit/edit-manager";
 import { ColorRegistry, FontLoader } from "@/resource";
 import { InheritStyle, ParagraphData, ParagraphStyle, TextBlockData, TextStyle } from "@/types";
 import { checkOverlap, genUUID, valueEqual } from "@/utils";
@@ -182,6 +183,10 @@ export class LayoutParagraphElement extends HTMLElement {
     const wasStructureDirty = this._perfStructureChanged;
     const lineCountBefore = this._model.previousLineCount;
     const overflowBefore = this._model.previousOverflow;
+
+    // EditManager.scale을 모델에 전달하여 getBoundingClientRect() 결과를
+    // scale=1 기준으로 정규화하도록 한다. scale 무관한 래핑 결과를 보장한다.
+    this._model.scale = EditManager.getInstance().scale;
 
     if (this._perfStructureChanged) {
       this._model.resetIncrementalState();

@@ -12,7 +12,7 @@ import {
   OverlapParts
 } from "@/types";
 import { GridCalculator } from "@/core/grid-calculator";
-import { getOverlapSizePX, mergeOverlapParts } from "@/utils";
+import { getOverlapSizePX, mergeOverlapParts, normalizeRect, type NormalizedRect } from "@/utils";
 import { FontLoader } from "@/resource/font-loader";
 import { ColorRegistry } from "@/resource/color-registry";
 
@@ -78,6 +78,13 @@ export class TextLayoutEngine {
 
   private _columnPpm: number[] = [];
 
+  /**
+   * 화면 배율(scale). `getBoundingClientRect()`로 측정한 viewport 픽셀을
+   * scale=1 기준 픽셀로 정규화하는 데 사용한다. 0 이하이면 1로 취급한다.
+   * `layoutStructure()`/`layoutText()` 호출 전에 paragraph 측에서 설정한다.
+   */
+  private _scale: number = 1;
+
   private _paragraphElement: LayoutParagraphElement;
   private _rootNode: Node;
 
@@ -88,8 +95,8 @@ export class TextLayoutEngine {
   private _lastFontKey: string = '';
   private _lastFontString: string = '';
 
-  /** 성능 캐시: 오버랩 요소의 DOMRect 캐시. 렌더링 사이클당 한 번 측정 후 재사용하여 강제 리플로우를 최소화한다. */
-  private _overlayRects: Map<LayoutBoxElement, DOMRect> | null = null;
+  /** 성능 캐시: 오버랩 요소의 정규화된 rect 캐시. 렌더링 사이클당 한 번 측정 후 재사용하여 강제 리플로우를 최소화한다. */
+  private _overlayRects: Map<LayoutBoxElement, NormalizedRect> | null = null;
 
   /**
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
@@ -257,6 +264,11 @@ export class TextLayoutEngine {
    * 성능 최적화: `_overlayRects` 캐시를 사용하여 렌더링 사이클당
    * `getBoundingClientRect()` 호출을 한 번으로 제한한다.
    * COVER면 라인 전체가 덮인 것이고, PART면 일부만 덮인 것이다.
+   *
+   * 모든 `getBoundingClientRect()` 결과는 `this._scale`로 나누어 scale=1 기준으로
+   * 정규화한다. lineRect와 overlayRect 모두 같은 scale로 정규화하므로 상대적
+   * 겹침 판정은 동일하지만, 서브픽셀 정밀도가 scale에 관계없이 일관되어
+   * scale 변경 시 텍스트 배치 어긋남을 원천 방지한다.
    */
   private _detectOverlapWithCache(lineEl: HTMLElement): { cover: boolean; overlapParts: OverlapParts[] } {
     const overlapEls = this._paragraphElement.overlayElements;
@@ -266,11 +278,13 @@ export class TextLayoutEngine {
     if (this._overlayRects === null) {
       this._overlayRects = new Map();
       for (const el of overlapEls) {
-        this._overlayRects.set(el, el.getBoundingClientRect());
+        // 정규화된 rect를 캐싱하여 이후 반복 측정을 피한다
+        this._overlayRects.set(el, normalizeRect(el.getBoundingClientRect(), this._scale));
       }
     }
 
-    const lineRect = lineEl.getBoundingClientRect();
+    // lineRect도 동일한 scale 기준으로 정규화하여 캐시된 overlayRect와 비교한다
+    const lineRect = normalizeRect(lineEl.getBoundingClientRect(), this._scale);
 
     for (const el of overlapEls) {
       const elRect = this._overlayRects.get(el);
@@ -280,7 +294,8 @@ export class TextLayoutEngine {
         continue;
       }
 
-      const type = getOverlapSizePX(lineEl, el);
+      // getOverlapSizePX는 내부에서 다시 getBoundingClientRect를 호출하므로 scale 전달이 필수
+      const type = getOverlapSizePX(lineEl, el, this._scale);
       if (type.direction === 'COVERS') cover = true;
       if (type.direction === 'PART') parts = parts.concat(type.parts);
     }
@@ -433,7 +448,10 @@ export class TextLayoutEngine {
     }
 
     for (let i = 0; i < vColumnEls.length; i++) {
-      const ppm = vColumnEls[i].getBoundingClientRect().width / this._columnWidths[i];
+      // vcolumn의 렌더링 폭(viewport px)을 scale로 나누어 scale=1 기준 픽셀 폭으로 정규화한다.
+      // 정규화된 px / columnWidths[i](mm) = scale 무관한 ppm을 보장한다.
+      const rect = normalizeRect(vColumnEls[i].getBoundingClientRect(), this._scale);
+      const ppm = rect.width / this._columnWidths[i];
       this._columnPpm.push(ppm);
     }
 
@@ -758,6 +776,21 @@ export class TextLayoutEngine {
    */
   public layoutText() {
     this._layoutTextIntoColumns();
+  }
+
+  /**
+   * 현재 화면 배율을 반환한다. `getBoundingClientRect()` 결과를 정규화하는 데 사용된다.
+   */
+  get scale(): number {
+    return this._scale;
+  }
+
+  /**
+   * 화면 배율을 설정한다. `layoutStructure()`/`layoutText()` 호출 전에 설정해야
+   * 오버랩 판정과 ppm 측정이 scale 무관하게 동작한다. 0 이하이면 1로 취급한다.
+   */
+  set scale(value: number) {
+    this._scale = value > 0 ? value : 1;
   }
 
   /**
