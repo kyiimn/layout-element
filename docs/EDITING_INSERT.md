@@ -35,11 +35,14 @@
 │  ├── _mode: InsertMode | null                                          │
 │  ├── _isDragging: boolean                                             │
 │  ├── _startContainer: LayoutDocumentElement | LayoutBoxElement | null  │
+│  ├── _insertHighlightTarget: LayoutBoxElement | LayoutDocumentElement | null │
 │  ├── startDrag(event)                                                  │
 │  ├── _findTargetContainer(startX, startY, endX, endY)                  │
 │  ├── _finishInsert(endX, endY)                                        │
 │  ├── _cancel()                                                        │
-│  └── _createPreview() / _updatePreview()                              │
+│  ├── _createPreview() / _updatePreview()                              │
+│  ├── _updateInsertHighlight() / _clearInsertHighlight()                │
+│  └── _removePreview() / _cleanup()                                    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -214,10 +217,15 @@ export interface InsertEventDetail {
 │     └── _updatePreview()                                     │
 │         → 점선 테두리 반투명 파란색 사각형 위치/크기 갱신     │
 │         → static 모드: 컬럼/라인 그리드 스냅                │
+│     └── _updateInsertHighlight()                             │
+│         → 드래그 영역을 완전히 포함하는 가장 안쪽 컨테이너 탐색 │
+│         → 이전 하이라이트 제거, 새 컨테이너에 reparent-target 설정 │
+│         → 레이아웃 편집 reparent와 동일한 주황색 테두리       │
 │                                                             │
 │  ④ mouseup (드래그 완료)                                      │
 │     │                                                        │
 │     ├── 이동 거리 < 3px? → _cleanup(), return (클릭으로 간주) │
+│     │   (_cleanup이 _clearInsertHighlight() 호출)            │
 │     ├── 드래그 영역의 네 꼭짓점으로 컨테이너 탐색          │
 │     ├── _findTargetContainer(startX, startY, endX, endY)      │
 │     │   → 네 꼭짓점 모두 hit된 후보 수집                    │
@@ -237,7 +245,7 @@ export interface InsertEventDetail {
 │  ④' ESC 키 (드래그 취소)                                      │
 │     │                                                        │
 │     ├── _cancel()                                            │
-│     ├── _cleanup()                                           │
+│     │   └── _cleanup() → _clearInsertHighlight() 호출        │
 │     └── EditManager._dispatchInsertCancel()                   │
 │         → insertCancel 이벤트 발생                            │
 │                                                             │
@@ -269,6 +277,18 @@ export interface InsertEventDetail {
 ```
 _findTargetContainer(startX, startY, endX, endY)
     │
+    ├── 0. static 모드 빠른 경로 (position === 'static')
+    │   center = (드래그 영역 중심점)
+    │   elements = document.elementsFromPoint(center.x, center.y)
+    │   for each el in elements (가장 안쪽부터 바깥쪽 순):
+    │     if el instanceof LayoutBoxElement:
+    │       if el.lock → continue (다음 바깥 box 시도)
+    │       if el.items has non-box child → continue (다음 바깥 box 시도)
+    │       return el  (첫 번째 유효 box-only 컨테이너)
+    │     if el instanceof LayoutDocumentElement:
+    │       break (document보다 먼저 유효 box가 없으면 document로 폴백)
+    │   → 유효 box를 찾지 못하면 absolute 경로로 폴백
+    │
     ├── 1. 네 꼭짓점 정의
     │   corners = [(startX, startY), (endX, startY), (startX, endY), (endX, endY)]
     │
@@ -283,17 +303,25 @@ _findTargetContainer(startX, startY, endX, endY)
     ├── 3. 네 꼭짓점 모두에서 hit된 후보만 필터링
     │   fullyHit = [el for (el, count) in candidates if count === 4]
     │
-    ├── 3b. 기하학적 rect containment 폴백 (hit test가 박스를 찾지 못한 경우)
-    │   if fullyHit에 LayoutBoxElement가 없음:
+    ├── 3b. 기하학적 rect containment 폴백 (유효 box 후보가 없는 경우)
+    │   hasValidBoxCandidate = fullyHit에 lock되지 않고 non-box 자식 없는 box가 있음?
+    │   if !hasValidBoxCandidate:
     │     allBoxes = _document.querySelectorAll('x-layout-box')
     │     for each box in allBoxes:
     │       if box.lock → skip
     │       if box.items has non-box child → skip
+    │       if candidates.has(box) → skip (이미 hit test에서 처리됨)
     │       rect = box.getBoundingClientRect()
     │       if startX >= rect.left-1 && endX <= rect.right+1 &&
     │          startY >= rect.top-1 && endY <= rect.bottom+1:
     │         if fullyHit의 다른 박스가 이 box를 포함하지 않음:
     │           fullyHit.push(box)
+    │
+    │   ※ 폴백 조건이 "fullyHit에 box가 없음"이 아니라
+    │      "fullyHit에 유효한 box 후보가 없음"인 이유:
+    │      안쪽 box가 paragraph/image 자식을 가지면 삽입 불가능하므로 거절되지만,
+    │      이 경우 부모 box-only 컨테이너를 찾아야 한다. 단순히 "box가 있음"만
+    │      검사하면 부모 컨테이너를 찾지 못하고 document로 폴백하는 버그가 발생한다.
     │
     ├── 4. 사각형이 각 후보의 경계 내에 완전히 포함되는지 확인
     │   for each el in fullyHit (box 우선, document는 후순위):
@@ -534,7 +562,49 @@ return { left: round(snapLeftPx), top: round(snapTopPx),
 
 ### 8.4 `_removePreview()` / `_cleanup()`
 
-`_removePreview()`는 미리보기 사각형을 DOM에서 제거하고 `_previewEl`을 `null`로 설정한다. `_cleanup()`은 `_isDragging`과 `_startContainer`를 초기화하고, `_removePreview()`를 호출한 뒤, `document`에 등록된 `mousemove`/`mouseup`/`keydown` 리스너를 모두 제거한다.
+`_removePreview()`는 미리보기 사각형을 DOM에서 제거하고 `_previewEl`을 `null`로 설정한다. `_cleanup()`은 `_isDragging`과 `_startContainer`를 초기화하고, `_clearInsertHighlight()`로 컨테이너 하이라이트를 제거한 뒤, `_removePreview()`를 호출하고, `document`에 등록된 `mousemove`/`mouseup`/`keydown` 리스너를 모두 제거한다.
+
+### 8.5 컨테이너 하이라이트 (삽입 드래그 중)
+
+삽입 드래그 중에는 미리보기 사각형과 함께, 현재 드래그 영역이 어느 컨테이너에 들어갈 수 있는지를 시각적으로 표시한다. 레이아웃 편집 모드의 reparent 하이라이트와 동일한 `reparent-target` DOM 속성과 주황색(`#ff9800`, 2px) 테두리 CSS를 재사용하여 일관된 시각적 피드백을 제공한다.
+
+| 속성 | 색상 | 적용 대상 | 조건 |
+|------|------|----------|------|
+| `reparent-target` | 주황 (`#ff9800`, 2px) | box 또는 document | 삽입 드래그 중 드래그 영역을 완전히 포함하는 가장 안쪽 유효 컨테이너 |
+
+#### `_updateInsertHighlight()`
+
+`_onMouseMove`에서 `_updatePreview()` 직후에 호출된다. 현재 드래그 영역으로 `_resolveInsertContainer()`를 호출하여 대상 컨테이너를 찾는다 — 이는 mouseup 시점의 `_finishInsert`가 호출하는 것과 **동일한 메서드**(`_resolveInsertContainer`)를 사용하므로, 하이라이트가 가리키는 컨테이너와 실제 삽입되는 컨테이너가 항상 일치한다.
+
+```
+_updateInsertHighlight()
+    │
+    ├── _isDragging? → 아니면 return
+    ├── startX/Y, endX/Y = 현재 드래그 영역 (min/max 보정)
+    ├── 드래그 영역 ≤ 1px? → _clearInsertHighlight(); return
+    ├── target = _resolveInsertContainer(startX, startY, endX, endY)
+    │        → _findTargetContainer와 동일 (단일 진실 공급원)
+    ├── _insertHighlightTarget === target? → return (변경 없음)
+    ├── 이전 _insertHighlightTarget이 있으면 reparent-target 제거
+    ├── target이 있으면 reparent-target 설정
+    └── _insertHighlightTarget = target
+```
+
+> **단일 진실 공급원 (single source of truth)**: `_resolveInsertContainer()`는 `_finishInsert`(드랍)와 `_updateInsertHighlight`(하이라이트)가 공유하는 컨테이너 결정 메서드다. 내부적으로 `_findTargetContainer`를 호출한다. 이를 통해 하이라이트가 가리키는 컨테이너와 실제 삽입되는 컨테이너가 알고리즘 수준에서 일치함을 보장한다. 단, mouseup 시점의 마우스 좌표가 mousemove 시점과 다를 수 있으므로, 드래그 중 이탈하는 경우 최종 드랍 컨테이너는 달라질 수 있다 — 이는 정상 동작이다.
+
+#### `_clearInsertHighlight()`
+
+`_cleanup()` 내에서 호출되어 드래그 종료(mouseup/ESC/임계값 미충족 클릭) 시 하이라이트를 제거한다. 현재 하이라이트 대상의 `reparent-target` 속성을 제거하고 `_insertHighlightTarget`을 `null`로 설정한다.
+
+#### 정적 모드에서의 컨테이너 탐색
+
+`_findTargetContainer()`는 `position: 'static'` 모드에서 드래그 영역의 **중심점**으로 컨테이너를 식별하고, `position: 'absolute'` 모드에서는 **네 꼭짓점 containment**로 식별한다. 따라서 하이라이트 역시 모드에 따라 동일하게 동작한다 — static 모드에서는 그리드 스냅 전의 픽셀 영역 중심점 기준, absolute 모드에서는 픽셀 영역의 네 꼭짓점 기준으로 컨테이너가 결정된다. 미리보기 사각형은 그리드 스냅된 영역을 표시하지만, 컨테이너 하이라이트는 스냅 전 드래그 영역을 기준으로 결정되므로 미리보기 경계와 하이라이트 컨테이너 경계가 일치하지 않을 수 있다.
+
+> **static 모드 중심점 순회**: `elementsFromPoint`는 가장 안쪽 요소부터 바깥쪽 순으로 반환한다. 안쪽 box가 paragraph/image 자식을 가지면 삽입 불가능하므로 거르고, 더 바깥의 box-only 컨테이너를 찾을 때까지 순회한다. document가 먼저 나오면(중심점이 box 밖) document로 폴백한다.
+
+#### 레이아웃 편집 reparent와의 관계
+
+레이아웃 편집 모드의 reparent 하이라이트(`LayoutEditController._updateReparentHighlight`)와 동일한 DOM 속성(`reparent-target`)과 CSS 규칙을 재사용한다. 두 모드는 상호 배타적으로 동작하므로(삽입 모드 활성화 시 `layoutEditMode = false`), 같은 속성을 공유해도 충돌이 발생하지 않는다. 삽입 모드에서는 드래그 중인 box가 없으므로 `_findReparentContainer`의 box 자신/자손 제외 로직이 불필요하여, `_findTargetContainer`를 그대로 사용한다.
 
 ---
 
@@ -629,7 +699,7 @@ ESC 키 이외의 입력은 무시한다.
 
 | 파일 | 역할 |
 |------|------|
-| `src/edit/insert-controller.ts` | `InsertController`: 삽입 모드의 드래그, 좌표 변환, 요소 생성, 미리보기 관리, 대상 컨테이너 찾기 |
+| `src/edit/insert-controller.ts` | `InsertController`: 삽입 모드의 드래그, 좌표 변환, 요소 생성, 미리보기 관리, 컨테이너 하이라이트(`_updateInsertHighlight`/`_clearInsertHighlight`/`_resolveInsertContainer`), 대상 컨테이너 찾기(`_findTargetContainer` — static 모드 중심점 순회, absolute 모드 4꼭짓점 containment + 유효 box 후보 폴백) |
 | `src/edit/edit-manager.ts` | `insertMode` getter/setter, `activateInsert`, `deactivateInsert`, `handleInsertMouseDown`, `_dispatchInsert`, `_dispatchInsertCancel`, `insert`/`insertCancel` 이벤트 발송, `_suppressNextClick` 플래그 |
 | `src/types/edit/insert.type.ts` | `InsertType`, `InsertPosition`, `InsertMode`, `InsertEventDetail` 타입 정의 |
 

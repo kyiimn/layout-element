@@ -1238,7 +1238,7 @@ _updateReparentHighlight(box, clientX, clientY)
 
 | 속성 | 색상 | 적용 대상 | 조건 |
 |------|------|----------|------|
-| `reparent-target` | 주황 (`#ff9800`, 2px) | box 또는 document | reparent 드래그 중 들어갈 수 있는 컨테이너 |
+| `reparent-target` | 주황 (`#ff9800`, 2px) | box 또는 document | reparent 드래그 중 들어갈 수 있는 컨테이너. **삽입 모드**에서도 동일한 속성/CSS로 컨테이너 하이라이트 표시 (`InsertController._updateInsertHighlight`) |
 
 하이라이트는 `_onMouseUp`, `_onKeyDown`(ESC), `_cancelAllDrags`(detach)에서 `_clearReparentHighlight()`로 제거된다.
 
