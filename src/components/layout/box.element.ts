@@ -54,6 +54,11 @@ export class LayoutBoxElement extends HTMLElement {
 
   private _resizeHandles: HTMLDivElement[] = [];
 
+  /** 테두리 바깥 요소(방향별). `top`/`bottom`/`left`/`right` 키로 관리한다. */
+  private _borderEls: Record<string, HTMLDivElement | null> = {
+    top: null, bottom: null, left: null, right: null,
+  };
+
   /** DOM 자식 변경(추가/제거)을 감지하여 layout + render를 자동 수행하는 MutationObserver. */
   private _childObserver: MutationObserver | null = null;
 
@@ -203,15 +208,16 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   /**
-   * 테두리 DOM 생성: `borderColor`가 설정된 경우 상/하/좌/우 테두리 요소를 생성한다.
+   * 테두리 DOM 생성·갱신: `borderColor`가 설정된 경우 상/하/좌/우 테두리 요소를
+   * 생성하거나 기존 요소를 갱신한다. `borderColor`가 없으면 모든 테두리 요소를 제거한다.
    * 내부 전용. `layout()`에서만 호출된다.
    */
   private _renderBorder() {
     if (!this.isConnected || !this.parentModel) return;
 
-    this._shadowRoot.querySelectorAll(':scope > :not(slot):not(style):not(.resize-handle)').forEach(node => node.remove());
-
+    const ppm = GridCalculator.ppm;
     const colorRegistry = ColorRegistry.getInstance();
+
     if (this.borderColor) {
       this.setAttribute('border', '');
       const borderStyle: Partial<CSSStyleDeclaration> = {
@@ -225,71 +231,77 @@ export class LayoutBoxElement extends HTMLElement {
         borderWidth: '0',
       };
 
+      const directions: Array<{ dir: string; width: number; outerStyle: Partial<CSSStyleDeclaration>; innerStyle: Partial<CSSStyleDeclaration> }> = [];
+
       if (this.borderTopWidth) {
-        const border = document.createElement('div');
-        border.setAttribute('border', 'top');
-        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
-          ...borderStyle,
-          height: `${Math.ceil(this.borderTopWidth * GridCalculator.ppm)}px`, top: '0', width: '100%',
+        directions.push({
+          dir: 'top',
+          width: this.borderTopWidth,
+          outerStyle: { ...borderStyle, height: `${Math.ceil(this.borderTopWidth * ppm)}px`, top: '0', width: '100%' },
+          innerStyle: { ...borderInsideStyle, borderTopWidth: '100px', height: '0', width: '100%' },
         });
-        const borderInside = document.createElement('div');
-        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
-          ...borderInsideStyle,
-          borderTopWidth: `100px`, height: '0', width: '100%',
-        });
-        border.appendChild(borderInside);
-        this._shadowRoot.appendChild(border);
       }
-
       if (this.borderBottomWidth) {
-        const border = document.createElement('div');
-        border.setAttribute('border', 'bottom');
-        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
-          ...borderStyle,
-          height: `${Math.ceil(this.borderBottomWidth * GridCalculator.ppm)}px`, bottom: '0', width: '100%',
+        directions.push({
+          dir: 'bottom',
+          width: this.borderBottomWidth,
+          outerStyle: { ...borderStyle, height: `${Math.ceil(this.borderBottomWidth * ppm)}px`, bottom: '0', width: '100%' },
+          innerStyle: { ...borderInsideStyle, borderBottomWidth: '100px', height: '0', width: '100%' },
         });
-        const borderInside = document.createElement('div');
-        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
-          ...borderInsideStyle,
-          borderBottomWidth: `100px`, height: '0', width: '100%',
-        });
-        border.appendChild(borderInside);
-        this._shadowRoot.appendChild(border);
       }
-
       if (this.borderLeftWidth) {
-        const border = document.createElement('div');
-        border.setAttribute('border', 'left');
-        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
-          ...borderStyle,
-          width: `${Math.ceil(this.borderLeftWidth * GridCalculator.ppm)}px`, height: '100%', left: '0',
+        directions.push({
+          dir: 'left',
+          width: this.borderLeftWidth,
+          outerStyle: { ...borderStyle, width: `${Math.ceil(this.borderLeftWidth * ppm)}px`, height: '100%', left: '0' },
+          innerStyle: { ...borderInsideStyle, borderLeftWidth: '100px', height: '100%', width: '0' },
         });
-        const borderInside = document.createElement('div');
-        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
-          ...borderInsideStyle,
-          borderLeftWidth: `100px`, height: '100%', width: '0',
+      }
+      if (this.borderRightWidth) {
+        directions.push({
+          dir: 'right',
+          width: this.borderRightWidth,
+          outerStyle: { ...borderStyle, width: `${Math.ceil(this.borderRightWidth * ppm)}px`, height: '100%', right: '0' },
+          innerStyle: { ...borderInsideStyle, borderRightWidth: '100px', height: '100%', width: '0' },
         });
-        border.appendChild(borderInside);
-        this._shadowRoot.appendChild(border);
       }
 
-      if (this.borderRightWidth) {
-        const border = document.createElement('div');
-        border.setAttribute('border', 'right');
-        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, {
-          ...borderStyle,
-          width: `${Math.ceil(this.borderRightWidth * GridCalculator.ppm)}px`, height: '100%', right: '0',
-        });
-        const borderInside = document.createElement('div');
-        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, {
-          ...borderInsideStyle,
-          borderRightWidth: `100px`, height: '100%', width: '0',
-        });
-        border.appendChild(borderInside);
-        this._shadowRoot.appendChild(border);
+      const activeDirs = new Set(directions.map(d => d.dir));
+
+      for (const { dir, outerStyle, innerStyle } of directions) {
+        if (this._borderEls[dir] && this._borderEls[dir]!.isConnected) {
+          const border = this._borderEls[dir]!;
+          Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, outerStyle);
+          const borderInside = border.firstElementChild as HTMLDivElement | null;
+          if (borderInside) {
+            Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, innerStyle);
+          }
+        } else {
+          const border = document.createElement('div');
+          border.setAttribute('border', dir);
+          Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(border.style, outerStyle);
+          const borderInside = document.createElement('div');
+          Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(borderInside.style, innerStyle);
+          border.appendChild(borderInside);
+          this._shadowRoot.appendChild(border);
+          this._borderEls[dir] = border;
+        }
+      }
+
+      for (const dir of ['top', 'bottom', 'left', 'right'] as const) {
+        if (!activeDirs.has(dir) && this._borderEls[dir]) {
+          this._borderEls[dir]!.remove();
+          this._borderEls[dir] = null;
+        }
       }
     } else {
       this.removeAttribute('border');
+      for (const dir of ['top', 'bottom', 'left', 'right'] as const) {
+        if (this._borderEls[dir]) {
+          this._borderEls[dir]!.remove();
+          this._borderEls[dir] = null;
+        }
+      }
     }
   }
 
@@ -571,37 +583,37 @@ export class LayoutBoxElement extends HTMLElement {
   set borderTopWidth(value: number) {
     if (this._borderTopWidth === value) return;
     this._borderTopWidth = value;
-    this.layout();
+    this._renderBorder();
   }
 
   set borderBottomWidth(value: number) {
     if (this._borderBottomWidth === value) return;
     this._borderBottomWidth = value;
-    this.layout();
+    this._renderBorder();
   }
 
   set borderLeftWidth(value: number) {
     if (this._borderLeftWidth === value) return;
     this._borderLeftWidth = value;
-    this.layout();
+    this._renderBorder();
   }
 
   set borderRightWidth(value: number) {
     if (this._borderRightWidth === value) return;
     this._borderRightWidth = value;
-    this.layout();
+    this._renderBorder();
   }
 
   set borderStyle(value: BoxBorderStyle) {
     if (this._borderStyle === value) return;
     this._borderStyle = value;
-    this.layout();
+    this._renderBorder();
   }
 
   set borderColor(value: string | undefined) {
     if (this._borderColor === value) return;
     this._borderColor = value;
-    this.layout();
+    this._renderBorder();
   }
 
   set paddingTop(value: number) {
