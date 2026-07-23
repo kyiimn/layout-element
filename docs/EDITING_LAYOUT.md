@@ -300,6 +300,50 @@ element.editableLayout = false;
 }
 ```
 
+**타입 라벨** — 선택된 박스의 좌측상단 안쪽에 요소 종류를 나타내는 라벨이 표시된다. `<x-layout-box>`의 shadow DOM에 `.type-label` 요소로 렌더링되며, 상태별로 다음 색상으로 표시된다.
+
+```css
+.type-label {
+  position: absolute; top: 0; left: 0;
+  padding: 1px 4px;
+  color: #fff;
+  font-family: "Wanted Sans Variable";
+  font-size: 12px;
+  line-height: 1.3;
+  pointer-events: none;
+  z-index: 99999998;
+  display: none;
+  white-space: nowrap;
+}
+:host([selected]) .type-label        { display: flex; align-items: center; gap: 4px; background: rgba(255, 0, 0, 0.85); }
+:host([hovered]) .type-label         { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); }
+:host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); }
+.type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 0 2px; font-size: 11px; line-height: 1; user-select: none; opacity: 0.85; }
+.type-label .parent-btn:hover { opacity: 1; }
+```
+
+라벨은 명칭 `<span>` 과 `▲` 버튼(`<span class="parent-btn">`) 두 자식으로 구성된다. `▲` 버튼은 `pointer-events: auto`로 클릭 가능하며, 클릭 시 현재 선택을 모두 해제한 뒤(`EditManager.clearLayoutSelection(false)`) 이 박스의 부모 박스를 선택한다(`EditManager.selectLayout(parent)`) — 멀티 선택이거나 다른 박스가 선택되어 있어도 모두 해제되고 부모만 단일 선택된다. 부모가 `<x-layout-document>`인 경우(루트 박스) 부모 선택이 무시된다.
+
+라벨 텍스트는 박스의 `contentType`과 `role`에 의해 결정된다 (`LayoutBoxElement._updateLabelText()`):
+
+| `contentType` | 기본 텍스트 | 의미 |
+|---|---|---|
+| `'image'` | `이미지` | 단일 `x-layout-image`를 자식으로 가진 박스 |
+| `'paragraph'` | `텍스트` | 단일 `x-layout-paragraph`를 자식으로 가진 박스 |
+| `null` | `박스` | 자식이 없거나 2개 이상(다중 자식/중첩 박스) |
+
+- `role`이 `'none'`이 아닌 경우 `[role=XXX]` 접미사가 붙는다. 예: `텍스트[role=body]`, `박스[role=group-article]`, `이미지[role=image]`.
+- 라벨은 `layout()` 호출 시, `role` 속성 변경 시(`attributeChangedCallback`), `appendChildData`/`data` 세터로 자식이 변경될 때(=`_childObserver` → `layout()` 흐름) 자동 갱신된다.
+- 인쇄 모드에서는 `selected`/`hovered`/`reparent-target` 어느 것도 설정되지 않으므로 라벨도 표시되지 않는다.
+
+**지면 라벨** — `<x-layout-document>`에도 동일한 `.type-label` 요소가 shadow DOM(루트 div 내부)에 존재하며, `reparent-target` 속성이 설정된 경우에만 `지면`이라는 텍스트로 표시된다. reparent/insert 드래그 중 후보 컨테이너가 document일 때 주황색 라벨이 노출된다.
+
+| 상태 | 색상 | 적용 대상 | 라벨 텍스트 |
+|------|------|----------|-----------|
+| `selected` | 빨간색 (`rgba(255,0,0,0.85)`) | box | `박스`/`텍스트`/`이미지` (+`[role=XXX]`) |
+| `hovered` | 파란색 (`rgba(74,144,217,0.85)`) | box | 동일 |
+| `reparent-target` | 주황색 (`rgba(255,152,0,0.85)`) | box, document | box는 동일 / document는 `지면` |
+
 **호버 표시** (`hovered`) — `<x-layout-box>`만 해당:
 
 ```css

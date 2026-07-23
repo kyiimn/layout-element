@@ -25,6 +25,7 @@ export class LayoutDocumentElement extends HTMLElement {
 
   private _shadowRoot: ShadowRoot;
   private _root?: HTMLDivElement;
+  private _labelEl: HTMLDivElement | null = null;
 
   private _visibleGuide: boolean;
   private _isPrint: boolean;
@@ -99,6 +100,8 @@ export class LayoutDocumentElement extends HTMLElement {
 
       styleEl.sheet.insertRule(":host {}", 0);
       styleEl.sheet.insertRule(":host([reparent-target]) { box-shadow: #ff9800 0px 0px 0px 2px inset; }", 1);
+      styleEl.sheet.insertRule('.type-label { position: absolute; top: 0; left: 0; padding: 1px 4px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: none; user-select: none; cursor: default; z-index: 99999998; display: none; white-space: nowrap; }', 2);
+      styleEl.sheet.insertRule(':host([reparent-target]) .type-label { display: block; background: rgba(255, 152, 0, 0.85); }', 3);
       const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
       rule.style.setProperty('background-color', '#ffffff', 'important');
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
@@ -115,6 +118,11 @@ export class LayoutDocumentElement extends HTMLElement {
     if (!this._root) {
       this._root = document.createElement('div');
       this._shadowRoot.appendChild(this._root);
+
+      this._labelEl = document.createElement('div');
+      this._labelEl.classList.add('type-label');
+      this._labelEl.textContent = '지면';
+      this._root.appendChild(this._labelEl);
 
       this._shadowRoot.appendChild(document.createElement('slot'));
     }

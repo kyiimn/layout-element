@@ -59,6 +59,9 @@ export class LayoutBoxElement extends HTMLElement {
     top: null, bottom: null, left: null, right: null,
   };
 
+  /** 선택된 박스의 좌측상단에 표시되는 타입/role 라벨 요소. */
+  private _labelEl: HTMLDivElement | null = null;
+
   /** DOM 자식 변경(추가/제거)을 감지하여 layout + render를 자동 수행하는 MutationObserver. */
   private _childObserver: MutationObserver | null = null;
 
@@ -101,6 +104,7 @@ export class LayoutBoxElement extends HTMLElement {
     try {
       if (name === 'role') {
         this._role = newVal as BoxRole | undefined;
+        this._updateLabelText();
       } else if (name === 'group-member') {
         this._groupMember = newVal ?? undefined;
       } else if (name === 'priority') {
@@ -171,9 +175,32 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule('.resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 11);
       styleEl.sheet.insertRule('.resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 12);
       styleEl.sheet.insertRule('.resize-handle[data-handle="right"] { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 13);
+      styleEl.sheet.insertRule('.type-label { position: absolute; top: 0; left: 0; padding: 1px 4px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: none; user-select: none; cursor: default; z-index: 99999998; display: none; white-space: nowrap; }', 14);
+      styleEl.sheet.insertRule(':host([selected]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 0, 0, 0.85); }', 15);
+      styleEl.sheet.insertRule(':host([hovered]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); }', 16);
+      styleEl.sheet.insertRule(':host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); }', 17);
+      styleEl.sheet.insertRule(':host([text-focused]) .type-label { display: none; }', 18);
+      styleEl.sheet.insertRule('.type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 0 2px; font-size: 11px; line-height: 1; user-select: none; opacity: 0.85; }', 19);
+      styleEl.sheet.insertRule('.type-label .parent-btn:hover { opacity: 1; }', 20);
       this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));
+
+      this._labelEl = document.createElement('div');
+      this._labelEl.classList.add('type-label');
+      const labelSpan = document.createElement('span');
+      this._labelEl.appendChild(labelSpan);
+      const parentBtn = document.createElement('span');
+      parentBtn.classList.add('parent-btn');
+      parentBtn.textContent = '▲';
+      parentBtn.title = '상위 요소 선택';
+      this._labelEl.appendChild(parentBtn);
+      this._shadowRoot.appendChild(this._labelEl);
+      this._updateLabelText();
+      parentBtn.addEventListener('click', (e: MouseEvent) => {
+        e.stopPropagation();
+        this._selectParent();
+      });
     }
 
     this._ensureResizeHandles();
@@ -347,6 +374,7 @@ export class LayoutBoxElement extends HTMLElement {
     this._applyStyle();
     this._renderBorder();
     this._propagateInheritStyle();
+    this._updateLabelText();
   }
 
   /**
@@ -867,6 +895,50 @@ export class LayoutBoxElement extends HTMLElement {
     return this.items[0].type;
   }
 
+  /**
+   * 선택 시 좌측상단에 표시할 라벨 텍스트를 갱신한다.
+   * - 자식이 하나인 paragraph/image 박스: `텍스트` / `이미지`
+   * - 그 외: `박스`
+   * - role이 'none'이 아닐 경우 `[role=XXX]` 접미사를 붙인다.
+   * @returns 없음
+   * @example 단일 paragraph + role=body → `텍스트[role=body]`
+   * @example 자식이 여러 box → `박스[role=group-article]`
+   */
+  private _updateLabelText(): void {
+    if (!this._labelEl) return;
+
+    const contentType = this.contentType;
+    const base = contentType === 'image'
+      ? '이미지'
+      : contentType === 'paragraph'
+        ? '텍스트'
+        : '박스';
+    const role = this._role && this._role !== 'none' ? this._role : undefined;
+    const text = role ? `${base}[role=${role}]` : base;
+    const span = this._labelEl.firstElementChild as HTMLSpanElement | null;
+    if (span && span.textContent !== text) {
+      span.textContent = text;
+    }
+  }
+
+  /**
+   * 라벨의 `▲` 버튼 클릭 핸들러.
+   * 현재 선택을 모두 해제한 뒤, 이 박스의 부모 박스가 존재하면 그 부모를 선택한다.
+   * 부모가 document(루트)이거나 선택 제한에 걸리면 아무 일도 일어나지 않는다.
+   * 선택 이동 후 마우스가 여전히 이 박스 위에 있으므로 hover 상태를 복원한다.
+   * @returns 없음
+   * @example 단일 paragraph + role=body → `텍스트[role=body]`
+   * @example 자식이 여러 box → `박스[role=group-article]`
+   */
+  private _selectParent(): void {
+    const manager = EditManager.getInstance();
+    const parent = this.parentElement;
+    if (!parent || !(parent instanceof LayoutBoxElement)) return;
+    manager.clearLayoutSelection(false);
+    manager.selectLayout(parent);
+    this._onLayoutMouseEnter();
+  }
+
   get editableLayout() { return this._editableLayout; }
 
   set editableLayout(value: boolean) {
@@ -921,6 +993,8 @@ export class LayoutBoxElement extends HTMLElement {
     if (!root) return;
     const hit = root.elementFromPoint(clientX, clientY);
     if (!hit) return;
+    // 라벨/버튼은 box 영역의 일부이므로 hit 대상에서 제외한다.
+    if (hit.closest('.type-label')) return;
     let el: Element | null = hit;
     while (el) {
       if (el instanceof LayoutBoxElement && !el.hasAttribute('selected')) {
