@@ -312,7 +312,7 @@ element.editableLayout = false;
 ```css
 .type-label {
   position: absolute; top: 0; left: 0;
-  padding: 1px 4px;
+  padding: 0px 0px 0px 6px;
   color: #fff;
   font-family: "Wanted Sans Variable";
   font-size: 12px;
@@ -329,7 +329,7 @@ element.editableLayout = false;
 :host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); cursor: grab; }
 :host([editable-layout][selected]) .type-label:active, :host([editable-layout][hovered]) .type-label:active { cursor: grabbing; }
 :host([text-focused]) .type-label    { display: none; }
-.type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 0 2px; font-size: 11px; line-height: 1; user-select: none; opacity: 0.85; }
+.type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; }
 .type-label .parent-btn:hover { opacity: 1; }
 ```
 

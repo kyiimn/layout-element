@@ -1388,6 +1388,12 @@ export class LayoutEditController {
         const unionRect = this._aabbUnion(startRect, currentRect);
         for (const sibling of box.parentElement.items) {
           if (sibling === box) continue;
+          // paragraph/image는 box가 아니므로 AABB 비교가 불가능하다.
+          // 텍스트 회피의 실제 대상이므로 무조건 수집한다.
+          if (!(sibling instanceof LayoutBoxElement)) {
+            this._collectParagraphs(sibling, affected);
+            continue;
+          }
           const siblingRect = this._getRectInParent(sibling);
           if (siblingRect && this._aabbIntersects(unionRect, siblingRect)) {
             this._collectParagraphs(sibling, affected);

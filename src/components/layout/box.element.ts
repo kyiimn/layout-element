@@ -175,13 +175,13 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule('.resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }', 11);
       styleEl.sheet.insertRule('.resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 12);
       styleEl.sheet.insertRule('.resize-handle[data-handle="right"] { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }', 13);
-      styleEl.sheet.insertRule('.type-label { position: absolute; top: 0; left: 0; padding: 1px 4px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: auto; user-select: none; cursor: grab; z-index: 99999998; display: none; white-space: nowrap; }', 14);
+      styleEl.sheet.insertRule('.type-label { position: absolute; top: 0; left: 0; padding: 0px 0px 0px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: auto; user-select: none; cursor: grab; z-index: 99999998; display: none; white-space: nowrap; }', 14);
       styleEl.sheet.insertRule(':host([selected]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 0, 0, 0.85); cursor: grab; }', 15);
       styleEl.sheet.insertRule(':host([hovered]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); cursor: grab; }', 16);
       styleEl.sheet.insertRule(':host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); cursor: grab; }', 17);
       styleEl.sheet.insertRule(':host([editable-layout][selected]) .type-label:active, :host([editable-layout][hovered]) .type-label:active { cursor: grabbing; }', 18);
       styleEl.sheet.insertRule(':host([text-focused]) .type-label { display: none; }', 19);
-      styleEl.sheet.insertRule('.type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 0 2px; font-size: 11px; line-height: 1; user-select: none; opacity: 0.85; }', 20);
+      styleEl.sheet.insertRule('.type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; }', 20);
       styleEl.sheet.insertRule('.type-label .parent-btn:hover { opacity: 1; }', 21);
       this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
@@ -1182,6 +1182,12 @@ export class LayoutBoxElement extends HTMLElement {
       }
       for (const sibling of this.parentElement.items) {
         if (sibling === this) continue;
+        // paragraph/image는 box가 아니므로 AABB 비교가 불가능하다.
+        // 텍스트 회피의 실제 대상이므로 무조건 수집한다.
+        if (!(sibling instanceof LayoutBoxElement)) {
+          this._collectParagraphs(sibling, affected);
+          continue;
+        }
         const siblingRect = this._getSiblingRectInParent(sibling);
         if (siblingRect && this._aabbIntersectsForCollection(myRect, siblingRect)) {
           this._collectParagraphs(sibling, affected);
