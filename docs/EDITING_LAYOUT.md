@@ -274,13 +274,20 @@ element.editableLayout = false;
 
 | 입력 | 동작 |
 |------|------|
-| **클릭** | 기존 선택을 모두 해제하고 클릭한 요소만 선택 |
-| **Ctrl+클릭** (또는 **Cmd+클릭**) | 기존 선택에 추가. 이미 선택된 요소를 다시 클릭하면 선택 해제(토글) |
+| **단순 클릭** (선택되지 않은 box) | 그것만 단일 선택. 기존 선택 모두 해제. `mousedown` 시점에 `_startDrag`에서 이미 `selectLayout(box)`을 호출하여 단일 선택으로 전환. `mouseup` 단순 클릭 분기에서는 `wasSelectedOnMouseDown`이 false이므로 추가 작업 없음 (이벤트 중복 방지) |
+| **단순 클릭** (이미 선택된 단일 box) | 변화 없음 (이미 단일 선택). `mousedown`에서는 selectLayout을 호출하지 않음. `mouseup` 단순 클릭 분기에서 `isInMultiSelection`이 false이고 Ctrl이 없으므로 selectLayout 호출 생략 |
+| **단순 클릭** (다중 선택 그룹의 일부 box) | 그것만 단일 선택으로 축소. 나머지 다중 선택 해제. `mousedown`에서는 selectLayout을 호출하지 않으며 (다중 선택 그룹 유지), `mouseup` 단순 클릭 분기에서 `wasSelectedOnMouseDown === true` && `isInMultiSelection === true`이므로 `selectLayout(box)`를 호출하여 축소 |
+| **Ctrl+클릭** (선택되지 않은 box) | 그것이 다중 선택에 추가. `mousedown` 시점에 `_startDrag`에서 `_setMultiSelect(true)` → `selectLayout(box)`을 호출하여 추가. `mouseup`에서는 추가 작업 없음. (`wasSelectedOnMouseDown === false`) |
+| **Ctrl+클릭** (이미 선택된 단일 box) | 그것만 선택 해제 (토글). `mousedown`에서는 selectLayout 호출 안 함. `mouseup` 단순 클릭 분기에서 `isCtrlClick === true`이므로 multi-select 모드로 `selectLayout(box)` 호출하여 토글 |
+| **Ctrl+클릭** (이미 선택된 box, 다중 선택 그룹의 일부) | 그것만 선택 해제 (토글). `mousedown`에서는 selectLayout 호출 안 함. `mouseup` 단순 클릭 분기에서 `isCtrlClick === true`이므로 multi-select 모드로 `selectLayout(box)` 호출하여 그것만 제거 |
+| **mousedown** (선택되지 않은 box) | `_startDrag`에서 즉시 `selectLayout(box)`을 호출. Ctrl/Meta가 눌려있으면 multi-select 모드 (다중 선택에 추가), 아니면 single-select 모드 (단일 선택으로 전환 + 기존 선택 해제). 이후 `_startLayoutDrag`가 `getTopLevelDragTargets`로 필터링할 때 이 box만 drag 대상이 됨 |
+| **mousedown** (이미 선택된 box) | selectLayout을 호출하지 않음. 다중 선택 그룹의 일부일 수 있으므로 선택 유지. "다중 선택 그룹의 자식 box를 끌어도 조상만 이동" 규칙 보존 |
+| **mousedown + drag** (미선택 box) | mousedown에서 그 box만 단일 선택(또는 다중 추가)으로 전환됨. drag 시 그 box만 이동. 기존 선택은 모두 해제됨(Ctrl 없이) 또는 유지됨(Ctrl+드래그). layoutSelectionChange 1회, layoutMove 1회 발생 |
+| **mousedown + drag** (이미 선택된 box) | mousedown에서 선택 변경 없음. drag 시 `getTopLevelDragTargets()`로 필터된 최상위 box만 이동. layoutMove 1회 발생, layoutSelectionChange 발생 안 함 |
 | **빈 영역 클릭** (문서 내부, box가 아닌 영역) | 모든 선택 해제 (`clearLayoutSelection(false)`), 포커스 박스도 해제, 텍스트 포커스도 blur |
 | **문서 외부 클릭** (툴바 등) | 선택 유지, 포커스 유지 |
 | **클릭** (이벤트 전파) | `stopPropagation()`으로 부모 요소의 클릭 이벤트 차단. 중첩된 box를 클릭해도 상위 box가 함께 선택되지 않음 |
 | **하위 요소 클릭** | 이벤트가 하위 레이아웃 요소(box)에서 발생한 경우, 상위 요소의 `LayoutEditController._onClick`/`LayoutEditController._onMouseDown`은 `_isEventFromDescendantLayout()` 검사로 해당 이벤트를 무시한다. 이를 통해 상위 요소가 선택된 상태에서도 하위 요소를 클릭하여 선택할 수 있다 |
-| **선택되지 않은 요소 mousedown** | 선택되지 않은 요소를 mousedown하면 기존 선택을 해제하고 해당 요소를 선택한 후 드래그를 시작한다. `BoxDragState.selectedOnMouseDown` 플래그로 click에서 중복 선택을 방지한다 |
 
 #### 드래그 이동 동작
 
@@ -310,19 +317,27 @@ element.editableLayout = false;
   font-family: "Wanted Sans Variable";
   font-size: 12px;
   line-height: 1.3;
-  pointer-events: none;
+  pointer-events: auto;
+  user-select: none;
+  cursor: grab;
   z-index: 99999998;
   display: none;
   white-space: nowrap;
 }
-:host([selected]) .type-label        { display: flex; align-items: center; gap: 4px; background: rgba(255, 0, 0, 0.85); }
-:host([hovered]) .type-label         { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); }
-:host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); }
+:host([selected]) .type-label        { display: flex; align-items: center; gap: 4px; background: rgba(255, 0, 0, 0.85); cursor: grab; }
+:host([hovered]) .type-label         { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); cursor: grab; }
+:host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); cursor: grab; }
+:host([editable-layout][selected]) .type-label:active, :host([editable-layout][hovered]) .type-label:active { cursor: grabbing; }
+:host([text-focused]) .type-label    { display: none; }
 .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 0 2px; font-size: 11px; line-height: 1; user-select: none; opacity: 0.85; }
 .type-label .parent-btn:hover { opacity: 1; }
 ```
 
-라벨은 명칭 `<span>` 과 `▲` 버튼(`<span class="parent-btn">`) 두 자식으로 구성된다. `▲` 버튼은 `pointer-events: auto`로 클릭 가능하며, 클릭 시 현재 선택을 모두 해제한 뒤(`EditManager.clearLayoutSelection(false)`) 이 박스의 부모 박스를 선택한다(`EditManager.selectLayout(parent)`) — 멀티 선택이거나 다른 박스가 선택되어 있어도 모두 해제되고 부모만 단일 선택된다. 부모가 `<x-layout-document>`인 경우(루트 박스) 부모 선택이 무시된다.
+라벨은 명칭 `<span>` 과 `▲` 버튼(`<span class="parent-btn">`) 두 자식으로 구성된다.
+
+**라벨 드래그 이동** — 라벨은 `pointer-events: auto`이므로 `mousedown`을 받는다. `LayoutEditController`는 document 레벨의 `mousedown` capture phase 리스너에서 `composedPath()`로 shadow DOM 내부의 box까지 추적하므로, 라벨에서 mousedown이 발생해도 동일한 흐름으로 box 드래그가 시작된다. 즉 **레이아웃 편집 모드에서 박스의 라벨을 잡고 끌어 이동**할 수 있다. 비편집 모드에서는 라벨이 클릭/드래그 이벤트를 받지만 `_isBoxEditable()`이 `false`라 드래그가 시작되지 않고, `LayoutSelectionController._onClick`만 거쳐 단순 클릭으로 선택된다. 커서는 `cursor: grab` → 드래그 중 `grabbing`으로 전환된다.
+
+`▲` 버튼(`<span class="parent-btn">`)은 `pointer-events: auto`로 클릭 가능하며, 라벨의 드래그 동작과 별개로 동작한다. `LayoutEditController._onMouseDown`은 mousedown 시점에 `composedPath()`로 `parent-btn`을 감지하여 `_startDrag`로의 진입을 건너뛴다 (line 363 가드). 이는 mousedown의 `preventDefault()`가 click 이벤트 발생을 막을 수 있고, mouseup의 단순 클릭 분기에서 `selectLayout`이 호출되어 부모 선택을 덮어쓸 위험을 방지하기 위함이다. 결과적으로 `parent-btn`의 click 핸들러(`stopPropagation` → `_selectParent()`)가 정상 실행되어, 현재 선택을 모두 해제하고(`EditManager.clearLayoutSelection(false)`) 이 박스의 부모 박스를 선택한다(`EditManager.selectLayout(parent)`) — 멀티 선택이거나 다른 박스가 선택되어 있어도 모두 해제되고 부모만 단일 선택된다. 부모가 `<x-layout-document>`인 경우(루트 박스) 부모 선택이 무시된다. `LayoutSelectionController._onClick`도 `composedPath()`로 `parent-btn`을 감지하여 자체 selectLayout 호출을 건너뛴다.
 
 라벨 텍스트는 박스의 `contentType`과 `role`에 의해 결정된다 (`LayoutBoxElement._updateLabelText()`):
 
@@ -488,7 +503,7 @@ private _resizeStates = new Map<LayoutBoxElement, BoxResizeState>();
 
 | 상태 | 필드 | 설명 |
 |------|------|------|
-| 드래그 | `BoxDragState` | `isDragging`, `dragMoved`, `selectedOnMouseDown`, `startMouseX/Y`, `startLeft/Top`, `originalLeft/Top/Width/Height/Position`, `lastClientX/Y`, `rafId`, `affectedParagraphs` |
+| 드래그 | `BoxDragState` | `isDragging`, `dragMoved`, `wasSelectedOnMouseDown`, `startMouseX/Y`, `startLeft/Top`, `originalLeft/Top/Width/Height/Position`, `lastClientX/Y`, `rafId`, `affectedParagraphs`, `reparentOutside` |
 | 리사이즈 | `BoxResizeState` | `isResizing`, `handle`, `moved`, `startMouseX/Y`, `startLeft/Top/Width/Height`, `lastClientX/Y`, `rafId`, `affectedParagraphs` |
 
 #### 삽입 모드 위임
@@ -841,22 +856,45 @@ LayoutEditController._onMouseDown(event)
     ├── button !== 0? → return
     ├── _isEventFromResizeHandle(event, box)? → _startResize(event, box); return
     ├── _isEventFromDescendantLayout(event, box)? → return
+    ├── _isEventFromParentBtn(event)? → stopPropagation(); return
+    │   (mousedown을 무시하여 box의 click 핸들러(_selectParent)가 처리하도록 한다)
     └── _startDrag(event, box)
-        ├── !box.hasAttribute('selected')?
-        │   ├── _setMultiSelect(event.ctrlKey || event.metaKey)
-        │   ├── selectLayout(box)          ← 기존 선택 해제 + 이 요소 선택
-        │   ├── _setMultiSelect(false)
-        │   └── BoxDragState.selectedOnMouseDown = true
+        ├── box가 미선택이면? → EditManager.selectLayout(box)
+        │   ├── Ctrl/Meta 눌림? → _setMultiSelect(true) (다중 선택에 추가)
+        │   └── 일반 클릭?     → _setMultiSelect(false) (단일 선택으로 전환)
+        │   (이후 _startLayoutDrag가 그 box만 drag 대상으로 설정)
+        ├── state.wasSelectedOnMouseDown = box.hasAttribute('selected') (캡처)
         ├── event.preventDefault()
         ├── event.stopPropagation()
-        └── ... (드래그 상태 초기화)
+        └── ... (드래그 상태 초기화; 이미 선택된 box는 선택 유지)
 ```
 
-### 3.1.1 mousedown에서의 자동 선택
+### 3.1.1 mousedown과 mouseup에서의 선택 갱신
 
-선택되지 않은 요소를 mousedown하면 기존 선택을 해제하고 해당 요소를 선택한 후 드래그를 시작한다.
-이를 통해 사용자가 먼저 클릭하여 선택한 후 드래그하는 두 단계 동작 없이,
-한 번의 드래그 동작으로 요소를 선택하고 이동할 수 있다.
+mousedown 시점에는 box의 선택 상태에 따라 다음과 같이 분기된다:
+
+- **미선택 box** (`!box.hasAttribute('selected')`): 즉시 `EditManager.selectLayout(box)`을 호출하여
+  그 box만 단일 선택으로 전환한다. 이후 `_startLayoutDrag()`가 `getTopLevelDragTargets()`로
+  필터링할 때 이 box만 drag 대상이 되어, 기존 선택된 box들은 그대로 유지된다.
+  ("선택 안 된 요소를 끌면 그것만 선택되고 기존 선택은 해제되고 그것만 이동")
+  단, 이 분기는 drag 완료 시점의 mouseup 동작에 영향을 주지 않는다 (box가 selected 상태로
+  drag를 시작하므로 mouseup 단순 클릭 분기에서 중복 selectLayout 호출을 막는다).
+- **이미 선택된 box** (`box.hasAttribute('selected')`): 선택 상태를 유지한다. 다중 선택
+  그룹의 일부일 수 있으므로 drag 시 top-level 필터링이 적용된다.
+
+mouseup 시점에는 다음 중 한 가지로 처리된다:
+
+- **단순 클릭** (`!state.dragMoved`): `EditManager.selectLayout(box)`을 호출하여 선택 갱신.
+  - 미선택 box였지만 mousedown에서 이미 selectLayout이 호출된 경우 (box.selected === true) →
+    selectLayout을 다시 호출하지 않음 (이벤트 중복 방지)
+  - 이미 선택된 box + Ctrl/Meta 클릭 → 그것만 선택 해제 (토글)
+  - 이미 선택된 box + 다중 선택 그룹의 일부 + 일반 클릭 → 그것만 단일로 축소
+  - 이미 선택된 box + 단일 선택 + 일반 클릭 → 변화 없음 (호출 자체를 생략)
+  그 후 `_suppressLayoutClick()`으로 후속 click 이벤트를 차단하여 `LayoutSelectionController._onClick`과의 중복 호출을 막는다.
+- **드래그** (`state.dragMoved === true`): 선택 상태는 mousedown에서 결정된 상태를 유지.
+  - 미선택 box였다면 mousedown에서 그 box만 단일 선택으로 전환됨
+  - 이미 선택된 box였다면 기존 선택(다중 선택 포함) 유지
+  `getTopLevelDragTargets()`로 필터된 최상위 box만 이동한다.
 
 ```
 LayoutEditController._onMouseDown(event)
@@ -864,21 +902,32 @@ LayoutEditController._onMouseDown(event)
     ├── button !== 0? → return
     ├── _isEventFromResizeHandle(event, box)? → _startResize(event, box); return
     ├── _isEventFromDescendantLayout(event, box)? → return (하위 요소가 처리)
-    ├── !box.hasAttribute('selected')? (선택되지 않은 요소)
-    │   ├── EditManager.selectLayout(box)   ← 기존 선택 해제 + 이 요소 선택
-    │   └── BoxDragState.selectedOnMouseDown = true  ← click에서 중복 선택 방지 플래그
     ├── event.preventDefault()
     ├── event.stopPropagation()
-    ├── _startDrag(event, box)              ← 드래그 상태 초기화
-    │   ├── BoxDragState.isDragging = true
-    │   ├── BoxDragState.dragMoved = false
-    │   └── EditManager._startLayoutDrag()
-    └── ...
-```
+    └── _startDrag(event, box)              ← 드래그 상태 초기화
+        ├── BoxDragState.isDragging = true
+        ├── BoxDragState.dragMoved = false
+        └── EditManager._startLayoutDrag()  ← getTopLevelDragTargets로 drag 대상 필터
 
-`BoxDragState.selectedOnMouseDown` 플래그:
-- `true`: mousedown에서 선택 처리를 완료했음. 이후 click 이벤트에서 `selectLayout`을 다시 호출하지 않음.
-- `false`: mousedown에서 선택하지 않았음(이미 선택된 요소). click에서 정상적으로 선택 토글 처리.
+LayoutEditController._onMouseUp(event)
+    ├── state.dragMoved === false? → 단순 클릭
+    │   ├── state.wasSelectedOnMouseDown === true? (mousedown에서 selectLayout 미호출)
+    │   │   ├── isCtrlClick || isInMultiSelection? → EditManager.selectLayout(box)
+    │   │   │   (다중 선택 축소 또는 토글 해제)
+    │   │   └── otherwise? → selectLayout 호출 생략 (선택 유지, 이벤트 중복 방지)
+    │   └── state.wasSelectedOnMouseDown === false? (mousedown에서 selectLayout 호출됨)
+    │       → selectLayout 호출 생략 (이미 mousedown에서 처리됨)
+    │   (참고: _startDrag는 미선택 box에 대해 mousedown 시점에 selectLayout을 호출하여
+    │    단일 선택 또는 다중 추가한다. 따라서 mousedown 직후 box.selected === true가 되어,
+    │    위 "wasSelectedOnMouseDown === false" 분기로 진입한다.)
+    │   ├── EditManager._suppressLayoutClick()  ← 후속 click 차단
+    │   └── EditManager._endLayoutDrag()
+    └── state.dragMoved === true? → 드래그
+        ├── EditManager._suppressLayoutClick()
+        ├── _computeNewPosition() / _tryReparent()로 위치 확정
+        ├── EditManager._dispatchLayoutMove()  ← layoutMove 이벤트
+        └── EditManager._endLayoutDrag()
+```
 
 ### 3.1.2 하위 요소 클릭 시 이벤트 처리
 
@@ -889,20 +938,23 @@ LayoutEditController._onMouseDown(event)
     │
     ├── mousedown 이벤트 (document capture)
     │   ├── LayoutEditController._onMouseDown
-    │   │   └── _findSelectableBoxFromEvent → 가장 안쪽 선택 가능 box 반환
+    │   │   └── _findEditableBoxFromEvent → 가장 안쪽 편집 가능 box 반환
     │   └── _isEventFromDescendantLayout(event, 상위 box) === true → return (상위는 무시)
     │
-    └── click 이벤트 (document capture)
-        └── LayoutEditController._onClick
-            ├── _findSelectableBoxFromEvent → 하위 box
-            ├── event.stopPropagation()
-            ├── selectedOnMouseDown === true → return (중복 선택 방지)
-            └── (selectLayout 생략, 이미 mousedown에서 선택 완료)
+    ├── mouseup 이벤트 (document capture)
+    │   └── LayoutEditController._onMouseUp
+    │       ├── state.dragMoved === false (단순 클릭)
+    │       │   └── EditManager.selectLayout(하위 box) ← 선택 갱신
+    │       └── _suppressLayoutClick() ← click 차단
+    │
+    └── click 이벤트 (window capture에서 차단됨, document capture 도달 안 함)
 ```
 
-`LayoutEditController`의 `_onMouseDown`과 `_onClick`은 `_isEventFromDescendantLayout()` 검사로
+`LayoutEditController`의 `_onMouseDown`과 `_onMouseUp`은 `_isEventFromDescendantLayout()` 검사로
 하위 레이아웃 요소에서 온 이벤트를 무시한다. 이를 통해 상위 요소가 선택된 상태에서도
-하위 요소를 클릭하여 선택을 전환할 수 있다.
+하위 요소를 클릭하여 선택을 전환할 수 있다. 단순 클릭 시의 click 이벤트는
+`_suppressLayoutClick()`이 window capture phase에서 `stopPropagation + preventDefault`로 차단하므로
+`LayoutSelectionController._onClick`까지 도달하지 않는다.
 
 ### 3.2 단일 선택 vs 다중 선택
 
@@ -962,10 +1014,16 @@ LayoutEditController._onMouseDown(event)
 │     ├── button !== 0? → 무시                                        │
 │     ├── _isEventFromResizeHandle(event, box)? → _startResize(); return│
 │     ├── _isEventFromDescendantLayout(event, box)? → return            │
-│     ├── !box.hasAttribute('selected')?                              │
-│     │   ├── EditManager.selectLayout(box)                            │
-│     │   └── BoxDragState.selectedOnMouseDown = true                  │
+│     ├── _isEventFromParentBtn(event)? → stopPropagation(); return    │
+│     │   (mousedown을 무시하여 box의 click 핸들러(_selectParent)가     │
+│     │    부모 박스 선택을 처리하도록 한다)                            │
 │     ├── event.preventDefault()                                       │
+│     ├── event.stopPropagation()                                       │
+│     ├── 미선택 box? → EditManager.selectLayout(box)                  │
+│     │   ├── Ctrl/Meta? → _setMultiSelect(true) (다중 선택에 추가)    │
+│     │   └── 일반?    → _setMultiSelect(false) (단일 선택으로 전환)   │
+│     ├── BoxDragState.wasSelectedOnMouseDown = box.hasAttribute('selected')│
+│     │   (mouseup 단순 클릭 분기에서 selectLayout 중복 호출 방지)      │
 │     ├── BoxDragState.isDragging = true                               │
 │     ├── BoxDragState.dragMoved = false                               │
 │     ├── BoxDragState.startMouseX/Y = clientX/Y                       │
@@ -977,6 +1035,8 @@ LayoutEditController._onMouseDown(event)
 │     │   └── 각 이동 대상의 시작 위치(left/top) 기록                   │
 │     ├── BoxDragState.affectedParagraphs = _collectAffectedParagraphs(box)
 │     └── document에 mousemove, mouseup, keydown 리스너 등록            │
+│     (이미 선택된 box는 선택 변경 없음. 미선택 box는 mousedown 시점에   │
+│      단일 선택 또는 다중 추가됨)                                     │
 │                                                                     │
 │  ② mousemove (드래그 중)                                              │
 │     │                                                               │
@@ -1009,7 +1069,19 @@ LayoutEditController._onMouseDown(event)
 │     ├── BoxDragState.isDragging = false                              │
 │     ├── _flushRerenderAffectedParagraphs(box, state)                 │
 │     ├── box.style.cursor = 'grab' (편집 가능 시)                     │
-│     ├── BoxDragState.dragMoved === false? → EditManager._endLayoutDrag(), return│
+│     ├── BoxDragState.dragMoved === false? → 단순 클릭 분기            │
+│     │   ├── state.wasSelectedOnMouseDown === true?                   │
+│     │   │   ├── isCtrlClick || isInMultiSelection?                   │
+│     │   │   │   ├── _setMultiSelect(isCtrlClick)                     │
+│     │   │   │   ├── EditManager.selectLayout(box)                    │
+│     │   │   │   └── _setMultiSelect(false)                            │
+│     │   │   └── otherwise? → selectLayout 호출 생략                    │
+│     │   └── state.wasSelectedOnMouseDown === false?                 │
+│     │       → selectLayout 호출 생략 (이미 mousedown에서 처리됨)      │
+│     ├── EditManager._suppressLayoutClick()                           │
+│     ├── EditManager._endLayoutDrag()                                 │
+│     ├── return (단순 클릭이면 아래 drag 분기 생략)                    │
+│     ├── _suppressLayoutClick()                                       │
 │     ├── 최종 위치 계산 → box.left/top 설정                           │
 │     ├── EditManager._dispatchLayoutMove(box, ...)                    │
 │     ├── for each other drag target:                                  │
@@ -1858,7 +1930,15 @@ private _resizeStates = new Map<LayoutBoxElement, BoxResizeState>();
 interface BoxDragState {
   isDragging: boolean;
   dragMoved: boolean;
-  selectedOnMouseDown: boolean;
+  /**
+   * mousedown 시점에 box가 이미 선택되어 있었는지 여부.
+   * mouseup 단순 클릭 분기에서 selectLayout 중복 호출을 막기 위한 플래그.
+   * - `true`: mousedown에서 selectLayout을 호출하지 않았으므로 mouseup에서
+   *   토글/축소 동작을 처리해야 한다.
+   * - `false`: mousedown에서 selectLayout을 호출하여 box를 선택했으므로
+   *   mouseup에서 다시 호출하면 안 된다 (이벤트 중복).
+   */
+  wasSelectedOnMouseDown: boolean;
   startMouseX: number;
   startMouseY: number;
   startLeft: number;
@@ -1872,6 +1952,12 @@ interface BoxDragState {
   lastClientY: number;
   rafId: number | null;
   affectedParagraphs: Set<LayoutParagraphElement> | null;
+  reparentOutside: {
+    mouseStartX: number;
+    mouseStartY: number;
+    left: number;
+    top: number;
+  } | null;
 }
 
 interface BoxResizeState {
