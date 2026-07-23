@@ -16,6 +16,13 @@ export class InsertController {
   private _currentClientY = 0;
   private _previewEl: HTMLDivElement | null = null;
   private _startContainer: LayoutDocumentElement | LayoutBoxElement | null = null;
+  /**
+   * 삽입 드래그 중 현재 하이라이트된 컨테이너.
+   * `null`이면 하이라이트 없음. 드래그 영역이 다른 컨테이너를 가리키면 이전 하이라이트를
+   * 제거하고 새 컨테이너에 `reparent-target` 속성을 설정한다.
+   * 레이아웃 편집 모드의 reparent 하이라이트와 동일한 속성/CSS를 재사용한다.
+   */
+  private _insertHighlightTarget: LayoutDocumentElement | LayoutBoxElement | null = null;
   private _boundStartDrag: (event: MouseEvent) => void;
   private _boundOnMouseMove: (event: MouseEvent) => void;
   private _boundOnMouseUp: (event: MouseEvent) => void;
@@ -95,6 +102,7 @@ export class InsertController {
     this._currentClientX = event.clientX;
     this._currentClientY = event.clientY;
     this._updatePreview(this._startClientX, this._startClientY, this._currentClientX, this._currentClientY);
+    this._updateInsertHighlight();
   }
 
   private _onMouseUp(event: MouseEvent): void {
@@ -141,7 +149,7 @@ export class InsertController {
     const endY = Math.max(this._startClientY, endClientY);
 
     // 드래그 영역을 완전히 포함하는 가장 안쪽 컨테이너를 찾는다
-    const container = this._findTargetContainer(startX, startY, endX, endY);
+    const container = this._resolveInsertContainer(startX, startY, endX, endY);
     if (!container) {
       this._cleanup();
       return;
@@ -214,6 +222,31 @@ export class InsertController {
   }
 
   /**
+   * 현재 드래그 영역에 대해 삽입될 컨테이너를 결정한다.
+   *
+   * `_finishInsert`(드랍)와 `_updateInsertHighlight`(드래그 중 하이라이트)가
+   * 공유하는 단일 진실 공급원(single source of truth). 이 메서드를 통해
+   * 하이라이트가 가리키는 컨테이너와 실제 삽입되는 컨테이너가 항상 일치한다.
+   *
+   * 내부적으로 `_findTargetContainer`를 호출하며, 후보가 없으면 `null`을
+   * 반환하여 호출자가 early return 하도록 한다.
+   *
+   * @param startX - 드래그 영역 왼쪽 화면 x좌표 (px)
+   * @param startY - 드래그 영역 위쪽 화면 y좌표 (px)
+   * @param endX - 드래그 영역 오른쪽 화면 x좌표 (px)
+   * @param endY - 드래그 영역 아래쪽 화면 y좌표 (px)
+   * @returns 삽입 대상 컨테이너. 후보가 없으면 `null`.
+   */
+  private _resolveInsertContainer(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+  ): LayoutDocumentElement | LayoutBoxElement | null {
+    return this._findTargetContainer(startX, startY, endX, endY);
+  }
+
+  /**
    * 드래그 영역을 완전히 포함하는 가장 안쪽 유효 컨테이너를 찾는다.
    *
    * 드래그 사각형의 네 꼭짓점이 모두 포함되는 가장 깊이 중첩된 컨테이너를 반환한다.
@@ -234,21 +267,21 @@ export class InsertController {
       const centerX = (startX + endX) / 2;
       const centerY = (startY + endY) / 2;
 
+      // elementsFromPoint는 가장 안쪽 요소부터 바깥쪽 순으로 반환한다.
+      // 안쪽 box가 paragraph/image 자식을 가지면 삽입 불가능하므로 거르고,
+      // 더 바깥의 box-only 컨테이너를 찾을 때까지 순회한다.
       const centerElements = document.elementsFromPoint(centerX, centerY);
-      let centerBox: LayoutBoxElement | null = null;
       for (const el of centerElements) {
         if (el instanceof LayoutBoxElement) {
-          centerBox = el;
-          break;
+          if (el.lock) continue;
+          const hasNonBoxChild = el.items.some(item => item.type !== 'box');
+          if (hasNonBoxChild) continue;
+          return el;
         }
-      }
-      if (centerBox) {
-        if (!centerBox.lock) {
-          const items = centerBox.items;
-          const hasNonBoxChild = items.some(item => item.type !== 'box');
-          if (!hasNonBoxChild) {
-            return centerBox;
-          }
+        if (el instanceof LayoutDocumentElement) {
+          // document보다 먼저 유효한 box가 나오면 그 box를 쓴다.
+          // document가 먼저 나오면(드래그 영역 중심이 box 밖) document로 폴백.
+          break;
         }
       }
     }
@@ -286,7 +319,14 @@ export class InsertController {
     // 기하학적 rect containment로 후보를 보충한다.
     // _document 내의 모든 x-layout-box를 순회하며 드래그 영역을 완전히 포함하는
     // 가장 안쪽 박스를 찾는다.
-    if (fullyHit.length === 0 || !fullyHit.some(el => el instanceof LayoutBoxElement)) {
+    //
+    // fullyHit에 box가 있더라도, 그 box들이 모두 비-box 자식(paragraph/image)을
+    // 가져서 삽입 불가능하다면 폴백을 실행해야 한다. 그렇지 않으면 안쪽 box가
+    // 거절된 후 부모 box-only 컨테이너를 찾지 못하고 document로 폴백한다.
+    const hasValidBoxCandidate = fullyHit.some(
+      el => el instanceof LayoutBoxElement && !el.lock && !el.items.some(i => i.type !== 'box'),
+    );
+    if (!hasValidBoxCandidate) {
       const allBoxes = this._document.querySelectorAll<LayoutBoxElement>('x-layout-box');
       for (const box of allBoxes) {
         if (candidates.has(box)) continue; // 이미 hit test에서 처리됨
@@ -571,10 +611,61 @@ export class InsertController {
     }
   }
 
+  /**
+   * 삽입 드래그 중 커서 영역이 들어갈 수 있는 컨테이너에 하이라이트를 토글한다.
+   *
+   * 드래그 영역의 네 꼭짓점을 기반으로 `_findTargetContainer`와 동일한 알고리즘으로
+   * 대상 컨테이너를 찾는다. 이전 하이라이트 대상과 새 대상이 다르면 이전
+   * `reparent-target` 속성을 제거하고 새 대상에 설정한다. 레이아웃 편집 모드의
+   * reparent 하이라이트와 동일한 속성/CSS를 재사용하여 일관된 시각적 피드백을 제공한다.
+   *
+   * @example
+   * // 드래그 중 mousemove 마다 호출되어 후보 컨테이너를 주황색 테두리로 표시
+   * controller._onMouseMove(event);  // → _updateInsertHighlight() 내부 호출
+   */
+  private _updateInsertHighlight(): void {
+    if (!this._isDragging) return;
+
+    const startX = Math.min(this._startClientX, this._currentClientX);
+    const startY = Math.min(this._startClientY, this._currentClientY);
+    const endX = Math.max(this._startClientX, this._currentClientX);
+    const endY = Math.max(this._startClientY, this._currentClientY);
+
+    // 드래그 임계값 미만이면 하이라이트를 갱신하지 않는다 (미리보기와 동일)
+    if (endX - startX <= 1 && endY - startY <= 1) {
+      this._clearInsertHighlight();
+      return;
+    }
+
+    const target = this._resolveInsertContainer(startX, startY, endX, endY);
+
+    if (this._insertHighlightTarget === target) return;
+
+    if (this._insertHighlightTarget) {
+      this._insertHighlightTarget.removeAttribute('reparent-target');
+    }
+    if (target) {
+      target.setAttribute('reparent-target', '');
+    }
+    this._insertHighlightTarget = target;
+  }
+
+  /**
+   * 삽입 하이라이트를 제거한다.
+   * 드래그 종료(mouseup/ESC) 및 `_cleanup` 시 호출된다.
+   */
+  private _clearInsertHighlight(): void {
+    if (this._insertHighlightTarget) {
+      this._insertHighlightTarget.removeAttribute('reparent-target');
+      this._insertHighlightTarget = null;
+    }
+  }
+
   /** 이벤트 리스너와 미리보기를 정리한다. */
   private _cleanup(): void {
     this._isDragging = false;
     this._startContainer = null;
+    this._clearInsertHighlight();
     this._removePreview();
     document.removeEventListener('mousemove', this._boundOnMouseMove);
     document.removeEventListener('mouseup', this._boundOnMouseUp);
