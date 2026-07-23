@@ -2039,19 +2039,35 @@ mouseup
 
 ### 10.6 성능: 중첩된 하위 요소를 가진 박스의 드래그/리사이즈
 
-드래그나 리사이즈 중 **박스가 움직이거나 크기가 바뀔 때마다** 영향받는 단락들을 다시 렌더링한다. `LayoutEditController`는 `_startDrag()`/`_startResize()`에서 `_collectAffectedParagraphs(box)`로 영향받는 단락 집합을 수집하고, drag/resize 종료 시 `_flushRerenderAffectedParagraphs()`로 한 번에 다시 렌더링한다. 이 메서드는 다음 작업을 수행한다:
+드래그나 리사이즈 중 **박스가 움직이거나 크기가 바뀔 때마다** 영향받는 단락들을 다시 렌더링한다. `LayoutEditController`는 `_startDrag()`/`_startResize()`에서 `_collectAffectedParagraphs(box, startRect)`로 영향받는 단락 집합을 수집하고, drag/resize 종료 시 `_flushRerenderAffectedParagraphs()`로 한 번에 다시 렌더링한다. 이 메서드는 다음 작업을 수행한다:
 
 1. 자식 단락 수집: `box.items`를 재귀적으로 순회
-2. 형제 단락 수집: 부모의 `items`를 재귀적으로 순회
+2. 형제 단락 수집: 부모의 `items` 중 **box의 이동 전/후 AABB union과 교차하는 형제**의 단락만 재귀적으로 순회 (AABB 최적화)
 3. 수집된 모든 `LayoutParagraphElement`에 대해 `_structureDirty = true`를 설정하고 `render()` 호출
 
-`render()`는 `TextLayoutEngine.layoutText()`를 실행하여 **문자 단위**로 줄바꿈과 오버랩 회피를 다시 계산한다. 따라서 단락 수가 많거나 텍스트가 길수록 비용이 커진다. 특히 중첩된 박스 하위에 많은 단락이 있으면, 상위 박스 하나를 움직여도 하위 트리 전체의 단락을 다시 렌더링하게 되어 프레임 저하가 발생할 수 있다.
+`render()`는 `TextLayoutEngine.layoutText()`를 실행하여 **문자 단위**로 줄바꿈과 오버랩 회피를 다시 계산한다. 따라서 단락 수가 많거나 텍스트가 길수록 비용이 커진다. 특히 중첩된 박스 하위에 많은 단락이 있으면, 상위 박스 하나를 움직여도 하위 트리 전체의 단락을 다시 렌더링하게 되어 프레임 저하가 발생할 수 있다. **AABB 최적화**는 이 비용을 줄이기 위해 형제 box의 AABB와 교차 검사하여 실제로 영향이 있는 형제만 수집한다. 단, `box.element.ts`의 setter에서 호출되는 `scheduleRerenderAffectedParagraphs`는 이전 위치 정보가 없으므로 **현재 box의 사각형과 교차하는 형제만** 수집하는 약간 다른 최적화를 적용한다.
 
-#### 10.6.1 성능 병목 현황
+#### 10.6.1 AABB 교차 최적화
+
+기본 구현은 부모의 모든 형제 box의 자식 단락을 재렌더링 대상으로 수집하지만, 실제로는 이동 전/후 box의 사각형과 **교차하는 형제 box**만 텍스트 회피의 영향을 받는다. AABB 최적화는 이 원리를 활용한다.
+
+**구현 위치별 차이**:
+- `LayoutEditController._collectAffectedParagraphs(box, startRect)`: drag/resize 시작 시점에 호출되며, `startRect`(시작 시점의 box 부모 좌표계 사각형)와 `currentRect`(현재 box 부모 좌표계 사각형)의 **union**과 교차하는 형제만 수집. move 모드에서만 적용. **reparent 모드**에서는 box가 `style.transform`으로 부모 밖으로 이동하여 `getBoundingClientRect()`가 부정확하므로 모든 형제를 수집한다.
+- `box.element.ts._collectAffectedParagraphs()`: `box.left/top/width/height` setter가 호출될 때마다 실행되며, 이전 위치 정보 없이 **현재 box의 사각형과 교차하는 형제만** 수집.
+
+**AABB 좌표 계산**:
+- `getBoundingClientRect()`를 사용. 부모와 자식에 동일한 CSS `transform`이 적용되면(미리보기 zoom 등) 차이 계산 시 자동 상쇄되어 부모 좌표계 픽셀이 정확하게 얻어진다.
+- reparent 모드에서는 box의 `style.transform`이 부모와 독립적으로 적용되므로 부모 좌표계 비교가 부정확 → AABB 최적화 제외.
+
+**효과**:
+- document 직계 자식 box 이동 시: 부모의 모든 직계 자식(형제)을 순회 → AABB 교차 형제만 순회로 감소
+- 신문 지면처럼 형제가 100+ 개 있는 경우, **이동 거리에 따라 O(N)에서 O(k) (k = 교차하는 형제 수)로 감소**
+
+#### 10.6.2 성능 병목 현황
 
 | 단계 | 비용 | 빈도 |
 |------|------|------|
-| `_collectAffectedParagraphs()`가 수집하는 단락 수 | O(박스 하위 트리 크기) | 드래그/리사이즈 시작 시 한 번 |
+| `_collectAffectedParagraphs()`가 수집하는 단락 수 | O(box 사각형과 교차하는 형제의 자식 트리 크기) | 드래그/리사이즈 시작 시 한 번 + box setter 호출 시 (rAF 프레임마다) |
 | `_collectParagraphs()` 재귀 순회 | O(트리 노드 수) | rAF 프레임마다 |
 | `paragraph.layout()` | DOM 측정, GridCalculator 재생성/업데이트 | `_structureDirty` 변경 시 |
 | `TextLayoutEngine.layoutText()` | 문자 단위 줄바꿈 + 오버랩 계산 | rAF 프레임마다 |
@@ -2059,32 +2075,36 @@ mouseup
 | `_applyOverlap()` | `getBoundingClientRect()` 호출 | 매 라인마다, 오버랩 요소마다 |
 | `column.renderText()` | span 단위 diff + DOM 조작 | rAF 프레임마다 |
 
-#### 10.6.2 최적화 전략
+#### 10.6.3 최적화 전략
 
 **1. 렌더링 쓰로틀링 / 디바운싱 (가장 효과 큼)**
 - 드래그/리사이즈 중 마우스 이동은 연속적으로 발생하지만, **사용자가 보는 것은 화면 프레임(60fps)**이다.
 - 매 rAF마다 전체 텍스트를 재계산하지 않고, **누적된 마우스 이동을 한 번에 처리**하도록 조정.
 - 또는 `_rerenderAffectedParagraphs()`를 쓰로틀링하여 16ms보다 긴 간격(예: 33ms, 50ms)으로만 실행.
 
-**2. `_collectAffectedParagraphs()` 결과 캐싱**
+**2. AABB 교차 최적화 (구현됨)**
+- `LayoutEditController._collectAffectedParagraphs`와 `box.element.ts._collectAffectedParagraphs`가 box의 AABB와 교차하는 형제 box만 수집한다. document 직계 자식 box 이동 시 O(N) → O(k)로 감소.
+
+**3. `_collectAffectedParagraphs()` 결과 캐싱**
 - 드래그 중 영향받는 단락 집합(`Set<LayoutParagraphElement>`)은 변하지 않는다면 매 프레임마다 재귀 순회할 필요 없음.
 - `BoxDragState.affectedParagraphs`/`BoxResizeState.affectedParagraphs`에 캐시하고, 드래그/리사이즈 시작 시 한 번만 수집.
+- 단, `box.element.ts`의 setter는 호출 시점의 box 위치로 캐시 무효화 여부를 결정해야 한다.
 
-**3. `_structureDirty`와 `render()` 디바운싱**
+**4. `_structureDirty`와 `render()` 디바운싱**
 - `paragraph.render()`를 즉시 실행하지 않고, **microtask/macrotask 큐에 예약**하여 동일한 rAF 안에서 여러 번 위치가 바뀌어도 한 번만 렌더링.
 - 또는 `requestAnimationFrame`을 사용해 화면 갱신 직전에 한 번에 처리.
 
-**4. 오버랩 캐시 갱신 최소화**
+**5. 오버랩 캐시 갱신 최소화**
 - `_applyOverlap()`은 매 라인마다 `getBoundingClientRect()`를 호출하고, `_overlayRects`는 `_layoutTextIntoColumns()` 시작 시 초기화된다.
 - 드래그 중 박스 위치만 변할 때는 오버랩 요소의 **rect가 이미 알고 있으므로** 매번 DOM 측정 대신 마지막 위치에서 이동량을 더하는 식으로 추정 가능.
 - 또는 `_overlayRects`를 `_layoutTextIntoColumns()` 외부에서 미리 계산해두고, 텍스트 배치 중에는 캐시만 참조.
 
-**5. 증분 텍스트 레이아웃 활용**
+**6. 증분 텍스트 레이아웃 활용**
 - `TextLayoutEngine`은 이미 `layoutText()`만 호출하면 `_columnContents`를 증분 갱신할 수 있다.
 - 다만 `_structureDirty = true`이면 `layoutStructure()` + `layoutText()`를 모두 재실행하여 비용이 커진다.
 - 박스 이동 시 컬럼 구조(폭, 간격)가 변하지 않으면 `_structureDirty = false`로 유지할 수 있다면 증분 갱신 가능.
 
-**6. DOM 측정 최소화**
+**7. DOM 측정 최소화**
 - `_createLineWithParts()`에서 `lineEl.getBoundingClientRect()`를 호출하여 라인 폭을 얻는다.
 - 이 값은 이미 `_columnWidths`에서 알 수 있으므로, `getBoundingClientRect()` 대신 계산된 값을 사용하면 reflow/layout 비용을 줄일 수 있다.
 

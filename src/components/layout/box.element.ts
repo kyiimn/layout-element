@@ -1156,7 +1156,12 @@ export class LayoutBoxElement extends HTMLElement {
   /**
    * 영향받는 단락 요소 집합을 수집한다.
    * 자식 박스를 재귀적으로 탐색하여 모든 단락 요소를 찾는다.
-   * 형제 박스의 자식 단락도 포함한다 (오버랩 영향).
+   *
+   * **최적화**: 형제 box의 자식 단락은 모두 수집하는 대신, 현재 box의 사각형과
+   * 실제로 교차하는 형제 box의 자식 단락만 수집한다. 이를 통해 매 setter 호출마다
+   * (drag/resize 중 rAF 콜백마다) 발생하던 형제 전체 순회 비용을 줄인다.
+   * box 자체의 자식 단락은 항상 수집한다 (box 내부 텍스트가 box의 새 위치에
+   * 맞춰 재배치되어야 함).
    */
   private _collectAffectedParagraphs(): Set<LayoutParagraphElement> {
     const affected = new Set<LayoutParagraphElement>();
@@ -1166,13 +1171,68 @@ export class LayoutBoxElement extends HTMLElement {
     }
 
     if (this.parentElement) {
+      const myRect = this._getRectInParentForCollection();
+      if (!myRect) {
+        // 부모가 없거나 rect를 계산할 수 없는 예외 상황. 안전하게 모든 형제 수집.
+        for (const sibling of this.parentElement.items) {
+          if (sibling === this) continue;
+          this._collectParagraphs(sibling, affected);
+        }
+        return affected;
+      }
       for (const sibling of this.parentElement.items) {
         if (sibling === this) continue;
-        this._collectParagraphs(sibling, affected);
+        const siblingRect = this._getSiblingRectInParent(sibling);
+        if (siblingRect && this._aabbIntersectsForCollection(myRect, siblingRect)) {
+          this._collectParagraphs(sibling, affected);
+        }
       }
     }
 
     return affected;
+  }
+
+  /**
+   * 부모 좌표계 기준 box의 사각형. CSS `transform`은 부모-자식에 동일하게
+   * 적용되므로 차이 계산 시 자동 상쇄된다.
+   */
+  private _getRectInParentForCollection(): { left: number; top: number; right: number; bottom: number } | null {
+    const parent = this.parentElement;
+    if (!parent) return null;
+    const parentRect = parent.getBoundingClientRect();
+    const myRect = this.getBoundingClientRect();
+    return {
+      left: myRect.left - parentRect.left,
+      top: myRect.top - parentRect.top,
+      right: myRect.right - parentRect.left,
+      bottom: myRect.bottom - parentRect.top,
+    };
+  }
+
+  /**
+   * 형제 box의 부모 좌표계 사각형.
+   */
+  private _getSiblingRectInParent(sibling: LayoutBoxElement): { left: number; top: number; right: number; bottom: number } | null {
+    const parent = this.parentElement;
+    if (!parent) return null;
+    const parentRect = parent.getBoundingClientRect();
+    const siblingRect = sibling.getBoundingClientRect();
+    return {
+      left: siblingRect.left - parentRect.left,
+      top: siblingRect.top - parentRect.top,
+      right: siblingRect.right - parentRect.left,
+      bottom: siblingRect.bottom - parentRect.top,
+    };
+  }
+
+  /**
+   * 두 AABB의 교차 여부. 경계 접촉만 있는 경우 교차하지 않는 것으로 간주.
+   */
+  private _aabbIntersectsForCollection(
+    a: { left: number; top: number; right: number; bottom: number },
+    b: { left: number; top: number; right: number; bottom: number },
+  ): boolean {
+    return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
   }
 
   /**

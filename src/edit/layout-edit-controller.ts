@@ -490,7 +490,11 @@ export class LayoutEditController {
 
     // EditManager에 드래그 시작을 알리고, 다중 선택된 box들을 드래그 대상으로 설정
     manager._startLayoutDrag();
-    state.affectedParagraphs = this._collectAffectedParagraphs(box);
+    // 시작 시점의 box 부모 좌표계 AABB를 캡처하여 _collectAffectedParagraphs의
+    // AABB union 비교에 사용한다. move 모드에서 이동 전/후 위치와 교차하는
+    // 형제 box만 재렌더링 대상이 된다.
+    const startRect = this._getRectInParent(box);
+    state.affectedParagraphs = this._collectAffectedParagraphs(box, startRect);
 
     // 다중 선택된 모든 box의 시작 위치를 각각의 BoxDragState에 기록.
     // 이 값들은 _onMouseMove에서 각 box를 독립적으로 이동시킬 때 사용된다.
@@ -875,7 +879,10 @@ export class LayoutEditController {
     state.lastClientY = event.clientY;
 
     manager._startLayoutResize();
-    state.affectedParagraphs = this._collectAffectedParagraphs(box);
+    // 시작 시점의 box 부모 좌표계 AABB를 캡처한다. 리사이즈도 move 모드와 동일하게
+    // AABB union으로 형제 box 필터링이 가능하다 (resize는 box의 width/height 변경).
+    const startRect = this._getRectInParent(box);
+    state.affectedParagraphs = this._collectAffectedParagraphs(box, startRect);
 
     this._activeResizeBox = box;
     document.addEventListener('mousemove', this._onResizeMouseMove);
@@ -1269,28 +1276,123 @@ export class LayoutEditController {
   // ─── Affected Paragraphs ──────────────────────────────────────
 
   /**
+   * 부모 좌표계 기준 사각형 (AABB) — `getBoundingClientRect()` 차이로 계산한다.
+   *
+   * 부모와 자식에 동일한 CSS `transform`이 적용되면(예: 미리보기 zoom) 차이
+   * 계산 시 자동으로 상쇄되어 부모 좌표계 픽셀이 정확하게 얻어진다. reparent
+   * 모드에서 box가 `style.transform`으로 부모 밖으로 이동한 경우 부모의 rect는
+   * 변하지 않으므로 box의 rect만 변환되어 부정확해진다. 따라서 reparent 모드에
+   * 서는 이 함수를 사용하지 않고 모든 형제를 수집한다.
+   *
+   * @param box - 사각형을 계산할 box 요소
+   * @returns 부모 좌표계 기준 픽셀 사각형. 부모가 없으면 null
+   */
+  private _getRectInParent(box: LayoutBoxElement): { left: number; top: number; right: number; bottom: number } | null {
+    const parent = box.parentElement;
+    if (!parent) return null;
+    const parentRect = parent.getBoundingClientRect();
+    const boxRect = box.getBoundingClientRect();
+    return {
+      left: boxRect.left - parentRect.left,
+      top: boxRect.top - parentRect.top,
+      right: boxRect.right - parentRect.left,
+      bottom: boxRect.bottom - parentRect.top,
+    };
+  }
+
+  /**
+   * 두 AABB가 교차하는지 판별한다.
+   *
+   * 경계 접촉만 있는 경우(`b.right === a.left`)는 교차하지 않는 것으로 간주하여
+   * 불필요한 재렌더링을 방지한다. 엄격한 비교(`>`)를 사용한다.
+   *
+   * @param a - 첫 번째 사각형
+   * @param b - 두 번째 사각형
+   * @returns 교차하면 `true`
+   */
+  private _aabbIntersects(
+    a: { left: number; top: number; right: number; bottom: number },
+    b: { left: number; top: number; right: number; bottom: number },
+  ): boolean {
+    return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+  }
+
+  /**
+   * 두 AABB의 union을 반환한다.
+   *
+   * @param a - 첫 번째 사각형
+   * @param b - 두 번째 사각형
+   * @returns union 사각형
+   */
+  private _aabbUnion(
+    a: { left: number; top: number; right: number; bottom: number },
+    b: { left: number; top: number; right: number; bottom: number },
+  ): { left: number; top: number; right: number; bottom: number } {
+    return {
+      left: Math.min(a.left, b.left),
+      top: Math.min(a.top, b.top),
+      right: Math.max(a.right, b.right),
+      bottom: Math.max(a.bottom, b.bottom),
+    };
+  }
+
+  /**
    * 드래그/리사이즈 중 영향받는 모든 단락 요소를 수집한다.
    *
-   * box 자체의 자식 단락뿐만 아니라 **형제 box의 자식 단락**도 포함한다.
-   * 이는 box가 이동/크기 변경 시 형제 box 내의 텍스트도 오버랩 회피를 위해
-   * 재렌더링되어야 하기 때문이다.
+   * **최적화**: 기본적으로는 box의 모든 형제 box의 자식 단락을 수집하지만,
+   * 일반 move 모드(`layoutEditType === 'move'`)에서는 이동 전/후 box의 AABB
+   * union과 교차하는 형제 box만 수집하여 재렌더링 비용을 줄인다. reparent
+   * 모드에서는 box가 부모 밖으로 나갈 수 있어 AABB 비교가 부정확하므로 모든
+   * 형제를 수집한다.
+   *
+   * box 자체의 자식 단락은 항상 수집한다 (box 내부 텍스트가 box의 새 위치에
+   * 맞춰 재배치되어야 함).
    *
    * @param box - 기준이 되는 box 요소
+   * @param startRect - 이동/리사이즈 시작 시점의 box 부모 좌표계 AABB.
+   *   `null`이면 현재 위치만 사용 (모든 형제 수집)
    * @returns 영향받는 단락 요소 집합
    */
-  private _collectAffectedParagraphs(box: LayoutBoxElement): Set<LayoutParagraphElement> {
+  private _collectAffectedParagraphs(
+    box: LayoutBoxElement,
+    startRect: { left: number; top: number; right: number; bottom: number } | null,
+  ): Set<LayoutParagraphElement> {
     const affected = new Set<LayoutParagraphElement>();
 
-    // box 자체의 자식 단락 수집
+    // box 자체의 자식 단락 수집 (항상)
     for (const item of box.items) {
       this._collectParagraphs(item, affected);
     }
 
-    // 형제 box의 자식 단락도 수집 (오버랩 영향)
+    // 형제 box의 자식 단락 수집
     if (box.parentElement) {
-      for (const sibling of box.parentElement.items) {
-        if (sibling === box) continue;
-        this._collectParagraphs(sibling, affected);
+      const manager = EditManager.getInstance();
+      // reparent 모드에서는 box가 부모 밖으로 나갈 수 있어 AABB 비교가 부정확.
+      // startRect가 없으면 (단순 클릭, 리사이즈 등) 안전하게 모든 형제 수집.
+      if (manager.layoutEditType === 'reparent' || startRect === null) {
+        for (const sibling of box.parentElement.items) {
+          if (sibling === box) continue;
+          this._collectParagraphs(sibling, affected);
+        }
+      } else {
+        // 일반 move 모드: 이동 전/후 AABB union과 교차하는 형제만 수집
+        const currentRect = this._getRectInParent(box);
+        if (!currentRect) {
+          // 부모가 사라진 등 예외 상황. 안전하게 모든 형제 수집.
+          for (const sibling of box.parentElement.items) {
+            if (sibling === box) continue;
+            this._collectParagraphs(sibling, affected);
+          }
+          return affected;
+        }
+        const unionRect = this._aabbUnion(startRect, currentRect);
+        for (const sibling of box.parentElement.items) {
+          if (sibling === box) continue;
+          const siblingRect = this._getRectInParent(sibling);
+          if (siblingRect && this._aabbIntersects(unionRect, siblingRect)) {
+            this._collectParagraphs(sibling, affected);
+          }
+        }
       }
     }
 
