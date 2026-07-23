@@ -148,10 +148,17 @@ export class LayoutSelectionController {
    * @param event - 클릭 마우스 이벤트
    */
   private _onClick = (event: MouseEvent): void => {
-    const box = this._findSelectableBoxFromEvent(event);
     const manager = EditManager.getInstance();
     if (manager.insertMode) return;
     if (manager._consumeSuppressNextClick()) return;
+
+    // 타입 라벨의 상위 선택 버튼(.parent-btn) 클릭은 선택 로직에서 제외한다.
+    // 버튼 자체 핸들러가 부모 박스 선택을 처리한다.
+    // composedPath()를 사용해 shadow DOM 경계를 넘어 실제 클릭 대상을 검사한다.
+    const path = event.composedPath();
+    if (path.some((el) => el instanceof Element && el.closest('.parent-btn'))) return;
+
+    const box = this._findSelectableBoxFromEvent(event);
 
     if (!box) {
       // 문서 영역 내부의 빈 공간 클릭만 선택 해제로 처리한다.
@@ -167,6 +174,10 @@ export class LayoutSelectionController {
     }
 
     if (manager.layoutEditMode && manager.isBoxEditable(box)) return;
+
+    // 텍스트 편집 중인 paragraph의 부모 box를 다시 클릭해도
+    // selectLayout이 재실행되어 text-focused가 풀리지 않도록 한다.
+    if (box.hasAttribute('text-focused')) return;
 
     event.stopPropagation();
     if (this._isEventFromDescendantLayout(event, box)) return;

@@ -805,24 +805,34 @@ export class EditManager {
     const parentBox = paragraph.parentElement;
     if (!(parentBox instanceof LayoutBoxElement)) return;
 
-    if (this._selectedLayouts.length === 1 && this._selectedLayouts[0] === parentBox) return;
+    if (this._selectedLayouts.length === 1 && this._selectedLayouts[0] === parentBox) {
+      parentBox.setAttribute('text-focused', '');
+      return;
+    }
 
     const previousLayouts = [...this._selectedLayouts];
     for (const prev of this._selectedLayouts) {
       prev.removeAttribute('selected');
+      prev.removeAttribute('text-focused');
     }
     this._selectedLayouts = [parentBox];
     parentBox.setAttribute('selected', '');
+    parentBox.setAttribute('text-focused', '');
     this._dispatchLayoutSelection(previousLayouts);
   }
 
   /**
    * 텍스트 편집 포커스가 해제되어도 레이아웃 선택은 유지된다.
+   * 단, `text-focused` 속성은 제거하여 라벨이 다시 표시되도록 한다.
    *
    * @param paragraph - 포커스를 잃은 단락. null이면 아무 일도 하지 않는다.
    */
-  private _clearBoxSelectionForParagraph(_paragraph: LayoutParagraphElement | null): void {
-    // 선택 유지: 텍스트 포커스가 떠나도 레이아웃 선택은 해제되지 않는다.
+  private _clearBoxSelectionForParagraph(paragraph: LayoutParagraphElement | null): void {
+    if (!paragraph) return;
+    const parentBox = paragraph.parentElement;
+    if (parentBox instanceof LayoutBoxElement) {
+      parentBox.removeAttribute('text-focused');
+    }
   }
 
   /**
@@ -847,6 +857,7 @@ export class EditManager {
       for (const el of this._selectedLayouts) {
         if (el !== target) {
           el.removeAttribute('selected');
+          el.removeAttribute('text-focused');
         }
       }
       this._selectedLayouts = [target];
@@ -1251,6 +1262,7 @@ export class EditManager {
         if (idx >= 0) {
           this._selectedLayouts.splice(idx, 1);
           el.removeAttribute('selected');
+          el.removeAttribute('text-focused');
         } else {
           this._selectedLayouts.push(el);
           el.setAttribute('selected', '');
@@ -1259,6 +1271,7 @@ export class EditManager {
     } else {
       for (const prev of this._selectedLayouts) {
         prev.removeAttribute('selected');
+        prev.removeAttribute('text-focused');
       }
       this._selectedLayouts = newSelections;
       for (const el of newSelections) {
@@ -1294,6 +1307,7 @@ export class EditManager {
       for (const el of this._selectedLayouts) {
         if (el === preserveBox) continue;
         el.removeAttribute('selected');
+        el.removeAttribute('text-focused');
       }
 
       if (preserveBox) {
@@ -1305,6 +1319,7 @@ export class EditManager {
       this._lastFocusedBox = null;
       for (const el of this._selectedLayouts) {
         el.removeAttribute('selected');
+        el.removeAttribute('text-focused');
       }
       this._selectedLayouts = [];
     }
@@ -1688,6 +1703,7 @@ export class EditManager {
       const previousLayouts = [...this._selectedLayouts];
       this._selectedLayouts.splice(idx, 1);
       element.removeAttribute('selected');
+      element.removeAttribute('text-focused');
       this._dispatchLayoutSelection(previousLayouts);
     }
   }
