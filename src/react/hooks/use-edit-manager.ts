@@ -18,6 +18,7 @@ export interface UseEditManagerOptions {
   onCursorMove?: (event: EditManagerEvent) => void;
   onLayoutSelectionChange?: (event: EditManagerEvent) => void;
   onLayoutMove?: (event: EditManagerEvent) => void;
+  onBoxPropertyChange?: (event: EditManagerEvent) => void;
 }
 
 export interface UseEditManagerReturn {
@@ -46,6 +47,7 @@ const EVENT_TYPES: Array<{ key: keyof UseEditManagerOptions; type: EditManagerEv
   { key: 'onCursorMove', type: 'cursorMove' },
   { key: 'onLayoutSelectionChange', type: 'layoutSelectionChange' },
   { key: 'onLayoutMove', type: 'layoutMove' },
+  { key: 'onBoxPropertyChange', type: 'boxPropertyChange' },
 ];
 
 export function useEditManager(

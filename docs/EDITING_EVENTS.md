@@ -8,7 +8,7 @@
 
 ## 1. 개요 (Overview)
 
-`EditManager`는 `layout-element`의 글로벌 편집 관리 싱글톤으로, 텍스트 편집, 레이아웃 선택, 드래그 이동, 리사이즈, 요소 삽입 등의 상태 변화를 외부 UI에 알리기 위해 11가지 이벤트 타입을 제공한다. 외부 편집 UI는 `addEventListener`로 이벤트를 수신하여 상태 동기화, undo/redo 스택, 스타일 패널 갱신 등을 수행한다.
+`EditManager`는 `layout-element`의 글로벌 편집 관리 싱글톤으로, 텍스트 편집, 레이아웃 선택, 드래그 이동, 리사이즈, 요소 삽입, Box 속성 변경 등의 상태 변화를 외부 UI에 알리기 위해 15가지 이벤트 타입을 제공한다. 외부 편집 UI는 `addEventListener`로 이벤트를 수신하여 상태 동기화, undo/redo 스택, 스타일 패널 갱신 등을 수행한다.
 
 ### 1.1 이벤트 시스템 아키텍처
 
@@ -28,13 +28,17 @@
 │  ├── addEventListener(type, listener)                                │
 │  └── removeEventListener(type, listener)                             │
 │                                                                      │
-│  내부 디스패처:                                                       │
-│  ├── _dispatch(type, controller, previousParagraph?, previousController?)│
-│  ├── _dispatchLayoutSelection(previousLayouts)                       │
-│  ├── _dispatchLayoutMove(element, prevLeft, prevTop, left, top, canceled)│
-│  ├── _dispatchLayoutResize(element, prevL, prevT, prevW, prevH, l, t, w, h, canceled)│
-│  ├── _dispatchInsert(detail: InsertEventDetail)                      │
-│  └── _dispatchInsertCancel()                                         │
+  │  내부 디스패처:                                                       │
+  │  ├── _dispatch(type, controller, previousParagraph?, previousController?)│
+  │  ├── _dispatchLayoutSelection(previousLayouts)                       │
+  │  ├── _dispatchLayoutMove(element, prevLeft, prevTop, left, top, canceled)│
+  │  ├── _dispatchLayoutResize(element, prevL, prevT, prevW, prevH, l, t, w, h, canceled)│
+  │  ├── _dispatchInsert(detail: InsertEventDetail)                      │
+  │  ├── _dispatchInsertCancel()                                         │
+  │  ├── _dispatchLayoutAdd(detail: LayoutAddEventDetail)                │
+  │  ├── _dispatchLayoutRemove(detail: LayoutRemoveEventDetail)           │
+  │  ├── _dispatchBoxPropertyChange(detail: BoxPropertyChangeEventDetail) │
+  │  └── _dispatchModeChange(previousMode)                               │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -113,7 +117,8 @@ export type EditManagerEventType =
   | 'layoutRemove'
   | 'insert'
   | 'insertCancel'
-  | 'modeChange';
+  | 'modeChange'
+  | 'boxPropertyChange';
 ```
 
 ### 3.2 `EditManagerEvent`
@@ -153,6 +158,8 @@ export interface EditManagerEvent {
   previousMode?: EditModeState;
   /** 모드 전환 후 상태 (modeChange 이벤트에서만) */
   mode?: EditModeState;
+  /** Box 속성 변경 상세 정보 (boxPropertyChange 이벤트에서만) */
+  boxPropertyDetail?: BoxPropertyChangeEventDetail;
 }
 ```
 
@@ -174,6 +181,7 @@ export type EditManagerEventListener = (event: EditManagerEvent) => void;
 | **레이아웃 편집** | `layoutSelectionChange`, `layoutMove`, `layoutResize`, `layoutAdd`, `layoutRemove` | `LayoutEditController`, `LayoutSelectionController`, `InsertController`, `EditManager.selectLayout` |
 | **삽입 모드** | `insert`, `insertCancel` | `InsertController` |
 | **모드 전환** | `modeChange` | `EditManager` (textEditMode/layoutEditMode/insertMode setter) |
+| **Box 속성 변경** | `boxPropertyChange` | `LayoutBoxElement` (role/groupMember/priority setter) |
 
 ---
 
@@ -608,11 +616,58 @@ interface LayoutRemoveEventDetail {
 
 ---
 
-## 9. 모드 전환 이벤트
+## 9. Box 속성 변경 이벤트
+
+Box의 의미적 속성(`role`, `groupMember`, `priority`)이 프로그래밍 방식으로 변경될 때 발생한다. `LayoutBoxElement`의 setter에서 값이 실제로 변경된 경우에만 `EditManager._dispatchBoxPropertyChange`를 통해 이벤트가 발생한다.
+
+### 9.1 `boxPropertyChange`
+
+```typescript
+manager.addEventListener('boxPropertyChange', (event) => {
+  const { box, property, oldValue, newValue } = event.boxPropertyDetail!;
+  console.log(`Box ${box.id}: ${property} changed from`, oldValue, '→', newValue);
+});
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `type` | `'boxPropertyChange'` | 이벤트 타입 |
+| `paragraph` | `null` | 항상 `null` |
+| `controller` | `null` | 항상 `null` |
+| `boxPropertyDetail` | `BoxPropertyChangeEventDetail` | 변경 상세 정보 |
+
+**`BoxPropertyChangeEventDetail` 타입:**
+
+```typescript
+type BoxPropertyName = 'role' | 'groupMember' | 'priority';
+
+interface BoxPropertyChangeEventDetail {
+  box: HTMLElement;                           // 속성이 변경된 LayoutBoxElement
+  property: BoxPropertyName;                  // 변경된 속성명
+  oldValue: BoxRole | string[] | number;      // 변경 전 값
+  newValue: BoxRole | string[] | number;      // 변경 후 값
+}
+```
+
+**발생 트리거:**
+
+| 속성 | 트리거 | oldValue / newValue 타입 |
+|------|--------|--------------------------|
+| `role` | `box.role = 'title'` | `BoxRole` (기본값 `'none'`) |
+| `groupMember` | `box.groupMember = ['a', 'b']` | `string[]` (기본값 `[]`) |
+| `priority` | `box.priority = 5` | `number` (기본값 `0`) |
+
+**값이 동일한 경우 이벤트 미발생**: `role`과 `priority` setter는 값이 변경되지 않으면 이벤트를 발생시키지 않는다. `groupMember` setter는 배열 요소가 동일하면 이벤트를 발생시키지 않는다. `attributeChangedCallback`을 통한 DOM 속성 변경에서는 이벤트가 발생하지 않는다 (setter를 통해서만 발생).
+
+**재진입 보호**: 다른 이벤트 디스패치 중에는 `boxPropertyChange` 이벤트가 발생하지 않는다 (`_dispatching` 플래그).
+
+---
+
+## 10. 모드 전환 이벤트
 
 모드 전환 이벤트는 `EditManager`의 `textEditMode`/`layoutEditMode`/`insertMode` setter에서 모드가 실제로 변경된 후 `_dispatchModeChange()`를 통해 발생한다. `paragraph`와 `controller`는 항상 `null as unknown as ...`이다.
 
-### 9.1 `modeChange`
+### 10.1 `modeChange`
 
 편집 모드가 전환될 때 발생한다. `textEditMode`, `layoutEditMode`, `insertMode` 중 하나가 변경되면 발생한다.
 
@@ -658,7 +713,7 @@ interface EditModeState {
 
 ---
 
-## 10. 클릭 억제 (`_suppressNextClick` / `_suppressLayoutClick`)
+## 11. 클릭 억제 (`_suppressNextClick` / `_suppressLayoutClick`)
 
 ### 10.1 `_suppressNextClick` 플래그 (삽입 완료/취소용)
 
@@ -923,6 +978,7 @@ LayoutSelectionController._onClick
 | `insert` | 삽입 | `position`, `element`, `container`, `left/top/width/height`, `zIndex`, `canceled` | 요소 삽입 완료 |
 | `insertCancel` | 삽입 | (없음) | 삽입 드래그 ESC 취소 |
 | `modeChange` | 모드 전환 | `previousMode`, `mode` | textEditMode/layoutEditMode/insertMode 변경 |
+| `boxPropertyChange` | Box 속성 | `boxPropertyDetail.box`, `boxPropertyDetail.property`, `boxPropertyDetail.oldValue`, `boxPropertyDetail.newValue` | box의 role/groupMember/priority 변경 |
 
 ---
 
@@ -936,7 +992,8 @@ LayoutSelectionController._onClick
 | `src/edit/layout-selection-controller.ts` | `LayoutSelectionController`: `_consumeSuppressNextClick` 소비 (삽입 후 클릭 억제), `layoutSelectionChange` 간접 발생 (`selectLayout` 호출). 드래그/리사이즈 후 클릭은 `_suppressLayoutClick`의 window capture 리스너가 먼저 소비하여 `_onClick`이 호출되지 않음. 더블클릭 시 텍스트 편집 모드 전환 + 포커스 부여 (`_onDblClick`) |
 | `src/edit/insert-controller.ts` | `InsertController`: `insert`, `insertCancel` 이벤트 발생 (`_dispatchInsert`, `_dispatchInsertCancel` 호출), `layoutAdd` 이벤트 발생 (`_dispatchLayoutAdd` 호출) |
 | `src/types/edit/insert.type.ts` | `InsertEventDetail` 타입 정의 (`insert` 이벤트 payload) |
-| `src/types/edit/layout.type.ts` | `LayoutEditModeConfig`, `LayoutAddEventDetail`, `LayoutRemoveEventDetail`, `EditModeState` 타입 정의 |
+| `src/types/edit/layout.type.ts` | `LayoutEditModeConfig`, `LayoutAddEventDetail`, `LayoutRemoveEventDetail`, `EditModeState`, `BoxPropertyChangeEventDetail` 타입 정의 |
+| `src/components/layout/box.element.ts` | `LayoutBoxElement`: `role`, `groupMember`, `priority` setter에서 `boxPropertyChange` 이벤트 발생 |
 
 ---
 
@@ -954,6 +1011,7 @@ LayoutSelectionController._onClick
 - **리스너 제거 시점**: 리스너를 제거하면 현재 디스패치 중인 `Set`에서도 즉시 제외되지만, 이미 실행 중인 리스너는 완료된다.
 - **`modeChange` 중간 상태 억제**: 모드 setter가 내부적으로 다른 모드 setter를 호출할 때 `_modeChangeSuppressed` 플래그로 중간 상태의 이벤트가 억제된다. 최종적으로 모드가 확정된 후 한 번만 `modeChange` 이벤트가 발생한다. 예: `textEditMode = true` 호출 시 내부적으로 `layoutEditMode = false`와 `insertMode = null`이 호출되지만, `modeChange` 이벤트는 최종적으로 `textEditMode = true`가 확정된 후 한 번만 발생한다.
 - **`modeChange` 동일 상태 no-op**: setter가 현재 값과 동일한 값을 받으면 `_dispatchModeChange`를 호출하지 않아 `modeChange` 이벤트가 발생하지 않는다.
+- **`boxPropertyChange` 값 동일 시 미발생**: `role`, `priority` setter는 값이 동일하면 이벤트를 발생시키지 않는다. `groupMember` setter는 배열 내용이 동일하면 이벤트를 발생시키지 않는다. `attributeChangedCallback`을 통한 DOM 속성 변경에서는 이벤트가 발생하지 않는다 (setter를 통해서만 발생).
 
 ---
 
@@ -1111,6 +1169,31 @@ manager.addEventListener('modeChange', (event) => {
     showInsertPanel();
   } else {
     showReadOnlyPanel();
+  }
+});
+```
+
+### 16.6 Box 속성 변경 UI 연동
+
+```typescript
+const manager = EditManager.getInstance();
+
+manager.addEventListener('boxPropertyChange', (event) => {
+  const { box, property, oldValue, newValue } = event.boxPropertyDetail!;
+
+  switch (property) {
+    case 'role':
+      console.log(`Box ${box.id} role: ${oldValue} → ${newValue}`);
+      updateBoxRolePanel(box, newValue as BoxRole);
+      break;
+    case 'groupMember':
+      console.log(`Box ${box.id} groupMember: [${(oldValue as string[]).join(', ')}] → [${(newValue as string[]).join(', ')}]`);
+      updateGroupMemberPanel(box, newValue as string[]);
+      break;
+    case 'priority':
+      console.log(`Box ${box.id} priority: ${oldValue} → ${newValue}`);
+      updatePriorityPanel(box, newValue as number);
+      break;
   }
 });
 ```

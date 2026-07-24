@@ -723,6 +723,9 @@ export class LayoutBoxElement extends HTMLElement {
 
   get role(): BoxRole { return this._role ?? 'none'; }
   set role(value: BoxRole | null | undefined) {
+    const normalized = (value === null || value === undefined || value === 'none') ? 'none' : value;
+    const oldValue = this._role ?? 'none';
+    if (normalized === oldValue) return;
     if (value === null || value === undefined || value === 'none') {
       this._role = undefined;
       this.removeAttribute('role');
@@ -730,6 +733,12 @@ export class LayoutBoxElement extends HTMLElement {
       this._role = value;
       this.setAttribute('role', value);
     }
+    EditManager.getInstance()._dispatchBoxPropertyChange({
+      box: this,
+      property: 'role',
+      oldValue,
+      newValue: normalized,
+    });
   }
 
   get groupMember(): string[] {
@@ -737,6 +746,7 @@ export class LayoutBoxElement extends HTMLElement {
     return this._groupMember.split(',').filter(s => s.length > 0);
   }
   set groupMember(value: string[]) {
+    const oldValue = this._groupMember ? this._groupMember.split(',').filter(s => s.length > 0) : [];
     if (value.length > 0) {
       const joined = value.join(',');
       this._groupMember = joined;
@@ -745,12 +755,29 @@ export class LayoutBoxElement extends HTMLElement {
       this._groupMember = undefined;
       this.removeAttribute('group-member');
     }
+    const newValue = this._groupMember ? this._groupMember.split(',').filter(s => s.length > 0) : [];
+    if (oldValue.length !== newValue.length || oldValue.some((v, i) => v !== newValue[i])) {
+      EditManager.getInstance()._dispatchBoxPropertyChange({
+        box: this,
+        property: 'groupMember',
+        oldValue,
+        newValue,
+      });
+    }
   }
 
   get priority() { return this._priority ?? 0; }
   set priority(value: number) {
+    const oldValue = this._priority ?? 0;
+    if (value === oldValue) return;
     this._priority = value;
     this.setAttribute('priority', String(value));
+    EditManager.getInstance()._dispatchBoxPropertyChange({
+      box: this,
+      property: 'priority',
+      oldValue,
+      newValue: value,
+    });
   }
 
   get lock(): boolean { return this._lock; }

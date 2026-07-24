@@ -1,4 +1,5 @@
 import type { InsertMode } from "./insert.type";
+import type { BoxRole } from "@/types/layout";
 
 /**
  * 레이아웃 편집 모드의 동작 타입.
@@ -77,4 +78,38 @@ export interface LayoutRemoveEventDetail {
   previousContainer: HTMLElement;
   /** 제거 방식 */
   source: 'reparent' | 'programmatic';
+}
+
+/**
+ * Box 속성 변경 이벤트에서 변경된 속성을 식별하는 타입.
+ *
+ * `boxPropertyChange` 이벤트의 `property` 필드로 사용되며,
+ * 어떤 속성이 변경되었는지 리스너에 알려준다.
+ */
+export type BoxPropertyName = 'role' | 'groupMember' | 'priority';
+
+/**
+ * Box 속성 변경 이벤트 상세 정보.
+ *
+ * `boxPropertyChange` 이벤트는 box의 의미적 속성(role, groupMember, priority)이
+ * 프로그래밍 방식으로 변경될 때 발생한다. DOM 속성(attribute)만 변경된 경우에는
+ * 발생하지 않는다.
+ *
+ * @example
+ * ```ts
+ * EditManager.getInstance().addEventListener('boxPropertyChange', (event) => {
+ *   const { box, property, oldValue, newValue } = event.boxPropertyDetail!;
+ *   console.log(`${box.id}.${property}: ${oldValue} → ${newValue}`);
+ * });
+ * ```
+ */
+export interface BoxPropertyChangeEventDetail {
+  /** 속성이 변경된 box 요소 */
+  box: HTMLElement;
+  /** 변경된 속성명 */
+  property: BoxPropertyName;
+  /** 변경 전 값 */
+  oldValue: BoxRole | string[] | number;
+  /** 변경 후 값 */
+  newValue: BoxRole | string[] | number;
 }

@@ -7,7 +7,7 @@ import { InsertController } from "./insert-controller";
 import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
 import type { SelectionRange } from "@/types/edit";
-import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState } from "@/types/edit";
+import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail } from "@/types/edit";
 import type { BoxRole } from "@/types/layout";
 
 /** 레이아웃 편집 대상 요소 (box만 해당) */
@@ -30,7 +30,8 @@ export type EditManagerEventType =
   | 'layoutRemove'
   | 'insert'
   | 'insertCancel'
-  | 'modeChange';
+  | 'modeChange'
+  | 'boxPropertyChange';
 
 /**
  * 글로벌 편집 관리 이벤트.
@@ -90,6 +91,8 @@ export interface EditManagerEvent {
   previousMode?: EditModeState;
   /** 모드 전환 후 상태 (modeChange 이벤트에서만) */
   mode?: EditModeState;
+  /** Box 속성 변경 상세 정보 (boxPropertyChange 이벤트에서만) */
+  boxPropertyDetail?: BoxPropertyChangeEventDetail;
 }
 
 /**
@@ -1862,6 +1865,35 @@ export class EditManager {
             paragraph: null as unknown as LayoutParagraphElement,
             controller: null as unknown as TextEditController,
             layoutRemoveDetail: detail,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
+
+  /**
+   * Box 속성(role, groupMember, priority) 변경 이벤트를 발생시킨다.
+   * 프로그래밍 방식으로 속성이 변경될 때 호출된다.
+   * @internal
+   */
+  _dispatchBoxPropertyChange(detail: BoxPropertyChangeEventDetail): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('boxPropertyChange');
+    if (!listeners || listeners.size === 0) return;
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'boxPropertyChange',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null as unknown as TextEditController,
+            boxPropertyDetail: detail,
           });
         } catch (e) {
           console.error(e);
