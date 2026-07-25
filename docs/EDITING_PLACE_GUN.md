@@ -252,20 +252,50 @@ export type PlaceGunChangeEventDetail = {
 - box의 `contentType`이 `null`(빈 box) 또는 항목 contentType과 불일치 → 건너뜀
 - 이벤트 경로에 box가 없음 → `null` 반환 (no-op)
 
-### 4.3 데이터 주입
+### 4.3 기사(text) 데이터 주입
 
-매칭된 요소에 항목의 데이터를 주입한다. 새 요소를 생성하지 않는다.
+기사 항목(`contentType === 'text'`)은 클릭한 box의 역할에 따라 3가지 케이스로 분기한다.
 
-| 항목 contentType | 주입 동작 |
-|------------------|-----------|
-| `'text'` | `paragraph.data = {...currentData, content: item.content.body}` + `model.textContent = item.content.body` + `markStructureChangedAndRender()` |
-| `'image'` | `image.url = subType === 'ad' ? /storage/ad/{uid}?variant=work : /storage/image/{uid}?variant=work` (url setter가 자동으로 `render()` 호출) |
+#### 케이스 1: 조상에 `group-article` box가 있는 경우
 
-`content`는 객체이며, text 항목은 `ArticleContent`(`{uid, title, body}`)에서 `body`를 추출하여 paragraph에 주입한다. image 항목은 `ImageContent`(`{uid, caption}`)에서 `uid`를 추출하고 `subType`으로 URL 패턴을 결정한다.
+클릭한 box의 조상 중 `role === 'group-article'`인 box가 있으면, 그 group-article 내에서 title/body box를 찾아 각각 주입한다.
 
-`model.textContent`를 직접 설정하는 이유: `paragraph.data` setter는 `_sourceContent`만 설정하고 `layout()` → `_layoutStructure()`를 호출하지만, model이 이미 존재하면 `_layoutStructure()`가 `model.textContent`(이전 텍스트)를 사용하고 `_sourceContent`를 무시한다. 따라서 model의 textContent를 직접 갱신해야 주입된 content가 렌더링에 반영된다.
+| 대상 box (role) | 주입 내용 | contentUid |
+|-----------------|----------|-----------|
+| group-article 내 `role === 'title'` box의 paragraph | `article.title` | 기사 UID |
+| group-article 내 `role === 'body'` box의 paragraph | `article.body` | 기사 UID |
 
-주입 후 부모 box의 `requestRerenderAffectedParagraphs()`를 호출하여 오버랩된 다른 paragraph가 갱신되도록 한다.
+추가로 group-article box의 `groupMember` 배열에 기사 UID를 추가한다.
+
+#### 케이스 2: 클릭한 box의 role이 `title` 또는 `body`인 경우
+
+group-article 하위가 아니지만 box 자체의 role이 `title`/`body`이면 그에 맞는 내용을 주입한다.
+
+| box role | 주입 내용 | contentUid |
+|----------|----------|-----------|
+| `title` | `article.title` | 기사 UID |
+| `body` | `article.body` | 기사 UID |
+
+#### 케이스 3: 그 외
+
+box의 paragraph에 `article.body`를 주입하고, box의 `contentUid`에 기사 UID를 저장한다.
+
+#### 주입 공통 동작
+
+`paragraph.data` setter로 content를 설정하고, model이 있으면 `model.textContent`를 직접 갱신한 후 `markStructureChangedAndRender()`로 재렌더링한다. `model.textContent`를 직접 설정하는 이유: `paragraph.data` setter는 `_sourceContent`만 설정하고 `layout()`을 호출하지만, model이 이미 존재하면 `_layoutStructure()`가 `model.textContent`(이전 텍스트)를 사용하고 `_sourceContent`를 무시한다.
+
+부모 box의 `requestRerenderAffectedParagraphs()`로 오버랩된 다른 paragraph를 갱신한다.
+
+### 4.4 이미지/광고(image) 데이터 주입
+
+이미지 항목(`contentType === 'image'`)은 클릭한 box 내의 image 요소에 URL을 주입한다.
+
+| 항목 subType | URL 패턴 |
+|--------------|----------|
+| `'image'` | `/storage/image/{uid}?variant=work` |
+| `'ad'` | `/storage/ad/{uid}?variant=work` |
+
+`image.url` setter가 자동으로 `render()`를 호출한다.
 
 ---
 
@@ -286,7 +316,7 @@ Place Gun이 활성 상태면 `<x-layout-document>`의 `style.cursor`가 `'copy'
 | 파일 | 역할 |
 |------|------|
 | `src/edit/edit-manager.ts` | `EditManager`: Place Gun 상태(`_placeGunItems`, `_placeGunPaused`), 공개 API(`loadPlaceGun`, `unloadPlaceGun`, `removePlaceGunItem`, `reorderPlaceGunItems`, `setPlaceGunPaused`), `_consumePlaceGunItem`, `_syncPlaceGunController`, `_dispatchPlaceGunChange` |
-| `src/edit/place-gun-controller.ts` | `PlaceGunController`: `handleBoxMouseDown` (box에서 호출), 매칭된 paragraph/image 요소에 데이터 주입, 커서 변경 |
+| `src/edit/place-gun-controller.ts` | `PlaceGunController`: `handleBoxMouseDown` (box에서 호출), 기사 3케이스 분기 주입(`_injectArticle`), 이미지 주입(`_injectImage`), 커서 변경 |
 | `src/components/layout/box.element.ts` | `LayoutBoxElement`: `_onPlaceGunMouseDown` mousedown 리스너, `placeGunActive` 시 `EditManager.handlePlaceGunMouseDown` 위임 |
 | `src/types/edit/place-gun.type.ts` | `PlaceGunContentType`, `PlaceGunItem`, `PlaceGunChangeEventDetail` 타입 정의 |
 
