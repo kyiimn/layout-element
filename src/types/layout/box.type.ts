@@ -124,6 +124,13 @@ export type BoxData = {
   /** 박스의 의미적 역할 (예: 기사 그룹, 본문, 이미지) */
   role?: BoxRole;
 
+  /**
+   * 박스가 담고 있는 콘텐츠의 외부 식별자(UID).
+   * 렌더링/레이아웃에 영향을 주지 않는 단순 메타정보이며 `role`과 동일하게 취급된다.
+   * `data` setter/`attributeChangedCallback`을 통해 `content-uid` DOM 속성과 동기화된다.
+   */
+  contentUid?: string;
+
   /** 그룹 멤버 ID 목록. 쉼표로 구분된 문자열로 직렬화됨 (요소의 JS getter/setter는 string[]로 동작) */
   groupMember?: string;
 

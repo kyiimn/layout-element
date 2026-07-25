@@ -24,6 +24,7 @@ export interface LayoutBoxProps {
   paddingLeft?: number;
   editableLayout?: boolean;
   role?: BoxRole;
+  contentUid?: string;
   groupMember?: string[];
   priority?: number;
   children?: ReactNode;
@@ -51,6 +52,7 @@ export const LayoutBox = forwardRef<LayoutBoxElement, LayoutBoxProps>(
     paddingLeft,
     editableLayout,
     role,
+    contentUid,
     groupMember,
     priority,
     children,
@@ -180,6 +182,12 @@ export const LayoutBox = forwardRef<LayoutBoxElement, LayoutBoxProps>(
       if (!element || role === undefined) return;
       element.role = role;
     }, [innerRef, role]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || contentUid === undefined) return;
+      element.contentUid = contentUid;
+    }, [innerRef, contentUid]);
 
     useEffect(() => {
       const element = innerRef.current;

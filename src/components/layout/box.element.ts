@@ -43,6 +43,7 @@ export class LayoutBoxElement extends HTMLElement {
   private _paddingRight: number = 0;
   private _zIndex: number = 0;
   private _role?: BoxRole;
+  private _contentUid?: string;
   private _groupMember?: string;
   private _priority?: number;
   private _lock: boolean = false;
@@ -97,7 +98,7 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   static get observedAttributes() {
-    return ['role', 'group-member', 'priority', 'lock'] as const;
+    return ['role', 'content-uid', 'group-member', 'priority', 'lock'] as const;
   }
 
   attributeChangedCallback(name: string, _oldVal: string | null, newVal: string | null) {
@@ -107,6 +108,8 @@ export class LayoutBoxElement extends HTMLElement {
       if (name === 'role') {
         this._role = newVal as BoxRole | undefined;
         this._updateLabelText();
+      } else if (name === 'content-uid') {
+        this._contentUid = newVal ?? undefined;
       } else if (name === 'group-member') {
         this._groupMember = newVal ?? undefined;
       } else if (name === 'priority') {
@@ -438,6 +441,7 @@ export class LayoutBoxElement extends HTMLElement {
       if (data.paddingLeft !== undefined) this._paddingLeft = data.paddingLeft;
       if (data.paddingRight !== undefined) this._paddingRight = data.paddingRight;
       if (data.role !== undefined) this.role = data.role;
+      if (data.contentUid !== undefined) this.contentUid = data.contentUid;
       if (data.groupMember !== undefined) this.groupMember = data.groupMember.split(',').filter(s => s.length > 0);
       if (data.priority !== undefined) this.priority = data.priority;
       if (data.lock !== undefined) this.lock = data.lock;
@@ -702,6 +706,7 @@ export class LayoutBoxElement extends HTMLElement {
       paddingBottom: this.paddingBottom,
       paddingLeft: this.paddingLeft,
       role: this._role,
+      contentUid: this._contentUid,
       groupMember: this._groupMember,
       priority: this.priority,
       lock: this._lock || undefined,
@@ -742,6 +747,26 @@ export class LayoutBoxElement extends HTMLElement {
     EditManager.getInstance()._dispatchBoxPropertyChange({
       box: this,
       property: 'role',
+      oldValue,
+      newValue: normalized,
+    });
+  }
+
+  get contentUid(): string | undefined { return this._contentUid; }
+  set contentUid(value: string | null | undefined) {
+    const normalized = value ?? undefined;
+    const oldValue = this._contentUid;
+    if (normalized === oldValue) return;
+    if (normalized === undefined) {
+      this._contentUid = undefined;
+      this.removeAttribute('content-uid');
+    } else {
+      this._contentUid = normalized;
+      this.setAttribute('content-uid', normalized);
+    }
+    EditManager.getInstance()._dispatchBoxPropertyChange({
+      box: this,
+      property: 'contentUid',
       oldValue,
       newValue: normalized,
     });
