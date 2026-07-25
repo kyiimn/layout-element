@@ -30,6 +30,7 @@ Before working on any feature, you **must** read the corresponding documentation
 | Layout editing mode | `docs/EDITING_LAYOUT.md` | Any request, modification, or work involving layout editing, box positioning, interactive layout changes, drag/resize, or selection (LayoutEditController, LayoutSelectionController) |
 | Insert mode | `docs/EDITING_INSERT.md` | Any request, modification, or work involving InsertController, insert mode activation, drag-to-insert, target container selection, or element creation during insert |
 | EditManager events | `docs/EDITING_EVENTS.md` | Any request, modification, or work involving EditManager event types, payload fields, event dispatch, `addEventListener`/`removeEventListener`, `_dispatching` reentrancy guard, or `_suppressNextClick` click suppression |
+| Place Gun | `docs/EDITING_PLACE_GUN.md` | Any request, modification, or work involving Place Gun, PlaceGunItem, PlaceGunController, item loading/unloading, click-to-place, pause, or reorder |
 
 **Rule**: Load the doc → understand current state → implement changes → update the doc to reflect what changed.
 
@@ -159,6 +160,7 @@ src/
     layout-edit-controller.ts # LayoutEditController (drag/resize/select in edit mode)
     layout-selection-controller.ts # LayoutSelectionController (click-to-select)
     insert-controller.ts     # InsertController (drag-to-insert)
+    place-gun-controller.ts  # PlaceGunController (click-to-place from loaded items)
     index.ts
   resource/
     color-registry.ts        # ColorRegistry (CMYK→RGB singleton)
@@ -188,11 +190,12 @@ src/
       color-map.type.ts
       post-data.type.ts
       index.ts
-    edit/                    # CursorPosition, SelectionRange, EditModel, InsertMode, LayoutEditType
+    edit/                    # CursorPosition, SelectionRange, EditModel, InsertMode, LayoutEditType, PlaceGunItem, PlaceGunChangeEventDetail
       cursor.type.ts
       selection.type.ts
       insert.type.ts
       layout.type.ts
+      place-gun.type.ts
       index.ts
     index.ts
   constants/                 # Constants: DEFAULT_FONT_SIZE, DEFAULT_PPM, etc.
