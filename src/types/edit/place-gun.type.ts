@@ -39,6 +39,8 @@ export type ImageContent = {
   uid: string;
   /** 이미지/광고 설명 (캡션). */
   caption: string;
+  /** 이미지/광고 접근 URL. */
+  url: string;
 };
 
 /**
@@ -63,7 +65,7 @@ export type ImageContent = {
  *   subType: 'image',
  *   title: '사진 제목',
  *   sourceId: 'img-456',
- *   content: { uid: 'img-456', caption: '캡션 설명' },
+ *   content: { uid: 'img-456', caption: '캡션 설명', url: '/storage/image/img-456?variant=work' },
  * };
  * ```
  */

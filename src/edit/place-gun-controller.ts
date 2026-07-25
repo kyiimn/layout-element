@@ -17,6 +17,12 @@ import type { PlaceGunItem, ArticleContent, ImageContent } from "@/types/edit";
  * 2. 클릭한 box의 role이 `title` 또는 `body`이면 그에 맞는 내용을 주입한다.
  * 3. 그 외는 본문을 주입한다.
  *
+ * 이미지/광고(image) 항목의 주입도 동일한 패턴으로 3가지 케이스로 분기한다:
+ * 1. 조상에 `role === 'group-image'`인 box가 있으면 그 그룹 내의
+ *    `image`/`caption` box에 각각 이미지 URL/캡션을 주입한다.
+ * 2. 클릭한 box의 role이 `image` 또는 `caption`이면 그에 맞는 내용을 주입한다.
+ * 3. 그 외는 image 요소에 URL을, paragraph 요소에 캡션을 주입한다.
+ *
  * @example
  * ```ts
  * // EditManager가 관리 — 직접 생성하지 않음
@@ -68,10 +74,7 @@ export class PlaceGunController {
     if (item.contentType === 'text') {
       this._injectArticle(box, item);
     } else {
-      const imageTarget = this._findImageInBox(box);
-      if (imageTarget) {
-        this._injectImage(item, imageTarget);
-      }
+      this._injectImageOrAd(box, item);
     }
 
     manager._suppressLayoutClick();
@@ -245,19 +248,105 @@ export class PlaceGunController {
   }
 
   /**
-   * image 요소에 이미지 URL을 주입한다.
+   * 이미지/광고 항목을 box에 주입한다.
    *
-   * @param item - 이미지 항목
-   * @param target - 주입 대상 image 요소
+   * 3가지 케이스로 분기:
+   * 1. 조상에 `group-image` box가 있으면 그 그룹 내의 image/caption에 주입
+   * 2. box의 role이 image/caption이면 그에 맞는 내용 주입
+   * 3. 그 외는 image 요소에 URL, paragraph 요소에 캡션을 주입
+   *
+   * @param box - 클릭한 box 요소
+   * @param item - 이미지/광고 항목
    */
-  private _injectImage(item: PlaceGunItem, target: LayoutImageElement): void {
-    const imageContent = item.content as ImageContent;
-    const url = item.subType === 'ad'
-      ? `/storage/ad/${imageContent.uid}?variant=work`
-      : `/storage/image/${imageContent.uid}?variant=work`;
-    target.url = url;
-    const parentBox = target.parentElement instanceof LayoutBoxElement ? target.parentElement : null;
-    parentBox?.requestRerenderAffectedParagraphs();
+  private _injectImageOrAd(box: LayoutBoxElement, item: PlaceGunItem): void {
+    const image = item.content as ImageContent;
+    const uid = image.uid;
+    const url = image.url;
+
+    const groupImage = this._findAncestorByRole(box, 'group-image');
+    if (groupImage) {
+      this._injectIntoGroupImage(groupImage, image, uid, url);
+      return;
+    }
+
+    const role = box.role;
+    if (role === 'image') {
+      const imageEl = this._findImageInBox(box);
+      if (!imageEl) return;
+      imageEl.url = url;
+      box.contentUid = uid;
+      box.requestRerenderAffectedParagraphs();
+      return;
+    }
+    if (role === 'caption') {
+      const paragraph = this._findParagraphInBox(box);
+      if (!paragraph) return;
+      this._injectText(paragraph, image.caption);
+      box.contentUid = uid;
+      box.requestRerenderAffectedParagraphs();
+      return;
+    }
+
+    const imageEl = this._findImageInBox(box);
+    if (imageEl) {
+      imageEl.url = url;
+      box.contentUid = uid;
+      box.requestRerenderAffectedParagraphs();
+      return;
+    }
+
+    const paragraph = this._findParagraphInBox(box);
+    if (paragraph) {
+      this._injectText(paragraph, image.caption);
+      box.contentUid = uid;
+      box.requestRerenderAffectedParagraphs();
+    }
+  }
+
+  /**
+   * group-image box 내의 image/caption 하위 box에 데이터를 주입한다.
+   *
+   * group-image 내에서 `role === 'image'`인 box의 image 요소에 URL을,
+   * `role === 'caption'`인 box의 paragraph에 캡션을 주입한다.
+   * 각 box의 contentUid에 UID를 저장하고, group-image의
+   * groupMember에 UID를 추가한다.
+   *
+   * @param groupImage - group-image role의 box
+   * @param image - 이미지 content 객체
+   * @param uid - 이미지/광고 UID
+   * @param url - 이미지/광고 URL
+   */
+  private _injectIntoGroupImage(
+    groupImage: LayoutBoxElement,
+    image: ImageContent,
+    uid: string,
+    url: string,
+  ): void {
+    const imageBox = this._findDescendantBoxByRole(groupImage, 'image');
+    const captionBox = this._findDescendantBoxByRole(groupImage, 'caption');
+
+    if (imageBox) {
+      const imageEl = this._findImageInBox(imageBox);
+      if (imageEl) {
+        imageEl.url = url;
+        imageBox.contentUid = uid;
+        imageBox.requestRerenderAffectedParagraphs();
+      }
+    }
+
+    if (captionBox) {
+      const paragraph = this._findParagraphInBox(captionBox);
+      if (paragraph) {
+        this._injectText(paragraph, image.caption);
+        captionBox.contentUid = uid;
+        captionBox.requestRerenderAffectedParagraphs();
+      }
+    }
+
+    const members = groupImage.groupMember;
+    if (!members.includes(uid)) {
+      groupImage.groupMember = [...members, uid];
+    }
   }
 
   /**
