@@ -288,14 +288,35 @@ box의 paragraph에 `article.body`를 주입하고, box의 `contentUid`에 기�
 
 ### 4.4 이미지/광고(image) 데이터 주입
 
-이미지 항목(`contentType === 'image'`)은 클릭한 box 내의 image 요소에 URL을 주입한다.
+이미지/광고 항목(`contentType === 'image'`)은 클릭한 box의 역할에 따라 3가지 케이스로 분기한다. `ImageContent`의 `url` 필드에서 URL을 직접 가져온다.
 
-| 항목 subType | URL 패턴 |
-|--------------|----------|
-| `'image'` | `/storage/image/{uid}?variant=work` |
-| `'ad'` | `/storage/ad/{uid}?variant=work` |
+#### 케이스 1: 조상에 `group-image` box가 있는 경우
 
-`image.url` setter가 자동으로 `render()`를 호출한다.
+클릭한 box의 조상 중 `role === 'group-image'`인 box가 있으면, 그 group-image 내에서 image/caption box를 찾아 각각 주입한다.
+
+| 대상 box (role) | 주입 내용 | contentUid |
+|-----------------|----------|-----------|
+| group-image 내 `role === 'image'` box의 image 요소 | `image.url` | UID |
+| group-image 내 `role === 'caption'` box의 paragraph | `image.caption` | UID |
+
+추가로 group-image box의 `groupMember` 배열에 UID를 추가한다.
+
+#### 케이스 2: 클릭한 box의 role이 `image` 또는 `caption`인 경우
+
+group-image 하위가 아니지만 box 자체의 role이 `image`/`caption`이면 그에 맞는 내용을 주입한다.
+
+| box role | 주입 대상 | 주입 내용 | contentUid |
+|----------|----------|----------|-----------|
+| `image` | image 요소 | `image.url` | UID |
+| `caption` | paragraph 요소 | `image.caption` | UID |
+
+#### 케이스 3: 그 외
+
+box 내의 image 요소가 있으면 `image.url`을 주입하고, paragraph 요소가 있으면 `image.caption`을 주입한다. box의 `contentUid`에 UID를 저장한다.
+
+#### 주입 공통 동작
+
+`image.url` setter가 자동으로 `render()`를 호출한다. paragraph 주입은 `_injectText` 헬퍼를 사용한다. 부모 box의 `requestRerenderAffectedParagraphs()`로 오버랩된 다른 paragraph를 갱신한다.
 
 ---
 

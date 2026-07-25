@@ -2258,6 +2258,7 @@ type ArticleContent = {
 type ImageContent = {
   uid: string;        // 이미지/광고 고유 식별자
   caption: string;    // 이미지/광고 설명 (캡션)
+  url: string;         // 이미지/광고 접근 URL
 };
 
 type PlaceGunItem = {
