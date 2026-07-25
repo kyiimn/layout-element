@@ -4,6 +4,18 @@ import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { EditManager } from "./edit-manager";
+import type { GridCalculator } from "@/core";
+
+/**
+ * 자석(Snap) 기능의 임계값 (단위: 화면 픽셀).
+ *
+ * absolute box를 드래그/리사이즈 중 부모 그리드의 컬럼/라인 경계에 이 값보다 가까이
+ * 접근하면 해당 경계로 흡착한다. `EditManager.screenPxToMm()`을 통해 mm로 환산하여
+ * 비교한다. Shift 키를 누른 상태에서는 이 한계를 무시하고 자유 이동/리사이즈한다.
+ *
+ * 값 조정 시 이 상수만 변경하면 된다.
+ */
+const SNAP_THRESHOLD_PX = 10;
 
 /**
  * 드래그 이동 중 box별 상태를 보관하는 인터페이스.
@@ -67,6 +79,12 @@ interface BoxDragState {
     /** 부모 밖 진입 시점의 box top (클램핑된 위치) */
     top: number;
   } | null;
+  /**
+   * 최신 mousemove 이벤트의 Shift 키 누름 상태.
+   * `true`이면 자석(Snap) 기능을 비활성화하여 자유 이동한다.
+   * rAF 콜백에서 읽기 위해 state에 보관한다.
+   */
+  shiftKey: boolean;
 }
 
 /**
@@ -101,6 +119,12 @@ interface BoxResizeState {
   rafId: number | null;
   /** 리사이즈 시작 시 미리 수집된 영향받는 단락 집합 */
   affectedParagraphs: Set<LayoutParagraphElement> | null;
+  /**
+   * 최신 mousemove 이벤트의 Shift 키 누름 상태.
+   * `true`이면 자석(Snap) 기능을 비활성화하여 자유 리사이즈한다.
+   * rAF 콜백에서 읽기 위해 state에 보관한다.
+   */
+  shiftKey: boolean;
 }
 
 /**
@@ -127,6 +151,7 @@ function createDragState(): BoxDragState {
     rafId: null,
     affectedParagraphs: null,
     reparentOutside: null,
+    shiftKey: false,
   };
 }
 
@@ -150,6 +175,7 @@ function createResizeState(): BoxResizeState {
     lastClientY: 0,
     rafId: null,
     affectedParagraphs: null,
+    shiftKey: false,
   };
 }
 
@@ -542,6 +568,7 @@ export class LayoutEditController {
     // rAF 콜백에서 읽을 수 있도록 최신 좌표를 state에 저장
     state.lastClientX = event.clientX;
     state.lastClientY = event.clientY;
+    state.shiftKey = event.shiftKey;
     const deltaX = event.clientX - state.startMouseX;
     const deltaY = event.clientY - state.startMouseY;
 
@@ -911,6 +938,7 @@ export class LayoutEditController {
 
     state.lastClientX = event.clientX;
     state.lastClientY = event.clientY;
+    state.shiftKey = event.shiftKey;
     const deltaX = event.clientX - state.startMouseX;
     const deltaY = event.clientY - state.startMouseY;
 
@@ -1085,16 +1113,32 @@ export class LayoutEditController {
     if (box.position === 'absolute') {
       // 문서 직계 자식 absolute 요소는 편집 영역 밖으로 자유롭게 이동 가능
       if (isDocumentChild) {
-        return { left: sLeft + deltaMmX, top: sTop + deltaMmY };
+        const raw = { left: sLeft + deltaMmX, top: sTop + deltaMmY };
+        if (state?.shiftKey) return raw;
+        const snapped = this._snapAbsolutePosition(
+          raw.left, raw.top, box.width, box.height, box.parentModel ?? null,
+          manager.screenPxToMm(SNAP_THRESHOLD_PX),
+        );
+        return snapped;
       }
 
       // parentWidth/parentHeight는 editableWidth/editableHeight로부터 온 값으로
       // 이미 부모의 padding이 차감되어 있다. 따라서 padding을 다시 빼면 이중 차감이 된다.
       const maxLeft = Math.max(0, (box.inheritStyle?.parentWidth || 0) - box.width);
       const maxTop = Math.max(0, (box.inheritStyle?.parentHeight || 0) - box.height);
-      return {
+      const clamped = {
         left: Math.max(0, Math.min(maxLeft, sLeft + deltaMmX)),
         top: Math.max(0, Math.min(maxTop, sTop + deltaMmY)),
+      };
+      if (state?.shiftKey) return clamped;
+      const snapped = this._snapAbsolutePosition(
+        clamped.left, clamped.top, box.width, box.height, box.parentModel ?? null,
+        manager.screenPxToMm(SNAP_THRESHOLD_PX),
+      );
+      // 스냅 후에도 부모 경계를 벗어나지 않도록 재클램핑
+      return {
+        left: Math.max(0, Math.min(maxLeft, snapped.left)),
+        top: Math.max(0, Math.min(maxTop, snapped.top)),
       };
     }
 
@@ -1128,6 +1172,192 @@ export class LayoutEditController {
     const newTop = Math.max(0, Math.min(maxTop, Math.round((newTopMm - columnCoords[newLeft].y1) / lineHeight)));
 
     return { left: newLeft, top: newTop };
+  }
+
+  /**
+   * absolute box 이동 시 부모 그리드의 컬럼/라인 경계로 4엣지 자석(Snap) 보정을 적용한다.
+   *
+   * 박스의 좌·우·상·하 네 엣지 각각이 임계값 이내로 가까운 컬럼/라인 경계를 찾아,
+   * 가장 가까운 한 엣지를 기준으로 `left`/`top`을 조정한다. 박스 크기(width/height)는
+   * 유지된다 — 좌·우 엣지가 동시에 임계값 이내여도 한쪽만 흡착하여 width가 변하지 않는다.
+   *
+   * @param left - 보정 전 left (mm)
+   * @param top - 보정 전 top (mm)
+   * @param width - 박스 width (mm, 변경 없음)
+   * @param height - 박스 height (mm, 변경 없음)
+   * @param parentModel - 부모 `GridCalculator`. null이면 보정 없이 원값 반환
+   * @param thresholdMm - 스냅 임계값 (mm). 이 거리 이내일 때만 흡착
+   * @returns 보정된 `{ left, top }`
+   *
+   * @example
+   * // 임계값 1mm, 박스 left=24.5, width=10, 가장 가까운 컬럼 x1=25.0 (거리 0.5mm)
+   * // → 좌측 엣지 흡착: left = 25.0, top은 그대로
+   * _snapAbsolutePosition(24.5, 30, 10, 20, parentModel, 1);
+   * // → { left: 25.0, top: 30 }
+   */
+  private _snapAbsolutePosition(
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+    parentModel: GridCalculator | null,
+    thresholdMm: number,
+  ): { left: number; top: number } {
+    if (!parentModel) return { left, top };
+
+    const { columnCoords, lineHeight } = parentModel;
+    const baseY = columnCoords.length > 0 ? columnCoords[0].y1 : 0;
+
+    // X축: 좌측(left)과 우측(left+width) 엣지 후보 수집
+    const xCandidates: Array<{ edge: 'left' | 'right'; dist: number; newLeft: number }> = [];
+    for (const col of columnCoords) {
+      // 좌측 엣지 → 컬럼 시작선 (x1)
+      const distLeft = Math.abs(left - col.x1);
+      if (distLeft <= thresholdMm) {
+        xCandidates.push({ edge: 'left', dist: distLeft, newLeft: col.x1 });
+      }
+      // 우측 엣지 → 컬럼 끝선 (x2)
+      const distRight = Math.abs((left + width) - col.x2);
+      if (distRight <= thresholdMm) {
+        xCandidates.push({ edge: 'right', dist: distRight, newLeft: col.x2 - width });
+      }
+    }
+
+    // Y축: 상단(top)과 하단(top+height) 엣지 후보 수집
+    const yCandidates: Array<{ edge: 'top' | 'bottom'; dist: number; newTop: number }> = [];
+    const maxLineY = parentModel.editableTextHeight;
+    for (let i = 0; ; i++) {
+      const lineY = baseY + lineHeight * i;
+      if (lineY > maxLineY + thresholdMm + height) break;
+      const distTop = Math.abs(top - lineY);
+      if (distTop <= thresholdMm) {
+        yCandidates.push({ edge: 'top', dist: distTop, newTop: lineY });
+      }
+      const distBottom = Math.abs((top + height) - lineY);
+      if (distBottom <= thresholdMm) {
+        yCandidates.push({ edge: 'bottom', dist: distBottom, newTop: lineY - height });
+      }
+    }
+
+    let snappedLeft = left;
+    let snappedTop = top;
+    if (xCandidates.length > 0) {
+      const best = xCandidates.reduce((a, b) => a.dist <= b.dist ? a : b);
+      snappedLeft = best.newLeft;
+    }
+    if (yCandidates.length > 0) {
+      const best = yCandidates.reduce((a, b) => a.dist <= b.dist ? a : b);
+      snappedTop = best.newTop;
+    }
+
+    return { left: snappedLeft, top: snappedTop };
+  }
+
+  /**
+   * absolute box 리사이즈 시 핸들이 담당하는 한 엣지를 부모 그리드의 컬럼/라인 경계로 자석(Snap) 보정한다.
+   *
+   * 핸들별 담당 엣지:
+   * - `right` → 우측 엣지 (left+width) 흡착 → width 조정, left/top 고정
+   * - `left` → 좌측 엣지 (left) 흡착 → left·width 조정, 우측 끝(sLeft+sWidth) 고정
+   * - `bottom` → 하단 엣지 (top+height) 흡착 → height 조정, left/top 고정
+   * - `top` → 상단 엣지 (top) 흡착 → top·height 조정, 하단 끝(sTop+sHeight) 고정
+   *
+   * @param handle - 리사이즈 핸들 방향
+   * @param left - 보정 전 left (mm)
+   * @param top - 보정 전 top (mm)
+   * @param width - 보정 전 width (mm)
+   * @param height - 보정 전 height (mm)
+   * @param parentModel - 부모 `GridCalculator`. null이면 보정 없이 원값 반환
+   * @param thresholdMm - 스냅 임계값 (mm). 이 거리 이내일 때만 흡착
+   * @returns 보정된 `{ left, top, width, height }`
+   *
+   * @example
+   * // right 핸들, 임계값 1mm, left=10, width=14.5, 가장 가까운 컬럼 x2=25.0 (거리 0.5mm)
+   * // → 우측 엣지 흡착: width = 15.0, left/top 유지
+   * _snapAbsoluteResize('right', 10, 20, 14.5, 30, parentModel, 1);
+   * // → { left: 10, top: 20, width: 15.0, height: 30 }
+   */
+  private _snapAbsoluteResize(
+    handle: 'top' | 'bottom' | 'left' | 'right',
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+    parentModel: GridCalculator | null,
+    thresholdMm: number,
+  ): { left: number; top: number; width: number; height: number } {
+    if (!parentModel) return { left, top, width, height };
+
+    const { columnCoords, lineHeight } = parentModel;
+    const baseY = columnCoords.length > 0 ? columnCoords[0].y1 : 0;
+    const maxLineY = parentModel.editableTextHeight;
+
+    switch (handle) {
+      case 'right': {
+        // 우측 엣지 (left+width) → 컬럼 x2
+        let best: { dist: number; value: number } | null = null;
+        for (const col of columnCoords) {
+          const dist = Math.abs((left + width) - col.x2);
+          if (dist <= thresholdMm && (!best || dist < best.dist)) {
+            best = { dist, value: col.x2 };
+          }
+        }
+        if (best) {
+          return { left, top, width: Math.max(1, best.value - left), height };
+        }
+        return { left, top, width, height };
+      }
+      case 'left': {
+        // 좌측 엣지 (left) → 컬럼 x1. 우측 끝(left+width) 고정
+        const rightEdge = left + width;
+        let best: { dist: number; value: number } | null = null;
+        for (const col of columnCoords) {
+          const dist = Math.abs(left - col.x1);
+          if (dist <= thresholdMm && (!best || dist < best.dist)) {
+            best = { dist, value: col.x1 };
+          }
+        }
+        if (best) {
+          const newLeft = Math.max(0, Math.min(rightEdge - 1, best.value));
+          return { left: newLeft, top, width: Math.max(1, rightEdge - newLeft), height };
+        }
+        return { left, top, width, height };
+      }
+      case 'bottom': {
+        // 하단 엣지 (top+height) → 라인 y
+        let best: { dist: number; value: number } | null = null;
+        for (let i = 0; ; i++) {
+          const lineY = baseY + lineHeight * i;
+          if (lineY > maxLineY + thresholdMm + height) break;
+          const dist = Math.abs((top + height) - lineY);
+          if (dist <= thresholdMm && (!best || dist < best.dist)) {
+            best = { dist, value: lineY };
+          }
+        }
+        if (best) {
+          return { left, top, width, height: Math.max(1, best.value - top) };
+        }
+        return { left, top, width, height };
+      }
+      case 'top': {
+        // 상단 엣지 (top) → 라인 y. 하단 끝(top+height) 고정
+        const bottomEdge = top + height;
+        let best: { dist: number; value: number } | null = null;
+        for (let i = 0; ; i++) {
+          const lineY = baseY + lineHeight * i;
+          if (lineY > maxLineY + thresholdMm + height) break;
+          const dist = Math.abs(top - lineY);
+          if (dist <= thresholdMm && (!best || dist < best.dist)) {
+            best = { dist, value: lineY };
+          }
+        }
+        if (best) {
+          const newTop = Math.max(0, Math.min(bottomEdge - 1, best.value));
+          return { left, top: newTop, width, height: Math.max(1, bottomEdge - newTop) };
+        }
+        return { left, top, width, height };
+      }
+    }
   }
 
   /**
@@ -1172,33 +1402,43 @@ export class LayoutEditController {
       // 이미 부모의 padding이 차감되어 있다. 따라서 padding을 다시 빼면 이중 차감이 된다.
       const parentW = box.inheritStyle?.parentWidth || 0;
       const parentH = box.inheritStyle?.parentHeight || 0;
+      const thresholdMm = manager.screenPxToMm(SNAP_THRESHOLD_PX);
+      const snapEnabled = !state.shiftKey;
 
       switch (handle) {
         case 'right': {
           // 우측 핸들: width만 변경, left/top/height 유지
           const maxWidth = parentW - sLeft;
           const width = Math.max(1, Math.min(maxWidth, sWidth + deltaMmX));
-          return { left: sLeft, top: sTop, width, height: sHeight };
+          const result = { left: sLeft, top: sTop, width, height: sHeight };
+          if (!snapEnabled) return result;
+          return this._snapAbsoluteResize('right', result.left, result.top, result.width, result.height, box.parentModel ?? null, thresholdMm);
         }
         case 'left': {
           // 좌측 핸들: width와 left가 함께 변경 (우측 끝 sLeft+sWidth 고정)
           const maxWidth = sLeft + sWidth;
           const width = Math.max(1, Math.min(maxWidth, sWidth - deltaMmX));
           const left = Math.max(0, Math.min(sLeft + sWidth - 1, sLeft + deltaMmX));
-          return { left, top: sTop, width, height: sHeight };
+          const result = { left, top: sTop, width, height: sHeight };
+          if (!snapEnabled) return result;
+          return this._snapAbsoluteResize('left', result.left, result.top, result.width, result.height, box.parentModel ?? null, thresholdMm);
         }
         case 'bottom': {
           // 하단 핸들: height만 변경, left/top/width 유지
           const maxHeight = parentH - sTop;
           const height = Math.max(1, Math.min(maxHeight, sHeight + deltaMmY));
-          return { left: sLeft, top: sTop, width: sWidth, height };
+          const result = { left: sLeft, top: sTop, width: sWidth, height };
+          if (!snapEnabled) return result;
+          return this._snapAbsoluteResize('bottom', result.left, result.top, result.width, result.height, box.parentModel ?? null, thresholdMm);
         }
         case 'top': {
           // 상단 핸들: height와 top이 함께 변경 (하단 끝 sTop+sHeight 고정)
           const maxHeight = sTop + sHeight;
           const height = Math.max(1, Math.min(maxHeight, sHeight - deltaMmY));
           const top = Math.max(0, Math.min(sTop + sHeight - 1, sTop + deltaMmY));
-          return { left: sLeft, top, width: sWidth, height };
+          const result = { left: sLeft, top, width: sWidth, height };
+          if (!snapEnabled) return result;
+          return this._snapAbsoluteResize('top', result.left, result.top, result.width, result.height, box.parentModel ?? null, thresholdMm);
         }
       }
     }

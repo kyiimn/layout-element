@@ -297,6 +297,42 @@ element.editableLayout = false;
 | **ESC (드래그 중)** | 드래그 취소, 시작 전 위치로 복원, 모든 드래그 리스너 해제 |
 | **mouseup (드래그 완료)** | 최종 스냅 위치로 확정, 드래그 리스너 해제 |
 
+#### 자석(Snap) 기능 — absolute box 이동/리사이즈
+
+`position: 'absolute'` 박스를 드래그 이동하거나 리사이즈할 때, 부모 그리드의 컬럼/라인 경계에 가까이 다가가면 자석(Snap) 기능이 해당 경계로 박스를 흡착시킨다. Figma/Illustrator의 스냅과 동일한 동작 방식이다.
+
+**임계값 상수**: `SNAP_THRESHOLD_PX` (기본값 `10`, 단위: 화면 픽셀). `EditManager.screenPxToMm()`로 mm로 환산하여 비교한다. 값을 조정하려면 `src/edit/layout-edit-controller.ts` 상단의 상수만 변경하면 된다.
+
+**스냅 대상**: 부모 `GridCalculator`의 컬럼 경계(`columnCoords[i].x1` 시작선, `x2` 끝선)와 라인 경계(`baseY + lineHeight * i`).
+
+**이동 시 스냅** (`_snapAbsolutePosition`):
+
+- 박스의 **좌·우·상·하 4개 엣지** 각각이 임계값 이내로 가까운 컬럼/라인 경계를 찾아, 가장 가까운 한 엣지를 기준으로 `left`/`top`을 조정한다.
+- 박스 크기(`width`/`height`)는 유지된다. 좌·우 엣지가 동시에 임계값 이내여도 한쪽만 흡착하여 width가 변하지 않는다.
+- 스냅 후에도 부모 경계를 벗어나지 않도록 재클램핑된다.
+- 문서 직계 자식 absolute 박스도 부모 그리드 모델(`parentModel`)이 있으면 스냅이 적용된다.
+
+**리사이즈 시 스냅** (`_snapAbsoluteResize`):
+
+- 각 리사이즈 핸들이 담당하는 **1개 엣지만** 검사한다 (이동과 달리 4엣지 전부가 아님):
+  - `right` 핸들 → 우측 엣지(`left+width`) → 컬럼 `x2` 흡착 → `width` 조정, `left`/`top` 고정
+  - `left` 핸들 → 좌측 엣지(`left`) → 컬럼 `x1` 흡착 → `left`·`width` 조정, 우측 끝 고정
+  - `bottom` 핸들 → 하단 엣지(`top+height`) → 라인 y 흡착 → `height` 조정, `left`/`top` 고정
+  - `top` 핸들 → 상단 엣지(`top`) → 라인 y 흡착 → `top`·`height` 조정, 하단 끝 고정
+- 최소 크기 1mm가 보장된다.
+
+**Shift 키로 비활성화**:
+
+- 드래그/리사이즈 중 **Shift 키를 누른 상태**에서는 자석 기능이 비활성화되어 자유 이동/리사이즈가 가능하다.
+- `BoxDragState.shiftKey`/`BoxResizeState.shiftKey`에 최신 mousemove의 `event.shiftKey` 값을 저장하고, rAF 콜백에서 `_computeNewPosition`/`_computeNewSize`가 이 값을 읽어 스냅 적용 여부를 결정한다.
+
+**적용 범위**:
+
+- `layoutEditMode = true` (move 모드)에서만 동작한다.
+- `layoutEditMode = { type: 'reparent' }` (reparent 모드)에서는 transform 기반 이동이므로 스냅이 적용되지 않는다.
+- `position: 'static'` 박스는 이미 컬럼/라인 단위 스냅이 내장되어 있으므로 별도의 자석 기능이 적용되지 않는다.
+- 부모가 `GridCalculator`(그리드 모델)를 가지지 않는 경우 스냅이 적용되지 않고 원래 위치가 그대로 반환된다.
+
 #### 시각적 피드백
 
 **선택 표시** (`selected`):
