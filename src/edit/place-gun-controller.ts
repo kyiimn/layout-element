@@ -11,9 +11,11 @@ import type { PlaceGunItem, ArticleContent, ImageContent } from "@/types/edit";
  * `handleBoxMouseDown`이 호출되어, 장전된 맨 위 항목을 클릭한 box의 기존
  * paragraph/image 요소에 주입한다.
  *
- * 클릭한 box에 매칭되는 paragraph/image 요소가 있으면 그 요소에
- * 항목의 데이터를 주입한다. 매칭되는 요소가 없으면 항목을 소비하지
- * 않고 no-op로 종료한다.
+ * 기사(text) 항목의 주입은 클릭한 box의 역할에 따라 3가지 케이스로 분기한다:
+ * 1. 조상에 `role === 'group-article'`인 box가 있으면 그 그룹 내의
+ *    `title`/`body` box에 각각 제목/본문을 주입한다.
+ * 2. 클릭한 box의 role이 `title` 또는 `body`이면 그에 맞는 내용을 주입한다.
+ * 3. 그 외는 본문을 주입한다.
  *
  * @example
  * ```ts
@@ -42,11 +44,6 @@ export class PlaceGunController {
   /**
    * box의 mousedown 이벤트를 처리하여 Place Gun 항목을 주입한다.
    *
-   * `LayoutBoxElement`의 `mousedown` 핸들러에서 `placeGunActive`일 때
-   * 호출된다. box의 `contentType`이 항목의 contentType과 일치하면
-   * 그 자식 요소에 데이터를 주입한다. 매칭되지 않으면 항목을 소비하지
-   * 않고 no-op로 종료한다.
-   *
    * @param box - mousedown이 발생한 box 요소
    * @param event - mousedown 이벤트
    * @returns 주입 성공 여부. 매칭 실패 시 `false`.
@@ -60,8 +57,7 @@ export class PlaceGunController {
     const nextItem = manager.placeGunItems[0];
     if (!nextItem) return false;
 
-    const target = this._findTargetInBox(box, nextItem);
-    if (!target) return false;
+    if (box.lock) return false;
 
     event.preventDefault();
     event.stopPropagation();
@@ -69,70 +65,199 @@ export class PlaceGunController {
     const item = manager._consumePlaceGunItem();
     if (!item) return false;
 
-    this._injectItem(item, target);
+    if (item.contentType === 'text') {
+      this._injectArticle(box, item);
+    } else {
+      const imageTarget = this._findImageInBox(box);
+      if (imageTarget) {
+        this._injectImage(item, imageTarget);
+      }
+    }
+
     manager._suppressLayoutClick();
     return true;
   }
 
   /**
-   * box 내에서 항목 contentType과 매칭되는 paragraph/image 자식 요소를 찾는다.
+   * 기사 항목을 box에 주입한다.
    *
-   * @param box - 검색할 box 요소
-   * @param item - 장전된 항목
-   * @returns 매칭된 요소. 없으면 `null`.
+   * 3가지 케이스로 분기:
+   * 1. 조상에 `group-article` box가 있으면 그 그룹 내의 title/body에 주입
+   * 2. box의 role이 title/body이면 그에 맞는 내용 주입
+   * 3. 그 외는 본문을 paragraph에 주입
+   *
+   * @param box - 클릭한 box 요소
+   * @param item - 기사 항목
    */
-  private _findTargetInBox(
-    box: LayoutBoxElement,
-    item: PlaceGunItem,
-  ): LayoutParagraphElement | LayoutImageElement | null {
-    if (box.lock) return null;
-    if (item.contentType === 'text' && box.contentType === 'paragraph') {
-      return box.items.find(
-        (child): child is LayoutParagraphElement => child instanceof LayoutParagraphElement,
-      ) ?? null;
+  private _injectArticle(box: LayoutBoxElement, item: PlaceGunItem): void {
+    const article = item.content as ArticleContent;
+    const uid = article.uid;
+
+    const groupArticle = this._findAncestorByRole(box, 'group-article');
+    if (groupArticle) {
+      this._injectIntoGroupArticle(groupArticle, article, uid);
+      return;
     }
-    if (item.contentType === 'image' && box.contentType === 'image') {
-      return box.items.find(
-        (child): child is LayoutImageElement => child instanceof LayoutImageElement,
-      ) ?? null;
+
+    const role = box.role;
+    if (role === 'title' || role === 'body') {
+      const paragraph = this._findParagraphInBox(box);
+      if (!paragraph) return;
+      const text = role === 'title' ? article.title : article.body;
+      this._injectText(paragraph, text);
+      box.contentUid = uid;
+      box.requestRerenderAffectedParagraphs();
+      return;
+    }
+
+    const paragraph = this._findParagraphInBox(box);
+    if (!paragraph) return;
+    this._injectText(paragraph, article.body);
+    box.contentUid = uid;
+    box.requestRerenderAffectedParagraphs();
+  }
+
+  /**
+   * group-article box 내의 title/body 하위 box에 데이터를 주입한다.
+   *
+   * group-article 내에서 `role === 'title'`인 box의 paragraph에 제목을,
+   * `role === 'body'`인 box의 paragraph에 본문을 주입한다.
+   * 각 box의 contentUid에 기사 UID를 저장하고, group-article의
+   * groupMember에 기사 UID를 추가한다.
+   *
+   * @param groupArticle - group-article role의 box
+   * @param article - 기사 content 객체
+   * @param uid - 기사 UID
+   */
+  private _injectIntoGroupArticle(
+    groupArticle: LayoutBoxElement,
+    article: ArticleContent,
+    uid: string,
+  ): void {
+    const titleBox = this._findDescendantBoxByRole(groupArticle, 'title');
+    const bodyBox = this._findDescendantBoxByRole(groupArticle, 'body');
+
+    if (titleBox) {
+      const paragraph = this._findParagraphInBox(titleBox);
+      if (paragraph) {
+        this._injectText(paragraph, article.title);
+        titleBox.contentUid = uid;
+        titleBox.requestRerenderAffectedParagraphs();
+      }
+    }
+
+    if (bodyBox) {
+      const paragraph = this._findParagraphInBox(bodyBox);
+      if (paragraph) {
+        this._injectText(paragraph, article.body);
+        bodyBox.contentUid = uid;
+        bodyBox.requestRerenderAffectedParagraphs();
+      }
+    }
+
+    const members = groupArticle.groupMember;
+    if (!members.includes(uid)) {
+      groupArticle.groupMember = [...members, uid];
+    }
+  }
+
+  /**
+   * box의 조상 중 지정된 role을 가진 가장 가까운 box를 찾는다.
+   *
+   * @param box - 탐색 시작 box
+   * @param role - 찾을 role
+   * @returns 매칭된 조상 box. 없으면 `null`.
+   */
+  private _findAncestorByRole(box: LayoutBoxElement, role: string): LayoutBoxElement | null {
+    let current: Element | null = box.parentElement;
+    while (current) {
+      if (current instanceof LayoutBoxElement && current.role === role) {
+        return current;
+      }
+      current = current.parentElement;
     }
     return null;
   }
 
   /**
-   * 항목의 데이터를 대상 요소에 주입한다.
+   * box의 자손 중 지정된 role을 가진 첫 번째 box를 찾는다.
    *
-   * @param item - 주입할 항목
-   * @param target - 주입 대상 요소
+   * @param box - 탐색 시작 box
+   * @param role - 찾을 role
+   * @returns 매칭된 자손 box. 없으면 `null`.
    */
-  private _injectItem(
-    item: PlaceGunItem,
-    target: LayoutParagraphElement | LayoutImageElement,
-  ): void {
-    const parentBox = target.parentElement instanceof LayoutBoxElement ? target.parentElement : null;
+  private _findDescendantBoxByRole(box: LayoutBoxElement, role: string): LayoutBoxElement | null {
+    const found = box.querySelector<LayoutBoxElement>(`x-layout-box[role="${role}"]`);
+    return found ?? null;
+  }
 
-    if (item.contentType === 'text' && target instanceof LayoutParagraphElement) {
-      const articleContent = item.content as ArticleContent;
-      const body = articleContent.body;
-      const data = target.data;
-      target.data = { ...data, content: body };
-      const model = target.model;
-      if (model) {
-        model.textContent = body;
-      }
-      target.markStructureChangedAndRender();
-      parentBox?.requestRerenderAffectedParagraphs();
-      return;
+  /**
+   * box 내의 첫 번째 paragraph 자식 요소를 찾는다.
+   *
+   * 중첩 box인 경우 `contentType`이 'paragraph'이면 그 내부 paragraph를 반환하고,
+   * 직접 paragraph 자식이 있으면 그것을 반환한다.
+   *
+   * @param box - 검색할 box
+   * @returns paragraph 요소. 없으면 `null`.
+   */
+  private _findParagraphInBox(box: LayoutBoxElement): LayoutParagraphElement | null {
+    if (box.contentType === 'paragraph') {
+      return box.items.find(
+        (child): child is LayoutParagraphElement => child instanceof LayoutParagraphElement,
+      ) ?? null;
     }
-    if (item.contentType === 'image' && target instanceof LayoutImageElement) {
-      const imageContent = item.content as ImageContent;
-      const url = item.subType === 'ad'
-        ? `/storage/ad/${imageContent.uid}?variant=work`
-        : `/storage/image/${imageContent.uid}?variant=work`;
-      target.url = url;
-      parentBox?.requestRerenderAffectedParagraphs();
-      return;
+    return box.querySelector<LayoutParagraphElement>('x-layout-paragraph');
+  }
+
+  /**
+   * box 내의 첫 번째 image 자식 요소를 찾는다.
+   *
+   * @param box - 검색할 box
+   * @returns image 요소. 없으면 `null`.
+   */
+  private _findImageInBox(box: LayoutBoxElement): LayoutImageElement | null {
+    if (box.contentType === 'image') {
+      return box.items.find(
+        (child): child is LayoutImageElement => child instanceof LayoutImageElement,
+      ) ?? null;
     }
+    return box.querySelector<LayoutImageElement>('x-layout-image');
+  }
+
+  /**
+   * paragraph에 텍스트를 주입한다.
+   *
+   * `paragraph.data` setter로 content를 설정하고, model이 있으면
+   * `model.textContent`를 직접 갱신한 후 `markStructureChangedAndRender()`로
+   * 재렌더링한다.
+   *
+   * @param paragraph - 주입 대상 paragraph
+   * @param text - 주입할 텍스트
+   */
+  private _injectText(paragraph: LayoutParagraphElement, text: string): void {
+    const data = paragraph.data;
+    paragraph.data = { ...data, content: text };
+    const model = paragraph.model;
+    if (model) {
+      model.textContent = text;
+    }
+    paragraph.markStructureChangedAndRender();
+  }
+
+  /**
+   * image 요소에 이미지 URL을 주입한다.
+   *
+   * @param item - 이미지 항목
+   * @param target - 주입 대상 image 요소
+   */
+  private _injectImage(item: PlaceGunItem, target: LayoutImageElement): void {
+    const imageContent = item.content as ImageContent;
+    const url = item.subType === 'ad'
+      ? `/storage/ad/${imageContent.uid}?variant=work`
+      : `/storage/image/${imageContent.uid}?variant=work`;
+    target.url = url;
+    const parentBox = target.parentElement instanceof LayoutBoxElement ? target.parentElement : null;
+    parentBox?.requestRerenderAffectedParagraphs();
   }
 
   /**
