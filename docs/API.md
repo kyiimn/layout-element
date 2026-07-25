@@ -35,8 +35,9 @@
    - [`EditManager`](#editmanager)
    - [`TextEditController`](#texteditcontroller)
    - [`TextEditCoordinateMapper`](#texteditcoordinatemapper)
-   - [`InsertController`](#insertcontroller)
-   - [`LayoutEditController`](#layouteditcontroller)
+    - [`InsertController`](#insertcontroller)
+    - [`LayoutEditController`](#layouteditcontroller)
+    - [`PlaceGunController`](#placeguncontroller)
 6. [Types](#types)
    - [Layout](#layout-types)
    - [Style](#style-types)
@@ -264,6 +265,7 @@ class LayoutBoxElement extends HTMLElement
 | `paddingBottom` | `number` | mm | 내부 하단 여백. |
 | `paddingLeft` | `number` | mm | 내부 좌측 여백. |
 | `role` | `BoxRole` | — | 의미적 역할 (예: `'body'`, `'image'`, `'title'`). |
+| `contentUid` | `string \| undefined` | — | 콘텐츠 외부 식별자(UID). 렌더링/레이아웃에 영향 없는 단순 메타정보. |
 | `groupMember` | `string[]` | — | 그룹 멤버 ID 배열. |
 | `priority` | `number` | — | 정렬 우선순위. |
 | `lock` | `boolean` | — | 편집 잠금. |
@@ -325,6 +327,7 @@ console.log(box.left, box.top, box.width, box.height); // mm 값
 | 속성 | 타입 | 설명 |
 |---|---|---|
 | `role` | `BoxRole` | `role` setter/getter와 동기화. |
+| `content-uid` | `string` | `contentUid` setter/getter와 동기화. 단순 메타정보. |
 | `group-member` | `string` | 쉼표 구분 그룹 멤버 ID. |
 | `priority` | `number` | 우선순위. |
 | `lock` | `boolean` | 잠금. |
@@ -1241,6 +1244,16 @@ class EditManager {
   deactivateInsert(): void;
   handleInsertMouseDown(event: MouseEvent): void;
 
+  // Place Gun
+  get placeGunItems: PlaceGunItem[];
+  get placeGunPaused: boolean;
+  get placeGunActive: boolean;
+  loadPlaceGun(items: readonly PlaceGunItem[]): void;
+  unloadPlaceGun(): void;
+  removePlaceGunItem(index: number): void;
+  reorderPlaceGunItems(from: number, to: number): void;
+  setPlaceGunPaused(paused: boolean): void;
+
   // 상태 조회
   get focusedParagraph: LayoutParagraphElement | null;
   get focusedController: TextEditController | null;
@@ -1270,6 +1283,9 @@ type EditManagerEventType =
   | 'layoutResize'          // 레이아웃 리사이즈
   | 'insert'                // 삽입 완료
   | 'insertCancel';         // 삽입 취소
+  | 'modeChange'            // 모드 전환
+  | 'boxPropertyChange'    // Box 속성 변경
+  | 'placeGunChange';       // Place Gun 상태 변경
 
 interface EditManagerEvent {
   type: EditManagerEventType;
@@ -1894,6 +1910,46 @@ destroy(): void;
 
 ---
 
+### `PlaceGunController`
+
+Place Gun 클릭 배치를 관리하는 컨트롤러. `EditManager.placeGunActive`가 true일 때
+문서 클릭을 감지하여 장전된 맨 위 항목을 클릭 위치의 기존 요소에 주입한다.
+
+> **참고**: `EditManager`가 자동으로 `attach()`/`detach()`를 관리하므로 직접 호출할 필요가 없다.
+
+```ts
+class PlaceGunController {
+  attach(): void;
+  detach(): void;
+}
+```
+
+#### 동작
+
+- `attach()`: 문서 커서를 `copy`로 변경
+- `detach()`: 커서 복원
+- `handleBoxMouseDown(box, event)`: box의 mousedown 이벤트에서 호출. 매칭되는 기존 요소에 데이터 주입 (새 요소 생성 안 함)
+
+#### 매칭 규칙
+
+| 항목 contentType | 매칭 대상 box `contentType` | 주입 대상 자식 요소 |
+|------------------|----------------------------|---------------------|
+| `'text'` | `'paragraph'` | `LayoutParagraphElement` |
+| `'image'` | `'image'` | `LayoutImageElement` |
+
+매칭되는 요소가 없으면 항목을 소비하지 않고 no-op로 종료한다.
+
+#### 데이터 주입
+
+| 항목 contentType | 주입 동작 |
+|------------------|-----------|
+| `'text'` | `paragraph.data = {...data, content: item.content.body}` + `model.textContent = item.content.body` + `markStructureChangedAndRender()` |
+| `'image'` | `image.url = subType === 'ad' ? /storage/ad/{uid} : /storage/image/{uid}` (url setter가 자동으로 `render()` 호출) |
+
+자세한 내용은 [`EDITING_PLACE_GUN.md`](./EDITING_PLACE_GUN.md) 참조.
+
+---
+
 ## Types
 
 ### Layout Types
@@ -1941,6 +1997,7 @@ type BoxData = {
   paddingBottom?: number;
   paddingLeft?: number;
   role?: BoxRole;
+  contentUid?: string;
   groupMember?: string;
   priority?: number;
   lock?: boolean;
@@ -2185,6 +2242,39 @@ interface InsertEventDetail {
 ```ts
 type LayoutElement = LayoutBoxElement;
 ```
+
+#### `PlaceGunItem` / `PlaceGunChangeEventDetail`
+
+```ts
+type PlaceGunContentType = 'text' | 'image';
+type PlaceGunSubType = 'article' | 'image' | 'ad';
+
+type ArticleContent = {
+  uid: string;       // 기사 고유 식별자
+  title: string;     // 기사 제목
+  body: string;       // 기사 본문 텍스트
+};
+
+type ImageContent = {
+  uid: string;        // 이미지/광고 고유 식별자
+  caption: string;    // 이미지/광고 설명 (캡션)
+};
+
+type PlaceGunItem = {
+  contentType: PlaceGunContentType;
+  subType: PlaceGunSubType;        // URL 패턴 결정용
+  title: string;                    // 패널 표시용 제목
+  sourceId: string;                 // 원본 컨텐츠 고유 식별자
+  content: ArticleContent | ImageContent;
+};
+
+type PlaceGunChangeEventDetail = {
+  items: PlaceGunItem[];
+  paused: boolean;
+};
+```
+
+자세한 Place Gun 동작 명세는 [`EDITING_PLACE_GUN.md`](./EDITING_PLACE_GUN.md) 참조.
 
 ---
 
