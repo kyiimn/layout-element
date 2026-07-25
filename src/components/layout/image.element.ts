@@ -4,11 +4,58 @@ import { genUUID } from "@/utils";
 import { DEFAULT_IMAGE_DPI } from "@/constants";
 
 /**
+ * URL 로더 함수 타입.
+ *
+ * 원본 URL을 받아 실제로 로드할 URL로 변환한다. 동기 또는 비동기로 동작할 수 있으며,
+ * 인쇄 모드처럼 인라인 데이터(`base64Data`)를 직접 반환하는 시나리오도 지원한다.
+ *
+ * @param url 원본 URL (`ImageData.url`)
+ * @param data 이미지 데이터 전체. 로더가 컨텍스트(예: `base64Data`, `dpi`)를 참조할 때 사용
+ * @returns 실제로 로드할 URL 문자열, 또는 로드하지 않을 경우 `undefined`/`null`
+ *
+ * @example
+ * ```ts
+ * // 동기 변환 예: CDN 경로로 치환
+ * LayoutImageElement.urlLoader = (url) => `https://cdn.example.com/${url}`;
+ *
+ * // 비동기 변환 예: 서버에서 서명된 URL 발급
+ * LayoutImageElement.urlLoader = async (url) => {
+ *   const res = await fetch(`/api/sign?url=${encodeURIComponent(url)}`);
+ *   const { signedUrl } = await res.json();
+ *   return signedUrl;
+ * };
+ *
+ * // 인쇄 모드: base64Data를 직접 반환
+ * LayoutImageElement.urlLoader = (_url, data) => data.base64Data;
+ * ```
+ */
+export type URLLoader = (
+  url: string,
+  data: ImageData,
+) => string | null | undefined | Promise<string | null | undefined>;
+
+/**
  * 이미지 크롭 렌더링 요소. `<x-layout-image>` 커스텀 엘리먼트.
  *
  * `ImageData`를 받아 `<canvas>`를 사용해 크롭된 이미지를 렌더링한다.
  * 원본 이미지에서 `x`, `y`, `width`, `height`로 정의된 영역을
  * `dpi`를 기준으로 mm 단위로 변환하여 표시한다.
+ *
+ * ### Custom URL Loader
+ *
+ * 정적 멤버 `LayoutImageElement.urlLoader`에 {@link URLLoader}를 설정하면,
+ * `render()` 시점에 원본 URL(`ImageData.url`)을 loader를 거쳐 실제 로드할 URL로 변환한다.
+ * loader가 설정되지 않으면 원본 URL을 그대로 사용한다(기존 동작).
+ * loader는 모든 이미지 요소 인스턴스에서 공유된다.
+ *
+ * @example
+ * ```ts
+ * // 로더 설정
+ * LayoutImageElement.urlLoader = (url) => `https://cdn.example.com/${url}`;
+ *
+ * // 로더 해제 (원본 URL 직접 사용)
+ * LayoutImageElement.urlLoader = undefined;
+ * ```
  */
 export class LayoutImageElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
@@ -25,6 +72,19 @@ export class LayoutImageElement extends HTMLElement {
   private _url?: string;
   private _zIndex: number = 0;
   private _overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number };
+
+  /**
+   * 전역 URL 로더. 모든 `LayoutImageElement` 인스턴스가 공유한다.
+   *
+   * `undefined`가 아니면 `render()` 시점에 원본 URL(`ImageData.url`)을 로더에 전달하여
+   * 실제로 로드할 URL을 얻는다. `undefined`면 원본 URL을 그대로 사용한다.
+   *
+   * @example
+   * ```ts
+   * LayoutImageElement.urlLoader = async (url) => fetchSignedUrl(url);
+   * ```
+   */
+  static urlLoader?: URLLoader;
 
   constructor() {
     super();
@@ -110,6 +170,9 @@ export class LayoutImageElement extends HTMLElement {
   /**
    * 캔버스 이미지 렌더링: 원본 이미지에서 크롭 영역을 추출하여 캔버스에 그린다.
    * `dpi`를 기준으로 픽셀/mm 변환을 수행한다.
+   *
+   * `urlLoader`가 설정되어 있으면 원본 URL을 loader에 전달하여 실제 로드할 URL을 얻는다.
+   * loader가 `null`/`undefined`를 반환하면 이미지를 로드하지 않는다.
    */
   async render() {
     if (!this.isConnected || !this.canvas) return;
@@ -117,6 +180,12 @@ export class LayoutImageElement extends HTMLElement {
 
     const ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
     if (this.url) {
+      const resolvedUrl = await this._resolveUrl(this.url);
+      if (!resolvedUrl) {
+        ctx.fillStyle = 'transparent';
+        ctx.fillRect(0, 0, this.canvas!.width, this.canvas!.height);
+        return;
+      }
       await (new Promise<boolean>((r) => {
         const img = new Image();
         img.crossOrigin = 'Anonymous';
@@ -144,12 +213,25 @@ export class LayoutImageElement extends HTMLElement {
           }
         };
         img.onerror = (_) => r(false);
-        img.src = this.url!;
+        img.src = resolvedUrl;
       }));
     } else {
       ctx.fillStyle = 'transparent';
       ctx.fillRect(0, 0, this.canvas!.width, this.canvas!.height);
     }
+  }
+
+  /**
+   * 원본 URL을 로더를 거쳐 실제 로드할 URL로 변환한다.
+   *
+   * @param url 원본 URL (`ImageData.url`)
+   * @returns 실제로 로드할 URL. `null`/`undefined`면 로드하지 않음
+   */
+  private async _resolveUrl(url: string): Promise<string | null | undefined> {
+    const loader = LayoutImageElement.urlLoader;
+    if (!loader) return url;
+    const result = await loader(url, this.data);
+    return result;
   }
 
   set data(data: ImageData) {
