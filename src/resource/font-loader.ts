@@ -97,9 +97,6 @@ export class FontLoader {
   }
 
   public async init(fonts?: Font[]) {
-    this._ready = false;
-    this._fontFaces = [];
-
     globalThis.document?.fonts.clear();
 
     try {

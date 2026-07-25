@@ -126,17 +126,17 @@ export class ColorRegistry {
   }
 
   public async init(colorSet?: CMYKColorSet) {
-    this._ready = false;
-    this._colorSet = {};
+    let newColorSet: CMYKColorSet = {};
 
     try {
       if (this._isPrint) {
         if (!colorSet) throw new Error('not given color set');
-        this._colorSet = colorSet;
+        newColorSet = colorSet;
       } else {
-        this._colorSet = await this._loadServer();
+        newColorSet = await this._loadServer();
       }
-      this._defaultColor = { c: 0, m: 0, y: 0, k: 0 };
+      this._defaultColor = { c: 0, m: 0, y: 0, k: 255 };
+      this._colorSet = newColorSet;
 
       const sheet = globalThis.document?.styleSheets[0];
       if (!sheet) {
