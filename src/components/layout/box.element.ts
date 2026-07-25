@@ -124,7 +124,7 @@ export class LayoutBoxElement extends HTMLElement {
   private _layoutStructure() {
     if (!this.isConnected || !this.parentModel) return;
 
-    const { columnWidth, gaps, lineHeight } = this.parentModel;
+    const { columnWidth, gaps } = this.parentModel;
 
     this._model ??= GridCalculator.create({
       element: this,
@@ -133,9 +133,9 @@ export class LayoutBoxElement extends HTMLElement {
     this._model.data = {
       element: this,
 
-      paddingTop: (this.position !== 'absolute' && this.paddingTop !== undefined) ? Math.ceil(this.paddingTop / lineHeight) * lineHeight : this.paddingTop,
+      paddingTop: this.paddingTop,
       paddingRight: this.paddingRight,
-      paddingBottom: (this.position !== 'absolute' && this.paddingBottom !== undefined) ? Math.ceil(this.paddingBottom / lineHeight) * lineHeight : this.paddingBottom,
+      paddingBottom: this.paddingBottom,
       paddingLeft: this.paddingLeft,
 
       columns: this.position !== 'absolute' ? columnWidth.slice(this.left, this.left + this.width) : this._savedColumns,
@@ -649,24 +649,28 @@ export class LayoutBoxElement extends HTMLElement {
     if (this._paddingTop === value) return;
     this._paddingTop = value;
     this.layout();
+    this.scheduleRerenderAffectedParagraphs();
   }
 
   set paddingRight(value: number) {
     if (this._paddingRight === value) return;
     this._paddingRight = value;
     this.layout();
+    this.scheduleRerenderAffectedParagraphs();
   }
 
   set paddingBottom(value: number) {
     if (this._paddingBottom === value) return;
     this._paddingBottom = value;
     this.layout();
+    this.scheduleRerenderAffectedParagraphs();
   }
 
   set paddingLeft(value: number) {
     if (this._paddingLeft === value) return;
     this._paddingLeft = value;
     this.layout();
+    this.scheduleRerenderAffectedParagraphs();
   }
 
   set inheritStyle(style: InheritStyle | undefined) {

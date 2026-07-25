@@ -108,7 +108,6 @@ export class LayoutParagraphElement extends HTMLElement {
     const fontWeight = this.textStyle.fontWeight || this._inheritStyle.fontWeight;
     const fontStyle = this.textStyle.fontStyle || this._inheritStyle.fontStyle;
     const fontSize = this.textStyle.fontSize || this._inheritStyle.fontSize;
-    const lineHeight = this.parentModel.lineHeight;
     const paddingTop = this._inheritStyle.paddingTop || 0;
 
     const colorRegistry = ColorRegistry.getInstance();
@@ -144,7 +143,7 @@ export class LayoutParagraphElement extends HTMLElement {
         fontSize: `${fontSize}mm`,
         height: `${this.absHeight}mm`,
         left: `${this.relLeft}mm`,
-        top: `${Math.ceil(paddingTop / lineHeight) * lineHeight}mm`,
+        top: `${paddingTop}mm`,
         width: `${this.absWidth}mm`,
         zIndex: `${this.zIndex + 100}`,
       }
@@ -430,7 +429,7 @@ export class LayoutParagraphElement extends HTMLElement {
 
   get relTop() {
     if (!this._inheritStyle || !this.parentModel) return 0;
-    return Math.ceil((this._inheritStyle.paddingTop || 0) / this.parentModel.lineHeight) * this.parentModel.lineHeight;
+    return this._inheritStyle.paddingTop || 0;
   }
 
   get absLeft(): number {

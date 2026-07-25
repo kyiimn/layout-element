@@ -1007,6 +1007,8 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 - `render()`에서 `columnContents` 길이만큼 `<x-layout-column>` 생성
 - `overlayElements` 게터가 `_detectOverlapWithCache()`에 사용될 오버랩 요소 제공
 
+**paragraph 위치와 `paddingTop`**: `_applyStyle()`에서 paragraph의 CSS `top`은 부모 box의 `inheritStyle.paddingTop`을 그대로 사용한다 (`top: ${paddingTop}mm`). 라인 그리드(=`lineHeight` 단위)로의 강제 스냅은 수행하지 않는다 — 사용자가 `paddingTop`을 명시적으로 설정한 것은 의도적으로 라인 그리드에서 벗어난 여백을 원한다는 뜻으로 해석하기 때문이다. `paddingTop = 0`(기본값)이면 `top: 0mm`가 되어 자연스럽게 라인 그리드에 정렬된다. `relTop` 게터도 동일하게 `paddingTop`을 그대로 반환한다. `LayoutImageElement`도 같은 방식으로 동작한다.
+
 #### Public API (셋터/게터)
 
 | 프로퍼티 | 타입 | 셋터 동작 | 설명 |

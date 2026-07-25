@@ -80,7 +80,6 @@ export class LayoutImageElement extends HTMLElement {
     if (!this.isConnected) return;
     if (!this.parentModel || !this._inheritStyle) return;
 
-    const lineHeight = this.parentModel.lineHeight;
     const paddingTop = this._inheritStyle.paddingTop || 0;
 
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
@@ -90,7 +89,7 @@ export class LayoutImageElement extends HTMLElement {
         height: `${this.absHeight}mm`,
         left: `${this.relLeft}mm`,
         position: 'absolute',
-        top: `${Math.ceil(paddingTop / lineHeight) * lineHeight}mm`,
+        top: `${paddingTop}mm`,
         width: `${this.absWidth}mm`,
         zIndex: `${this.zIndex + 100}`,
       }
@@ -273,7 +272,7 @@ export class LayoutImageElement extends HTMLElement {
 
   get relTop() {
     if (!this._inheritStyle || !this.parentModel) return 0;
-    return Math.ceil((this._inheritStyle.paddingTop || 0) / this.parentModel.lineHeight) * this.parentModel.lineHeight;
+    return this._inheritStyle.paddingTop || 0;
   }
 
   get absLeft(): number {
