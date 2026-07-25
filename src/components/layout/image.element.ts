@@ -72,6 +72,7 @@ export class LayoutImageElement extends HTMLElement {
   private _url?: string;
   private _zIndex: number = 0;
   private _overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number };
+  private _objectUrl?: string;
 
   /**
    * 전역 URL 로더. 모든 `LayoutImageElement` 인스턴스가 공유한다.
@@ -96,7 +97,12 @@ export class LayoutImageElement extends HTMLElement {
     this.layout();
   }
 
-  disconnectedCallback() { }
+  disconnectedCallback() {
+    if (this._objectUrl) {
+      URL.revokeObjectURL(this._objectUrl);
+      this._objectUrl = undefined;
+    }
+  }
 
   /**
    * 구조 계산: 스타일 규칙 생성 및 캔버스 요소 생성.
@@ -186,6 +192,14 @@ export class LayoutImageElement extends HTMLElement {
         ctx.fillRect(0, 0, this.canvas!.width, this.canvas!.height);
         return;
       }
+
+      if (this._objectUrl && this._objectUrl !== resolvedUrl) {
+        URL.revokeObjectURL(this._objectUrl);
+      }
+      if (resolvedUrl.startsWith('blob:')) {
+        this._objectUrl = resolvedUrl;
+      }
+
       await (new Promise<boolean>((r) => {
         const img = new Image();
         img.crossOrigin = 'Anonymous';
