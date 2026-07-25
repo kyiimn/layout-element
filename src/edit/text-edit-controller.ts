@@ -747,7 +747,11 @@ export class TextEditController {
 
     if (event.key === "Escape") {
       event.preventDefault();
-      this._clearSelection();
+      if (this._cursorModel.selection) {
+        this._clearSelection();
+      } else {
+        EditManager.getInstance().textEditMode = false;
+      }
       return;
     }
 
