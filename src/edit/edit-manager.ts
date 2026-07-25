@@ -6,8 +6,9 @@ import type { TextEditController, CurrentStyle } from "./text-edit-controller";
 import { InsertController } from "./insert-controller";
 import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
+import { PlaceGunController } from "./place-gun-controller";
 import type { SelectionRange } from "@/types/edit";
-import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail } from "@/types/edit";
+import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail, PlaceGunItem, PlaceGunChangeEventDetail } from "@/types/edit";
 import type { BoxRole } from "@/types/layout";
 
 /** 레이아웃 편집 대상 요소 (box만 해당) */
@@ -31,7 +32,8 @@ export type EditManagerEventType =
   | 'insert'
   | 'insertCancel'
   | 'modeChange'
-  | 'boxPropertyChange';
+  | 'boxPropertyChange'
+  | 'placeGunChange';
 
 /**
  * 글로벌 편집 관리 이벤트.
@@ -93,6 +95,8 @@ export interface EditManagerEvent {
   mode?: EditModeState;
   /** Box 속성 변경 상세 정보 (boxPropertyChange 이벤트에서만) */
   boxPropertyDetail?: BoxPropertyChangeEventDetail;
+  /** Place Gun 상태 변경 상세 정보 (placeGunChange 이벤트에서만) */
+  placeGunDetail?: PlaceGunChangeEventDetail;
 }
 
 /**
@@ -157,6 +161,10 @@ export class EditManager {
   private _selectableRoles: Set<BoxRole> | null = null;
   private _selectableBoxIds: Set<string> | null = null;
   private _selectableRootId: string | null = null;
+
+  private _placeGunItems: PlaceGunItem[] = [];
+  private _placeGunPaused: boolean = false;
+  private _placeGunController: PlaceGunController | null = null;
 
   /**
    * CSS `transform: scale(s)`이 적용된 환경을 위한 화면 scale 보정 계수.
@@ -1426,6 +1434,19 @@ export class EditManager {
   }
 
   /**
+   * Place Gun 활성 상태에서 box mousedown 이벤트를 PlaceGunController에 위임한다.
+   * `LayoutBoxElement`의 mousedown 핸들러에서 호출한다.
+   *
+   * @param box - mousedown이 발생한 box 요소
+   * @param event - mousedown 이벤트
+   * @returns 주입 성공 여부
+   */
+  handlePlaceGunMouseDown(box: LayoutBoxElement, event: MouseEvent): boolean {
+    if (!this._placeGunController || !this.placeGunActive) return false;
+    return this._placeGunController.handleBoxMouseDown(box, event);
+  }
+
+  /**
    * 삽입 모드를 비활성화한다. `insertMode = null`과 동일하다.
    */
   deactivateInsert(): void {
@@ -1955,6 +1976,219 @@ export class EditManager {
       for (const listener of listeners) {
         try {
           listener(event);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
+
+  // ─── Place Gun ───────────────────────────────────────────────
+
+  /**
+   * 현재 Place Gun에 장전된 항목 리스트를 반환한다.
+   *
+   * 리스트의 맨 앞(index 0)이 "다음으로 쏠 항목"이다.
+   * 반환되는 배열은 내부 배열의 얕은 복사이므로 안전하게 수정할 수 있다.
+   *
+   * @returns 장전된 항목 배열 (얕은 복사)
+   *
+   * @example
+   * ```ts
+   * const items = manager.placeGunItems;
+   * if (items.length > 0) {
+   *   console.log('다음 항목:', items[0]?.title);
+   * }
+   * ```
+   */
+  get placeGunItems(): PlaceGunItem[] {
+    return [...this._placeGunItems];
+  }
+
+  /**
+   * Place Gun이 일시정지 상태인지 반환한다.
+   *
+   * `true`이면 장전된 항목이 있어도 클릭 배치가 동작하지 않고
+   * 커서도 기본 상태로 유지된다.
+   *
+   * @returns 일시정지 여부
+   */
+  get placeGunPaused(): boolean {
+    return this._placeGunPaused;
+  }
+
+  /**
+   * Place Gun이 활성 상태인지 반환한다.
+   *
+   * 활성 = 항목이 1개 이상 장전되어 있고 일시정지되지 않음.
+   * 활성 상태에서만 문서 클릭 시 항목이 배치된다.
+   *
+   * @returns 활성 여부
+   */
+  get placeGunActive(): boolean {
+    return this._placeGunItems.length > 0 && !this._placeGunPaused;
+  }
+
+  /**
+   * Place Gun에 항목들을 장전한다.
+   *
+   * 기존에 장전된 항목은 모두 교체된다. 항목이 1개 이상이면 자동으로
+   * PlaceGunController가 생성되어 문서 클릭 리스너가 활성화된다.
+   *
+   * @param items - 장전할 항목 배열. 빈 배열이면 `unloadPlaceGun()`과 동일.
+   *
+   * @example
+   * ```ts
+   * manager.loadPlaceGun([
+   *   { contentType: 'text', title: '기사1', sourceId: 'a1', content: '내용...' },
+   *   { contentType: 'image', title: '사진1', sourceId: 'i1', content: '/img/1.png' },
+   * ]);
+   * ```
+   */
+  loadPlaceGun(items: readonly PlaceGunItem[]): void {
+    if (this._isPrint) return;
+    this._placeGunItems = [...items];
+    this._placeGunPaused = false;
+    this._syncPlaceGunController();
+    this._dispatchPlaceGunChange();
+  }
+
+  /**
+   * Place Gun에 장전된 모든 항목을 비운다.
+   *
+   * 일시정지 상태도 해제되고 PlaceGunController가 제거된다.
+   */
+  unloadPlaceGun(): void {
+    if (this._placeGunItems.length === 0 && !this._placeGunPaused && !this._placeGunController) return;
+    this._placeGunItems = [];
+    this._placeGunPaused = false;
+    this._syncPlaceGunController();
+    this._dispatchPlaceGunChange();
+  }
+
+  /**
+   * 특정 인덱스의 항목을 제거한다.
+   *
+   * @param index - 제거할 항목의 0-based 인덱스
+   * @throws {RangeError} index가 범위를 벗어나면
+   */
+  removePlaceGunItem(index: number): void {
+    if (index < 0 || index >= this._placeGunItems.length) {
+      throw new RangeError(`EditManager.removePlaceGunItem: index ${index}가 범위를 벗어났습니다 (길이: ${this._placeGunItems.length}).`);
+    }
+    this._placeGunItems.splice(index, 1);
+    this._syncPlaceGunController();
+    this._dispatchPlaceGunChange();
+  }
+
+  /**
+   * 항목의 순서를 변경한다.
+   *
+   * `from` 인덱스의 항목을 `to` 인덱스로 이동한다.
+   * 맨 위(0)로 옮기면 다음으로 쏠 항목이 된다.
+   *
+   * @param from - 이동할 항목의 현재 인덱스
+   * @param to - 항목의 새 인덱스
+   * @throws {RangeError} from 또는 to가 범위를 벗어나면
+   *
+   * @example
+   * ```ts
+   * // 3번째 항목을 맨 위로
+   * manager.reorderPlaceGunItems(2, 0);
+   * ```
+   */
+  reorderPlaceGunItems(from: number, to: number): void {
+    const len = this._placeGunItems.length;
+    if (from < 0 || from >= len) {
+      throw new RangeError(`EditManager.reorderPlaceGunItems: from ${from}가 범위를 벗어났습니다 (길이: ${len}).`);
+    }
+    if (to < 0 || to >= len) {
+      throw new RangeError(`EditManager.reorderPlaceGunItems: to ${to}가 범위를 벗어났습니다 (길이: ${len}).`);
+    }
+    if (from === to) return;
+    const [item] = this._placeGunItems.splice(from, 1);
+    this._placeGunItems.splice(to, 0, item);
+    this._dispatchPlaceGunChange();
+  }
+
+  /**
+   * Place Gun 일시정지 상태를 설정한다.
+   *
+   * `true`로 설정하면 장전된 항목이 있어도 클릭 배치가 동작하지 않고
+   * 커서가 기본 상태로 복원된다. `false`면 다시 배치 가능 상태가 된다.
+   *
+   * @param paused - 일시정지 여부
+   */
+  setPlaceGunPaused(paused: boolean): void {
+    if (this._placeGunPaused === paused) return;
+    this._placeGunPaused = paused;
+    this._syncPlaceGunController();
+    this._dispatchPlaceGunChange();
+  }
+
+  /**
+   * 맨 위 항목을 소비하고 반환한다.
+   *
+   * PlaceGunController가 클릭 배치를 완료한 후 호출된다.
+   * 항목이 제거되고 리스트가 갱신되며, 리스트가 비면 컨트롤러가 자동
+   * 비활성화된다.
+   *
+   * @returns 소비된 항목. 장전된 항목이 없거나 일시정지 상태면 `null`.
+   * @internal
+   */
+  _consumePlaceGunItem(): PlaceGunItem | null {
+    if (!this.placeGunActive) return null;
+    const [item, ...rest] = this._placeGunItems;
+    this._placeGunItems = rest;
+    this._syncPlaceGunController();
+    this._dispatchPlaceGunChange();
+    return item ?? null;
+  }
+
+  /**
+   * 현재 장전/일시정지 상태에 따라 PlaceGunController를 동기화한다.
+   *
+   * `placeGunActive`가 true면 컨트롤러를 생성/활성화하고,
+   * false면 컨트롤러를 비활성화한다.
+   */
+  private _syncPlaceGunController(): void {
+    if (this.placeGunActive) {
+      if (!this._placeGunController) {
+        this._placeGunController = new PlaceGunController();
+      }
+      this._placeGunController.attach();
+    } else {
+      if (this._placeGunController) {
+        this._placeGunController.detach();
+      }
+    }
+  }
+
+  /**
+   * `placeGunChange` 이벤트를 발생시킨다.
+   */
+  private _dispatchPlaceGunChange(): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('placeGunChange');
+    if (!listeners || listeners.size === 0) return;
+
+    const detail: PlaceGunChangeEventDetail = {
+      items: [...this._placeGunItems],
+      paused: this._placeGunPaused,
+    };
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'placeGunChange',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null as unknown as TextEditController,
+            placeGunDetail: detail,
+          });
         } catch (e) {
           console.error(e);
         }

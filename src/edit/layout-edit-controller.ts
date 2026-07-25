@@ -403,6 +403,7 @@ export class LayoutEditController {
     const box = this._findEditableBoxFromEvent(event);
     if (!box) return;
     const manager = EditManager.getInstance();
+    if (manager.placeGunActive) return;
     if (manager.insertMode) {
       manager.handleInsertMouseDown(event);
       return;

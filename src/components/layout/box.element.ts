@@ -84,6 +84,7 @@ export class LayoutBoxElement extends HTMLElement {
     this._startChildObserver();
     this.addEventListener('mouseenter', this._onLayoutMouseEnter);
     this.addEventListener('mouseleave', this._onLayoutMouseLeave);
+    this.addEventListener('mousedown', this._onPlaceGunMouseDown);
     this.layout();
   }
 
@@ -91,6 +92,7 @@ export class LayoutBoxElement extends HTMLElement {
     this._stopChildObserver();
     this.removeEventListener('mouseenter', this._onLayoutMouseEnter);
     this.removeEventListener('mouseleave', this._onLayoutMouseLeave);
+    this.removeEventListener('mousedown', this._onPlaceGunMouseDown);
     EditManager.getInstance()._unregisterLayout(this);
   }
 
@@ -1035,6 +1037,20 @@ export class LayoutBoxElement extends HTMLElement {
       }
       el = el.parentElement;
     }
+  }
+
+  /**
+   * Place Gun 활성 상태일 때 box의 mousedown 이벤트를 EditManager에 위임한다.
+   *
+   * Place Gun이 비활성이면 아무 동작도 하지 않고 다른 핸들러가 정상 동작하도록 한다.
+   * 활성이면 `EditManager.handlePlaceGunMouseDown`이 매칭 검사 후 주입을 수행하고,
+   * 매칭 성공 시 `preventDefault` + `stopPropagation`으로 후속 핸들러를 차단한다.
+   */
+  private _onPlaceGunMouseDown = (event: MouseEvent): void => {
+    if (this._isPrint) return;
+    const manager = EditManager.getInstance();
+    if (!manager.placeGunActive) return;
+    manager.handlePlaceGunMouseDown(this, event);
   }
 
   /**
