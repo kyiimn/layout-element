@@ -41,6 +41,12 @@ export type ImageContent = {
   caption: string;
   /** 이미지/광고 접근 URL. */
   url: string;
+  /** 원본 이미지 너비 (픽셀). */
+  width: number;
+  /** 원본 이미지 높이 (픽셀). */
+  height: number;
+  /** 이미지 해상도 (DPI). */
+  dpi: number;
 };
 
 /**

@@ -1,4 +1,16 @@
 /**
+ * 이미지 object-fit 동작.
+ *
+ * - `'cover'`: box 영역을 채우면서 원본 비율 유지. 넘치는 부분은 크롭.
+ * - `'fill'`: box 영역에 맞춰 늘림. 비율 무시.
+ * - `'contain'`: box 안에 전체 이미지 표시. 여백 발생.
+ * - `'none'`: x/y/width/height를 그대로 사용.
+ *
+ * @readonly
+ */
+export type ImageObjectFit = 'cover' | 'fill' | 'contain' | 'none';
+
+/**
  * 이미지 크롭 영역과 소스를 정의하는 데이터.
  *
  * `<canvas>`를 사용해 크롭된 이미지를 렌더링한다.
@@ -39,4 +51,13 @@ export type ImageData = {
 
   /** 오버랩 감지 시 이미지 불투명 픽셀 주변의 패딩 (mm). 숫자면 상하좌우 동일. */
   overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number };
+
+  /** 원본 이미지 너비 (픽셀). 메타데이터. */
+  originalWidth?: number;
+
+  /** 원본 이미지 높이 (픽셀). 메타데이터. */
+  originalHeight?: number;
+
+  /** object-fit 동작. 기본값 'cover'. 'none'이면 x/y/width/height를 그대로 사용. */
+  objectFit?: ImageObjectFit;
 }
