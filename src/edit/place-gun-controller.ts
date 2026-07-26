@@ -2,6 +2,7 @@ import { EditManager } from "./edit-manager";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
+import { DEFAULT_IMAGE_DPI } from "@/constants";
 import type { PlaceGunItem, ArticleContent, ImageContent } from "@/types/edit";
 
 /**
@@ -248,6 +249,39 @@ export class PlaceGunController {
   }
 
   /**
+   * image 요소에 이미지 데이터를 주입한다.
+   *
+   * 원본 이미지의 픽셀 크기(originalWidth/originalHeight)와 dpi, URL을
+   * 설정하고 `objectFit: 'cover'`로 지정한다. 실제 크롭 영역 계산은
+   * `LayoutImageElement.render()`에서 object-fit에 따라 자동 수행된다.
+   *
+   * @param imageEl - 주입 대상 image 요소
+   * @param image - 이미지 content 객체
+   * @param box - image 요소를 포함하는 box
+   */
+  private _applyImageToElement(
+    imageEl: LayoutImageElement,
+    image: ImageContent,
+    box: LayoutBoxElement,
+  ): void {
+    void box;
+    const data = imageEl.data;
+    const dpi = image.dpi || data.dpi || DEFAULT_IMAGE_DPI;
+    const origW = image.width;
+    const origH = image.height;
+
+    imageEl.data = {
+      ...data,
+      dpi,
+      url: image.url,
+      originalWidth: origW,
+      originalHeight: origH,
+      objectFit: 'cover',
+    };
+    void imageEl.render();
+  }
+
+  /**
    * 이미지/광고 항목을 box에 주입한다.
    *
    * 3가지 케이스로 분기:
@@ -261,11 +295,10 @@ export class PlaceGunController {
   private _injectImageOrAd(box: LayoutBoxElement, item: PlaceGunItem): void {
     const image = item.content as ImageContent;
     const uid = image.uid;
-    const url = image.url;
 
     const groupImage = this._findAncestorByRole(box, 'group-image');
     if (groupImage) {
-      this._injectIntoGroupImage(groupImage, image, uid, url);
+      this._injectIntoGroupImage(groupImage, image, uid);
       return;
     }
 
@@ -273,7 +306,7 @@ export class PlaceGunController {
     if (role === 'image') {
       const imageEl = this._findImageInBox(box);
       if (!imageEl) return;
-      imageEl.url = url;
+      this._applyImageToElement(imageEl, image, box);
       box.contentUid = uid;
       box.requestRerenderAffectedParagraphs();
       return;
@@ -289,7 +322,7 @@ export class PlaceGunController {
 
     const imageEl = this._findImageInBox(box);
     if (imageEl) {
-      imageEl.url = url;
+      this._applyImageToElement(imageEl, image, box);
       box.contentUid = uid;
       box.requestRerenderAffectedParagraphs();
       return;
@@ -320,7 +353,6 @@ export class PlaceGunController {
     groupImage: LayoutBoxElement,
     image: ImageContent,
     uid: string,
-    url: string,
   ): void {
     const imageBox = this._findDescendantBoxByRole(groupImage, 'image');
     const captionBox = this._findDescendantBoxByRole(groupImage, 'caption');
@@ -328,7 +360,7 @@ export class PlaceGunController {
     if (imageBox) {
       const imageEl = this._findImageInBox(imageBox);
       if (imageEl) {
-        imageEl.url = url;
+        this._applyImageToElement(imageEl, image, imageBox);
         imageBox.contentUid = uid;
         imageBox.requestRerenderAffectedParagraphs();
       }
