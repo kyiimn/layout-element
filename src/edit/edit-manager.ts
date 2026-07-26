@@ -278,6 +278,96 @@ export class EditManager {
     this._scale = 1;
   }
 
+  /**
+   * 모든 편집 상태를 초기화한다. LayoutEditor 컴포넌트가 unmount될 때 호출한다.
+   *
+   * 싱글톤 EditManager는 컴포넌트 전환 시에도 인스턴스가 유지되므로,
+   * 이전 문서의 편집 상태(선택, 포커스, 모드, 컨트롤러, 필터 등)가
+   * 새 문서에서 그대로 남아 요소 그리기 등의 동작을 방해하는 것을 방지한다.
+   *
+   * - 선택된 레이아웃 요소의 DOM 속성(`selected`, `text-focused`)을 제거한다.
+   * - 포커스된 컨트롤러를 해제하고 blur 처리한다.
+   * - 드래그/리사이즈 상태를 초기화한다.
+   * - 모드(레이아웃 편집, 텍스트 편집, 삽입)를 모두 비활성화한다.
+   * - 필터 역할/ID/루트를 초기화한다.
+   * - 하위 컨트롤러(SelectionController 제외)를 detach/destroy한다.
+   * - 클릭 소비 핸들러와 타이머를 정리한다.
+   * - scale을 1로 원복한다.
+   * - 이벤트 리스너는 제거하지 않는다 (React useEffect cleanup이 담당).
+   *
+   * @example
+   * ```ts
+   * // LayoutEditor unmount 시
+   * React.useEffect(() => {
+   *   return () => { EditManager.getInstance().reset(); };
+   * }, []);
+   * ```
+   */
+  reset(): void {
+    for (const el of this._selectedLayouts) {
+      el.removeAttribute('selected');
+      el.removeAttribute('text-focused');
+    }
+    this._selectedLayouts = [];
+
+    this._blurFocusedParagraph();
+    this._focusedController = null;
+    this._lastFocusedBox = null;
+
+    this._isLayoutDragging = false;
+    this._isLayoutResizing = false;
+    this._dragTargets = [];
+    this._dragStartPositions.clear();
+
+    this._textEditMode = false;
+    this._layoutEditMode = false;
+    this._layoutEditType = 'move';
+    this._insertMode = null;
+
+    this._editableRoles = null;
+    this._editableBoxIds = null;
+    this._editableTextRoles = null;
+    this._editableTextBoxIds = null;
+    this._editableParagraphIds = null;
+    this._selectableRoles = null;
+    this._selectableBoxIds = null;
+    this._selectableRootId = null;
+    this._editableRootId = null;
+
+    if (this._layoutEditController) {
+      this._layoutEditController.destroy();
+      this._layoutEditController = null;
+    }
+    this._insertController = null;
+    this._placeGunController = null;
+
+    this._removeClickConsumeHandler();
+    this._suppressNextClick = false;
+
+    this._placeGunItems = [];
+    this._placeGunPaused = false;
+    this._multiSelect = false;
+    this._scale = 1;
+
+    document.querySelectorAll('x-layout-box[editable-layout]').forEach((el) => {
+      if (el instanceof LayoutBoxElement) {
+        el.editableLayout = false;
+      }
+    });
+    document.querySelectorAll('x-layout-paragraph[editable-text]').forEach((el) => {
+      if (el instanceof LayoutParagraphElement) {
+        el.editableText = false;
+      }
+    });
+
+    this._dispatchModeChange({
+      textEditMode: false,
+      layoutEditMode: false,
+      layoutEditType: 'move',
+      insertMode: null,
+    });
+  }
+
   /** 현재 scale 보정 계수를 반환한다. */
   get scale(): number {
     return this._scale;
