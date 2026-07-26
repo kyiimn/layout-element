@@ -69,6 +69,9 @@ export class LayoutBoxElement extends HTMLElement {
   /** `data` 세터에서 자식을 재구축할 때 observer 중복 트리거를 방지하는 플래그. */
   private _rebuildingChildren = false;
 
+  /** `_rebuildingChildren`이 true인 동안 getter가 반환할 캐시된 데이터. */
+  private _pendingData: BoxData | null = null;
+
   /**
    * `attributeChangedCallback`에서 property 세터를 호출할 때 true.
    * property 세터가 다시 `setAttribute`를 호출하여 발생하는 무한 루프를 방지한다.
@@ -425,6 +428,7 @@ export class LayoutBoxElement extends HTMLElement {
 
   set data(data: BoxData) {
     this._rebuildingChildren = true;
+    this._pendingData = data;
     try {
       if (data.id !== undefined) this.id = data.id;
       if (data.position !== undefined) this._position = data.position;
@@ -470,6 +474,7 @@ export class LayoutBoxElement extends HTMLElement {
       this.requestRerenderAffectedParagraphs();
     } finally {
       this._rebuildingChildren = false;
+      this._pendingData = null;
     }
   }
 
@@ -685,6 +690,9 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   get data(): BoxData {
+    if (this._rebuildingChildren && this._pendingData) {
+      return this._pendingData;
+    }
     return {
       id: this.id || undefined,
       type: this.type,

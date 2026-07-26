@@ -27,6 +27,14 @@ export class LayoutDocumentElement extends HTMLElement {
   private _root?: HTMLDivElement;
   private _labelEl: HTMLDivElement | null = null;
 
+  /** `data` 세터에서 자식을 재구축할 때 observer 중복 트리거를 방지하는 플래그. */
+  private _rebuildingChildren = false;
+
+  /** `_rebuildingChildren`이 true인 동안 getter가 반환할 캐시된 데이터. */
+  private _pendingData: DocumentData | null = null;
+
+  private _childObserver: MutationObserver | null = null;
+
   private _visibleGuide: boolean;
   private _isPrint: boolean;
 
@@ -54,12 +62,14 @@ export class LayoutDocumentElement extends HTMLElement {
   connectedCallback() {
     if (!this.id) this.id = genUUID();
     if (this._isPrint) return;
-
+    this._startChildObserver();
     this.layout();
     this.render();
   }
 
-  disconnectedCallback() { }
+  disconnectedCallback() {
+    this._stopChildObserver();
+  }
 
   /**
    * 구조 계산: GridCalculator 데이터 할당 및 모델 생성.
@@ -238,31 +248,38 @@ export class LayoutDocumentElement extends HTMLElement {
   }
 
   set data(data: DocumentData) {
-    if (data.id !== undefined) this.id = data.id;
-    if (data.paddingTop !== undefined) this._paddingTop = data.paddingTop;
-    if (data.paddingBottom !== undefined) this._paddingBottom = data.paddingBottom;
-    if (data.paddingLeft !== undefined) this._paddingLeft = data.paddingLeft;
-    if (data.paddingRight !== undefined) this._paddingRight = data.paddingRight;
+    this._rebuildingChildren = true;
+    this._pendingData = data;
+    try {
+      if (data.id !== undefined) this.id = data.id;
+      if (data.paddingTop !== undefined) this._paddingTop = data.paddingTop;
+      if (data.paddingBottom !== undefined) this._paddingBottom = data.paddingBottom;
+      if (data.paddingLeft !== undefined) this._paddingLeft = data.paddingLeft;
+      if (data.paddingRight !== undefined) this._paddingRight = data.paddingRight;
 
-    this._width = data.width;
-    this._height = data.height;
-    this._columns = data.columns;
-    this._gap = data.gap;
-    this._paragraphStyle = data.paragraphStyle;
-    this._textStyle = data.textStyle;
+      this._width = data.width;
+      this._height = data.height;
+      this._columns = data.columns;
+      this._gap = data.gap;
+      this._paragraphStyle = data.paragraphStyle;
+      this._textStyle = data.textStyle;
 
-    this.items.forEach(e => e.remove());
+      this.items.forEach(e => e.remove());
 
-    if (!this._isPrint) this.layout();
+      if (!this._isPrint) this.layout();
 
-    const children = data.children || [];
-    for (let i = 0; i < children.length; i++) {
-      const child = children[i];
-      const boxEl = document.createElement('x-layout-box');
-      boxEl.data = child;
-      this.appendChild(boxEl);
+      const children = data.children || [];
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        const boxEl = document.createElement('x-layout-box');
+        boxEl.data = child;
+        this.appendChild(boxEl);
+      }
+      if (!this._isPrint) this.render();
+    } finally {
+      this._rebuildingChildren = false;
+      this._pendingData = null;
     }
-    if (!this._isPrint) this.render();
   }
 
   set width(value: number) {
@@ -336,6 +353,9 @@ export class LayoutDocumentElement extends HTMLElement {
   }
 
   get data() {
+    if (this._rebuildingChildren && this._pendingData) {
+      return this._pendingData;
+    }
     return {
       id: this.id,
       width: this.width,
@@ -392,6 +412,37 @@ export class LayoutDocumentElement extends HTMLElement {
 
   get items() {
     return Array.from(this.querySelectorAll<LayoutBoxElement>(":scope > x-layout-box"));
+  }
+
+  /**
+   * MutationObserver를 시작하여 직접 DOM 조작에 의한 자식 추가/제거를 감지한다.
+   * `data` 세터를 통한 자식 재구축 시에는 `_rebuildingChildren` 플래그로 무시한다.
+   */
+  private _startChildObserver(): void {
+    if (this._childObserver) return;
+    this._childObserver = new MutationObserver((mutations) => {
+      if (this._rebuildingChildren) return;
+
+      let hasChildListChange = false;
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList') {
+          hasChildListChange = true;
+          break;
+        }
+      }
+      if (!hasChildListChange) return;
+
+      this.layout();
+      this.render();
+    });
+    this._childObserver.observe(this, { childList: true });
+  }
+
+  private _stopChildObserver(): void {
+    if (this._childObserver) {
+      this._childObserver.disconnect();
+      this._childObserver = null;
+    }
   }
 }
 customElements.define('x-layout-document', LayoutDocumentElement);
