@@ -62,9 +62,6 @@ export class LayoutGuideColumnElement extends HTMLElement {
       styleEl.sheet.insertRule(":host {}", 0);
       const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(rule.style, {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: `${this._lineHeight - this._fontSize}mm`,
         height: `${this._height}mm`,
         left: `${this._left}mm`,
         overflow: 'hidden',
@@ -85,6 +82,9 @@ export class LayoutGuideColumnElement extends HTMLElement {
         borderWidth: '1px',
         boxSizing: 'border-box',
         height: `${this._fontSize}mm`,
+        position: 'absolute',
+        top: `${this._lineHeight * j}mm`,
+        width: '100%',
       });
       this._shadowRoot.appendChild(lineEl);
     }
