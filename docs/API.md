@@ -474,7 +474,7 @@ class LayoutImageElement extends HTMLElement
 | 메서드 | 시그니처 | 설명 |
 |---|---|---|
 | `layout()` | `(): void` | DOM/스타일 갱신. |
-| `render()` | `(): Promise<void>` | 원본 이미지 로드 후 `<canvas>`에 크롭. |
+| `render()` | `(): Promise<void>` | 원본 이미지 로드 후 `<canvas>`에 크롭. 캐싱된 이미지가 있으면 동기 `drawImage`만 수행. |
 
 #### 데이터 프로퍼티
 
@@ -508,6 +508,75 @@ class LayoutImageElement extends HTMLElement
   투명 픽셀은 텍스트를 막지 않음.
 - `overlapPadding` 또는 `zIndex` 변경 시 형제 단락을 재렌더링하여
   텍스트가 새 영역을 회피하도록 함.
+
+#### 이미지 재렌더링 트리거
+
+이미지 캔버스(`absWidth` × `absHeight`)와 크롭 영역(`x`, `y`, `width`, `height`,
+`objectFit`)이 바뀌면 `render()`를 다시 호출하여 픽셀을 다시 그려야 한다.
+`LayoutImageElement`는 다음 상황에서 자동으로 `render()`를 호출한다.
+
+| 트리거 | 경로 | 비고 |
+|---|---|---|
+| `data` setter | `layout()` + `render()` | `objectFit`, `x`/`y`/`width`/`height`, `url` 등 일괄 갱신 |
+| `x`, `y`, `width`, `height`, `dpi`, `url`, `objectFit` setter | `render()` | 단일 필드 변경 (기존 값과 같으면 no-op) |
+| `zIndex`, `overlapPadding` setter | `layout()` + `render()` + 부모 `requestRerenderAffectedParagraphs()` | 형제 단락 텍스트 회피 재계산 |
+| `inheritStyle` setter | `layout()` + `render()` | 상위 box의 크기/여백 변경 시. `absWidth`/`absHeight`가 `inheritStyle.parentWidth`/`parentHeight`에 의존하므로 캔버스 픽셀을 다시 그려야 함 |
+
+**상위 box 크기/여백 변경 경로**:
+
+```
+box.width = N  (또는 height/top/left/paddingTop/...)
+  → box.layout()
+    → box._propagateInheritStyle()
+      → childImage.inheritStyle = newStyle
+        → childImage.layout() + childImage.render()  ← 캔버스 재그리기
+  → box.scheduleRerenderAffectedParagraphs()  ← 형제 단락 텍스트 회피
+```
+
+> **참고**: `LayoutBoxElement.scheduleRerenderAffectedParagraphs()`는
+> 단락만 수집한다. 자식 image는 `_propagateInheritStyle()` 경로로
+> `inheritStyle` setter가 `render()`를 호출하므로 별도 수집이 불필요하다.
+
+#### 이미지 로딩 캐싱 및 깜빡임 방지
+
+`render()`가 호출될 때마다 `new Image()`를 만들고 `onload`를 기다리면 상위 box
+크기 변경 등 빈번한 재렌더링에서 비효율적이며, 캔버스를 비운 뒤 이미지를 다시
+그리는 동안 빈 프레임이 노출되어 깜빡임이 발생한다. `LayoutImageElement`는
+두 가지 최적화로 이를 해결한다.
+
+**1. 이미지 캐싱** — 한 번 로드한 `HTMLImageElement`를 재사용
+
+| 내부 필드 | 설명 |
+|---|---|
+| `_cachedImage` | 로드된 `HTMLImageElement` |
+| `_cachedImageSrc` | `_cachedImage`가 로드된 resolved URL (캐시 키) |
+| `_imageLoadingPromise` | 진행 중인 로드 Promise. 같은 URL에 대한 동시 `render()` 호출 시 중복 네트워크 요청 방지 |
+| `_cachedResolvedUrl` | `_resolveUrl()` 결과 캐시. `url`이 바뀌지 않으면 매 `await` 없이 동기 경로로 진행 |
+
+**2. 깜빡임 방지 렌더링** — 캔버스를 먼저 비우지 않음
+
+| 최적화 | 기존 동작 | 개선 동작 |
+|---|---|---|
+| 캔버스 초기화 | `render()` 시작 시 `canvas.width = canvas.width`로 전체 초기화 | 초기화 제거. `_drawImage()`에서 필요 시에만 크기 변경 |
+| 캔버스 크기 변경 | 매 `render()`마다 `width`/`height` 설정 (내용 지워짐) | 새 크기가 기존과 다를 때만 설정. 같으면 `clearRect` + `drawImage` |
+| resolved URL | 매 `render()`마다 `await _resolveUrl()` | `_cachedResolvedUrl`로 캐시. 히트 시 `await` 없음 |
+| 캐시 히트 drawImage | `await` 후 `drawImage` | 완전 동기 `drawImage` (빈 프레임 없음) |
+
+**캐시 히트/미스 동작**:
+
+- **히트**: `_cachedImageSrc === resolvedUrl` → 완전 동기 `drawImage`. `await`/네트워크/빈 프레임 없음.
+- **미스**: `_loadImage()`로 새 `HTMLImageElement` 로드 → 캐싱 → `drawImage`.
+
+**캐시 무효화 시점** (`_clearImageCache()` 호출):
+
+- `url` setter — 새 URL로 교체 시
+- `data` setter — `data.url`이 기존 값과 다를 때
+- `disconnectedCallback` — DOM에서 제거 시
+- `render()`에서 `resolvedUrl`이 `null`/`undefined`일 때 (로드 불가 상태)
+
+> `urlLoader`가 매번 다른 URL을 반환하는 경우(예: 서명 URL 갱신) 캐시가 계속
+> 미스 처리된다. `urlLoader`는 같은 원본 URL에 대해 안정적인 결과를 반환하는
+> 것이 권장된다.
 
 #### 예제
 
