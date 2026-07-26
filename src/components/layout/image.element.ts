@@ -1,4 +1,4 @@
-import { InheritStyle, ImageData, PrintPostData } from "@/types";
+import { InheritStyle, ImageData, ImageObjectFit, PrintPostData } from "@/types";
 import { LayoutBoxElement } from "./box.element";
 import { genUUID } from "@/utils";
 import { DEFAULT_IMAGE_DPI } from "@/constants";
@@ -73,6 +73,34 @@ export class LayoutImageElement extends HTMLElement {
   private _zIndex: number = 0;
   private _overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number };
   private _objectUrl?: string;
+  private _originalWidth?: number;
+  private _originalHeight?: number;
+  private _objectFit: ImageObjectFit = 'cover';
+
+  /**
+   * 캐싱된 `HTMLImageElement`. `render()`가 호출될 때마다 `new Image()`를 만들고
+   * `onload`를 기다리는 비용을 피하기 위해, 한 번 로드한 이미지를 재사용한다.
+   * 캐시 키는 `_cachedImageSrc`이며, `url`이나 `urlLoader` 결과가 바뀌면 무효화된다.
+   */
+  private _cachedImage?: HTMLImageElement;
+
+  /**
+   * `_cachedImage`가 로드된 resolved URL.
+   * `_resolveUrl()` 결과와 비교하여 캐시 유효성을 판정한다.
+   */
+  private _cachedImageSrc?: string;
+
+  /**
+   * 진행 중인 이미지 로드 Promise. 같은 URL에 대한 `render()` 동시 호출 시
+   * 중복 네트워크 요청을 방지한다.
+   */
+  private _imageLoadingPromise?: Promise<HTMLImageElement | null>;
+
+  /**
+   * 캐싱된 `_resolveUrl()` 결과. `url`이 바뀌지 않는 한 재계산하지 않아
+   * `render()`가 완전 동기 경로로 실행될 수 있다.
+   */
+  private _cachedResolvedUrl?: string | null;
 
   /**
    * 전역 URL 로더. 모든 `LayoutImageElement` 인스턴스가 공유한다.
@@ -102,6 +130,7 @@ export class LayoutImageElement extends HTMLElement {
       URL.revokeObjectURL(this._objectUrl);
       this._objectUrl = undefined;
     }
+    this._clearImageCache();
   }
 
   /**
@@ -177,62 +206,252 @@ export class LayoutImageElement extends HTMLElement {
    * 캔버스 이미지 렌더링: 원본 이미지에서 크롭 영역을 추출하여 캔버스에 그린다.
    * `dpi`를 기준으로 픽셀/mm 변환을 수행한다.
    *
-   * `urlLoader`가 설정되어 있으면 원본 URL을 loader에 전달하여 실제 로드할 URL을 얻는다.
-   * loader가 `null`/`undefined`를 반환하면 이미지를 로드하지 않는다.
+   * 깜빡임 방지를 위해 캔버스를 먼저 비우지 않는다. `_drawImage()`가 새 캔버스
+   * 크기가 기존과 다를 때만 `width`/`height`를 설정(이때 내용이 지워진 뒤 즉시
+   * `drawImage`로 채운다)하고, 크기가 같으면 `clearRect` + `drawImage`로
+   * 교체한다. 캐시 히트 시에는 `await` 없이 완전 동기로 실행되므로 빈 프레임이
+   * 노출되지 않는다.
+   *
+   * `urlLoader`가 설정되어 있으면 원본 URL을 loader에 전달하여 실제 로드할 URL을
+   * 얻는다. loader가 `null`/`undefined`를 반환하면 이미지를 로드하지 않는다.
    */
   async render() {
     if (!this.isConnected || !this.canvas) return;
-    this.canvas.width = this.canvas.width;
 
     const ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
-    if (this.url) {
-      const resolvedUrl = await this._resolveUrl(this.url);
-      if (!resolvedUrl) {
-        ctx.fillStyle = 'transparent';
-        ctx.fillRect(0, 0, this.canvas!.width, this.canvas!.height);
-        return;
-      }
 
-      if (this._objectUrl && this._objectUrl !== resolvedUrl) {
-        URL.revokeObjectURL(this._objectUrl);
-      }
-      if (resolvedUrl.startsWith('blob:')) {
-        this._objectUrl = resolvedUrl;
-      }
-
-      await (new Promise<boolean>((r) => {
-        const img = new Image();
-        img.crossOrigin = 'Anonymous';
-        img.onload = () => {
-          const dpi = this.dpi;
-          const ppm = dpi / 25.4;
-
-          const sx = Math.round(this.x * ppm);
-          const sy = Math.round(this.y * ppm);
-          const sWidth = Math.round(this.width * ppm);
-          const sHeight = Math.round(this.height * ppm);
-
-          this.canvas!.width = sWidth;
-          this.canvas!.height = sHeight;
-
-          try {
-            ctx.drawImage(
-              img,
-              sx, sy, sWidth, sHeight,
-              0, 0, sWidth, sHeight
-            );
-            r(true);
-          } catch (_) {
-            r(false);
-          }
-        };
-        img.onerror = (_) => r(false);
-        img.src = resolvedUrl;
-      }));
-    } else {
-      ctx.fillStyle = 'transparent';
-      ctx.fillRect(0, 0, this.canvas!.width, this.canvas!.height);
+    if (!this.url) {
+      this._cachedResolvedUrl = null;
+      this._fillTransparent(ctx);
+      return;
     }
+
+    // 캐시된 resolved URL이 있으면 await 없이 동기 경로로 진행
+    let resolvedUrl: string | null | undefined;
+    if (this._cachedResolvedUrl !== undefined && this._cachedResolvedUrl !== null) {
+      resolvedUrl = this._cachedResolvedUrl;
+    } else {
+      resolvedUrl = await this._resolveUrl(this.url);
+      this._cachedResolvedUrl = resolvedUrl;
+    }
+
+    if (!resolvedUrl) {
+      this._clearImageCache();
+      this._fillTransparent(ctx);
+      return;
+    }
+
+    // 캐시 히트: 동기 drawImage (await 없음, 빈 프레임 없음)
+    if (this._cachedImage && this._cachedImageSrc === resolvedUrl) {
+      this._drawImage(ctx, this._cachedImage);
+      return;
+    }
+
+    // 캐시 미스: 로드 후 그리기
+    this._clearImageCache();
+    if (this._objectUrl && this._objectUrl !== resolvedUrl) {
+      URL.revokeObjectURL(this._objectUrl);
+    }
+    if (resolvedUrl.startsWith('blob:')) {
+      this._objectUrl = resolvedUrl;
+    }
+
+    const img = await this._loadImage(resolvedUrl);
+    if (!img) return;
+    this._drawImage(ctx, img);
+  }
+
+  /**
+   * 캔버스를 투명하게 채운다. 캔버스 크기를 유지하면서 `clearRect`만 수행하여
+   * 불필요한 리사이즈로 인한 깜빡임을 방지한다.
+   */
+  private _fillTransparent(ctx: CanvasRenderingContext2D): void {
+    ctx.clearRect(0, 0, this.canvas!.width, this.canvas!.height);
+  }
+
+  /**
+   * `HTMLImageElement`를 로드하고 캐싱한다.
+   * 같은 `src`에 대한 동시 호출은 진행 중인 Promise를 재사용하여 중복 네트워크
+   * 요청을 방지한다.
+   *
+   * @param src - 로드할 이미지 URL
+   * @returns 로드된 `HTMLImageElement`. 로드 실패 시 `null`
+   */
+  private _loadImage(src: string): Promise<HTMLImageElement | null> {
+    if (this._imageLoadingPromise && this._cachedImageSrc === src) {
+      return this._imageLoadingPromise;
+    }
+
+    this._imageLoadingPromise = new Promise<HTMLImageElement | null>((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      img.onload = () => {
+        this._cachedImage = img;
+        this._cachedImageSrc = src;
+        this._imageLoadingPromise = undefined;
+        resolve(img);
+      };
+      img.onerror = () => {
+        this._imageLoadingPromise = undefined;
+        resolve(null);
+      };
+      img.src = src;
+    });
+    return this._imageLoadingPromise;
+  }
+
+  /**
+   * 캔버스에 크롭 영역을 그린다. `objectFit`이 `'none'`이 아니고 원본 크기를
+   * 알면 `_computeObjectFit()`으로 크롭 영역을 재계산한다.
+   *
+   * 깜빡임 방지: 새 캔버스 크기가 기존과 같으면 `clearRect` + `drawImage`로
+   * 교체하고, 다르면 `width`/`height`를 설정한 뒤 즉시 `drawImage`로 채운다.
+   * `width`/`height` 설정 시 캔버스가 지워지지만 다음 줄에서 바로 그리므로
+   * 빈 프레임이 노출되지 않는다.
+   *
+   * @param ctx - 캔버스 2D 컨텍스트
+   * @param img - 원본 이미지
+   */
+  private _drawImage(ctx: CanvasRenderingContext2D, img: HTMLImageElement): void {
+    const dpi = this.dpi;
+    const ppm = dpi / 25.4;
+
+    let drawX = this.x;
+    let drawY = this.y;
+    let drawW = this.width;
+    let drawH = this.height;
+
+    if (this._objectFit !== 'none' && this._originalWidth && this._originalHeight) {
+      const fit = this._computeObjectFit(
+        this._objectFit,
+        this.absWidth, this.absHeight,
+        this._originalWidth, this._originalHeight,
+        ppm,
+      );
+      drawX = fit.x;
+      drawY = fit.y;
+      drawW = fit.width;
+      drawH = fit.height;
+    }
+
+    const sx = Math.round(drawX * ppm);
+    const sy = Math.round(drawY * ppm);
+    const sWidth = Math.round(drawW * ppm);
+    const sHeight = Math.round(drawH * ppm);
+
+    const canvas = this.canvas!;
+    if (canvas.width !== sWidth || canvas.height !== sHeight) {
+      canvas.width = sWidth;
+      canvas.height = sHeight;
+    } else {
+      ctx.clearRect(0, 0, sWidth, sHeight);
+    }
+
+    try {
+      ctx.drawImage(
+        img,
+        sx, sy, sWidth, sHeight,
+        0, 0, sWidth, sHeight
+      );
+    } catch (_) {
+      // drawImage 실패 — 무시
+    }
+  }
+
+  /**
+   * 이미지 캐시를 무효화한다. `url`/`data` 세터 변경이나 `disconnectedCallback`
+   * 시 호출하여 새 이미지를 강제로 로드하게 한다.
+   */
+  private _clearImageCache(): void {
+    this._cachedImage = undefined;
+    this._cachedImageSrc = undefined;
+    this._imageLoadingPromise = undefined;
+    this._cachedResolvedUrl = undefined;
+  }
+
+  /**
+   * object-fit 모드에 따라 크롭 영역(mm)을 계산한다.
+   *
+   * - `'cover'`: box를 채우면서 비율 유지. 넘치는 부분 크롭, 중앙 정렬.
+   * - `'fill'`: box에 맞춰 늘림. 비율 무시. 전체 원본 사용.
+   * - `'contain'`: box 안에 전체 이미지 표시. 여백 발생, 중앙 정렬.
+   *
+   * @param fit - object-fit 모드
+   * @param boxWmm - box 너비 (mm)
+   * @param boxHmm - box 높이 (mm)
+   * @param origW - 원본 이미지 너비 (픽셀)
+   * @param origH - 원본 이미지 높이 (픽셀)
+   * @param ppm - 픽셀/mm 변환 비율 (dpi / 25.4)
+   * @returns `{ x, y, width, height }` (mm 단위)
+   *
+   * @example
+   * ```ts
+   * // cover: box 55×35mm, image 800×600px, dpi 72
+   * // → ppm=2.835, boxWpx=156, boxHpx=99
+   * // → imgAspect 1.33 < boxAspect 1.57 → 너비 기준, 상하 크롭
+   * // → cropHPx=509, cropHmm=179.6, y=16.2mm
+   * ```
+   */
+  private _computeObjectFit(
+    fit: ImageObjectFit,
+    boxWmm: number,
+    boxHmm: number,
+    origW: number,
+    origH: number,
+    ppm: number,
+  ): { x: number; y: number; width: number; height: number } {
+    const origWmm = origW / ppm;
+    const origHmm = origH / ppm;
+
+    if (fit === 'fill') {
+      return { x: 0, y: 0, width: boxWmm, height: boxHmm };
+    }
+
+    const boxWpx = boxWmm * ppm;
+    const boxHpx = boxHmm * ppm;
+    const boxAspect = boxWpx / boxHpx;
+    const imgAspect = origW / origH;
+
+    if (fit === 'cover') {
+      if (imgAspect > boxAspect) {
+        const scale = boxHpx / origH;
+        const cropWPx = Math.round(boxWpx / scale);
+        return {
+          x: Math.round((origW - cropWPx) / 2) / ppm,
+          y: 0,
+          width: cropWPx / ppm,
+          height: origHmm,
+        };
+      }
+      const scale = boxWpx / origW;
+      const cropHPx = Math.round(boxHpx / scale);
+      return {
+        x: 0,
+        y: Math.round((origH - cropHPx) / 2) / ppm,
+        width: origWmm,
+        height: cropHPx / ppm,
+      };
+    }
+
+    // contain
+    if (imgAspect > boxAspect) {
+      const scale = boxWpx / origW;
+      const fittedHPx = Math.round(boxHpx / scale);
+      return {
+        x: 0,
+        y: Math.round((fittedHPx - origH) / 2) / ppm,
+        width: origWmm,
+        height: origHmm,
+      };
+    }
+    const scale = boxHpx / origH;
+    const fittedWPx = Math.round(boxWpx / scale);
+    return {
+      x: Math.round((fittedWPx - origW) / 2) / ppm,
+      y: 0,
+      width: origWmm,
+      height: origHmm,
+    };
   }
 
   /**
@@ -253,14 +472,23 @@ export class LayoutImageElement extends HTMLElement {
     if (data.zIndex !== undefined) this._zIndex = data.zIndex;
     if (data.overlapPadding !== undefined) this._overlapPadding = data.overlapPadding;
 
+    const urlChanged = this._url !== data.url;
     this._x = data.x;
     this._y = data.y;
     this._width = data.width;
     this._height = data.height;
     this._dpi = data.dpi;
     this._url = data.url;
+    this._originalWidth = data.originalWidth;
+    this._originalHeight = data.originalHeight;
+    this._objectFit = data.objectFit ?? 'cover';
+
+    if (urlChanged) {
+      this._clearImageCache();
+    }
 
     this.layout();
+    this.render();
   }
 
   set x(value: number) {
@@ -296,6 +524,7 @@ export class LayoutImageElement extends HTMLElement {
   set url(value: string | undefined) {
     if (this._url === value) return;
     this._url = value;
+    this._clearImageCache();
     this.render();
   }
 
@@ -319,6 +548,32 @@ export class LayoutImageElement extends HTMLElement {
     return this._overlapPadding;
   }
 
+  set originalWidth(value: number | undefined) {
+    this._originalWidth = value;
+  }
+
+  get originalWidth(): number | undefined {
+    return this._originalWidth;
+  }
+
+  set originalHeight(value: number | undefined) {
+    this._originalHeight = value;
+  }
+
+  get originalHeight(): number | undefined {
+    return this._originalHeight;
+  }
+
+  set objectFit(value: ImageObjectFit) {
+    if (this._objectFit === value) return;
+    this._objectFit = value;
+    this.render();
+  }
+
+  get objectFit(): ImageObjectFit {
+    return this._objectFit;
+  }
+
   get data() {
     return {
       id: this.id,
@@ -330,6 +585,9 @@ export class LayoutImageElement extends HTMLElement {
       height: this._height,
       dpi: this._dpi,
       url: this._url || '',
+      originalWidth: this._originalWidth,
+      originalHeight: this._originalHeight,
+      objectFit: this._objectFit,
       type: this.type,
     };
   }
@@ -356,6 +614,10 @@ export class LayoutImageElement extends HTMLElement {
   set inheritStyle(style: InheritStyle | undefined) {
     this._inheritStyle = style;
     this.layout();
+    // absWidth/absHeight는 inheritStyle.parentWidth/parentHeight에 의존하므로
+    // 상위 box의 크기/여백 변경 시 이미지 캔버스 크기와 크롭 영역이 달라진다.
+    // layout()은 CSS 위치/크기만 갱신하므로 render()로 캔버스 픽셀을 다시 그려야 한다.
+    this.render();
   }
 
   get inheritStyle() {
