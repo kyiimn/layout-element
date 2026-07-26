@@ -908,11 +908,17 @@ export class LayoutBoxElement extends HTMLElement {
     } else {
       calcHeight = this.height;
     }
-    if (this.parentModel?.editableHeight) {
+    // absolute box는 부모의 실제 콘텐츠 영역 하단(contentHeight)까지 확장될 수 있다.
+    // editableHeight는 lineHeight 배수로 버림된 값이라 부모 하단이 라인 중간에 걸친 경우
+    // 박스 하단이 더 아래로 내려가지 못하고 height가 줄어드는 문제가 있었다.
+    const limitHeight = this.parentModel?.contentHeight
+      ?? this.parentModel?.editableHeight
+      ?? 0;
+    if (limitHeight) {
       const top = this.parentElement.type !== 'document' ? this.relTop : 0;
-      calcHeight = Math.min(calcHeight, this.parentModel.editableHeight - (top - (this._inheritStyle?.paddingTop || 0)));
+      calcHeight = Math.min(calcHeight, limitHeight - (top - (this._inheritStyle?.paddingTop || 0)));
     }
-    return calcHeight;
+    return Math.max(0, calcHeight);
   }
 
   get overlayElements() {

@@ -1125,15 +1125,23 @@ export class LayoutEditController {
 
       // parentWidth/parentHeight는 editableWidth/editableHeight로부터 온 값으로
       // 이미 부모의 padding이 차감되어 있다. 따라서 padding을 다시 빼면 이중 차감이 된다.
+      // absolute box는 mm 단위로 자유롭게 이동하므로 부모의 실제 콘텐츠 영역 하단까지
+      // 이동할 수 있어야 한다. editableHeight는 lineHeight 배수로 버림되어 있어
+      // 부모 하단이 라인 중간에 걸친 경우 editableHeight보다 더 아래로 갈 수 없었다.
+      // parentModel.contentHeight(= height - paddingTop - paddingBottom)를 사용하여
+      // 부모의 실제 하단까지 이동할 수 있도록 한다.
+      const parentModel = box.parentModel ?? null;
       const maxLeft = Math.max(0, (box.inheritStyle?.parentWidth || 0) - box.width);
-      const maxTop = Math.max(0, (box.inheritStyle?.parentHeight || 0) - box.height);
+      const maxTop = parentModel
+        ? Math.max(0, parentModel.contentHeight - box.height)
+        : Math.max(0, (box.inheritStyle?.parentHeight || 0) - box.height);
       const clamped = {
         left: Math.max(0, Math.min(maxLeft, sLeft + deltaMmX)),
         top: Math.max(0, Math.min(maxTop, sTop + deltaMmY)),
       };
       if (state?.shiftKey) return clamped;
       const snapped = this._snapAbsolutePosition(
-        clamped.left, clamped.top, box.width, box.height, box.parentModel ?? null,
+        clamped.left, clamped.top, box.width, box.height, parentModel,
         manager.screenPxToMm(SNAP_THRESHOLD_PX),
       );
       // 스냅 후에도 부모 경계를 벗어나지 않도록 재클램핑
@@ -1182,6 +1190,10 @@ export class LayoutEditController {
    * 가장 가까운 한 엣지를 기준으로 `left`/`top`을 조정한다. 박스 크기(width/height)는
    * 유지된다 — 좌·우 엣지가 동시에 임계값 이내여도 한쪽만 흡착하여 width가 변하지 않는다.
    *
+   * Y축 스냅 후보는 라인 경계(`baseY + lineHeight * i`) 외에 부모 콘텐츠 영역 하단
+   * (`contentHeight` = `height - paddingTop - paddingBottom`)도 포함한다. 부모 하단이
+   * 라인 중간에 걸쳐있는 경우 absolute box가 실제 하단까지 자유롭게 내려갈 수 있도록 한다.
+   *
    * @param left - 보정 전 left (mm)
    * @param top - 보정 전 top (mm)
    * @param width - 박스 width (mm, 변경 없음)
@@ -1225,8 +1237,12 @@ export class LayoutEditController {
     }
 
     // Y축: 상단(top)과 하단(top+height) 엣지 후보 수집
+    // 라인 경계(baseY + lineHeight * i)와 부모 콘텐츠 영역 하단(contentHeight)을 모두 후보로 사용한다.
+    // 부모 하단이 라인 중간에 걸쳐있는 경우 absolute box가 실제 하단까지 내려갈 수 있도록 한다.
     const yCandidates: Array<{ edge: 'top' | 'bottom'; dist: number; newTop: number }> = [];
-    const maxLineY = parentModel.editableTextHeight;
+    const maxLineY = parentModel.contentHeight;
+
+    // 라인 경계 후보 수집
     for (let i = 0; ; i++) {
       const lineY = baseY + lineHeight * i;
       if (lineY > maxLineY + thresholdMm + height) break;
@@ -1237,6 +1253,21 @@ export class LayoutEditController {
       const distBottom = Math.abs((top + height) - lineY);
       if (distBottom <= thresholdMm) {
         yCandidates.push({ edge: 'bottom', dist: distBottom, newTop: lineY - height });
+      }
+    }
+
+    // 부모 콘텐츠 영역 하단(contentHeight)을 추가 후보로 수집.
+    // contentHeight가 마지막 라인 경계와 정확히 일치하지 않는 경우(라인 중간에 걸친 경우)
+    // absolute box가 부모 실제 하단까지 자유롭게 내려갈 수 있도록 한다.
+    const lastLineY = baseY + lineHeight * Math.floor((maxLineY - baseY) / lineHeight);
+    if (Math.abs(maxLineY - lastLineY) > 0.001) {
+      const distTop = Math.abs(top - maxLineY);
+      if (distTop <= thresholdMm) {
+        yCandidates.push({ edge: 'top', dist: distTop, newTop: maxLineY });
+      }
+      const distBottom = Math.abs((top + height) - maxLineY);
+      if (distBottom <= thresholdMm) {
+        yCandidates.push({ edge: 'bottom', dist: distBottom, newTop: maxLineY - height });
       }
     }
 
@@ -1260,7 +1291,7 @@ export class LayoutEditController {
    * 핸들별 담당 엣지:
    * - `right` → 우측 엣지 (left+width) 흡착 → width 조정, left/top 고정
    * - `left` → 좌측 엣지 (left) 흡착 → left·width 조정, 우측 끝(sLeft+sWidth) 고정
-   * - `bottom` → 하단 엣지 (top+height) 흡착 → height 조정, left/top 고정
+   * - `bottom` → 하단 엣지 (top+height) 흡착 → height 조정, left/top 고정. 부모 콘텐츠 영역 하단(contentHeight)도 스냅 후보에 포함
    * - `top` → 상단 엣지 (top) 흡착 → top·height 조정, 하단 끝(sTop+sHeight) 고정
    *
    * @param handle - 리사이즈 핸들 방향
@@ -1291,7 +1322,7 @@ export class LayoutEditController {
 
     const { columnCoords, lineHeight } = parentModel;
     const baseY = columnCoords.length > 0 ? columnCoords[0].y1 : 0;
-    const maxLineY = parentModel.editableTextHeight;
+    const maxLineY = parentModel.contentHeight;
 
     switch (handle) {
       case 'right': {
@@ -1325,7 +1356,7 @@ export class LayoutEditController {
         return { left, top, width, height };
       }
       case 'bottom': {
-        // 하단 엣지 (top+height) → 라인 y
+        // 하단 엣지 (top+height) → 라인 y 또는 부모 편집 영역 하단
         let best: { dist: number; value: number } | null = null;
         for (let i = 0; ; i++) {
           const lineY = baseY + lineHeight * i;
@@ -1333,6 +1364,15 @@ export class LayoutEditController {
           const dist = Math.abs((top + height) - lineY);
           if (dist <= thresholdMm && (!best || dist < best.dist)) {
             best = { dist, value: lineY };
+          }
+        }
+        // 부모 편집 영역 하단(maxLineY)을 추가 후보로 수집.
+        // maxLineY가 라인 경계가 아닌 경우(라인 중간에 걸친 경우)에만 추가하여 중복을 방지한다.
+        const lastLineY = baseY + lineHeight * Math.floor((maxLineY - baseY) / lineHeight);
+        if (Math.abs(maxLineY - lastLineY) > 0.001) {
+          const dist = Math.abs((top + height) - maxLineY);
+          if (dist <= thresholdMm && (!best || dist < best.dist)) {
+            best = { dist, value: maxLineY };
           }
         }
         if (best) {
@@ -1402,7 +1442,13 @@ export class LayoutEditController {
       // parentWidth/parentHeight는 editableWidth/editableHeight로부터 온 값으로
       // 이미 부모의 padding이 차감되어 있다. 따라서 padding을 다시 빼면 이중 차감이 된다.
       const parentW = box.inheritStyle?.parentWidth || 0;
-      const parentH = box.inheritStyle?.parentHeight || 0;
+      const parentModel = box.parentModel ?? null;
+      // absolute box의 하단 클램핑은 contentHeight(= height - paddingTop - paddingBottom)를 기준으로 한다.
+      // editableHeight는 lineHeight 배수로 버림되어 부모 하단이 라인 중간에 걸친 경우
+      // 더 아래로 확장할 수 없었다. contentHeight를 사용하여 부모의 실제 하단까지 확장 가능하다.
+      const parentH = parentModel
+        ? parentModel.contentHeight
+        : (box.inheritStyle?.parentHeight || 0);
       const thresholdMm = manager.screenPxToMm(SNAP_THRESHOLD_PX);
       const snapEnabled = !state.shiftKey;
 
@@ -1413,7 +1459,7 @@ export class LayoutEditController {
           const width = Math.max(1, Math.min(maxWidth, sWidth + deltaMmX));
           const result = { left: sLeft, top: sTop, width, height: sHeight };
           if (!snapEnabled) return result;
-          return this._snapAbsoluteResize('right', result.left, result.top, result.width, result.height, box.parentModel ?? null, thresholdMm);
+          return this._snapAbsoluteResize('right', result.left, result.top, result.width, result.height, parentModel, thresholdMm);
         }
         case 'left': {
           // 좌측 핸들: width와 left가 함께 변경 (우측 끝 sLeft+sWidth 고정)
@@ -1422,7 +1468,7 @@ export class LayoutEditController {
           const left = Math.max(0, Math.min(sLeft + sWidth - 1, sLeft + deltaMmX));
           const result = { left, top: sTop, width, height: sHeight };
           if (!snapEnabled) return result;
-          return this._snapAbsoluteResize('left', result.left, result.top, result.width, result.height, box.parentModel ?? null, thresholdMm);
+          return this._snapAbsoluteResize('left', result.left, result.top, result.width, result.height, parentModel, thresholdMm);
         }
         case 'bottom': {
           // 하단 핸들: height만 변경, left/top/width 유지
@@ -1430,7 +1476,7 @@ export class LayoutEditController {
           const height = Math.max(1, Math.min(maxHeight, sHeight + deltaMmY));
           const result = { left: sLeft, top: sTop, width: sWidth, height };
           if (!snapEnabled) return result;
-          return this._snapAbsoluteResize('bottom', result.left, result.top, result.width, result.height, box.parentModel ?? null, thresholdMm);
+          return this._snapAbsoluteResize('bottom', result.left, result.top, result.width, result.height, parentModel, thresholdMm);
         }
         case 'top': {
           // 상단 핸들: height와 top이 함께 변경 (하단 끝 sTop+sHeight 고정)
@@ -1439,7 +1485,7 @@ export class LayoutEditController {
           const top = Math.max(0, Math.min(sTop + sHeight - 1, sTop + deltaMmY));
           const result = { left: sLeft, top, width: sWidth, height };
           if (!snapEnabled) return result;
-          return this._snapAbsoluteResize('top', result.left, result.top, result.width, result.height, box.parentModel ?? null, thresholdMm);
+          return this._snapAbsoluteResize('top', result.left, result.top, result.width, result.height, parentModel, thresholdMm);
         }
       }
     }

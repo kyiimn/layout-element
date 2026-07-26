@@ -221,6 +221,17 @@ export class GridCalculator {
     return this.editableHeight + (this.lineHeight - this.fontSize);
   }
 
+  /**
+   * 부모 박스의 실제 콘텐츠 영역 높이 (mm).
+   *
+   * `editableHeight`가 `lineHeight`의 정수배로 버림된 값인 반면,
+   * `contentHeight`는 `height - paddingTop - paddingBottom`으로 버림 없는 실제 하단이다.
+   * absolute box 클램핑 시 부모의 실제 하단까지 이동/확장할 수 있도록 사용된다.
+   */
+  get contentHeight() {
+    return this._height - (this._paddingTop || 0) - (this._paddingBottom || 0);
+  }
+
   get fontSize() {
     return this.textStyle.fontSize || DEFAULT_FONT_SIZE;
   }

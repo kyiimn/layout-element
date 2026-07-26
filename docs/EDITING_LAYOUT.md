@@ -317,7 +317,9 @@ element.editableLayout = false;
 
 **임계값 상수**: `SNAP_THRESHOLD_PX` (기본값 `10`, 단위: 화면 픽셀). `EditManager.screenPxToMm()`로 mm로 환산하여 비교한다. 값을 조정하려면 `src/edit/layout-edit-controller.ts` 상단의 상수만 변경하면 된다.
 
-**스냅 대상**: 부모 `GridCalculator`의 컬럼 경계(`columnCoords[i].x1` 시작선, `x2` 끝선)와 라인 경계(`baseY + lineHeight * i`).
+**스냅 대상**: 부모 `GridCalculator`의 컬럼 경계(`columnCoords[i].x1` 시작선, `x2` 끝선)와 라인 경계(`baseY + lineHeight * i`). 부모 콘텐츠 영역 하단(`contentHeight` = `height - paddingTop - paddingBottom`)도 스냅 대상에 포함된다.
+
+**부모 하단 경계 스냅**: 부모 박스의 콘텐츠 영역 하단(`contentHeight`)이 `lineHeight`의 정수배가 아닌 경우(라인 중간에 걸쳐있는 경우), absolute box의 하단 엣지가 부모 실제 하단까지 내려갈 수 있도록 `contentHeight` 자체도 Y축 스냅 후보에 포함된다. 이는 이동 스냅(`_snapAbsolutePosition`)과 리사이즈의 `bottom` 핸들 스냅(`_snapAbsoluteResize`) 모두에 적용된다. absolute box의 클램핑 한계도 `contentHeight`를 기준으로 적용되어, 박스가 부모의 실제 하단까지 자유롭게 이동/확장될 수 있다. 단, `contentHeight`가 마지막 라인 경계와 정확히 일치하는 경우(정수배인 경우)에는 중복을 방지하기 위해 추가 후보에서 제외된다.
 
 **이동 시 스냅** (`_snapAbsolutePosition`):
 
