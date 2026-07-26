@@ -361,6 +361,21 @@ _findTargetContainer(startX, startY, endX, endY)
 
 드래그 사각형을 완전히 포함하는 컨테이너가 하나도 없으면, `EditManager.editableRootId`로 지정된 루트 box를 반환한다. `editableRootId`가 없으면 문서 루트(`<x-layout-document>`)를 반환한다.
 
+### 5.5 `editableRootId` 제한 — root box 밖으로 삽입 금지
+
+`editableRootId`가 설정되어 있는 경우(root가 document가 아닌 특정 box인 경우), 삽입 드래그 영역이 root box 밖으로 나가는 것을 방지한다.
+
+| 상황 | 동작 |
+|------|------|
+| static 모드 중심점이 root box 내부 box에 있음 | 해당 box를 컨테이너로 사용 |
+| static 모드 중심점이 root box 밖에 있음 | root box 내부 box만 후보 → root box로 폴백 |
+| absolute 모드 4꼭짓점이 root box 내부에 있음 | 해당 box를 컨테이너로 사용 |
+| absolute 모드 드래그 영역이 root box 밖으로 나감 | root box 자체로 클램핑 (document로 폴백하지 않음) |
+| 기하학적 rect containment 폴백 | root box 내부의 box만 후보로 검토 |
+| 최종 폴백 | `_getRootContainer()`가 root box 반환 |
+
+**핵심**: `editableRootId` 설정 시 document는 절대 컨테이너로 반환되지 않으며, root box가 최종 클램핑 대상이 된다. root box 자체는 편집 불가(`isBoxEditable`이 `false`)하지만 삽입 컨테이너로는 사용된다.
+
 ```typescript
 private _getRootContainer(): LayoutDocumentElement | LayoutBoxElement {
   const manager = EditManager.getInstance();

@@ -1423,11 +1423,14 @@ _tryReparent(box, clientX, clientY, state)
     ├── 1. _findReparentContainer(box, clientX, clientY) → newContainer
     │   ├── elementsFromPoint로 후보 수집
     │   ├── box 자신/자손, lock, 비-box 자식이 있는 box 제외
+    │   ├── editableRootId 설정 시 root box 내부의 box만 후보 (root 밖 reparent 금지)
     │   ├── 기하학적 rect containment 폴백 (elementsFromPoint가 박스를 찾지 못한 경우)
     │   │   ├── 드래그 중인 box의 rect를 완전히 포함하는 박스를 querySelectorAll로 순회
+    │   │   ├── editableRootId 설정 시 root box 내부의 box만 후보
     │   │   ├── 1px 허용 오차로 서브픽셀 경계 문제 흡수
     │   │   └── 가장 작은 면적(가장 안쪽) 박스를 선택
     │   └── 없으면 EditManager 루트(editableRootId 또는 document)로 폴백
+    │       (editableRootId 설정 시 document가 아닌 root box로 폴백)
     │
     ├── 2. newContainer === box.parentElement? → return null (부모 변경 없음)
     │

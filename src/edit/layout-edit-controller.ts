@@ -1870,6 +1870,12 @@ export class LayoutEditController {
    * 적합한 컨테이너가 없으면 EditManager 루트로 폴백한다.
    */
   private _findReparentContainer(box: LayoutBoxElement, clientX: number, clientY: number): LayoutBoxElement | LayoutDocumentElement | null {
+    const manager = EditManager.getInstance();
+    const rootId = manager.editableRootId;
+    const rootBox = rootId
+      ? document.getElementById(rootId) as LayoutBoxElement | null
+      : null;
+
     const elements = document.elementsFromPoint(clientX, clientY);
 
     // 후보 컨테이너: box 자신과 box의 자손이 아닌 첫 번째 box 또는 document
@@ -1881,10 +1887,14 @@ export class LayoutEditController {
         if (el.lock) continue;
         const hasNonBoxChild = el.items.some(item => item.type !== 'box');
         if (hasNonBoxChild) continue;
+        // editableRootId가 설정된 경우 root box 내부의 box만 허용
+        if (rootBox && !rootBox.contains(el)) continue;
         newContainer = el;
         break;
       }
       if (el instanceof LayoutDocumentElement) {
+        // editableRootId가 설정된 경우 document로의 reparent 금지
+        if (rootBox) continue;
         newContainer = el;
         break;
       }
@@ -1905,6 +1915,8 @@ export class LayoutEditController {
           if (candidate === box) continue;
           if (box.contains(candidate)) continue;
           if (candidate.lock) continue;
+          // editableRootId가 설정된 경우 root box 내부의 box만 후보
+          if (rootBox && !rootBox.contains(candidate)) continue;
           const hasNonBoxChild = candidate.items.some(item => item.type !== 'box');
           if (hasNonBoxChild) continue;
 
@@ -1929,16 +1941,16 @@ export class LayoutEditController {
 
     if (!newContainer) {
       // 커서 위치에 적합한 컨테이너가 없으면 EditManager 루트로 폴백
-      const manager = EditManager.getInstance();
-      const rootId = manager.editableRootId;
-      if (rootId) {
-        const rootBox = document.getElementById(rootId) as LayoutBoxElement | null;
-        if (rootBox && !rootBox.contains(box) && rootBox !== box) {
-          newContainer = rootBox;
-        }
+      if (rootBox && !rootBox.contains(box) && rootBox !== box) {
+        newContainer = rootBox;
       }
       if (!newContainer) {
-        newContainer = box.closest('x-layout-document') as LayoutDocumentElement | null;
+        // editableRootId가 설정된 경우 document로 폴백하지 않고 root box로 클램핑
+        if (rootBox) {
+          newContainer = rootBox;
+        } else {
+          newContainer = box.closest('x-layout-document') as LayoutDocumentElement | null;
+        }
       }
     }
 

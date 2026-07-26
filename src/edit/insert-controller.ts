@@ -259,6 +259,12 @@ export class InsertController {
    * @returns 유효한 컨테이너 요소, 또는 루트 요소
    */
   private _findTargetContainer(startX: number, startY: number, endX: number, endY: number): LayoutDocumentElement | LayoutBoxElement {
+    const manager = EditManager.getInstance();
+    const rootId = manager.editableRootId;
+    const rootBox = rootId
+      ? this._document.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null
+      : null;
+
     // static 모드에서는 마우스 픽셀 위치가 그리드 스냅 후 의미가 없으므로,
     // 드래그 영역의 중심점으로 컨테이너를 식별한다. 꼭짓점은 box 경계선 밖에
     // 놓일 수 있지만 중심점은 box 내부에 있으므로 box를 컨테이너로 찾을 수 있다.
@@ -276,6 +282,8 @@ export class InsertController {
           if (el.lock) continue;
           const hasNonBoxChild = el.items.some(item => item.type !== 'box');
           if (hasNonBoxChild) continue;
+          // editableRootId가 설정된 경우 root box 내부의 box만 허용
+          if (rootBox && !rootBox.contains(el)) continue;
           return el;
         }
         if (el instanceof LayoutDocumentElement) {
@@ -331,6 +339,8 @@ export class InsertController {
       for (const box of allBoxes) {
         if (candidates.has(box)) continue; // 이미 hit test에서 처리됨
         if (box.lock) continue;
+        // editableRootId가 설정된 경우 root box 내부의 box만 후보로 검토
+        if (rootBox && !rootBox.contains(box)) continue;
         const items = box.items;
         const hasNonBoxChild = items.some(item => item.type !== 'box');
         if (hasNonBoxChild) continue;
@@ -386,20 +396,18 @@ export class InsertController {
       startX >= docRect.left && endX <= docRect.right &&
       startY >= docRect.top && endY <= docRect.bottom
     ) {
-      // Document 내부에서 box를 찾지 못한 경우 — editableRootId가 있으면 해당 루트 box 확인
-      const manager = EditManager.getInstance();
-      const rootId = manager.editableRootId;
-      if (rootId) {
-        const rootBox = this._document.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null;
-        if (rootBox && !rootBox.lock) {
-          const rootRect = rootBox.getBoundingClientRect();
-          if (
-            startX >= rootRect.left && endX <= rootRect.right &&
-            startY >= rootRect.top && endY <= rootRect.bottom
-          ) {
-            return rootBox;
-          }
+      // editableRootId가 설정된 경우 root box 내부에 완전히 포함되는지 확인.
+      // root 밖으로 나가는 것을 방지한다.
+      if (rootBox && !rootBox.lock) {
+        const rootRect = rootBox.getBoundingClientRect();
+        if (
+          startX >= rootRect.left && endX <= rootRect.right &&
+          startY >= rootRect.top && endY <= rootRect.bottom
+        ) {
+          return rootBox;
         }
+        // root box 영역을 벗어나면 root box 자체로 클램핑
+        return rootBox;
       }
       return this._document;
     }
