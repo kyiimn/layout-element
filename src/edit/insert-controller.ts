@@ -155,13 +155,27 @@ export class InsertController {
       return;
     }
 
-    const widthPx = endX - startX;
-    const heightPx = endY - startY;
+    // 컨테이너의 편집 영역을 구한다. 드래그 영역이 컨테이너보다 큰 경우
+    // left+width, top+height가 컨테이너 영역을 초과하지 않도록 클램핑한다.
+    const containerRect = container.getBoundingClientRect();
+    const manager = EditManager.getInstance();
+    const containerModel = container.model;
+    const containerContentW = containerModel ? containerModel.editableWidth : 0;
+    const containerContentH = containerModel ? containerModel.contentHeight : 0;
 
-    const widthMm = EditManager.getInstance().screenPxToMm(widthPx);
-    const heightMm = EditManager.getInstance().screenPxToMm(heightPx);
+    // 드래그 시작/끝점을 컨테이너 rect 내부로 클램핑
+    const clampedStartX = Math.max(containerRect.left, Math.min(startX, containerRect.right));
+    const clampedEndX = Math.max(containerRect.left, Math.min(endX, containerRect.right));
+    const clampedStartY = Math.max(containerRect.top, Math.min(startY, containerRect.bottom));
+    const clampedEndY = Math.max(containerRect.top, Math.min(endY, containerRect.bottom));
 
-    const { left: leftMm, top: topMm } = this._screenToContainerMm(startX, startY, container);
+    const widthPx = clampedEndX - clampedStartX;
+    const heightPx = clampedEndY - clampedStartY;
+
+    const widthMm = manager.screenPxToMm(widthPx);
+    const heightMm = manager.screenPxToMm(heightPx);
+
+    const { left: leftMm, top: topMm } = this._screenToContainerMm(clampedStartX, clampedStartY, container);
 
     const zIndex = this._getNextZIndex(container);
 
@@ -181,6 +195,13 @@ export class InsertController {
       top = Math.round(topMm * 100) / 100;
       width = Math.round(widthMm * 100) / 100;
       height = Math.round(heightMm * 100) / 100;
+      // absolute 모드: left+width, top+height가 컨테이너 영역을 초과하지 않도록 클램핑
+      if (containerContentW > 0 && left + width > containerContentW) {
+        width = Math.max(1, Math.round((containerContentW - left) * 100) / 100);
+      }
+      if (containerContentH > 0 && top + height > containerContentH) {
+        height = Math.max(1, Math.round((containerContentH - top) * 100) / 100);
+      }
     }
 
     if (mode.position === 'absolute') {
@@ -199,7 +220,6 @@ export class InsertController {
 
     this._cleanup();
 
-    const manager = EditManager.getInstance();
     const detail: InsertEventDetail = {
       type: mode.type,
       position: mode.position,
@@ -467,19 +487,23 @@ export class InsertController {
     const editAreaTop = columnCoords[0]?.y1 ?? 0;
 
     const nearestColumn = Math.round((leftMm - editAreaLeft) / avgColWidth);
-    const clampedColumn = Math.max(0, Math.min(columnCount - Math.max(1, Math.round(widthMm / avgColWidth)), nearestColumn));
-
     const nearestLine = Math.round((topMm - editAreaTop) / lineHeight);
-    const clampedLine = Math.max(0, nearestLine);
 
-    const staticWidth = Math.max(1, Math.round(widthMm / avgColWidth));
-    const staticHeight = Math.max(1, Math.round(heightMm / lineHeight));
+    // width/height를 컨테이너의 남은 공간을 초과하지 않도록 클램핑
+    const maxCols = Math.max(1, Math.min(
+      Math.round(widthMm / avgColWidth),
+      columnCount - nearestColumn,
+    ));
+    const maxLines = Math.max(1, Math.round(heightMm / lineHeight));
+
+    const clampedColumn = Math.max(0, Math.min(columnCount - maxCols, nearestColumn));
+    const clampedLine = Math.max(0, nearestLine);
 
     return {
       left: clampedColumn,
       top: clampedLine,
-      width: staticWidth,
-      height: staticHeight,
+      width: maxCols,
+      height: maxLines,
     };
   }
 
