@@ -103,7 +103,7 @@ console.log(manager.layoutEditType); // 'move' | 'reparent'
 
 `layoutEditMode`가 `true`(또는 `{ type: ... }`)가 되면 `EditManager`는 문서 안의 모든 `<x-layout-box>`를 순회하며, `isBoxEditable(box)` 결과에 따라 각 box의 `editableLayout` 속성을 갱신한다. `false`로 설정되면 모든 box의 `editableLayout` 속성이 `false`가 된다. **선택은 레이아웃 편집 모드와 무관하게 항상 유지된다.**
 
-**기본적으로 모든 box가 허용된다.** `layoutEditMode`만 켜고 `editableRoles`와 `editableBoxIds`를 모두 `null`로 두면 Root 제한(`setEditableRootId`)과 lock을 제외한 모든 box가 편집 가능하다. 편집을 막으려면 `layoutEditMode`를 `false`로 설정하거나, `editableRoles`/`editableBoxIds`를 지정해 허용 범위를 좁혀야 한다. box의 `lock` 속성이 `true`이거나 조상 box 중 하나라도 lock이면 해당 box와 하위 요소는 항상 편집 불가이다.
+**기본적으로 모든 box가 허용된다.** `layoutEditMode`만 켜고 `editableRoles`와 `editableBoxIds`를 모두 `null`로 두면 Root 제한(`setEditableRootId`)과 lock을 제외한 모든 box가 편집·선택 가능하다. 편집을 막으려면 `layoutEditMode`를 `false`로 설정하거나, `editableRoles`/`editableBoxIds`를 지정해 허용 범위를 좁혀야 한다. box의 `lock` 속성이 `true`이거나 조상 box 중 하나라도 lock이면 해당 box와 하위 요소는 항상 편집·선택 모두 불가이다.
 
 **하위 호환**: `true`는 `{ type: 'move' }`와 동일하다. 기존 `boolean` API를 그대로 사용할 수 있다.
 
@@ -247,6 +247,20 @@ const selectable = manager.isBoxSelectable(box); // boolean
 3. 선택 전용 role 필터(`selectableRoles`)가 설정되어 있으면 box의 `role`이 그 안에 포함되어야 한다. `null`이면 편집 필터(`editableRoles`)를 따른다.
 4. 선택 전용 ID 필터(`selectableBoxIds`)가 설정되어 있으면 box의 `id`가 그 안에 포함되어야 한다. `null`이면 편집 필터(`editableBoxIds`)를 따른다.
 5. 모든 필터가 `null`이면 lock/루트 제한을 제외한 모든 box가 선택 가능하다.
+
+| lock/ancestor lock | Root 범위 | `selectableRoles` | `selectableBoxIds` | box.role | box.id | 결과 |
+|--------------------|-----------|-------------------|--------------------|----------|--------|------|
+| locked | (any) | (any) | (any) | (any) | (any) | `false` |
+| unlocked | outside Root | (any) | (any) | (any) | (any) | `false` |
+| unlocked | Root 자체(`id === rootId`) | (any) | (any) | (any) | (any) | `false` |
+| unlocked | inside Root | `null` | `null` | (any) | (any) | `true` |
+| unlocked | inside Root | `['body']` | `null` | `'body'` | (any) | `true` |
+| unlocked | inside Root | `['body']` | `null` | `'image'` | (any) | `false` |
+| unlocked | inside Root | `null` | `['b1']` | (any) | `'b1'` | `true` |
+| unlocked | inside Root | `['body']` | `['b1']` | `'body'` | `'b1'` | `true` |
+| unlocked | inside Root | `['body']` | `['b1']` | `'body'` | `'b2'` | `false` |
+
+> **참고**: `selectableRoles`/`selectableBoxIds`가 `null`이면 각각 `editableRoles`/`editableBoxIds`를 대신 사용한다(Row 2~3 참조). `selectableRootId`가 `null`이면 `editableRootId`를 대신 사용한다.
 
 #### `editableLayout` 속성 (하위 호환)
 
