@@ -501,7 +501,7 @@ export class InsertController {
     } else if (mode.type === 'paragraph') {
       boxData.children = { type: 'paragraph', content: '' };
     } else if (mode.type === 'image') {
-      boxData.children = { type: 'image', x: 0, y: 0, width: 100, height: 100, dpi: 72, url: '' };
+      boxData.children = { type: 'image', dpi: 72, url: '' };
     }
 
     boxEl.data = boxData;
