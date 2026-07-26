@@ -64,10 +64,10 @@ export class LayoutImageElement extends HTMLElement {
   private _canvas?: HTMLCanvasElement;
   private _shadowRoot: ShadowRoot;
 
-  private _x: number = 0;
-  private _y: number = 0;
-  private _width: number = 0;
-  private _height: number = 0;
+  private _x?: number;
+  private _y?: number;
+  private _width?: number;
+  private _height?: number;
   private _dpi: number = DEFAULT_IMAGE_DPI;
   private _url?: string;
   private _zIndex: number = 0;
@@ -315,13 +315,49 @@ export class LayoutImageElement extends HTMLElement {
   private _drawImage(ctx: CanvasRenderingContext2D, img: HTMLImageElement): void {
     const dpi = this.dpi;
     const ppm = dpi / 25.4;
+    const canvas = this.canvas!;
 
-    let drawX = this.x;
-    let drawY = this.y;
-    let drawW = this.width;
-    let drawH = this.height;
+    if (this._objectFit === 'none') {
+      // objectFit 'none': x/y/width/height are mm-based display position and size.
+      // Defaults: x=0, y=0, width=box width, height=box height.
+      const dx = Math.round((this._x ?? 0) * ppm);
+      const dy = Math.round((this._y ?? 0) * ppm);
+      const dw = Math.round((this._width ?? this.absWidth) * ppm);
+      const dh = Math.round((this._height ?? this.absHeight) * ppm);
 
-    if (this._objectFit !== 'none' && this._originalWidth && this._originalHeight) {
+      const canvasW = Math.round(this.absWidth * ppm);
+      const canvasH = Math.round(this.absHeight * ppm);
+
+      if (canvas.width !== canvasW || canvas.height !== canvasH) {
+        canvas.width = canvasW;
+        canvas.height = canvasH;
+      } else {
+        ctx.clearRect(0, 0, canvasW, canvasH);
+      }
+
+      const origW = this._originalWidth ?? img.naturalWidth;
+      const origH = this._originalHeight ?? img.naturalHeight;
+
+      try {
+        ctx.drawImage(
+          img,
+          0, 0, origW, origH,
+          dx, dy, dw, dh,
+        );
+      } catch (_) {
+        // drawImage 실패 — 무시
+      }
+      return;
+    }
+
+    // objectFit cover/contain/fill: compute source crop in mm, convert to px.
+    // x/y/width/height are optional internal crop coordinates (default 0).
+    let drawX = this._x ?? 0;
+    let drawY = this._y ?? 0;
+    let drawW = this._width ?? 0;
+    let drawH = this._height ?? 0;
+
+    if (this._originalWidth && this._originalHeight) {
       const fit = this._computeObjectFit(
         this._objectFit,
         this.absWidth, this.absHeight,
@@ -339,7 +375,6 @@ export class LayoutImageElement extends HTMLElement {
     const sWidth = Math.round(drawW * ppm);
     const sHeight = Math.round(drawH * ppm);
 
-    const canvas = this.canvas!;
     if (canvas.width !== sWidth || canvas.height !== sHeight) {
       canvas.width = sWidth;
       canvas.height = sHeight;
@@ -491,25 +526,25 @@ export class LayoutImageElement extends HTMLElement {
     this.render();
   }
 
-  set x(value: number) {
+  set x(value: number | undefined) {
     if (this._x === value) return;
     this._x = value;
     this.render();
   }
 
-  set y(value: number) {
+  set y(value: number | undefined) {
     if (this._y === value) return;
     this._y = value;
     this.render();
   }
 
-  set width(value: number) {
+  set width(value: number | undefined) {
     if (this._width === value) return;
     this._width = value;
     this.render();
   }
 
-  set height(value: number) {
+  set height(value: number | undefined) {
     if (this._height === value) return;
     this._height = value;
     this.render();
