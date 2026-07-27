@@ -1,3 +1,4 @@
+import { Z_INDEX_INSERT_PREVIEW, Z_INDEX_MAX_LAYOUT } from "@/constants";
 import { GridCalculator } from "@/core";
 import { EditManager } from "./edit-manager";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
@@ -507,11 +508,11 @@ export class InsertController {
     };
   }
 
-  /** 컨테이너 내에서 다음 zIndex를 계산한다. */
+  /** 컨테이너 내에서 다음 zIndex를 계산한다. 최댓값은 Z_INDEX_MAX_LAYOUT(90000)을 초과할 수 없다. */
   private _getNextZIndex(container: LayoutDocumentElement | LayoutBoxElement): number {
     const items = container.items;
     if (items.length === 0) return 1;
-    return Math.max(...items.map(i => i.zIndex ?? 0)) + 1;
+    return Math.min(Math.max(...items.map(i => i.zIndex ?? 0)) + 1, Z_INDEX_MAX_LAYOUT);
   }
 
   /** 삽입할 DOM 요소를 생성한다. */
@@ -552,7 +553,7 @@ export class InsertController {
     el.style.border = '2px dashed #1a73e8';
     el.style.backgroundColor = 'rgba(26, 115, 232, 0.1)';
     el.style.pointerEvents = 'none';
-    el.style.zIndex = '999999';
+    el.style.zIndex = String(Z_INDEX_INSERT_PREVIEW);
     el.style.display = 'none';
     document.body.appendChild(el);
     return el;

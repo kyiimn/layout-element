@@ -341,7 +341,60 @@
 
 ---
 
-## 8. React 래퍼 규칙
+## 8. z-index 제약사항
+
+### 8.1 레이아웃 요소 z-index 범위 제한
+
+- **레이아웃 요소의 `zIndex`는 `0 ~ 90000` 범위만 사용할 수 있다.**
+  `BoxData.zIndex`, `ImageData.zIndex`, `ParagraphData.zIndex` 등
+  모델 데이터의 `zIndex` 값은 `90000`을 초과할 수 없다.
+- **`90001 ~ 99999`는 예약 범위이다.**
+  이 범위는 편집 UI(선택 표시, 리사이즈 핸들, 타입 라벨, 미리보기 오버레이 등)
+  등 특수한 용도로만 사용되며, 레이아웃 요소의 `zIndex`로 사용할 수 없다.
+- **`100000` 이상의 z-index 값은 사용하지 않는다.**
+  과거에 사용하던 `99999999`, `99999998`, `999999` 등의 값은
+  예약 범위 내의 값으로 대체되었다.
+
+### 8.2 예약 z-index 값 목록
+
+| 값 | 용도 | 사용 위치 |
+|---|---|---|
+| `91000` | 광고 역할 고정 z-index (`role: 'ad'`) | `box.element.ts` |
+| `91001` | 면머리 역할 고정 z-index (`role: 'header'`) | `box.element.ts` |
+| `99999` | 리사이즈 핸들 (resize-handle) | `box.element.ts` |
+| `99998` | 타입 라벨 (type-label) | `box.element.ts`, `document.element.ts` |
+| `99997` | 삽입 미리보기 오버레이 (insert preview) | `insert-controller.ts` |
+| `9999` | 텍스트 편집 textarea (IME 입력) | `text-edit-controller.ts` |
+
+### 8.3 역할(role) 기반 z-index 고정
+
+- **`role: 'ad'`인 box의 `zIndex` getter는 항상 `91000`을 반환한다.**
+  `data.zIndex`에 설정된 값은 무시되며, `_zIndex` 내부 필드는 보존되지만
+  `zIndex` getter가 `Z_INDEX_ROLE_AD`(91000)을 반환한다.
+- **`role: 'header'`인 box의 `zIndex` getter는 항상 `91001`을 반환한다.**
+  `data.zIndex`에 설정된 값은 무시되며, `_zIndex` 내부 필드는 보존되지만
+  `zIndex` getter가 `Z_INDEX_ROLE_HEADER`(91001)을 반환한다.
+- **`role`가 `'ad'` 또는 `'header'`인 경우 `zIndex` setter와 `data` setter의 `zIndex` 할당은 무시된다.**
+  역할 고정 z-index는 변경할 수 없다.
+- **`role`가 `'ad'` 또는 `'header'`가 아닌 경우** `zIndex` getter는 `_zIndex`를 그대로 반환한다.
+- **`role` setter에서 role이 변경되면 `layout()` + `requestRerenderAffectedParagraphs()`가 호출된다.**
+  이로 인해 z-index 변경이 시각적으로 즉시 반영된다.
+- **`data` getter의 `zIndex` 필드는 `this.zIndex`를 사용하므로** role 기반 오버라이드 값이 자동으로 반영된다.
+- **역할 고정 z-index에서 해제될 때(예: `'ad'` → `'none'`)**,
+  `_zIndex`는 형제 요소 중 역할 고정 z-index(`91000`, `91001`)를 제외한 최댓값 + 1로 복원된다.
+  형제 요소가 없으면 `1`로 설정된다. 복원값은 `Z_INDEX_MAX_LAYOUT`(90000)을 초과할 수 없다.
+
+### 8.4 새로운 예약 값 추가 시 주의사항
+
+- 예약 범위(`90001 ~ 99999`)에 새 값을 추가할 때는
+  기존 값과 충돌하지 않도록 `RULES.md`의 표와 `src/constants/defaults.ts`의
+  상수를 함께 업데이트해야 한다.
+- 레이아웃 요소의 `zIndex`에 예약 범위 값을 할당하지 말 것.
+- CSS `z-index` 속성에 하드코딩된 값 대신 `defaults.ts`의 상수를 사용할 것.
+
+---
+
+## 9. React 래퍼 규칙
 
 ### 8.1 Custom Element 공개 API 변경 시 React 래퍼 동기화
 

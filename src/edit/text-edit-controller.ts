@@ -6,7 +6,7 @@ import { SelectionRange } from "@/types/edit/selection.type";
 import type { TextLineData } from "@/types/layout/text/text-line.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
-import { DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN } from "@/constants";
+import { DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
 
 /**
  * 커서 위치에서 유효한 스타일 정보.
@@ -395,7 +395,7 @@ export class TextEditController {
     textarea.style.margin = "0";
     textarea.style.resize = "none";
     textarea.style.overflow = "hidden";
-    textarea.style.zIndex = "9999";
+    textarea.style.zIndex = String(Z_INDEX_TEXTAREA);
     textarea.setAttribute("tabindex", "-1");
     textarea.setAttribute("role", "textbox");
     textarea.setAttribute("aria-label", "텍스트 편집 영역");

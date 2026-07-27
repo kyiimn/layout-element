@@ -1,4 +1,5 @@
 import { GridCalculator } from "@/core";
+import { Z_INDEX_TYPE_LABEL } from "@/constants";
 import { DocumentData, ParagraphStyle, PrintPostData, TextStyle, BoxData } from "@/types";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
@@ -110,7 +111,7 @@ export class LayoutDocumentElement extends HTMLElement {
 
       styleEl.sheet.insertRule(":host {}", 0);
       styleEl.sheet.insertRule(":host([reparent-target]) { box-shadow: #ff9800 0px 0px 0px 2px inset; }", 1);
-      styleEl.sheet.insertRule('.type-label { position: absolute; top: 0; left: 0; padding: 2px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: none; user-select: none; cursor: default; z-index: 99999998; display: none; white-space: nowrap; }', 2);
+      styleEl.sheet.insertRule('.type-label { position: absolute; top: 0; left: 0; padding: 2px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: none; user-select: none; cursor: default; z-index: ' + Z_INDEX_TYPE_LABEL + '; display: none; white-space: nowrap; }', 2);
       styleEl.sheet.insertRule(':host([reparent-target]) .type-label { display: block; background: rgba(255, 152, 0, 0.85); }', 3);
       const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
       rule.style.setProperty('background-color', '#ffffff', 'important');
