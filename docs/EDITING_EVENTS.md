@@ -96,6 +96,40 @@ function MyComponent() {
 
 `useEditManager` 훅은 마운트 시 `addEventListener`로 리스너를 등록하고 언마운트 시 `removeEventListener`로 해제한다. 자세한 훅 API는 `EDITING_LAYOUT.md`와 `EDITING_TEXT.md`를 참조한다.
 
+### 2.4 `reset()` — 편집 상태 전체 초기화 (unmount용)
+
+`EditManager`는 싱글톤이므로 컴포넌트 전환(React unmount/remount 등) 시에도 인스턴스가
+유지된다. 이전 문서의 편집 상태(선택, 포커스, 모드, 컨트롤러, 필터)가 새 문서로
+누출되어 요소 그리기 등의 동작을 방해하지 않도록, `LayoutEditor` 컴포넌트가
+unmount될 때 `reset()`을 호출한다.
+
+```typescript
+// React 예시
+React.useEffect(() => {
+  return () => { EditManager.getInstance().reset(); };
+}, []);
+```
+
+`reset()`이 초기화하는 항목:
+
+| 항목 | 초기화 동작 |
+|---|---|
+| 선택된 레이아웃 요소 DOM | `selected`, `text-focused` 속성 제거 |
+| `_selectedLayouts` | `[]` |
+| 포커스된 컨트롤러 | `_blurFocusedParagraph()` + `_focusedController = null` + `_lastFocusedBox = null` |
+| 드래그/리사이즈 상태 | `_isLayoutDragging = false`, `_isLayoutResizing = false`, `_dragTargets = []`, `_dragStartPositions.clear()` |
+| 편집 모드 | `_textEditMode = false`, `_layoutEditMode = false`, `_layoutEditType = 'move'`, `_insertMode = null` |
+| 필터 | `_editableRoles`/`_editableBoxIds`/`_editableTextRoles`/`_editableTextBoxIds`/`_editableParagraphIds`/`_selectableRoles`/`_selectableBoxIds`/`_selectableRootId`/`_editableRootId` = `null` |
+| 하위 컨트롤러 | `_layoutEditController.destroy()` 후 `null`, `_insertController = null`, `_placeGunController = null` |
+| 클릭 소비 | `_removeClickConsumeHandler()`, `_suppressNextClick = false` |
+| Place Gun 상태 | `_placeGunItems = []`, `_placeGunPaused = false` |
+| 멀티셀렉트 | `_multiSelect = false` |
+| scale | `1` |
+| 문서 내 편집 가능 속성 | `x-layout-box[editable-layout]`과 `x-layout-paragraph[editable-text]`를 순회하며 `editableLayout`/`editableText`를 `false`로 설정 |
+| 이벤트 리스너 | 제거하지 않음 (React `useEffect` cleanup이 담당) |
+
+`reset()` 종료 시 `modeChange` 이벤트가 발생한다 (`previousMode` = reset 전 모드, `mode` = 모두 비활성화 상태).
+
 ---
 
 ## 3. 타입 정의

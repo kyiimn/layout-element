@@ -684,6 +684,12 @@ class LayoutVirtualColumnElement extends HTMLElement
 **텍스트 줄 위치 가이드**. 편집 모드에서 텍스트 줄의 위치/높이를 시각적으로 보여주는
 오버레이입니다. 인쇄 모드에서는 자동 숨김 처리됩니다.
 
+각 가이드 라인은 `position: absolute`로 `top: ${lineHeight * j}mm` 위치에 배치된다.
+이전에는 flexbox `gap`으로 라인 간격을 구현했으나, 브라우저의 mm→px 하위픽셀 변환
+오차가 라인이 아래로 갈수록 누적되어 static box의 수학적 `top` 계산(`lineHeight * top`)과
+어긋나는 문제가 있었다. absolute positioning으로 변경하여 계산식과 정확히 일치하도록
+수정했다.
+
 #### Class: `LayoutGuideColumnElement`
 
 ```ts
