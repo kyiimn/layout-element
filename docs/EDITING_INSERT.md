@@ -478,20 +478,21 @@ editAreaLeft = columnCoords[0].x1
 editAreaTop  = columnCoords[0].y1
 
 nearestColumn = round((leftMm - editAreaLeft) / avgColWidth)
-clampedColumn = clamp(nearestColumn, 0, columnCount - max(1, round(widthMm / avgColWidth)))
-
 nearestLine = round((topMm - editAreaTop) / lineHeight)
+
+// width/height를 컨테이너의 남은 공간을 초과하지 않도록 클램핑
+maxCols = max(1, min(round(widthMm / avgColWidth), columnCount - nearestColumn))
+maxLines = max(1, round(heightMm / lineHeight))
+
+clampedColumn = clamp(nearestColumn, 0, columnCount - maxCols)
 clampedLine = max(0, nearestLine)
 
-staticWidth  = max(1, round(widthMm / avgColWidth))
-staticHeight = max(1, round(heightMm / lineHeight))
-
-return { left: clampedColumn, top: clampedLine, width: staticWidth, height: staticHeight }
+return { left: clampedColumn, top: clampedLine, width: maxCols, height: maxLines }
 ```
 
 - `left`: 가장 가까운 컬럼 인덱스로 스냅, `[0, columnCount - width]` 범위로 클램핑
 - `top`: 가장 가까운 라인 인덱스로 스냅, 최소 0
-- `width`: 최소 1컬럼
+- `width`: `round(widthMm / avgColWidth)`와 `columnCount - nearestColumn`(시작 컬럼부터 남은 컬럼 수) 중 작은 값. 최소 1컬럼. 드래그 영역이 컨테이너 컬럼 수를 넘어가지 않도록 클램핑
 - `height`: 최소 1라인
 
 ### 7.3 absolute 모드 최종 값
@@ -504,6 +505,24 @@ top    = round(topMm * 100) / 100
 width  = round(widthMm * 100) / 100
 height = round(heightMm * 100) / 100
 ```
+
+absolute 모드에서는 추가로 컨테이너의 편집 영역(`editableWidth`/`contentHeight`)을
+초과하지 않도록 클램핑한다:
+
+```
+if containerContentW > 0 and left + width > containerContentW:
+  width = max(1, round((containerContentW - left) * 100) / 100)
+if containerContentH > 0 and top + height > containerContentH:
+  height = max(1, round((containerContentH - top) * 100) / 100)
+```
+
+> `containerContentW`/`containerContentH`는 `container.model.editableWidth`와
+> `container.model.contentHeight`에서 얻는다. `left + width` 또는 `top + height`가
+> 컨테이너 영역을 초과하면 `width`/`height`를 남은 공간에 맞춰 축소한다 (최소 1mm).
+
+또한 드래그 시작/끝점 자체도 컨테이너 rect 내부로 클램핑한 뒤 width/height를
+계산하므로, 드래그 영역이 컨테이너보다 크게 그려져도 컨테이너 영역을 벗어나지
+않는다.
 
 ### 7.4 model이 없는 경우
 
