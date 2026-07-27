@@ -496,7 +496,8 @@ class LayoutImageElement extends HTMLElement
 |---|---|---|
 | `canvas` | `HTMLCanvasElement \| undefined` | 렌더링된 캔버스. |
 | `absLeft` / `absTop` | `number` (mm) | 절대 위치. |
-| `absWidth` / `absHeight` | `number` (mm) | 절대 크기. |
+| `absWidth` | `number` (mm) | 절대 너비. `inheritStyle.parentWidth`(부모 editableWidth, 이미 padding 차감됨)을 그대로 사용. 위치 보정은 `relLeft`(`paddingLeft`)에서 처리. |
+| `absHeight` | `number` (mm) | 절대 높이. `inheritStyle.parentHeight`를 그대로 사용. |
 | `type` | `'image'` | 타입 리터럴. |
 | `printPostData` | `PrintPostData[]` | 인쇄 후처리 데이터. |
 

@@ -678,7 +678,7 @@ export class LayoutImageElement extends HTMLElement {
 
   get absWidth() {
     if (!this._inheritStyle) return 0;
-    return this._inheritStyle.parentWidth - (this._inheritStyle.paddingLeft || 0) - (this._inheritStyle.paddingRight || 0);
+    return this._inheritStyle.parentWidth;
   }
 
   get absHeight() {
