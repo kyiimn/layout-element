@@ -146,6 +146,10 @@ export type ArticleContent = {
 export type ImageContent = {
   uid: string;      // 이미지/광고 고유 식별자
   caption: string;   // 이미지/광고 설명 (캡션)
+  url: string;       // 이미지/광고 접근 URL
+  width: number;     // 원본 이미지 너비 (픽셀). 주입 시 ImageData.originalWidth로 전달
+  height: number;    // 원본 이미지 높이 (픽셀). 주입 시 ImageData.originalHeight로 전달
+  dpi: number;       // 이미지 해상도 (DPI). 주입 시 ImageData.dpi로 전달
 };
 ```
 
@@ -288,7 +292,7 @@ box의 paragraph에 `article.body`를 주입하고, box의 `contentUid`에 기�
 
 ### 4.4 이미지/광고(image) 데이터 주입
 
-이미지/광고 항목(`contentType === 'image'`)은 클릭한 box의 역할에 따라 3가지 케이스로 분기한다. `ImageContent`의 `url` 필드에서 URL을 직접 가져온다.
+이미지/광고 항목(`contentType === 'image'`)은 클릭한 box의 역할에 따라 3가지 케이스로 분기한다. `ImageContent`의 `url`/`width`/`height`/`dpi` 필드를 사용해 이미지 요소에 데이터를 주입한다.
 
 #### 케이스 1: 조상에 `group-image` box가 있는 경우
 
@@ -296,7 +300,7 @@ box의 paragraph에 `article.body`를 주입하고, box의 `contentUid`에 기�
 
 | 대상 box (role) | 주입 내용 | contentUid |
 |-----------------|----------|-----------|
-| group-image 내 `role === 'image'` box의 image 요소 | `image.url` | UID |
+| group-image 내 `role === 'image'` box의 image 요소 | `_applyImageToElement(image, imageBox)` (url, originalWidth, originalHeight, dpi, objectFit='cover') | UID |
 | group-image 내 `role === 'caption'` box의 paragraph | `image.caption` | UID |
 
 추가로 group-image box의 `groupMember` 배열에 UID를 추가한다.
@@ -307,16 +311,18 @@ group-image 하위가 아니지만 box 자체의 role이 `image`/`caption`이면
 
 | box role | 주입 대상 | 주입 내용 | contentUid |
 |----------|----------|----------|-----------|
-| `image` | image 요소 | `image.url` | UID |
+| `image` | image 요소 | `_applyImageToElement(image, box)` | UID |
 | `caption` | paragraph 요소 | `image.caption` | UID |
 
 #### 케이스 3: 그 외
 
-box 내의 image 요소가 있으면 `image.url`을 주입하고, paragraph 요소가 있으면 `image.caption`을 주입한다. box의 `contentUid`에 UID를 저장한다.
+box 내의 image 요소가 있으면 `_applyImageToElement`로 이미지 데이터를 주입하고, paragraph 요소가 있으면 `image.caption`을 주입한다. box의 `contentUid`에 UID를 저장한다.
 
 #### 주입 공통 동작
 
-`image.url` setter가 자동으로 `render()`를 호출한다. paragraph 주입은 `_injectText` 헬퍼를 사용한다. 부모 box의 `requestRerenderAffectedParagraphs()`로 오버랩된 다른 paragraph를 갱신한다.
+이미지 주입은 `_applyImageToElement(imageEl, image, box)` 헬퍼를 사용한다. 이 헬퍼는 `imageEl.data`를 `{ ...data, dpi, url, originalWidth, originalHeight, objectFit: 'cover' }`로 갱신한다 — 단순히 `url` setter만 호출하는 것이 아니라 원본 이미지 픽셀 크기(`originalWidth`/`originalHeight`)와 `dpi`, `objectFit: 'cover'`를 함께 설정하여 `LayoutImageElement.render()`에서 `_computeObjectFit`이 자동으로 크롭 영역을 계산하도록 한다. 이후 `void imageEl.render()`로 렌더링을 트리거한다.
+
+paragraph 주입은 `_injectText` 헬퍼를 사용한다. 부모 box의 `requestRerenderAffectedParagraphs()`로 오버랩된 다른 paragraph를 갱신한다.
 
 ---
 
@@ -337,7 +343,7 @@ Place Gun이 활성 상태면 `<x-layout-document>`의 `style.cursor`가 `'copy'
 | 파일 | 역할 |
 |------|------|
 | `src/edit/edit-manager.ts` | `EditManager`: Place Gun 상태(`_placeGunItems`, `_placeGunPaused`), 공개 API(`loadPlaceGun`, `unloadPlaceGun`, `removePlaceGunItem`, `reorderPlaceGunItems`, `setPlaceGunPaused`), `_consumePlaceGunItem`, `_syncPlaceGunController`, `_dispatchPlaceGunChange` |
-| `src/edit/place-gun-controller.ts` | `PlaceGunController`: `handleBoxMouseDown` (box에서 호출), 기사 3케이스 분기 주입(`_injectArticle`), 이미지 주입(`_injectImage`), 커서 변경 |
+| `src/edit/place-gun-controller.ts` | `PlaceGunController`: `handleBoxMouseDown` (box에서 호출), 기사 3케이스 분기 주입(`_injectArticle`), 이미지 주입(`_injectImageOrAd` → `_applyImageToElement`), 커서 변경 |
 | `src/components/layout/box.element.ts` | `LayoutBoxElement`: `_onPlaceGunMouseDown` mousedown 리스너, `placeGunActive` 시 `EditManager.handlePlaceGunMouseDown` 위임 |
 | `src/types/edit/place-gun.type.ts` | `PlaceGunContentType`, `PlaceGunItem`, `PlaceGunChangeEventDetail` 타입 정의 |
 

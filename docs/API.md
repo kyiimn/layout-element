@@ -481,14 +481,17 @@ class LayoutImageElement extends HTMLElement
 | 이름 | 타입 | 단위 | 설명 |
 |---|---|---|---|
 | `data` | `ImageData` | — | 한 번에 갱신. |
-| `x` | `number` | px (원본) | 크롭 시작 X. |
-| `y` | `number` | px (원본) | 크롭 시작 Y. |
-| `width` | `number` | px (원본) | 크롭 너비. |
-| `height` | `number` | px (원본) | 크롭 높이. |
+| `x` | `number \| undefined` | objectFit==='none': mm, 그 외: px (원본) | 크롭 시작 X. `undefined` 시 0 (또는 objectFit==='none' 시 박스 좌측). |
+| `y` | `number \| undefined` | objectFit==='none': mm, 그 외: px (원본) | 크롭 시작 Y. `undefined` 시 0 (또는 objectFit==='none' 시 박스 상단). |
+| `width` | `number \| undefined` | objectFit==='none': mm, 그 외: px (원본) | 크롭/표시 너비. `undefined` 시 0 (또는 objectFit==='none' 시 `absWidth`). |
+| `height` | `number \| undefined` | objectFit==='none': mm, 그 외: px (원본) | 크롭/표시 높이. `undefined` 시 0 (또는 objectFit==='none' 시 `absHeight`). |
 | `dpi` | `number` | DPI | 해상도. `mm = px / dpi × 25.4`. |
 | `url` | `string \| undefined` | — | 이미지 URL. |
 | `zIndex` | `number` | — | 렌더링 순서. |
 | `overlapPadding` | `number \| { top?, right?, bottom?, left? }` | mm | 텍스트 회피 패딩. |
+| `objectFit` | `ImageObjectFit` | — | object-fit 동작 (`'cover'` \| `'fill'` \| `'contain'` \| `'none'`). 기본값 `'cover'`. `'none'`이면 `x`/`y`/`width`/`height`를 mm 단위 표시 위치와 크기로 해석. |
+| `originalWidth` | `number \| undefined` | px (원본) | 원본 이미지 너비 메타데이터. `objectFit !== 'none'` 시 `_computeObjectFit`에 사용. `undefined` 시 `img.naturalWidth`로 폴백. |
+| `originalHeight` | `number \| undefined` | px (원본) | 원본 이미지 높이 메타데이터. `objectFit !== 'none'` 시 `_computeObjectFit`에 사용. `undefined` 시 `img.naturalHeight`로 폴백. |
 
 #### 게터
 
@@ -518,8 +521,8 @@ class LayoutImageElement extends HTMLElement
 
 | 트리거 | 경로 | 비고 |
 |---|---|---|
-| `data` setter | `layout()` + `render()` | `objectFit`, `x`/`y`/`width`/`height`, `url` 등 일괄 갱신 |
-| `x`, `y`, `width`, `height`, `dpi`, `url`, `objectFit` setter | `render()` | 단일 필드 변경 (기존 값과 같으면 no-op) |
+| `data` setter | `layout()` + `render()` | `objectFit`, `x`/`y`/`width`/`height`, `url`, `originalWidth`/`originalHeight` 등 일괄 갱신 |
+| `x`, `y`, `width`, `height`, `dpi`, `url`, `objectFit`, `originalWidth`, `originalHeight` setter | `render()` | 단일 필드 변경 (기존 값과 같으면 no-op) |
 | `zIndex`, `overlapPadding` setter | `layout()` + `render()` + 부모 `requestRerenderAffectedParagraphs()` | 형제 단락 텍스트 회피 재계산 |
 | `inheritStyle` setter | `layout()` + `render()` | 상위 box의 크기/여백 변경 시. `absWidth`/`absHeight`가 `inheritStyle.parentWidth`/`parentHeight`에 의존하므로 캔버스 픽셀을 다시 그려야 함 |
 
@@ -578,6 +581,23 @@ box.width = N  (또는 height/top/left/paddingTop/...)
 > `urlLoader`가 매번 다른 URL을 반환하는 경우(예: 서명 URL 갱신) 캐시가 계속
 > 미스 처리된다. `urlLoader`는 같은 원본 URL에 대해 안정적인 결과를 반환하는
 > 것이 권장된다.
+
+#### Object URL 수명주기 (메모리 누수 방지)
+
+`urlLoader`가 `blob:` URL(`URL.createObjectURL()` 결과)을 반환하거나 `url` 자체가
+`blob:` 스킴인 경우, `LayoutImageElement`는 해당 Object URL을 추적하여 DOM에서
+분리될 때 `URL.revokeObjectURL()`로 해제한다. 이중 등록된 Object URL은 새 URL이
+로드될 때 이전 것을 먼저 해제한다.
+
+| 시점 | 동작 |
+|---|---|
+| `render()`에서 `resolvedUrl.startsWith('blob:')` | `_objectUrl`에 저장. 이전 `_objectUrl`이 있고 새 URL과 다르면 `revokeObjectURL` 호출 |
+| `disconnectedCallback` | DOM 분리 시 `_objectUrl`이 있으면 `revokeObjectURL` 후 `undefined`로 초기화 |
+
+> **주의**: 외부 코드에서 `URL.createObjectURL()`로 만든 blob URL을 `url`에
+> 전달한 뒤 직접 `revokeObjectURL()`을 호출하면, `LayoutImageElement`가 이미지를
+> 로드하기 전에 URL이 무효화될 수 있다. Object URL의 해제는
+> `LayoutImageElement`에 위임하거나, 로드 완료 후에 수행해야 한다.
 
 #### 예제
 
@@ -1335,6 +1355,10 @@ class EditManager {
   // 판별
   isParagraphEditable(paragraph: LayoutParagraphElement): boolean;
   isBoxEditable(box: LayoutBoxElement): boolean;
+
+  // 라이프사이클
+  /** 모든 편집 상태를 초기화. LayoutEditor unmount 시 호출하여 싱글톤의 잔류 상태를 제거. */
+  reset(): void;
 }
 ```
 
@@ -2138,20 +2162,48 @@ type TextLineData = {
 
 #### `ImageData`
 
+`x`/`y`/`width`/`height`의 의미는 `objectFit`에 따라 다릅니다:
+- `objectFit !== 'none'` (cover/contain/fill): 픽셀 단위의 소스 크롭 영역. `dpi`로 mm 변환 후 `_computeObjectFit`에서 실제 크롭 위치를 재계산합니다. 내부 렌더링 전용이며 UI에 노출되지 않습니다.
+- `objectFit === 'none'`: mm 단위의 박스 내 표시 위치와 크기. 원본 이미지 전체를 지정된 위치/크기로 렌더링합니다. 생략 시 박스 크기로 기본값이 사용됩니다.
+
 ```ts
+type ImageObjectFit = 'cover' | 'fill' | 'contain' | 'none';
+
 type ImageData = {
   type: 'image';
   id?: string;
-  x: number;       // 원본 픽셀
-  y: number;       // 원본 픽셀
-  width: number;   // 원본 픽셀
-  height: number;  // 원본 픽셀
+  /**
+   * objectFit==='none': 박스 내 이미지 시작 X (mm). 그 외: 크롭 시작 X (원본 픽셀).
+   * 생략 시 0 (또는 objectFit==='none' 시 박스 좌측).
+   */
+  x?: number;
+  /**
+   * objectFit==='none': 박스 내 이미지 시작 Y (mm). 그 외: 크롭 시작 Y (원본 픽셀).
+   * 생략 시 0 (또는 objectFit==='none' 시 박스 상단).
+   */
+  y?: number;
+  /**
+   * objectFit==='none': 이미지 표시 너비 (mm). 생략 시 박스 너비(absWidth).
+   * 그 외: 크롭 너비 (원본 픽셀).
+   */
+  width?: number;
+  /**
+   * objectFit==='none': 이미지 표시 높이 (mm). 생략 시 박스 높이(absHeight).
+   * 그 외: 크롭 높이 (원본 픽셀).
+   */
+  height?: number;
   dpi: number;
   url: string;
   zIndex?: number;
   overlapPadding?: number | {
     top?: number; right?: number; bottom?: number; left?: number;
   };
+  /** 원본 이미지 너비 (픽셀). 메타데이터. */
+  originalWidth?: number;
+  /** 원본 이미지 높이 (픽셀). 메타데이터. */
+  originalHeight?: number;
+  /** object-fit 동작. 기본값 'cover'. 'none'이면 x/y/width/height를 mm 단위 표시 위치/크기로 사용. */
+  objectFit?: ImageObjectFit;
 };
 ```
 
@@ -2329,6 +2381,12 @@ type ImageContent = {
   uid: string;        // 이미지/광고 고유 식별자
   caption: string;    // 이미지/광고 설명 (캡션)
   url: string;         // 이미지/광고 접근 URL
+  /** 원본 이미지 너비 (픽셀). Place Gun 주입 시 ImageData.originalWidth로 전달. */
+  width: number;
+  /** 원본 이미지 높이 (픽셀). Place Gun 주입 시 ImageData.originalHeight로 전달. */
+  height: number;
+  /** 이미지 해상도 (DPI). Place Gun 주입 시 ImageData.dpi로 전달. */
+  dpi: number;
 };
 
 type PlaceGunItem = {
