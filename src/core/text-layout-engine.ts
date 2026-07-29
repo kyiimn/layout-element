@@ -623,6 +623,7 @@ export class TextLayoutEngine {
             }
 
             if (result.overflow) {
+              columnContent.push(result.lineData);
               lineEl = null;
               partEls = [];
               break;
