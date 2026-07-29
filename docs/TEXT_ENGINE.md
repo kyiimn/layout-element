@@ -1065,7 +1065,9 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 - 이미지 오버랩 탐지는 `LayoutImageElement.canvas`가 존재할 때만 픽셀 수준으로 수행한다.
 - `overlapPadding`이 설정된 이미지는 타원 기반 감지를 사용한다. 캔버스가 없으면 기하학적 확장 사각형으로 폴백하며, 이 경우 투명 영역 구분이 불가능하다.
 - 텍스트 오버플로우는 마지막 컬럼에서 `_overflow`로 집계되며 `render-error` 이벤트로 통지된다. 오버플로우된 라인은 `renderText()`에서 `display: none` 처리되어 시각적으로 숨겨진다.
+- 오버플로우 발생 시 `LayoutParagraphElement`의 `:host`에 하단 8px 빨간 inset shadow(`inset 0 -8px 0 0 #ff0000`)가 자동 적용되어 사용자에게 오버플로우를 시각적으로 알린다. 인쇄 모드에서는 적용되지 않는다. 오버플로우가 해제되면 shadow도 자동 제거된다.
 - Canvas 폰트 측정은 실제 DOM 렌더링과 약간 다를 수 있으나, `widthRatio`와 `minWidth` 보정으로 대부분의 경우 일치한다.
+- `LayoutParagraphElement.render()` 완료 후 항상 `render-complete` 커스텀 이벤트가 디스패치된다. 오버플로우 발생 여부와 무관하게 렌더링 결과를 통지하며, 페이로드는 `RenderCompleteEventDetail` 타입을 따른다. 배치된 글자/라인 수(`placed.chars`, `placed.lines`), 오버플로우 여부 및 통계(`overflow.hasOverflow`, `overflow.chars`, `overflow.lines`), 컬럼 수(`columnCount`)를 포함한다. `render-error`와 독립적으로 동작하며 기존 이벤트에 영향을 주지 않는다.
 
 ---
 

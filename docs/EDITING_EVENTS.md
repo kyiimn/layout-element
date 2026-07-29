@@ -10,6 +10,17 @@
 
 `EditManager`는 `layout-element`의 글로벌 편집 관리 싱글톤으로, 텍스트 편집, 레이아웃 선택, 드래그 이동, 리사이즈, 요소 삽입, Box 속성 변경 등의 상태 변화를 외부 UI에 알리기 위해 15가지 이벤트 타입을 제공한다. 외부 편집 UI는 `addEventListener`로 이벤트를 수신하여 상태 동기화, undo/redo 스택, 스타일 패널 갱신 등을 수행한다.
 
+> **참고: 요소 자체 CustomEvent와의 관계**
+>
+> `EditManager` 이벤트 시스템과 별개로, 레이아웃 요소 자체가 DOM `CustomEvent`를 디스패치한다. 이 이벤트들은 `EditManager.addEventListener`가 아닌 **요소의 `addEventListener`**로 수신한다.
+>
+> | 이벤트 | 발생 주체 | 발생 조건 | 페이로드 |
+> |--------|----------|----------|----------|
+> | `render-error` | `LayoutParagraphElement` | 텍스트 오버플로우 발생 시 | `{ id, type: 'text-overflow', overflow: number }` |
+> | `render-complete` | `LayoutParagraphElement` | `render()` 완료 후 항상 | `RenderCompleteEventDetail` (`{ type, id, placed: { chars, lines }, overflow: { hasOverflow, chars, lines }, columnCount }`) |
+>
+> 두 이벤트는 동일한 `render()` 호출 내에서 순차적으로 발생한다. `render-error`는 오버플로우 시에만, `render-complete`는 항상 디스패치된다. `EditManager`의 `_dispatching` 재진입 가드와 무관하게 동작하며, 기존 `EditManager` 이벤트에 영향을 주지 않는다.
+
 ### 1.1 이벤트 시스템 아키텍처
 
 ```
@@ -1093,6 +1104,8 @@ LayoutSelectionController._onClick
 | `src/types/edit/layout.type.ts` | `LayoutEditModeConfig`, `LayoutAddEventDetail`, `LayoutRemoveEventDetail`, `EditModeState`, `BoxPropertyChangeEventDetail` 타입 정의 |
 | `src/types/edit/place-gun.type.ts` | `PlaceGunItem`, `PlaceGunChangeEventDetail` 타입 정의 (`placeGunChange` 이벤트 payload) |
 | `src/components/layout/box.element.ts` | `LayoutBoxElement`: `role`, `contentUid`, `groupMember`, `priority` setter에서 `boxPropertyChange` 이벤트 발생 |
+| `src/components/layout/paragraph.element.ts` | `LayoutParagraphElement`: `render()` 완료 후 `render-complete` CustomEvent 디스패치 (항상), 오버플로우 시 `render-error` CustomEvent 디스패치. `EditManager` 이벤트 시스템과 독립적 |
+| `src/types/layout/render-complete-event.type.ts` | `RenderCompleteEventDetail` 타입 정의 (`render-complete` 이벤트 payload) |
 
 ---
 
@@ -1111,6 +1124,7 @@ LayoutSelectionController._onClick
 - **`modeChange` 중간 상태 억제**: 모드 setter가 내부적으로 다른 모드 setter를 호출할 때 `_modeChangeSuppressed` 플래그로 중간 상태의 이벤트가 억제된다. 최종적으로 모드가 확정된 후 한 번만 `modeChange` 이벤트가 발생한다. 예: `textEditMode = true` 호출 시 내부적으로 `layoutEditMode = false`와 `insertMode = null`이 호출되지만, `modeChange` 이벤트는 최종적으로 `textEditMode = true`가 확정된 후 한 번만 발생한다.
 - **`modeChange` 동일 상태 no-op**: setter가 현재 값과 동일한 값을 받으면 `_dispatchModeChange`를 호출하지 않아 `modeChange` 이벤트가 발생하지 않는다.
 - **`boxPropertyChange` 값 동일 시 미발생**: `role`, `contentUid`, `priority` setter는 값이 동일하면 이벤트를 발생시키지 않는다. `groupMember` setter는 배열 내용이 동일하면 이벤트를 발생시키지 않는다. `attributeChangedCallback`을 통한 DOM 속성 변경에서는 이벤트가 발생하지 않는다 (setter를 통해서만 발생).
+- **요소 자체 CustomEvent와의 독립성**: `LayoutParagraphElement`가 디스패치하는 `render-error`/`render-complete` CustomEvent는 `EditManager` 이벤트 시스템과 독립적이다. 이 이벤트들은 `EditManager.addEventListener`가 아닌 요소의 `addEventListener`로 수신해야 하며, `EditManager`의 `_dispatching` 재진입 가드의 적용을 받지 않는다. `render-complete`는 `render()` 완료 후 항상 디스패치되므로, 리스너 내에서 `EditManager` 이벤트를 발생시켜도 정상적으로 처리된다.
 
 ---
 

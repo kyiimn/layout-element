@@ -73,10 +73,11 @@ flowchart LR
     E --> G["editController.postRender()"]
     G --> H[mapper.rebuild]
     H --> I["커서/선택 재배치"]
-    I --> J[화면 갱신]
+    I --> J[render-complete 이벤트 디스패치]
+    J --> K[화면 갱신]
 ```
 
-요약하면, 텍스트 편집 컨트롤러는 입력을 받아 모델을 바꾸고, 단락의 `render()`가 실제 DOM을 다시 그린 뒤, `postRender()`를 통해 매퍼와 커서/선택을 동기화한다. `postRender()`는 항상 `render()` 내부에서 자동 호출되므로 호스트 프로그램은 별도로 호출할 필요가 없다.
+요약하면, 텍스트 편집 컨트롤러는 입력을 받아 모델을 바꾸고, 단락의 `render()`가 실제 DOM을 다시 그린 뒤, `postRender()`를 통해 매퍼와 커서/선택을 동기화한다. `postRender()`는 항상 `render()` 내부에서 자동 호출되므로 호스트 프로그램은 별도로 호출할 필요가 없다. `render()`의 최종 단계에서 `render-complete` 커스텀 이벤트가 디스패치되어 배치된 글자/라인 수와 오버플로우 통계를 호스트 프로그램에 전달한다. 오버플로우 발생 시에는 `render-error` 이벤트가 먼저 디스패치된다. 두 이벤트 모두 `EditManager` 이벤트 시스템과 독립적인 요소 자체의 CustomEvent이다.
 
 ### 1.4 활성화된 단락의 텍스트 편집 데이터 흐름
 
@@ -104,7 +105,10 @@ sequenceDiagram
     EC->>EC: _updateCursorPosition()
     EC->>EC: _updateSelection()
     EC->>DOM: cursor/selection 위치 갱신
+    P->>P: dispatchEvent('render-complete', _computeRenderStats())
 ```
+
+`render-complete` 이벤트는 `postRender()` 이후에 디스패치된다. 페이로드는 `RenderCompleteEventDetail` 타입이며, 배치된 글자/라인 수(`placed.chars`, `placed.lines`), 오버플로우 여부 및 통계(`overflow.hasOverflow`, `overflow.chars`, `overflow.lines`), 컬럼 수(`columnCount`)를 포함한다. 오버플로우 발생 시에는 `render-complete` 이전에 `render-error` 이벤트가 먼저 디스패치된다.
 
 ### 1.5 현재 지원 범위
 
@@ -270,7 +274,7 @@ flowchart LR
 | `editableText` | `boolean` get/set | 텍스트 편집 모드를 활성화하거나 비활성화한다. `true` 설정 시 `TextEditController`가 생성되고, `false` 설정 시 제거된다. |
 | `editController` | `TextEditController \| null` get | 현재 연결된 `TextEditController` 인스턴스를 반환한다. 텍스트 편집 모드가 꺼져 있으면 `null`이다. |
 | `model` | `TextLayoutEngine \| null` get | 단락에 연결된 `TextLayoutEngine` 모델을 반환한다. |
-| `render()` | `void` | 단락을 다시 렌더링한다. 편집 중이면 `editController.postRender()`를 자동으로 호출한다. |
+| `render()` | `void` | 단락을 다시 렌더링한다. 편집 중이면 `editController.postRender()`를 자동으로 호출한다. 렌더링 완료 후 항상 `render-complete` 커스텀 이벤트를 디스패치하여 배치/오버플로우 통계를 전달한다. 오버플로우 발생 시에는 `render-error` 커스텀 이벤트도 디스패치한다. 오버플로우 시 하단 8px 빨간 inset shadow로 시각적 표시를 적용한다 (인쇄 모드 제외). |
 
 ### 3.2 `TextEditController`
 
