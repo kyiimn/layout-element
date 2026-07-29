@@ -210,8 +210,10 @@ export class LayoutParagraphElement extends HTMLElement {
       this._model.layoutText();
     }
 
+    const renderStats = this._computeRenderStats();
+
     const hadOverflow = this._hasOverflow;
-    const hasOverflowNow = !this._isPrint && this._model.overflow > 0;
+    const hasOverflowNow = renderStats.overflow.hasOverflow;
     if (hasOverflowNow !== hadOverflow) {
       this._hasOverflow = hasOverflowNow;
       this._applyStyle();
@@ -263,7 +265,7 @@ export class LayoutParagraphElement extends HTMLElement {
     }
 
     this.dispatchEvent(new CustomEvent('render-complete', {
-      detail: this._computeRenderStats(),
+      detail: renderStats,
       bubbles: true,
       composed: true,
     }));
@@ -356,7 +358,7 @@ export class LayoutParagraphElement extends HTMLElement {
       id: this.id,
       placed: { chars: placedChars, lines: placedLines },
       overflow: {
-        hasOverflow: overflowChars > 0 || overflowLines > 0,
+        hasOverflow: !this._isPrint && (overflowChars > 0 || overflowLines > 0),
         chars: overflowChars,
         lines: overflowLines,
       },
