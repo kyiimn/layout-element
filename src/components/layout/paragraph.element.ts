@@ -2,7 +2,7 @@ import { TextLayoutEngine } from "@/core";
 import { TextEditController } from "@/edit/text-edit-controller";
 import { EditManager } from "@/edit/edit-manager";
 import { ColorRegistry, FontLoader } from "@/resource";
-import { InheritStyle, ParagraphData, ParagraphStyle, TextBlockData, TextStyle } from "@/types";
+import { InheritStyle, ParagraphData, ParagraphStyle, RenderCompleteEventDetail, TextBlockData, TextStyle } from "@/types";
 import { checkOverlap, genUUID, valueEqual } from "@/utils";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutColumnElement } from "./column.element";
@@ -14,6 +14,8 @@ import { LayoutColumnElement } from "./column.element";
  * `LayoutColumnElement`를 생성하여 각 컬럼을 렌더링한다.
  *
  * 오버플로우 발생 시 `render-error` 커스텀 이벤트를 디스패치한다.
+ * 렌더링 완료 후 항상 `render-complete` 커스텀 이벤트를 디스패치하여
+ * 배치된 글자/라인 수와 오버플로우 통계를 전달한다.
  */
 export class LayoutParagraphElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
@@ -38,6 +40,13 @@ export class LayoutParagraphElement extends HTMLElement {
 
   /** 성능 최적화: 구조 변경 여부 플래그. true면 다음 render()에서 전체 재생성을 수행한다. */
   private _perfStructureChanged: boolean = true;
+
+  /**
+   * 오버플로우 시각 표시기 활성화 여부. `render()`에서 텍스트 오버플로우가
+   * 감지되면 `true`로 설정되어 하단 8px 빨간 inset shadow가 표시된다.
+   * 인쇄 모드에서는 항상 `false`이다.
+   */
+  private _hasOverflow: boolean = false;
 
   constructor() {
     super();
@@ -146,6 +155,9 @@ export class LayoutParagraphElement extends HTMLElement {
         top: `${paddingTop}mm`,
         width: `${this.absWidth}mm`,
         zIndex: `${this.zIndex + 100}`,
+        boxShadow: this._hasOverflow && !this._isPrint
+          ? 'inset 0 -8px 0 0 #ff0000'
+          : '',
       }
     );
   }
@@ -175,6 +187,8 @@ export class LayoutParagraphElement extends HTMLElement {
   /**
    * 텍스트 컬럼 렌더링: TextLayoutEngine으로 텍스트 래핑을 수행하고
    * 컬럼 DOM을 생성/갱신한다. 오버플로우 발생 시 `render-error` 이벤트를 디스패치한다.
+   * 렌더링 완료 후 항상 `render-complete` 이벤트를 디스패치하여 배치/오버플로우 통계를 전달한다.
+   * 오버플로우 시 하단 8px 빨간 inset shadow로 시각적 표시를 적용한다.
    */
   render() {
     if (!this.isConnected || !this._model) return;
@@ -194,6 +208,13 @@ export class LayoutParagraphElement extends HTMLElement {
       this._perfStructureChanged = false;
     } else {
       this._model.layoutText();
+    }
+
+    const hadOverflow = this._hasOverflow;
+    const hasOverflowNow = !this._isPrint && this._model.overflow > 0;
+    if (hasOverflowNow !== hadOverflow) {
+      this._hasOverflow = hasOverflowNow;
+      this._applyStyle();
     }
 
     if (this._model.overflow > 0) {
@@ -240,6 +261,12 @@ export class LayoutParagraphElement extends HTMLElement {
     if (this._editController) {
       this._editController.postRender(needsFullRecreate);
     }
+
+    this.dispatchEvent(new CustomEvent('render-complete', {
+      detail: this._computeRenderStats(),
+      bubbles: true,
+      composed: true,
+    }));
   }
 
   /**
@@ -257,6 +284,84 @@ export class LayoutParagraphElement extends HTMLElement {
       || lineCountBefore === -1
       || lineCountBefore !== lineCountAfter
       || overflowBefore !== overflowAfter;
+  }
+
+  /**
+   * `render()` 완료 시 `render-complete` 이벤트의 페이로드를 계산한다.
+   *
+   * `columnContents`를 순회하며 각 라인의 누적 높이(mm)와 컬럼 높이
+   * (`inheritStyle.parentHeight`, mm)를 비교해 오버플로우 라인을 식별한다.
+   * `LayoutColumnElement.renderText()`의 `display: none` 처리 로직과 동일한
+   * 기준을 사용하되 DOM에 의존하지 않고 모델 데이터만으로 동작한다.
+   * `textBlockStyle`에 의해 라인 높이가 오버라이드된 경우를 반영하기 위해
+   * `genLineStyle()`의 height 오버라이드 규칙을 적용한다.
+   *
+   * @returns `RenderCompleteEventDetail` 페이로드 객체
+   */
+  private _computeRenderStats(): RenderCompleteEventDetail {
+    const model = this._model;
+    if (!model) {
+      return {
+        type: 'paragraph',
+        id: this.id,
+        placed: { chars: 0, lines: 0 },
+        overflow: { hasOverflow: false, chars: 0, lines: 0 },
+        columnCount: 0,
+      };
+    }
+
+    const columnContents = model.columnContents;
+    const columnCount = columnContents.length;
+    const parentHeight = this.absHeight;
+    const lineGap = this._paragraphStyle?.lineGap || this._inheritStyle?.lineGap || 1;
+    const defaultLineHeight = model.lineHeight;
+    const lastColumnIdx = columnCount - 1;
+
+    let placedChars = 0;
+    let placedLines = 0;
+    let overflowLines = 0;
+    const overflowChars = model.overflow;
+
+    for (let c = 0; c < columnCount; c++) {
+      const lines = columnContents[c] || [];
+      let accumulatedHeightMm = 0;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        const fontSize = line.textBlockStyle?.fontSize;
+        let lineHeightMm = defaultLineHeight;
+        if (fontSize !== undefined && fontSize > 0 && defaultLineHeight < fontSize * lineGap) {
+          lineHeightMm = Math.ceil((fontSize * lineGap) / defaultLineHeight) * defaultLineHeight;
+        }
+
+        const isOverflowLine = parentHeight > 0 && accumulatedHeightMm + lineHeightMm > parentHeight + 1e-6;
+
+        if (isOverflowLine) {
+          if (c === lastColumnIdx) {
+            overflowLines++;
+          }
+        } else {
+          accumulatedHeightMm += lineHeightMm;
+          placedLines++;
+          for (const part of line.parts) {
+            placedChars += part.content.length;
+          }
+        }
+      }
+    }
+
+    return {
+      type: 'paragraph',
+      id: this.id,
+      placed: { chars: placedChars, lines: placedLines },
+      overflow: {
+        hasOverflow: overflowChars > 0 || overflowLines > 0,
+        chars: overflowChars,
+        lines: overflowLines,
+      },
+      columnCount,
+    };
   }
 
   set data(data: ParagraphData) {
