@@ -230,7 +230,7 @@ export type EditManagerEventListener = (event: EditManagerEvent) => void;
 | **삽입 모드** | `insert`, `insertCancel` | `InsertController` |
 | **모드 전환** | `modeChange` | `EditManager` (textEditMode/layoutEditMode/insertMode setter) |
 | **Box 속성 변경** | `boxPropertyChange` | `LayoutBoxElement` (role/contentUid/groupMember/priority setter) |
-| **Place Gun** | `placeGunChange` | `EditManager` (load/unload/remove/reorder/pause) |
+| **Place Gun** | `placeGunChange`, `placeGunBefore`, `placeGunAfter` | `EditManager` (load/unload/remove/reorder/pause), `PlaceGunController` (click-to-place) |
 
 ---
 
@@ -1087,6 +1087,8 @@ LayoutSelectionController._onClick
 | `modeChange` | 모드 전환 | `previousMode`, `mode` | textEditMode/layoutEditMode/insertMode 변경 |
 | `boxPropertyChange` | Box 속성 | `boxPropertyDetail.box`, `boxPropertyDetail.property`, `boxPropertyDetail.oldValue`, `boxPropertyDetail.newValue` | box의 role/contentUid/groupMember/priority 변경 |
 | `placeGunChange` | Place Gun | `placeGunDetail.items`, `placeGunDetail.paused` | Place Gun 장전/비우기/삭제/재정렬/일시정지/소비 |
+| `placeGunBefore` | Place Gun | `placeGunBeforeDetail.item`, `placeGunBeforeDetail.box` | Place Gun 항목 주입 직전 (클릭 배치 시작) |
+| `placeGunAfter` | Place Gun | `placeGunAfterDetail.item`, `placeGunAfterDetail.box`, `placeGunAfterDetail.success` | Place Gun 항목 주입 완료 직후 |
 
 ---
 
@@ -1102,7 +1104,7 @@ LayoutSelectionController._onClick
 | `src/edit/place-gun-controller.ts` | `PlaceGunController`: Place Gun 클릭 배치 처리, `_consumePlaceGunItem` 호출로 항목 소비 → `placeGunChange` 간접 발생. 새 요소를 생성하지 않고 기존 paragraph/image에 데이터 주입하므로 `layoutAdd` 이벤트는 발생하지 않음 |
 | `src/types/edit/insert.type.ts` | `InsertEventDetail` 타입 정의 (`insert` 이벤트 payload) |
 | `src/types/edit/layout.type.ts` | `LayoutEditModeConfig`, `LayoutAddEventDetail`, `LayoutRemoveEventDetail`, `EditModeState`, `BoxPropertyChangeEventDetail` 타입 정의 |
-| `src/types/edit/place-gun.type.ts` | `PlaceGunItem`, `PlaceGunChangeEventDetail` 타입 정의 (`placeGunChange` 이벤트 payload) |
+| `src/types/edit/place-gun.type.ts` | `PlaceGunItem`, `PlaceGunChangeEventDetail`, `PlaceGunBeforeEventDetail`, `PlaceGunAfterEventDetail` 타입 정의 (`placeGunChange`/`placeGunBefore`/`placeGunAfter` 이벤트 payload) |
 | `src/components/layout/box.element.ts` | `LayoutBoxElement`: `role`, `contentUid`, `groupMember`, `priority` setter에서 `boxPropertyChange` 이벤트 발생 |
 | `src/components/layout/paragraph.element.ts` | `LayoutParagraphElement`: `render()` 완료 후 `render-complete` CustomEvent 디스패치 (항상), 오버플로우 시 `render-error` CustomEvent 디스패치. `EditManager` 이벤트 시스템과 독립적 |
 | `src/types/layout/render-complete-event.type.ts` | `RenderCompleteEventDetail` 타입 정의 (`render-complete` 이벤트 payload) |
