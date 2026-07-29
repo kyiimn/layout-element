@@ -8,7 +8,7 @@ import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
 import { PlaceGunController } from "./place-gun-controller";
 import type { SelectionRange } from "@/types/edit";
-import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail, PlaceGunItem, PlaceGunChangeEventDetail } from "@/types/edit";
+import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail, PlaceGunItem, PlaceGunChangeEventDetail, PlaceGunBeforeEventDetail, PlaceGunAfterEventDetail } from "@/types/edit";
 import type { BoxRole } from "@/types/layout";
 
 /** 레이아웃 편집 대상 요소 (box만 해당) */
@@ -33,7 +33,9 @@ export type EditManagerEventType =
   | 'insertCancel'
   | 'modeChange'
   | 'boxPropertyChange'
-  | 'placeGunChange';
+  | 'placeGunChange'
+  | 'placeGunBefore'
+  | 'placeGunAfter';
 
 /**
  * 글로벌 편집 관리 이벤트.
@@ -97,6 +99,10 @@ export interface EditManagerEvent {
   boxPropertyDetail?: BoxPropertyChangeEventDetail;
   /** Place Gun 상태 변경 상세 정보 (placeGunChange 이벤트에서만) */
   placeGunDetail?: PlaceGunChangeEventDetail;
+  /** Place Gun 발사 전 상세 정보 (placeGunBefore 이벤트에서만) */
+  placeGunBeforeDetail?: PlaceGunBeforeEventDetail;
+  /** Place Gun 발사 후 상세 정보 (placeGunAfter 이벤트에서만) */
+  placeGunAfterDetail?: PlaceGunAfterEventDetail;
 }
 
 /**
@@ -2278,6 +2284,75 @@ export class EditManager {
             paragraph: null as unknown as LayoutParagraphElement,
             controller: null as unknown as TextEditController,
             placeGunDetail: detail,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
+
+  /**
+   * `placeGunBefore` 이벤트를 발생시킨다.
+   * PlaceGunController가 항목을 주입하기 직전에 호출한다.
+   *
+   * @param item - 주입할 Place Gun 항목
+   * @param box - 주입 대상 box 요소
+   * @internal
+   */
+  _dispatchPlaceGunBefore(item: PlaceGunItem, box: HTMLElement): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('placeGunBefore');
+    if (!listeners || listeners.size === 0) return;
+
+    const detail: PlaceGunBeforeEventDetail = { item, box };
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'placeGunBefore',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null as unknown as TextEditController,
+            placeGunBeforeDetail: detail,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
+
+  /**
+   * `placeGunAfter` 이벤트를 발생시킨다.
+   * PlaceGunController가 항목 주입을 완료한 직후에 호출한다.
+   *
+   * @param item - 주입된 Place Gun 항목
+   * @param box - 주입 대상 box 요소
+   * @param success - 주입 성공 여부
+   * @internal
+   */
+  _dispatchPlaceGunAfter(item: PlaceGunItem, box: HTMLElement, success: boolean): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('placeGunAfter');
+    if (!listeners || listeners.size === 0) return;
+
+    const detail: PlaceGunAfterEventDetail = { item, box, success };
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'placeGunAfter',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null as unknown as TextEditController,
+            placeGunAfterDetail: detail,
           });
         } catch (e) {
           console.error(e);

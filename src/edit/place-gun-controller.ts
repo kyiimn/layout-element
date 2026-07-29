@@ -69,6 +69,8 @@ export class PlaceGunController {
     event.preventDefault();
     event.stopPropagation();
 
+    manager._dispatchPlaceGunBefore(nextItem, box);
+
     const item = manager._consumePlaceGunItem();
     if (!item) return false;
 
@@ -77,6 +79,8 @@ export class PlaceGunController {
     } else {
       this._injectImageOrAd(box, item);
     }
+
+    manager._dispatchPlaceGunAfter(item, box, true);
 
     manager._suppressLayoutClick();
     return true;
