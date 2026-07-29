@@ -104,3 +104,48 @@ export type PlaceGunChangeEventDetail = {
   /** 변경 후 일시정지 여부. */
   paused: boolean;
 };
+
+/**
+ * `placeGunBefore` 이벤트의 상세 정보.
+ *
+ * Place Gun 항목이 box에 주입되기 **직전**에 디스패치된다.
+ * 호스트 프로그램은 이 이벤트를 수신하여 주입 전 사전 작업(로그 기록,
+ * 검증, UI 피드백 등)을 수행할 수 있다.
+ *
+ * @example
+ * ```ts
+ * manager.addEventListener('placeGunBefore', (event) => {
+ *   const detail = event.placeGunBeforeDetail!;
+ *   console.log('주입 예정:', detail.item.title, '→ box:', detail.box.id);
+ * });
+ * ```
+ */
+export type PlaceGunBeforeEventDetail = {
+  /** 주입할 Place Gun 항목. */
+  item: PlaceGunItem;
+  /** 주입 대상 box 요소. */
+  box: HTMLElement;
+};
+
+/**
+ * `placeGunAfter` 이벤트의 상세 정보.
+ *
+ * Place Gun 항목이 box에 주입된 **직후**에 디스패치된다.
+ * 주입 성공 여부와 주입된 항목/box 정보를 포함한다.
+ *
+ * @example
+ * ```ts
+ * manager.addEventListener('placeGunAfter', (event) => {
+ *   const detail = event.placeGunAfterDetail!;
+ *   console.log('주입 완료:', detail.item.title, '→ box:', detail.box.id, '성공:', detail.success);
+ * });
+ * ```
+ */
+export type PlaceGunAfterEventDetail = {
+  /** 주입된 Place Gun 항목. */
+  item: PlaceGunItem;
+  /** 주입 대상 box 요소. */
+  box: HTMLElement;
+  /** 주입 성공 여부. 매칭 실패 시 `false`. */
+  success: boolean;
+};
