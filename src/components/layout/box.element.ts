@@ -996,6 +996,29 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   /**
+   * `contentType`과 동일한 재귀 경로를 따라 가장 깊은 비-box 자식 요소를 반환한다.
+   *
+   * `contentType === 'image'`인 경우, 실제 `LayoutImageElement`는 중첩 box 안에
+   * 있을 수 있다. `getOverlapSizePX` 등에서 `items[0]`을 직접 image로
+   * 캐스트하면 중첩 box인 경우 잘못된 요소를 참조하게 되므로 이 getter로
+   * 실제 image/paragraph 요소를 안전하게 얻는다.
+   *
+   * @returns 자식이 하나이고 그 자식이 box이면 재귀적으로 파고들어
+   *          최종 non-box 자식을 반환. 자식이 없거나 여럿이면 null.
+   *
+   * @example
+   * // box(A) → box(B) → image(C)
+   * // A.contentElement → C (LayoutImageElement)
+   * // A.contentType → 'image'
+   */
+  get contentElement(): LayoutImageElement | LayoutParagraphElement | null {
+    if (this.items.length !== 1) return null;
+    const child = this.items[0];
+    if (child.type === 'box') return (child as LayoutBoxElement).contentElement;
+    return child as LayoutImageElement | LayoutParagraphElement;
+  }
+
+  /**
    * 선택 시 좌측상단에 표시할 라벨 텍스트를 갱신한다.
    * - 자식이 하나인 paragraph/image 박스: `텍스트` / `이미지`
    * - 그 외: `박스`

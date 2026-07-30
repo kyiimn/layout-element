@@ -60,6 +60,24 @@
 - 이 캐시를 제거하면 라인마다 `getBoundingClientRect()`가 호출되어
   강제 리플로우가 발생한다.
 
+### 1.6.1 `getOverlapSizePX` — 중첩 box의 이미지 참조 시 `contentElement` 사용
+
+- **`getOverlapSizePX()`의 `targetElement`는 항상 `LayoutBoxElement`이다.**
+  `overlayElements`가 `LayoutBoxElement[]`를 반환하기 때문이다.
+- **`contentType === 'image'`가 `true`여도 `items[0]`이 `LayoutImageElement`가 아닐 수 있다.**
+  `contentType`은 단일 자식 box를 재귀적으로 파고들어 판정하므로,
+  `box(A) → box(B) → image(C)` 구조에서 `A.contentType === 'image'`이지만
+  `A.items[0]`은 `box(B)`이다.
+- **`items[0] as LayoutImageElement` 캐스트는 이 경우 잘못된 요소를 참조한다.**
+  canvas, overlapPadding 모두 box(B)에서 읽히므로 `undefined`가 되고,
+  픽셀 탐지가 skip되어 기하학적 폴백(전체 박스 rect 사용)으로 떨어진다.
+- **반드시 `targetElement.contentElement`를 사용하여 실제 image 요소를 얻을 것.**
+  `contentElement`는 `contentType`과 동일한 재귀 경로를 따라가므로
+  중첩 box 구조에서도 올바른 `LayoutImageElement`를 반환한다.
+- **canvas 픽셀 매핑에도 이미지 요소의 rect(`imgRect`)를 사용해야 함.**
+  박스 rect(`r2`)는 중첩 box에서 실제 이미지보다 클 수 있으므로,
+  `r2`를 사용하면 canvas 픽셀과 화면 좌표의 매핑이 어긋난다.
+
 ### 1.7 폰트 문자열 캐시
 
 - `_getCanvasFont()`의 단일 항목 캐시(`_lastFontKey`/`_lastFontString`)는

@@ -104,16 +104,19 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
 
   let padTop = 0, padRight = 0, padBottom = 0, padLeft = 0;
   let hasOverlapPadding = false;
+  let imageEl: LayoutImageElement | null = null;
   if (targetElement.contentType === 'image') {
-    const imageEl = targetElement.items[0] as LayoutImageElement;
-    const padding = imageEl.overlapPadding;
-    if (padding !== undefined) {
-      const ppm = GridCalculator.ppm;
-      padTop = (typeof padding === 'number' ? padding : padding.top ?? 0) * ppm;
-      padRight = (typeof padding === 'number' ? padding : padding.right ?? 0) * ppm;
-      padBottom = (typeof padding === 'number' ? padding : padding.bottom ?? 0) * ppm;
-      padLeft = (typeof padding === 'number' ? padding : padding.left ?? 0) * ppm;
-      hasOverlapPadding = true;
+    imageEl = targetElement.contentElement as LayoutImageElement | null;
+    if (imageEl) {
+      const padding = imageEl.overlapPadding;
+      if (padding !== undefined) {
+        const ppm = GridCalculator.ppm;
+        padTop = (typeof padding === 'number' ? padding : padding.top ?? 0) * ppm;
+        padRight = (typeof padding === 'number' ? padding : padding.right ?? 0) * ppm;
+        padBottom = (typeof padding === 'number' ? padding : padding.bottom ?? 0) * ppm;
+        padLeft = (typeof padding === 'number' ? padding : padding.left ?? 0) * ppm;
+        hasOverlapPadding = true;
+      }
     }
   }
 
@@ -136,8 +139,11 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
   const relEnd = intersectionEnd - r1.left;
 
   // 이미지 픽셀 단위 겹침 탐지 — COVERS 판정 전에 수행
-  if (targetElement.contentType === 'image') {
-    const imageEl = targetElement.items[0] as LayoutImageElement;
+  if (targetElement.contentType === 'image' && imageEl) {
+
+    // 이미지 요소의 rect를 사용하여 캔버스 픽셀과 정확히 매핑한다.
+    // targetElement(박스)의 rect는 중첩 box의 경우 실제 이미지보다 클 수 있다.
+    const imgRect = normalizeRect(imageEl.getBoundingClientRect(), scale);
 
     if (hasOverlapPadding) {
 
@@ -145,21 +151,21 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
         const canvas = imageEl.canvas;
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
         if (ctx) {
-          // r2.width는 정규화된(scale=1 기준) 픽셀 폭이므로, canvas 픽셀 매핑도 scale=1 기준
-          const scaleX = canvas.width / r2.width;
-          const scaleY = canvas.height / r2.height;
+          // imgRect.width는 정규화된(scale=1 기준) 픽셀 폭이므로, canvas 픽셀 매핑도 scale=1 기준
+          const scaleX = canvas.width / imgRect.width;
+          const scaleY = canvas.height / imgRect.height;
 
-          const sampleTopScreen = Math.max(r2.top, r1.top - padBottom);
-          const sampleBottomScreen = Math.min(r2.bottom, r1.bottom + padTop);
+          const sampleTopScreen = Math.max(imgRect.top, r1.top - padBottom);
+          const sampleBottomScreen = Math.min(imgRect.bottom, r1.bottom + padTop);
 
           let sy: number;
           let sh: number;
 
           if (sampleBottomScreen > sampleTopScreen) {
-            const relY = sampleTopScreen - r2.top;
+            const relY = sampleTopScreen - imgRect.top;
             sy = Math.max(0, Math.floor(relY * scaleY));
             sh = Math.min(canvas.height - sy, Math.ceil((sampleBottomScreen - sampleTopScreen) * scaleY));
-          } else if (r1.bottom <= r2.top) {
+          } else if (r1.bottom <= imgRect.top) {
             sy = 0;
             sh = Math.min(canvas.height, Math.ceil(padTop * scaleY));
           } else {
@@ -180,7 +186,7 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
               const opaqueColumns = new Set<number>();
 
               for (let y = 0; y < imgHeight; y++) {
-                const pixelScreenY = (sy + y) / scaleY + r2.top;
+                const pixelScreenY = (sy + y) / scaleY + imgRect.top;
 
                 let dy: number;
                 if (pixelScreenY < r1.top) {
@@ -199,7 +205,7 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
                   const alphaIndex = (y * imgWidth + x) * 4 + 3;
                   if (pixels[alphaIndex] === 0) continue;
 
-                  const pixelScreenX = (sx + x) / scaleX + r2.left;
+                  const pixelScreenX = (sx + x) / scaleX + imgRect.left;
 
                   let dx: number;
                   if (pixelScreenX < r1.left) {
@@ -228,12 +234,12 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
 
               // Each opaque column blocks a range extended by horizontal padding.
               const sortedCols = Array.from(opaqueColumns).sort((a, b) => a - b);
-              const pxWidth = r2.width / canvas.width;
+              const pxWidth = imgRect.width / canvas.width;
 
               const paddedParts: { x1: number; x2: number }[] = [];
               for (const col of sortedCols) {
-                const colStart = r2.left - r1.left + col * pxWidth - padLeft;
-                const colEnd = r2.left - r1.left + (col + 1) * pxWidth + padRight;
+                const colStart = imgRect.left - r1.left + col * pxWidth - padLeft;
+                const colEnd = imgRect.left - r1.left + (col + 1) * pxWidth + padRight;
                 if (colEnd > 0 && colStart < r1.width) {
                   paddedParts.push({
                     x1: Math.max(0, colStart),
@@ -257,10 +263,10 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
       }
 
       const expandedR2 = {
-        left: r2.left - padLeft,
-        right: r2.right + padRight,
-        top: r2.top - padTop,
-        bottom: r2.bottom + padBottom,
+        left: imgRect.left - padLeft,
+        right: imgRect.right + padRight,
+        top: imgRect.top - padTop,
+        bottom: imgRect.bottom + padBottom,
       };
       if (r1.bottom <= expandedR2.top || r1.top >= expandedR2.bottom) {
         return { direction: 'NONE', parts: [] };
@@ -280,16 +286,23 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
       const canvas = imageEl.canvas;
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (ctx) {
-        const scaleX = canvas.width / r2.width;
-        const scaleY = canvas.height / r2.height;
+        const scaleX = canvas.width / imgRect.width;
+        const scaleY = canvas.height / imgRect.height;
 
-        const relativeX = intersectionStart - r2.left;
-        const relativeY = Math.max(r1.top, r2.top) - r2.top;
-        const relativeHeight = Math.min(r1.bottom, r2.bottom) - Math.max(r1.top, r2.top);
+        const imgIntersectionStart = Math.max(r1.left, imgRect.left);
+        const imgIntersectionEnd = Math.min(r1.right, imgRect.right);
+        const imgRawOverlapWidth = imgIntersectionEnd - imgIntersectionStart;
+        if (imgRawOverlapWidth <= 0) {
+          return { direction: 'NONE', parts: [] };
+        }
+
+        const relativeX = imgIntersectionStart - imgRect.left;
+        const relativeY = Math.max(r1.top, imgRect.top) - imgRect.top;
+        const relativeHeight = Math.min(r1.bottom, imgRect.bottom) - Math.max(r1.top, imgRect.top);
 
         const sx = Math.floor(relativeX * scaleX);
         const sy = Math.floor(relativeY * scaleY);
-        const sw = Math.ceil(rawOverlapWidth * scaleX);
+        const sw = Math.ceil(imgRawOverlapWidth * scaleX);
         const sh = Math.ceil(relativeHeight * scaleY);
 
         if (sw > 0 && sh > 0) {
@@ -311,8 +324,12 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
 
             if (opaqueColumns.size === 0) return { direction: "NONE", parts: [] };
 
-            // 모든 열에 불투명 픽셀이 있으면 완전 차단
-            const isFullyCovering = opaqueColumns.size === imgWidth;
+            // 라인 전체가 교차 영역 내에 있고, 교차 영역 내 모든 column이 불투명하면 COVERS.
+            // 교차 영역이 라인 전체보다 좁으면 PART로 처리한다.
+            // (이미지가 라인 일부만 덮을 때 COVERS로 판정하면 과도한 빈 줄이 생김)
+            const isFullyCovering = opaqueColumns.size === imgWidth
+              && imgIntersectionStart <= r1.left
+              && imgIntersectionEnd >= r1.right;
             if (isFullyCovering) {
               return { direction: 'COVERS', parts: [{ x1: 0, x2: r1.width }] };
             }
@@ -322,23 +339,24 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
             const parts: { x1: number, x2: number }[] = [];
             let partStart = sortedCols[0];
             let prevCol = sortedCols[0];
-            const pxWidth = rawOverlapWidth / imgWidth;
+            const pxWidth = imgRawOverlapWidth / imgWidth;
+            const imgRelStart = imgIntersectionStart - r1.left;
 
             for (let i = 1; i < sortedCols.length; i++) {
               if (sortedCols[i] === prevCol + 1) {
                 prevCol = sortedCols[i];
               } else {
                 parts.push({
-                  x1: relStart + partStart * pxWidth,
-                  x2: relStart + (prevCol + 1) * pxWidth,
+                  x1: imgRelStart + partStart * pxWidth,
+                  x2: imgRelStart + (prevCol + 1) * pxWidth,
                 });
                 partStart = sortedCols[i];
                 prevCol = sortedCols[i];
               }
             }
             parts.push({
-              x1: relStart + partStart * pxWidth,
-              x2: relStart + (prevCol + 1) * pxWidth,
+              x1: imgRelStart + partStart * pxWidth,
+              x2: imgRelStart + (prevCol + 1) * pxWidth,
             });
 
             return { direction: 'PART', parts };
