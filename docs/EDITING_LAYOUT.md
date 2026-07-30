@@ -431,7 +431,7 @@ element.editableLayout = false;
 
 **호버 동작 규칙**:
 
-1. 인쇄 모드가 아니고 `selected`가 없는 `<x-layout-box>`에 마우스가 올라가면 `hovered`가 설정된다. 레이아웃 편집 모드 여부와 관계없이 화면 렌더링 중에는 항상 동작한다.
+1. 인쇄 모드가 아니고 `selected`가 없으며 `lock`이 `false`인 `<x-layout-box>`에 마우스가 올라가면 `hovered`가 설정된다. 레이아웃 편집 모드 여부와 관계없이 화면 렌더링 중에는 항상 동작한다.
 2. 이미 선택된 요소(`selected`)는 호버 표시가 나타나지 않는다. 텍스트 편집 포커스로 인해 `selected`가 설정된 box도 동일하게 호버가 억제된다.
 3. **paragraph 포커스로 인해 부모 box가 `selected`로 전환될 때, 해당 box의 기존 `hovered` 속성은 제거된다**. 이는 paragraph 위에 마우스가 있는 상태에서 클릭으로 포커스를 줄 때, 즉시 빨간색 `selected` 테두리가 파란색 `hovered` 테두리를 덮어쓰도록 보장한다.
 4. 마우스가 요소에 진입하면 **조상 요소의 `hovered`를 모두 제거**하여, 가장 안쪽(최상위) 요소만 호버 표시가 보인다
@@ -2181,7 +2181,7 @@ mouseup
 - **`_overlayRects`**: `TextLayoutEngine`이 `_layoutTextIntoColumns()` 시작 시 `null`로 초기화한다. `paragraph.render()`에서 `TextLayoutEngine.create()` 호출 시 `getOverlapSizePX()`를 통해 새로 계산된다.
 - **`layoutMove` 이벤트**: 드래그 완료(mouseup) 또는 취소(ESC) 시 `EditManager._dispatchLayoutMove()`를 통해 발생한다. 단순 클릭(이동 임계값 3px 미만)에서는 발생하지 않는다. `canceled` 필드로 완료와 취소를 구분할 수 있다.
 - **호버 표시 (`hovered`)**: `<x-layout-box>`에만 적용되며, `<x-layout-document>`는 호버 표시를 지원하지 않는다. `mouseenter` 시 조상 요소의 `hovered`를 모두 제거하여 가장 안쪽 요소만 호버 표시가 보이도록 한다. `mouseleave` 시 `elementFromPoint`로 마우스 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다. 이 동작은 중첩된 박스에서 자식→부모로 마우스가 돌아갈 때 부모의 호버가 복원되도록 보장한다.
-- **호버와 선택의 우선순위**: `selected`가 있는 요소는 `hovered`를 표시하지 않는다. `LayoutBoxElement._onLayoutMouseEnter`에서 `hasAttribute('selected')`를 먼저 검사하여, 이미 선택된 요소 위에 마우스가 있을 때 파란색 호버 테두리가 빨간색 선택 테두리와 겹치지 않도록 한다. 조상의 `hovered` 제거는 `selected` 체크 전에 수행되어, 선택된 요소 위에서 마우스가 움직일 때 조상 요소의 호버 표시도 제거된다.
+- **호버와 선택의 우선순위**: `selected`가 있는 요소는 `hovered`를 표시하지 않는다. `LayoutBoxElement._onLayoutMouseEnter`에서 `hasAttribute('selected')`를 먼저 검사하여, 이미 선택된 요소 위에 마우스가 있을 때 파란색 호버 테두리가 빨간색 선택 테두리와 겹치지 않도록 한다. 조상의 `hovered` 제거는 `selected` 체크 전에 수행되어, 선택된 요소 위에서 마우스가 움직일 때 조상 요소의 호버 표시도 제거된다. **lock이 `true`인 box도 호버가 억제된다** — `_onLayoutMouseEnter`에서 `this._lock`이 `true`이면 조상 `hovered` 제거 없이 즉시 early return하여 호버 표시가 나타나지 않는다.
 - **드래그/리사이즈 중 hover 차단**: `EditManager._isDraggingLayout()` 또는 `_isResizingLayout()`이 `true`이면 `LayoutBoxElement._onLayoutMouseEnter`와 `_onLayoutMouseLeave`가 early return하여 hover 표시가 전혀 나타나지 않는다. 드래그 이동 중이나 크기 조정 중에 마우스가 다른 박스 위로 이동해도 방해가 되지 않도록 한다. 드래그/리사이즈가 종료되면 `EditManager._endLayoutDrag()`/`_endLayoutResize()`에서 플래그가 해제되어 hover가 정상 동작한다.
 
 ---

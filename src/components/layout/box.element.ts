@@ -1088,6 +1088,7 @@ export class LayoutBoxElement extends HTMLElement {
 
   private _onLayoutMouseEnter = (): void => {
     if (this._isPrint) return;
+    if (this._lock) return;
     const manager = EditManager.getInstance();
     if (manager._isDraggingLayout() || manager._isResizingLayout()) return;
     if (manager._isInsertDragging()) return;
