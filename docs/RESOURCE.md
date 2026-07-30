@@ -166,7 +166,7 @@ FontLoader.resetLoader();
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `init(fonts?)` | `(fonts?: Font[]) => Promise<FontFace[]>` | 폰트를 로드하고 브라우저에 등록한다. 인쇄 모드에서는 `fonts`를 직접 주입받는다. 화면 모드에서는 `_loadServer()`로 데이터를 가져온다. |
+| `init(fonts?)` | `(fonts?: Font[]) => Promise<FontFace[]>` | 폰트를 로드하고 브라우저에 등록한다. 인쇄 모드에서는 `fonts`를 직접 주입받는다. 화면 모드에서는 `_loadServer()`로 데이터를 가져온다. **이미 초기화된 상태에서 동일한 폰트 데이터로 재호출하면 스킵하고 기존 `_fontFaces`를 그대로 반환한다.** 동일성 판단은 `_computeFontsSignature()`로 생성한 signature 문자열 비교를 통해 수행한다. 화면 모드에서 `fonts` 파라미터 없이 호출한 경우에는 signature 비교가 불가능하므로 항상 재로드한다. |
 | `getFontFamily(_fontFamily?)` | `(_fontFamily?: string) => string` | 폰트 패밀리명을 반환한다. 현재는 항상 `'Myoungjo'`를 반환한다. `_fontFamily` 파라미터는 향후 매핑 구현을 위해 예약되어 있다. |
 
 #### 게터
@@ -176,7 +176,16 @@ FontLoader.resetLoader();
 | `fontFaces` | `FontFace[]` | 등록된 `FontFace` 배열을 반환한다. `ready`가 `true`가 아니면 에러를 던진다. |
 | `ready` | `boolean` | 초기화 완료 여부. `init()`이 성공하면 `true`가 된다. |
 
-### 2.7 에러 처리
+### 2.7 중복 초기화 스킵
+
+`init()`은 이미 `_ready === true`인 상태에서 동일한 폰트 데이터로 재호출되면 `document.fonts.clear()` 및 `FontFace` 재생성을 스킵하고 기존 `_fontFaces`를 그대로 반환한다.
+
+- **Signature 비교**: `_computeFontsSignature(fonts)`는 각 폰트의 `family`/`weight`/`style`/`ttfFilename`/`base64Data`를 결합한 문자열을 생성하며, 이전 호출 시 저장한 `_lastFontsSignature`와 비교한다.
+- **스킵 조건**: `_ready === true` && `fonts !== undefined` && `_computeFontsSignature(fonts) === _lastFontsSignature`.
+- **화면 모드**: `init()`을 `fonts` 없이 호출하면 signature 비교가 불가능하므로 항상 재로드한다. 단, 재로드 후 `_lastFontsSignature`가 갱신되므로 이후 동일한 `fonts`를 인자로 넘겨 호출하면 스킵된다.
+- **인쇄 모드**: `init(fonts)`로 폰트를 주입하므로 signature 비교가 항상 가능하다. 같은 `fonts` 배열로 재호출하면 스킵된다.
+
+### 2.8 에러 처리
 
 - `init()` 호출 전 `getFontFamily()`, `fontFaces`에 접근하면 `'font map is not ready'` 에러가 발생한다.
 - 인쇄 모드에서 `fonts` 파라미터 없이 `init()`을 호출하면 `'not given fonts'` 에러가 발생한다.
