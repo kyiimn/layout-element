@@ -1,4 +1,4 @@
-import { Z_INDEX_INSERT_PREVIEW, Z_INDEX_MAX_LAYOUT } from "@/constants";
+import { Z_INDEX_INSERT_PREVIEW, Z_INDEX_MAX_LAYOUT, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER } from "@/constants";
 import { GridCalculator } from "@/core";
 import { EditManager } from "./edit-manager";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
@@ -508,11 +508,33 @@ export class InsertController {
     };
   }
 
-  /** 컨테이너 내에서 다음 zIndex를 계산한다. 최댓값은 Z_INDEX_MAX_LAYOUT(90000)을 초과할 수 없다. */
+  /**
+   * 컨테이너 내에서 다음 zIndex를 계산한다.
+   *
+   * `role=ad`(91000)/`role=header`(91001)는 고정 z-index를 사용하므로
+   * 일반 레이아웃 요소의 z-index 계산에서 제외한다. 이 값들이 포함되면
+   * 새 요소가 항상 90000(`Z_INDEX_MAX_LAYOUT`)에 clamp되어 역할 기반
+   * 고정 z-index와 경쟁하지 못하는 문제가 발생한다.
+   *
+   * 최댓값은 Z_INDEX_MAX_LAYOUT(90000)을 초과할 수 없다.
+   *
+   * @param container - 부모 컨테이너 요소
+   * @returns 새 요소에 할당할 z-index 값
+   *
+   * @example
+   * // siblings: [{ zIndex: 5 }, { role: 'ad', _zIndex: 3 }]
+   * // ad의 zIndex 게터는 91000이지만 0으로 취급 → max(5, 0) + 1 = 6
+   * _getNextZIndex(container); // → 6
+   */
   private _getNextZIndex(container: LayoutDocumentElement | LayoutBoxElement): number {
     const items = container.items;
     if (items.length === 0) return 1;
-    return Math.min(Math.max(...items.map(i => i.zIndex ?? 0)) + 1, Z_INDEX_MAX_LAYOUT);
+    const maxZ = Math.max(...items.map(i => {
+      const z = i.zIndex ?? 0;
+      if (z === Z_INDEX_ROLE_AD || z === Z_INDEX_ROLE_HEADER) return 0;
+      return z;
+    }));
+    return Math.min(maxZ + 1, Z_INDEX_MAX_LAYOUT);
   }
 
   /** 삽입할 DOM 요소를 생성한다. */

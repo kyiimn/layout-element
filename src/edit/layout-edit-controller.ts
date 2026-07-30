@@ -1,4 +1,4 @@
-import { Z_INDEX_MAX_LAYOUT } from "@/constants";
+import { Z_INDEX_MAX_LAYOUT, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER } from "@/constants";
 import { BoxPosition } from "@/types";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
@@ -1807,8 +1807,15 @@ export class LayoutEditController {
     const topMm = Math.max(0, manager.screenPxToMm(boxRect.top - containerRect.top) - containerPaddingTop);
 
     // 새 컨테이너 내에서 가장 높은 z-index + 1 (최댓값 Z_INDEX_MAX_LAYOUT 제한)
+    // role=ad/header 고정 z-index(91000/91001)는 계산에서 제외
     const siblings = newContainer.items;
-    const maxZ = siblings.length === 0 ? 0 : Math.max(...siblings.map(i => i.zIndex ?? 0));
+    const maxZ = siblings.length === 0
+      ? 0
+      : Math.max(...siblings.map(i => {
+        const z = i.zIndex ?? 0;
+        if (z === Z_INDEX_ROLE_AD || z === Z_INDEX_ROLE_HEADER) return 0;
+        return z;
+      }));
     const newZIndex = Math.min(maxZ + 1, Z_INDEX_MAX_LAYOUT);
 
     // box.data 추출 (자손 트리 포함). width/height는 원래 값(static: 컬럼/라인 수, absolute: mm)을 그대로 유지

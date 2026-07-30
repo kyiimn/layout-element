@@ -383,6 +383,10 @@
 - **역할 고정 z-index에서 해제될 때(예: `'ad'` → `'none'`)**,
   `_zIndex`는 형제 요소 중 역할 고정 z-index(`91000`, `91001`)를 제외한 최댓값 + 1로 복원된다.
   형제 요소가 없으면 `1`로 설정된다. 복원값은 `Z_INDEX_MAX_LAYOUT`(90000)을 초과할 수 없다.
+- **새 요소 생성(`InsertController._getNextZIndex`) 및 reparent(`LayoutEditController._tryReparent`) 시에도**
+  형제 요소의 `zIndex` getter 반환값 중 `91000`/`91001`(role 고정)은 0으로 취급하여 계산한다.
+  그렇지 않으면 role 기반 고정 z-index가 `Math.max(...)`에 포함되어 새 요소가 항상
+  `90000`(`Z_INDEX_MAX_LAYOUT`)에 clamp되어 role 고정 z-index와 경쟁하지 못하는 문제가 발생한다.
 
 ### 8.4 새로운 예약 값 추가 시 주의사항
 
