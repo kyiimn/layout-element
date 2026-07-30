@@ -86,7 +86,7 @@ export interface LayoutRemoveEventDetail {
  * `boxPropertyChange` 이벤트의 `property` 필드로 사용되며,
  * 어떤 속성이 변경되었는지 리스너에 알려준다.
  */
-export type BoxPropertyName = 'role' | 'contentUid' | 'groupMember' | 'priority';
+export type BoxPropertyName = 'role' | 'contentUid' | 'groupMember' | 'priority' | 'zIndex';
 
 /**
  * Box 속성 변경 이벤트 상세 정보.

@@ -609,10 +609,17 @@ export class LayoutBoxElement extends HTMLElement {
 
   set zIndex(value: number) {
     if (this._role === 'ad' || this._role === 'header') return;
+    const oldValue = this._zIndex;
     if (this._zIndex === value) return;
     this._zIndex = value;
     this.layout();
     this.requestRerenderAffectedParagraphs();
+    EditManager.getInstance()._dispatchBoxPropertyChange({
+      box: this,
+      property: 'zIndex',
+      oldValue,
+      newValue: value,
+    });
   }
 
   set backgroundColor(value: string | undefined) {

@@ -229,7 +229,7 @@ export type EditManagerEventListener = (event: EditManagerEvent) => void;
 | **레이아웃 편집** | `layoutSelectionChange`, `layoutMove`, `layoutResize`, `layoutAdd`, `layoutRemove` | `LayoutEditController`, `LayoutSelectionController`, `InsertController`, `EditManager.selectLayout` |
 | **삽입 모드** | `insert`, `insertCancel` | `InsertController` |
 | **모드 전환** | `modeChange` | `EditManager` (textEditMode/layoutEditMode/insertMode setter) |
-| **Box 속성 변경** | `boxPropertyChange` | `LayoutBoxElement` (role/contentUid/groupMember/priority setter) |
+| **Box 속성 변경** | `boxPropertyChange` | `LayoutBoxElement` (role/contentUid/groupMember/priority/zIndex setter) |
 | **Place Gun** | `placeGunChange`, `placeGunBefore`, `placeGunAfter` | `EditManager` (load/unload/remove/reorder/pause), `PlaceGunController` (click-to-place) |
 
 ---
@@ -701,7 +701,7 @@ manager.addEventListener('boxPropertyChange', (event) => {
 **`BoxPropertyChangeEventDetail` 타입:**
 
 ```typescript
-type BoxPropertyName = 'role' | 'contentUid' | 'groupMember' | 'priority';
+type BoxPropertyName = 'role' | 'contentUid' | 'groupMember' | 'priority' | 'zIndex';
 
 interface BoxPropertyChangeEventDetail {
   box: HTMLElement;                                       // 속성이 변경된 LayoutBoxElement
@@ -719,6 +719,7 @@ interface BoxPropertyChangeEventDetail {
 | `contentUid` | `box.contentUid = 'article-42'` | `string \| undefined` (기본값 `undefined`) |
 | `groupMember` | `box.groupMember = ['a', 'b']` | `string[]` (기본값 `[]`) |
 | `priority` | `box.priority = 5` | `number` (기본값 `0`) |
+| `zIndex` | `box.zIndex = 5` | `number` (기본값 `0`). `role`이 `'ad'`/`'header'`이면 setter가 무시되어 이벤트도 발생하지 않는다. |
 
 **값이 동일한 경우 이벤트 미발생**: `role`과 `priority` setter는 값이 변경되지 않으면 이벤트를 발생시키지 않는다. `contentUid` setter는 값이 동일하면 이벤트를 발생시키지 않는다. `groupMember` setter는 배열 요소가 동일하면 이벤트를 발생시키지 않는다. `attributeChangedCallback`을 통한 DOM 속성 변경에서는 이벤트가 발생하지 않는다 (setter를 통해서만 발생).
 
@@ -1085,7 +1086,7 @@ LayoutSelectionController._onClick
 | `insert` | 삽입 | `position`, `element`, `container`, `left/top/width/height`, `zIndex`, `canceled` | 요소 삽입 완료 |
 | `insertCancel` | 삽입 | (없음) | 삽입 드래그 ESC 취소 |
 | `modeChange` | 모드 전환 | `previousMode`, `mode` | textEditMode/layoutEditMode/insertMode 변경 |
-| `boxPropertyChange` | Box 속성 | `boxPropertyDetail.box`, `boxPropertyDetail.property`, `boxPropertyDetail.oldValue`, `boxPropertyDetail.newValue` | box의 role/contentUid/groupMember/priority 변경 |
+| `boxPropertyChange` | Box 속성 | `boxPropertyDetail.box`, `boxPropertyDetail.property`, `boxPropertyDetail.oldValue`, `boxPropertyDetail.newValue` | box의 role/contentUid/groupMember/priority/zIndex 변경 |
 | `placeGunChange` | Place Gun | `placeGunDetail.items`, `placeGunDetail.paused` | Place Gun 장전/비우기/삭제/재정렬/일시정지/소비 |
 | `placeGunBefore` | Place Gun | `placeGunBeforeDetail.item`, `placeGunBeforeDetail.box` | Place Gun 항목 주입 직전 (클릭 배치 시작) |
 | `placeGunAfter` | Place Gun | `placeGunAfterDetail.item`, `placeGunAfterDetail.box`, `placeGunAfterDetail.success` | Place Gun 항목 주입 완료 직후 |
@@ -1105,7 +1106,7 @@ LayoutSelectionController._onClick
 | `src/types/edit/insert.type.ts` | `InsertEventDetail` 타입 정의 (`insert` 이벤트 payload) |
 | `src/types/edit/layout.type.ts` | `LayoutEditModeConfig`, `LayoutAddEventDetail`, `LayoutRemoveEventDetail`, `EditModeState`, `BoxPropertyChangeEventDetail` 타입 정의 |
 | `src/types/edit/place-gun.type.ts` | `PlaceGunItem`, `PlaceGunChangeEventDetail`, `PlaceGunBeforeEventDetail`, `PlaceGunAfterEventDetail` 타입 정의 (`placeGunChange`/`placeGunBefore`/`placeGunAfter` 이벤트 payload) |
-| `src/components/layout/box.element.ts` | `LayoutBoxElement`: `role`, `contentUid`, `groupMember`, `priority` setter에서 `boxPropertyChange` 이벤트 발생 |
+| `src/components/layout/box.element.ts` | `LayoutBoxElement`: `role`, `contentUid`, `groupMember`, `priority`, `zIndex` setter에서 `boxPropertyChange` 이벤트 발생 |
 | `src/components/layout/paragraph.element.ts` | `LayoutParagraphElement`: `render()` 완료 후 `render-complete` CustomEvent 디스패치 (항상), 오버플로우 시 `render-error` CustomEvent 디스패치. `EditManager` 이벤트 시스템과 독립적 |
 | `src/types/layout/render-complete-event.type.ts` | `RenderCompleteEventDetail` 타입 정의 (`render-complete` 이벤트 payload) |
 
@@ -1125,7 +1126,7 @@ LayoutSelectionController._onClick
 - **리스너 제거 시점**: 리스너를 제거하면 현재 디스패치 중인 `Set`에서도 즉시 제외되지만, 이미 실행 중인 리스너는 완료된다.
 - **`modeChange` 중간 상태 억제**: 모드 setter가 내부적으로 다른 모드 setter를 호출할 때 `_modeChangeSuppressed` 플래그로 중간 상태의 이벤트가 억제된다. 최종적으로 모드가 확정된 후 한 번만 `modeChange` 이벤트가 발생한다. 예: `textEditMode = true` 호출 시 내부적으로 `layoutEditMode = false`와 `insertMode = null`이 호출되지만, `modeChange` 이벤트는 최종적으로 `textEditMode = true`가 확정된 후 한 번만 발생한다.
 - **`modeChange` 동일 상태 no-op**: setter가 현재 값과 동일한 값을 받으면 `_dispatchModeChange`를 호출하지 않아 `modeChange` 이벤트가 발생하지 않는다.
-- **`boxPropertyChange` 값 동일 시 미발생**: `role`, `contentUid`, `priority` setter는 값이 동일하면 이벤트를 발생시키지 않는다. `groupMember` setter는 배열 내용이 동일하면 이벤트를 발생시키지 않는다. `attributeChangedCallback`을 통한 DOM 속성 변경에서는 이벤트가 발생하지 않는다 (setter를 통해서만 발생).
+- **`boxPropertyChange` 값 동일 시 미발생**: `role`, `contentUid`, `priority`, `zIndex` setter는 값이 동일하면 이벤트를 발생시키지 않는다. `groupMember` setter는 배열 내용이 동일하면 이벤트를 발생시키지 않는다. `zIndex` setter는 `role`이 `'ad'`/`'header'`이면 setter 자체가 무시되어 이벤트도 발생하지 않는다. `attributeChangedCallback`을 통한 DOM 속성 변경에서는 이벤트가 발생하지 않는다 (setter를 통해서만 발생).
 - **요소 자체 CustomEvent와의 독립성**: `LayoutParagraphElement`가 디스패치하는 `render-error`/`render-complete` CustomEvent는 `EditManager` 이벤트 시스템과 독립적이다. 이 이벤트들은 `EditManager.addEventListener`가 아닌 요소의 `addEventListener`로 수신해야 하며, `EditManager`의 `_dispatching` 재진입 가드의 적용을 받지 않는다. `render-complete`는 `render()` 완료 후 항상 디스패치되므로, 리스너 내에서 `EditManager` 이벤트를 발생시켜도 정상적으로 처리된다.
 
 ---
