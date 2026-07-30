@@ -304,6 +304,17 @@ export class LayoutBoxElement extends HTMLElement {
 
       const activeDirs = new Set(directions.map(d => d.dir));
 
+      if (activeDirs.size === 0) {
+        this.removeAttribute('border');
+        for (const dir of ['top', 'bottom', 'left', 'right'] as const) {
+          if (this._borderEls[dir]) {
+            this._borderEls[dir]!.remove();
+            this._borderEls[dir] = null;
+          }
+        }
+        return;
+      }
+
       for (const { dir, outerStyle, innerStyle } of directions) {
         if (this._borderEls[dir] && this._borderEls[dir]!.isConnected) {
           const border = this._borderEls[dir]!;
