@@ -37,6 +37,7 @@ export class FontLoader {
   private _fontFaces: { name: string, fontFace: FontFace; }[] = [];
   private _ready: boolean = false;
   private _isPrint: boolean = false;
+  private _lastFontsSignature?: string;
 
   private constructor() {
     this._isPrint = window.matchMedia("print").matches;
@@ -97,6 +98,16 @@ export class FontLoader {
   }
 
   public async init(fonts?: Font[]) {
+    if (this._ready) {
+      const prevSignature = this._lastFontsSignature;
+      const candidateSignature = fonts !== undefined
+        ? this._computeFontsSignature(fonts)
+        : undefined;
+      if (prevSignature !== undefined && candidateSignature === prevSignature) {
+        return this._fontFaces;
+      }
+    }
+
     globalThis.document?.fonts.clear();
 
     try {
@@ -133,12 +144,34 @@ export class FontLoader {
         );
       }
       this._ready = true;
+      this._lastFontsSignature = this._computeFontsSignature(fonts);
 
       return this._fontFaces;
     } catch (e) {
       console.error(e);
       throw e;
     }
+  }
+
+  /**
+   * 폰트 배열의 내용을 식별 가능한 문자열로 직렬화한다.
+   *
+   * 같은 폰트 데이터로 `init()`이 재호출되었는지 비교하기 위해 사용된다.
+   * 배열 순서, 각 폰트의 `family`/`weight`/`style`/`ttfFilename`/`base64Data`를
+   * 기준으로 결정론적 문자열을 생성한다.
+   *
+   * @param fonts - 직렬화할 폰트 배열
+   * @returns 폰트 배열의 signature 문자열
+   * @example
+   * ```ts
+   * const sig = loader._computeFontsSignature(fonts);
+   * loader._lastFontsSignature = sig;
+   * ```
+   */
+  private _computeFontsSignature(fonts: Font[]): string {
+    return fonts
+      .map(f => `${f.family}|${f.weight}|${f.style}|${f.ttfFilename ?? ''}|${f.base64Data ?? ''}`)
+      .join('\n');
   }
 
   /**
