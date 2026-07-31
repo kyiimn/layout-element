@@ -2305,10 +2305,10 @@ type PrintPostDataChar = {
   char: string;              // 글자
   rect: PrintPostDataRect;   // 글자별 위치·크기 (픽셀)
   fontFamily: string;        // CSS font-family
-  fontSize: string;           // CSS font-size (예: '16px')
+  fontSize: string;           // 폰트 크기 (mm 또는 px)
   fontWeight: string;        // CSS font-weight
   widthRatio: number;        // 장평 비율 (CSS scale에서 추출)
-  color: string;             // CSS color (rgb() 형식)
+  color: CMYKColor;           // CMYK 색상 (ColorRegistry에서 색상 명칭으로 조회)
 };
 ```
 

@@ -45,8 +45,12 @@ export type PrintPostDataChar = {
   /** 장평 비율. CSS `scale` 값에서 추출 (예: `0.9` = 90% 장평) */
   widthRatio: number;
 
-  /** CSS `color` 값 (예: `'rgb(0, 0, 0)'`). 인쇄 후처리에서 CMYK로 변환한다. */
-  color: string;
+  /**
+   * 글자 색상 (CMYK).
+   * `ColorRegistry.colorMap`에서 computed style의 RGB 값을 역추적하여
+   * 원본 CMYK 색상을 반환한다.
+   */
+  color: CMYKColor;
 };
 
 /**

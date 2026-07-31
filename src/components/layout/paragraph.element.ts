@@ -17,6 +17,7 @@ import { LayoutColumnElement } from "./column.element";
  * 렌더링 완료 후 항상 `render-complete` 커스텀 이벤트를 디스패치하여
  * 배치된 글자/라인 수와 오버플로우 통계를 전달한다.
  */
+
 export class LayoutParagraphElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
   private _styleRule?: CSSStyleRule;
@@ -620,36 +621,71 @@ export class LayoutParagraphElement extends HTMLElement {
   get printPostData(): PrintPostData[] {
     const rect = this.getBoundingClientRect();
     const chars: PrintPostDataChar[] = [];
+    const registry = ColorRegistry.getInstance();
+    const model = this._model;
 
     for (const col of this.columnEl) {
       const root = col.shadowRoot;
       if (root === null) continue;
-      const spans = root.querySelectorAll<HTMLSpanElement>('span[data-source-offset]');
-      for (const span of spans) {
-        const char = span.innerText;
-        if (char.length === 0) continue;
+      const lineDivs = Array.from(root.children).filter(
+        (c): c is HTMLDivElement => c.tagName === 'DIV',
+      );
 
-        const spanRect = span.getBoundingClientRect();
-        const style = window.getComputedStyle(span);
+      const columnIndex = col.index;
+      const lines = model !== undefined && columnIndex !== undefined
+        ? model.columnContents[columnIndex] ?? []
+        : [];
 
-        const scaleValue = style.scale || '1 1';
-        const widthRatio = parseFloat(scaleValue.split(' ')[0] || '1');
-        if (Number.isNaN(widthRatio)) continue;
+      for (let li = 0; li < lineDivs.length; li++) {
+        const lineDiv = lineDivs[li]!;
+        const lineData = lines[li];
+        const colorName = lineData?.textBlockStyle?.color;
+        const cmyk = colorName !== undefined
+          ? registry.get(colorName)
+          : registry.get('default');
 
-        chars.push({
-          char,
-          rect: {
-            x: spanRect.x + window.scrollX,
-            y: spanRect.y + window.scrollY,
-            width: spanRect.width,
-            height: spanRect.height,
-          },
-          fontFamily: style.fontFamily,
-          fontSize: style.fontSize,
-          fontWeight: style.fontWeight,
-          widthRatio,
-          color: style.color,
-        });
+        const partDivs = Array.from(lineDiv.children).filter(
+          (c): c is HTMLDivElement => c.tagName === 'DIV',
+        );
+        for (const partDiv of partDivs) {
+          const spans = partDiv.querySelectorAll<HTMLSpanElement>(':scope > span[data-source-offset]');
+          for (const span of spans) {
+            const char = span.innerText;
+            if (char.length === 0) continue;
+
+            const spanRect = span.getBoundingClientRect();
+            const style = window.getComputedStyle(span);
+
+            const scaleValue = style.scale || '1 1';
+            const widthRatio = parseFloat(scaleValue.split(' ')[0] || '1');
+            if (Number.isNaN(widthRatio)) continue;
+
+            const charFontFamily = lineData?.textBlockStyle?.fontFamily
+              ? FontLoader.getInstance().getFontFamily(lineData.textBlockStyle.fontFamily)
+              : style.fontFamily;
+            const charFontSize = lineData?.textBlockStyle?.fontSize !== undefined
+              ? `${lineData.textBlockStyle.fontSize}mm`
+              : style.fontSize;
+            const charFontWeight = lineData?.textBlockStyle?.fontWeight !== undefined
+              ? String(lineData.textBlockStyle.fontWeight)
+              : style.fontWeight;
+
+            chars.push({
+              char,
+              rect: {
+                x: spanRect.x + window.scrollX,
+                y: spanRect.y + window.scrollY,
+                width: spanRect.width,
+                height: spanRect.height,
+              },
+              fontFamily: charFontFamily,
+              fontSize: charFontSize,
+              fontWeight: charFontWeight,
+              widthRatio,
+              color: cmyk,
+            });
+          }
+        }
       }
     }
 
