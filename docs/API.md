@@ -475,24 +475,28 @@ class LayoutImageElement extends HTMLElement
 | 메서드 | 시그니처 | 설명 |
 |---|---|---|
 | `layout()` | `(): void` | DOM/스타일 갱신. |
-| `render()` | `(): Promise<void>` | 원본 이미지 로드 후 `<canvas>`에 크롭. 캐싱된 이미지가 있으면 동기 `drawImage`만 수행. |
+| `render()` | `(): Promise<void>` | 원본 이미지 로드 후 `<canvas>`에 배치. 캐싱된 이미지가 있으면 동기 `drawImage`만 수행. |
+
+#### 렌더링 모델 — clip-as-crop
+
+`LayoutImageElement`는 원본 이미지 전체를 `width`×`height`(mm) 크기로 리사이즈하여 박스 내 `(x, y)` 위치에 배치한다. 캔버스 크기 = 박스 크기이므로 박스 밖 영역은 자동으로 clip되어 크롭 효과를 낸다. `objectFit`은 렌더링에 사용되지 않으며 편집 UI 메타데이터로만 보존된다.
 
 #### 데이터 프로퍼티
 
 | 이름 | 타입 | 단위 | 설명 |
 |---|---|---|---|
 | `data` | `ImageData` | — | 한 번에 갱신. |
-| `x` | `number \| undefined` | objectFit==='none': mm, 그 외: px (원본) | 크롭 시작 X. `undefined` 시 0 (또는 objectFit==='none' 시 박스 좌측). |
-| `y` | `number \| undefined` | objectFit==='none': mm, 그 외: px (원본) | 크롭 시작 Y. `undefined` 시 0 (또는 objectFit==='none' 시 박스 상단). |
-| `width` | `number \| undefined` | objectFit==='none': mm, 그 외: px (원본) | 크롭/표시 너비. `undefined` 시 0 (또는 objectFit==='none' 시 `absWidth`). |
-| `height` | `number \| undefined` | objectFit==='none': mm, 그 외: px (원본) | 크롭/표시 높이. `undefined` 시 0 (또는 objectFit==='none' 시 `absHeight`). |
-| `dpi` | `number` | DPI | 해상도. `mm = px / dpi × 25.4`. |
-| `url` | `string \| undefined` | — | 이미지 URL. |
+| `x` | `number \| undefined` | mm | 박스 내 이미지 표시 시작 X. 음수면 박스 왼쪽으로 치워져 원본 오른쪽이 크롭. `undefined` 시 0. |
+| `y` | `number \| undefined` | mm | 박스 내 이미지 표시 시작 Y. 음수면 박스 위쪽으로 치워져 원본 아래쪽이 크롭. `undefined` 시 0. |
+| `width` | `number \| undefined` | mm | 이미지 표시 너비. 원본을 이 크기로 리사이즈. `undefined` 시 `absWidth`. |
+| `height` | `number \| undefined` | mm | 이미지 표시 높이. 원본을 이 크기로 리사이즈. `undefined` 시 `absHeight`. |
+| `dpi` | `number` | DPI | 캔버스 렌더링 해상도 (mm→canvas px 변환 전용). 원본 메타데이터의 dpi와 무관. |
+| `url` | `string \| undefined` | — | 이미지 URL. `urlLoader`가 설정되면 로더를 거쳐 변환. |
 | `zIndex` | `number` | — | 렌더링 순서. |
 | `overlapPadding` | `number \| { top?, right?, bottom?, left? }` | mm | 텍스트 회피 패딩. |
-| `objectFit` | `ImageObjectFit` | — | object-fit 동작 (`'cover'` \| `'fill'` \| `'contain'` \| `'none'`). 기본값 `'cover'`. `'none'`이면 `x`/`y`/`width`/`height`를 mm 단위 표시 위치와 크기로 해석. |
-| `originalWidth` | `number \| undefined` | px (원본) | 원본 이미지 너비 메타데이터. `objectFit !== 'none'` 시 `_computeObjectFit`에 사용. `undefined` 시 `img.naturalWidth`로 폴백. |
-| `originalHeight` | `number \| undefined` | px (원본) | 원본 이미지 높이 메타데이터. `objectFit !== 'none'` 시 `_computeObjectFit`에 사용. `undefined` 시 `img.naturalHeight`로 폴백. |
+| `objectFit` | `ImageObjectFit` | — | 편집 UI 메타데이터 ONLY (`'cover'` \| `'fill'` \| `'contain'` \| `'none'`). `LayoutImageElement` 렌더링 미사용. 편집 UI가 이 값으로 `x`/`y`/`width`/`height`를 계산. 기본값 `'cover'`. |
+| `originalWidth` | `number \| undefined` | mm | 원본 이미지 너비 (mm). Place Gun에서 `px / dpi × 25.4`로 변환하여 주입. |
+| `originalHeight` | `number \| undefined` | mm | 원본 이미지 높이 (mm). Place Gun에서 `px / dpi × 25.4`로 변환하여 주입. |
 | `aiProcessing` (set) | `boolean` | — | AI 처리 중 오버레이 토글. `true` 시 반투명 오버레이 + shimmer/spinner 애니메이션 표시. `pointer-events: auto`로 마우스 이벤트 차단. `data` getter에 포함되지 않는 휘발성 속성 (저장/직렬화 시 제외). `layout()`/`render()` 미호출. |
 
 #### 게터
@@ -524,7 +528,8 @@ class LayoutImageElement extends HTMLElement
 | 트리거 | 경로 | 비고 |
 |---|---|---|
 | `data` setter | `layout()` + `render()` | `objectFit`, `x`/`y`/`width`/`height`, `url`, `originalWidth`/`originalHeight` 등 일괄 갱신 |
-| `x`, `y`, `width`, `height`, `dpi`, `url`, `objectFit`, `originalWidth`, `originalHeight` setter | `render()` | 단일 필드 변경 (기존 값과 같으면 no-op) |
+| `x`, `y`, `width`, `height`, `dpi`, `url`, `originalWidth`, `originalHeight` setter | `render()` | 단일 필드 변경 (기존 값과 같으면 no-op) |
+| `objectFit` setter | (없음) | 메타데이터만 갱신. 렌더링 미영향. 편집 UI가 별도로 `x`/`y`/`width`/`height`를 갱신. |
 | `zIndex`, `overlapPadding` setter | `layout()` + `render()` + 부모 `requestRerenderAffectedParagraphs()` | 형제 단락 텍스트 회피 재계산 |
 | `inheritStyle` setter | `layout()` + `render()` | 상위 box의 크기/여백 변경 시. `absWidth`/`absHeight`가 `inheritStyle.parentWidth`/`parentHeight`에 의존하므로 캔버스 픽셀을 다시 그려야 함 |
 
@@ -2170,9 +2175,7 @@ type TextLineData = {
 
 #### `ImageData`
 
-`x`/`y`/`width`/`height`의 의미는 `objectFit`에 따라 다릅니다:
-- `objectFit !== 'none'` (cover/contain/fill): 픽셀 단위의 소스 크롭 영역. `dpi`로 mm 변환 후 `_computeObjectFit`에서 실제 크롭 위치를 재계산합니다. 내부 렌더링 전용이며 UI에 노출되지 않습니다.
-- `objectFit === 'none'`: mm 단위의 박스 내 표시 위치와 크기. 원본 이미지 전체를 지정된 위치/크기로 렌더링합니다. 생략 시 박스 크기로 기본값이 사용됩니다.
+`x`/`y`/`width`/`height`는 모두 **mm 단위**로 통일됩니다. 원본 이미지 전체를 `width`×`height`(mm) 크기로 리사이즈하여 박스 내 `(x, y)`에 배치하고, 박스 밖은 캔버스 clip으로 잘립니다(= 크롭). `objectFit`은 편집 UI가 `x`/`y`/`width`/`height`를 계산할 때 참조하는 메타데이터이며 `LayoutImageElement` 렌더링에서는 사용하지 않습니다.
 
 ```ts
 type ImageObjectFit = 'cover' | 'fill' | 'contain' | 'none';
@@ -2180,37 +2183,32 @@ type ImageObjectFit = 'cover' | 'fill' | 'contain' | 'none';
 type ImageData = {
   type: 'image';
   id?: string;
-  /**
-   * objectFit==='none': 박스 내 이미지 시작 X (mm). 그 외: 크롭 시작 X (원본 픽셀).
-   * 생략 시 0 (또는 objectFit==='none' 시 박스 좌측).
-   */
+  /** 박스 내 이미지 표시 시작 X (mm). 음수면 원본 오른쪽이 크롭. 생략 시 0. */
   x?: number;
-  /**
-   * objectFit==='none': 박스 내 이미지 시작 Y (mm). 그 외: 크롭 시작 Y (원본 픽셀).
-   * 생략 시 0 (또는 objectFit==='none' 시 박스 상단).
-   */
+  /** 박스 내 이미지 표시 시작 Y (mm). 음수면 원본 아래쪽이 크롭. 생략 시 0. */
   y?: number;
-  /**
-   * objectFit==='none': 이미지 표시 너비 (mm). 생략 시 박스 너비(absWidth).
-   * 그 외: 크롭 너비 (원본 픽셀).
-   */
+  /** 이미지 표시 너비 (mm). 원본을 이 크기로 리사이즈. 생략 시 박스 너비(absWidth). */
   width?: number;
-  /**
-   * objectFit==='none': 이미지 표시 높이 (mm). 생략 시 박스 높이(absHeight).
-   * 그 외: 크롭 높이 (원본 픽셀).
-   */
+  /** 이미지 표시 높이 (mm). 원본을 이 크기로 리사이즈. 생략 시 박스 높이(absHeight). */
   height?: number;
+  /** 캔버스 렌더링 해상도 (DPI). mm→canvas px 변환 전용. */
   dpi: number;
+  /** 이미지 URL. urlLoader가 설정되면 로더를 거쳐 변환. */
   url: string;
+  /** 렌더링 순서 (z-index). */
   zIndex?: number;
+  /** 오버랩 감지 시 이미지 불투명 픽셀 주변 패딩 (mm). */
   overlapPadding?: number | {
     top?: number; right?: number; bottom?: number; left?: number;
   };
-  /** 원본 이미지 너비 (픽셀). 메타데이터. */
+  /** 원본 이미지 너비 (mm). Place Gun에서 px/dpi×25.4로 변환하여 주입. */
   originalWidth?: number;
-  /** 원본 이미지 높이 (픽셀). 메타데이터. */
+  /** 원본 이미지 높이 (mm). Place Gun에서 px/dpi×25.4로 변환하여 주입. */
   originalHeight?: number;
-  /** object-fit 동작. 기본값 'cover'. 'none'이면 x/y/width/height를 mm 단위 표시 위치/크기로 사용. */
+  /**
+   * object-fit 동작 (편집 UI 메타데이터). LayoutImageElement 렌더링 미사용.
+   * 편집 UI가 이 값으로 x/y/width/height를 계산. 기본값 'cover'.
+   */
   objectFit?: ImageObjectFit;
 };
 ```

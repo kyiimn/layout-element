@@ -1,6 +1,6 @@
 import { InheritStyle, ImageData, ImageObjectFit, PrintPostData } from "@/types";
 import { LayoutBoxElement } from "./box.element";
-import { genUUID, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay } from "@/utils";
+import { genUUID, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay, computeObjectFit } from "@/utils";
 import { DEFAULT_IMAGE_DPI } from "@/constants";
 
 /**
@@ -303,93 +303,39 @@ export class LayoutImageElement extends HTMLElement {
   }
 
   /**
-   * 캔버스에 크롭 영역을 그린다. `objectFit`이 `'none'`이 아니고 원본 크기를
-   * 알면 `_computeObjectFit()`으로 크롭 영역을 재계산한다.
+   * 캔버스에 이미지를 그린다.
+   *
+   * 원본 이미지 전체를 `width`×`height`(mm) 크기로 리사이즈하여 박스 내
+   * `(x, y)` 위치에 배치한다. 캔버스 크기 = 박스 크기이므로 박스 밖 영역은
+   * 자동으로 clip되어 크롭 효과를 낸다.
    *
    * 깜빡임 방지: 새 캔버스 크기가 기존과 같으면 `clearRect` + `drawImage`로
    * 교체하고, 다르면 `width`/`height`를 설정한 뒤 즉시 `drawImage`로 채운다.
-   * `width`/`height` 설정 시 캔버스가 지워지지만 다음 줄에서 바로 그리므로
-   * 빈 프레임이 노출되지 않는다.
    *
    * @param ctx - 캔버스 2D 컨텍스트
-   * @param img - 원본 이미지
+   * @param img - 로드된 이미지 (work 이미지)
    */
   private _drawImage(ctx: CanvasRenderingContext2D, img: HTMLImageElement): void {
-    const dpi = this.dpi;
-    const ppm = dpi / 25.4;
+    const ppm = this.dpi / 25.4;
     const canvas = this.canvas!;
 
-    if (this._objectFit === 'none') {
-      // objectFit 'none': x/y/width/height are mm-based display position and size.
-      // Defaults: x=0, y=0, width=box width, height=box height.
-      const dx = Math.round((this._x ?? 0) * ppm);
-      const dy = Math.round((this._y ?? 0) * ppm);
-      const dw = Math.round((this._width ?? this.absWidth) * ppm);
-      const dh = Math.round((this._height ?? this.absHeight) * ppm);
+    const canvasW = Math.round(this.absWidth * ppm);
+    const canvasH = Math.round(this.absHeight * ppm);
 
-      const canvasW = Math.round(this.absWidth * ppm);
-      const canvasH = Math.round(this.absHeight * ppm);
-
-      if (canvas.width !== canvasW || canvas.height !== canvasH) {
-        canvas.width = canvasW;
-        canvas.height = canvasH;
-      } else {
-        ctx.clearRect(0, 0, canvasW, canvasH);
-      }
-
-      const origW = this._originalWidth ?? img.naturalWidth;
-      const origH = this._originalHeight ?? img.naturalHeight;
-
-      try {
-        ctx.drawImage(
-          img,
-          0, 0, origW, origH,
-          dx, dy, dw, dh,
-        );
-      } catch (_) {
-        // drawImage 실패 — 무시
-      }
-      return;
-    }
-
-    // objectFit cover/contain/fill: compute source crop in mm, convert to px.
-    // x/y/width/height are optional internal crop coordinates (default 0).
-    let drawX = this._x ?? 0;
-    let drawY = this._y ?? 0;
-    let drawW = this._width ?? 0;
-    let drawH = this._height ?? 0;
-
-    if (this._originalWidth && this._originalHeight) {
-      const fit = this._computeObjectFit(
-        this._objectFit,
-        this.absWidth, this.absHeight,
-        this._originalWidth, this._originalHeight,
-        ppm,
-      );
-      drawX = fit.x;
-      drawY = fit.y;
-      drawW = fit.width;
-      drawH = fit.height;
-    }
-
-    const sx = Math.round(drawX * ppm);
-    const sy = Math.round(drawY * ppm);
-    const sWidth = Math.round(drawW * ppm);
-    const sHeight = Math.round(drawH * ppm);
-
-    if (canvas.width !== sWidth || canvas.height !== sHeight) {
-      canvas.width = sWidth;
-      canvas.height = sHeight;
+    if (canvas.width !== canvasW || canvas.height !== canvasH) {
+      canvas.width = canvasW;
+      canvas.height = canvasH;
     } else {
-      ctx.clearRect(0, 0, sWidth, sHeight);
+      ctx.clearRect(0, 0, canvasW, canvasH);
     }
+
+    const dx = Math.round((this._x ?? 0) * ppm);
+    const dy = Math.round((this._y ?? 0) * ppm);
+    const dw = Math.round((this._width ?? this.absWidth) * ppm);
+    const dh = Math.round((this._height ?? this.absHeight) * ppm);
 
     try {
-      ctx.drawImage(
-        img,
-        sx, sy, sWidth, sHeight,
-        0, 0, sWidth, sHeight
-      );
+      ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, dx, dy, dw, dh);
     } catch (_) {
       // drawImage 실패 — 무시
     }
@@ -407,91 +353,6 @@ export class LayoutImageElement extends HTMLElement {
   }
 
   /**
-   * object-fit 모드에 따라 크롭 영역(mm)을 계산한다.
-   *
-   * - `'cover'`: box를 채우면서 비율 유지. 넘치는 부분 크롭, 중앙 정렬.
-   * - `'fill'`: box에 맞춰 늘림. 비율 무시. 전체 원본 사용.
-   * - `'contain'`: box 안에 전체 이미지 표시. 여백 발생, 중앙 정렬.
-   *
-   * @param fit - object-fit 모드
-   * @param boxWmm - box 너비 (mm)
-   * @param boxHmm - box 높이 (mm)
-   * @param origW - 원본 이미지 너비 (픽셀)
-   * @param origH - 원본 이미지 높이 (픽셀)
-   * @param ppm - 픽셀/mm 변환 비율 (dpi / 25.4)
-   * @returns `{ x, y, width, height }` (mm 단위)
-   *
-   * @example
-   * ```ts
-   * // cover: box 55×35mm, image 800×600px, dpi 72
-   * // → ppm=2.835, boxWpx=156, boxHpx=99
-   * // → imgAspect 1.33 < boxAspect 1.57 → 너비 기준, 상하 크롭
-   * // → cropHPx=509, cropHmm=179.6, y=16.2mm
-   * ```
-   */
-  private _computeObjectFit(
-    fit: ImageObjectFit,
-    boxWmm: number,
-    boxHmm: number,
-    origW: number,
-    origH: number,
-    ppm: number,
-  ): { x: number; y: number; width: number; height: number } {
-    const origWmm = origW / ppm;
-    const origHmm = origH / ppm;
-
-    if (fit === 'fill') {
-      return { x: 0, y: 0, width: boxWmm, height: boxHmm };
-    }
-
-    const boxWpx = boxWmm * ppm;
-    const boxHpx = boxHmm * ppm;
-    const boxAspect = boxWpx / boxHpx;
-    const imgAspect = origW / origH;
-
-    if (fit === 'cover') {
-      if (imgAspect > boxAspect) {
-        const scale = boxHpx / origH;
-        const cropWPx = Math.round(boxWpx / scale);
-        return {
-          x: Math.round((origW - cropWPx) / 2) / ppm,
-          y: 0,
-          width: cropWPx / ppm,
-          height: origHmm,
-        };
-      }
-      const scale = boxWpx / origW;
-      const cropHPx = Math.round(boxHpx / scale);
-      return {
-        x: 0,
-        y: Math.round((origH - cropHPx) / 2) / ppm,
-        width: origWmm,
-        height: cropHPx / ppm,
-      };
-    }
-
-    // contain
-    if (imgAspect > boxAspect) {
-      const scale = boxWpx / origW;
-      const fittedHPx = Math.round(boxHpx / scale);
-      return {
-        x: 0,
-        y: Math.round((fittedHPx - origH) / 2) / ppm,
-        width: origWmm,
-        height: origHmm,
-      };
-    }
-    const scale = boxHpx / origH;
-    const fittedWPx = Math.round(boxWpx / scale);
-    return {
-      x: Math.round((fittedWPx - origW) / 2) / ppm,
-      y: 0,
-      width: origWmm,
-      height: origHmm,
-    };
-  }
-
-  /**
    * 원본 URL을 로더를 거쳐 실제 로드할 URL로 변환한다.
    *
    * @param url 원본 URL (`ImageData.url`)
@@ -502,6 +363,36 @@ export class LayoutImageElement extends HTMLElement {
     if (!loader) return url;
     const result = await loader(url, this.data);
     return result;
+  }
+
+  /**
+   * 현재 `objectFit`/`originalWidth`/`originalHeight`와 박스 크기로
+   * `x`/`y`/`width`/`height`를 자동 계산하여 저장한다.
+   *
+   * `originalWidth`/`originalHeight` 또는 `absWidth`/`absHeight`가 0이면
+   * 계산을 건너뛴다(초기 라이프사이클 또는 메타데이터 미설정).
+   *
+   * @returns {void}
+   */
+  private _applyObjectFit(): void {
+    const origW = this._originalWidth ?? 0;
+    const origH = this._originalHeight ?? 0;
+    const boxW = this.absWidth;
+    const boxH = this.absHeight;
+    if (origW <= 0 || origH <= 0 || boxW <= 0 || boxH <= 0) return;
+
+    const rect = computeObjectFit({
+      fit: this._objectFit,
+      originalWidth: origW,
+      originalHeight: origH,
+      boxWidth: boxW,
+      boxHeight: boxH,
+    });
+
+    this._x = rect.x;
+    this._y = rect.y;
+    this._width = rect.width;
+    this._height = rect.height;
   }
 
   set data(data: ImageData) {
@@ -522,6 +413,10 @@ export class LayoutImageElement extends HTMLElement {
 
     if (urlChanged) {
       this._clearImageCache();
+    }
+
+    if (data.x === undefined && data.y === undefined && data.width === undefined && data.height === undefined) {
+      this._applyObjectFit();
     }
 
     this.layout();
@@ -587,6 +482,8 @@ export class LayoutImageElement extends HTMLElement {
 
   set originalWidth(value: number | undefined) {
     this._originalWidth = value;
+    this._applyObjectFit();
+    this.render();
   }
 
   get originalWidth(): number | undefined {
@@ -595,6 +492,8 @@ export class LayoutImageElement extends HTMLElement {
 
   set originalHeight(value: number | undefined) {
     this._originalHeight = value;
+    this._applyObjectFit();
+    this.render();
   }
 
   get originalHeight(): number | undefined {
@@ -604,6 +503,7 @@ export class LayoutImageElement extends HTMLElement {
   set objectFit(value: ImageObjectFit) {
     if (this._objectFit === value) return;
     this._objectFit = value;
+    this._applyObjectFit();
     this.render();
   }
 
@@ -692,9 +592,7 @@ export class LayoutImageElement extends HTMLElement {
   set inheritStyle(style: InheritStyle | undefined) {
     this._inheritStyle = style;
     this.layout();
-    // absWidth/absHeight는 inheritStyle.parentWidth/parentHeight에 의존하므로
-    // 상위 box의 크기/여백 변경 시 이미지 캔버스 크기와 크롭 영역이 달라진다.
-    // layout()은 CSS 위치/크기만 갱신하므로 render()로 캔버스 픽셀을 다시 그려야 한다.
+    this._applyObjectFit();
     this.render();
   }
 

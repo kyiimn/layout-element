@@ -255,12 +255,12 @@ export class PlaceGunController {
   /**
    * image 요소에 이미지 데이터를 주입한다.
    *
-   * 원본 이미지의 픽셀 크기(originalWidth/originalHeight)와 dpi, URL을
-   * 설정하고 `objectFit: 'cover'`로 지정한다. 실제 크롭 영역 계산은
-   * `LayoutImageElement.render()`에서 object-fit에 따라 자동 수행된다.
+   * 원본 이미지의 픽셀 크기를 dpi로 mm 변환하여 `originalWidth`/`originalHeight`
+   * (mm)로 설정하고 `objectFit: 'cover'`로 지정한다. `x`/`y`/`width`/`height`는
+   * `LayoutImageElement`의 `data` setter가 `objectFit` + 박스 크기로 자동 계산한다.
    *
    * @param imageEl - 주입 대상 image 요소
-   * @param image - 이미지 content 객체
+   * @param image - 이미지 content 객체 (px 단위 width/height/dpi 포함)
    * @param box - image 요소를 포함하는 box
    */
   private _applyImageToElement(
@@ -271,15 +271,19 @@ export class PlaceGunController {
     void box;
     const data = imageEl.data;
     const dpi = image.dpi || data.dpi || DEFAULT_IMAGE_DPI;
-    const origW = image.width;
-    const origH = image.height;
+    const origWidthMm = (image.width / dpi) * 25.4;
+    const origHeightMm = (image.height / dpi) * 25.4;
 
     imageEl.data = {
       ...data,
+      x: undefined,
+      y: undefined,
+      width: undefined,
+      height: undefined,
       dpi,
       url: image.url,
-      originalWidth: origW,
-      originalHeight: origH,
+      originalWidth: origWidthMm,
+      originalHeight: origHeightMm,
       objectFit: 'cover',
     };
     void imageEl.render();
