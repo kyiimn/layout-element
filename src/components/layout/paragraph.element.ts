@@ -2,7 +2,7 @@ import { TextLayoutEngine } from "@/core";
 import { TextEditController } from "@/edit/text-edit-controller";
 import { EditManager } from "@/edit/edit-manager";
 import { ColorRegistry, FontLoader } from "@/resource";
-import { InheritStyle, ParagraphData, ParagraphStyle, RenderCompleteEventDetail, TextBlockData, TextStyle } from "@/types";
+import { InheritStyle, ParagraphData, ParagraphStyle, PrintPostData, PrintPostDataChar, RenderCompleteEventDetail, TextBlockData, TextStyle } from "@/types";
 import { checkOverlap, genUUID, valueEqual, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay } from "@/utils";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutColumnElement } from "./column.element";
@@ -617,8 +617,52 @@ export class LayoutParagraphElement extends HTMLElement {
     return list;
   }
 
-  get printPostData() {
-    return [];
+  get printPostData(): PrintPostData[] {
+    const rect = this.getBoundingClientRect();
+    const chars: PrintPostDataChar[] = [];
+
+    for (const col of this.columnEl) {
+      const root = col.shadowRoot;
+      if (root === null) continue;
+      const spans = root.querySelectorAll<HTMLSpanElement>('span[data-source-offset]');
+      for (const span of spans) {
+        const char = span.innerText;
+        if (char.length === 0) continue;
+
+        const spanRect = span.getBoundingClientRect();
+        const style = window.getComputedStyle(span);
+
+        const scaleValue = style.scale || '1 1';
+        const widthRatio = parseFloat(scaleValue.split(' ')[0] || '1');
+        if (Number.isNaN(widthRatio)) continue;
+
+        chars.push({
+          char,
+          rect: {
+            x: spanRect.x + window.scrollX,
+            y: spanRect.y + window.scrollY,
+            width: spanRect.width,
+            height: spanRect.height,
+          },
+          fontFamily: style.fontFamily,
+          fontSize: style.fontSize,
+          fontWeight: style.fontWeight,
+          widthRatio,
+          color: style.color,
+        });
+      }
+    }
+
+    return [{
+      data: this.data,
+      rect: {
+        x: rect.x + window.scrollX,
+        y: rect.y + window.scrollY,
+        width: rect.width,
+        height: rect.height,
+      },
+      chars,
+    }];
   }
 
   get type() { return 'paragraph' as const; }

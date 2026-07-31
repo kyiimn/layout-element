@@ -398,7 +398,7 @@ class LayoutParagraphElement extends HTMLElement
 | `overlayElements` | `LayoutBoxElement[]` | 오버랩된 형제 박스. |
 | `type` | `'paragraph'` | 타입 리터럴. |
 | `zIndex` | `number` | 렌더링 순서. |
-| `printPostData` | `[]` | 인쇄 후처리 데이터 (paragraph는 빈 배열). |
+| `printPostData` | `PrintPostData<ParagraphData>[]` | 인쇄 후처리 데이터. paragraph rect + `chars` 배열 (글자별 rect/폰트/장평/색상). |
 
 #### `render-error` 이벤트
 
@@ -2289,8 +2289,9 @@ type InheritStyle = TextStyle & ParagraphStyle & {
 ```ts
 type PrintPostData<T = BoxData | ImageData | ParagraphData> = {
   color?: CMYKColor;       // 인쇄용 CMYK 색상
-  data: T;                 // 원본 데이터
+  data: T;                 // 원본 데이터. data.type이 요소 종류 구분자
   rect: PrintPostDataRect;
+  chars?: PrintPostDataChar[];  // paragraph 전용. 글자별 렌더링 정보
 };
 
 type PrintPostDataRect = {
@@ -2298,6 +2299,16 @@ type PrintPostDataRect = {
   y: number;
   width: number;
   height: number;
+};
+
+type PrintPostDataChar = {
+  char: string;              // 글자
+  rect: PrintPostDataRect;   // 글자별 위치·크기 (픽셀)
+  fontFamily: string;        // CSS font-family
+  fontSize: string;           // CSS font-size (예: '16px')
+  fontWeight: string;        // CSS font-weight
+  widthRatio: number;        // 장평 비율 (CSS scale에서 추출)
+  color: string;             // CSS color (rgb() 형식)
 };
 ```
 
