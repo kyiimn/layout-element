@@ -638,7 +638,9 @@ export class LayoutParagraphElement extends HTMLElement {
 
       for (let li = 0; li < lineDivs.length; li++) {
         const lineDiv = lineDivs[li]!;
+        if (lineDiv.style.display === 'none') continue;
         const lineData = lines[li];
+        if (lineData === undefined) continue;
         const colorName = lineData?.textBlockStyle?.color;
         const cmyk = colorName !== undefined
           ? registry.get(colorName)
