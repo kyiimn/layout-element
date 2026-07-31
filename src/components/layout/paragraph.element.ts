@@ -377,6 +377,7 @@ export class LayoutParagraphElement extends HTMLElement {
     if (data.zIndex !== undefined) this._zIndex = data.zIndex;
 
     this._sourceContent = data.content;
+    if (this._model && typeof data.content === 'string') this._model.textContent = data.content;
 
     this.layout();
     this._perfStructureChanged = true;
@@ -395,13 +396,58 @@ export class LayoutParagraphElement extends HTMLElement {
     return {
       id: this.id,
       column: this._column,
-      content: this._model?.textContent ?? this._sourceContent,
+      content: this.content,
       gap: this._gap,
       paragraphStyle: this._paragraphStyle,
       textStyle: this._textStyle,
       zIndex: this._zIndex,
       type: this.type,
     };
+  }
+
+  /**
+   * 단락의 텍스트 콘텐츠를 반환한다.
+   *
+   * 렌더링된 실제 텍스트를 기준으로 한다. `TextEditController`로 편집 중인 경우
+   * `model.textContent`를, model이 아직 생성되지 않은 초기 상태에서는
+   * 세터로 전달된 원본 콘텐츠(`_sourceContent`)를 반환한다.
+   *
+   * @returns 렌더링된 텍스트 콘텐츠. `string` 또는 `TextBlockData[]`.
+   */
+  get content(): string | (string | TextBlockData)[] {
+    return this._model?.textContent ?? this._sourceContent;
+  }
+
+  /**
+   * 단락의 텍스트 콘텐츠를 설정한다.
+   *
+   * `data` setter의 `content` 갱신 경로를 캡슐화한다. 다음 상태를
+   * 동시에 동기화한 뒤 재렌더링까지 한 번에 수행한다.
+   *
+   * 1. `_sourceContent` — model이 없는 초기 상태에서 `data` getter가
+   *    반환할 폴백 콘텐츠.
+   * 2. `model.textContent` — model이 이미 존재하는 경우 `layout()`의
+   *    `_layoutStructure()`가 `_model.textContent ?? _sourceContent`를
+   *    평가하므로, 새 텍스트를 model에도 직접 반영해야 기존 텍스트가
+   *    우선되는 규칙을 덮어쓸 수 있다. `string`인 경우에만 갱신한다.
+   * 3. `markStructureChangedAndRender()` — 구조 변경 플래그 설정 후
+   *    `render()` 호출.
+   *
+   * `data` setter는 내부 필드를 직접 갱신한 뒤 자체 `layout()`을
+   * 호출하므로 이 setter를 거치지 않는다 (중복 렌더링 방지).
+   *
+   * @param value - 새 텍스트 콘텐츠. `string` 또는 `TextBlockData[]`.
+   *
+   * @example
+   * ```ts
+   * // 외부 컨트롤러(PlaceGun, AI fit 등)에서 텍스트 주입
+   * paragraph.content = '새 본문 텍스트';
+   * ```
+   */
+  set content(value: string | (string | TextBlockData)[]) {
+    this._sourceContent = value;
+    if (this._model && typeof value === 'string') this._model.textContent = value;
+    this.markStructureChangedAndRender();
   }
 
   get columnEl() {

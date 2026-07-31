@@ -374,6 +374,7 @@ class LayoutParagraphElement extends HTMLElement
 | 이름 | 타입 | 단위 | 설명 |
 |---|---|---|---|
 | `data` | `ParagraphData` | — | 한 번에 갱신. `content` 필드는 렌더링된 실제 텍스트를 반환 (편집 반영). |
+| `content` | `string \| (string \| TextBlockData)[]` | — | 텍스트 콘텐츠 단독 갱신/조회. setter는 `_sourceContent`와 `model.textContent`(`string`인 경우)를 동시에 동기화한 뒤 `markStructureChangedAndRender()`로 재렌더링까지 수행. `data` setter는 이 setter를 거치지 않고 내부 필드를 직접 갱신 후 `layout()` 호출 (중복 렌더링 방지). |
 | `column` | `number \| number[]` (via `data`) | — | 하위 컬럼 그리드 (생략 시 부모 상속). |
 | `gap` | `number \| number[]` (via `data`) | mm | 하위 컬럼 간격. |
 | `zIndex` | `number` (via `data`) | — | 렌더링 순서. |
@@ -2050,7 +2051,7 @@ class PlaceGunController {
 
 | 항목 contentType | 주입 동작 |
 |------------------|-----------|
-| `'text'` | `paragraph.data = {...data, content: item.content.body}` + `model.textContent = item.content.body` + `markStructureChangedAndRender()` |
+| `'text'` | `paragraph.content = item.content.body` + `EditManager.notifyTextChange(paragraph)` |
 | `'image'` | `image.url = subType === 'ad' ? /storage/ad/{uid} : /storage/image/{uid}` (url setter가 자동으로 `render()` 호출) |
 
 자세한 내용은 [`EDITING_PLACE_GUN.md`](./EDITING_PLACE_GUN.md) 참조.
