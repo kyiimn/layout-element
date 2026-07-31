@@ -225,9 +225,8 @@ export type PlaceGunChangeEventDetail = {
 │     ├── manager._consumePlaceGunItem()                      │
 │     │   → 맨 위 항목 제거 + placeGunChange 디스패치          │
 │     ├── _injectItem(item, target)                           │
-│     │   ├── text → paragraph.data = {...data, content}      │
-│     │   │        + model.textContent = item.content.body     │
-│     │   │        + markStructureChangedAndRender()           │
+│     │   ├── text → paragraph.content = item.content.body      │
+│     │   │        + EditManager.notifyTextChange(paragraph)    │
 │     │   └── image → image.url = subType별 URL               │
 │     └── manager._suppressLayoutClick()                      │
 │         → 후속 클릭 이벤트가 선택을 해제하지 않도록 방지      │
