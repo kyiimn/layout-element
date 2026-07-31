@@ -218,7 +218,11 @@ export class GridCalculator {
   }
 
   get editableTextHeight() {
-    return this.editableHeight + (this.lineHeight - this.fontSize);
+    // lineHeight - fontSize 연산과 editableHeight와의 덧셈에서 발생하는
+    // 부동소수점 오차(예: 4.8 - 4 = 0.7999999999999998, 71.2 + 0.7999... = 71.99999999999999)
+    // 가 하위 overflow 판정으로 전파되는 것을 방지하기 위해 1e-6 단위로 반올림한다.
+    const raw = this.editableHeight + (this.lineHeight - this.fontSize);
+    return Math.round(raw * 1e6) / 1e6;
   }
 
   /**

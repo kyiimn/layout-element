@@ -91,7 +91,11 @@ export class LayoutVirtualColumnElement extends HTMLElement {
       .filter((el): el is HTMLDivElement => el instanceof HTMLDivElement).length;
     const contentHeightMm = lineCount * this._model.lineHeight;
     const containerHeightMm = this._model.inheritStyle?.parentHeight ?? 0;
-    return contentHeightMm > containerHeightMm;
+    // 부동소수점 오차(예: 15*4.8=72 vs parentHeight=71.99999999999999)로 인한
+    // 잘못된 overflow 판정을 방지하기 위해 1e-6 tolerance를 적용한다.
+    // 이 기준은 LayoutParagraphElement._computeRenderStats()의
+    // `accumulatedHeightMm + lineHeightMm > parentHeight + 1e-6`과 동일하다.
+    return contentHeightMm > containerHeightMm + 1e-6;
   }
 
   set model(model: TextLayoutEngine | undefined) {
