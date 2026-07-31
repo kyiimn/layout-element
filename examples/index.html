@@ -60,6 +60,11 @@
         color: #fff;
         border-color: #7a1ae8;
       }
+      #toolbar button.active-ai {
+        background: #1a8e8e;
+        color: #fff;
+        border-color: #1a8e8e;
+      }
       #toolbar select {
         padding: 8px 12px;
         border: 1px solid #ccc;
@@ -171,6 +176,21 @@
         </select>
         <button id="btn-insert">📥 삽입 모드</button>
       </div>
+      <div
+        style="
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          justify-content: center;
+          width: 100%;
+          margin-top: 8px;
+        "
+      >
+        <button id="btn-ai-toggle">🤖 AI 처리 오버레이 토글</button>
+        <button id="btn-ai-paragraph">🤖 단락에만 표시</button>
+        <button id="btn-ai-image">🤖 이미지에만 표시</button>
+        <button id="btn-ai-clear">🤖 모두 해제</button>
+      </div>
     </div>
 
     <div id="hint"></div>
@@ -220,6 +240,10 @@
           "btn-layout-reparent",
         );
         const btnInsert = document.getElementById("btn-insert");
+        const btnAiToggle = document.getElementById("btn-ai-toggle");
+        const btnAiParagraph = document.getElementById("btn-ai-paragraph");
+        const btnAiImage = document.getElementById("btn-ai-image");
+        const btnAiClear = document.getElementById("btn-ai-clear");
         const insertType = document.getElementById("insert-type");
         const insertPosition = document.getElementById("insert-position");
         const hint = document.getElementById("hint");
@@ -340,6 +364,70 @@
               position: insertPosition.value,
             };
           }
+        });
+
+        // AI 처리 오버레이 토글
+        let aiActive = false;
+
+        function getAllParagraphs() {
+          return Array.from(doc.querySelectorAll("x-layout-paragraph"));
+        }
+
+        function getAllImages() {
+          return Array.from(doc.querySelectorAll("x-layout-image"));
+        }
+
+        function setAiOverlay(paragraphs, images, active) {
+          for (const p of paragraphs) p.aiProcessing = active;
+          for (const i of images) i.aiProcessing = active;
+        }
+
+        btnAiToggle.addEventListener("click", () => {
+          aiActive = !aiActive;
+          setAiOverlay(getAllParagraphs(), getAllImages(), aiActive);
+          btnAiToggle.classList.toggle("active-ai", aiActive);
+          btnAiParagraph.classList.remove("active-ai");
+          btnAiImage.classList.remove("active-ai");
+          hint.textContent = aiActive
+            ? "AI 처리 오버레이 표시 중. 버튼을 다시 누르면 해제됩니다."
+            : "";
+        });
+
+        btnAiParagraph.addEventListener("click", () => {
+          const wasParagraphOnly = btnAiParagraph.classList.contains("active-ai");
+          setAiOverlay(getAllParagraphs(), [], !wasParagraphOnly);
+          btnAiParagraph.classList.toggle("active-ai", !wasParagraphOnly);
+          if (!wasParagraphOnly) {
+            aiActive = false;
+            btnAiToggle.classList.remove("active-ai");
+            btnAiImage.classList.remove("active-ai");
+            hint.textContent = "단락에만 AI 처리 오버레이 표시 중.";
+          } else {
+            hint.textContent = "";
+          }
+        });
+
+        btnAiImage.addEventListener("click", () => {
+          const wasImageOnly = btnAiImage.classList.contains("active-ai");
+          setAiOverlay([], getAllImages(), !wasImageOnly);
+          btnAiImage.classList.toggle("active-ai", !wasImageOnly);
+          if (!wasImageOnly) {
+            aiActive = false;
+            btnAiToggle.classList.remove("active-ai");
+            btnAiParagraph.classList.remove("active-ai");
+            hint.textContent = "이미지에만 AI 처리 오버레이 표시 중.";
+          } else {
+            hint.textContent = "";
+          }
+        });
+
+        btnAiClear.addEventListener("click", () => {
+          aiActive = false;
+          setAiOverlay(getAllParagraphs(), getAllImages(), false);
+          btnAiToggle.classList.remove("active-ai");
+          btnAiParagraph.classList.remove("active-ai");
+          btnAiImage.classList.remove("active-ai");
+          hint.textContent = "";
         });
 
         // EditManager 이벤트 수신
