@@ -380,6 +380,7 @@ class LayoutParagraphElement extends HTMLElement
 | `textStyle` (set) | `TextStyle` | — | 글자 스타일. 변경 시 구조 재계산 + 재렌더링. 기존 값과 같으면 no-op. |
 | `paragraphStyle` (set) | `ParagraphStyle` | — | 문단 스타일. 변경 시 구조 재계산 + 재렌더링. 기존 값과 같으면 no-op. |
 | `editableText` (set) | `boolean` | — | 텍스트 편집 모드. 인쇄 모드에서는 무시됨. |
+| `aiProcessing` (set) | `boolean` | — | AI 처리 중 오버레이 토글. `true` 시 반투명 오버레이 + shimmer/spinner 애니메이션 표시. `pointer-events: auto`로 마우스 이벤트 차단. `data` getter에 포함되지 않는 휘발성 속성 (저장/직렬화 시 제외). `layout()`/`render()` 미호출. |
 | `inheritStyle` (set) | `InheritStyle \| undefined` | — | 상위 캐스케이드 스타일. |
 
 #### 계산 게터
@@ -492,6 +493,7 @@ class LayoutImageElement extends HTMLElement
 | `objectFit` | `ImageObjectFit` | — | object-fit 동작 (`'cover'` \| `'fill'` \| `'contain'` \| `'none'`). 기본값 `'cover'`. `'none'`이면 `x`/`y`/`width`/`height`를 mm 단위 표시 위치와 크기로 해석. |
 | `originalWidth` | `number \| undefined` | px (원본) | 원본 이미지 너비 메타데이터. `objectFit !== 'none'` 시 `_computeObjectFit`에 사용. `undefined` 시 `img.naturalWidth`로 폴백. |
 | `originalHeight` | `number \| undefined` | px (원본) | 원본 이미지 높이 메타데이터. `objectFit !== 'none'` 시 `_computeObjectFit`에 사용. `undefined` 시 `img.naturalHeight`로 폴백. |
+| `aiProcessing` (set) | `boolean` | — | AI 처리 중 오버레이 토글. `true` 시 반투명 오버레이 + shimmer/spinner 애니메이션 표시. `pointer-events: auto`로 마우스 이벤트 차단. `data` getter에 포함되지 않는 휘발성 속성 (저장/직렬화 시 제외). `layout()`/`render()` 미호출. |
 
 #### 게터
 
@@ -2431,6 +2433,14 @@ type PlaceGunChangeEventDetail = {
 | `DEFAULT_WIDTH_RATIO` | `0.8` | — | 장평 (글자 가로폭 비율). |
 | `DEFAULT_TEXT_ALIGN` | `'justify'` | — | 양쪽 정렬. |
 | `DEFAULT_VERTICAL_ALIGN` | `'top'` | — | 상단 정렬. |
+| `Z_INDEX_MAX_LAYOUT` | `90000` | — | 레이아웃 요소 zIndex 최댓값. 90001 이상은 예약 범위. |
+| `Z_INDEX_RESIZE_HANDLE` | `99999` | — | 예약: 리사이즈 핸들. |
+| `Z_INDEX_TYPE_LABEL` | `99998` | — | 예약: 타입 라벨. |
+| `Z_INDEX_INSERT_PREVIEW` | `99997` | — | 예약: 삽입 미리보기 오버레이. |
+| `Z_INDEX_AI_PROCESSING` | `99996` | — | 예약: AI 처리 중 오버레이. |
+| `Z_INDEX_TEXTAREA` | `9999` | — | 예약: 텍스트 편집 textarea (IME 입력). |
+| `Z_INDEX_ROLE_AD` | `91000` | — | 역할 고정 z-index: 광고 (ad). |
+| `Z_INDEX_ROLE_HEADER` | `91001` | — | 역할 고정 z-index: 면머리 (header). |
 
 ---
 
@@ -2498,6 +2508,80 @@ const genUUID: () => string;
 ```ts
 /** `Math.random()` 기반 헬퍼. 패키지 진입점에서 export되지 않음. */
 const genRandom: (min?: number, max?: number) => number;
+```
+
+### AI Processing Overlay 헬퍼
+
+`<x-layout-paragraph>`와 `<x-layout-image>`의 AI 처리 중 오버레이를 관리하는 4개 함수.
+모든 함수는 shadow DOM 내부에 오버레이 요소를 생성/토글/제거한다.
+
+#### `createAiProcessingOverlay(shadowRoot)`
+
+```ts
+/**
+ * AI 처리 중 오버레이를 shadow DOM에 생성한다.
+ * shadow root에 `<style>`과 `<div>`를 한 번만 주입한다.
+ * 오버레이는 기본적으로 `display: none` 상태이며, `setAiProcessingActive`로 활성화한다.
+ *
+ * @param shadowRoot - 오버레이를 삽입할 shadow root
+ * @throws stylesheet 생성에 실패한 경우
+ *
+ * @example
+ * createAiProcessingOverlay(this._shadowRoot);
+ */
+function createAiProcessingOverlay(shadowRoot: ShadowRoot): void;
+```
+
+#### `setAiProcessingActive(shadowRoot, active)`
+
+```ts
+/**
+ * AI 처리 중 오버레이의 활성화 상태를 토글한다.
+ * 오버레이가 shadow DOM에 없으면 아무 작업도 수행하지 않는다.
+ * `layout()`/`render()`를 트리거하지 않으므로 비용이 거의 없다.
+ *
+ * @param shadowRoot - 오버레이가 위치한 shadow root
+ * @param active - `true`면 오버레이 표시, `false`면 숨김
+ *
+ * @example
+ * setAiProcessingActive(this._shadowRoot, true);  // AI 처리 시작
+ * setAiProcessingActive(this._shadowRoot, false); // AI 처리 완료
+ */
+function setAiProcessingActive(shadowRoot: ShadowRoot, active: boolean): void;
+```
+
+#### `isAiProcessingActive(shadowRoot)`
+
+```ts
+/**
+ * AI 처리 중 오버레이의 현재 활성화 상태를 반환한다.
+ * 오버레이가 shadow DOM에 없으면 `false`를 반환한다.
+ *
+ * @param shadowRoot - 오버레이가 위치한 shadow root
+ * @returns 활성화 여부. 오버레이 미존재 시 `false`
+ *
+ * @example
+ * if (isAiProcessingActive(this._shadowRoot)) { /* AI 처리 중 *\/ }
+ */
+function isAiProcessingActive(shadowRoot: ShadowRoot): boolean;
+```
+
+#### `removeAiProcessingOverlay(shadowRoot)`
+
+```ts
+/**
+ * AI 처리 중 오버레이를 shadow DOM에서 제거한다.
+ * `disconnectedCallback` 등에서 호출하여 잔류 DOM을 정리한다.
+ * 오버레이가 없으면 아무 작업도 수행하지 않는다.
+ *
+ * @param shadowRoot - 오버레이가 위치한 shadow root
+ *
+ * @example
+ * disconnectedCallback() {
+ *   removeAiProcessingOverlay(this._shadowRoot);
+ * }
+ */
+function removeAiProcessingOverlay(shadowRoot: ShadowRoot): void;
 ```
 
 ---

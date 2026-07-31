@@ -360,6 +360,7 @@ import type { LayoutParagraphProps } from 'layout-element/react';
 |---|---|---|---|---|
 | `data` | `ParagraphData` | — | **필수** | 단락 데이터. |
 | `editableText` | `boolean` | — | 선택 | 텍스트 편집 활성화. 인쇄 모드에서는 무시. |
+| `aiProcessing` | `boolean` | — | 선택 | AI 처리 중 오버레이 토글. `true` 시 반투명 오버레이 + shimmer/spinner 애니메이션. `pointer-events: auto`로 마우스 이벤트 차단. `data`에 포함되지 않는 휘발성 속성. |
 | `onRenderError` | `(event: CustomEvent) => void` | — | 선택 | 오버플로우 등 render-error 핸들러. |
 | `children` | `ReactNode` | — | 선택 | 자식. |
 
@@ -369,6 +370,7 @@ import type { LayoutParagraphProps } from 'layout-element/react';
 |---|---|
 | `data` | `element.data = data` |
 | `editableText` | `element.editableText = editableText` |
+| `aiProcessing` | `element.aiProcessing = aiProcessing` |
 
 > `editableText`는 `EditManager`로 단락에 포커스를 주는 게 더 권장됩니다. 컴포넌트
 > prop 방식은 "편집 가능 영역"으로 표시만 합니다.
@@ -414,6 +416,7 @@ import type { LayoutImageProps } from 'layout-element/react';
 | `url` | `string` | — | 선택 | 이미지 URL. |
 | `zIndex` | `number` | — | 선택 | z-index. |
 | `overlapPadding` | `number \| { top?, right?, bottom?, left? }` | mm | 선택 | 텍스트 회피 패딩. |
+| `aiProcessing` | `boolean` | — | 선택 | AI 처리 중 오버레이 토글. `true` 시 반투명 오버레이 + shimmer/spinner 애니메이션. `pointer-events: auto`로 마우스 이벤트 차단. `data`에 포함되지 않는 휘발성 속성. |
 
 #### Ref
 
@@ -773,10 +776,16 @@ export {
   DEFAULT_BORDER_STYLE, DEFAULT_FONT_SIZE, DEFAULT_FONT_STYLE, DEFAULT_FONT_WEIGHT,
   DEFAULT_LINE_GAP, DEFAULT_PPM, DEFAULT_IMAGE_DPI, DEFAULT_SPACE_RATIO,
   DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN,
+  Z_INDEX_MAX_LAYOUT, Z_INDEX_RESIZE_HANDLE, Z_INDEX_TYPE_LABEL,
+  Z_INDEX_INSERT_PREVIEW, Z_INDEX_AI_PROCESSING, Z_INDEX_TEXTAREA,
+  Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER,
 };
 
 // Utils (`@/utils`를 `export *`로 재노출)
-export { checkOverlap, getOverlapSizePX, mergeOverlapParts, genUUID };
+export {
+  checkOverlap, getOverlapSizePX, mergeOverlapParts, genUUID,
+  createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay,
+};
 ```
 
 > 위 트리는 단순화된 형태입니다. 정확한 export 목록은 패키지 진입점
