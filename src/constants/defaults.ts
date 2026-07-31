@@ -23,6 +23,9 @@ export const Z_INDEX_TYPE_LABEL = 99998;
 /** 예약: 삽입 미리보기 오버레이 (insert preview) z-index */
 export const Z_INDEX_INSERT_PREVIEW = 99997;
 
+/** 예약: AI 처리 중 오버레이 (ai processing) z-index */
+export const Z_INDEX_AI_PROCESSING = 99996;
+
 /** 예약: 텍스트 편집 textarea (IME 입력) z-index */
 export const Z_INDEX_TEXTAREA = 9999;
 
