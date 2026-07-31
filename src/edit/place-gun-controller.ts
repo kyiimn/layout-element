@@ -243,13 +243,8 @@ export class PlaceGunController {
    * @param text - 주입할 텍스트
    */
   private _injectText(paragraph: LayoutParagraphElement, text: string): void {
-    const data = paragraph.data;
-    paragraph.data = { ...data, content: text };
-    const model = paragraph.model;
-    if (model) {
-      model.textContent = text;
-    }
-    paragraph.markStructureChangedAndRender();
+    paragraph.content = text;
+    EditManager.getInstance().notifyTextChange(paragraph);
   }
 
   /**

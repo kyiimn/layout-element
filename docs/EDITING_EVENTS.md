@@ -288,9 +288,11 @@ manager.addEventListener('textChange', (event) => {
 |------|------|------|
 | `type` | `'textChange'` | 이벤트 타입 |
 | `paragraph` | `LayoutParagraphElement` | 텍스트가 변경된 단락 |
-| `controller` | `TextEditController` | 편집 컨트롤러 |
+| `controller` | `TextEditController \| null` | 편집 컨트롤러. `TextEditController` 경로에서는 인스턴스, `notifyTextChange(paragraph)` public API 경로(PlaceGun 주입, AI fit 등)에서는 `null` |
 
-**발생 트리거**: `TextEditController`에서 텍스트가 변경될 때 `EditManager._notifyTextChange(controller)` → `_dispatch('textChange', controller)`.
+**발생 트리거**:
+- `TextEditController`에서 텍스트가 변경될 때 `EditManager._notifyTextChange(controller)` → `_dispatch('textChange', controller)`.
+- `TextEditController`를 거치지 않는 텍스트 변경 경로(PlaceGun 주입, AI fit 등)에서 `EditManager.notifyTextChange(paragraph)` 호출 시. 외부 코드가 텍스트를 직접 주입한 후 이 메서드를 호출해 `textChange` 구독자가 React state 등 외부 상태를 `element.data`와 동기화하도록 한다.
 
 ### 5.3 `styleChange`
 

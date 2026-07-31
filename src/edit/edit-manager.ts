@@ -484,6 +484,49 @@ export class EditManager {
   }
 
   /**
+   * 텍스트 변경 이벤트를 외부에서 발생시킨다.
+   *
+   * `TextEditController`를 거치지 않고 텍스트가 변경되는 경로
+   * (PlaceGun 주입, AI fit 등)에서 호출하여 `textChange` 이벤트를
+   * 디스패치한다. 구독자(`LayoutEditor`의 동기화 핸들러 등)는
+   * 이벤트 페이로드에 의존하지 않고 자체적으로 최신 `element.data`를
+   * 읽어 React state와 동기화한다.
+   *
+   * @param paragraph - 텍스트가 변경된 paragraph 요소. 이벤트 페이로드의
+   *   `paragraph` 필드에 설정된다.
+   * @example
+   * ```ts
+   * const manager = EditManager.getInstance();
+   * // PlaceGun/AI fit 등 컨트롤러 외부 경로에서 텍스트 주입 후
+   * manager.notifyTextChange(paragraph);
+   * ```
+   */
+  notifyTextChange(paragraph: LayoutParagraphElement): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('textChange');
+    if (!listeners || listeners.size === 0) return;
+
+    const event: EditManagerEvent = {
+      type: 'textChange',
+      paragraph,
+      controller: null as unknown as TextEditController,
+    };
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener(event);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
+
+  /**
    * 스타일 변경 이벤트를 발생시킨다.
    * `TextEditController`에서 스타일이 변경될 때 호출된다.
    * @internal
