@@ -176,7 +176,7 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule("@media screen { :host([editable-layout][hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; } }", 4);
       styleEl.sheet.insertRule("@media screen { :host([editable-layout][selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; } }", 5);
       styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { box-shadow: #ff9800 0px 0px 0px 2px inset, #ff9800 0px 0px 0px 2px; } }", 6);
-      styleEl.sheet.insertRule(`@media print { [border] { display: none; } }`, 7);
+      styleEl.sheet.insertRule(`@media print { [border] { display: none !important; } }`, 7);
       styleEl.sheet.insertRule('@media screen { .resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: ' + Z_INDEX_RESIZE_HANDLE + '; pointer-events: auto; display: none; } }', 8);
       styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .resize-handle { display: block; } }', 9);
       styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 10);
@@ -191,6 +191,7 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule('@media screen { :host([text-focused]) .type-label { display: none; } }', 19);
       styleEl.sheet.insertRule('@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }', 20);
       styleEl.sheet.insertRule('@media screen { .type-label .parent-btn:hover { opacity: 1; } }', 21);
+      styleEl.sheet.insertRule('@media print { .type-label { display: none !important; } }', 22);
       this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));

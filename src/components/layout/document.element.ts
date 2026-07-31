@@ -110,9 +110,10 @@ export class LayoutDocumentElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
-      styleEl.sheet.insertRule(":host([reparent-target]) { box-shadow: #ff9800 0px 0px 0px 2px inset; }", 1);
-      styleEl.sheet.insertRule('.type-label { position: absolute; top: 0; left: 0; padding: 2px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: none; user-select: none; cursor: default; z-index: ' + Z_INDEX_TYPE_LABEL + '; display: none; white-space: nowrap; }', 2);
-      styleEl.sheet.insertRule(':host([reparent-target]) .type-label { display: block; background: rgba(255, 152, 0, 0.85); }', 3);
+      styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { box-shadow: #ff9800 0px 0px 0px 2px inset; } }", 1);
+      styleEl.sheet.insertRule('@media screen { .type-label { position: absolute; top: 0; left: 0; padding: 2px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: none; user-select: none; cursor: default; z-index: ' + Z_INDEX_TYPE_LABEL + '; display: none; white-space: nowrap; } }', 2);
+      styleEl.sheet.insertRule('@media screen { :host([reparent-target]) .type-label { display: block; background: rgba(255, 152, 0, 0.85); } }', 3);
+      styleEl.sheet.insertRule('@media print { .type-label { display: none !important; } }', 4);
       const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
       rule.style.setProperty('background-color', '#ffffff', 'important');
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
