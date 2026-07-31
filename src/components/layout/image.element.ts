@@ -1,6 +1,6 @@
 import { InheritStyle, ImageData, ImageObjectFit, PrintPostData } from "@/types";
 import { LayoutBoxElement } from "./box.element";
-import { genUUID } from "@/utils";
+import { genUUID, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay } from "@/utils";
 import { DEFAULT_IMAGE_DPI } from "@/constants";
 
 /**
@@ -123,9 +123,11 @@ export class LayoutImageElement extends HTMLElement {
   connectedCallback() {
     if (!this.id) this.id = genUUID();
     this.layout();
+    createAiProcessingOverlay(this._shadowRoot);
   }
 
   disconnectedCallback() {
+    removeAiProcessingOverlay(this._shadowRoot);
     if (this._objectUrl) {
       URL.revokeObjectURL(this._objectUrl);
       this._objectUrl = undefined;
@@ -607,6 +609,47 @@ export class LayoutImageElement extends HTMLElement {
 
   get objectFit(): ImageObjectFit {
     return this._objectFit;
+  }
+
+  /**
+   * AI 처리 중 상태를 반환한다.
+   *
+   * `data` getter에 포함되지 않는 휘발성 속성으로, 저장/직렬화 시 자동 제외된다.
+   *
+   * @returns AI 처리 중 여부
+   *
+   * @example
+   * ```ts
+   * if (imageElement.aiProcessing) {
+   *   // AI 처리 중 로직
+   * }
+   * ```
+   */
+  get aiProcessing(): boolean {
+    return isAiProcessingActive(this._shadowRoot);
+  }
+
+  /**
+   * AI 처리 중 상태를 설정한다.
+   *
+   * `true`이면 요소를 반투명 오버레이로 덮고 shimmer + spinner 애니메이션을 표시한다.
+   * 오버레이는 `pointer-events: auto`로 마우스 이벤트를 가로채 요소 조작을 차단한다.
+   * `layout()`/`render()`를 트리거하지 않으므로 비용이 거의 없다.
+   * `data` setter와 독립적이며 저장 시 직렬화되지 않는다.
+   *
+   * @param value - `true`면 AI 처리 중 오버레이 표시, `false`면 숨김
+   *
+   * @example
+   * ```ts
+   * // AI 처리 시작
+   * imageElement.aiProcessing = true;
+   *
+   * // AI 처리 완료
+   * imageElement.aiProcessing = false;
+   * ```
+   */
+  set aiProcessing(value: boolean) {
+    setAiProcessingActive(this._shadowRoot, value);
   }
 
   get data() {
