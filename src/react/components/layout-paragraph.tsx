@@ -6,13 +6,14 @@ import { useLayoutElement } from '@/react/hooks';
 export interface LayoutParagraphProps {
   data: ParagraphData;
   editableText?: boolean;
+  aiProcessing?: boolean;
   onRenderError?: (event: CustomEvent) => void;
   onRenderComplete?: (detail: RenderCompleteEventDetail) => void;
   children?: ReactNode;
 }
 
 export const LayoutParagraph = forwardRef<LayoutParagraphElement, LayoutParagraphProps>(
-  function LayoutParagraph({ data, editableText, onRenderError, onRenderComplete, children }, ref) {
+  function LayoutParagraph({ data, editableText, aiProcessing, onRenderError, onRenderComplete, children }, ref) {
     const { ref: innerRef, define } = useLayoutElement<LayoutParagraphElement>();
 
     useEffect(() => {
@@ -30,6 +31,12 @@ export const LayoutParagraph = forwardRef<LayoutParagraphElement, LayoutParagrap
       if (!element || editableText === undefined) return;
       element.editableText = editableText;
     }, [innerRef, editableText]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || aiProcessing === undefined) return;
+      element.aiProcessing = aiProcessing;
+    }, [innerRef, aiProcessing]);
 
     useEffect(() => {
       const element = innerRef.current;
