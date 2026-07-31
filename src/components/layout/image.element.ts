@@ -7,10 +7,10 @@ import { DEFAULT_IMAGE_DPI } from "@/constants";
  * URL 로더 함수 타입.
  *
  * 원본 URL을 받아 실제로 로드할 URL로 변환한다. 동기 또는 비동기로 동작할 수 있으며,
- * 인쇄 모드처럼 인라인 데이터(`base64Data`)를 직접 반환하는 시나리오도 지원한다.
+ * 인쇄 모드처럼 인라인 데이터(`data:` URL)를 직접 반환하는 시나리오도 지원한다.
  *
  * @param url 원본 URL (`ImageData.url`)
- * @param data 이미지 데이터 전체. 로더가 컨텍스트(예: `base64Data`, `dpi`)를 참조할 때 사용
+ * @param data 이미지 데이터 전체. 로더가 컨텍스트(예: `dpi`)를 참조할 때 사용
  * @returns 실제로 로드할 URL 문자열, 또는 로드하지 않을 경우 `undefined`/`null`
  *
  * @example
@@ -25,8 +25,8 @@ import { DEFAULT_IMAGE_DPI } from "@/constants";
  *   return signedUrl;
  * };
  *
- * // 인쇄 모드: base64Data를 직접 반환
- * LayoutImageElement.urlLoader = (_url, data) => data.base64Data;
+ * // 인쇄 모드: data: URL을 직접 반환
+ * LayoutImageElement.urlLoader = (url) => `data:image/png;base64,...`;
  * ```
  */
 export type URLLoader = (

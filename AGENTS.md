@@ -9,9 +9,10 @@ Newspaper layout engine implemented as Web Components (Custom Elements). Renders
 ## Commands
 
 ```bash
-npm run dev      # Vite dev server, opens examples/index.html
-npm run build    # Vite library build → dist/ (IIFE + React ESM + .d.ts)
-npm run preview  # Preview production build
+npm run dev              # Vite dev server, opens examples/index.html
+npm run build            # Vite library build → dist/ (IIFE + React ESM + .d.ts)
+npm run build:obfuscate  # build + JavaScript obfuscation (scripts/obfuscate.mjs)
+npm run preview          # Preview production build
 ```
 
 No test runner, linter, or formatter is configured.
@@ -61,7 +62,7 @@ When you make **any** of the following changes, you **must** update the correspo
   - Format: ESM (`formats: ['es']` in `vite.config.react.ts`)
   - Entry: `src/react/index.ts`
   - Externalizes `react` and `react/jsx-runtime` (peer dependency)
-- **Types**: Generated via `vite-plugin-dts` with `rollupTypes` — produces a single bundled `dist/layout-element.d.ts`
+- **Types**: Generated via `vite-plugin-dts` with `insertTypesEntry` — produces a bundled `dist/layout-element.d.ts` (entry) and per-file `dist/**/*.d.ts`
 - **Path alias**: `@` → `./src/*` (both tsconfig.json and vite.config.ts)
 
 ## Architecture
@@ -107,7 +108,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 ### Managers (Singletons, must init before rendering)
 
 - **`ColorRegistry`**: Loads `color.json` → CMYK→RGB conversion → injects CSS variables `--colorman-{name}`. In print mode, receives `CMYKColorSet` via `init()` instead of fetching.
-- **`FontLoader`**: Loads `fonts.json` → registers `FontFace` objects. In print mode, uses `base64Data` instead of `ttfFilename`. Hardcoded return value `getFontFamily()` → `'Myoungjo'`.
+- **`FontLoader`**: Loads `fonts.json` → registers `FontFace` objects. In print mode, receives `Font[]` via `init()` and uses `base64Data` (`data:font/ttf;base64,...` URI) to register fonts without server requests (only fonts with `base64Data` are loaded). In screen mode, fetches `fonts.json` via `_loadServer()` (or a custom loader registered via `registerLoader()`) and registers fonts using `base64Data` when present, falling back to `ttfFilename` otherwise — i.e., `base64Data` takes precedence in both modes. `registerLoader(loader)` / `resetLoader()` allow replacing the default `fetch('fonts.json')` with a custom async loader (e.g., API endpoint). `init()` uses `_computeFontsSignature()` to skip redundant re-initialization when the same `Font[]` is passed again. Hardcoded return value `getFontFamily()` → `'Myoungjo'`.
 - **`EditManager`**: Singleton (`src/edit/edit-manager.ts`) that manages global edit state. Tracks focused paragraph/controller, dispatches events (`focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`, `layoutSelectionChange`, `layoutMove`, `layoutResize`, `layoutAdd`, `layoutRemove`, `insert`, `insertCancel`, `modeChange`). Provides `focusParagraph()` / `blurParagraph()` API for programmatic focus control. `TextEditController` instances register/unregister with it. **Selection rules**: Selection is always active (except in print mode and insert mode). No `selectableMode` toggle needed — `LayoutSelectionController` is always attached. Clicking inside the document on empty space (not on a box) clears all selection and blurs text focus; clicking outside the document (e.g., toolbar) does nothing. **Mode switching**: Each mode setter deactivates other modes when activated — `layoutEditMode = true` (or `{ type: 'move' }`) switches `textEditMode = false` and `insertMode = null`; `layoutEditMode = { type: 'reparent' }` enables reparent mode; `textEditMode = true` switches `layoutEditMode = false` and `insertMode = null`; `insertMode = (non-null)` switches both `layoutEditMode = false` and `textEditMode = false`. **Selection preservation across mode switches**: Mode switches do NOT clear selection. Exiting layout edit mode preserves the current selection (the `editableLayout` setter no longer calls `_unregisterLayout`). **Text edit mode selection**: Entering text edit mode reduces multi-selection to single selection — if any selected box has `contentType === 'paragraph'`, the topmost such box remains selected; otherwise, the topmost selected element remains. The remaining paragraph receives focus via `focusParagraph()`. **Insert mode**: Entering insert mode clears all selection (including focused box via `clearLayoutSelection(false)`). **Focused box selection preservation**: When a paragraph receives text-edit focus, its parent `<x-layout-box>` is automatically selected via `_selectBoxForParagraph()`. This selection persists through blur (focus leaving the paragraph, but not moving to another paragraph) and mode switches. `clearLayoutSelection(preserveFocusedBox)` preserves the focused paragraph's parent box using `_lastFocusedBox` fallback when `_focusedController` is already null. Only `_unregister` (controller destruction) or `clearLayoutSelection(false)` (empty space click, insert mode) clears `_lastFocusedBox`. **Layout add/remove events**: `layoutAdd` dispatched when a layout element is added to the DOM (insert mode or reparent). `layoutRemove` dispatched when a layout element is removed from the DOM (reparent). Both include `source` field (`'insert'`, `'reparent'`, or `'programmatic'`).
 ## Important Constraints
 
@@ -123,7 +124,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
   `overlapPadding` values are always in mm and internally converted to screen pixels via `GridCalculator.ppm`.
 - **Image Object URL lifecycle**: When `urlLoader` returns a `blob:` URL (or `url` itself is `blob:`), `LayoutImageElement` tracks it in `_objectUrl` and calls `URL.revokeObjectURL()` on re-render (when the new URL differs) and in `disconnectedCallback`. This prevents memory leaks from un-revoked Object URLs. External code should not revoke blob URLs passed to `LayoutImageElement` until after the element is disconnected.
 - **overlapPadding uses ellipse-based detection**: When `overlapPadding` is set on an image, `getOverlapSizePX()` uses per-column ellipse detection instead of simple rectangle intersection. Each opaque pixel's distance to the text line is normalized by the directional padding values (`ndx = dx/horizPad`, `ndy = dy/vertPad`), and pixels within the elliptical padding zone (`ndx² + ndy² ≤ 1`) are considered overlapping. This creates a naturally rounded padding zone around the image's opaque shape, not a rectangular bounding box. Transparent areas do not block text. Falls back to geometric expanded rectangle when canvas is unavailable.
-- **Custom URL loader for images**: `LayoutImageElement.urlLoader` is a static `URLLoader` member shared by all image instances. When set, `render()` passes `ImageData.url` through the loader to obtain the actual URL to load (sync or async). When unset, the original URL is used directly (default behavior). Returning `null`/`undefined` from the loader skips loading. Useful for CDN rewriting, signed-URL fetching, or returning `base64Data` directly in print mode.
+- **Custom URL loader for images**: `LayoutImageElement.urlLoader` is a static `URLLoader` member shared by all image instances. When set, `render()` passes `ImageData.url` through the loader to obtain the actual URL to load (sync or async). When unset, the original URL is used directly (default behavior). Returning `null`/`undefined` from the loader skips loading. Useful for CDN rewriting, signed-URL fetching, or returning inline `data:` URLs in print mode.
 - **`getFontFamily()` is hardcoded**: Currently returns `'Myoungjo'` regardless of input. Font family mapping is not implemented.
 - **No tests exist**: There is no test infrastructure. No `vitest`, no `jest`, no test files.
 - **ColorRegistry without stylesheet**: `ColorRegistry.init()` sets `_ready = true` even when no stylesheet is available (SSR, test environments). Color data is accessible via `colorMap` but CSS variables are not injected.
@@ -179,13 +180,14 @@ src/
     font-loader.ts           # FontLoader (font loading singleton)
     index.ts
   types/
-    layout/                  # DocumentData, BoxData, ParagraphData, ImageData, GuideColumnData, TextData
+    layout/                  # DocumentData, BoxData, ParagraphData, ImageData, GuideColumnData, TextData, RenderCompleteEventDetail
       box.type.ts
       document.type.ts
       guide-column.type.ts
       image.type.ts
       paragraph.type.ts
       text.type.ts
+      render-complete-event.type.ts  # RenderCompleteEventDetail (render-complete event payload)
       text/
         text-block.type.ts
         text-line.type.ts
@@ -210,14 +212,17 @@ src/
       place-gun.type.ts
       index.ts
     index.ts
-  constants/                 # Constants: DEFAULT_FONT_SIZE, DEFAULT_PPM, etc.
-    defaults.ts
+  constants/                 # Constants: DEFAULT_FONT_SIZE, DEFAULT_PPM, z-index reservations, etc.
+    defaults.ts              # DEFAULT_*, Z_INDEX_* constants
+    line-break.ts            # LINE_START_FORBIDDEN / LINE_END_FORBIDDEN + isLineStartForbidden / isLineEndForbidden (한글 금칙문자)
     index.ts
-  utils/                     # checkOverlap, getOverlapSizePX, genUUID, ai-processing-overlay
+  utils/                     # checkOverlap, getOverlapSizePX, genUUID, ai-processing-overlay, objectFit, valueEqual
     ai-processing-overlay.ts   # createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay
     check-overlap.ts
     gen-uuid.ts
-    random.ts                # genRandom() helper (not exported by utils/index.ts)
+    image-fit.ts               # computeObjectFit (objectFit 프리셋 → mm 좌표/크기 변환)
+    value-equal.ts             # valueEqual (number | number[] 깊은 동등성 비교)
+    random.ts                  # genRandom() helper (not exported by utils/index.ts)
     index.ts
   examples/                  # exampleData (demo content for dev)
     example-data.ts
@@ -229,6 +234,7 @@ src/
       layout-paragraph.tsx
       layout-image.tsx
       layout-guide-column.tsx
+      logo.tsx                 # Logo (SVG mark component for dev/demo)
       index.ts
     hooks/                   # React hooks for editable text state and manager access
       use-editable-text.ts
@@ -238,7 +244,7 @@ src/
     context.tsx              # React Context provider for layout options
     index.ts                 # React entry point: re-exports vanilla library + React layer
   globals.d.ts               # JSX intrinsic elements for React interop
-  index.ts                   # Vanilla entry point: exports components, core, resource, types, constants, examples
+  index.ts                   # Vanilla entry point: exports components, core, resource, types, constants, utils, examples
 examples/
   index.html                 # Dev demo page
   color.json                 # CMYK color definitions (fetched at runtime)
@@ -252,7 +258,7 @@ examples/
 - **Managers must init**: `ColorRegistry.getInstance().init()` and `FontLoader.getInstance().init()` must be called and awaited before setting `document.data`. Without this, `getCSSColor()` and `getFontFamily()` throw. `ColorRegistry.init()` sets `_ready = true` even when no stylesheet is available (SSR, test environments) — color data is accessible via `colorMap` but CSS variables are not injected.
 - **`examples/color.json` and `examples/fonts.json`**: Served by Vite dev server. The fetch URLs are relative (`color.json`, `fonts.json`), so they must be co-located with the HTML page.
 - **Print mode**: Detected via `window.matchMedia("print")`. In print mode, both managers skip `fetch()` and expect data injection. The document element's `connectedCallback` assigns an `id` (auto-generated via `genUUID()` if absent) **before** returning early — you must call `.layout()` and `.render()` manually after data injection. Images and guide columns are hidden via `@media print` CSS rules (`visibility: hidden` / `display: none`); their rendered positions and sizes are instead collected via `printPostData` getters for post-processing outside the browser. Editing features (`editableLayout`, `editableText`) are completely blocked in print mode — setters return early without creating controllers or event listeners.
-- **TypeScript 7 RC**: `typescript: ^7.0.1-rc` is configured. The `noEmit: true` setting means `tsc` is type-check only; actual compilation is handled by Vite.
+- **TypeScript 7 RC**: `typescript: ^7.0.2` is configured. The `noEmit: true` setting means `tsc` is type-check only; actual compilation is handled by Vite.
 - **`noUnusedLocals` and `noUnusedParameters`** are enabled in tsconfig — dead imports or unused params will cause build errors.
 - **Cursor width is 1px**: The `<x-edit-cursor>` element has a fixed width of 1px and does not blink.
 - **Korean IME composition**: TextEditController handles IME composition via `compositionstart`, `compositionupdate`, and `compositionend` events. This is essential for Korean text input on Windows (TSF), macOS, and Linux (IBus).
@@ -273,8 +279,8 @@ The library ships two separate builds:
 
 `src/react/` is kept in a separate build. It re-exports everything from the vanilla entry point (`@/types`, `@/core`, `@/resource`, `@/constants`, `@/components`, `@/edit`) and adds React-specific wrappers:
 
-- `components/` — one wrapper component per Custom Element (`LayoutDocument`, `LayoutBox`, `LayoutParagraph`, `LayoutImage`, `LayoutGuideColumn`).
-- `hooks/` — `useEditable`, `useEditManager`, `useLayoutElement`.
+- `components/` — one wrapper component per Custom Element (`LayoutDocument`, `LayoutBox`, `LayoutParagraph`, `LayoutImage`, `LayoutGuideColumn`), plus `Logo` (SVG mark for dev/demo).
+- `hooks/` — `useEditableText`, `useEditManager`, `useLayoutElement`.
 - `context.tsx` — React Context provider for layout options.
 
 ### Build output
@@ -298,7 +304,7 @@ import {
   LayoutBox,
   LayoutParagraph,
   LayoutImage,
-  useEditable,
+  useEditableText,
 } from 'layout-element/react';
 ```
 
@@ -309,4 +315,4 @@ import {
 />
 ```
 
-`react` is a peer dependency (`>=18.0.0`). The IIFE bundle does not bundle or reference React.
+`react` is a peer dependency (`>=19.0.0`). The IIFE bundle does not bundle or reference React.
