@@ -1053,7 +1053,7 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 ### 18.3 `LayoutVirtualColumnElement`
 
 - `_initStructureAndMeasureColumns()`와 `_layoutTextIntoColumns()`에서 임시로 생성
-- `isOverflow`로 컬럼 높이 초과 여부 감지. **mm 기반 판정**: children 수 × `model.lineHeight`(mm)와 `model.inheritStyle.parentHeight`(mm)를 직접 비교하여 scale에 무관한 오버플로우 판정을 보장한다.
+- `isOverflow`로 컬럼 높이 초과 여부 감지. **mm 기반 판정**: children 수 × `model.lineHeight`(mm)와 `model.inheritStyle.parentHeight`(mm)를 직접 비교하여 scale에 무관한 오버플로우 판정을 보장한다. **부동소수점 오차 tolerance**: 비교 시 `containerHeightMm + 1e-6` 기준을 사용하여, `editableTextHeight` 계산에서 발생하는 부동소수점 오차(예: `15 × 4.8 = 72` vs `parentHeight = 71.99999999999999`)로 인해 15줄이 꽉 찬 컬럼이 overflow로 잘못 판정되는 현상을 방지한다. 이 기준은 `LayoutParagraphElement._computeRenderStats()`의 `accumulatedHeightMm + lineHeightMm > parentHeight + 1e-6`과 동일하다.
 - 측정 완료 후 제거됨
 
 ---
