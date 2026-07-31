@@ -985,9 +985,6 @@ export class LayoutBoxElement extends HTMLElement {
     const data: PrintPostData[] = [];
     const rect = this.getBoundingClientRect();
 
-    this.items.forEach(c => {
-      data.push(...c.printPostData)
-    });
     const colorRegistry = ColorRegistry.getInstance();
 
     data.push({
@@ -1003,6 +1000,12 @@ export class LayoutBoxElement extends HTMLElement {
         height: rect.height,
       },
     });
+
+    const sortedItems = [...this.items].sort((a, b) => a.zIndex - b.zIndex).reverse();
+    for (const item of sortedItems) {
+      data.push(...item.printPostData);
+    }
+
     return data;
   }
 

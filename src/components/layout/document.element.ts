@@ -405,7 +405,10 @@ export class LayoutDocumentElement extends HTMLElement {
 
   get printPostData() {
     const data: PrintPostData[] = [];
-    this.items.forEach(c => data.push(...c.printPostData));
+    const sortedItems = [...this.items].sort((a, b) => a.zIndex - b.zIndex).reverse();
+    for (const item of sortedItems) {
+      data.push(...item.printPostData);
+    }
     this.querySelectorAll('x-layout-guide-column').forEach((gc: any) => {
       if (gc.printPostData) data.push(...gc.printPostData);
     });
