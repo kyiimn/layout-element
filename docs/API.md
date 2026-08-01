@@ -2116,7 +2116,7 @@ type BoxPosition = 'static' | 'absolute';
 type BoxBorderStyle = 'solid' | 'dotted' | 'dashed';
 type BoxRole =
   | 'group-article' | 'body' | 'image' | 'title' | 'caption'
-  | 'group-image' | 'header' | 'ad' | 'none';
+  | 'group-image' | 'header' | 'ad' | 'byline' | 'none';
 ```
 
 #### `ParagraphData`

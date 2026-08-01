@@ -164,7 +164,10 @@ export type EditManagerEventType =
   | 'insertCancel'
   | 'modeChange'
   | 'boxPropertyChange'
-  | 'placeGunChange';
+  | 'contextMenu'
+  | 'placeGunChange'
+  | 'placeGunBefore'
+  | 'placeGunAfter';
 ```
 
 ### 3.2 `EditManagerEvent`
@@ -206,6 +209,8 @@ export interface EditManagerEvent {
   mode?: EditModeState;
   /** Box 속성 변경 상세 정보 (boxPropertyChange 이벤트에서만) */
   boxPropertyDetail?: BoxPropertyChangeEventDetail;
+  /** 컨텍스트 메뉴 상세 정보 (contextMenu 이벤트에서만) */
+  contextMenuDetail?: ContextMenuEventDetail;
   /** Place Gun 상태 변경 상세 정보 (placeGunChange 이벤트에서만) */
   placeGunDetail?: PlaceGunChangeEventDetail;
 }
@@ -773,6 +778,38 @@ interface PlaceGunChangeEventDetail {
 
 ---
 
+## 9.3 `contextMenu`
+
+`contextmenu` DOM 이벤트(우클릭)가 document 내부에서 발생하면 `LayoutSelectionController._onContextMenu`가 처리하여 `contextMenu` 이벤트를 디스패치한다. 이벤트 디스패치 전에 선택 룰이 적용된다.
+
+```typescript
+manager.addEventListener('contextMenu', (event) => {
+  const detail = event.contextMenuDetail!;
+  console.log('우클릭한 요소:', detail.element);
+  console.log('마우스 위치:', detail.mouseX, detail.mouseY);
+  console.log('현재 선택된 요소들:', detail.selectedLayouts);
+});
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `type` | `'contextMenu'` | 이벤트 타입 |
+| `contextMenuDetail.element` | `LayoutBoxElement \| LayoutDocumentElement \| null` | 우클릭한 요소 (box, document, 또는 빈 공간 `null`) |
+| `contextMenuDetail.mouseX` | `number` | 뷰포트 기준 마우스 X 좌표 (clientX) |
+| `contextMenuDetail.mouseY` | `number` | 뷰포트 기준 마우스 Y 좌표 (clientY) |
+| `contextMenuDetail.selectedLayouts` | `LayoutBoxElement[]` | 이벤트 발생 시 선택된 레이아웃 요소들 (선택 갱신 후) |
+
+### 선택 룰
+
+1. **이미 선택된 box에서 우클릭** → 기존 selection 유지 (멀티 선택 포함)
+2. **선택되지 않은 box 우클릭** → 기존 selection 해제 후 해당 box만 선택
+3. **빈 공간 우클릭** (document 내부, box 외부) → selection 해제, `element`는 `LayoutDocumentElement`
+4. **document 외부 우클릭** → 이벤트 디스패치하지 않음
+
+**재진입 보호**: 다른 이벤트 디스패치 중에는 `contextMenu` 이벤트가 발생하지 않는다 (`_dispatching` 플래그).
+
+---
+
 ## 10. 모드 전환 이벤트
 
 모드 전환 이벤트는 `EditManager`의 `textEditMode`/`layoutEditMode`/`insertMode` setter에서 모드가 실제로 변경된 후 `_dispatchModeChange()`를 통해 발생한다. `paragraph`와 `controller`는 항상 `null as unknown as ...`이다.
@@ -1089,6 +1126,7 @@ LayoutSelectionController._onClick
 | `insertCancel` | 삽입 | (없음) | 삽입 드래그 ESC 취소 |
 | `modeChange` | 모드 전환 | `previousMode`, `mode` | textEditMode/layoutEditMode/insertMode 변경 |
 | `boxPropertyChange` | Box 속성 | `boxPropertyDetail.box`, `boxPropertyDetail.property`, `boxPropertyDetail.oldValue`, `boxPropertyDetail.newValue` | box의 role/contentUid/groupMember/priority/zIndex 변경 |
+| `contextMenu` | 컨텍스트 메뉴 | `contextMenuDetail.element`, `contextMenuDetail.mouseX`, `contextMenuDetail.mouseY`, `contextMenuDetail.selectedLayouts` | box/document 우클릭 (선택 룰 적용 후) |
 | `placeGunChange` | Place Gun | `placeGunDetail.items`, `placeGunDetail.paused` | Place Gun 장전/비우기/삭제/재정렬/일시정지/소비 |
 | `placeGunBefore` | Place Gun | `placeGunBeforeDetail.item`, `placeGunBeforeDetail.box` | Place Gun 항목 주입 직전 (클릭 배치 시작) |
 | `placeGunAfter` | Place Gun | `placeGunAfterDetail.item`, `placeGunAfterDetail.box`, `placeGunAfterDetail.success` | Place Gun 항목 주입 완료 직후 |
@@ -1106,9 +1144,10 @@ LayoutSelectionController._onClick
 | `src/edit/insert-controller.ts` | `InsertController`: `insert`, `insertCancel` 이벤트 발생 (`_dispatchInsert`, `_dispatchInsertCancel` 호출), `layoutAdd` 이벤트 발생 (`_dispatchLayoutAdd` 호출) |
 | `src/edit/place-gun-controller.ts` | `PlaceGunController`: Place Gun 클릭 배치 처리, `_consumePlaceGunItem` 호출로 항목 소비 → `placeGunChange` 간접 발생. 새 요소를 생성하지 않고 기존 paragraph/image에 데이터 주입하므로 `layoutAdd` 이벤트는 발생하지 않음 |
 | `src/types/edit/insert.type.ts` | `InsertEventDetail` 타입 정의 (`insert` 이벤트 payload) |
-| `src/types/edit/layout.type.ts` | `LayoutEditModeConfig`, `LayoutAddEventDetail`, `LayoutRemoveEventDetail`, `EditModeState`, `BoxPropertyChangeEventDetail` 타입 정의 |
+| `src/types/edit/layout.type.ts` | `LayoutEditModeConfig`, `LayoutAddEventDetail`, `LayoutRemoveEventDetail`, `EditModeState`, `BoxPropertyChangeEventDetail`, `ContextMenuEventDetail` 타입 정의 |
 | `src/types/edit/place-gun.type.ts` | `PlaceGunItem`, `PlaceGunChangeEventDetail`, `PlaceGunBeforeEventDetail`, `PlaceGunAfterEventDetail` 타입 정의 (`placeGunChange`/`placeGunBefore`/`placeGunAfter` 이벤트 payload) |
 | `src/components/layout/box.element.ts` | `LayoutBoxElement`: `role`, `contentUid`, `groupMember`, `priority`, `zIndex` setter에서 `boxPropertyChange` 이벤트 발생 |
+| `src/edit/layout-selection-controller.ts` | `LayoutSelectionController`: `contextmenu` 이벤트 리스너 등록 (capture phase), 선택 룰 적용 후 `_dispatchContextMenu` 호출 → `contextMenu` 이벤트 발생 |
 | `src/components/layout/paragraph.element.ts` | `LayoutParagraphElement`: `render()` 완료 후 `render-complete` CustomEvent 디스패치 (항상), 오버플로우 시 `render-error` CustomEvent 디스패치. `EditManager` 이벤트 시스템과 독립적 |
 | `src/types/layout/render-complete-event.type.ts` | `RenderCompleteEventDetail` 타입 정의 (`render-complete` 이벤트 payload) |
 
