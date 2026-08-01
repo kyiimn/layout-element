@@ -42,7 +42,7 @@
 │   │  cursor: grab ↄ   │    │  cursor: grab ↄ    │                  │
 │   └────────────────────┘    └────────────────────┘                  │
 │                                                                      │
-│  EditManager (singleton)                                             │
+│  EditManager (per-document instance)                                             │
 │  ├── layoutEditMode: boolean                                         │
 │  ├── editableRoles: ReadonlySet<BoxRole> | null                      │
 │  ├── editableBoxIds: ReadonlySet<string> | null                      │
@@ -86,7 +86,7 @@
 레이아웃 편집 모드는 `EditManager`의 글로벌 상태로 제어한다.
 
 ```typescript
-const manager = EditManager.getInstance();
+const manager = layoutDocEl.editManager;
 
 // 기본 이동 모드(move): 부모 내부에서만 이동 (경계 클램핑 적용)
 manager.layoutEditMode = true;
@@ -172,7 +172,7 @@ const editable = manager.isBoxEditable(box); // boolean
 레이아웃 선택은 기본적으로 항상 활성이다. `LayoutSelectionController`는 처음부터 부착되어 있으며, 인쇄 모드와 삽입 모드를 제외하면 항상 동작한다. 선택은 `layoutEditMode`와 독립적으로 동작한다.
 
 ```typescript
-const manager = EditManager.getInstance();
+const manager = layoutDocEl.editManager;
 
 // 항상 클릭 선택 가능 (인쇄/삽입 모드 제외)
 manager.selectLayout(box);
@@ -575,7 +575,7 @@ private _resizeStates = new Map<LayoutBoxElement, BoxResizeState>();
 #### 레이아웃 편집 모드 및 필터
 
 ```typescript
-const manager = EditManager.getInstance();
+const manager = layoutDocEl.editManager;
 
 // 글로벌 모드
 manager.layoutEditMode = true;
@@ -708,7 +708,7 @@ manager.setEditableRootId(null);
 **scale 변경 시 paragraph 재렌더링**: `setScale(s)`는 보정 계수를 설정한 뒤, 문서 내 모든 `<x-layout-paragraph>`에 대해 `markStructureChangedAndRender()`를 호출한다. 이는 `TextLayoutEngine._columnPpm`(컬럼 픽셀/mm 비율)이 `layoutStructure()` 시점의 scale을 반영하여 측정되기 때문이다. scale이 변경되어도 `paragraph.render()`가 `_perfStructureChanged = false` 상태로 호출되면 `layoutText()`만 실행되어 이전 scale 기준의 `_columnPpm`이 재사용되고, `partWidths`(현재 scale의 viewport 픽셀)와 `_charWidthPx`(이전 scale ppm 기반)가 불일치하여 컬럼에 들어가는 문자 수가 잘못 계산된다. `markStructureChangedAndRender()`가 `_perfStructureChanged = true`를 설정하여 다음 `render()`에서 `layoutStructure()`가 호출되도록 보장함으로써 `_columnPpm`이 새 scale 기준으로 재측정된다.
 
 ```typescript
-const manager = EditManager.getInstance();
+const manager = layoutDocEl.editManager;
 
 // 마운트 시: zoom 상태에 맞춰 보정 계수 적용
 React.useEffect(() => {
@@ -1711,7 +1711,7 @@ private _onKeyDown = (event: KeyboardEvent): void => {
   this._flushRerenderAffectedParagraphs(box, state);
   box.style.cursor = this._isBoxEditable(box) ? 'grab' : '';
 
-  const manager = EditManager.getInstance();
+  const manager = layoutDocEl.editManager;
   const dragTargets = manager._getDragTargets();
   const isTopLevel = dragTargets.includes(box);
 

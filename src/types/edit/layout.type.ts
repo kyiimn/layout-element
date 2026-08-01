@@ -98,7 +98,7 @@ export type BoxPropertyName = 'role' | 'contentUid' | 'groupMember' | 'priority'
  *
  * @example
  * ```ts
- * EditManager.getInstance().addEventListener('contextMenu', (event) => {
+ * layoutDocEl.editManager.addEventListener('contextMenu', (event) => {
  *   const detail = event.contextMenuDetail!;
  *   console.log('우클릭한 요소:', detail.element);
  *   console.log('마우스 위치:', detail.mouseX, detail.mouseY);
@@ -126,7 +126,7 @@ export interface ContextMenuEventDetail {
  *
  * @example
  * ```ts
- * EditManager.getInstance().addEventListener('boxPropertyChange', (event) => {
+ * layoutDocEl.editManager.addEventListener('boxPropertyChange', (event) => {
  *   const { box, property, oldValue, newValue } = event.boxPropertyDetail!;
  *   console.log(`${box.id}.${property}: ${oldValue} → ${newValue}`);
  * });

@@ -25,7 +25,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  EditManager (singleton)                                             │
+│  EditManager (per-document instance)                                             │
 │                                                                      │
 │  ├── _listeners: Map<EditManagerEventType, Set<EditManagerEventListener>>│
 │  ├── _dispatching: boolean (재진입 보호)                              │
@@ -117,7 +117,7 @@ unmount될 때 `reset()`을 호출한다.
 ```typescript
 // React 예시
 React.useEffect(() => {
-  return () => { EditManager.getInstance().reset(); };
+  return () => { layoutDocEl.editManager.reset(); };
 }, []);
 ```
 
@@ -1177,7 +1177,7 @@ LayoutSelectionController._onClick
 ### 16.1 텍스트 편집 UI 연동
 
 ```typescript
-const manager = EditManager.getInstance();
+const manager = layoutDocEl.editManager;
 
 // 포커스 이동 → 스타일 패널 갱신
 manager.addEventListener('focusChange', (event) => {
@@ -1301,7 +1301,7 @@ function EditorPanel() {
 ### 16.5 모드 전환 UI 연동
 
 ```typescript
-const manager = EditManager.getInstance();
+const manager = layoutDocEl.editManager;
 
 manager.addEventListener('modeChange', (event) => {
   const { previousMode, mode } = event;
@@ -1333,7 +1333,7 @@ manager.addEventListener('modeChange', (event) => {
 ### 16.6 Box 속성 변경 UI 연동
 
 ```typescript
-const manager = EditManager.getInstance();
+const manager = layoutDocEl.editManager;
 
 manager.addEventListener('boxPropertyChange', (event) => {
   const { box, property, oldValue, newValue } = event.boxPropertyDetail!;

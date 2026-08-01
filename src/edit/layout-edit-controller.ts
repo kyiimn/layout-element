@@ -192,7 +192,7 @@ function createResizeState(): BoxResizeState {
  * 드래그/리사이즈 상태를 private 필드로 보관했다. 이 컨트롤러는 그 책임을
  * 문서 레벨의 단일 리스너로 중앙화한다.
  *
- * - **이벤트 위임**: `mousedown`과 `click`을 capture phase로 `document.documentElement`에 등록한다.
+ * - **이벤트 위임**: `mousedown`과 `click`을 capture phase로 문서 요소(`LayoutDocumentElement`)에 등록한다.
  *   `composedPath()`를 통해 shadow DOM 내부의 box까지 추적할 수 있다.
  * - **상태 분리**: 각 box의 드래그/리사이즈 상태는 `Map<LayoutBoxElement, BoxDragState>` /
  *   `Map<LayoutBoxElement, BoxResizeState>`로 관리된다. box 인스턴스 자체는 상태를 보관하지 않는다.
@@ -201,15 +201,17 @@ function createResizeState(): BoxResizeState {
  *
  * @example
  * ```ts
- * const manager = EditManager.getInstance();
+ * const manager = this._manager;
  * manager.setEditableRoles(['body', 'title']);
  * manager.layoutEditMode = true;
  * // → LayoutEditController가 attach()되어 편집 가능한 box의 드래그/리사이즈를 처리
  * ```
  */
 export class LayoutEditController {
-  /** 이벤트 리스너가 등록되는 루트 요소 (일반적으로 `document.documentElement`) */
+  /** 이벤트 리스너가 등록되는 루트 요소 (문서 요소 `LayoutDocumentElement`) */
   private _document: HTMLElement;
+  /** 이 컨트롤러가 속한 EditManager 인스턴스 */
+  private _manager: EditManager;
   /** 컨트롤러 활성화 여부. `attach()`/`detach()`로 토글된다 */
   private _attached = false;
 
@@ -232,9 +234,11 @@ export class LayoutEditController {
 
   /**
    * @param doc - 이벤트 리스너가 등록될 루트 HTMLElement
+   * @param manager - 이 컨트롤러가 속한 EditManager 인스턴스
    */
-  constructor(doc: HTMLElement) {
+  constructor(doc: HTMLElement, manager: EditManager) {
     this._document = doc;
+    this._manager = manager;
   }
 
   /**
@@ -283,7 +287,7 @@ export class LayoutEditController {
    * @returns 편집 가능 여부
    */
   private _isBoxEditable(box: LayoutBoxElement): boolean {
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     if (this._isBoxOrAncestorLocked(box)) return false;
     if (!this._isWithinEditableRoot(box)) return false;
     return manager.isBoxEditable(box) || box.editableLayout;
@@ -306,7 +310,7 @@ export class LayoutEditController {
    * 루트가 지정되지 않았거나 box가 루트의 자손이면 true, 루트 자체이거나 외부이면 false.
    */
   private _isWithinEditableRoot(box: LayoutBoxElement): boolean {
-    const rootId = EditManager.getInstance().editableRootId;
+    const rootId = this._manager.editableRootId;
     if (rootId === null) return true;
     if (box.id === rootId) return false;
     let current: Element | null = box.parentElement;
@@ -403,7 +407,7 @@ export class LayoutEditController {
   private _onMouseDown = (event: MouseEvent): void => {
     const box = this._findEditableBoxFromEvent(event);
     if (!box) return;
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     if (manager.placeGunActive) return;
     if (manager.insertMode) {
       manager.handleInsertMouseDown(event);
@@ -472,7 +476,7 @@ export class LayoutEditController {
    * @param box - 드래그를 시작할 box 요소
    */
   private _startDrag(event: MouseEvent, box: LayoutBoxElement): void {
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     let state = this._dragStates.get(box);
     if (!state) {
       state = createDragState();
@@ -587,7 +591,7 @@ export class LayoutEditController {
       // rAF 콜백 실행 시점의 최신 마우스 좌표를 사용
       const dx = state.lastClientX - state.startMouseX;
       const dy = state.lastClientY - state.startMouseY;
-      const manager = EditManager.getInstance();
+      const manager = this._manager;
       const dragTargets = manager._getDragTargets();
       const isTopLevel = dragTargets.includes(box);
 
@@ -681,7 +685,7 @@ export class LayoutEditController {
     this._flushRerenderAffectedParagraphs(box, state);
     box.style.cursor = this._isBoxEditable(box) ? 'grab' : '';
 
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
 
     // 드래그 이동이 없었으면 (임계값 미충족 = 단순 클릭)
     if (!state.dragMoved) {
@@ -834,7 +838,7 @@ export class LayoutEditController {
     box.style.cursor = this._isBoxEditable(box) ? 'grab' : '';
     box.style.transform = '';
 
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     const dragTargets = manager._getDragTargets();
     const isTopLevel = dragTargets.includes(box);
 
@@ -878,7 +882,7 @@ export class LayoutEditController {
    * @param box - 리사이즈를 시작할 box 요소
    */
   private _startResize(event: MouseEvent, box: LayoutBoxElement): void {
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     if (manager.insertMode) return;
     if (!box.hasAttribute('selected')) return;
 
@@ -998,7 +1002,7 @@ export class LayoutEditController {
 
     // 리사이즈 중 보류된 단락 재렌더링을 즉시 실행
     this._flushRerenderAffectedParagraphs(box, state);
-    EditManager.getInstance()._endLayoutResize();
+    this._manager._endLayoutResize();
 
     // 리사이즈 이동이 없었으면 (임계값 미충족 = 단순 클릭)
     if (!state.moved) {
@@ -1008,7 +1012,7 @@ export class LayoutEditController {
 
     // 리사이즈 이동이 있었으면 후속 click 이벤트가 빈 영역 클릭으로
     // 처리되어 선택이 해제되는 것을 방지한다.
-    EditManager.getInstance()._suppressLayoutClick();
+    this._manager._suppressLayoutClick();
 
     // 최종 크기 계산 및 적용
     const deltaX = event.clientX - state.startMouseX;
@@ -1020,7 +1024,7 @@ export class LayoutEditController {
     if (width !== box.width) box.width = width;
     if (height !== box.height) box.height = height;
 
-    EditManager.getInstance()._dispatchLayoutResize(
+    this._manager._dispatchLayoutResize(
       box,
       state.startLeft, state.startTop, state.startWidth, state.startHeight,
       left, top, width, height,
@@ -1060,7 +1064,7 @@ export class LayoutEditController {
     state.isResizing = false;
     state.handle = null;
     this._flushRerenderAffectedParagraphs(box, state);
-    EditManager.getInstance()._endLayoutResize();
+    this._manager._endLayoutResize();
 
     // 원래 크기로 복원
     if (box.left !== state.startLeft) box.left = state.startLeft;
@@ -1068,7 +1072,7 @@ export class LayoutEditController {
     if (box.width !== state.startWidth) box.width = state.startWidth;
     if (box.height !== state.startHeight) box.height = state.startHeight;
 
-    EditManager.getInstance()._dispatchLayoutResize(
+    this._manager._dispatchLayoutResize(
       box,
       state.startLeft, state.startTop, state.startWidth, state.startHeight,
       state.startLeft, state.startTop, state.startWidth, state.startHeight,
@@ -1106,7 +1110,7 @@ export class LayoutEditController {
     const state = this._dragStates.get(box);
     const sLeft = startLeft ?? (state ? state.startLeft : box.left);
     const sTop = startTop ?? (state ? state.startTop : box.top);
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     const deltaMmX = manager.screenDeltaToMm(deltaPxX);
     const deltaMmY = manager.screenDeltaToMm(deltaPxY);
 
@@ -1437,7 +1441,7 @@ export class LayoutEditController {
     if (!handle) return { left: sLeft, top: sTop, width: sWidth, height: sHeight };
 
     if (box.position === 'absolute') {
-      const manager = EditManager.getInstance();
+      const manager = this._manager;
       const deltaMmX = manager.screenDeltaToMm(deltaPxX);
       const deltaMmY = manager.screenDeltaToMm(deltaPxY);
       // parentWidth/parentHeight는 editableWidth/editableHeight로부터 온 값으로
@@ -1498,7 +1502,7 @@ export class LayoutEditController {
     const { columnCount, lineHeight } = parentModel;
     const editableTextHeight = parentModel.editableTextHeight;
     const avgColWidth = parentModel.editableWidth / parentModel.columnCount;
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     const deltaMmX = manager.screenDeltaToMm(deltaPxX);
     const deltaMmY = manager.screenDeltaToMm(deltaPxY);
 
@@ -1654,7 +1658,7 @@ export class LayoutEditController {
 
     // 형제 box의 자식 단락 수집
     if (box.parentElement) {
-      const manager = EditManager.getInstance();
+      const manager = this._manager;
       // reparent 모드에서는 box가 부모 밖으로 나갈 수 있어 AABB 비교가 부정확.
       // startRect가 없으면 (단순 클릭, 리사이즈 등) 안전하게 모든 형제 수집.
       if (manager.layoutEditType === 'reparent' || startRect === null) {
@@ -1794,7 +1798,7 @@ export class LayoutEditController {
     // box의 현재 화면 위치를 새 컨테이너 내부 mm 좌표로 변환
     const boxRect = box.getBoundingClientRect();
     const containerRect = newContainer.getBoundingClientRect();
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
 
     let containerPaddingLeft = 0;
     let containerPaddingTop = 0;
@@ -1878,7 +1882,7 @@ export class LayoutEditController {
    * 적합한 컨테이너가 없으면 EditManager 루트로 폴백한다.
    */
   private _findReparentContainer(box: LayoutBoxElement, clientX: number, clientY: number): LayoutBoxElement | LayoutDocumentElement | null {
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     const rootId = manager.editableRootId;
     const rootBox = rootId
       ? document.getElementById(rootId) as LayoutBoxElement | null
@@ -2007,7 +2011,7 @@ export class LayoutEditController {
    * 다시 부모 안으로 돌아오면 transform을 해제하고 일반 이동으로 복귀한다.
    */
   private _applyReparentDragMove(box: LayoutBoxElement, dx: number, dy: number, state: BoxDragState): void {
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
 
     // 클램핑된 위치 계산 (부모 안에서의 최대 이동 가능 위치)
     const clamped = this._computeNewPosition(box, dx, dy, state.startLeft, state.startTop);

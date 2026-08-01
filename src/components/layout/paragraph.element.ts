@@ -37,6 +37,7 @@ export class LayoutParagraphElement extends HTMLElement {
 
   private _editableText: boolean = false;
   private _editController: TextEditController | null = null;
+  private _editManagerRef: EditManager | null = null;
   private _isPrint: boolean = window.matchMedia("print").matches;
 
   /** 성능 최적화: 구조 변경 여부 플래그. true면 다음 render()에서 전체 재생성을 수행한다. */
@@ -62,17 +63,39 @@ export class LayoutParagraphElement extends HTMLElement {
 
   connectedCallback() {
     if (!this.id) this.id = genUUID();
+    this._editManagerRef = this.editManager;
     this.layout();
     createAiProcessingOverlay(this._shadowRoot);
     if (this._editableText && !this._editController) {
-      this._editController = new TextEditController(this);
+      this._editController = this._editManagerRef ? new TextEditController(this, this._editManagerRef) : null;
     }
+  }
+
+  /**
+   * 이 paragraph가 속한 문서의 EditManager를 반환한다.
+   *
+   * parent 체인을 따라 올라가 `LayoutDocumentElement.editManager`를 발견한다.
+   * 문서에 연결되지 않은 경우 `null`을 반환한다.
+   *
+   * @returns 소속 문서의 EditManager. 문서에 연결되지 않았으면 `null`.
+   */
+  get editManager(): EditManager | null {
+    let el: Element | null = this.parentElement;
+    while (el) {
+      if (el instanceof LayoutBoxElement) {
+        const boxManager = el.editManager;
+        if (boxManager) return boxManager;
+      }
+      el = el.parentElement;
+    }
+    return null;
   }
 
   disconnectedCallback() {
     removeAiProcessingOverlay(this._shadowRoot);
     this._editController?.destroy();
     this._editController = null;
+    this._editManagerRef = null;
   }
 
   /**
@@ -202,7 +225,7 @@ export class LayoutParagraphElement extends HTMLElement {
 
     // EditManager.scale을 모델에 전달하여 getBoundingClientRect() 결과를
     // scale=1 기준으로 정규화하도록 한다. scale 무관한 래핑 결과를 보장한다.
-    this._model.scale = EditManager.getInstance().scale;
+    this._model.scale = this.editManager?.scale ?? 1;
 
     if (this._perfStructureChanged) {
       this._model.resetIncrementalState();
@@ -723,7 +746,10 @@ export class LayoutParagraphElement extends HTMLElement {
   set editableText(value: boolean) {
     if (this._isPrint) return;
     if (value && !this._editController) {
-      this._editController = new TextEditController(this);
+      const manager = this._editManagerRef ?? this.editManager;
+      if (manager) {
+        this._editController = new TextEditController(this, manager);
+      }
     } else if (!value && this._editController) {
       this._editController.destroy();
       this._editController = null;

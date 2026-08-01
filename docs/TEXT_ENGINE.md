@@ -769,7 +769,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 2. **오버랩 rect 캐시** (`_detectOverlapWithCache`): 오버랩 요소의 rect를 scale로 나누어 캐싱한다. 라인 rect도 동일한 scale로 나누어 비교하므로, 모든 scale에서 동일한 겹침 판정 결과를 보장한다.
 3. **`getOverlapSizePX()`**: 내부에서 `getBoundingClientRect()`를 다시 호출하므로, scale 파라미터를 받아 r1/r2를 정규화한다. canvas 픽셀 매핑(`canvas.width / r2.width`)도 정규화된 r2.width 기준으로 수행되어 scale 무관하다.
 
-`TextLayoutEngine.scale` 프로퍼티를 통해 scale 값을 받으며, `LayoutParagraphElement.render()`가 `EditManager.getInstance().scale`을 읽어 `model.scale`에 설정한 후 `layoutStructure()`/`layoutText()`를 호출한다. `EditManager.setScale()`은 모든 paragraph의 `markStructureChangedAndRender()`를 호출하므로, scale 변경 시 자동으로 재렌더링되어 새 scale이 반영된다.
+`TextLayoutEngine.scale` 프로퍼티를 통해 scale 값을 받으며, `LayoutParagraphElement.render()`가 `layoutDocEl.editManager.scale`을 읽어 `model.scale`에 설정한 후 `layoutStructure()`/`layoutText()`를 호출한다. `EditManager.setScale()`은 모든 paragraph의 `markStructureChangedAndRender()`를 호출하므로, scale 변경 시 자동으로 재렌더링되어 새 scale이 반영된다.
 
 ---
 

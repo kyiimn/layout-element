@@ -125,7 +125,7 @@ export type EditManagerEventListener = (event: EditManagerEvent) => void;
  *
  * @example
  * ```ts
- * const manager = EditManager.getInstance();
+ * const manager = layoutDocEl.editManager;
  *
  * // 이벤트 리스너 등록
  * manager.addEventListener('focusChange', (e) => {
@@ -146,7 +146,7 @@ export type EditManagerEventListener = (event: EditManagerEvent) => void;
  * ```
  */
 export class EditManager {
-  private static _instance: EditManager | null = null;
+  private _docEl: LayoutDocumentElement;
   private _controllers: Set<TextEditController> = new Set();
   private _focusedController: TextEditController | null = null;
   private _lastFocusedBox: LayoutBoxElement | null = null;
@@ -194,7 +194,29 @@ export class EditManager {
   /** 편집 루트 box id. null이면 제한 없음. 지정 시 해당 box 내부 요소만 편집 가능, Root 자체는 편집 불가. */
   private _editableRootId: string | null = null;
 
-  private constructor() {}
+  /**
+   * 이 EditManager가 관리하는 문서 요소.
+   *
+   * 문서별로 독립적인 인스턴스이므로, 전역 DOM 순회(`document.querySelectorAll`)
+   * 대신 이 요소의 하위 트리만 순회한다.
+   */
+  get docEl(): LayoutDocumentElement { return this._docEl; }
+
+  /**
+   * 주어진 문서 요소를 관리하는 편집 관리자를 생성한다.
+   *
+   * 문서별로 하나의 인스턴스를 생성하며, `LayoutDocumentElement.connectedCallback`
+   * 또는 외부(LayoutEditor React 컴포넌트)가 인스턴스를 생성해 `editManager`
+   * 프로퍼티로 할당한다. 생성 시 `LayoutSelectionController`를 즉시 생성하고
+   * attach하여 클릭/더블클릭/컨텍스트메뉴 이벤트를 문서 연결과 동시에 처리한다.
+   *
+   * @param docEl - 이 EditManager가 관리할 `LayoutDocumentElement`
+   */
+  constructor(docEl: LayoutDocumentElement) {
+    this._docEl = docEl;
+    this._selectionController = new LayoutSelectionController(this._docEl, this);
+    this._selectionController.attach();
+  }
 
   /**
    * 현재 편집 모드 상태 스냅샷을 반환한다.
@@ -249,25 +271,13 @@ export class EditManager {
   }
 
   /**
-   * 싱글톤 인스턴스를 반환한다.
-   */
-  static getInstance(): EditManager {
-    if (!EditManager._instance) {
-      EditManager._instance = new EditManager();
-      EditManager._instance._selectionController = new LayoutSelectionController(document.documentElement);
-      EditManager._instance._selectionController.attach();
-    }
-    return EditManager._instance;
-  }
-
-  /**
    * CSS `transform: scale(s)`이 적용된 환경을 위한 화면 scale 보정 계수를 설정한다.
    * 이후 `screenPxToMm()`/`screenDeltaToMm()`이 `originalPpm * scale`을 사용해
    * 변환된 픽셀 좌표를 mm으로 정확히 환산한다.
    *
    * @example
    * ```ts
-   * const manager = EditManager.getInstance();
+   * const manager = layoutDocEl.editManager;
    * manager.setScale(0.5);  // zoom 50% 환경
    * manager.setScale(1);    // 원본
    * ```
@@ -277,7 +287,7 @@ export class EditManager {
       throw new Error(`EditManager.setScale: scale은 0보다 커야 합니다 (입력값: ${scale}).`);
     }
     this._scale = scale;
-    document.querySelectorAll<LayoutParagraphElement>('x-layout-paragraph').forEach((p) => {
+    this._docEl.querySelectorAll<LayoutParagraphElement>('x-layout-paragraph').forEach((p) => {
       p.markStructureChangedAndRender();
     });
   }
@@ -304,13 +314,13 @@ export class EditManager {
    * - scale을 1로 원복한다.
    * - 이벤트 리스너는 제거하지 않는다 (React useEffect cleanup이 담당).
    *
-   * @example
-   * ```ts
-   * // LayoutEditor unmount 시
-   * React.useEffect(() => {
-   *   return () => { EditManager.getInstance().reset(); };
-   * }, []);
-   * ```
+    * @example
+    * ```ts
+    * // LayoutEditor unmount 시
+    * React.useEffect(() => {
+    *   return () => { layoutDocEl.editManager?.reset(); };
+    * }, [layoutDocEl]);
+    * ```
    */
   reset(): void {
     for (const el of this._selectedLayouts) {
@@ -358,12 +368,12 @@ export class EditManager {
     this._multiSelect = false;
     this._scale = 1;
 
-    document.querySelectorAll('x-layout-box[editable-layout]').forEach((el) => {
+    this._docEl.querySelectorAll('x-layout-box[editable-layout]').forEach((el) => {
       if (el instanceof LayoutBoxElement) {
         el.editableLayout = false;
       }
     });
-    document.querySelectorAll('x-layout-paragraph[editable-text]').forEach((el) => {
+    this._docEl.querySelectorAll('x-layout-paragraph[editable-text]').forEach((el) => {
       if (el instanceof LayoutParagraphElement) {
         el.editableText = false;
       }
@@ -499,7 +509,7 @@ export class EditManager {
    *   `paragraph` 필드에 설정된다.
    * @example
    * ```ts
-   * const manager = EditManager.getInstance();
+   * const manager = layoutDocEl.editManager;
    * // PlaceGun/AI fit 등 컨트롤러 외부 경로에서 텍스트 주입 후
    * manager.notifyTextChange(paragraph);
    * ```
@@ -655,7 +665,7 @@ export class EditManager {
     let paragraph: LayoutParagraphElement | null;
 
     if (typeof target === 'string') {
-      const element = document.getElementById(target);
+      const element = this._docEl.querySelector('#' + CSS.escape(target));
       paragraph = element instanceof LayoutParagraphElement
         ? element
         : null;
@@ -722,7 +732,7 @@ export class EditManager {
     let paragraph: LayoutParagraphElement | null;
 
     if (typeof target === 'string') {
-      const element = document.getElementById(target);
+      const element = this._docEl.querySelector('#' + CSS.escape(target));
       paragraph = element instanceof LayoutParagraphElement
         ? element
         : null;
@@ -765,7 +775,7 @@ export class EditManager {
    *
    * @example
    * ```ts
-   * const manager = EditManager.getInstance();
+   * const manager = layoutDocEl.editManager;
    * manager.setEditableTextRoles(['body', 'title']);
    * manager.textEditMode = true;
    * // → 부모 box role이 'body' 또는 'title'인 paragraph만 편집 가능
@@ -1030,7 +1040,7 @@ export class EditManager {
    * `isParagraphEditable()` 결과를 paragraph별로 적용한다.
    */
   private _applyEditableTextToAllParagraphs(): void {
-    const paragraphs = document.querySelectorAll<LayoutParagraphElement>('x-layout-paragraph');
+    const paragraphs = this._docEl.querySelectorAll<LayoutParagraphElement>('x-layout-paragraph');
     paragraphs.forEach((paragraph) => {
       const editable = this.isParagraphEditable(paragraph);
       if (paragraph.editableText !== editable) {
@@ -1050,7 +1060,7 @@ export class EditManager {
    *
    * @example
    * ```ts
-   * const manager = EditManager.getInstance();
+   * const manager = layoutDocEl.editManager;
    * manager.setEditableRoles(['body', 'title']);
    * manager.layoutEditMode = true;
    * // → role이 'body' 또는 'title'인 box만 편집 가능
@@ -1109,14 +1119,13 @@ export class EditManager {
   get layoutEditType(): LayoutEditType { return this._layoutEditType; }
 
   private _updateControllers(): void {
-    if (!this._selectionController) {
-      this._selectionController = new LayoutSelectionController(document.documentElement);
+    if (this._selectionController) {
+      this._selectionController.attach();
     }
-    this._selectionController.attach();
 
     if (this._layoutEditMode) {
       if (!this._layoutEditController) {
-        this._layoutEditController = new LayoutEditController(document.documentElement);
+        this._layoutEditController = new LayoutEditController(this._docEl, this);
       }
       this._layoutEditController.attach();
     } else {
@@ -1371,7 +1380,7 @@ export class EditManager {
    * `isBoxEditable()` 결과를 box별로 적용한다.
    */
   private _applyEditableLayoutToAllBoxes(): void {
-    const boxes = document.querySelectorAll<LayoutBoxElement>('x-layout-box');
+    const boxes = this._docEl.querySelectorAll<LayoutBoxElement>('x-layout-box');
     boxes.forEach((box) => {
       const editable = this.isBoxEditable(box);
       if (box.editableLayout !== editable) {
@@ -1530,19 +1539,19 @@ export class EditManager {
         this.clearLayoutSelection(false);
       }
 
-      const docEl = document.querySelector('x-layout-document') as LayoutDocumentElement | null;
-      if (!docEl) {
-        throw new Error('EditManager.insertMode: 문서 요소(x-layout-document)를 찾을 수 없습니다.');
+      const docEl = this._docEl;
+      if (!docEl.isConnected) {
+        throw new Error('EditManager.insertMode: 문서 요소(x-layout-document)가 연결되어 있지 않습니다.');
       }
 
       if (!isDragging) {
-        document.querySelectorAll<LayoutBoxElement>('x-layout-box').forEach((box) => {
+        this._docEl.querySelectorAll<LayoutBoxElement>('x-layout-box').forEach((box) => {
           box.style.cursor = 'crosshair';
         });
       }
 
       if (!this._insertController) {
-        this._insertController = new InsertController(docEl);
+        this._insertController = new InsertController(docEl, this);
       }
       this._insertController.setMode(mode);
       this._insertMode = mode;
@@ -1552,7 +1561,7 @@ export class EditManager {
       }
       this._insertMode = null;
 
-      document.querySelectorAll<LayoutBoxElement>('x-layout-box').forEach((box) => {
+      this._docEl.querySelectorAll<LayoutBoxElement>('x-layout-box').forEach((box) => {
         box.style.cursor = '';
       });
     }
@@ -1971,7 +1980,7 @@ export class EditManager {
 
   private _resolveLayoutElement(target: LayoutElement | string): LayoutElement | null {
     if (typeof target === 'string') {
-      const element = document.getElementById(target);
+      const element = this._docEl.querySelector('#' + CSS.escape(target));
       if (element instanceof LayoutBoxElement) {
         return element;
       }
@@ -2328,7 +2337,7 @@ export class EditManager {
   private _syncPlaceGunController(): void {
     if (this.placeGunActive) {
       if (!this._placeGunController) {
-        this._placeGunController = new PlaceGunController();
+        this._placeGunController = new PlaceGunController(this);
       }
       this._placeGunController.attach();
     } else {

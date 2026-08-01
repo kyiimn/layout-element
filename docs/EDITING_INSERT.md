@@ -24,7 +24,7 @@
 ┌─────────────────────────────────────────────────────────────────────┐
 │ <x-layout-document>                                                  │
 │                                                                      │
-│  EditManager (singleton)                                             │
+│  EditManager (per-document instance)                                             │
 │  ├── insertMode: InsertMode | null                                    │
 │  ├── _insertController: InsertController | null                       │
 │  ├── activateInsert(mode) / deactivateInsert()                        │
@@ -59,7 +59,7 @@
 ### 2.1 `EditManager.insertMode` getter / setter
 
 ```typescript
-const manager = EditManager.getInstance();
+const manager = layoutDocEl.editManager;
 
 // 삽입 모드 활성화
 manager.insertMode = { type: 'box', position: 'absolute' };
@@ -378,7 +378,7 @@ _findTargetContainer(startX, startY, endX, endY)
 
 ```typescript
 private _getRootContainer(): LayoutDocumentElement | LayoutBoxElement {
-  const manager = EditManager.getInstance();
+  const manager = layoutDocEl.editManager;
   const rootId = manager.editableRootId;
   if (rootId) {
     const rootBox = this._document.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null;
@@ -695,7 +695,7 @@ ESC 키 이외의 입력은 무시한다.
 
 ### 11.1 삽입 모드 활성화 시 레이아웃 기능 억제
 
-삽입 모드가 활성화되면 다음 핸들러가 `EditManager.getInstance().insertMode` 가드로 early return하여 레이아웃 선택/드래그/리사이즈가 방해되지 않는다.
+삽입 모드가 활성화되면 다음 핸들러가 `layoutDocEl.editManager.insertMode` 가드로 early return하여 레이아웃 선택/드래그/리사이즈가 방해되지 않는다.
 
 - `LayoutEditController._onMouseDown` — 삽입 모드 중 `EditManager.handleInsertMouseDown()` 위임 후 return
 - `LayoutEditController._startResize` — 삽입 모드 중 리사이즈 시작 차단

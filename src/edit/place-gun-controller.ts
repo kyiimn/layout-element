@@ -32,7 +32,15 @@ import type { PlaceGunItem, ArticleContent, ImageContent } from "@/types/edit";
  * ```
  */
 export class PlaceGunController {
+  private _manager: EditManager;
   private _cursorApplied = false;
+
+  /**
+   * @param manager - 이 컨트롤러가 속한 EditManager 인스턴스
+   */
+  constructor(manager: EditManager) {
+    this._manager = manager;
+  }
 
   /**
    * 문서 커서를 `copy`로 변경한다.
@@ -58,7 +66,7 @@ export class PlaceGunController {
   handleBoxMouseDown(box: LayoutBoxElement, event: MouseEvent): boolean {
     if (event.button !== 0) return false;
 
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     if (!manager.placeGunActive) return false;
 
     const nextItem = manager.placeGunItems[0];
@@ -244,7 +252,7 @@ export class PlaceGunController {
    */
   private _injectText(paragraph: LayoutParagraphElement, text: string): void {
     paragraph.content = text;
-    EditManager.getInstance().notifyTextChange(paragraph);
+    this._manager.notifyTextChange(paragraph);
   }
 
   /**

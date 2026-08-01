@@ -430,9 +430,10 @@
           hint.textContent = "";
         });
 
-        // EditManager 이벤트 수신
-        const { EditManager } = await import("/src/edit/edit-manager");
-        const em = EditManager.getInstance();
+        // EditManager 이벤트 수신 (문서 요소에서 per-document 인스턴스 획득)
+        const docEl = document.querySelector('x-layout-document');
+        const em = docEl?.editManager;
+        if (!em) return;
 
         // 텍스트 편집 이벤트
         const textEventTypes = [

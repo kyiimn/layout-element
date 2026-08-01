@@ -51,9 +51,9 @@ const EVENT_TYPES: Array<{ key: keyof UseEditManagerOptions; type: EditManagerEv
 ];
 
 export function useEditManager(
+  manager: EditManager,
   options: UseEditManagerOptions = {},
 ): UseEditManagerReturn {
-  const manager = EditManager.getInstance();
   const optionsRef = useRef(options);
   optionsRef.current = options;
 

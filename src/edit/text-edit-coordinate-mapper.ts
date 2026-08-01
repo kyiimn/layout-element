@@ -21,6 +21,7 @@ import { EditManager } from "./edit-manager";
  */
 export class TextEditCoordinateMapper {
   private _paragraph: LayoutParagraphElement;
+  private _manager: EditManager;
 
   /** 렌더링 오프셋 → 소스 오프셋 */
   private _renderedToSource: Map<number, number> = new Map();
@@ -44,8 +45,13 @@ export class TextEditCoordinateMapper {
    */
   private _totalLineCount = 0;
 
-  constructor(paragraph: LayoutParagraphElement) {
+  /**
+   * @param paragraph - 이 mapper가 바인딩된 paragraph 요소
+   * @param manager - 이 mapper가 속한 EditManager 인스턴스
+   */
+  constructor(paragraph: LayoutParagraphElement, manager: EditManager) {
     this._paragraph = paragraph;
+    this._manager = manager;
     this.rebuild();
   }
 
@@ -241,7 +247,7 @@ export class TextEditCoordinateMapper {
     const lineEl = lineEls[lineIndex];
     const rect = lineEl.getBoundingClientRect();
     const paraRect = this._paragraph.getBoundingClientRect();
-    const scale = EditManager.getInstance().scale;
+    const scale = this._manager.scale;
 
     return {
       top: (rect.top - paraRect.top) / scale,
@@ -261,7 +267,7 @@ export class TextEditCoordinateMapper {
 
     const spanRect = span.getBoundingClientRect();
     const paragraphRect = this._paragraph.getBoundingClientRect();
-    const scale = EditManager.getInstance().scale;
+    const scale = this._manager.scale;
 
     return new DOMRect(
       (spanRect.left - paragraphRect.left) / scale,
@@ -585,7 +591,7 @@ export class TextEditCoordinateMapper {
     if (startOffset >= endOffset) return result;
 
     const paragraphRect = this._paragraph.getBoundingClientRect();
-    const scale = EditManager.getInstance().scale;
+    const scale = this._manager.scale;
     const columns = this._getAllColumns();
 
     for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
@@ -716,7 +722,7 @@ export class TextEditCoordinateMapper {
     const paraRect = this._paragraph.getBoundingClientRect();
     // fontSize는 getComputedStyle에서 오므로 paragraph local coordinate와 동일 (transform 영향 없음).
     const fontSize = parseFloat(getComputedStyle(firstColumn).fontSize) || 16;
-    const scale = EditManager.getInstance().scale;
+    const scale = this._manager.scale;
 
     const textAlign = this._paragraph.paragraphStyle?.textAlign || DEFAULT_TEXT_ALIGN;
     let left: number;

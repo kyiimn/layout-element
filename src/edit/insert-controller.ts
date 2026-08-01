@@ -9,6 +9,7 @@ import type { InsertMode, InsertEventDetail } from "@/types/edit";
 /** 드래그-삽입을 통한 새 요소 생성을 관리하는 컨트롤러. */
 export class InsertController {
   private _document: LayoutDocumentElement;
+  private _manager: EditManager;
   private _mode: InsertMode | null = null;
   private _isDragging = false;
   private _startClientX = 0;
@@ -31,8 +32,13 @@ export class InsertController {
 
   private static readonly DRAG_THRESHOLD = 3;
 
-  constructor(document: LayoutDocumentElement) {
+  /**
+   * @param document - 삽입 대상 문서 요소
+   * @param manager - 이 컨트롤러가 속한 EditManager 인스턴스
+   */
+  constructor(document: LayoutDocumentElement, manager: EditManager) {
     this._document = document;
+    this._manager = manager;
     this._boundStartDrag = this.startDrag.bind(this);
     this._boundOnMouseMove = this._onMouseMove.bind(this);
     this._boundOnMouseUp = this._onMouseUp.bind(this);
@@ -131,7 +137,7 @@ export class InsertController {
   /** ESC 취소 시 호출: 미리보기를 제거하고 취소 이벤트를 발생시킨다. */
   private _cancel(): void {
     this._cleanup();
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     manager._dispatchInsertCancel();
   }
 
@@ -159,7 +165,7 @@ export class InsertController {
     // 컨테이너의 편집 영역을 구한다. 드래그 영역이 컨테이너보다 큰 경우
     // left+width, top+height가 컨테이너 영역을 초과하지 않도록 클램핑한다.
     const containerRect = container.getBoundingClientRect();
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     const containerModel = container.model;
     const containerContentW = containerModel ? containerModel.editableWidth : 0;
     const containerContentH = containerModel ? containerModel.contentHeight : 0;
@@ -280,7 +286,7 @@ export class InsertController {
    * @returns 유효한 컨테이너 요소, 또는 루트 요소
    */
   private _findTargetContainer(startX: number, startY: number, endX: number, endY: number): LayoutDocumentElement | LayoutBoxElement {
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     const rootId = manager.editableRootId;
     const rootBox = rootId
       ? this._document.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null
@@ -446,7 +452,7 @@ export class InsertController {
    * @returns 루트 컨테이너 요소
    */
   private _getRootContainer(): LayoutDocumentElement | LayoutBoxElement {
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     const rootId = manager.editableRootId;
     if (rootId) {
       const rootBox = this._document.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null;
@@ -458,7 +464,7 @@ export class InsertController {
   /** 화면 좌표를 컨테이너 내부 mm 좌표로 변환한다. */
   private _screenToContainerMm(clientX: number, clientY: number, container: LayoutDocumentElement | LayoutBoxElement): { left: number; top: number } {
     const rect = container.getBoundingClientRect();
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
 
     let containerPaddingLeft = 0;
     let containerPaddingTop = 0;
@@ -618,7 +624,7 @@ export class InsertController {
       return { left: leftPx, top: topPx, width: widthPx, height: widthPx };
     }
 
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     const { columnCoords, lineHeight, columnCount } = model;
 
     const rect = container.getBoundingClientRect();

@@ -11,6 +11,7 @@ import { EditManager } from "./edit-manager";
 export class TextEditContextAdapter {
   private _editContext: BrowserEditContext | null;
   private _mapper: TextEditCoordinateMapper;
+  private _manager: EditManager;
   private _callbacks: EditContextCallbacks;
 
   private _boundOnTextUpdate: (e: Event) => void;
@@ -21,10 +22,12 @@ export class TextEditContextAdapter {
   private constructor(
     editContext: BrowserEditContext,
     mapper: TextEditCoordinateMapper,
+    manager: EditManager,
     callbacks: EditContextCallbacks,
   ) {
     this._editContext = editContext;
     this._mapper = mapper;
+    this._manager = manager;
     this._callbacks = callbacks;
 
     // Bind handlers so we can remove them later in destroy()
@@ -48,9 +51,15 @@ export class TextEditContextAdapter {
   /**
    * Factory method. Creates an `TextEditContextAdapter` when the EditContext API
    * is available, otherwise returns `null`.
+   *
+   * @param mapper - 좌표 변환에 사용할 TextEditCoordinateMapper
+   * @param manager - 이 adapter가 속한 EditManager 인스턴스
+   * @param callbacks - EditContext 이벤트 콜백
+   * @returns TextEditContextAdapter 인스턴스. 지원하지 않으면 `null`.
    */
   static create(
     mapper: TextEditCoordinateMapper,
+    manager: EditManager,
     callbacks: EditContextCallbacks,
   ): TextEditContextAdapter | null {
     if (!TextEditContextAdapter.isSupported()) {
@@ -60,7 +69,7 @@ export class TextEditContextAdapter {
     // EditContext is guaranteed to exist by isSupported() check above.
     const EditContextCtor = (globalThis as unknown as { EditContext: new () => BrowserEditContext }).EditContext;
     const editContext = new EditContextCtor();
-    return new TextEditContextAdapter(editContext, mapper, callbacks);
+    return new TextEditContextAdapter(editContext, mapper, manager, callbacks);
   }
 
   /** Returns the underlying EditContext instance (for attaching to an element). */
@@ -113,7 +122,7 @@ export class TextEditContextAdapter {
 
     // getCharRect는 paragraph local coordinate(transform: scale 적용 전)를 반환하므로,
     // EditContext API가 요구하는 viewport coordinate로 변환하기 위해 scale을 곱한다.
-    const scale = EditManager.getInstance().scale;
+    const scale = this._manager.scale;
     const paragraphRect = this._mapper.paragraph.getBoundingClientRect();
     const bounds: CharacterBoundsInfo[] = [];
 

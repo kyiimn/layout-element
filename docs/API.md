@@ -1459,7 +1459,7 @@ deactivateAll(): void;
  * `false`이면 모든 단락이 편집 불가, 포커스 해제.
  *
  * @example
- * const manager = EditManager.getInstance();
+ * const manager = layoutDocEl.editManager;
  * manager.setEditableTextRoles(['body', 'title']);
  * manager.textEditMode = true;
  * // → 부모 box role이 'body' 또는 'title'인 paragraph만 편집 가능
@@ -1654,7 +1654,7 @@ handleInsertMouseDown(event: MouseEvent): void;
 #### 예제
 
 ```ts
-const manager = EditManager.getInstance();
+const manager = layoutDocEl.editManager;
 
 // 텍스트 포커스
 manager.focusParagraph('paragraph-1', { cursorOffset: 5 });

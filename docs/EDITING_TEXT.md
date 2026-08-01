@@ -532,7 +532,7 @@ manager.setEditableRootId(null);
 - **기본적으로 모든 단락이 허용된다.** `textEditMode`만 켜고 세 필터(`editableTextRoles`, `editableTextBoxIds`, `editableParagraphIds`)를 모두 `null`로 두면, lock과 `editableRootId` 제한만 적용된 채 문서 전체(또는 Root 내부)의 단락이 편집 가능하다. 편집을 막으려면 `textEditMode`를 `false`로 설정해야 한다.
 
 ```ts
-const manager = EditManager.getInstance();
+const manager = layoutDocEl.editManager;
 manager.textEditMode = true;  // 조건에 맞는 단락만 편집 가능
 manager.textEditMode = false; // 모든 단락 비활성화 + 포커스 해제
 ```
@@ -731,7 +731,7 @@ import {
   LayoutParagraphElement,
 } from 'layout-element';
 
-const manager = EditManager.getInstance();
+const manager = layoutDocEl.editManager;
 
 // 텍스트 편집 모드 활성화 + 필터 적용
 manager.setEditableTextRoles(['body', 'caption']);
@@ -1534,7 +1534,7 @@ const localY = event.clientY - paragraphRect.top;
 ```ts
 const spanRect = span.getBoundingClientRect();
 const paragraphRect = paragraph.getBoundingClientRect();
-const scale = EditManager.getInstance().scale;
+const scale = layoutDocEl.editManager.scale;
 return new DOMRect(
   (spanRect.left - paragraphRect.left) / scale,
   (spanRect.top - paragraphRect.top) / scale,
@@ -1770,7 +1770,7 @@ flowchart LR
 
 1. `spanRect = _optimisticSpan.getBoundingClientRect()`.
 2. `paragraphRect = paragraph.getBoundingClientRect()`.
-3. `scale = EditManager.getInstance().scale`.
+3. `scale = layoutDocEl.editManager.scale`.
 4. `localLeft = (spanRect.left - paragraphRect.left) / scale`.
 5. `visualWidth = spanRect.width / scale`.
 6. `widthRatio = paragraph.model?.widthRatio ?? 1`.

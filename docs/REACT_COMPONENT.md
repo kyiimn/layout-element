@@ -1000,7 +1000,7 @@ function WithRefs() {
 | `<Logo>` | (대응 없음 — React 전용 순수 SVG 컴포넌트) |
 | `LayoutProvider` | `ColorRegistry.init()` + `FontLoader.init()` |
 | `useLayoutContext` | `ColorRegistry.getInstance()` + `FontLoader.getInstance()` 직접 접근 |
-| `useEditManager` | `EditManager.getInstance().addEventListener(...)` |
+| `useEditManager` | `layoutDocEl.editManager.addEventListener(...)` |
 | `useLayoutElement` | `customElements.define` (보통 자동) |
 | `useEditableText` | `element.editableText = true` 직접 |
 

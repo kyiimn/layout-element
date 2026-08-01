@@ -5,6 +5,7 @@ import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
 import { genUUID } from "@/utils";
+import { EditManager } from "@/edit/edit-manager";
 
 /**
  * 문서 루트 요소. `<x-layout-document>` 커스텀 엘리먼트.
@@ -52,12 +53,28 @@ export class LayoutDocumentElement extends HTMLElement {
   private _paragraphStyle: ParagraphStyle = {};
   private _textStyle: TextStyle = {};
 
+  /**
+   * 이 문서 요소 전용 EditManager 인스턴스.
+   *
+   * constructor에서 생성되어 요소 생명주기 내내 존재한다.
+   * 하위 box/paragraph 요소들은 parent 체인을 통해 이 인스턴스에 접근한다.
+   */
+  private _editManager: EditManager;
+
+  /**
+   * 이 문서 요소 전용 EditManager 인스턴스를 반환한다.
+   *
+   * @returns EditManager 인스턴스.
+   */
+  get editManager(): EditManager { return this._editManager; }
+
   constructor() {
     super();
 
     this._shadowRoot = this.attachShadow({ mode: "open" });
     this._visibleGuide = true;
     this._isPrint = window.matchMedia("print").matches;
+    this._editManager = new EditManager(this);
   }
 
   connectedCallback() {
@@ -70,6 +87,7 @@ export class LayoutDocumentElement extends HTMLElement {
 
   disconnectedCallback() {
     this._stopChildObserver();
+    this._editManager.reset();
   }
 
   /**

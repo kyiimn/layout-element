@@ -15,23 +15,27 @@ import { EditManager } from "./edit-manager";
  *
  * ## 아키텍처
  *
- * - **이벤트 위임**: `click`을 capture phase로 `document.documentElement`에 등록한다.
+ * - **이벤트 위임**: `click`을 capture phase로 문서 요소(`LayoutDocumentElement`)에 등록한다.
  *   `composedPath()`를 통해 shadow DOM 내부의 box까지 추적할 수 있다.
  * - **선택 전용**: 드래그/리사이즈 상태를 관리하지 않고 오직 선택만 처리한다.
  * - **필터링**: `EditManager.isBoxSelectable()`로 선택 가능 여부를 판별한다.
  *   lock, root, role, id 필터를 적용하되 `layoutEditMode` 여부는 확인하지 않는다.
  */
 export class LayoutSelectionController {
-  /** 이벤트 리스너가 등록되는 루트 요소 (일반적으로 `document.documentElement`) */
+  /** 이벤트 리스너가 등록되는 루트 요소 (문서 요소 `LayoutDocumentElement`) */
   private _document: HTMLElement;
+  /** 이 컨트롤러가 속한 EditManager 인스턴스 */
+  private _manager: EditManager;
   /** 컨트롤러 활성화 여부. `attach()`/`detach()`로 토글된다 */
   private _attached = false;
 
   /**
    * @param doc - 이벤트 리스너가 등록될 루트 HTMLElement
+   * @param manager - 이 컨트롤러가 속한 EditManager 인스턴스
    */
-  constructor(doc: HTMLElement) {
+  constructor(doc: HTMLElement, manager: EditManager) {
     this._document = doc;
+    this._manager = manager;
   }
 
   /**
@@ -83,7 +87,7 @@ export class LayoutSelectionController {
     const path = event.composedPath();
     for (const el of path) {
       if (el instanceof LayoutBoxElement) {
-        const manager = EditManager.getInstance();
+        const manager = this._manager;
         if (manager.isBoxSelectable(el)) {
           return el;
         }
@@ -104,7 +108,7 @@ export class LayoutSelectionController {
    */
   private _isEventFromDescendantLayout(event: MouseEvent, box: LayoutBoxElement): boolean {
     const path = event.composedPath();
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     for (const el of path) {
       if (el === box) return false;
       if (el instanceof LayoutBoxElement && manager.isBoxSelectable(el)) return true;
@@ -125,7 +129,7 @@ export class LayoutSelectionController {
    */
   private _findParagraphFromEvent(event: MouseEvent): LayoutParagraphElement | null {
     const path = event.composedPath();
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     for (const el of path) {
       if (el instanceof LayoutParagraphElement) {
         const parentBox = el.parentElement;
@@ -150,7 +154,7 @@ export class LayoutSelectionController {
    * @param event - 클릭 마우스 이벤트
    */
   private _onClick = (event: MouseEvent): void => {
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     if (manager.insertMode) return;
     if (manager._consumeSuppressNextClick()) return;
 
@@ -215,7 +219,7 @@ export class LayoutSelectionController {
    * @param event - 더블클릭 마우스 이벤트
    */
   private _onDblClick = (event: MouseEvent): void => {
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
     if (manager.insertMode) return;
 
     const paragraph = this._findParagraphFromEvent(event);
@@ -253,7 +257,7 @@ export class LayoutSelectionController {
    * @param event - 컨텍스트 메뉴 마우스 이벤트
    */
   private _onContextMenu = (event: MouseEvent): void => {
-    const manager = EditManager.getInstance();
+    const manager = this._manager;
 
     const box = this._findSelectableBoxFromEvent(event);
 

@@ -29,6 +29,7 @@ export type CurrentStyle = {
  */
 export class TextEditController {
   private _paragraph: LayoutParagraphElement;
+  private _manager: EditManager;
   private _mapper: TextEditCoordinateMapper;
 
   private _textarea: HTMLTextAreaElement;
@@ -81,9 +82,10 @@ export class TextEditController {
   private _lastMouseX: number = 0;
   private _lastMouseY: number = 0;
 
-  constructor(paragraph: LayoutParagraphElement) {
+  constructor(paragraph: LayoutParagraphElement, manager: EditManager) {
     this._paragraph = paragraph;
-    this._mapper = new TextEditCoordinateMapper(paragraph);
+    this._manager = manager;
+    this._mapper = new TextEditCoordinateMapper(paragraph, manager);
 
     this._textarea = this._createTextarea();
     this._cursorEl = document.createElement("x-layout-cursor") as LayoutCursorElement;
@@ -170,7 +172,7 @@ export class TextEditController {
 
     this._updateCursorPosition();
 
-    EditManager.getInstance()._register(this);
+    this._manager._register(this);
   }
 
   /**
@@ -242,7 +244,7 @@ export class TextEditController {
    * 편집기를 제거하고 모든 이벤트 리스너를 해제한다.
    */
   destroy(): void {
-    EditManager.getInstance()._unregister(this);
+    this._manager._unregister(this);
 
     this._paragraph.removeEventListener("click", this._handleClick);
     this._paragraph.removeEventListener("mousedown", this._handleMouseDown);
@@ -380,7 +382,7 @@ export class TextEditController {
     this._wasFocused = false;
     this._cursorEl.visible = false;
 
-    EditManager.getInstance()._releaseFocus(this);
+    this._manager._releaseFocus(this);
   }
 
   private _createTextarea(): HTMLTextAreaElement {
@@ -548,7 +550,7 @@ export class TextEditController {
           this._updateCursorPosition();
           this._updateSelection();
           this._emitStyleChange();
-          EditManager.getInstance()._notifyCursorMove(this);
+          this._manager._notifyCursorMove(this);
           document.addEventListener("mousemove", this._handleMouseMove);
         }
       }
@@ -564,7 +566,7 @@ export class TextEditController {
       this.focus();
       this._updateCursorPosition();
       this._updateSelection();
-      EditManager.getInstance()._notifyCursorMove(this);
+      this._manager._notifyCursorMove(this);
       document.addEventListener("mousemove", this._handleMouseMove);
       return;
     }
@@ -576,7 +578,7 @@ export class TextEditController {
     this._updateCursorPosition();
     this._updateSelection();
     this._emitStyleChange();
-    EditManager.getInstance()._notifyCursorMove(this);
+    this._manager._notifyCursorMove(this);
     document.addEventListener("mousemove", this._handleMouseMove);
   }
 
@@ -588,7 +590,7 @@ export class TextEditController {
 
     if (!this._wasDragged) {
       this._wasDragged = true;
-      EditManager.getInstance()._notifySelectionStart(this);
+      this._manager._notifySelectionStart(this);
     }
 
     this._mousemoveRafId = requestAnimationFrame(() => {
@@ -622,8 +624,8 @@ export class TextEditController {
     }
     document.removeEventListener("mousemove", this._handleMouseMove);
     if (this._cursorModel.selection) {
-      EditManager.getInstance()._notifySelectionEnd(this);
-      EditManager.getInstance()._notifyCursorMove(this);
+      this._manager._notifySelectionEnd(this);
+      this._manager._notifyCursorMove(this);
     }
   }
 
@@ -645,9 +647,9 @@ export class TextEditController {
     this.focus();
     this._updateCursorPosition();
     this._updateSelection();
-    EditManager.getInstance()._notifySelectionStart(this);
-    EditManager.getInstance()._notifySelectionEnd(this);
-    EditManager.getInstance()._notifyCursorMove(this);
+    this._manager._notifySelectionStart(this);
+    this._manager._notifySelectionEnd(this);
+    this._manager._notifyCursorMove(this);
   }
 
   private _findWordBoundaries(content: string, offset: number): { start: number; end: number } {
@@ -673,7 +675,7 @@ export class TextEditController {
   }
 
   private _onFocus(): void {
-    EditManager.getInstance()._requestFocus(this);
+    this._manager._requestFocus(this);
     this._isFocused = true;
     if (this._cursorModel.selection) {
       this._cursorEl.visible = false;
@@ -701,7 +703,7 @@ export class TextEditController {
           this._debounceTimer = null;
         }
         this._paragraph.render();
-        EditManager.getInstance()._notifyTextChange(this);
+        this._manager._notifyTextChange(this);
       }
     }
 
@@ -732,7 +734,7 @@ export class TextEditController {
     if (hasShortcut && event.key.toLowerCase() === "a") {
       event.preventDefault();
       this._selectAll();
-      EditManager.getInstance()._notifyCursorMove(this);
+      this._manager._notifyCursorMove(this);
       return;
     }
 
@@ -750,7 +752,7 @@ export class TextEditController {
       if (this._cursorModel.selection) {
         this._clearSelection();
       } else {
-        EditManager.getInstance().textEditMode = false;
+        this._manager.textEditMode = false;
       }
       return;
     }
@@ -806,7 +808,7 @@ export class TextEditController {
         this._emitStyleChange();
       }
       if (!event.repeat && isCursorKey) {
-        EditManager.getInstance()._notifyCursorMove(this);
+        this._manager._notifyCursorMove(this);
       }
       break;
     }
@@ -857,7 +859,7 @@ export class TextEditController {
         this._emitStyleChange();
       }
       if (!event.repeat && isCursorKey) {
-        EditManager.getInstance()._notifyCursorMove(this);
+        this._manager._notifyCursorMove(this);
       }
       break;
     }
@@ -882,7 +884,7 @@ export class TextEditController {
         this._emitStyleChange();
       }
       if (!event.repeat && isCursorKey) {
-        EditManager.getInstance()._notifyCursorMove(this);
+        this._manager._notifyCursorMove(this);
       }
       break;
     }
@@ -926,7 +928,7 @@ export class TextEditController {
       this._updateCursorPosition();
       this._updateSelection();
       if (!isShift) { this._emitStyleChange(); }
-      if (!event.repeat && isCursorKey) { EditManager.getInstance()._notifyCursorMove(this); }
+      if (!event.repeat && isCursorKey) { this._manager._notifyCursorMove(this); }
       break;
     }
     case "End": {
@@ -966,7 +968,7 @@ export class TextEditController {
       this._updateCursorPosition();
       this._updateSelection();
       if (!isShift) { this._emitStyleChange(); }
-      if (!event.repeat && isCursorKey) { EditManager.getInstance()._notifyCursorMove(this); }
+      if (!event.repeat && isCursorKey) { this._manager._notifyCursorMove(this); }
       break;
     }
       case "Backspace": {
@@ -983,8 +985,8 @@ export class TextEditController {
         this._cursorModel.offset = offset - 1;
         this._textarea.setSelectionRange(offset - 1, offset - 1);
         this._debouncedRender();
-        EditManager.getInstance()._notifyTextChange(this);
-        EditManager.getInstance()._notifyCursorMove(this);
+        this._manager._notifyTextChange(this);
+        this._manager._notifyCursorMove(this);
       }
       break;
     }
@@ -1001,8 +1003,8 @@ export class TextEditController {
         this._textarea.value = newContent;
         this._textarea.setSelectionRange(offset, offset);
         this._debouncedRender();
-        EditManager.getInstance()._notifyTextChange(this);
-        EditManager.getInstance()._notifyCursorMove(this);
+        this._manager._notifyTextChange(this);
+        this._manager._notifyCursorMove(this);
       }
       break;
     }
@@ -1022,8 +1024,8 @@ export class TextEditController {
     this._textarea.setSelectionRange(replaceStart + 1, replaceStart + 1);
     this._cursorModel.selection = null;
     this._debouncedRender();
-    EditManager.getInstance()._notifyTextChange(this);
-    EditManager.getInstance()._notifyCursorMove(this);
+    this._manager._notifyTextChange(this);
+    this._manager._notifyCursorMove(this);
     break;
   }
       default:
@@ -1037,7 +1039,7 @@ export class TextEditController {
 
     const cursorKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
     if (cursorKeys.includes(event.key)) {
-      EditManager.getInstance()._notifyCursorMove(this);
+      this._manager._notifyCursorMove(this);
     }
   }
 
@@ -1136,8 +1138,8 @@ export class TextEditController {
     this._cursorModel.selection = null;
     this._textarea.setSelectionRange(newOffset, newOffset);
     this._debouncedRender();
-    EditManager.getInstance()._notifyTextChange(this);
-    EditManager.getInstance()._notifyCursorMove(this);
+    this._manager._notifyTextChange(this);
+    this._manager._notifyCursorMove(this);
   }
 
   private _selectAll(): void {
@@ -1431,8 +1433,8 @@ export class TextEditController {
         this._updateSelection();
       }
       this._debouncedRender();
-      EditManager.getInstance()._notifyTextChange(this);
-      EditManager.getInstance()._notifyCursorMove(this);
+      this._manager._notifyTextChange(this);
+      this._manager._notifyCursorMove(this);
       return;
     }
 
@@ -1455,8 +1457,8 @@ export class TextEditController {
     }
     this._debouncedRender();
     this._emitStyleChange();
-    EditManager.getInstance()._notifyTextChange(this);
-    EditManager.getInstance()._notifyCursorMove(this);
+    this._manager._notifyTextChange(this);
+    this._manager._notifyCursorMove(this);
   }
 
   private _replaceSelection(replacement: string): void {
@@ -1479,8 +1481,8 @@ export class TextEditController {
     this._cursorModel.selection = null;
 
     this._debouncedRender();
-    EditManager.getInstance()._notifyTextChange(this);
-    EditManager.getInstance()._notifyCursorMove(this);
+    this._manager._notifyTextChange(this);
+    this._manager._notifyCursorMove(this);
   }
 
   private _onCompositionStart(): void {
@@ -1600,7 +1602,7 @@ export class TextEditController {
     if (!this._compositionSpan || !this._compositionSpan.parentNode) return false;
     const spanRect = this._compositionSpan.getBoundingClientRect();
     const paragraphRect = this._paragraph.getBoundingClientRect();
-    const scale = EditManager.getInstance().scale;
+    const scale = this._manager.scale;
     const localLeft = (spanRect.left - paragraphRect.left) / scale;
     const visualWidth = spanRect.width / scale;
     const widthRatio = this._paragraph.model?.widthRatio ?? 1;
@@ -1661,8 +1663,8 @@ export class TextEditController {
     this._updateCursorPosition();
     this._updateSelection();
     this._emitStyleChange();
-    EditManager.getInstance()._notifyTextChange(this);
-    EditManager.getInstance()._notifyCursorMove(this);
+    this._manager._notifyTextChange(this);
+    this._manager._notifyCursorMove(this);
   }
 
   private _removeCompositionSpan(): void {
@@ -1782,7 +1784,7 @@ export class TextEditController {
     if (this._optimisticSpan && this._optimisticSpan.parentNode) {
       const spanRect = this._optimisticSpan.getBoundingClientRect();
       const paragraphRect = this._paragraph.getBoundingClientRect();
-      const scale = EditManager.getInstance().scale;
+      const scale = this._manager.scale;
       const localLeft = (spanRect.left - paragraphRect.left) / scale;
       const visualWidth = spanRect.width / scale;
       const widthRatio = this._paragraph.model?.widthRatio ?? 1;
@@ -1990,7 +1992,7 @@ export class TextEditController {
     this._syncTextareaSelection();
     this._updateCursorPosition();
     this._emitStyleChange();
-    EditManager.getInstance()._notifyCursorMove(this);
+    this._manager._notifyCursorMove(this);
   }
 
   /**
@@ -2002,7 +2004,7 @@ export class TextEditController {
     this._syncTextareaSelection();
     this._updateSelection();
     this._emitStyleChange();
-    EditManager.getInstance()._notifyCursorMove(this);
+    this._manager._notifyCursorMove(this);
   }
 
   /**
@@ -2013,7 +2015,7 @@ export class TextEditController {
     const json = JSON.stringify(current);
     if (json !== this._lastStyleJson) {
       this._lastStyleJson = json;
-      EditManager.getInstance()._notifyStyleChange(this);
+      this._manager._notifyStyleChange(this);
     }
   }
 }

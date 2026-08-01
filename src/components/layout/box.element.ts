@@ -78,6 +78,9 @@ export class LayoutBoxElement extends HTMLElement {
    */
   private _isSyncingAttribute = false;
 
+  /** `connectedCallback`에서 캐싱한 EditManager. `disconnectedCallback`에서 사용. */
+  private _editManagerRef: EditManager | null = null;
+
   constructor() {
     super();
     this._shadowRoot = this.attachShadow({ mode: "open" });
@@ -85,6 +88,7 @@ export class LayoutBoxElement extends HTMLElement {
 
   connectedCallback() {
     if (!this.id) this.id = genUUID();
+    this._editManagerRef = this.editManager;
     this._startChildObserver();
     this.addEventListener('mouseenter', this._onLayoutMouseEnter);
     this.addEventListener('mouseleave', this._onLayoutMouseLeave);
@@ -92,12 +96,30 @@ export class LayoutBoxElement extends HTMLElement {
     this.layout();
   }
 
+  /**
+   * 이 box가 속한 문서의 EditManager를 반환한다.
+   *
+   * parent 체인을 따라 올라가 `LayoutDocumentElement.editManager`를 발견한다.
+   * 문서에 연결되지 않은 경우 `null`을 반환한다.
+   *
+   * @returns 소속 문서의 EditManager. 문서에 연결되지 않았으면 `null`.
+   */
+  get editManager(): EditManager | null {
+    let el: Element | null = this.parentElement;
+    while (el) {
+      if (el instanceof LayoutDocumentElement) return el.editManager;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
   disconnectedCallback() {
     this._stopChildObserver();
     this.removeEventListener('mouseenter', this._onLayoutMouseEnter);
     this.removeEventListener('mouseleave', this._onLayoutMouseLeave);
     this.removeEventListener('mousedown', this._onPlaceGunMouseDown);
-    EditManager.getInstance()._unregisterLayout(this);
+    this._editManagerRef?._unregisterLayout(this);
+    this._editManagerRef = null;
   }
 
   static get observedAttributes() {
@@ -626,7 +648,7 @@ export class LayoutBoxElement extends HTMLElement {
     this._zIndex = value;
     this.layout();
     this.requestRerenderAffectedParagraphs();
-    EditManager.getInstance()._dispatchBoxPropertyChange({
+    this.editManager?._dispatchBoxPropertyChange({
       box: this,
       property: 'zIndex',
       oldValue,
@@ -798,7 +820,7 @@ export class LayoutBoxElement extends HTMLElement {
     }
     this.layout();
     this.requestRerenderAffectedParagraphs();
-    EditManager.getInstance()._dispatchBoxPropertyChange({
+    this.editManager?._dispatchBoxPropertyChange({
       box: this,
       property: 'role',
       oldValue,
@@ -818,7 +840,7 @@ export class LayoutBoxElement extends HTMLElement {
       this._contentUid = normalized;
       this.setAttribute('content-uid', normalized);
     }
-    EditManager.getInstance()._dispatchBoxPropertyChange({
+    this.editManager?._dispatchBoxPropertyChange({
       box: this,
       property: 'contentUid',
       oldValue,
@@ -842,7 +864,7 @@ export class LayoutBoxElement extends HTMLElement {
     }
     const newValue = this._groupMember ? this._groupMember.split(',').filter(s => s.length > 0) : [];
     if (oldValue.length !== newValue.length || oldValue.some((v, i) => v !== newValue[i])) {
-      EditManager.getInstance()._dispatchBoxPropertyChange({
+      this.editManager?._dispatchBoxPropertyChange({
         box: this,
         property: 'groupMember',
         oldValue,
@@ -857,7 +879,7 @@ export class LayoutBoxElement extends HTMLElement {
     if (value === oldValue) return;
     this._priority = value;
     this.setAttribute('priority', String(value));
-    EditManager.getInstance()._dispatchBoxPropertyChange({
+    this.editManager?._dispatchBoxPropertyChange({
       box: this,
       property: 'priority',
       oldValue,
@@ -1076,7 +1098,8 @@ export class LayoutBoxElement extends HTMLElement {
    * @example 자식이 여러 box → `박스[role=group-article]`
    */
   private _selectParent(): void {
-    const manager = EditManager.getInstance();
+    const manager = this.editManager;
+    if (!manager) return;
     const parent = this.parentElement;
     if (!parent || !(parent instanceof LayoutBoxElement)) return;
     manager.clearLayoutSelection(false);
@@ -1104,7 +1127,8 @@ export class LayoutBoxElement extends HTMLElement {
   private _onLayoutMouseEnter = (): void => {
     if (this._isPrint) return;
     if (this._lock) return;
-    const manager = EditManager.getInstance();
+    const manager = this.editManager;
+    if (!manager) return;
     if (manager._isDraggingLayout() || manager._isResizingLayout()) return;
     if (manager._isInsertDragging()) return;
     let ancestor: Element | null = this.parentElement;
@@ -1121,7 +1145,8 @@ export class LayoutBoxElement extends HTMLElement {
   private _onLayoutMouseLeave = (event: MouseEvent): void => {
     if (this._isPrint) return;
     this.removeAttribute('hovered');
-    const manager = EditManager.getInstance();
+    const manager = this.editManager;
+    if (!manager) return;
     if (manager._isDraggingLayout() || manager._isResizingLayout()) return;
     if (manager._isInsertDragging()) return;
     const related = event.relatedTarget as Element | null;
@@ -1160,7 +1185,8 @@ export class LayoutBoxElement extends HTMLElement {
    */
   private _onPlaceGunMouseDown = (event: MouseEvent): void => {
     if (this._isPrint) return;
-    const manager = EditManager.getInstance();
+    const manager = this.editManager;
+    if (!manager) return;
     if (!manager.placeGunActive) return;
     manager.handlePlaceGunMouseDown(this, event);
   }

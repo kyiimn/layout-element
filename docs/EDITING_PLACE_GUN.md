@@ -28,7 +28,7 @@ Place Gun이 활성 상태(항목 ≥ 1, 일시정지 아님)이면 문서 커�
 ┌─────────────────────────────────────────────────────────────────────┐
 │ <x-layout-document>                                                  │
 │                                                                      │
-│  EditManager (singleton)                                             │
+│  EditManager (per-document instance)                                             │
 │  ├── placeGunItems: PlaceGunItem[]                                    │
 │  ├── placeGunPaused: boolean                                          │
 │  ├── placeGunActive: boolean (get — items > 0 && !paused)            │
@@ -65,7 +65,7 @@ Place Gun이 활성 상태(항목 ≥ 1, 일시정지 아님)이면 문서 커�
 ### 2.1 장전 / 비우기
 
 ```typescript
-const manager = EditManager.getInstance();
+const manager = layoutDocEl.editManager;
 
 // 장전
 manager.loadPlaceGun([
