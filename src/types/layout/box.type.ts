@@ -24,9 +24,10 @@ export type BoxBorderStyle = 'solid' | 'dotted' | 'dashed';
  * - `'group-image'`: 이미지 그룹 컨테이너
  * - `'header'`: 면머리 그룹 컨테이너
  * - `'ad'`: 광고 이미지 영역
+ * - `'byline'`: 기자정보 영역. paragraph를 가진 박스에 설정하여 기자정보를 표시한다.
  * - `'none'`: 역할 미지정 (기본값)
  */
-export type BoxRole = 'group-article' | 'body' | 'image' | 'title' | 'caption' | 'group-image' | 'header' | 'ad' | 'none';
+export type BoxRole = 'group-article' | 'body' | 'image' | 'title' | 'caption' | 'group-image' | 'header' | 'ad' | 'byline' | 'none';
 
 /**
  * 위치 지정 가능한 컨테이너 데이터.
