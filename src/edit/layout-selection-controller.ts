@@ -46,6 +46,7 @@ export class LayoutSelectionController {
     this._attached = true;
     this._document.addEventListener('click', this._onClick, true);
     this._document.addEventListener('dblclick', this._onDblClick, true);
+    this._document.addEventListener('contextmenu', this._onContextMenu, true);
   }
 
   /**
@@ -56,6 +57,7 @@ export class LayoutSelectionController {
     this._attached = false;
     this._document.removeEventListener('click', this._onClick, true);
     this._document.removeEventListener('dblclick', this._onDblClick, true);
+    this._document.removeEventListener('contextmenu', this._onContextMenu, true);
   }
 
   /**
@@ -232,5 +234,57 @@ export class LayoutSelectionController {
         controller.setCursor({ textOffset: offset });
       }
     }
+  }
+
+  // ─── Context Menu Handling ─────────────────────────────────────
+
+  /**
+   * 컨텍스트 메뉴(우클릭) 이벤트 핸들러.
+   *
+   * 선택 룰에 따라 우클릭한 요소의 선택 상태를 갱신한 뒤
+   * `contextMenu` 이벤트를 `EditManager`를 통해 디스패치한다.
+   *
+   * 선택 룰:
+   * 1. 이미 선택된 box에서 우클릭 → 기존 selection 유지 (멀티 선택 포함)
+   * 2. 선택되지 않은 box 우클릭 → 기존 selection 해제 후 해당 box만 선택
+   * 3. 빈 공간 우클릭 → selection 해제, element는 `null`
+   * 4. document 영역에서 우클릭 (box 외부) → element는 document, selection은 빈 상태
+   *
+   * @param event - 컨텍스트 메뉴 마우스 이벤트
+   */
+  private _onContextMenu = (event: MouseEvent): void => {
+    const manager = EditManager.getInstance();
+
+    const box = this._findSelectableBoxFromEvent(event);
+
+    if (box) {
+      const isSelected = manager.selectedLayouts.includes(box);
+      if (!isSelected) {
+        manager.clearLayoutSelection(false);
+        manager.selectLayout(box);
+      }
+    } else {
+      const isInsideDocument = event.composedPath().some(
+        (el) => el instanceof LayoutDocumentElement
+      );
+      if (isInsideDocument) {
+        manager.clearLayoutSelection(false);
+      } else {
+        return;
+      }
+    }
+
+    const docElement = event.composedPath().find(
+      (el) => el instanceof LayoutDocumentElement
+    ) as LayoutDocumentElement | undefined;
+
+    const element = box ?? docElement ?? null;
+
+    manager._dispatchContextMenu({
+      element,
+      mouseX: event.clientX,
+      mouseY: event.clientY,
+      selectedLayouts: [...manager.selectedLayouts],
+    });
   }
 }

@@ -8,7 +8,7 @@ import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
 import { PlaceGunController } from "./place-gun-controller";
 import type { SelectionRange } from "@/types/edit";
-import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail, PlaceGunItem, PlaceGunChangeEventDetail, PlaceGunBeforeEventDetail, PlaceGunAfterEventDetail } from "@/types/edit";
+import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail, ContextMenuEventDetail, PlaceGunItem, PlaceGunChangeEventDetail, PlaceGunBeforeEventDetail, PlaceGunAfterEventDetail } from "@/types/edit";
 import type { BoxRole } from "@/types/layout";
 
 /** 레이아웃 편집 대상 요소 (box만 해당) */
@@ -33,6 +33,7 @@ export type EditManagerEventType =
   | 'insertCancel'
   | 'modeChange'
   | 'boxPropertyChange'
+  | 'contextMenu'
   | 'placeGunChange'
   | 'placeGunBefore'
   | 'placeGunAfter';
@@ -97,6 +98,8 @@ export interface EditManagerEvent {
   mode?: EditModeState;
   /** Box 속성 변경 상세 정보 (boxPropertyChange 이벤트에서만) */
   boxPropertyDetail?: BoxPropertyChangeEventDetail;
+  /** 컨텍스트 메뉴 상세 정보 (contextMenu 이벤트에서만) */
+  contextMenuDetail?: ContextMenuEventDetail;
   /** Place Gun 상태 변경 상세 정보 (placeGunChange 이벤트에서만) */
   placeGunDetail?: PlaceGunChangeEventDetail;
   /** Place Gun 발사 전 상세 정보 (placeGunBefore 이벤트에서만) */
@@ -2079,6 +2082,36 @@ export class EditManager {
             controller: null as unknown as TextEditController,
             selectedLayouts: [...this._selectedLayouts],
             previousLayouts,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
+
+  /**
+   * 컨텍스트 메뉴 이벤트를 디스패치한다.
+   *
+   * @param detail - 컨텍스트 메뉴 이벤트 상세 정보
+   * @internal
+   */
+  _dispatchContextMenu(detail: ContextMenuEventDetail): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('contextMenu');
+    if (!listeners || listeners.size === 0) return;
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'contextMenu',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null as unknown as TextEditController,
+            contextMenuDetail: detail,
           });
         } catch (e) {
           console.error(e);

@@ -1,5 +1,7 @@
 import type { InsertMode } from "./insert.type";
 import type { BoxRole } from "@/types/layout";
+import type { LayoutBoxElement } from "@/components/layout/box.element";
+import type { LayoutDocumentElement } from "@/components/layout/document.element";
 
 /**
  * 레이아웃 편집 모드의 동작 타입.
@@ -87,6 +89,33 @@ export interface LayoutRemoveEventDetail {
  * 어떤 속성이 변경되었는지 리스너에 알려준다.
  */
 export type BoxPropertyName = 'role' | 'contentUid' | 'groupMember' | 'priority' | 'zIndex';
+
+/**
+ * 컨텍스트 메뉴 이벤트 상세 정보.
+ *
+ * `contextMenu` 이벤트는 box 또는 document에서 우클릭(`contextmenu` DOM 이벤트) 시 발생한다.
+ * 선택 룰에 따라 우클릭한 요소의 선택 상태를 갱신한 후 디스패치된다.
+ *
+ * @example
+ * ```ts
+ * EditManager.getInstance().addEventListener('contextMenu', (event) => {
+ *   const detail = event.contextMenuDetail!;
+ *   console.log('우클릭한 요소:', detail.element);
+ *   console.log('마우스 위치:', detail.mouseX, detail.mouseY);
+ *   console.log('현재 선택된 요소들:', detail.selectedLayouts);
+ * });
+ * ```
+ */
+export interface ContextMenuEventDetail {
+  /** 우클릭이 발생한 요소 (box 또는 document). `null`이면 빈 공간 우클릭 */
+  element: LayoutBoxElement | LayoutDocumentElement | null;
+  /** 뷰포트 기준 마우스 X 좌표 (clientX) */
+  mouseX: number;
+  /** 뷰포트 기준 마우스 Y 좌표 (clientY) */
+  mouseY: number;
+  /** 이벤트 발생 시 선택된 레이아웃 요소들 (선택 갱신 후) */
+  selectedLayouts: LayoutBoxElement[];
+}
 
 /**
  * Box 속성 변경 이벤트 상세 정보.
