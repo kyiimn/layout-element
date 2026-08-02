@@ -21,11 +21,12 @@ export type ColorLoaderFn = () => Promise<CMYKColorSet>;
 /**
  * CMYK 색상 로드 및 RGB 변환을 관리하는 싱글턴 레지스트리.
  *
- * `color.json`에서 `CMYKColorSet`을 로드하고, 각 색상을 RGB로 변환하여
- * CSS 변수(`--color-{name}`)로 문서에 주입한다.
+ * `color.json`에서 `CMYKColorSet`을 로드하여 내부에 보관하고,
+ * `getCSSColor(name)` 호출 시 해당 색상을 CMYK → RGB → `#RRGGBB` hex로
+ * 변환하여 반환한다. 스타일시트에 CSS 변수를 주입하지 않는다.
  *
- * 컴포넌트에서 `backgroundColor: "red"`처럼 CMYK 이름을 사용하면
- * 해당 CSS 변수로 렌더링된다.
+ * 컴포넌트에서 `backgroundColor: "red"`처럼 등록된 CMYK 이름을 사용하면
+ * `getCSSColor()`가 반환한 hex 문자열로 렌더링된다.
  *
  * 인쇄 모드(`window.matchMedia("print")`)에서는 서버 로딩을 생략하고
  * `colorSet` setter를 통해 데이터를 주입받는다.
@@ -138,21 +139,6 @@ export class ColorRegistry {
       this._defaultColor = { c: 0, m: 0, y: 0, k: 255 };
       this._colorSet = newColorSet;
 
-      const sheet = globalThis.document?.styleSheets[0];
-      if (!sheet) {
-        this._ready = true;
-        return this.colorMap;
-      }
-
-      const ruleIdx = sheet.cssRules.length;
-      sheet.insertRule(":root {}", ruleIdx);
-
-      const rule = sheet.cssRules[ruleIdx] as CSSStyleRule;
-      rule.style.setProperty('--colorman-default', this._rgbHex(this._cmykToRgb(this._defaultColor)));
-
-      Object.keys(this._colorSet).forEach(name => {
-        rule.style.setProperty(`--colorman-${name}`, this._rgbHex(this._cmykToRgb(this._colorSet[name])));
-      });
       this._ready = true;
 
       return this.colorMap;
@@ -163,13 +149,56 @@ export class ColorRegistry {
   }
 
   /**
-   * CSS 변수 형태의 색상 반환.
+   * CSS 색상 문자열 반환.
+   *
+   * 등록된 색상 이름이면 해당 색상의 `#RRGGBB` hex 문자열을 반환한다.
+   * 등록되지 않은 이름(또는 CSS 색상 문자열)은 기본 색상(`_defaultColor`)의
+   * hex로 폴백된다.
+   *
+   * 반환값이 hex 문자열이므로, `getOpacityHex()`로 생성한 2자리 alpha hex를
+   * 뒤에 결합하여 `#RRGGBBAA` 형태의 투명도 포함 색상을 만들 수 있다.
+   *
    * @param name CMYK 색상 이름
-   * @returns `var(--colorman-{name})` 또는 `var(--colorman-default)`
+   * @returns `#RRGGBB` hex 문자열. 등록되지 않은 이름은 기본 색상 hex
+   *
+   * @example
+   * ```ts
+   * const bg = registry.getCSSColor('red');
+   * // → '#FF0000'
+   *
+   * // 투명도 결합
+   * const bg50 = registry.getCSSColor('red') + registry.getOpacityHex(0.5);
+   * // → '#FF000080'
+   * ```
    */
   public getCSSColor(name: string) {
     if (!this.ready) throw new Error('color map is not ready');
-    return Object.keys(this._colorSet).includes(name) ? `var(--colorman-${name})` : 'var(--colorman-default)';
+    return Object.keys(this._colorSet).includes(name)
+      ? this._rgbHex(this._cmykToRgb(this._colorSet[name]))
+      : this._rgbHex(this._cmykToRgb(this._defaultColor));
+  }
+
+  /**
+   * 0~1 투명도 값을 2자리 hex alpha 문자열로 변환한다.
+   *
+   * CSS `opacity`와 동일한 0~1 범위를 받아 `00`(완전 투명) ~ `FF`(완전 불투명)
+   * hex 2자리로 변환한다. `getCSSColor()`가 반환한 `#RRGGBB` hex 뒤에 결합하여
+   * `#RRGGBBAA` 형태의 8자리 hex 색상을 만드는 데 사용한다.
+   *
+   * @param opacity 0~1 범위의 투명도. 범위를 벗어나면 clamp 처리된다.
+   * @returns 2자리 hex alpha 문자열 (`00`~`FF`)
+   *
+   * @example
+   * ```ts
+   * registry.getOpacityHex(0);   // → '00'
+   * registry.getOpacityHex(0.5);  // → '80'
+   * registry.getOpacityHex(1);   // → 'FF'
+   * registry.getOpacityHex(0.3);// → '4D'
+   * ```
+   */
+  public getOpacityHex(opacity: number) {
+    const clamped = Math.min(1, Math.max(0, opacity));
+    return Math.round(clamped * 255).toString(16).padStart(2, '0').toUpperCase();
   }
 
   /**
