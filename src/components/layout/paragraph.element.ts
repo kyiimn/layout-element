@@ -664,7 +664,11 @@ export class LayoutParagraphElement extends HTMLElement {
         if (lineDiv.style.display === 'none') continue;
         const lineData = lines[li];
         if (lineData === undefined) continue;
-        const colorName = lineData?.textBlockStyle?.color;
+        // genPartStyle()의 CSS 상속과 동일한 우선순위: textBlockStyle → textStyle → inheritStyle.
+        // 상속 색상을 무시하면 검은 배경 박스의 흰 글자가 default(검은색)로 폴백되어 보이지 않는다.
+        const colorName = lineData?.textBlockStyle?.color
+          ?? this._textStyle?.color
+          ?? this._inheritStyle?.color;
         const cmyk = colorName !== undefined
           ? registry.get(colorName)
           : registry.get('default');

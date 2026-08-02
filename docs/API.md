@@ -144,7 +144,7 @@ class LayoutDocumentElement extends HTMLElement
 
 | 이름 | 타입 | 단위 | 설명 |
 |---|---|---|---|
-| `data` | `DocumentData` | — | 한 번에 모든 필드 갱신. `setter`는 자식을 재생성하고 layout+render. `data.id`가 전달되면 요소의 `id`에 반영. |
+| `data` | `DocumentData` | — | 한 번에 모든 필드 갱신. 자식 박스는 ID 기반 diff로 재구성 (같은 ID는 in-place 업데이트, 새 ID는 생성, 없는 ID는 제거). `data.id`가 전달되면 요소의 `id`에 반영. |
 | `id` | `string` | — | 요소 고유 식별자. `connectedCallback` 시점에 `id`가 없으면 `genUUID()`로 자동 할당. `data.id` setter로도 갱신 가능. |
 | `width` | `number` | mm | 문서 너비. |
 | `height` | `number` | mm | 문서 높이. |
@@ -246,7 +246,7 @@ class LayoutBoxElement extends HTMLElement
 
 | 이름 | 타입 | 단위 | 의미 |
 |---|---|---|---|
-| `data` | `BoxData` | — | 한 번에 갱신. 자식 재구축 포함. |
+| `data` | `BoxData` | — | 한 번에 갱신. 자식은 ID 기반 diff로 재구성 (같은 ID는 in-place 업데이트, 새 ID는 생성, 없는 ID는 제거). |
 | `left` | `number` | mm (static: 컬럼 인덱스) | 좌측 위치. |
 | `top` | `number` | mm | 상단 위치. |
 | `width` | `number` | mm (static: 컬럼 수) | 너비. |
@@ -291,7 +291,12 @@ class LayoutBoxElement extends HTMLElement
 
 #### `data` setter 동작
 
-- 모든 필드를 갱신하고 자식을 완전히 재구축합니다.
+- 모든 필드를 갱신하고 자식을 ID 기반 diff로 재구성합니다.
+- 같은 `id`를 가진 기존 자식 요소는 `element.data = child`로 in-place 업데이트 (재생성 없음, 이미지 캐시 유지).
+- 새 `id`를 가진 자식은 새로 생성하여 `appendChild`합니다.
+- 새 `children`에 없는 `id`를 가진 기존 자식은 제거합니다.
+- 자식 순서는 `appendChild`로 재배열합니다.
+- `id`가 없는 자식은 항상 새로 생성됩니다 (안정적 식별자가 없음).
 - `_rebuildingChildren` 플래그로 `MutationObserver`의 중복 트리거를 억제합니다.
 - `lock: true`면 box 자신과 모든 자손이 편집에서 제외됩니다 (drag/resize/text edit 모두).
 
@@ -2366,6 +2371,15 @@ type PrintPostDataChar = {
   color: CMYKColor;           // CMYK 색상 (ColorRegistry에서 색상 명칭으로 조회)
 };
 ```
+
+`PrintPostDataChar.color` 결정 우선순위 (화면 렌더링 `genPartStyle()`의 CSS 상속과 동일):
+
+1. `lineData.textBlockStyle.color` — 블록 단위 오버라이드
+2. `paragraph.textStyle.color` — 단락 수준 글자 스타일
+3. `paragraph.inheritStyle.color` — 부모에서 상속된 색상
+4. `ColorRegistry.get('default')` — 폴백 (`_defaultColor`, `init()` 후 `{ c:0, m:0, y:0, k:255 }`)
+
+`textBlockStyle.color`만 확인하면 단락 레벨(`textStyle.color`)이나 상속(`inheritStyle.color`)으로 색상을 지정한 일반 텍스트가 검은색 default로 폴백되어, 검은 배경 박스 안의 흰 글자가 보이지 않는 버그가 발생한다.
 
 #### `ColorMap`
 
