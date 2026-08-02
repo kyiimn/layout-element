@@ -2,8 +2,11 @@ import { EditManager } from "./edit-manager";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
+import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { DEFAULT_IMAGE_DPI } from "@/constants";
-import type { PlaceGunItem, ArticleContent, ImageContent } from "@/types/edit";
+import { GridCalculator } from "@/core/grid-calculator";
+import type { PlaceGunItem, ArticleContent, ImageContent, ElementPatternContent, StylePatternContent } from "@/types/edit";
+import type { BoxData } from "@/types/layout/box.type";
 
 /**
  * Place Gun 클릭 배치를 관리하는 컨트롤러.
@@ -84,6 +87,10 @@ export class PlaceGunController {
 
     if (item.contentType === 'text') {
       this._injectArticle(box, item);
+    } else if (item.contentType === 'element') {
+      this._injectElementPattern(box, item, event);
+    } else if (item.contentType === 'style') {
+      this._injectStylePattern(box, item);
     } else {
       this._injectImageOrAd(box, item);
     }
@@ -390,6 +397,116 @@ export class PlaceGunController {
     if (!members.includes(uid)) {
       groupImage.groupMember = [...members, uid];
     }
+  }
+
+  /**
+   * 클릭한 box 내의 로컬 mm 좌표를 계산한다.
+   *
+   * @param box - 클릭한 box 요소
+   * @param event - mousedown 이벤트
+   * @returns box 내부 기준 (x, y) mm 좌표
+   */
+  private _getLocalMmPoint(box: LayoutBoxElement, event: MouseEvent): { x: number; y: number } {
+    const rect = box.getBoundingClientRect();
+    const ppm = GridCalculator.ppm;
+    const x = (event.clientX - rect.left) / ppm;
+    const y = (event.clientY - rect.top) / ppm;
+    return { x, y };
+  }
+
+  /**
+   * static 박스의 클릭 위치에서 컬럼 인덱스와 줄 수를 계산한다.
+   *
+   * 부모의 GridCalculator에서 컬럼 좌표와 lineHeight를 가져와
+   * 클릭한 x/y 위치가 몇 번째 컬럼이고 몇 줄째인지 계산한다.
+   *
+   * @param box - 클릭한 static box
+   * @param event - mousedown 이벤트
+   * @returns { left: 컬럼 인덱스, top: 줄 수 }
+   */
+  private _computeStaticPosition(box: LayoutBoxElement, event: MouseEvent): { left: number; top: number } {
+    const model = box.parentElement?.model;
+    if (!model) return { left: 0, top: 0 };
+
+    const { x, y } = this._getLocalMmPoint(box, event);
+    const columnCoords = model.columnCoords;
+    const lineHeight = model.lineHeight;
+
+    let left = 0;
+    for (let i = 0; i < columnCoords.length; i++) {
+      if (x >= columnCoords[i].x1) left = i;
+      else break;
+    }
+
+    const baseY = columnCoords[left]?.y1 ?? 0;
+    const top = Math.max(0, Math.round((y - baseY) / lineHeight));
+
+    return { left, top };
+  }
+
+  /**
+   * 요소 패턴을 클릭한 위치에 주입한다.
+   *
+   * absolute 패턴: 클릭 위치를 box 내부 mm 좌표로 변환하여 left/top으로 설정.
+   * static 패턴: 클릭 위치에서 컬럼 인덱스와 줄 수를 계산하여 left/top으로 설정.
+   * boxData 트리 전체를 새 box로 주입한다.
+   *
+   * @param box - 클릭한 box 요소 (주입 대상의 부모)
+   * @param item - 요소 패턴 항목
+   * @param event - mousedown 이벤트
+   */
+  private _injectElementPattern(box: LayoutBoxElement, item: PlaceGunItem, event: MouseEvent): void {
+    const content = item.content as ElementPatternContent;
+    const { boxData, position } = content;
+
+    const container = box.parentElement;
+    if (!container) return;
+
+    let left: number;
+    let top: number;
+    if (position === 'absolute') {
+      const parentRect = (container as LayoutBoxElement | LayoutDocumentElement).getBoundingClientRect();
+      const ppm = GridCalculator.ppm;
+      left = (event.clientX - parentRect.left) / ppm;
+      top = (event.clientY - parentRect.top) / ppm;
+    } else {
+      const result = this._computeStaticPosition(box, event);
+      left = result.left;
+      top = result.top;
+    }
+
+    const newBoxData: BoxData = {
+      ...boxData,
+      left,
+      top,
+    };
+
+    const newBoxEl = document.createElement('x-layout-box') as LayoutBoxElement;
+    newBoxEl.data = newBoxData;
+    container.appendChild(newBoxEl);
+    newBoxEl.requestRerenderAffectedParagraphs();
+  }
+
+  /**
+   * 스타일 패턴을 클릭한 paragraph에 주입한다.
+   *
+   * 클릭한 box 내의 paragraph를 찾아 textStyle/paragraphStyle을 덮어쓴다.
+   *
+   * @param box - 클릭한 box 요소
+   * @param item - 스타일 패턴 항목
+   */
+  private _injectStylePattern(box: LayoutBoxElement, item: PlaceGunItem): void {
+    const content = item.content as StylePatternContent;
+    const paragraph = this._findParagraphInBox(box);
+    if (!paragraph) return;
+
+    const data = paragraph.data;
+    paragraph.data = {
+      ...data,
+      textStyle: { ...data.textStyle, ...content.textStyle },
+      paragraphStyle: { ...data.paragraphStyle, ...content.paragraphStyle },
+    };
+    paragraph.markStructureChangedAndRender();
   }
 
   /**

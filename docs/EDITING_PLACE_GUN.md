@@ -10,12 +10,14 @@
 
 Place Gun은 InDesign의 "Place Gun" 개념을 차용한 기능으로, 여러 컨텐츠 항목을 메모리에 장전(Load)한 뒤 문서 표면에서 클릭할 때마다 장전된 순서대로 하나씩 배치한다.
 
-- **장전 가능한 컨텐츠**: `text`(단락), `image`(이미지)
-- **배치 방식**: 단일 클릭(드래그 아님). 클릭 위치에 이미 매칭되는 요소가 있으면 그 요소에 데이터를 주입한다. 새 요소를 생성하지 않는다.
+- **장전 가능한 컨텐츠**: `text`(단락), `image`(이미지), `element`(요소 패턴), `style`(스타일 패턴)
+- **배치 방식**: 단일 클릭(드래그 아님). 클릭 위치에 이미 매칭되는 요소가 있으면 그 요소에 데이터를 주입한다. element 항목은 새 box를 생성하여 주입한다.
 - **매칭 규칙**: 클릭 위치의 box 자식이 항목 contentType과 일치해야 함
   - `text` 항목 → box의 `contentType`이 `'paragraph'`인 자식 paragraph
   - `image` 항목 → box의 `contentType`이 `'image'`인 자식 image
-- **비매칭 시 no-op**: 매칭되는 요소가 없으면 항목을 소비하지 않고 아무 동작도 하지 않는다
+  - `element` 항목 → 클릭한 box의 부모에 새 box 생성하여 주입 (기존 요소 매칭 없음)
+  - `style` 항목 → 클릭한 box 내의 paragraph에 스타일 주입
+- **비매칭 시 no-op**: 매칭되는 요소가 없으면 항목을 소비하지 않고 아무 동작도 하지 않는다 (element 항목은 매칭 없이 항상 새 box를 생성하므로 제외)
 - **일시정지**: 장전된 항목이 있어도 배치를 일시정지할 수 있음
 - **순서 변경**: 외부 UI에서 리스트 재정렬 (EditManager API로 반영)
 - **취소**: 항목 삭제, 전체 비우기
@@ -123,13 +125,13 @@ manager.setPlaceGunPaused(false);  // 재개 — 커서 copy, 클릭 배치 활�
 ### 3.1 `PlaceGunContentType`
 
 ```typescript
-export type PlaceGunContentType = 'text' | 'image';
+export type PlaceGunContentType = 'text' | 'image' | 'element' | 'style';
 ```
 
 ### 3.2 `PlaceGunSubType`
 
 ```typescript
-export type PlaceGunSubType = 'article' | 'image' | 'ad';
+export type PlaceGunSubType = 'article' | 'image' | 'ad' | 'element' | 'style';
 ```
 
 이미지/광고의 URL 패턴을 결정한다.
@@ -153,7 +155,7 @@ export type ImageContent = {
 };
 ```
 
-`contentType === 'text'`인 항목의 `content`는 `ArticleContent`이고, `contentType === 'image'`인 항목의 `content`는 `ImageContent`이다.
+`contentType === 'text'`인 항목의 `content`는 `ArticleContent`, `contentType === 'image'`인 항목의 `content`는 `ImageContent`, `contentType === 'element'`인 항목의 `content`는 `ElementPatternContent`, `contentType === 'style'`인 항목의 `content`는 `StylePatternContent`이다.
 
 ### 3.4 `PlaceGunItem`
 
@@ -169,7 +171,7 @@ export type PlaceGunItem = {
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
-| `contentType` | `'text' \| 'image'` | 컨텐츠 종류 (배치 매칭용) |
+| `contentType` | `'text' \| 'image' \| 'element' \| 'style'` | 컨텐츠 종류 (배치 매칭용) |
 | `subType` | `'article' \| 'image' \| 'ad'` | 세부 종류 (URL 패턴 결정용) |
 | `title` | `string` | 패널 표시용 제목 |
 | `sourceId` | `string` | 원본 컨텐츠 고유 식별자 |
@@ -323,6 +325,26 @@ box 내의 image 요소가 있으면 `_applyImageToElement`로 이미지 데이�
 
 paragraph 주입은 `_injectText` 헬퍼를 사용한다. 부모 box의 `requestRerenderAffectedParagraphs()`로 오버랩된 다른 paragraph를 갱신한다.
 
+### 4.5 요소 패턴(element) 주입
+
+요소 패턴 항목(`contentType === 'element'`)은 클릭한 box의 부모 컨테이너에 새 box를 생성하여 주입한다. `ElementPatternContent`의 `boxData`와 `position`을 사용한다.
+
+#### absolute 패턴
+
+클릭한 위치를 부모 컨테이너 기준 mm 좌표로 변환하여 `boxData.left`/`boxData.top`으로 설정한다. `GridCalculator.ppm`으로 픽셀→mm 변환을 수행한다.
+
+#### static 패턴
+
+클릭한 위치에서 컬럼 인덱스와 줄 수를 계산한다. 부모의 `GridCalculator`에서 `columnCoords`와 `lineHeight`를 가져와:
+1. 클릭 x 좌표가 어느 컬럼에 속하는지 인덱스(`left`) 계산
+2. 클릭 y 좌표가 컬럼 상단에서 몇 줄째인지(`top`) 계산: `Math.round((y - columnY1) / lineHeight)`
+
+계산된 `left`/`top`으로 `boxData`를 갱신하여 새 box를 생성한다.
+
+### 4.6 스타일 패턴(style) 주입
+
+스타일 패턴 항목(`contentType === 'style'`)은 클릭한 box 내의 첫 번째 paragraph를 찾아 `StylePatternContent`의 `textStyle`/`paragraphStyle`을 기존 스타일에 덮어쓴다. `paragraph.data` setter로 갱신 후 `markStructureChangedAndRender()`로 재렌더링한다.
+
 ---
 
 ## 5. 커서 변경
@@ -342,7 +364,7 @@ Place Gun이 활성 상태면 `<x-layout-document>`의 `style.cursor`가 `'copy'
 | 파일 | 역할 |
 |------|------|
 | `src/edit/edit-manager.ts` | `EditManager`: Place Gun 상태(`_placeGunItems`, `_placeGunPaused`), 공개 API(`loadPlaceGun`, `unloadPlaceGun`, `removePlaceGunItem`, `reorderPlaceGunItems`, `setPlaceGunPaused`), `_consumePlaceGunItem`, `_syncPlaceGunController`, `_dispatchPlaceGunChange` |
-| `src/edit/place-gun-controller.ts` | `PlaceGunController`: `handleBoxMouseDown` (box에서 호출), 기사 3케이스 분기 주입(`_injectArticle`), 이미지 주입(`_injectImageOrAd` → `_applyImageToElement`), 커서 변경 |
+| `src/edit/place-gun-controller.ts` | `PlaceGunController`: `handleBoxMouseDown` (box에서 호출), 기사 3케이스 분기 주입(`_injectArticle`), 이미지 주입(`_injectImageOrAd` → `_applyImageToElement`), 요소 패턴 주입(`_injectElementPattern`), 스타일 패턴 주입(`_injectStylePattern`), 커서 변경 |
 | `src/components/layout/box.element.ts` | `LayoutBoxElement`: `_onPlaceGunMouseDown` mousedown 리스너, `placeGunActive` 시 `EditManager.handlePlaceGunMouseDown` 위임 |
 | `src/types/edit/place-gun.type.ts` | `PlaceGunContentType`, `PlaceGunItem`, `PlaceGunChangeEventDetail` 타입 정의 |
 

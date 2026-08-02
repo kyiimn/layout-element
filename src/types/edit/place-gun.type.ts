@@ -1,12 +1,17 @@
+import type { TextStyle, ParagraphStyle } from "../style";
+import type { BoxData } from "../layout/box.type";
+
 /**
  * Place Gun으로 장전할 컨텐츠의 종류.
  *
  * - `'text'`: 텍스트 단락. 클릭 위치의 paragraph 요소에 텍스트를 주입한다.
  * - `'image'`: 이미지. 클릭 위치의 image 요소에 이미지 URL을 주입한다.
+ * - `'element'`: 요소 패턴. 클릭 위치에 BoxData 트리를 주입한다.
+ * - `'style'`: 스타일 패턴. 클릭한 paragraph에 텍스트/문단 스타일을 주입한다.
  *
  * @readonly
  */
-export type PlaceGunContentType = 'text' | 'image';
+export type PlaceGunContentType = 'text' | 'image' | 'element' | 'style';
 
 /**
  * Place Gun 항목의 세부 종류. 이미지/광고의 URL 패턴을 결정한다.
@@ -14,10 +19,12 @@ export type PlaceGunContentType = 'text' | 'image';
  * - `'article'`: 기사. `contentType === 'text'`와 함께 사용.
  * - `'image'`: 이미지. `contentType === 'image'`와 함께 사용.
  * - `'ad'`: 광고. `contentType === 'image'`와 함께 사용.
+ * - `'element'`: 요소 패턴. `contentType === 'element'`와 함께 사용.
+ * - `'style'`: 스타일 패턴. `contentType === 'style'`와 함께 사용.
  *
  * @readonly
  */
-export type PlaceGunSubType = 'article' | 'image' | 'ad';
+export type PlaceGunSubType = 'article' | 'image' | 'ad' | 'element' | 'style';
 
 /**
  * 기사 컨텐츠의 본문 데이터.
@@ -47,6 +54,35 @@ export type ImageContent = {
   height: number;
   /** 이미지 해상도 (DPI). */
   dpi: number;
+};
+
+/**
+ * 요소 패턴 컨텐츠의 본문 데이터.
+ *
+ * 저장된 BoxData 트리와 position 정보를 포함한다.
+ * 주입 시 position에 따라 클릭 위치를 기준으로 좌표를 계산한다.
+ */
+export type ElementPatternContent = {
+  /** 패턴 고유 식별자. */
+  uid: string;
+  /** 저장된 BoxData (id 제거됨, 최상위 left/top=0). */
+  boxData: BoxData;
+  /** 박스 배치 모드. */
+  position: 'static' | 'absolute';
+};
+
+/**
+ * 스타일 패턴 컨텐츠의 본문 데이터.
+ *
+ * 주입 시 클릭한 paragraph의 textStyle/paragraphStyle을 덮어쓴다.
+ */
+export type StylePatternContent = {
+  /** 패턴 고유 식별자. */
+  uid: string;
+  /** 주입할 텍스트 스타일. */
+  textStyle: Partial<TextStyle>;
+  /** 주입할 문단 스타일. */
+  paragraphStyle: Partial<ParagraphStyle>;
 };
 
 /**
@@ -88,8 +124,10 @@ export type PlaceGunItem = {
    * 컨텐츠 본문 데이터.
    * - `contentType === 'text'`: {@link ArticleContent} (uid, title, body).
    * - `contentType === 'image'`: {@link ImageContent} (uid, caption).
+   * - `contentType === 'element'`: {@link ElementPatternContent} (uid, boxData, position).
+   * - `contentType === 'style'`: {@link StylePatternContent} (uid, textStyle, paragraphStyle).
    */
-  content: ArticleContent | ImageContent;
+  content: ArticleContent | ImageContent | ElementPatternContent | StylePatternContent;
 };
 
 /**
