@@ -489,7 +489,11 @@ export class LayoutBoxElement extends HTMLElement {
       if (data.contentUid !== undefined) this.contentUid = data.contentUid;
       if (data.groupMember !== undefined) this.groupMember = data.groupMember.split(',').filter(s => s.length > 0);
       if (data.priority !== undefined) this.priority = data.priority;
-      if (data.lock !== undefined) this.lock = data.lock;
+      // `lock`은 명시적으로 `true`일 때만 잠금. `undefined`/`false`는 모두 잠금 해제.
+      // role 전환(viewer→layout 등) 시 setBoxLockDeep(false)가 `delete next.lock`으로
+      // `data.lock`을 `undefined`로 만들기 때문에, 조건부 할당을 사용하면 이전 잠금
+      // 상태가 남아 선택/편집 이벤트가 비활성화되는 버그가 발생한다.
+      this.lock = data.lock === true;
 
       this._left = data.left;
       this._top = data.top;

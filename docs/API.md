@@ -299,6 +299,7 @@ class LayoutBoxElement extends HTMLElement
 - `id`가 없는 자식은 항상 새로 생성됩니다 (안정적 식별자가 없음).
 - `_rebuildingChildren` 플래그로 `MutationObserver`의 중복 트리거를 억제합니다.
 - `lock: true`면 box 자신과 모든 자손이 편집에서 제외됩니다 (drag/resize/text edit 모두).
+- `data.lock === true`일 때만 잠금으로 설정됩니다. `data.lock`이 `undefined` 또는 `false`이면 기존 잠금 상태와 무관하게 **잠금이 해제**됩니다. (role 전환 등으로 `setBoxLockDeep(false)`가 `delete next.lock`을 수행해 `data.lock`이 `undefined`가 되는 경우를 안전하게 처리하기 위함입니다.)
 
 #### 예제
 
