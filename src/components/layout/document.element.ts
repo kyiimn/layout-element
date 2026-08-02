@@ -302,18 +302,44 @@ export class LayoutDocumentElement extends HTMLElement {
       this._paragraphStyle = data.paragraphStyle;
       this._textStyle = data.textStyle;
 
-      this.items.forEach(e => e.remove());
-
-      if (!this._isPrint) this.layout();
+      const existingBoxes = this.items;
+      const existingById = new Map<string, LayoutBoxElement>();
+      for (const box of existingBoxes) {
+        if (box.id) existingById.set(box.id, box);
+      }
 
       const children = data.children || [];
+      const usedIds = new Set<string>();
+
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
-        const boxEl = document.createElement('x-layout-box');
-        boxEl.data = child;
-        this.appendChild(boxEl);
+        const childId = child.id;
+
+        if (childId && existingById.has(childId)) {
+          const existingBox = existingById.get(childId)!;
+          usedIds.add(childId);
+          existingBox.data = child;
+          if (existingBox !== this.children[i]) {
+            this.appendChild(existingBox);
+          }
+        } else {
+          const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
+          boxEl.data = child;
+          this.appendChild(boxEl);
+          if (childId) usedIds.add(childId);
+        }
       }
-      if (!this._isPrint) this.render();
+
+      for (const box of existingBoxes) {
+        if (box.id && !usedIds.has(box.id)) {
+          box.remove();
+        }
+      }
+
+      if (!this._isPrint) {
+        this.layout();
+        this.render();
+      }
     } finally {
       this._rebuildingChildren = false;
       this._pendingData = null;

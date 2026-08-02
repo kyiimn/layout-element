@@ -496,21 +496,48 @@ export class LayoutBoxElement extends HTMLElement {
       this._width = data.width;
       this._height = data.height;
 
-      this.items.forEach(e => e.remove());
-
-      this.layout();
+      const existingChildren = this.items;
+      const existingById = new Map<string, LayoutBoxElement | LayoutParagraphElement | LayoutImageElement>();
+      for (const child of existingChildren) {
+        if (child.id) existingById.set(child.id, child);
+      }
 
       const children = data.children;
-      if (children) {
-        if (Array.isArray(children)) {
-          for (const child of children) {
-            this._appendChildData(child);
+      const childArray = children
+        ? (Array.isArray(children) ? children : [children])
+        : [];
+      const usedIds = new Set<string>();
+
+      for (let i = 0; i < childArray.length; i++) {
+        const child = childArray[i];
+        const childId = child.id;
+
+        if (childId && existingById.has(childId)) {
+          const existingEl = existingById.get(childId)!;
+          usedIds.add(childId);
+          const targetType = child.type === 'text' ? 'paragraph' : child.type;
+          if (existingEl.localName === 'x-layout-' + targetType) {
+            existingEl.data = child.type === 'text'
+              ? { ...child, type: 'paragraph' as const, column: 1, gap: 0 }
+              : child;
+            if (existingEl !== this.children[i]) {
+              this.appendChild(existingEl);
+            }
+            continue;
           }
-        } else {
-          this._appendChildData(children);
+        }
+
+        this._appendChildData(child);
+        if (childId) usedIds.add(childId);
+      }
+
+      for (const child of existingChildren) {
+        if (child.id && !usedIds.has(child.id)) {
+          child.remove();
         }
       }
 
+      this.layout();
       this.render();
       this.requestRerenderAffectedParagraphs();
     } finally {
