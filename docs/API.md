@@ -174,7 +174,7 @@ class LayoutDocumentElement extends HTMLElement
 | 이름 | 타입 | 설명 |
 |---|---|---|
 | `visibleGuide` (set) | `boolean` | 가이드 컬럼의 표시 여부 토글. |
-| `printPostData` (get) | `PrintPostData[]` | 인쇄 후처리용 위치/데이터 배열. 인쇄 모드에서 사용. |
+| `printPostData` (get) | `PrintPostData[]` | 인쇄 후처리용 위치/데이터 배열. 인쇄 모드에서 사용. 자식 요소를 z-index **오름차순**(낮은 것부터)으로 재귀 수집하여 반환. PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로, CSS z-index 동작(낮은 것이 먼저 그려지고 높은 것이 위에 덮임)과 일치함. |
 
 #### 인쇄 모드 동작
 
