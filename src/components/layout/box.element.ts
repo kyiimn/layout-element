@@ -496,6 +496,11 @@ export class LayoutBoxElement extends HTMLElement {
       this._width = data.width;
       this._height = data.height;
 
+      // 자식 reconcile 전에 부모 모델(columnCoords)을 새 데이터로 갱신해야
+      // appendChild 중 자식 connectedCallback → layout → relLeft getter가
+      // stale columnCoords[this.left]를 읽어 `undefined.x1` 크래시가 발생하지 않는다.
+      this._layoutStructure();
+
       const existingChildren = this.items;
       const existingById = new Map<string, LayoutBoxElement | LayoutParagraphElement | LayoutImageElement>();
       for (const child of existingChildren) {
@@ -964,7 +969,11 @@ export class LayoutBoxElement extends HTMLElement {
 
   get relLeft() {
     if (this.position !== 'absolute') {
-      return this.parentModel ? this.parentModel.columnCoords[this.left].x1 : 0;
+      if (this.parentModel) {
+        const coord = this.parentModel.columnCoords[this.left];
+        return coord ? coord.x1 : 0;
+      }
+      return 0;
     } else {
       return (this.inheritStyle?.paddingLeft || 0) + this.left;
     }
@@ -974,7 +983,8 @@ export class LayoutBoxElement extends HTMLElement {
     if (this.position !== 'absolute') {
       if (this.parentModel) {
         const { columnCoords, lineHeight } = this.parentModel;
-        return columnCoords[this.left].y1 + (lineHeight * this.top);
+        const coord = columnCoords[this.left];
+        return coord ? coord.y1 + (lineHeight * this.top) : 0;
       } else {
         return 0;
       }

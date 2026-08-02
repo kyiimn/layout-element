@@ -302,6 +302,11 @@ export class LayoutDocumentElement extends HTMLElement {
       this._paragraphStyle = data.paragraphStyle;
       this._textStyle = data.textStyle;
 
+      // 자식 reconcile 전에 부모 모델(columnCoords)을 새 데이터로 갱신해야
+      // appendChild 중 자식 connectedCallback → layout → relLeft getter가
+      // stale columnCoords[this.left]를 읽어 `undefined.x1` 크래시가 발생하지 않는다.
+      this._layoutStructure();
+
       const existingBoxes = this.items;
       const existingById = new Map<string, LayoutBoxElement>();
       for (const box of existingBoxes) {
