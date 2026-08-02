@@ -67,14 +67,29 @@ export type PrintPostDataChar = {
  *
  * @example
  * const boxPostData: PrintPostData<BoxData> = {
- *   color: { c: 0, m: 0, y: 0, k: 255 },  // 테두리 CMYK 색상
- *   data: boxData,                          // 원본 BoxData
+ *   color: { c: 0, m: 0, y: 0, k: 255 },          // 테두리 CMYK 색상
+ *   backgroundColor: { c: 0, m: 255, y: 255, k: 0 }, // 배경 CMYK 색상
+ *   backgroundOpacity: 0.5,                        // 배경 투명도
+ *   data: boxData,                                 // 원본 BoxData
  *   rect: { x: 100, y: 200, width: 300, height: 150 }  // 렌더링된 위치
  * };
  */
 export type PrintPostData<T = BoxData | ImageData | ParagraphData> = {
-  /** 이 요소에 사용된 CMYK 색상 (인쇄용) */
+  /** 이 요소에 사용된 CMYK 색상 (인쇄용). box의 경우 테두리 색상 */
   color?: CMYKColor;
+
+  /**
+   * 배경색의 CMYK 값 (인쇄용). `data.type === 'box'`인 경우에만 사용.
+   * `BoxData.backgroundColor`가 설정된 경우 `ColorRegistry.get()`으로
+   * 변환한 CMYK 값. 미설정 시 `undefined`.
+   */
+  backgroundColor?: CMYKColor;
+
+  /**
+   * 배경색 투명도 (0~1). `data.type === 'box'`인 경우에만 사용.
+   * `BoxData.backgroundOpacity`값. 미설정 시 `undefined`(불투명으로 간주).
+   */
+  backgroundOpacity?: number;
 
   /** 원본 레이아웃 데이터. `data.type`으로 요소 종류 구분 */
   data: T;
