@@ -33,7 +33,7 @@ flowchart LR
     CR_CUSTOM["_customLoader?"]
     CR_FETCH["fetch('color.json')"]
     CR_CMYK["CMYK → RGB 변환"]
-    CR_CSS["CSS 변수 주입"]
+    CR_CSS["hex 변환 제공"]
   end
 
   FL_INIT --> FL_LOAD
@@ -61,11 +61,16 @@ flowchart LR
 - **화면 모드**: `fonts.json` (또는 커스텀 로더)에서 `Font[]`를 가져오고, 각 폰트의 `ttfFilename`을 이용해 `FontFace`를 생성하여 브라우저에 등록한다.
 - **인쇄 모드**: 외부에서 주입한 `Font[]`의 `base64Data`를 이용해 `data:` URI로 `FontFace`를 생성한다. 서버 요청을 하지 않는다.
 
+스타일 필드(`TextStyle.fontFamily`, `TextBlockStyle.fontFamily`)에서 지정하는 폰트 패밀리값은 `FontLoader.getFontFamily()`를 통해 `Font.family`와 매칭되어 실제 `FontFace.family`로 변환된다. 일치하는 `family`가 없으면 등록된 첫 번째 폰트로 폴백된다. CSS `font-family` 키워드(`"serif"`, `"sans-serif"` 등)는 사용할 수 없다.
+
 ### 2.2 `Font` 타입
 
 ```ts
 type Font = {
-  /** 폰트 패밀리명 (예: "Noto Sans KR") */
+  /**
+   * 폰트 패밀리명 (예: "Myoungjo", "Noto Sans KR").
+   * 이 값이 스타일 필드(`TextStyle.fontFamily` 등)에서 참조하는 식별자이다.
+   */
   family: string;
 
   /** 폰트 굵기 (400, 700 등) */
@@ -84,6 +89,7 @@ type Font = {
 
 - `ttfFilename`: 화면 모드에서 `FontFace`의 `src`에 URL로 사용된다.
 - `base64Data`: 인쇄 모드에서 `FontFace`의 `src`에 `data:` URI로 사용된다.
+- `family`: 스타일 필드의 `fontFamily` 값이 참조하는 키이다. `FontLoader.getFontFamily(name)`이 일치하는 `family`를 찾아 실제 `FontFace.family`를 반환한다.
 
 ### 2.3 `FontLoaderFn` 타입
 
@@ -167,7 +173,7 @@ FontLoader.resetLoader();
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
 | `init(fonts?)` | `(fonts?: Font[]) => Promise<FontFace[]>` | 폰트를 로드하고 브라우저에 등록한다. 인쇄 모드에서는 `fonts`를 직접 주입받는다. 화면 모드에서는 `_loadServer()`로 데이터를 가져온다. **이미 초기화된 상태에서 동일한 폰트 데이터로 재호출하면 스킵하고 기존 `_fontFaces`를 그대로 반환한다.** 동일성 판단은 `_computeFontsSignature()`로 생성한 signature 문자열 비교를 통해 수행한다. 화면 모드에서 `fonts` 파라미터 없이 호출한 경우에는 signature 비교가 불가능하므로 항상 재로드한다. |
-| `getFontFamily(_fontFamily?)` | `(_fontFamily?: string) => string` | 폰트 패밀리명을 반환한다. 현재는 항상 `'Myoungjo'`를 반환한다. `_fontFamily` 파라미터는 향후 매핑 구현을 위해 예약되어 있다. |
+| `getFontFamily(fontName?)` | `(fontName?: string) => string` | 폰트 패밀리명을 반환한다. 등록된 `Font` 중 `family`가 `fontName`과 일치하는 폰트를 찾아 해당 `FontFace.family`를 반환한다. 일치하는 폰트가 없으면 등록된 첫 번째 폰트의 `FontFace.family`로 폴백된다. |
 
 #### 게터
 
@@ -197,12 +203,14 @@ FontLoader.resetLoader();
 
 ### 3.1 역할
 
-`ColorRegistry`는 CMYK 색상 데이터를 로드하고 RGB로 변환하여 CSS 변수로 문서에 주입하는 싱글톤 레지스트리이다.
+`ColorRegistry`는 CMYK 색상 데이터를 로드하고 RGB로 변환하여 제공하는 싱글톤 레지스트리이다.
 
-- **화면 모드**: `color.json` (또는 커스텀 로더)에서 `CMYKColorSet`을 가져오고, 각 색상을 RGB로 변환하여 `:root`에 CSS 변수(`--colorman-{name}`)로 주입한다.
+- **화면 모드**: `color.json` (또는 커스텀 로더)에서 `CMYKColorSet`을 가져와 내부에 보관한다.
 - **인쇄 모드**: 외부에서 주입한 `CMYKColorSet`을 직접 사용한다.
 
-컴포넌트에서 `backgroundColor: "red"`처럼 CMYK 이름을 사용하면, 해당 CSS 변수로 렌더링된다.
+스타일 필드(`TextStyle.color`, `TextBlockStyle.color`, `BoxData.backgroundColor`, `BoxData.borderColor`)에서 지정하는 색상값은 `ColorRegistry.getCSSColor()`를 통해 `#RRGGBB` hex 문자열로 변환된다. 여기서 `{name}`은 `CMYKColorSet`에 등록된 키(색상 이름)이어야 한다. 등록되지 않은 이름이나 CSS 색상 문자열(`#000`, `rgb(...)`)을 넣으면 기본 색상 hex로 폴백되어 의도한 색상이 나오지 않는다. 예: `backgroundColor: "red"` → `#FF0000`로 렌더링.
+
+배경색 투명도는 `BoxData.backgroundOpacity`(0~1)로 지정하며, `ColorRegistry.getOpacityHex(opacity)`가 2자리 hex alpha(`00`~`FF`)로 변환한다. `getCSSColor()` 반환값 뒤에 결합하여 `#RRGGBBAA` 8자리 hex로 적용한다.
 
 ### 3.2 `CMYKColorSet` 및 관련 타입
 
@@ -228,7 +236,7 @@ type ColorMap = {
 };
 ```
 
-- `CMYKColorSet`의 키는 색상 이름(예: `"red"`, `"blue"`)이다.
+- `CMYKColorSet`의 키는 색상 이름(예: `"red"`, `"blue"`)이다. 이 키가 스타일 필드(`TextStyle.color`, `BoxData.backgroundColor` 등)의 색상값으로 사용된다.
 - `CMYKColor`의 각 값은 0-255 범위이다.
 - `RGBColor`의 각 값은 0-255 범위이다.
 
@@ -247,7 +255,6 @@ sequenceDiagram
     participant App as 애플리케이션
     participant CR as ColorRegistry
     participant Server as color.json / 커스텀 로더
-    participant DOM as Document stylesheet
 
     App->>CR: init(colorSet?)
     CR->>CR: _ready = false, _colorSet = {}
@@ -265,18 +272,8 @@ sequenceDiagram
         end
     end
 
-    CR->>CR: _defaultColor = {c:0, m:0, y:0, k:0}
-
-    alt stylesheet 접근 가능
-        CR->>DOM: sheet.insertRule(":root {}")
-        CR->>DOM: rule.setProperty('--colorman-default', ...)
-        loop 각 색상 이름
-            CR->>DOM: rule.setProperty('--colorman-{name}', ...)
-        end
-    else stylesheet 없음 (SSR 등)
-        CR->>CR: _ready = true, return colorMap
-    end
-
+    CR->>CR: _defaultColor = {c:0, m:0, y:0, k:255}
+    CR->>CR: _colorSet = newColorSet
     CR->>CR: _ready = true
     CR-->>App: ColorMap[]
 ```
@@ -325,19 +322,20 @@ b = round(255 * (1 - min(1, y_ + k_)))
 - `cmyk`가 생략되면 `_defaultColor`({ c: 0, m: 0, y: 0, k: 0 })를 사용한다.
 - `min(1, ...)`으로 1을 넘지 않도록 클램프한다.
 
-### 3.7 CSS 변수 주입
+### 3.7 색상 변환 및 적용
 
-`init()`은 문서의 첫 번째 스타일시트에 `:root` 규칙을 추가하고, 각 색상을 CSS 변수로 주입한다.
+`init()`은 로드한 `CMYKColorSet`을 내부에 보관하고, `getCSSColor(name)` 호출 시 해당 색상을 CMYK → RGB → `#RRGGBB` hex로 변환하여 반환한다. 스타일시트에 CSS 변수를 주입하지 않는다 — 런타임에서 `getCSSColor()`가 직접 hex를 반환한다.
 
 ```
---colorman-default  →  #FFFFFF  (CMYK 0,0,0,0 → RGB 255,255,255)
---colorman-red      →  #FF0000  (예시)
---colorman-blue     →  #0000FF  (예시)
+getCSSColor('default') → '#FFFFFF'  (CMYK 0,0,0,255 → RGB 255,255,255)
+getCSSColor('red')     → '#FF0000'  (예시)
+getCSSColor('blue')    → '#0000FF'  (예시)
 ```
 
-- 변수명 형식: `--colorman-{name}`
-- 기본 색상: `--colorman-default`
-- 스타일시트에 접근할 수 없는 환경(SSR, 테스트)에서는 CSS 변수 주입을 건너뛰고 `_ready = true`로 설정한다. `colorMap` 게터로 데이터 자체는 접근 가능하다.
+- 런타임 색상 적용: `getCSSColor(name)` → `#RRGGBB` hex 직접 반환
+- 투명도 결합: `getCSSColor(name) + getOpacityHex(opacity)` → `#RRGGBBAA` 8자리 hex
+- 기본 색상: 등록되지 않은 이름 폴백 시 사용
+- SSR/테스트 환경에서도 stylesheet 접근 없이 `getCSSColor()`/`colorMap`이 동작한다 (데이터는 `_colorSet` 기반으로 동작).
 
 ### 3.8 공개 API
 
@@ -353,8 +351,9 @@ b = round(255 * (1 - min(1, y_ + k_)))
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `init(colorSet?)` | `(colorSet?: CMYKColorSet) => Promise<ColorMap[]>` | 색상을 로드하고 CSS 변수를 주입한다. 인쇄 모드에서는 `colorSet`을 직접 주입받는다. 화면 모드에서는 `_loadServer()`로 데이터를 가져온다. |
-| `getCSSColor(name)` | `(name: string) => string` | CSS 변수 형태의 색상을 반환한다. 등록된 색상이면 `var(--colorman-{name})`, 아니면 `var(--colorman-default)`. |
+| `init(colorSet?)` | `(colorSet?: CMYKColorSet) => Promise<ColorMap[]>` | 색상을 로드하여 내부에 보관한다. 인쇄 모드에서는 `colorSet`을 직접 주입받는다. 화면 모드에서는 `_loadServer()`로 데이터를 가져온다. `getCSSColor()` 호출 시 CMYK → RGB → hex 변환을 수행한다. |
+| `getCSSColor(name)` | `(name: string) => string` | `#RRGGBB` hex 문자열을 반환한다. `name`이 `CMYKColorSet`에 등록된 키이면 해당 색상의 hex, 등록되지 않은 이름(또는 CSS 색상 문자열)이면 기본 색상 hex로 폴백된다. `getOpacityHex()`로 생성한 alpha hex를 뒤에 결합하여 `#RRGGBBAA` 형태로 투명도를 적용할 수 있다. |
+| `getOpacityHex(opacity)` | `(opacity: number) => string` | 0~1 투명도 값을 2자리 hex alpha 문자열(`00`~`FF`)로 변환한다. 범위를 벗어나면 clamp 처리된다. `getCSSColor()` 반환값 뒤에 결합하여 사용한다. |
 | `get(name)` | `(name: string) => CMYKColor` | 색상 이름으로 CMYK 값을 반환한다. 등록되지 않은 이름이면 `_defaultColor`({ c: 0, m: 0, y: 0, k: 0 })를 반환한다. |
 
 #### 게터
@@ -581,8 +580,10 @@ function PrintLayout({ printFonts, printColors }) {
 ## 7. 주의사항 및 제약
 
 - **초기화 순서**: `FontLoader.getInstance().init()`과 `ColorRegistry.getInstance().init()`은 렌더링 전에 반드시 호출되고 완료되어야 한다. `ready`가 `true`가 되기 전에 `getFontFamily()`, `fontFaces`, `getCSSColor()`, `get()`, `colorMap`에 접근하면 에러가 발생한다.
-- **`getFontFamily()` 하드코딩**: 현재 `getFontFamily()`는 인수와 관계없이 항상 `'Myoungjo'`를 반환한다. 폰트 패밀리 매핑은 구현되지 않았다.
-- **stylesheet 접근 불가**: `ColorRegistry.init()`은 `document.styleSheets[0]`에 접근할 수 없는 환경(SSR, 테스트)에서도 `_ready = true`로 설정한다. `colorMap` 게터로 데이터에 접근할 수 있지만, CSS 변수는 주입되지 않는다.
+- **`getFontFamily()` 폴백**: `getFontFamily(fontName)`는 등록된 `Font` 중 `family`가 `fontName`과 일치하는 폰트를 찾아 해당 `FontFace.family`를 반환한다. 일치하는 폰트가 없으면 등록된 첫 번째 폰트의 `FontFace.family`로 폴백된다. CSS `font-family` 키워드(`"serif"` 등)는 등록된 `family`가 아니므로 폴백된다.
+- **`getCSSColor()` 폴백**: `getCSSColor(name)`는 `name`이 `CMYKColorSet`에 등록된 키인 경우에만 해당 색상의 `#RRGGBB` hex를 반환하고, 그 외의 모든 값(등록되지 않은 이름, CSS 색상 문자열 `#000`/`rgb(...)` 등)은 기본 색상 hex로 폴백된다. 스타일 필드에는 등록된 색상 이름만 사용해야 한다.
+- **`getOpacityHex()` 범위**: 0~1 범위를 벗어나는 값은 clamp 처리된다(음수 → `00`, 1 초과 → `FF`). `getCSSColor()`가 반환한 `#RRGGBB` hex 뒤에 결합하여 `#RRGGBBAA` 8자리 hex 색상을 만든다.
+- **stylesheet 미의존**: `ColorRegistry`는 `document.styleSheets`에 접근하지 않는다. `init()`은 `CMYKColorSet`을 내부에 보관만 하며, `getCSSColor()`가 호출 시점에 CMYK → RGB → `#RRGGBB` hex 변환을 수행한다. SSR/테스트 환경에서도 `_ready = true`로 설정되어 `getCSSColor()`/`colorMap`이 정상 동작한다.
 - **커스텀 로더 에러**: 커스텀 로더에서 예외가 발생하면 `init()`이 해당 에러를 그대로 전파한다. 호출자가 `try/catch`로 처리해야 한다.
 - **정적 필드**: `_customLoader`는 정적 필드이므로, `FontLoader.registerLoader()` / `ColorRegistry.registerLoader()`는 인스턴스가 없는 상태에서도 호출할 수 있다. 등록된 로더는 모든 인스턴스에 영향을 미친다.
 - **로더 재등록**: `registerLoader()`를 여러 번 호출하면 마지막에 등록한 로더가 사용된다. 이전 로더는 덮어쓰기된다.

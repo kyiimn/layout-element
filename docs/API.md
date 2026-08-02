@@ -253,13 +253,14 @@ class LayoutBoxElement extends HTMLElement
 | `height` | `number` | mm (static: 줄 수) | 높이. |
 | `position` | `'static' \| 'absolute'` | — | 배치 모드. |
 | `zIndex` | `number` | — | 렌더링 순서. |
-| `backgroundColor` | `string \| undefined` | — | CSS 색상 또는 CMYK 이름. |
+| `backgroundColor` | `string \| undefined` | — | 배경색. `ColorRegistry`에 등록된 CMYK 색상 이름만 사용 가능. |
+| `backgroundOpacity` | `number \| undefined` | 0~1 | 배경색 투명도. CSS `opacity`와 동일 범위. 생략 시 1(불투명). |
 | `borderTopWidth` | `number` | mm | 상단 테두리 두께. |
 | `borderRightWidth` | `number` | mm | 우측 테두리 두께. |
 | `borderBottomWidth` | `number` | mm | 하단 테두리 두께. |
 | `borderLeftWidth` | `number` | mm | 좌측 테두리 두께. |
 | `borderStyle` | `'solid' \| 'dotted' \| 'dashed'` | — | 테두리 스타일. |
-| `borderColor` | `string \| undefined` | — | 테두리 색상. |
+| `borderColor` | `string \| undefined` | — | 테두리 색상. `ColorRegistry`에 등록된 CMYK 색상 이름만 사용 가능. |
 | `paddingTop` | `number` | mm | 내부 상단 여백. |
 | `paddingRight` | `number` | mm | 내부 우측 여백. |
 | `paddingBottom` | `number` | mm | 내부 하단 여백. |
@@ -1140,17 +1141,49 @@ async init(colorSet?: CMYKColorSet): Promise<ColorMap[]>;
 
 ```ts
 /**
- * CSS 변수 형태의 색상 문자열 반환.
+ * CSS 색상 문자열 반환.
  *
- * @param name - CMYK 색상 이름
- * @returns `var(--colorman-${name})` 또는 `var(--colorman-default)`
+ * 등록된 색상 이름이면 해당 색상의 `#RRGGBB` hex 문자열을 반환한다.
+ * 등록되지 않은 이름이나 CSS 색상 문자열(`#000`, `rgb(...)`)은
+ * 기본 색상 hex로 폴백된다. 스타일 필드(`TextStyle.color`,
+ * `BoxData.backgroundColor` 등)에는 등록된 색상 이름만 사용해야 한다.
+ *
+ * 반환값이 hex 문자열이므로 `getOpacityHex()`로 생성한 2자리 alpha hex를
+ * 뒤에 결합하여 `#RRGGBBAA` 형태의 투명도 포함 색상을 만들 수 있다.
+ *
+ * @param name - CMYKColorSet에 등록된 색상 이름
+ * @returns `#RRGGBB` hex 문자열. 등록되지 않은 이름은 기본 색상 hex
  * @throws {Error} `ready === false`일 때
  *
  * @example
  * const bg = registry.getCSSColor('red');
- * // → 'var(--colorman-red)'
+ * // → '#FF0000'
+ *
+ * registry.getCSSColor('#000000');   // → 기본 색상 hex (폴백)
+ * registry.getCSSColor('unknown');   // → 기본 색상 hex (폴백)
+ *
+ * // 투명도 결합
+ * const bg50 = registry.getCSSColor('red') + registry.getOpacityHex(0.5);
+ * // → '#FF000080'
  */
 getCSSColor(name: string): string;
+
+/**
+ * 0~1 투명도 값을 2자리 hex alpha 문자열로 변환.
+ *
+ * CSS `opacity`와 동일한 0~1 범위를 받아 `00`(완전 투명) ~ `FF`(완전 불투명)
+ * hex 2자리로 변환한다. `getCSSColor()`가 반환한 `#RRGGBB` hex 뒤에 결합하여
+ * `#RRGGBBAA` 8자리 hex 색상을 만드는 데 사용한다. 범위를 벗어나면 clamp.
+ *
+ * @param opacity - 0~1 투명도. 음수는 0, 1 초과는 1로 clamp.
+ * @returns 2자리 hex alpha 문자열 (`00`~`FF`)
+ *
+ * @example
+ * registry.getOpacityHex(0);    // → '00'
+ * registry.getOpacityHex(0.5);  // → '80'
+ * registry.getOpacityHex(1);    // → 'FF'
+ */
+getOpacityHex(opacity: number): string;
 ```
 
 ```ts
@@ -1178,8 +1211,12 @@ get(name: string): CMYKColor;
 const registry = ColorRegistry.getInstance();
 await registry.init();
 
-box.borderColor = 'red';      // 'var(--colorman-red)'로 렌더링
+box.borderColor = 'red';      // '#FF0000'로 렌더링
 const cmyk = registry.get('red');  // { c:0, m:255, y:255, k:0 }
+
+// 배경색 + 투명도
+box.backgroundColor = 'red';
+box.backgroundOpacity = 0.5;   // getCSSColor('red') + getOpacityHex(0.5) → '#FF000080'
 
 // 인쇄 모드: 데이터 주입
 const colorSet: CMYKColorSet = {
@@ -1261,15 +1298,21 @@ async init(fonts?: Font[]): Promise<FontFace[]>;
 /**
  * 폰트 패밀리명 반환.
  *
- * @param _fontFamily - 요청된 폰트 패밀리명 (현재 미사용, 항상 'Myoungjo' 반환)
- * @returns 기본 폰트 패밀리명
+ * `FontLoader`에 등록된 `Font` 중 `family`가 `fontName`과 일치하는 폰트를
+ * 찾아 해당 `FontFace.family`를 반환한다. 일치하는 폰트가 없으면 등록된
+ * 첫 번째 폰트의 `FontFace.family`로 폴백된다. 스타일 필드의
+ * `fontFamily` 값은 `Font.family` 값이어야 하며, CSS `font-family`
+ * 키워드(`"serif"` 등)는 매칭되지 않아 폴백된다.
+ *
+ * @param fontName - 등록된 Font.family 값
+ * @returns 일치하는 FontFace.family, 또는 등록된 첫 폰트의 family
  * @throws {Error} `ready === false`일 때
  *
  * @example
- * const family = FontLoader.getInstance().getFontFamily('Noto Sans');
- * // → 'Myoungjo' (현재는 항상 동일)
+ * const family = FontLoader.getInstance().getFontFamily('Myoungjo');
+ * // → 등록된 FontFace.family 중 'Myoungjo'와 일치하는 값
  */
-getFontFamily(_fontFamily?: string): string;
+getFontFamily(fontName?: string): string;
 ```
 
 #### 게터
@@ -1279,14 +1322,25 @@ getFontFamily(_fontFamily?: string): string;
 | `fontFaces` | `FontFace[]` | 등록된 FontFace 배열. |
 | `ready` | `boolean` | 초기화 완료 여부. |
 
-> **하드코딩된 동작**: `getFontFamily()`는 현재 인자 무관하게 `'Myoungjo'`를 반환합니다.
-> 폰트 패밀리 매핑은 아직 구현되지 않았습니다.
+> **폰트 패밀리 매칭**: `getFontFamily(fontName)`는 등록된 `Font` 중
+> `family`가 `fontName`과 일치하는 폰트를 찾아 `FontFace.family`를
+> 반환합니다. 일치하는 폰트가 없으면 등록된 첫 번째 폰트로
+> 폴백됩니다. 스타일 필드(`TextStyle.fontFamily`,
+> `TextBlockStyle.fontFamily`)에는 `FontLoader`에 등록된
+> `Font.family` 값만 사용해야 합니다.
 
 #### 예제
 
 ```ts
 await FontLoader.getInstance().init();
 console.log(FontLoader.getInstance().ready); // true
+
+// 등록된 Font.family로 폰트 패밀리 조회
+const family = FontLoader.getInstance().getFontFamily('Myoungjo');
+// → 등록된 'Myoungjo' FontFace.family
+
+// 미등록 폰트는 첫 폰트로 폴백
+FontLoader.getInstance().getFontFamily('serif'); // → 등록된 첫 폰트
 ```
 
 ---
@@ -2093,7 +2147,8 @@ type BoxData = {
   height: number;      // mm (static: 줄 수)
   position?: 'static' | 'absolute';  // 기본 'static'
   zIndex?: number;
-  backgroundColor?: string;
+  backgroundColor?: string;   // ColorRegistry 등록 이름
+  backgroundOpacity?: number; // 0~1, 생략 시 1
   borderTopWidth?: number;
   borderRightWidth?: number;
   borderBottomWidth?: number;
