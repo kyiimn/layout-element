@@ -89,8 +89,27 @@ export type BoxData = {
   /** 렌더링 순서 (z-index). 높을수록 위에 표시됨 */
   zIndex?: number;
 
-  /** 배경색 (CSS 색상 문자열 또는 CMYK 색상 이름) */
+  /**
+   * 배경색.
+   *
+   * `ColorRegistry`에 등록된 CMYK 색상 이름(`CMYKColorSet`의 키)만
+   * 사용 가능. `ColorRegistry.getCSSColor()`가 `#RRGGBB` hex로
+   * 변환한다. 등록되지 않은 이름(또는 CSS 색상 문자열)은
+   * 기본 색상 hex로 폴백된다.
+   */
   backgroundColor?: string;
+
+  /**
+   * 배경색 투명도. CSS `opacity`와 동일한 0~1 범위.
+   *
+   * `backgroundColor`와 함께 사용되며, `ColorRegistry.getOpacityHex()`가
+   * 0~1 값을 2자리 hex(`00`~`FF`)로 변환하여 `getCSSColor()`가 반환한
+   * `#RRGGBB` hex 뒤에 결합한다. 예: `backgroundColor: 'red'`,
+   * `backgroundOpacity: 0.5` → `getCSSColor('red') + getOpacityHex(0.5)` →
+   * `#FF000080` 형태로 적용.
+   * 생략 시 1(불투명)으로 간주한다.
+   */
+  backgroundOpacity?: number;
 
   /** 상단 테두리 두께 */
   borderTopWidth?: number;
@@ -104,7 +123,14 @@ export type BoxData = {
   /** 좌측 테두리 두께 */
   borderLeftWidth?: number;
 
-  /** 테두리 색상 (CSS 색상 문자열 또는 CMYK 색상 이름) */
+  /**
+   * 테두리 색상.
+   *
+   * `ColorRegistry`에 등록된 CMYK 색상 이름(`CMYKColorSet`의 키)만
+   * 사용 가능. `ColorRegistry.getCSSColor()`가 `#RRGGBB` hex로
+   * 변환한다. 등록되지 않은 이름(또는 CSS 색상 문자열)은
+   * 기본 색상 hex로 폴백된다.
+   */
   borderColor?: string;
 
   /** 테두리 스타일. 기본값: `'solid'` */

@@ -31,6 +31,7 @@ export class LayoutBoxElement extends HTMLElement {
   private _height: number = 0;
   private _position: BoxPosition = "static";
   private _backgroundColor?: string;
+  private _backgroundOpacity?: number;
   private _borderColor?: string;
   private _borderStyle: BoxBorderStyle = "solid";
   private _borderTopWidth: number = 0;
@@ -236,6 +237,7 @@ export class LayoutBoxElement extends HTMLElement {
     }
 
     this._ensureResizeHandles();
+    const colorRegistry = ColorRegistry.getInstance();
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
       this._styleRule.style,
       {
@@ -247,6 +249,10 @@ export class LayoutBoxElement extends HTMLElement {
         top: `${this.relTop}mm`,
         width: `${this.absWidth}mm`,
         zIndex: `${this.zIndex + 100}`,
+        backgroundColor: this._backgroundColor
+          ? colorRegistry.getCSSColor(this._backgroundColor) +
+            colorRegistry.getOpacityHex(this._backgroundOpacity ?? 1)
+          : 'transparent',
       }
     );
   }
@@ -468,6 +474,7 @@ export class LayoutBoxElement extends HTMLElement {
       if (data.position !== undefined) this._position = data.position;
       if (data.zIndex !== undefined && this._role !== 'ad' && this._role !== 'header') this._zIndex = data.zIndex;
       if (data.backgroundColor !== undefined) this._backgroundColor = data.backgroundColor;
+      if (data.backgroundOpacity !== undefined) this._backgroundOpacity = data.backgroundOpacity;
       if (data.borderTopWidth !== undefined) this._borderTopWidth = data.borderTopWidth;
       if (data.borderBottomWidth !== undefined) this._borderBottomWidth = data.borderBottomWidth;
       if (data.borderLeftWidth !== undefined) this._borderLeftWidth = data.borderLeftWidth;
@@ -662,6 +669,12 @@ export class LayoutBoxElement extends HTMLElement {
     this.layout();
   }
 
+  set backgroundOpacity(value: number | undefined) {
+    if (this._backgroundOpacity === value) return;
+    this._backgroundOpacity = value;
+    this.layout();
+  }
+
   set borderTopWidth(value: number) {
     if (this._borderTopWidth === value) return;
     this._borderTopWidth = value;
@@ -745,6 +758,7 @@ export class LayoutBoxElement extends HTMLElement {
       position: this.position,
       zIndex: this.zIndex,
       backgroundColor: this.backgroundColor,
+      backgroundOpacity: this.backgroundOpacity,
       borderTopWidth: this.borderTopWidth,
       borderBottomWidth: this.borderBottomWidth,
       borderLeftWidth: this.borderLeftWidth,
@@ -775,6 +789,7 @@ export class LayoutBoxElement extends HTMLElement {
     return this._zIndex;
   }
   get backgroundColor() { return this._backgroundColor; }
+  get backgroundOpacity() { return this._backgroundOpacity; }
   get borderColor() { return this._borderColor; }
   get borderStyle() { return this._borderStyle; }
   get borderTopWidth() { return this._borderTopWidth; }
@@ -1011,6 +1026,8 @@ export class LayoutBoxElement extends HTMLElement {
 
     data.push({
       color: this.borderColor ? colorRegistry.get(this.borderColor) : undefined,
+      backgroundColor: this.backgroundColor ? colorRegistry.get(this.backgroundColor) : undefined,
+      backgroundOpacity: this.backgroundOpacity,
       data: {
         ...this.data,
         borderStyle: this.borderStyle || DEFAULT_BORDER_STYLE,

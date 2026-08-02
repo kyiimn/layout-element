@@ -12,6 +12,7 @@ export interface LayoutBoxProps {
   position?: BoxPosition;
   zIndex?: number;
   backgroundColor?: string;
+  backgroundOpacity?: number;
   borderTopWidth?: number;
   borderBottomWidth?: number;
   borderLeftWidth?: number;
@@ -40,6 +41,7 @@ export const LayoutBox = forwardRef<LayoutBoxElement, LayoutBoxProps>(
     position,
     zIndex,
     backgroundColor,
+    backgroundOpacity,
     borderTopWidth,
     borderBottomWidth,
     borderLeftWidth,
@@ -110,6 +112,12 @@ export const LayoutBox = forwardRef<LayoutBoxElement, LayoutBoxProps>(
       if (!element || backgroundColor === undefined) return;
       element.backgroundColor = backgroundColor;
     }, [innerRef, backgroundColor]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || backgroundOpacity === undefined) return;
+      element.backgroundOpacity = backgroundOpacity;
+    }, [innerRef, backgroundOpacity]);
 
     useEffect(() => {
       const element = innerRef.current;
