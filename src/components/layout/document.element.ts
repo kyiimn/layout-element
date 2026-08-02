@@ -81,14 +81,32 @@ export class LayoutDocumentElement extends HTMLElement {
     if (!this.id) this.id = genUUID();
     if (this._isPrint) return;
     this._startChildObserver();
+    this.addEventListener('mousedown', this._onPlaceGunMouseDown);
     this.layout();
     this.render();
   }
 
   disconnectedCallback() {
     this._stopChildObserver();
+    this.removeEventListener('mousedown', this._onPlaceGunMouseDown);
     this._editManager.reset();
   }
+
+  /**
+   * Place Gun 활성 상태일 때 document 빈 공간 mousedown을 EditManager에 위임한다.
+   *
+   * box 자식에서 발생한 mousedown은 box의 `_onPlaceGunMouseDown`이 먼저 처리하고
+   * `stopPropagation`을 호출하므로 여기에 도달하지 않는다.
+   * document 빈 공간 클릭 시 element 항목만 주입을 시도한다.
+   */
+  private _onPlaceGunMouseDown = (event: MouseEvent): void => {
+    if (this._isPrint) return;
+    const manager = this._editManager;
+    if (!manager.placeGunActive) return;
+    const nextItem = manager.placeGunItems[0];
+    if (!nextItem || nextItem.contentType !== 'element') return;
+    manager.handlePlaceGunDocumentMouseDown(this, event);
+  };
 
   /**
    * 구조 계산: GridCalculator 데이터 할당 및 모델 생성.

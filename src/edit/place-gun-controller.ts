@@ -3,8 +3,7 @@ import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
-import { DEFAULT_IMAGE_DPI } from "@/constants";
-import { GridCalculator } from "@/core/grid-calculator";
+import { DEFAULT_IMAGE_DPI, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER, Z_INDEX_MAX_LAYOUT } from "@/constants";
 import type { PlaceGunItem, ArticleContent, ImageContent, ElementPatternContent, StylePatternContent } from "@/types/edit";
 import type { BoxData } from "@/types/layout/box.type";
 
@@ -60,6 +59,43 @@ export class PlaceGunController {
   }
 
   /**
+   * document 빈 공간의 mousedown 이벤트를 처리하여 element 패턴 항목을 주입한다.
+   *
+   * element 항목만 처리하며, 다른 contentType은 무시한다.
+   * 클릭 위치를 document 내부 mm 좌표로 변환하여 새 box를 생성한다.
+   *
+   * @param doc - mousedown이 발생한 document 요소
+   * @param event - mousedown 이벤트
+   * @returns 주입 성공 여부
+   */
+  handleDocumentMouseDown(doc: LayoutDocumentElement, event: MouseEvent): boolean {
+    if (event.button !== 0) return false;
+
+    const manager = this._manager;
+    if (!manager.placeGunActive) return false;
+
+    const nextItem = manager.placeGunItems[0];
+    if (!nextItem) return false;
+
+    if (nextItem.contentType !== 'element') return false;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    manager._dispatchPlaceGunBefore(nextItem, doc);
+
+    const item = manager._consumePlaceGunItem();
+    if (!item) return false;
+
+    this._injectElementPattern(item, event);
+
+    manager._dispatchPlaceGunAfter(item, doc, true);
+
+    manager._suppressLayoutClick();
+    return true;
+  }
+
+  /**
    * box의 mousedown 이벤트를 처리하여 Place Gun 항목을 주입한다.
    *
    * @param box - mousedown이 발생한 box 요소
@@ -88,7 +124,7 @@ export class PlaceGunController {
     if (item.contentType === 'text') {
       this._injectArticle(box, item);
     } else if (item.contentType === 'element') {
-      this._injectElementPattern(box, item, event);
+      this._injectElementPattern(item, event);
     } else if (item.contentType === 'style') {
       this._injectStylePattern(box, item);
     } else {
@@ -400,85 +436,146 @@ export class PlaceGunController {
   }
 
   /**
-   * 클릭한 box 내의 로컬 mm 좌표를 계산한다.
+   * 클릭 위치에서 요소 패턴을 주입할 컨테이너를 찾는다.
    *
-   * @param box - 클릭한 box 요소
-   * @param event - mousedown 이벤트
-   * @returns box 내부 기준 (x, y) mm 좌표
+   * `elementsFromPoint`로 클릭 위치의 요소 목록을 가져와,
+   * box-only 컨테이너(비-box 자식이 없는 box)를 찾는다.
+   * 찾지 못하면 document로 폴백한다.
+   *
+   * `editableRootId`가 설정된 경우 root box 내부의 box만 허용한다.
+   *
+   * @param clientX - 클릭 X 좌표
+   * @param clientY - 클릭 Y 좌표
+   * @returns 주입 컨테이너 (box 또는 document)
    */
-  private _getLocalMmPoint(box: LayoutBoxElement, event: MouseEvent): { x: number; y: number } {
-    const rect = box.getBoundingClientRect();
-    const ppm = GridCalculator.ppm;
-    const x = (event.clientX - rect.left) / ppm;
-    const y = (event.clientY - rect.top) / ppm;
-    return { x, y };
-  }
+  private _findPatternContainer(clientX: number, clientY: number): LayoutDocumentElement | LayoutBoxElement | null {
+    const manager = this._manager;
+    const rootId = manager.editableRootId;
+    const rootBox = rootId
+      ? manager.docEl.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null
+      : null;
 
-  /**
-   * static 박스의 클릭 위치에서 컬럼 인덱스와 줄 수를 계산한다.
-   *
-   * 부모의 GridCalculator에서 컬럼 좌표와 lineHeight를 가져와
-   * 클릭한 x/y 위치가 몇 번째 컬럼이고 몇 줄째인지 계산한다.
-   *
-   * @param box - 클릭한 static box
-   * @param event - mousedown 이벤트
-   * @returns { left: 컬럼 인덱스, top: 줄 수 }
-   */
-  private _computeStaticPosition(box: LayoutBoxElement, event: MouseEvent): { left: number; top: number } {
-    const model = box.parentElement?.model;
-    if (!model) return { left: 0, top: 0 };
-
-    const { x, y } = this._getLocalMmPoint(box, event);
-    const columnCoords = model.columnCoords;
-    const lineHeight = model.lineHeight;
-
-    let left = 0;
-    for (let i = 0; i < columnCoords.length; i++) {
-      if (x >= columnCoords[i].x1) left = i;
-      else break;
+    const elements = document.elementsFromPoint(clientX, clientY);
+    for (const el of elements) {
+      if (el instanceof LayoutBoxElement) {
+        if (el.lock) continue;
+        const hasNonBoxChild = el.items.some(item => item.type !== 'box');
+        if (hasNonBoxChild) continue;
+        if (rootBox && !rootBox.contains(el)) continue;
+        return el;
+      }
+      if (el instanceof LayoutDocumentElement) {
+        break;
+      }
     }
 
-    const baseY = columnCoords[left]?.y1 ?? 0;
-    const top = Math.max(0, Math.round((y - baseY) / lineHeight));
-
-    return { left, top };
+    if (rootBox && !rootBox.lock) {
+      return rootBox;
+    }
+    return manager.docEl;
   }
 
   /**
-   * 요소 패턴을 클릭한 위치에 주입한다.
+   * 화면 좌표를 컨테이너 내부 mm 좌표로 변환한다.
    *
-   * absolute 패턴: 클릭 위치를 box 내부 mm 좌표로 변환하여 left/top으로 설정.
-   * static 패턴: 클릭 위치에서 컬럼 인덱스와 줄 수를 계산하여 left/top으로 설정.
-   * boxData 트리 전체를 새 box로 주입한다.
+   * 컨테이너의 padding을 고려하여 편집 영역 기준 좌표를 반환한다.
    *
-   * @param box - 클릭한 box 요소 (주입 대상의 부모)
+   * @param clientX - 화면 X 좌표
+   * @param clientY - 화면 Y 좌표
+   * @param container - 주입 대상 컨테이너
+   * @returns 컨테이너 편집 영역 기준 (left, top) mm 좌표
+   */
+  private _screenToContainerMm(
+    clientX: number,
+    clientY: number,
+    container: LayoutDocumentElement | LayoutBoxElement,
+  ): { left: number; top: number } {
+    const rect = container.getBoundingClientRect();
+    const manager = this._manager;
+
+    let containerPaddingLeft = 0;
+    let containerPaddingTop = 0;
+    if (container instanceof LayoutBoxElement) {
+      containerPaddingLeft = container.paddingLeft ?? 0;
+      containerPaddingTop = container.paddingTop ?? 0;
+    }
+
+    const leftMm = Math.max(0, manager.screenPxToMm(clientX - rect.left) - containerPaddingLeft);
+    const topMm = Math.max(0, manager.screenPxToMm(clientY - rect.top) - containerPaddingTop);
+
+    return { left: leftMm, top: topMm };
+  }
+
+  /**
+   * mm 좌표를 static 그리드 좌표(컬럼 인덱스, 줄 수)로 변환한다.
+   *
+   * 컨테이너의 GridCalculator에서 컬럼 좌표와 lineHeight를 가져와 계산한다.
+   *
+   * @param leftMm - 컨테이너 편집 영역 기준 X mm 좌표
+   * @param topMm - 컨테이너 편집 영역 기준 Y mm 좌표
+   * @param container - 주입 대상 컨테이너
+   * @returns { left: 컬럼 인덱스, top: 줄 수 }
+   */
+  private _mmToStatic(
+    leftMm: number,
+    topMm: number,
+    container: LayoutDocumentElement | LayoutBoxElement,
+  ): { left: number; top: number } {
+    const model = container.model;
+    if (!model) return { left: 0, top: 0 };
+
+    const { columnCoords, lineHeight, editableWidth, columnCount } = model;
+    const avgColWidth = editableWidth / columnCount;
+
+    const editAreaLeft = columnCoords[0]?.x1 ?? 0;
+    const editAreaTop = columnCoords[0]?.y1 ?? 0;
+
+    const nearestColumn = Math.max(0, Math.min(
+      Math.round((leftMm - editAreaLeft) / avgColWidth),
+      columnCount - 1,
+    ));
+    const nearestLine = Math.max(0, Math.round((topMm - editAreaTop) / lineHeight));
+
+    return { left: nearestColumn, top: nearestLine };
+  }
+
+  /**
+   * 요소 패턴을 클릭 위치에 주입한다.
+   *
+   * `_findPatternContainer`로 컨테이너를 찾고, position에 따라 좌표를 계산한다:
+   * - absolute: 클릭 위치를 컨테이너 내부 mm 좌표로 변환
+   * - static: `_mmToStatic`으로 컬럼 인덱스와 줄 수 계산
+   *
    * @param item - 요소 패턴 항목
    * @param event - mousedown 이벤트
    */
-  private _injectElementPattern(box: LayoutBoxElement, item: PlaceGunItem, event: MouseEvent): void {
+  private _injectElementPattern(item: PlaceGunItem, event: MouseEvent): void {
     const content = item.content as ElementPatternContent;
     const { boxData, position } = content;
 
-    const container = box.parentElement;
+    const container = this._findPatternContainer(event.clientX, event.clientY);
     if (!container) return;
+
+    const { left: leftMm, top: topMm } = this._screenToContainerMm(event.clientX, event.clientY, container);
 
     let left: number;
     let top: number;
     if (position === 'absolute') {
-      const parentRect = (container as LayoutBoxElement | LayoutDocumentElement).getBoundingClientRect();
-      const ppm = GridCalculator.ppm;
-      left = (event.clientX - parentRect.left) / ppm;
-      top = (event.clientY - parentRect.top) / ppm;
+      left = Math.max(0, Math.round(leftMm * 100) / 100);
+      top = Math.max(0, Math.round(topMm * 100) / 100);
     } else {
-      const result = this._computeStaticPosition(box, event);
+      const result = this._mmToStatic(leftMm, topMm, container);
       left = result.left;
       top = result.top;
     }
+
+    const zIndex = this._getNextZIndex(container);
 
     const newBoxData: BoxData = {
       ...boxData,
       left,
       top,
+      zIndex,
     };
 
     const newBoxEl = document.createElement('x-layout-box') as LayoutBoxElement;
@@ -507,6 +604,25 @@ export class PlaceGunController {
       paragraphStyle: { ...data.paragraphStyle, ...content.paragraphStyle },
     };
     paragraph.markStructureChangedAndRender();
+  }
+
+  /**
+   * 컨테이너 내 자식 요소들의 최대 zIndex + 1을 반환한다.
+   *
+   * role 고정 zIndex(ad/header)는 제외하고 계산한다.
+   *
+   * @param container - 주입 대상 컨테이너
+   * @returns 새 box의 zIndex
+   */
+  private _getNextZIndex(container: LayoutDocumentElement | LayoutBoxElement): number {
+    const items = container.items;
+    if (items.length === 0) return 1;
+    const maxZ = Math.max(...items.map(i => {
+      const z = i.zIndex ?? 0;
+      if (z === Z_INDEX_ROLE_AD || z === Z_INDEX_ROLE_HEADER) return 0;
+      return z;
+    }));
+    return Math.min(maxZ + 1, Z_INDEX_MAX_LAYOUT);
   }
 
   /**

@@ -1597,6 +1597,11 @@ export class EditManager {
     return this._placeGunController.handleBoxMouseDown(box, event);
   }
 
+  handlePlaceGunDocumentMouseDown(doc: LayoutDocumentElement, event: MouseEvent): boolean {
+    if (!this._placeGunController || !this.placeGunActive) return false;
+    return this._placeGunController.handleDocumentMouseDown(doc, event);
+  }
+
   /**
    * 삽입 모드를 비활성화한다. `insertMode = null`과 동일하다.
    */
