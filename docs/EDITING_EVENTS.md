@@ -406,7 +406,7 @@ manager.addEventListener('layoutSelectionChange', (event) => {
 
 | 트리거 | 호출 경로 |
 |--------|----------|
-| `EditManager.selectLayout(target, multi?)` | `_selectLayoutInternal()` → `_dispatchLayoutSelection(previousLayouts)` |
+| `EditManager.selectLayout(target, multi?)` | `_selectLayoutInternal()` → `_dispatchLayoutSelection(previousLayouts)`. 이전 선택에서 `text-focused` 속성을 제거할 때 포커스된 paragraph의 부모 box는 보존한다 |
 | `EditManager.clearLayoutSelection(preserveFocusedBox?)` | `_dispatchLayoutSelection(previousLayouts)`. `preserveFocusedBox=false` 시 `_lastFocusedBox`도 초기화 |
 | 요소가 DOM에서 제거됨 | `_unregisterLayout(element)` → `_dispatchLayoutSelection(previousLayouts)` |
 | 텍스트 편집 포커스로 인한 자동 선택 | `_selectBoxForParagraph()` → `_dispatchLayoutSelection(previousLayouts)` |

@@ -957,6 +957,20 @@ export class EditManager {
   }
 
   /**
+   * 현재 포커스된 단락의 부모 box를 반환한다.
+   * 포커스된 단락이 없으면 `_lastFocusedBox`를 폴백으로 사용한다.
+   * 둘 다 없으면 `null`을 반환한다.
+   *
+   * @returns 포커스된 단락의 부모 box, 폴백 box, 또는 `null`
+   */
+  private _getFocusedParentBox(): LayoutBoxElement | null {
+    const focusedParagraph = this._focusedController?.['_paragraph'] as LayoutParagraphElement | undefined;
+    const focusedParentBox = focusedParagraph?.parentElement;
+    return (focusedParentBox instanceof LayoutBoxElement ? focusedParentBox : null)
+      ?? this._lastFocusedBox;
+  }
+
+  /**
    * 텍스트 편집 포커스가 들어온 paragraph의 부모 box를 레이아웃 선택한다.
    * 기존 선택은 모두 해제하고 부모 box만 단일 선택으로 설정한다.
    * 텍스트 편집 모드는 단일 paragraph 포커스만 허용하므로 멀티선택을 허용하지 않는다.
@@ -1418,13 +1432,19 @@ export class EditManager {
 
     const previousLayouts = [...this._selectedLayouts];
 
+    // text-focused 속성은 텍스트 포커스 시스템이 소유하므로,
+    // 포커스된 paragraph의 부모 box에서는 selectLayout이 제거하지 않는다.
+    const focusedParentBox = this._getFocusedParentBox();
+
     if (this._multiSelect) {
       for (const el of newSelections) {
         const idx = this._selectedLayouts.indexOf(el);
         if (idx >= 0) {
           this._selectedLayouts.splice(idx, 1);
           el.removeAttribute('selected');
-          el.removeAttribute('text-focused');
+          if (el !== focusedParentBox) {
+            el.removeAttribute('text-focused');
+          }
         } else {
           this._selectedLayouts.push(el);
           el.setAttribute('selected', '');
@@ -1433,7 +1453,9 @@ export class EditManager {
     } else {
       for (const prev of this._selectedLayouts) {
         prev.removeAttribute('selected');
-        prev.removeAttribute('text-focused');
+        if (prev !== focusedParentBox) {
+          prev.removeAttribute('text-focused');
+        }
       }
       this._selectedLayouts = newSelections;
       for (const el of newSelections) {
@@ -1461,10 +1483,7 @@ export class EditManager {
     const previousLayouts = [...this._selectedLayouts];
 
     if (preserveFocusedBox) {
-      const focusedParagraph = this._focusedController?.['_paragraph'] as LayoutParagraphElement | undefined;
-      const focusedParentBox = focusedParagraph?.parentElement;
-      const preserveBox = (focusedParentBox instanceof LayoutBoxElement ? focusedParentBox : null)
-        ?? this._lastFocusedBox;
+      const preserveBox = this._getFocusedParentBox();
 
       for (const el of this._selectedLayouts) {
         if (el === preserveBox) continue;
