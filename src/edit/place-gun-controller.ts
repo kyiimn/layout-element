@@ -4,6 +4,7 @@ import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { GridCalculator } from "@/core";
+import { staticGridContains } from "@/utils";
 import { DEFAULT_IMAGE_DPI, Z_INDEX_INSERT_PREVIEW, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER, Z_INDEX_MAX_LAYOUT } from "@/constants";
 import type { PlaceGunItem, ArticleContent, ImageContent, ElementPatternContent, StylePatternContent } from "@/types/edit";
 import type { BoxData } from "@/types/layout/box.type";
@@ -47,6 +48,13 @@ export class PlaceGunController {
    */
   private _previewEl: HTMLDivElement | null = null;
 
+  /**
+   * 현재 하이라이트 중인 컨테이너 요소.
+   * `reparent-target` DOM 속성(주황색 테두리)으로 배치될 부모를 표시한다.
+   * InsertController 삽입 하이라이트와 동일한 속성/CSS를 재사용한다.
+   */
+  private _highlightTarget: LayoutDocumentElement | LayoutBoxElement | null = null;
+
   private _boundOnMouseMove: (event: MouseEvent) => void;
 
   /**
@@ -71,6 +79,7 @@ export class PlaceGunController {
   detach(): void {
     this._applyCursor(false);
     this._removePreview();
+    this._clearHighlight();
     document.removeEventListener('mousemove', this._boundOnMouseMove);
   }
 
@@ -99,6 +108,7 @@ export class PlaceGunController {
     event.stopPropagation();
 
     this._removePreview();
+    this._clearHighlight();
 
     manager._dispatchPlaceGunBefore(nextItem, doc);
 
@@ -135,6 +145,7 @@ export class PlaceGunController {
     event.stopPropagation();
 
     this._removePreview();
+    this._clearHighlight();
 
     manager._dispatchPlaceGunBefore(nextItem, box);
 
@@ -475,11 +486,24 @@ export class PlaceGunController {
    *
    * `editableRootId`가 설정된 경우 root box 내부의 box만 허용한다.
    *
+   * static 모드에서는 추가로, 클릭 좌표 + 패턴 크기(width 컬럼 스팬, height 라인 수)로
+   * 계산한 요소 영역이 후보 box의 컬럼/라인 그리드 안에 완전히 들어오는지 검증한다.
+   * 벗어나면 더 바깥 컨테이너로 폴백한다.
+   *
    * @param clientX - 클릭 X 좌표
    * @param clientY - 클릭 Y 좌표
+   * @param position - 패턴 배치 모드 (`'static'` 또는 `'absolute'`)
+   * @param patternWidth - 패턴의 width (static: 컬럼 스팬 수, absolute: mm)
+   * @param patternHeight - 패턴의 height (static: 라인 수, absolute: mm)
    * @returns 주입 컨테이너 (box 또는 document)
    */
-  private _findPatternContainer(clientX: number, clientY: number): LayoutDocumentElement | LayoutBoxElement | null {
+  private _findPatternContainer(
+    clientX: number,
+    clientY: number,
+    position: 'static' | 'absolute',
+    patternWidth: number,
+    patternHeight: number,
+  ): LayoutDocumentElement | LayoutBoxElement | null {
     const manager = this._manager;
     const rootId = manager.editableRootId;
     const rootBox = rootId
@@ -493,6 +517,15 @@ export class PlaceGunController {
         const hasNonBoxChild = el.items.some(item => item.type !== 'box');
         if (hasNonBoxChild) continue;
         if (rootBox && !rootBox.contains(el)) continue;
+
+        if (position === 'static') {
+          const { left: leftMm, top: topMm } = this._screenToContainerMm(clientX, clientY, el);
+          const staticCoords = this._mmToStatic(leftMm, topMm, el);
+          const span = Math.max(1, Math.min(patternWidth, el.model?.columnCount ?? 1));
+          if (!staticGridContains(el, staticCoords.left, staticCoords.top, span, patternHeight)) {
+            continue;
+          }
+        }
         return el;
       }
       if (el instanceof LayoutDocumentElement) {
@@ -584,7 +617,7 @@ export class PlaceGunController {
     const content = item.content as ElementPatternContent;
     const { boxData, position } = content;
 
-    const container = this._findPatternContainer(event.clientX, event.clientY);
+    const container = this._findPatternContainer(event.clientX, event.clientY, position, boxData.width, boxData.height);
     if (!container) return;
 
     const { left: leftMm, top: topMm } = this._screenToContainerMm(event.clientX, event.clientY, container);
@@ -668,12 +701,14 @@ export class PlaceGunController {
     const manager = this._manager;
     if (!manager.placeGunActive) {
       this._removePreview();
+      this._clearHighlight();
       return;
     }
 
     const nextItem = manager.placeGunItems[0];
     if (!nextItem || nextItem.contentType !== 'element') {
       this._removePreview();
+      this._clearHighlight();
       return;
     }
 
@@ -685,18 +720,21 @@ export class PlaceGunController {
       event.clientY > docRect.bottom
     ) {
       this._removePreview();
+      this._clearHighlight();
       return;
     }
 
     const content = nextItem.content as ElementPatternContent;
     const { boxData, position } = content;
 
-    const container = this._findPatternContainer(event.clientX, event.clientY);
+    const container = this._findPatternContainer(event.clientX, event.clientY, position, boxData.width, boxData.height);
     if (!container) {
       this._removePreview();
+      this._clearHighlight();
       return;
     }
 
+    this._updateHighlight(container);
     this._updatePreview(event.clientX, event.clientY, container, position, boxData);
   }
 
@@ -727,6 +765,29 @@ export class PlaceGunController {
     if (this._previewEl) {
       this._previewEl.remove();
       this._previewEl = null;
+    }
+  }
+
+  /**
+   * 배치될 부모 컨테이너를 `reparent-target` 속성으로 하이라이트한다.
+   * 이전 하이라이트 대상과 다르면 이전 속성을 제거하고 새 컨테이너에 설정한다.
+   *
+   * @param target - 하이라이트할 컨테이너 (box 또는 document)
+   */
+  private _updateHighlight(target: LayoutDocumentElement | LayoutBoxElement): void {
+    if (this._highlightTarget === target) return;
+    this._clearHighlight();
+    target.setAttribute('reparent-target', '');
+    this._highlightTarget = target;
+  }
+
+  /**
+   * 컨테이너 하이라이트를 제거한다.
+   */
+  private _clearHighlight(): void {
+    if (this._highlightTarget) {
+      this._highlightTarget.removeAttribute('reparent-target');
+      this._highlightTarget = null;
     }
   }
 
