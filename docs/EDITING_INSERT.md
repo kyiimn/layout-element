@@ -270,6 +270,8 @@ export interface InsertEventDetail {
 
 드래그 영역(사각형)을 완전히 포함하는 가장 안쪽 유효 컨테이너를 찾는다. 이전에는 드래그 영역의 중심점을 기준으로 컨테이너를 찾았으나, 현재는 **네 꼭짓점 모두**가 포함되는 컨테이너를 선택하여 작은 컨테이너가 큰 삽입을 받아들여 크기가 조정되는 문제를 해결한다.
 
+> **static 모드 그리드 containment 검증**: static 모드(`position: 'static'`)에서는 중심점 히트테스트로 후보 box를 찾은 후, 추가로 **생성될 요소의 static 그리드 영역(컬럼 인덱스 + 스팬, 라인 인덱스 + 라인 수)이 후보 box의 컬럼/라인 그리드 안에 완전히 들어오는지** `staticGridContains()`로 검증한다. 요소가 후보 box의 컬럼 수나 라인 수를 초과하면 더 바깥 컨테이너로 폴백한다. 이는 absolute 모드의 네 꼭짓점 containment와 대응되며, static 좌표계(컬럼×라인)에서 동일한 경계 검증을 수행한다.
+
 > **경계 일치 폴백**: 드래그 영역이 박스 경계에 딱 맞아떨어지면 `elementsFromPoint`가 경계선 위 꼭짓점을 hit하지 못할 수 있다. 이 경우 기하학적 rect containment(1px 허용 오차)로 후보를 보충하여, 경계에 정확히 맞춘 드래그도 의도한 박스 내부로 들어간다.
 
 ### 5.2 선택 알고리즘
@@ -280,11 +282,18 @@ _findTargetContainer(startX, startY, endX, endY)
     ├── 0. static 모드 빠른 경로 (position === 'static')
     │   center = (드래그 영역 중심점)
     │   elements = document.elementsFromPoint(center.x, center.y)
+    │   widthMm = screenPxToMm(|endX - startX|)
+    │   heightMm = screenPxToMm(|endY - startY|)
     │   for each el in elements (가장 안쪽부터 바깥쪽 순):
     │     if el instanceof LayoutBoxElement:
     │       if el.lock → continue (다음 바깥 box 시도)
     │       if el.items has non-box child → continue (다음 바깥 box 시도)
-    │       return el  (첫 번째 유효 box-only 컨테이너)
+    │       if rootBox && !rootBox.contains(el) → continue
+    │       staticCoords = _mmToStatic(_screenToContainerMm(minX, minY, el), widthMm, heightMm, el)
+    │       if !staticGridContains(el, staticCoords.left, staticCoords.top,
+    │                              staticCoords.width, staticCoords.height):
+    │         continue (요소가 이 box의 그리드를 벗어남 → 다음 바깥 box 시도)
+    │       return el  (첫 번째 유효 + 그리드 containment 통과 box-only 컨테이너)
     │     if el instanceof LayoutDocumentElement:
     │       break (document보다 먼저 유효 box가 없으면 document로 폴백)
     │   → 유효 box를 찾지 못하면 absolute 경로로 폴백
@@ -331,6 +340,12 @@ _findTargetContainer(startX, startY, endX, endY)
     │       rect = el.getBoundingClientRect()
     │       if startX >= rect.left && endX <= rect.right &&
     │          startY >= rect.top && endY <= rect.bottom:
+    │         if position === 'static':
+    │           staticCoords = _mmToStatic(_screenToContainerMm(minX, minY, el),
+    │                                       widthMm, heightMm, el)
+    │           if !staticGridContains(el, staticCoords.left, staticCoords.top,
+    │                                  staticCoords.width, staticCoords.height):
+    │             skip (그리드 벗어남 → 다음 후보)
     │         return el
     │
     ├── 5. Document 요소도 포함 여부 확인
@@ -354,8 +369,9 @@ _findTargetContainer(startX, startY, endX, endY)
 | `<x-layout-box>` | `lock` 설정됨 | 건너뜀 |
 | `<x-layout-box>` | 자식이 없거나 모든 자식이 `type === 'box'` | 유효한 컨테이너 |
 | `<x-layout-box>` | 자식 중 `paragraph`나 `image`가 있음 | 유효하지 않음 |
+| `<x-layout-box>` (static 모드) | 요소의 static 그리드 영역이 box의 컬럼/라인 수를 초과 | 유효하지 않음 (더 바깥 컨테이너로 폴백) |
 
-단락이나 이미지가 이미 들어 있는 박스 안에 새 박스를 추가하면 기존 콘텐츠와의 모순이 생길 수 있으므로, 그 경우 상위 컨테이너로 거슬러 올라간다.
+단락이나 이미지가 이미 들어 있는 박스 안에 새 박스를 추가하면 기존 콘텐츠와의 모순이 생길 수 있으므로, 그 경우 상위 컨테이너로 거슬러 올라간다. static 모드에서는 추가로, 요소가 차지할 컬럼/라인 영역이 후보 box의 그리드를 벗어나면 상위 컨테이너로 거슬러 올라간다.
 
 ### 5.4 폴백: `_getRootContainer()`
 
@@ -632,9 +648,9 @@ _updateInsertHighlight()
 
 #### 정적 모드에서의 컨테이너 탐색
 
-`_findTargetContainer()`는 `position: 'static'` 모드에서 드래그 영역의 **중심점**으로 컨테이너를 식별하고, `position: 'absolute'` 모드에서는 **네 꼭짓점 containment**로 식별한다. 따라서 하이라이트 역시 모드에 따라 동일하게 동작한다 — static 모드에서는 그리드 스냅 전의 픽셀 영역 중심점 기준, absolute 모드에서는 픽셀 영역의 네 꼭짓점 기준으로 컨테이너가 결정된다. 미리보기 사각형은 그리드 스냅된 영역을 표시하지만, 컨테이너 하이라이트는 스냅 전 드래그 영역을 기준으로 결정되므로 미리보기 경계와 하이라이트 컨테이너 경계가 일치하지 않을 수 있다.
+`_findTargetContainer()`는 `position: 'static'` 모드에서 드래그 영역의 **중심점**으로 컨테이너를 식별하고, `position: 'absolute'` 모드에서는 **네 꼭짓점 containment**로 식별한다. static 모드에서는 중심점 히트테스트로 후보 box를 찾은 후, 추가로 `staticGridContains()`로 요소의 static 그리드 영역(컬럼 인덱스 + 스팬, 라인 인덱스 + 라인 수)이 후보 box의 컬럼/라인 그리드 안에 완전히 들어오는지 검증한다. 요소가 후보 box의 그리드를 벗어나면 더 바깥 컨테이너로 폴백한다. 따라서 하이라이트 역시 모드에 따라 동일하게 동작한다 — static 모드에서는 그리드 스냅 전의 픽셀 영역 중심점 + 그리드 containment 기준, absolute 모드에서는 픽셀 영역의 네 꼭짓점 기준으로 컨테이너가 결정된다. 미리보기 사각형은 그리드 스냅된 영역을 표시하지만, 컨테이너 하이라이트는 스냅 전 드래그 영역을 기준으로 결정되므로 미리보기 경계와 하이라이트 컨테이너 경계가 일치하지 않을 수 있다.
 
-> **static 모드 중심점 순회**: `elementsFromPoint`는 가장 안쪽 요소부터 바깥쪽 순으로 반환한다. 안쪽 box가 paragraph/image 자식을 가지면 삽입 불가능하므로 거르고, 더 바깥의 box-only 컨테이너를 찾을 때까지 순회한다. document가 먼저 나오면(중심점이 box 밖) document로 폴백한다.
+> **static 모드 중심점 순회**: `elementsFromPoint`는 가장 안쪽 요소부터 바깥쪽 순으로 반환한다. 안쪽 box가 paragraph/image 자식을 가지면 삽입 불가능하므로 거르고, 더 바깥의 box-only 컨테이너를 찾을 때까지 순회한다. document가 먼저 나오면(중심점이 box 밖) document로 폴백한다. 각 후보 box에 대해 `staticGridContains()` 검증을 통과하지 못하면(요소 영역이 box의 컬럼/라인 수를 초과하면) 건너뛰고 다음 바깥 box를 시도한다.
 
 #### 레이아웃 편집 reparent와의 관계
 
@@ -733,7 +749,7 @@ ESC 키 이외의 입력은 무시한다.
 
 | 파일 | 역할 |
 |------|------|
-| `src/edit/insert-controller.ts` | `InsertController`: 삽입 모드의 드래그, 좌표 변환, 요소 생성, 미리보기 관리, 컨테이너 하이라이트(`_updateInsertHighlight`/`_clearInsertHighlight`/`_resolveInsertContainer`), 대상 컨테이너 찾기(`_findTargetContainer` — static 모드 중심점 순회, absolute 모드 4꼭짓점 containment + 유효 box 후보 폴백) |
+| `src/edit/insert-controller.ts` | `InsertController`: 삽입 모드의 드래그, 좌표 변환, 요소 생성, 미리보기 관리, 컨테이너 하이라이트(`_updateInsertHighlight`/`_clearInsertHighlight`/`_resolveInsertContainer`), 대상 컨테이너 찾기(`_findTargetContainer` — static 모드 중심점 순회 + `staticGridContains` 그리드 containment 검증, absolute 모드 4꼭짓점 containment + 유효 box 후보 폴백) |
 | `src/edit/edit-manager.ts` | `insertMode` getter/setter, `activateInsert`, `deactivateInsert`, `handleInsertMouseDown`, `_dispatchInsert`, `_dispatchInsertCancel`, `insert`/`insertCancel` 이벤트 발송, `_suppressNextClick` 플래그 |
 | `src/types/edit/insert.type.ts` | `InsertType`, `InsertPosition`, `InsertMode`, `InsertEventDetail` 타입 정의 |
 
@@ -749,5 +765,5 @@ ESC 키 이외의 입력은 무시한다.
 - 삽입 모드 중에는 레이아웃 선택과 드래그 이동, 리사이즈가 모두 비활성화된다.
 - `boxData.children` 설정은 `appendChild`보다 먼저 이루어져야 `connectedCallback` 시점에 올바른 초기 상태를 갖는다.
 - **mousedown 캡처/버블링**: `LayoutEditController`의 `mousedown` 리스너는 캡처 단계로 `document.documentElement`에 등록된다. box 위에서 mousedown하면 먼저 `LayoutEditController._onMouseDown`이 `EditManager.handleInsertMouseDown()`을 호출하여 `InsertController.startDrag()`를 위임 실행하고, `startDrag()` 내부의 `_isDragging` 가드로 중복 실행을 방지한다. `InsertController`의 `mousedown` 리스너는 문서(document)에 버블링 단계로 등록되어, box가 없는 문서 빈 공간에서도 삽입 드래그가 시작되도록 한다.
-- **대상 컨테이너 선택은 드래그 영역의 네 꼭짓점 기반**: 중심점이 아닌 네 꼭짓점 모두가 포함되는 가장 안쪽 컨테이너를 선택한다. 작은 컨테이너 위에 큰 요소를 그려도 작은 컨테이너가 아닌 상위 컨테이너에 삽입된다.
+- **대상 컨테이너 선택은 드래그 영역 기반**: absolute 모드에서는 네 꼭짓점 모두가 포함되는 가장 안쪽 컨테이너를 선택한다. static 모드에서는 중심점 히트테스트 후 `staticGridContains()`로 요소의 컬럼/라인 영역이 컨테이너 그리드 안에 완전히 들어오는지 검증한다. 작은 컨테이너 위에 큰 요소를 그려도 작은 컨테이너가 아닌 상위 컨테이너에 삽입된다.
 - **폴백은 EditManager 루트**: 어떤 컨테이너도 드래그 사각형을 완전히 포함하지 못하면 `editableRootId`의 루트 box, 또는 document 루트로 폴백한다.

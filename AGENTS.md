@@ -226,13 +226,14 @@ src/
     defaults.ts              # DEFAULT_*, Z_INDEX_* constants
     line-break.ts            # LINE_START_FORBIDDEN / LINE_END_FORBIDDEN + isLineStartForbidden / isLineEndForbidden (한글 금칙문자)
     index.ts
-  utils/                     # checkOverlap, getOverlapSizePX, genUUID, ai-processing-overlay, objectFit, valueEqual
+  utils/                     # checkOverlap, getOverlapSizePX, genUUID, ai-processing-overlay, objectFit, valueEqual, staticGridContains
     ai-processing-overlay.ts   # createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay
     check-overlap.ts
     gen-uuid.ts
-    image-fit.ts               # computeObjectFit (objectFit 프리셋 → mm 좌표/크기 변환)
-    value-equal.ts             # valueEqual (number | number[] 깊은 동등성 비교)
-    random.ts                  # genRandom() helper (not exported by utils/index.ts)
+image-fit.ts               # computeObjectFit (objectFit 프리셋 → mm 좌표/크기 변환)
+value-equal.ts             # valueEqual (number | number[] 깊은 동등성 비교)
+static-grid-containment.ts # staticGridContains (static 좌표계 컬럼/라인 그리드 containment 검증)
+random.ts                  # genRandom() helper (not exported by utils/index.ts)
     index.ts
   examples/                  # exampleData (demo content for dev)
     example-data.ts

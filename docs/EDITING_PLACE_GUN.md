@@ -332,15 +332,21 @@ paragraph 주입은 `_injectText` 헬퍼를 사용한다. 부모 box의 `request
 
 요소 패턴 항목(`contentType === 'element'`)은 클릭한 box의 부모 컨테이너에 새 box를 생성하여 주입한다. `ElementPatternContent`의 `boxData`와 `position`을 사용한다.
 
+#### 컨테이너 찾기: `_findPatternContainer`
+
+`_findPatternContainer(clientX, clientY, position, patternWidth, patternHeight)`는 클릭 위치에서 요소 패턴을 주입할 컨테이너를 찾는다. `elementsFromPoint`로 클릭 위치의 요소 목록을 가져와, box-only 컨테이너(비-box 자식이 없는 box)를 찾는다. 찾지 못하면 document로 폴백한다. `editableRootId`가 설정된 경우 root box 내부의 box만 허용한다.
+
+**static 모드 그리드 containment 검증**: `position === 'static'`일 때는 추가로, 클릭 좌표 + 패턴 크기(`patternWidth` 컬럼 스팬, `patternHeight` 라인 수)로 계산한 요소 영역이 후보 box의 컬럼/라인 그리드 안에 완전히 들어오는지 `staticGridContains()`로 검증한다. 요소가 후보 box의 컬럼 수나 라인 수를 초과하면 더 바깥 컨테이너로 폴백한다. 이는 InsertController의 static 모드 containment 검증과 동일한 로직이며, absolute 모드의 네 꼭짓점 containment와 대응된다.
+
 #### element 패턴 미리보기 (preview)
 
 Place Gun이 활성 상태이고 다음으로 쏠 항목의 `contentType === 'element'`일 때, 마우스 커서를 따라 점선 박스 미리보기가 표시된다. Insert 모드의 미리보기와 동일한 스타일(`2px dashed #1a73e8`, `rgba(26, 115, 232, 0.1)` 배경, `Z_INDEX_INSERT_PREVIEW`)을 사용한다.
 
-- **mousemove**: `PlaceGunController._onMouseMove`가 마우스 위치에서 배치될 컨테이너(`_findPatternContainer`)와 좌표를 계산하여 preview 박스의 화면 위치/크기를 갱신한다.
+- **mousemove**: `PlaceGunController._onMouseMove`가 마우스 위치에서 배치될 컨테이너(`_findPatternContainer`)와 좌표를 계산하여 preview 박스의 화면 위치/크기를 갱신한다. 동시에 `_updateHighlight`로 배치될 부모 컨테이너에 `reparent-target` 속성(주황색 `#ff9800` 2px 테두리)을 설정하여 시각적으로 표시한다. 이전 하이라이트 대상과 다르면 이전 속성을 제거하고 새 컨테이너에 설정한다.
 - **absolute 패턴**: 마우스 위치를 컨테이너 mm 좌표로 변환 → 점선 박스 좌상단을 마우스 위치로, 크기는 `boxData.width`/`height`(mm)를 `GridCalculator.ppm × scale`로 화면 px 변환.
 - **static 패턴**: `_mmToStatic`으로 컬럼 인덱스/줄 수를 계산하고, `columnCoords[startCol].x1` ~ `columnCoords[endCol].x2`로 스냅된 x범위, `줄 수 × lineHeight`로 높이를 화면 px로 변환. 컬럼 span은 `boxData.width`(컬럼 개수)를 사용하며 컨테이너의 남은 컬럼 수를 초과하지 않도록 클램핑.
-- **표시 조건**: `placeGunActive === true` && 다음 항목 `contentType === 'element'` && 마우스 커서가 `<x-layout-document>` 영역 내 && `_findPatternContainer`가 컨테이너를 반환. 항목이 없거나 element가 아니거나 커서가 문서 밖이거나 컨테이너를 찾지 못하면 preview 제거.
-- **제거 시점**: `detach()`(Place Gun 비활성화), `handleBoxMouseDown`/`handleDocumentMouseDown` 배치 직전, mousemove에서 조건 불만족 시.
+- **표시 조건**: `placeGunActive === true` && 다음 항목 `contentType === 'element'` && 마우스 커서가 `<x-layout-document>` 영역 내 && `_findPatternContainer`가 컨테이너를 반환. 항목이 없거나 element가 아니거나 커서가 문서 밖이거나 컨테이너를 찾지 못하면 preview 및 하이라이트 제거.
+- **제거 시점**: `detach()`(Place Gun 비활성화), `handleBoxMouseDown`/`handleDocumentMouseDown` 배치 직전, mousemove에서 조건 불만족 시. preview 제거와 하이라이트 제거는 항상 함께 수행된다.
 
 #### absolute 패턴
 
