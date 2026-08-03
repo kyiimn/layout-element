@@ -3,7 +3,8 @@ import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
-import { DEFAULT_IMAGE_DPI, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER, Z_INDEX_MAX_LAYOUT } from "@/constants";
+import { GridCalculator } from "@/core";
+import { DEFAULT_IMAGE_DPI, Z_INDEX_INSERT_PREVIEW, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER, Z_INDEX_MAX_LAYOUT } from "@/constants";
 import type { PlaceGunItem, ArticleContent, ImageContent, ElementPatternContent, StylePatternContent } from "@/types/edit";
 import type { BoxData } from "@/types/layout/box.type";
 
@@ -38,24 +39,39 @@ export class PlaceGunController {
   private _cursorApplied = false;
 
   /**
+   * element 패턴 배치 미리보기 박스.
+   *
+   * 다음으로 쏠 항목의 `contentType === 'element'`일 때만 표시된다.
+   * mousemove 시 마우스 위치 + 패턴 boxData의 width/height로 점선 박스를 그린다.
+   * detach, mousedown(배치), 항목 변경, 일시정지 시 제거된다.
+   */
+  private _previewEl: HTMLDivElement | null = null;
+
+  private _boundOnMouseMove: (event: MouseEvent) => void;
+
+  /**
    * @param manager - 이 컨트롤러가 속한 EditManager 인스턴스
    */
   constructor(manager: EditManager) {
     this._manager = manager;
+    this._boundOnMouseMove = this._onMouseMove.bind(this);
   }
 
   /**
-   * 문서 커서를 `copy`로 변경한다.
+   * 문서 커서를 `copy`로 변경하고 element 패턴 preview용 mousemove 리스너를 등록한다.
    */
   attach(): void {
     this._applyCursor(true);
+    document.addEventListener('mousemove', this._boundOnMouseMove);
   }
 
   /**
-   * 커서를 복원한다.
+   * 커서를 복원하고 preview를 제거하며 mousemove 리스너를 해제한다.
    */
   detach(): void {
     this._applyCursor(false);
+    this._removePreview();
+    document.removeEventListener('mousemove', this._boundOnMouseMove);
   }
 
   /**
@@ -81,6 +97,8 @@ export class PlaceGunController {
 
     event.preventDefault();
     event.stopPropagation();
+
+    this._removePreview();
 
     manager._dispatchPlaceGunBefore(nextItem, doc);
 
@@ -115,6 +133,8 @@ export class PlaceGunController {
 
     event.preventDefault();
     event.stopPropagation();
+
+    this._removePreview();
 
     manager._dispatchPlaceGunBefore(nextItem, box);
 
@@ -634,6 +654,167 @@ export class PlaceGunController {
       return z;
     }));
     return Math.min(maxZ + 1, Z_INDEX_MAX_LAYOUT);
+  }
+
+  /**
+   * mousemove 이벤트 핸들러.
+   *
+   * 다음으로 쏠 항목이 `contentType === 'element'`일 때만 preview를 갱신한다.
+   * 항목이 없거나 element가 아니면 preview를 제거한다.
+   *
+   * @param event - mousemove 이벤트
+   */
+  private _onMouseMove(event: MouseEvent): void {
+    const manager = this._manager;
+    if (!manager.placeGunActive) {
+      this._removePreview();
+      return;
+    }
+
+    const nextItem = manager.placeGunItems[0];
+    if (!nextItem || nextItem.contentType !== 'element') {
+      this._removePreview();
+      return;
+    }
+
+    const docRect = manager.docEl.getBoundingClientRect();
+    if (
+      event.clientX < docRect.left ||
+      event.clientX > docRect.right ||
+      event.clientY < docRect.top ||
+      event.clientY > docRect.bottom
+    ) {
+      this._removePreview();
+      return;
+    }
+
+    const content = nextItem.content as ElementPatternContent;
+    const { boxData, position } = content;
+
+    const container = this._findPatternContainer(event.clientX, event.clientY);
+    if (!container) {
+      this._removePreview();
+      return;
+    }
+
+    this._updatePreview(event.clientX, event.clientY, container, position, boxData);
+  }
+
+  /**
+   * 미리보기 점선 박스 DOM 요소를 생성한다.
+   *
+   * InsertController의 `_createPreview`와 동일한 스타일(`2px dashed #1a73e8`,
+   * `rgba(26, 115, 232, 0.1)` 배경)을 사용하여 시각적 일관성을 유지한다.
+   *
+   * @returns 생성된 미리보기 div 요소
+   */
+  private _createPreview(): HTMLDivElement {
+    const el = document.createElement('div');
+    el.style.position = 'fixed';
+    el.style.border = '2px dashed #1a73e8';
+    el.style.backgroundColor = 'rgba(26, 115, 232, 0.1)';
+    el.style.pointerEvents = 'none';
+    el.style.zIndex = String(Z_INDEX_INSERT_PREVIEW);
+    el.style.display = 'none';
+    document.body.appendChild(el);
+    return el;
+  }
+
+  /**
+   * 미리보기 사각형을 제거한다.
+   */
+  private _removePreview(): void {
+    if (this._previewEl) {
+      this._previewEl.remove();
+      this._previewEl = null;
+    }
+  }
+
+  /**
+   * 미리보기 박스의 화면 위치와 크기를 계산하여 갱신한다.
+   *
+   * position 분기:
+   * - `absolute`: 마우스 위치를 컨테이너 mm 좌표로 변환 → ppm으로 화면 px 변환.
+   *   박스 좌상단을 마우스 위치로, 크기는 boxData.width/height(mm)를 ppm으로 변환.
+   * - `static`: `_mmToStatic`으로 컬럼 인덱스/줄 수를 구하고,
+   *   컬럼 span × 컬럼 너비, 줄 수 × lineHeight로 화면 px 크기 계산.
+   *
+   * @param clientX - 마우스 화면 X 좌표 (px)
+   * @param clientY - 마우스 화면 Y 좌표 (px)
+   * @param container - 배치 대상 컨테이너
+   * @param position - 패턴 배치 모드 ('static' | 'absolute')
+   * @param boxData - 패턴 BoxData (width/height 사용)
+   */
+  private _updatePreview(
+    clientX: number,
+    clientY: number,
+    container: LayoutDocumentElement | LayoutBoxElement,
+    position: 'static' | 'absolute',
+    boxData: BoxData,
+  ): void {
+    if (!this._previewEl) {
+      this._previewEl = this._createPreview();
+    }
+
+    const rect = container.getBoundingClientRect();
+    const manager = this._manager;
+    const screenPpm = GridCalculator.ppm * manager.scale;
+
+    let containerPaddingLeft = 0;
+    let containerPaddingTop = 0;
+    if (container instanceof LayoutBoxElement) {
+      containerPaddingLeft = container.paddingLeft ?? 0;
+      containerPaddingTop = container.paddingTop ?? 0;
+    }
+
+    if (position === 'absolute') {
+      const leftMm = Math.max(0, manager.screenPxToMm(clientX - rect.left) - containerPaddingLeft);
+      const topMm = Math.max(0, manager.screenPxToMm(clientY - rect.top) - containerPaddingTop);
+
+      const leftPx = rect.left + (leftMm + containerPaddingLeft) * screenPpm;
+      const topPx = rect.top + (topMm + containerPaddingTop) * screenPpm;
+      const widthPx = boxData.width * screenPpm;
+      const heightPx = boxData.height * screenPpm;
+
+      this._previewEl.style.left = `${Math.round(leftPx)}px`;
+      this._previewEl.style.top = `${Math.round(topPx)}px`;
+      this._previewEl.style.width = `${Math.round(widthPx)}px`;
+      this._previewEl.style.height = `${Math.round(heightPx)}px`;
+      this._previewEl.style.display = 'block';
+      return;
+    }
+
+    // static: mm → 컬럼 인덱스/줄 수 변환 후 컬럼 너비/lineHeight로 화면 px 계산
+    const model = container.model;
+    if (!model) {
+      this._previewEl.style.display = 'none';
+      return;
+    }
+
+    const leftMm = Math.max(0, manager.screenPxToMm(clientX - rect.left) - containerPaddingLeft);
+    const topMm = Math.max(0, manager.screenPxToMm(clientY - rect.top) - containerPaddingTop);
+
+    const staticResult = this._mmToStatic(leftMm, topMm, container);
+    const { columnCoords, lineHeight, columnCount } = model;
+
+    const startCol = Math.max(0, Math.min(staticResult.left, columnCount - 1));
+    const span = Math.max(1, Math.min(boxData.width, columnCount - startCol));
+    const endCol = Math.min(columnCount - 1, startCol + span - 1);
+
+    const snapLeftMm = columnCoords[startCol]?.x1 ?? 0;
+    const snapRightMm = columnCoords[endCol]?.x2 ?? 0;
+    const editAreaTopMm = columnCoords[0]?.y1 ?? 0;
+
+    const leftPx = rect.left + (snapLeftMm + containerPaddingLeft) * screenPpm;
+    const topPx = rect.top + (editAreaTopMm + containerPaddingTop + staticResult.top * lineHeight) * screenPpm;
+    const widthPx = (snapRightMm - snapLeftMm) * screenPpm;
+    const heightPx = boxData.height * lineHeight * screenPpm;
+
+    this._previewEl.style.left = `${Math.round(leftPx)}px`;
+    this._previewEl.style.top = `${Math.round(topPx)}px`;
+    this._previewEl.style.width = `${Math.round(widthPx)}px`;
+    this._previewEl.style.height = `${Math.round(heightPx)}px`;
+    this._previewEl.style.display = 'block';
   }
 
   /**
