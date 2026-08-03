@@ -332,6 +332,16 @@ paragraph 주입은 `_injectText` 헬퍼를 사용한다. 부모 box의 `request
 
 요소 패턴 항목(`contentType === 'element'`)은 클릭한 box의 부모 컨테이너에 새 box를 생성하여 주입한다. `ElementPatternContent`의 `boxData`와 `position`을 사용한다.
 
+#### element 패턴 미리보기 (preview)
+
+Place Gun이 활성 상태이고 다음으로 쏠 항목의 `contentType === 'element'`일 때, 마우스 커서를 따라 점선 박스 미리보기가 표시된다. Insert 모드의 미리보기와 동일한 스타일(`2px dashed #1a73e8`, `rgba(26, 115, 232, 0.1)` 배경, `Z_INDEX_INSERT_PREVIEW`)을 사용한다.
+
+- **mousemove**: `PlaceGunController._onMouseMove`가 마우스 위치에서 배치될 컨테이너(`_findPatternContainer`)와 좌표를 계산하여 preview 박스의 화면 위치/크기를 갱신한다.
+- **absolute 패턴**: 마우스 위치를 컨테이너 mm 좌표로 변환 → 점선 박스 좌상단을 마우스 위치로, 크기는 `boxData.width`/`height`(mm)를 `GridCalculator.ppm × scale`로 화면 px 변환.
+- **static 패턴**: `_mmToStatic`으로 컬럼 인덱스/줄 수를 계산하고, `columnCoords[startCol].x1` ~ `columnCoords[endCol].x2`로 스냅된 x범위, `줄 수 × lineHeight`로 높이를 화면 px로 변환. 컬럼 span은 `boxData.width`(컬럼 개수)를 사용하며 컨테이너의 남은 컬럼 수를 초과하지 않도록 클램핑.
+- **표시 조건**: `placeGunActive === true` && 다음 항목 `contentType === 'element'` && 마우스 커서가 `<x-layout-document>` 영역 내 && `_findPatternContainer`가 컨테이너를 반환. 항목이 없거나 element가 아니거나 커서가 문서 밖이거나 컨테이너를 찾지 못하면 preview 제거.
+- **제거 시점**: `detach()`(Place Gun 비활성화), `handleBoxMouseDown`/`handleDocumentMouseDown` 배치 직전, mousemove에서 조건 불만족 시.
+
 #### absolute 패턴
 
 클릭한 위치를 부모 컨테이너 기준 mm 좌표로 변환하여 `boxData.left`/`boxData.top`으로 설정한다. `GridCalculator.ppm`으로 픽셀→mm 변환을 수행한다.
@@ -367,7 +377,7 @@ Place Gun이 활성 상태면 `<x-layout-document>`의 `style.cursor`가 `'copy'
 | 파일 | 역할 |
 |------|------|
 | `src/edit/edit-manager.ts` | `EditManager`: Place Gun 상태(`_placeGunItems`, `_placeGunPaused`), 공개 API(`loadPlaceGun`, `unloadPlaceGun`, `removePlaceGunItem`, `reorderPlaceGunItems`, `setPlaceGunPaused`), `_consumePlaceGunItem`, `_syncPlaceGunController`, `_dispatchPlaceGunChange` |
-| `src/edit/place-gun-controller.ts` | `PlaceGunController`: `handleBoxMouseDown` (box에서 호출), 기사 3케이스 분기 주입(`_injectArticle`), 이미지 주입(`_injectImageOrAd` → `_applyImageToElement`), 요소 패턴 주입(`_injectElementPattern`), 스타일 패턴 주입(`_injectStylePattern`), 커서 변경 |
+| `src/edit/place-gun-controller.ts` | `PlaceGunController`: `handleBoxMouseDown` (box에서 호출), 기사 3케이스 분기 주입(`_injectArticle`), 이미지 주입(`_injectImageOrAd` → `_applyImageToElement`), 요소 패턴 주입(`_injectElementPattern`), 스타일 패턴 주입(`_injectStylePattern`), 커서 변경, element 패턴 미리보기(`_onMouseMove`/`_createPreview`/`_updatePreview`/`_removePreview`) |
 | `src/components/layout/box.element.ts` | `LayoutBoxElement`: `_onPlaceGunMouseDown` mousedown 리스너, `placeGunActive` 시 `EditManager.handlePlaceGunMouseDown` 위임 |
 | `src/types/edit/place-gun.type.ts` | `PlaceGunContentType`, `PlaceGunItem`, `PlaceGunChangeEventDetail` 타입 정의 |
 
@@ -382,3 +392,4 @@ Place Gun이 활성 상태면 `<x-layout-document>`의 `style.cursor`가 `'copy'
 - **항목 소비는 매칭 시에만**: 매칭되는 요소를 찾은 후에만 `_consumePlaceGunItem()`이 호출된다. 매칭 실패 시 항목은 리스트에 그대로 남는다.
 - **컨트롤러 자동 관리**: `loadPlaceGun`/`unloadPlaceGun`/`setPlaceGunPaused`가 자동으로 `PlaceGunController`를 attach/detach한다. 직접 `attach()`/`detach()`를 호출할 필요가 없다.
 - **클릭 억제**: 배치 후 `manager._suppressLayoutClick()`을 호출하여 후속 클릭이 빈 공간 클릭으로 처리되어 선택이 해제되는 것을 방지한다.
+- **element 패턴 미리보기**: Place Gun 활성 상태에서 다음 항목이 `contentType === 'element'`일 때만 마우스 커서를 따라 점선 박스가 표시된다. text/image/style 항목일 때는 preview가 표시되지 않는다. 일시정지(`placeGunPaused === true`) 시에는 `placeGunActive === false`가 되어 preview도 제거된다.
