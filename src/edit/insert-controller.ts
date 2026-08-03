@@ -4,6 +4,7 @@ import { EditManager } from "./edit-manager";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { BoxData } from "@/types";
+import { staticGridContains } from "@/utils";
 import type { InsertMode, InsertEventDetail } from "@/types/edit";
 
 /** 드래그-삽입을 통한 새 요소 생성을 관리하는 컨트롤러. */
@@ -304,6 +305,14 @@ export class InsertController {
       // 안쪽 box가 paragraph/image 자식을 가지면 삽입 불가능하므로 거르고,
       // 더 바깥의 box-only 컨테이너를 찾을 때까지 순회한다.
       const centerElements = document.elementsFromPoint(centerX, centerY);
+
+      // 중심점이 안쪽 box에 있더라도 요소 영역이 그 box의 컬럼/라인 경계를
+      // 벗어나면 더 바깥 컨테이너로 폴백해야 한다.
+      const widthPx = Math.abs(endX - startX);
+      const heightPx = Math.abs(endY - startY);
+      const widthMm = manager.screenPxToMm(widthPx);
+      const heightMm = manager.screenPxToMm(heightPx);
+
       for (const el of centerElements) {
         if (el instanceof LayoutBoxElement) {
           if (el.lock) continue;
@@ -311,6 +320,16 @@ export class InsertController {
           if (hasNonBoxChild) continue;
           // editableRootId가 설정된 경우 root box 내부의 box만 허용
           if (rootBox && !rootBox.contains(el)) continue;
+
+          const { left: leftMm, top: topMm } = this._screenToContainerMm(
+            Math.min(startX, endX),
+            Math.min(startY, endY),
+            el,
+          );
+          const staticCoords = this._mmToStatic(leftMm, topMm, widthMm, heightMm, el);
+          if (!staticGridContains(el, staticCoords.left, staticCoords.top, staticCoords.width, staticCoords.height)) {
+            continue;
+          }
           return el;
         }
         if (el instanceof LayoutDocumentElement) {
@@ -396,6 +415,11 @@ export class InsertController {
 
     // 사각형이 각 후보의 경계 내에 완전히 포함되는지 확인
     // 가장 안쪽(깊이 중첩된) 유효 컨테이너를 찾는다
+    const isStatic = this._mode?.position === 'static';
+    const widthPxFallback = Math.abs(endX - startX);
+    const heightPxFallback = Math.abs(endY - startY);
+    const widthMmFallback = manager.screenPxToMm(widthPxFallback);
+    const heightMmFallback = manager.screenPxToMm(heightPxFallback);
     for (const el of fullyHit) {
       if (el instanceof LayoutDocumentElement) {
         // Document는 항상 포함하므로, 더 안쪽 box가 없을 때의 대상
@@ -412,6 +436,17 @@ export class InsertController {
           startX >= rect.left && endX <= rect.right &&
           startY >= rect.top && endY <= rect.bottom
         ) {
+          if (isStatic) {
+            const { left: leftMm, top: topMm } = this._screenToContainerMm(
+              Math.min(startX, endX),
+              Math.min(startY, endY),
+              el,
+            );
+            const staticCoords = this._mmToStatic(leftMm, topMm, widthMmFallback, heightMmFallback, el);
+            if (!staticGridContains(el, staticCoords.left, staticCoords.top, staticCoords.width, staticCoords.height)) {
+              continue;
+            }
+          }
           return el;
         }
       }
