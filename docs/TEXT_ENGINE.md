@@ -32,9 +32,9 @@ const model = TextLayoutEngine.create({
 
 - 모든 레이아웃 크기는 **mm**(밀리미터) 단위이다.
 - `ppm`(pixels-per-mm)을 통해 화면 픽셀로 변환한다.
-- 텍스트 래핑은 **Canvas `measureText().width` (advance width)** 기반으로 수행한다. DOM `scrollWidth > clientWidth` 방식은 사용하지 않는다.
+- 텍스트 래핑은 **폰트 메트릭(`glyph.advanceWidth`)** 기반으로 수행한다. DOM `scrollWidth > clientWidth` 방식은 사용하지 않는다.
 - 오버랩 회피는 실제 렌더링된 요소의 `getBoundingClientRect()`를 기준으로 계산한다.
-- 한 렌더링 사이클 내에서 오버랩 요소의 `DOMRect`와 Canvas 폰트 문자열을 캐싱하여 반복 측정을 줄인다.
+- 한 렌더링 사이클 내에서 오버랩 요소의 `DOMRect`를 캐싱하여 반복 측정을 줄인다.
 
 ---
 
@@ -326,100 +326,57 @@ freeRegions = [
 
 ---
 
-## 6. 글자 폭 측정 (`_charWidthMm()``)
+## 6. 글자 폭 측정 (`_charWidthMm()`)
 
 ### 6.1 개요
 
-`_charWidthMm()`는 `TEXT_MEASUREMENT_MODE` 상수(`src/constants/defaults.ts`)에 따라 두 가지 측정 모드를 지원한다.
-
-- **`'canvas'` (기본값)**: Canvas 2D `measureText()`를 사용해 문자의 **advance width**를 측정한 뒤 **mm 단위**로 반환한다. 브라우저 렌더링 파이프라인에 의존하므로 환경(브라우저 엔진/OS/DPI/hinting)마다 미세하게 다른 결과를 낼 수 있다. 모니터 내에서 scale 무관성은 보장되지만, 클라이언트 ↔ 서버(Playwright) 간 일치성은 보장되지 않는다.
-- **`'opentype'`**: opentype.js로 폰트 메트릭 테이블(`hmtx`)을 직접 파싱하여 `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 폭을 계산한다. 같은 TTF 파일을 사용하는 한 환경에 무관하게 동일한 값을 반환하므로, 모니터 작업 결과가 서버 재렌더링/윤전기 인쇄물과 동일하게 보장된다. 폰트/글리프 조회 실패 시 자동으로 canvas 모드로 폴백한다.
+`_charWidthMm()`는 폰트 메트릭 테이블(`hmtx`)을 직접 파싱하여 문자의 advance width를 mm 단위로 반환한다. opentype.js로 파싱된 폰트 객체에서 `glyph.advanceWidth / unitsPerEm * fontSize`로 계산한다. 같은 TTF 파일을 사용하는 한 환경(브라우저 엔진/OS/DPI)에 무관하게 동일한 값을 반환하므로, 모니터 작업 결과가 서버 재렌더링/윤전기 인쇄물과 동일하게 보장된다.
 
 ```ts
 private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle): number {
   const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-  const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
-  const minWidthEm = (char === ' ') ? this.spaceRatio : (!isHalfWidth ? 0.15 : 0.35);
-  const minWidthMm = minWidthEm * fontSize;
+  const minWidthMm = this.spaceRatio * fontSize;
 
-  if (TEXT_MEASUREMENT_MODE === 'opentype') {
-    const otWidth = this._charWidthMmViaOpentype(char, textBlockStyle, fontSize);
-    if (otWidth !== null) {
-      const widthWithRatio = otWidth * this.widthRatio;
-      return Math.max(widthWithRatio, minWidthMm);
-    }
+  if (char === ' ') {
+    return minWidthMm;
   }
 
-  const maxWidthMm = this.widthRatio * fontSize;
-  const ppm = this._columnPpm[0] || GridCalculator.ppm;
-  this._ctx.font = this._getCachedFontString(textBlockStyle, ppm);
-  const metrics = this._ctx.measureText(char);
-  const rawWidthMm = metrics.width / ppm;
-  return Math.min(Math.max(rawWidthMm, minWidthMm), maxWidthMm);
+  const fontWidth = this._charWidthMmFromFont(char, textBlockStyle, fontSize);
+  if (fontWidth !== null) {
+    return Math.max(fontWidth, minWidthMm);
+  }
+
+  return minWidthMm;
 }
 
-private _charWidthMmViaOpentype(char: string, textBlockStyle: TextBlockStyle | undefined, fontSize: number): number | null {
+private _charWidthMmFromFont(char: string, textBlockStyle: TextBlockStyle | undefined, fontSize: number): number | null {
   const fontLoader = FontLoader.getInstance();
   const fontName = textBlockStyle?.fontFamily;
-  const otFont = fontLoader.getOpenTypeFont(fontName);
-  if (!otFont) return null;
+  const parsedFont = fontLoader.getParsedFont(fontName);
+  if (!parsedFont) return null;
 
-  const glyph = otFont.charToGlyph(char);
+  const glyph = parsedFont.charToGlyph(char);
   if (!glyph || glyph.advanceWidth === undefined || glyph.advanceWidth === null) {
     return null;
   }
 
-  return (glyph.advanceWidth / otFont.unitsPerEm) * fontSize;
+  return (glyph.advanceWidth / parsedFont.unitsPerEm) * fontSize;
 }
 ```
 
 ### 6.2 핵심 포인트
 
-- **canvas 모드**: `metrics.width`(advance width, px)를 `ppm`으로 나누어 mm로 변환한다. Canvas `measureText().width`는 폰트 메트릭에 의해 `fontSizePx`에 정확히 선형 비례하므로, `measureText().width / ppm`은 **scale(ppm)에 완전히 무관**한 mm 값을 반환한다.
-- **opentype 모드**: `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 폭을 직접 계산한다. ppm 변환을 거치지 않으므로 환경(브라우저 엔진/OS/DPI)에 완전히 무관하며, 같은 TTF 파일을 사용하는 한 클라이언트 ↔ 서버 간 동일한 결과를 보장한다.
-- **장평(`widthRatio`) 처리 — 모드별 차이**:
-  - **canvas 모드**: `widthRatio * fontSize`를 **상한 클램프**로 적용. canvas는 glyph의 실제 렌더링 폭을 모르므로 상한선으로 휴리스틱하게 장평을 강제한다. 원본 폭이 상한보다 좁으면 장평이 적용되지 않는 근본적 한계가 있다. DOM도 `maxWidth` 상한 + `scale`로 대응하지만, 측정값과 실제 렌더링 폭이 불일치하여 마지막 글자가 틀을 넘어갈 수 있다.
-  - **opentype 모드**: `_charWidthMm`은 **원본 폭(장평 미적용)**을 반환. 장평 곱셈은 호출자(`_layoutTextIntoColumns` 줄바꿈 계산, `_genOpentypeOuterStyle` DOM `width`)에서 각각 적용한다. DOM은 외부 span에 `width`로 정확히 고정하고 내부 span에 `scale`로 glyph 축소를 적용하여 측정값과 렌더링을 결정론적으로 일치시킨다 — 마지막 글자가 틀을 넘어가는 현상을 방지한다.
+- `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 폭을 직접 계산한다. ppm 변환을 거치지 않으므로 환경(브라우저 엔진/OS/DPI)에 완전히 무관하며, 같은 TTF 파일을 사용하는 한 클라이언트 ↔ 서버 간 동일한 결과를 보장한다.
+- **장평(`widthRatio`) 처리**: `_charWidthMm`은 **원본 폭(장평 미적용)**을 반환. 장평 곱셈은 호출자(`_layoutTextIntoColumns` 줄바꿈 계산, `genCharStyle` DOM `width`)에서 각각 적용한다. DOM은 외부 span에 `width`로 정확히 고정하고 내부 span에 `scale`로 glyph 축소를 적용하여 측정값과 렌더링을 결정론적으로 일치시킨다 — 마지막 글자가 틀을 넘어가는 현상을 방지한다.
 - **`Math.round()`를 사용하지 않는다.** 부동소수점 정밀도를 보존하여 서로 다른 scale에서 동일한 줄바꿈 결과를 보장한다.
-- **최소 폭(`minWidthMm`)**: 양쪽 모드 공통. 결함 글리프(0폭/비정상적 narrow) 방어. 반각 0.35em, 전각 0.15em.
-- **공백 처리**: opentype 모드에서 공백은 폰트 메트릭이 아닌 `spaceRatio * fontSize`로 고정한다. canvas 모드는 `minWidthMm` 바닥값으로 보정한다.
-- 반각 판정은 `char.charCodeAt(0) <= 255`로 이루어진다. Latin-1 전각 문자(128-255)는 반각으로 오분류될 수 있다.
+- **최소 폭(`minWidthMm`)**: 결함 글리프(0폭/비정상적 narrow) 방어. `spaceRatio × fontSize`를 바닥값으로 사용한다.
+- **공백 처리**: 공백은 폰트 메트릭 조회 없이 `spaceRatio * fontSize`로 고정한다.
 
-### 6.3 모드 전환 및 폴백
+### 6.3 폰트 파싱 실패 시 폴백
 
-- `TEXT_MEASUREMENT_MODE` 상수를 변경하여 두 모드를 전환할 수 있다. 모드 변경 후에는 모든 단락을 재렌더링해야 결과가 반영된다.
-- **opentype → canvas 폴백**: opentype.js가 로드되지 않았거나, 폰트 파싱에 실패했거나, 특정 글리프를 찾을 수 없는 경우 자동으로 canvas 모드로 폴백한다. 이때 `FontLoader.opentypeEnabled`가 `false`이면 이후 모든 opentype 시도가 즉시 `null`을 반환하여 불필요한 오버헤드를 방지한다.
-- **`base64Data`가 없는 폰트**: `ttfFilename` 경로의 폰트는 별도 fetch가 필요하므로 opentype.js 캐시에서 누락된다. 해당 폰트로 측정 시 canvas 모드로 폴백한다. 화면 모드에서 `base64Data`가 우선되므로 대부분의 케이스가 커버된다.
-
-### 6.3 폰트 문자열 캐시
-
-`_getCachedFontString()`는 단일 항목 폰트 문자열 캐시를 사용한다.
-
-```ts
-private _getCachedFontString(textBlockStyle?: TextBlockStyle, ppm?: number): string {
-  const fontLoader = FontLoader.getInstance();
-  const fontFamily = textBlockStyle?.fontFamily
-    ? fontLoader.getFontFamily(textBlockStyle.fontFamily)
-    : fontLoader.getFontFamily();
-  const fontSize = textBlockStyle?.fontSize
-    ? textBlockStyle.fontSize
-    : this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-  const fontWeight = textBlockStyle?.fontWeight || this._textStyle?.fontWeight || this._inheritStyle?.fontWeight || 'normal';
-  const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
-  const fontSizePx = fontSize * effectivePpm;
-
-  const key = `${fontWeight}|${fontSizePx}|${fontFamily}`;
-  if (key === this._lastFontKey) return this._lastFontString;
-
-  const fontString = `${fontWeight} ${fontSizePx}px ${fontFamily}`;
-  this._lastFontKey = key;
-  this._lastFontString = fontString;
-  return fontString;
-}
-```
-
-- 키: `${fontWeight}|${fontSizePx}|${fontFamily}`
-- 히트율: 약 99%. 한 번의 렌더링 사이클에서 대부분의 문자가 동일한 폰트를 사용하기 때문이다.
+- 폰트 파싱에 실패했거나 특정 글리프를 찾을 수 없는 경우 `_charWidthMmFromFont`가 `null`을 반환하고 `_charWidthMm`은 `minWidthMm` 바닥값을 사용한다.
+- `FontLoader._parsed === false`이면 이후 모든 폰트 조회 시도가 즉시 `null`을 반환하여 불필요한 오버헤드를 방지한다.
+- **`base64Data`가 없는 폰트**: `ttfFilename` 경로의 폰트는 별도 fetch가 필요하므로 파싱 캐시에서 누락될 수 있다. 화면 모드에서 `base64Data`가 우선되므로 대부분의 케이스가 커버된다.
 
 ---
 
@@ -735,29 +692,13 @@ public genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaratio
 
 ### 11.4 `genCharStyle(char)`
 
-글자(char) 요소의 스타일을 생성한다. 측정 모드(`TEXT_MEASUREMENT_MODE`)에 따라 다른 스타일을 반환한다.
+글자(char) 요소의 외부 span 스타일을 생성한다. 이중 span 구조에서 외부 span을 담당한다.
 
 ```ts
 public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
 ```
 
-#### canvas 모드
-
-- `display: 'inline-block'`
-- `maxWidth`: `${widthRatio}em` (장평 비율만큼 레이아웃 박스 너비 제한)
-- `minWidth`: 공백 `${spaceRatio}em` (기본값 0.15em, `TextStyle.spaceRatio`로 설정 가능), 1바이트 문자 `0.35em`, 그 외 `0.15em`
-- `scale`: `${widthRatio} 1` (글자 모양 자체를 수평 축소 — 장평)
-- `textAlign`: `'center'`
-- `transformOrigin`: `'0'`
-
-`maxWidth`와 `scale`은 함께 작동한다:
-- `maxWidth: ${wr}em`은 레이아웃 박스 너비를 `wr * fontSize`로 제한한다. 글자 사이 간격이 줄어든다.
-- `scale: ${wr} 1`은 글자 모양(glyph) 자체를 수평으로 `wr`배 축소한다. 글자가 좁아진다.
-- 둘 다 `widthRatio`를 적용하므로, 장평 0.8이면 레이아웃 박스도 0.8em, 글자 모양도 80%로 축소된다.
-
-#### opentype 모드 (이중 span 구조)
-
-opentype 모드에서는 외부 span과 내부 span의 이중 구조를 사용한다:
+외부 span과 내부 span의 이중 구조를 사용한다:
 
 ```html
 <span data-source-offset="N" style="width: 3.2mm; overflow: hidden; display: inline-block;">
@@ -775,15 +716,16 @@ opentype 모드에서는 외부 span과 내부 span의 이중 구조를 사용�
 
 **내부 span** (`genCharInnerStyle` 반환):
 - `display: 'inline-block'`
-- `scale`: `${widthRatio} 1` (glyph 모양 수평 축소 — 장평)
+- `scale`: `${widthRatio * 0.88} 1` (glyph 모양 수평 축소 — 장평)
 - `transformOrigin`: `'0 center'`
+
+> **보정 계수 `0.88`**: opentype.js의 `advanceWidth`(레이아웃 폭, side bearing 포함)와 브라우저 실제 렌더링 glyph 너비(hinting/subpixel 등으로 약간 좁음) 간의 미세한 차이를 보정하는 경험적 값. 이 보정이 없으면 외부 span의 `width`보다 내부 glyph가 약간 넓게 렌더링되어 글자가 오버플로우하거나 인접 글자와 살짝 겹치는 현상이 발생한다. **절대 변경하거나 제거해서는 안 된다.** 제거 시 시각적 정렬이 깨진다.
 
 `width`와 `scale`은 분리되어 작동한다:
 - 외부 span의 `width`는 `_charWidthMm(char)`으로 측정한 원본 폭에 장평을 곱해 정확히 고정한다. 측정값과 DOM 렌더링이 결정론적으로 일치하며, 마지막 글자가 틀을 넘어가는 현상을 방지한다.
-- 내부 span의 `scale`은 glyph 모양을 수평으로 `wr`배 축소한다. 시각적 장평 효과.
-- `overflow: hidden`으로 내부 glyph가 외부 박스를 넘어도 잘려서 보이지 않는다.
+- 내부 span의 `scale`은 glyph 모양을 수평으로 `wr × 0.88`배 축소한다. 시각적 장평 효과.
 - 공백은 `fontSize × spaceRatio`로 고정한다 (폰트 메트릭 무시).
-- 문자별 Map 캐시(`_opentypeOuterStyleCache`, 키 `${char}|${widthRatio}`)로 재계산을 생략한다.
+- 문자별 Map 캐시(`_charOuterStyleCache`, 키 `${char}|${widthRatio}`)로 재계산을 생략한다.
 
 ---
 
@@ -822,7 +764,7 @@ const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColu
 
 ### 12.5 scale 무관성
 
-텍스트 래핑 계산의 모든 산술은 mm 단위로 수행된다. mm는 CSS `transform: scale(s)`의 영향을 받지 않는 절대 단위이므로, scale이 변경되어도 줄바꿈 결과(줄당 문자 수, 컬럼당 줄 수)가 동일하게 보장된다. DOM에서 px로 측정한 값은 ppm으로 나누어 mm로 변환하며, Canvas `measureText().width`도 동일하게 ppm으로 나누어 mm로 변환한다. 두 변환 모두 ppm에 비례하므로 scale에 무관한 결과를 보장한다.
+텍스트 래핑 계산의 모든 산술은 mm 단위로 수행된다. mm는 CSS `transform: scale(s)`의 영향을 받지 않는 절대 단위이므로, scale이 변경되어도 줄바꿈 결과(줄당 문자 수, 컬럼당 줄 수)가 동일하게 보장된다. 폰트 메트릭 기반 문자 폭 측정(`glyph.advanceWidth / unitsPerEm * fontSize`)은 ppm 변환을 거치지 않으므로 환경에 완전히 무관하며, DOM에서 px로 측정한 값은 ppm으로 나누어 mm로 변환한다. 따라서 scale에 무관한 결과를 보장한다.
 
 #### 12.5.1 `getBoundingClientRect()` 정규화
 
@@ -830,7 +772,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 
 이를 방지하기 위해 모든 `getBoundingClientRect()` 결과는 `EditManager.scale`로 나누어 **scale=1 기준 픽셀 좌표**로 정규화한 뒤 사용한다. 정규화는 다음 세 경로에 적용된다:
 
-1. **ppm 측정** (`_initStructureAndMeasureColumns`): 가상 컬럼의 렌더링 폭을 scale로 나누어 ppm을 계산한다. ppm이 scale에 무관해지면 `_charWidthMm()`의 `measureText().width / ppm`도 scale 무관한 mm 값을 반환하여, 오버랩이 없는 라인의 글자 배치도 일관된다.
+1. **ppm 측정** (`_initStructureAndMeasureColumns`): 가상 컬럼의 렌더링 폭을 scale로 나누어 ppm을 계산한다. 폰트 메트릭 기반 `_charWidthMm()`은 ppm에 무관하게 동일한 mm 값을 반환하므로, 오버랩이 없는 라인의 글자 배치도 일관된다.
 2. **오버랩 rect 캐시** (`_detectOverlapWithCache`): 오버랩 요소의 rect를 scale로 나누어 캐싱한다. 라인 rect도 동일한 scale로 나누어 비교하므로, 모든 scale에서 동일한 겹침 판정 결과를 보장한다.
 3. **`getOverlapSizePX()`**: 내부에서 `getBoundingClientRect()`를 다시 호출하므로, scale 파라미터를 받아 r1/r2를 정규화한다. canvas 픽셀 매핑(`canvas.width / r2.width`)도 정규화된 r2.width 기준으로 수행되어 scale 무관하다.
 
@@ -907,8 +849,8 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `_createLineElement(textBlockStyle?)` | 줄 DOM 요소 생성 |
 | `_computeFreeRegions(lineWidth, overlapParts)` | 오버랩 영역의 여집합으로 자유 영역 계산 |
 | `_detectOverlapWithCache(lineEl)` | 오버랩 요소와의 겹침 계산. COVER/PART 판정. `_overlayRects` 캐시 사용 |
-| `_charWidthMm(char, textBlockStyle?, ppm?)` | Canvas `measureText()`로 문자 advance width를 측정 후 ppm으로 나누어 mm 반환. `widthRatio` 및 minWidth 적용. `Math.round()` 없음 |
-| `_getCachedFontString(textBlockStyle?, ppm?)` | Canvas 폰트 문자열 생성. 단일 항목 캐시 사용 |
+| `_charWidthMm(char, textBlockStyle?)` | 폰트 메트릭(`glyph.advanceWidth / unitsPerEm * fontSize`)으로 문자 폭을 mm로 직접 계산. `minWidthMm` 바닥값 적용. `Math.round()` 없음 |
+| `_charWidthMmFromFont(char, textBlockStyle?, fontSize)` | `FontLoader.getParsedFont()`로 폰트 객체 조회 후 글리프 advance width 계산. 폰트/글리프 누락 시 `null` |
 | `_createPartElement(widthMm, marginLeftMm)` | 파트 DOM 요소 생성. mm 단위 CSS 적용 |
 | `_removeTrailingEmptyLine(columnContent)` | 빈 파트만 있는 마지막 줄 제거 |
 | `_applyLineBreakRules()` | 한글 조판 금칙문자(행두/행말 금지) 후처리. 인접 줄 경계의 금칙 위반 교정 (§22 참조) |
@@ -1131,7 +1073,7 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 - `overlapPadding`이 설정된 이미지는 타원 기반 감지를 사용한다. 캔버스가 없으면 기하학적 확장 사각형으로 폴백하며, 이 경우 투명 영역 구분이 불가능하다.
 - 텍스트 오버플로우는 마지막 컬럼에서 `_overflow`로 집계되며 `render-error` 이벤트로 통지된다. 오버플로우된 라인은 `renderText()`에서 `display: none` 처리되어 시각적으로 숨겨진다. `_createLineWithParts()`가 overflow를 반환한 경우에도 라인 데이터를 `columnContent`에 포함시켜, `_computeRenderStats()`가 라인 기반 오버플로우를 감지할 수 있도록 한다. 이는 텍스트 끝의 `\n`으로 인해 발생하는 빈 라인 오버플로우도 감지하기 위함이다.
 - 오버플로우 발생 시 `LayoutParagraphElement`의 `:host`에 하단 8px 빨간 inset shadow(`inset 0 -8px 0 0 #ff0000`)가 자동 적용되어 사용자에게 오버플로우를 시각적으로 알린다. 인쇄 모드에서는 적용되지 않는다. 오버플로우가 해제되면 shadow도 자동 제거된다.
-- Canvas 폰트 측정은 실제 DOM 렌더링과 약간 다를 수 있으나, `widthRatio`와 `minWidth` 보정으로 대부분의 경우 일치한다. **opentype 모드**(`TEXT_MEASUREMENT_MODE === 'opentype'`)에서는 폰트 메트릭 테이블에서 직접 읽은 advance width를 사용하므로 브라우저 렌더링 파이프라인 차이에서 오는 불일치가 발생하지 않는다. 단, opentype.js가 로드되지 않았거나 폰트 파싱에 실패하면 자동으로 canvas 모드로 폴백한다.
+- 폰트 메트릭 테이블에서 직접 읽은 advance width를 사용하므로 브라우저 렌더링 파이프라인 차이에서 오는 불일치가 발생하지 않는다. 폰트 파싱에 실패하면 `minWidthMm` 바닥값으로 폴백한다.
 - `LayoutParagraphElement.render()` 완료 후 항상 `render-complete` 커스텀 이벤트가 디스패치된다. 오버플로우 발생 여부와 무관하게 렌더링 결과를 통지하며, 페이로드는 `RenderCompleteEventDetail` 타입을 따른다. 배치된 글자/라인 수(`placed.chars`, `placed.lines`), 오버플로우 여부 및 통계(`overflow.hasOverflow`, `overflow.chars`, `overflow.lines`), 컬럼 수(`columnCount`)를 포함한다. `render-error`와 독립적으로 동작하며 기존 이벤트에 영향을 주지 않는다.
 
 ---
@@ -1166,7 +1108,7 @@ if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] +
 }
 ```
 
-`charWidth`는 Canvas `measureText()`로 계산한 고정값이다. `partWidths`는 `_createLineWithParts()`에서 자유 영역 픽셀 폭으로 결정된다. 둘 다 정렬에 영향을 받지 않는다.
+`charWidth`는 폰트 메트릭으로 계산한 고정값이다. `partWidths`는 `_createLineWithParts()`에서 자유 영역 픽셀 폭으로 결정된다. 둘 다 정렬에 영향을 받지 않는다.
 
 즉, `space-between`이든 `center`이든 `flex-end`이든 같은 글자들이 들어 있으면 총 너비는 같고, 파트 폭도 같다. 따라서 래핑 결과는 모든 정렬에서 동일하다.
 
@@ -1299,81 +1241,42 @@ textAlign = 'justify' (space-between)
 
 `TextLayoutEngine`과 연관 컴포넌트들은 렌더링 성능을 향상하기 위해 6가지 최적화 전략을 사용한다. 각 전략은 강제 리플로우(`getBoundingClientRect()`) 호출을 최소화하거나 DOM 조작을 줄이는 것을 목표로 한다.
 
-### 21.1 Canvas `measureText()` 기반 문자 폭 측정
+### 21.1 폰트 메트릭 기반 문자 폭 측정
 
-**대상:** `_charWidthMm()` (`src/core/text-layout-engine.ts:229`)
+**대상:** `_charWidthMm()` (`src/core/text-layout-engine.ts:205`)
 
 **문제:** DOM 기반 문자 폭 측정(`scrollWidth > clientWidth`)은 강제 리플로우를 유발한다. 문자마다 span을 생성하고 측정하면 O(n)번의 리플로우가 발생한다.
 
-**해결:** Canvas 2D Context의 `measureText().width`(advance width)를 사용하여 DOM 조작 없이 순수 계산으로 문자 폭을 구한다. 측정값을 ppm으로 나누어 **mm 단위**로 반환한다.
+**해결:** 폰트 메트릭 테이블에서 `glyph.advanceWidth / unitsPerEm * fontSize`로 직접 계산하여 DOM 조작 없이 순수 계산으로 문자 폭을 구한다. ppm 변환을 거치지 않으므로 환경에 완전히 무관하다.
 
 ```ts
-private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle, ppm?: number): number {
-  const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
-  this._ctx.font = this._getCachedFontString(textBlockStyle, effectivePpm);
-  const metrics = this._ctx.measureText(char);
-  const rawWidthMm = metrics.width / effectivePpm;
+private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle): number {
   const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-  const maxWidthMm = this.widthRatio * fontSize;
-  const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
-  const minWidthEm = (char === ' ') ? this.spaceRatio : (!isHalfWidth ? 0.15 : 0.35);
-  const minWidthMm = minWidthEm * fontSize;
-  return Math.min(Math.max(rawWidthMm, minWidthMm), maxWidthMm);
+  const minWidthMm = this.spaceRatio * fontSize;
+
+  if (char === ' ') {
+    return minWidthMm;
+  }
+
+  const fontWidth = this._charWidthMmFromFont(char, textBlockStyle, fontSize);
+  if (fontWidth !== null) {
+    return Math.max(fontWidth, minWidthMm);
+  }
+
+  return minWidthMm;
 }
 ```
 
 **핵심 포인트:**
-- `metrics.width` (advance width)를 ppm으로 나누어 mm로 변환 — `measureText().width / ppm`은 scale에 무관한 mm 값을 반환한다.
+- `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 폭을 직접 계산 — ppm 변환 없이 환경에 무관한 mm 값을 반환.
 - `Math.round()`를 사용하지 않음 — 부동소수점 정밀도를 보존하여 서로 다른 scale에서 동일한 줄바꿈 결과를 보장.
-- `maxWidthMm = widthRatio * fontSize`(mm)로 상한 클램프 — 장평 비율 반영.
-- `minWidthMm` 바닥값 — 0폭 문자 방지 (공백 `spaceRatio`em 기본 0.15, 전각 `0.15em`, 반각 `0.35em`).
+- `minWidthMm` 바닥값 — 결함 글리프(0폭/누락) 방지 (`spaceRatio × fontSize`).
 
-**효과:** 텍스트 래핑 계산 시 DOM 조작 없이 순수 계산으로 처리. O(n)번의 강제 리플로우 제거. scale에 무관한 줄바꿈 보장.
+**효과:** 텍스트 래핑 계산 시 DOM 조작 없이 순수 계산으로 처리. O(n)번의 강제 리플로우 제거. 환경에 무관한 줄바꿈 보장.
 
 > **참고:** 문자 폭 측정의 상세한 규칙은 섹션 6을 참조.
 
-### 21.2 폰트 문자열 단일 항목 캐시
-
-**대상:** `_getCachedFontString()` (`src/core/text-layout-engine.ts:168`)
-
-**문제:** `ctx.font` 설정은 Canvas 상태 변경을 유발하여 비용이 크다. 문자마다 폰트 문자열을 재생성하면 불필요한 오버헤드가 발생한다.
-
-**해결:** 단일 항목 캐시(`_lastFontKey`/`_lastFontString`)로 직전에 사용한 폰트 문자열을 재사용한다.
-
-```ts
-private _getCachedFontString(textBlockStyle?: TextBlockStyle, ppm?: number): string {
-  const fontLoader = FontLoader.getInstance();
-  const fontFamily = textBlockStyle?.fontFamily
-    ? fontLoader.getFontFamily(textBlockStyle.fontFamily)
-    : fontLoader.getFontFamily();
-  const fontSize = textBlockStyle?.fontSize
-    ? textBlockStyle.fontSize
-    : this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-  const fontWeight = textBlockStyle?.fontWeight || this._textStyle?.fontWeight || this._inheritStyle?.fontWeight || 'normal';
-  const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
-  const fontSizePx = fontSize * effectivePpm;
-
-  const key = `${fontWeight}|${fontSizePx}|${fontFamily}`;
-  if (key === this._lastFontKey) return this._lastFontString;
-
-  const fontString = `${fontWeight} ${fontSizePx}px ${fontFamily}`;
-  this._lastFontKey = key;
-  this._lastFontString = fontString;
-  return fontString;
-}
-```
-
-**핵심 포인트:**
-- 키: `${fontWeight}|${fontSizePx}|${fontFamily}`
-- `fontSizePx`(계산된 픽셀값)를 키에 사용 — ppm 차이를 반영.
-- Map 기반 캐시가 아닌 단일 항목 캐시 — 한 렌더링 사이클에서 대부분의 문자가 동일 폰트를 사용하므로 히트율 약 99% 달성.
-- `fontSizePx`가 키에 포함되므로 ppm 변경 시 자동으로 캐시 미스가 발생하여 올바른 폰트 문자열이 재생성됨.
-
-**효과:** `ctx.font` 설정 비용을 렌더링 사이클당 1회로 통합.
-
-> **참고:** 상세한 내용은 섹션 6.3을 참조.
-
-### 21.3 오버랩 rect 캐시 (`_overlayRects`)
+### 21.2 오버랩 rect 캐시 (`_overlayRects`)
 
 **대상:** `_detectOverlapWithCache()` (`src/core/text-layout-engine.ts:215`)
 
@@ -1405,7 +1308,7 @@ if (this._overlayRects === null) {
 
 > **참고:** 상세한 내용은 섹션 8을 참조.
 
-### 21.4 배치 vcolumn ppm 측정
+### 21.3 배치 vcolumn ppm 측정
 
 **대상:** `_initStructureAndMeasureColumns()` (`src/core/text-layout-engine.ts:344`)
 
@@ -1445,7 +1348,7 @@ private _initStructureAndMeasureColumns() {
 
 **효과:** O(columns)번의 강제 리플로우를 1번으로 통합.
 
-### 21.5 key 기반 증분 span 렌더링
+### 21.4 key 기반 증분 span 렌더링
 
 **대상:** `LayoutColumnElement.renderText()` (`src/components/layout/column.element.ts`)
 
@@ -1522,7 +1425,7 @@ for (const unusedSpan of existingSpans.values()) {
 
 **효과:** 한 글자 입력 시 변경된 라인의 span만 갱신되고 나머지는 재사용. `innerHTML = ''`가 발생하지 않음. DOM 조작과 가비지 컬렉션 부하 최소화.
 
-### 21.6 `EditCoordinateMapper` 캐싱
+### 21.5 `EditCoordinateMapper` 캐싱
 
 **대상:** `EditCoordinateMapper` (`src/edit/edit-coordinate-mapper.ts`)
 
@@ -1567,18 +1470,17 @@ for (const s of spans) {
 
 **효과:** 드래그 선택 시 매 프레임 `getBoundingClientRect()` 호출을 span 수 × 3번에서 span 수 × 1번으로 감소. `querySelectorAll` 호출을 `rebuild()` 주기당 1번으로 통합.
 
-### 21.7 최적화 전략 요약
+### 21.6 최적화 전략 요약
 
 | 전략 | 대상 | 문제 | 해결 | 효과 |
 |------|------|------|------|------|
-| Canvas `measureText()` | `_charWidthMm()` | DOM 기반 측정의 O(n) 리플로우 | Canvas 2D `measureText().width / ppm`로 mm 단위 측정 | DOM 조작 없이 순수 계산, scale 무관 |
-| 폰트 문자열 캐시 | `_getCachedFontString()` | `ctx.font` 설정 비용 | 단일 항목 캐시 (히트율 99%) | `ctx.font` 설정을 사이클당 1회로 통합 |
+| 폰트 메트릭 측정 | `_charWidthMm()` | DOM 기반 측정의 O(n) 리플로우 | `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 단위 직접 계산 | DOM 조작 없이 순수 계산, 환경 무관 |
 | 오버랩 rect 캐시 | `_detectOverlapWithCache()` | 라인×오버랩 요소 수의 리플로우 | `Map`에 오버랩 요소 rect 캐싱 | 리플로우를 사이클당 1번으로 통합 |
 | 배치 vcolumn 측정 | `_initStructureAndMeasureColumns()` | 컬럼마다 개별 측정 | 모든 컬럼을 한 번에 생성/측정/제거 | O(columns)번 리플로우를 1번으로 통합 |
 | key 기반 증분 렌더링 | `renderText()` | 전체 DOM 재구축 (`innerHTML = ''`) | `data-source-offset` key로 span 재사용 | 변경된 span만 갱신, DOM 조작 최소화 |
 | Mapper 캐싱 | `EditCoordinateMapper` | 반복 `querySelectorAll` / `getBoundingClientRect` | `_columnSpansCache` + 로컬 `spanRects` Map | 드래그 시 프레임당 리플로우 감소 |
 
-### 21.8 캐시 생명 주기 다이어그램
+### 21.7 캐시 생명 주기 다이어그램
 
 ```mermaid
 flowchart TD
@@ -1593,10 +1495,10 @@ flowchart TD
         T6 -->|"vcolumn 일괄 제거"| T7["_columnPpm[] 확정"]
     end
 
-    subgraph FontCache["폰트 문자열 캐시"]
-        F1["_charWidthPx() 첫 호출"] -->|"key !== _lastFontKey"| F2["fontString 생성"]
-        F2 -->|"_lastFontKey/ _lastFontString 저장"| F3["이후 _charWidthPx() 호출"]
-        F3 -->|"key === _lastFontKey"| F4["_lastFontString 반환"]
+    subgraph StyleCache["스타일 캐시"]
+        F1["genCharStyle(char) 첫 호출"] -->|"key `${char}|${wr}` 미스"| F2["style 생성"]
+        F2 -->|"_charOuterStyleCache.set"| F3["이후 genCharStyle() 호출"]
+        F3 -->|"cache hit"| F4["_charOuterStyleCache.get 반환"]
         F4 -->|"다음 렌더링 사이클"| F1
     end
 
@@ -1617,7 +1519,7 @@ flowchart TD
     end
 ```
 
-### 21.9 여전히 최적화되지 않은 영역
+### 21.8 여전히 최적화되지 않은 영역
 
 다음 영역은 현재 캐싱되지 않아 향후 최적화 후보이다:
 
