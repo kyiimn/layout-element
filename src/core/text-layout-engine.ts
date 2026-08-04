@@ -1,4 +1,4 @@
-import { DEFAULT_FONT_SIZE, DEFAULT_LETTER_SPACING, DEFAULT_LINE_GAP, DEFAULT_SPACE_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, DEFAULT_WIDTH_RATIO, TEXT_MEASUREMENT_MODE, isLineEndForbidden, isLineStartForbidden } from "@/constants";
+import { DEFAULT_FONT_SIZE, DEFAULT_LETTER_SPACING, DEFAULT_LINE_GAP, DEFAULT_SPACE_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, DEFAULT_WIDTH_RATIO, isLineEndForbidden, isLineStartForbidden } from "@/constants";
 import type { LayoutBoxElement, LayoutParagraphElement } from "@/components";
 import type { LayoutVirtualColumnElement } from "@/components/layout/v-column.element";
 import {
@@ -11,7 +11,6 @@ import {
   TextLineData,
   OverlapParts
 } from "@/types";
-import { GridCalculator } from "@/core/grid-calculator";
 import { getOverlapSizePX, mergeOverlapParts, normalizeRect, type NormalizedRect } from "@/utils";
 import { FontLoader } from "@/resource/font-loader";
 import { ColorRegistry } from "@/resource/color-registry";
@@ -63,16 +62,11 @@ export class TextLayoutEngine {
   private _previousLineCount: number = -1;
   private _previousOverflow: number = -1;
 
-  /** 성능 캐시: 장평 비율(`widthRatio`) 변경 시에만 스타일 캐시를 재계산한다. */
-  private _cachedWidthRatio: number = 0;
-  /** 성능 캐시: 공백 비율(`spaceRatio`) 변경 시에만 스타일 캐시를 재계산한다. */
-  private _cachedSpaceRatio: number = 0;
-  /** 성능 캐시: 반각 문자용 CSS 스타일. `_updatePerfCharStyleCache()`에서 갱신. */
-  private _cachedHalfWidthStyle: Partial<CSSStyleDeclaration> = {};
-  /** 성능 캐시: 전각 문자용 CSS 스타일. `_updatePerfCharStyleCache()`에서 갱신. */
-  private _cachedFullWidthStyle: Partial<CSSStyleDeclaration> = {};
-  /** 성능 캐시: 공백 문자용 CSS 스타일. `_updatePerfCharStyleCache()`에서 갱신. */
-  private _cachedSpaceStyle: Partial<CSSStyleDeclaration> = {};
+  /** 성능 캐시: opentype 모드 문자별 외부 span 스타일. 키 `${char}|${widthRatio}`. */
+  private _opentypeOuterStyleCache: Map<string, Partial<CSSStyleDeclaration>> = new Map();
+  /** 성능 캐시: opentype 모드 내부 span 스타일. 장평 변경 시 갱신. */
+  private _opentypeInnerStyle: Partial<CSSStyleDeclaration> = {};
+  private _opentypeInnerStyleKey: string = '';
 
   private _lineHeight: number = 0;
 
@@ -88,13 +82,6 @@ export class TextLayoutEngine {
   private _paragraphElement: LayoutParagraphElement;
   private _rootNode: Node;
 
-  private _canvas: HTMLCanvasElement;
-  private _ctx: CanvasRenderingContext2D;
-
-  /** 성능 캐시: 폰트 문자열 단일 항목 캐시. 히트율 약 99%. 키: `${fontWeight}|${fontSizePx}|${fontFamily}` */
-  private _lastFontKey: string = '';
-  private _lastFontString: string = '';
-
   /** 성능 캐시: 오버랩 요소의 정규화된 rect 캐시. 렌더링 사이클당 한 번 측정 후 재사용하여 강제 리플로우를 최소화한다. */
   private _overlayRects: Map<LayoutBoxElement, NormalizedRect> | null = null;
 
@@ -108,9 +95,6 @@ export class TextLayoutEngine {
   private constructor(options: TextLayoutEngineOptions) {
     this._paragraphElement = options.paragraphEl;
     this._rootNode = options.rootNode;
-
-    this._canvas = document.createElement('canvas');
-    this._ctx = this._canvas.getContext('2d')!;
 
     this.data = options;
   }
@@ -190,32 +174,6 @@ export class TextLayoutEngine {
   }
 
   /**
-   * Canvas 폰트 문자열을 생성한다. 성능 최적화: 단일 항목 캐시를 사용하여
-   * 동일한 폰트 키에 대해 문자열 재생성을 생략한다.
-   * 키: `${fontWeight}|${fontSizePx}|${fontFamily}`, 히트율 약 99%.
-   */
-  private _getCachedFontString(textBlockStyle?: TextBlockStyle, ppm?: number): string {
-    const fontLoader = FontLoader.getInstance();
-    const fontFamily = textBlockStyle?.fontFamily
-      ? fontLoader.getFontFamily(textBlockStyle.fontFamily)
-      : fontLoader.getFontFamily();
-    const fontSize = textBlockStyle?.fontSize
-      ? textBlockStyle.fontSize
-      : this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-    const fontWeight = textBlockStyle?.fontWeight || this._textStyle?.fontWeight || this._inheritStyle?.fontWeight || 'normal';
-    const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
-    const fontSizePx = fontSize * effectivePpm;
-
-    const key = `${fontWeight}|${fontSizePx}|${fontFamily}`;
-    if (key === this._lastFontKey) return this._lastFontString;
-
-    const fontString = `${fontWeight} ${fontSizePx}px ${fontFamily}`;
-    this._lastFontKey = key;
-    this._lastFontString = fontString;
-    return fontString;
-  }
-
-  /**
    * 문자의 레이아웃 폭을 mm 단위로 측정한다.
    *
    * Canvas `measureText().width`는 폰트 메트릭에 의해 `fontSizePx`에 정확히 선형 비례하므로,
@@ -256,20 +214,16 @@ export class TextLayoutEngine {
     const minWidthEm = (char === ' ') ? this.spaceRatio : (!isHalfWidth ? 0.15 : 0.35);
     const minWidthMm = minWidthEm * fontSize;
 
-    if (TEXT_MEASUREMENT_MODE === 'opentype') {
-      const otWidth = this._charWidthMmViaOpentype(char, textBlockStyle, fontSize);
-      if (otWidth !== null) {
-        const widthWithRatio = otWidth * this.widthRatio;
-        return Math.max(widthWithRatio, minWidthMm);
-      }
+    if (char === ' ') {
+      return this.spaceRatio * fontSize;
     }
 
-    const maxWidthMm = this.widthRatio * fontSize;
-    const ppm = this._columnPpm[0] || GridCalculator.ppm;
-    this._ctx.font = this._getCachedFontString(textBlockStyle, ppm);
-    const metrics = this._ctx.measureText(char);
-    const rawWidthMm = metrics.width / ppm;
-    return Math.min(Math.max(rawWidthMm, minWidthMm), maxWidthMm);
+    const otWidth = this._charWidthMmViaOpentype(char, textBlockStyle, fontSize);
+    if (otWidth !== null) {
+      return Math.max(otWidth, minWidthMm);
+    }
+
+    return minWidthMm;
   }
 
   /**
@@ -335,6 +289,7 @@ export class TextLayoutEngine {
    * @throws 이 메서드는 예외를 던지지 않는다. 모든 경계 검사는 컨텐츠 길이로 가드한다.
    * @returns 반환값 없음. `_columnContents`를 제자리에서 변형한다.
    */
+
   private _applyLineBreakRules(): void {
     for (let col = 0; col < this._columnContents.length; col++) {
       const columnContent = this._columnContents[col];
@@ -353,17 +308,17 @@ export class TextLayoutEngine {
         const nextFirstChar = nextFirstPart.content[0];
 
         if (isLineStartForbidden(nextFirstChar)) {
-          if (!isLineEndForbidden(curLastChar) && curLastPart.content.length > 1) {
-            nextFirstPart.content.unshift(curLastChar);
-            curLastPart.content.pop();
+          if (!isLineEndForbidden(curLastChar)) {
+            curLastPart.content.push(nextFirstChar);
+            nextFirstPart.content.shift();
           }
           continue;
         }
 
         if (isLineEndForbidden(curLastChar)) {
           if (!isLineStartForbidden(nextFirstChar)) {
-            curLastPart.content.push(nextFirstChar);
-            nextFirstPart.content.shift();
+            nextFirstPart.content.unshift(curLastChar);
+            curLastPart.content.pop();
           }
         }
       }
@@ -703,7 +658,9 @@ export class TextLayoutEngine {
 
         for (; idxContentOfBlock < block.content.length; idxContentOfBlock++) {
           const char = block.content[idxContentOfBlock];
-          const charWidth = this._charWidthMm(char, block.textBlockStyle) + letterSpacingMm;
+          const rawCharWidth = this._charWidthMm(char, block.textBlockStyle);
+          const baseWidth = rawCharWidth * this.widthRatio;
+          const charWidth = baseWidth + letterSpacingMm;
 
           const placeChar = (): boolean => {
             if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
@@ -991,7 +948,6 @@ export class TextLayoutEngine {
    * - `textBlockStyle` → 폰트, 색상, 정렬 오버라이드
    */
   public genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> {
-    const letterSpacing = this.textStyle?.letterSpacing || this.inheritStyle?.letterSpacing || DEFAULT_LETTER_SPACING;
     const textAlign = this.paragraphStyle?.textAlign || this.inheritStyle?.textAlign || DEFAULT_TEXT_ALIGN;
 
     const fontLoader = FontLoader.getInstance();
@@ -1025,7 +981,6 @@ export class TextLayoutEngine {
       flexWrap: 'nowrap',
       alignItems: 'baseline',
       justifyContent,
-      letterSpacing: letterSpacing !== undefined ? `${letterSpacing}em` : undefined,
       ...blockStyle,
     };
   }
@@ -1039,50 +994,88 @@ export class TextLayoutEngine {
    * `isHalfWidth`는 Latin-1 범위(128-255)의 전각 문자를 반각으로 오분류할 수 있다.
    * 정밀한 분류가 필요하면 Unicode East Asian Width 범위 기반 판별로 교체해야 한다.
    */
-  /**
-   * 성능 캐시: 장평/공백 비율이 변경되었을 때만 반각/전각/공백 스타일 캐시를 재계산한다.
-   * `genCharStyle()`에서 호출되며, 캐시 히트 시 재계산을 생략한다.
-   */
-  private _updatePerfCharStyleCache(): void {
-    const wr = this.widthRatio;
-    const sr = this.spaceRatio;
-    if (wr === this._cachedWidthRatio && sr === this._cachedSpaceRatio) return;
-    this._cachedWidthRatio = wr;
-    this._cachedSpaceRatio = sr;
-
-    this._cachedHalfWidthStyle = {
-      display: 'inline-block',
-      maxWidth: `${wr}em`,
-      minWidth: '0.35em',
-      scale: `${wr} 1`,
-      textAlign: 'center',
-      transformOrigin: '0',
-    };
-
-    this._cachedFullWidthStyle = {
-      display: 'inline-block',
-      maxWidth: `${wr}em`,
-      minWidth: '0.15em',
-      scale: `${wr} 1`,
-      textAlign: 'center',
-      transformOrigin: '0',
-    };
-
-    this._cachedSpaceStyle = {
-      display: 'inline-block',
-      maxWidth: `${wr}em`,
-      minWidth: `${sr}em`,
-      scale: `${wr} 1`,
-      textAlign: 'center',
-      transformOrigin: '0',
-    };
-  }
 
   public genCharStyle = (char: string): Partial<CSSStyleDeclaration> => {
-    this._updatePerfCharStyleCache();
-    if (char === ' ') return this._cachedSpaceStyle;
-    if (char.length === 1 && char.charCodeAt(0) <= 255) return this._cachedHalfWidthStyle;
-    return this._cachedFullWidthStyle;
+    return this._genOpentypeOuterStyle(char);
+  }
+
+  /**
+   * 내부 span 스타일 생성. `scale` transform으로 glyph 시각 축소.
+   * 외부 span과 분리되어 레이아웃 박스 크기에 영향을 주지 않는다.
+   */
+  public genCharInnerStyle = (): Partial<CSSStyleDeclaration> => {
+    const wr = this.widthRatio;
+    const key = `inner|${wr}`;
+    if (key === this._opentypeInnerStyleKey) return this._opentypeInnerStyle;
+    this._opentypeInnerStyleKey = key;
+    this._opentypeInnerStyle = {
+      display: 'inline-block',
+      scale: `${wr * 0.88} 1`,
+      transformOrigin: '0 center',
+    };
+    return this._opentypeInnerStyle;
+  }
+
+  /**
+   * opentype 모드에서 문자의 원본 폭(mm, 장평 미적용)과 장평 적용 폭(mm)을 반환한다.
+   * 디버깅용 data 속성 저장에 사용된다.
+   * @param char - 대상 문자
+   * @returns `{ owidth: 원본 폭 mm, swidth: 장평 적용 폭 mm }`
+   */
+  public getCharWidths = (char: string): { owidth: number; swidth: number } => {
+    const wr = this.widthRatio;
+    const fontSize = this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+    const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
+    const lsMm = lsEm * fontSize;
+    let owidth: number;
+    if (char === ' ') {
+      owidth = this.spaceRatio * fontSize;
+    } else {
+      owidth = this._charWidthMm(char);
+    }
+    const swidth = owidth * wr + lsMm;
+    return { owidth, swidth };
+  }
+
+  /**
+   * opentype 모드용 외부 span 스타일 생성.
+   *
+   * `_charWidthMm`으로 원본 폭을 측정한 뒤 `widthRatio`를 곱해 `width`를 정확히 고정한다.
+   * `overflow: hidden`으로 내부 glyph의 넘침을 숨긴다. 내부 span이 `scale`로 glyph를 축소한다.
+   * 공백은 `fontSize × spaceRatio`로 고정한다.
+   */
+  private _genOpentypeOuterStyle(char: string): Partial<CSSStyleDeclaration> {
+    const wr = this.widthRatio;
+    const cacheKey = `${char}|${wr}`;
+    const cached = this._opentypeOuterStyleCache.get(cacheKey);
+    if (cached) return cached;
+
+    const fontSize = this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+    const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
+    const lsMm = lsEm * fontSize;
+    let widthMm: number;
+    if (char === ' ') {
+      widthMm = this.spaceRatio * fontSize * wr + lsMm;
+    } else {
+      const rawWidthMm = this._charWidthMm(char);
+      widthMm = rawWidthMm * wr + lsMm;
+    }
+
+    const widthCss = `${widthMm}mm`;
+    const style: Partial<CSSStyleDeclaration> = {
+      display: 'inline-block',
+      width: widthCss,
+      minWidth: widthCss,
+      maxWidth: widthCss,
+      overflow: 'hidden',
+      textAlign: 'center',
+    };
+
+    if (this._opentypeOuterStyleCache.size > 5000) {
+      this._opentypeOuterStyleCache.clear();
+    }
+    this._opentypeOuterStyleCache.set(cacheKey, style);
+    return style;
   }
 
   set inheritStyle(inheritStyle: InheritStyle) {

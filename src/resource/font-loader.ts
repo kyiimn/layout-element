@@ -172,12 +172,12 @@ export class FontLoader {
   }
 
   /**
+  /**
    * 폰트 배열에서 opentype.js `Font` 객체를 파싱하여 캐싱한다.
    *
-   * `base64Data`가 있는 폰트만 파싱한다. `ttfFilename` 경로의 폰트는 별도 fetch가
-   * 필요하므로 여기서는 처리하지 않는다 — 화면 모드에서 `base64Data`가 우선되므로
-   * 대부분의 케이스가 커버된다. `base64Data`가 없는 폰트는 opentype.js 캐시에서
-   * 누락되며, 해당 폰트로 측정 시 canvas 모드로 폴백한다.
+   * `base64Data`가 있는 폰트는 base64에서 직접 파싱하고, `ttfFilename`만 있는
+   * 폰트는 fetch로 ArrayBuffer를 로드하여 파싱한다. 화면 모드에서는 대부분
+   * `ttfFilename`을 사용하므로 이 경로가 필수적이다.
    *
    * @param fonts - 파싱할 폰트 배열
    */
@@ -186,18 +186,24 @@ export class FontLoader {
     this._opentypeFonts.clear();
 
     for (const f of fonts) {
-      if (!f.base64Data) continue;
+      if (!f.base64Data && !f.ttfFilename) continue;
       try {
-        const binaryString = atob(f.base64Data);
-        const buffer = new ArrayBuffer(binaryString.length);
-        const view = new Uint8Array(buffer);
-        for (let i = 0; i < binaryString.length; i++) {
-          view[i] = binaryString.charCodeAt(i);
+        let buffer: ArrayBuffer;
+        if (f.base64Data) {
+          const binaryString = atob(f.base64Data);
+          buffer = new ArrayBuffer(binaryString.length);
+          const view = new Uint8Array(buffer);
+          for (let i = 0; i < binaryString.length; i++) {
+            view[i] = binaryString.charCodeAt(i);
+          }
+        } else {
+          const res = await fetch(f.ttfFilename!);
+          buffer = await res.arrayBuffer();
         }
         const otFont = opentype.parse(buffer);
         this._opentypeFonts.set(f.family, otFont);
       } catch (e) {
-        console.warn(`opentype.js parse failed for font "${f.family}", falling back to canvas mode for this font`, e);
+        console.warn(`opentype.js parse failed for font "${f.family}"`, e);
       }
     }
   }
