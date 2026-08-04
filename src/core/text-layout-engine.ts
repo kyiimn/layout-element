@@ -62,11 +62,11 @@ export class TextLayoutEngine {
   private _previousLineCount: number = -1;
   private _previousOverflow: number = -1;
 
-  /** 성능 캐시: opentype 모드 문자별 외부 span 스타일. 키 `${char}|${widthRatio}`. */
-  private _opentypeOuterStyleCache: Map<string, Partial<CSSStyleDeclaration>> = new Map();
-  /** 성능 캐시: opentype 모드 내부 span 스타일. 장평 변경 시 갱신. */
-  private _opentypeInnerStyle: Partial<CSSStyleDeclaration> = {};
-  private _opentypeInnerStyleKey: string = '';
+  /** 성능 캐시: 문자별 외부 span 스타일. 키 `${char}|${widthRatio}`. */
+  private _charOuterStyleCache: Map<string, Partial<CSSStyleDeclaration>> = new Map();
+  /** 성능 캐시: 내부 span 스타일. 장평 변경 시 갱신. */
+  private _charInnerStyle: Partial<CSSStyleDeclaration> = {};
+  private _charInnerStyleKey: string = '';
 
   private _lineHeight: number = 0;
 
@@ -176,60 +176,47 @@ export class TextLayoutEngine {
   /**
    * 문자의 레이아웃 폭을 mm 단위로 측정한다.
    *
-   * Canvas `measureText().width`는 폰트 메트릭에 의해 `fontSizePx`에 정확히 선형 비례하므로,
-   * `measureText().width / ppm`은 항상 scale(ppm)에 무관한 mm 값을 반환한다.
+   * 폰트 메트릭 테이블에서 직접 `glyph.advanceWidth / unitsPerEm * fontSize`로
+   * 계산하므로 ppm 변환을 거치지 않아 환경(브라우저 엔진/OS/DPI)에 완전히 무관하다.
    * `Math.round()`를 사용하지 않아 부동소수점 정밀도를 보존하며,
    * 이로 인해 서로 다른 scale에서 동일한 줄바꿈 결과를 보장한다.
    *
-   * **단일 ppm 사용**: 모든 컬럼에서 동일한 기준 ppm(`_columnPpm[0]`)을 사용하여
-   * 문자 폭을 측정한다. 컬럼마다 ppm을 개별 측정하면 `getBoundingClientRect()`의
-   * 서브픽셀 정밀도 차이로 인해 같은 문자가 컬럼마다 미세하게 다른 mm 폭을 갖게 되어,
-   * scale 변경 시 줄바꿈이 어긋나는 원인이 된다. 단일 ppm을 사용하면 모든 컬럼에서
-   * 동일한 문자 폭을 보장하여 컬럼 간 일관성과 scale 무관성을 동시에 달성한다.
+   * **장평(`widthRatio`) 처리**: 폰트 메트릭에서 읽은 `glyph.advanceWidth`가
+   * 정확한 원본 폭이므로, 호출자가 `rawWidth × widthRatio`로 모든 글자에 정확히
+   * 장평을 반영한다. 상한 클램프가 없으므로 좁은 글자도 정확히 축소된다.
    *
-   * **장평(`widthRatio`) 처리 — 모드별 차이**:
-   * - **canvas 모드**: `widthRatio * fontSize`를 상한 클램프로 적용. canvas는 glyph의
-   *   실제 렌더링 폭을 모르므로 상한선으로 휴리스틱하게 장평을 강제한다. 원본 폭이
-   *   상한보다 좁으면 장평이 적용되지 않는 근본적 한계가 있다.
-   * - **opentype 모드**: `widthRatio`를 곱셈으로 적용. `glyph.advanceWidth`가 정확한
-   *   원본 폭이므로, `rawWidth × widthRatio`로 모든 글자에 정확히 장평이 반영된다.
-   *   상한 클램프가 없으므로 좁은 글자도 정확히 축소된다.
-   *
-   * **최소 폭(`minWidthMm`)**: 양쪽 모드 공통. 결함 글리프(0폭/비정상적 narrow) 방어.
-   * 공백은 `spaceRatio` em, 반각 0.35em, 전각 0.15em. 장평 적용 후에 바닥값으로 적용.
+   * **최소 폭(`minWidthMm`)**: 결함 글리프(0폭/비정상적 narrow) 방어.
+   * `spaceRatio × fontSize`를 바닥값으로 사용하며, 폰트 메트릭 조회 성공 시
+   * `Math.max(fontWidth, minWidthMm)`로 적용된다.
    *
    * @param char - 측정할 문자
    * @param textBlockStyle - 블록 레벨 스타일 오버라이드
-   * @returns 문자 폭 (mm). scale 및 컬럼에 무관.
+   * @returns 문자 폭 (mm, 장평 미적용). scale 및 컬럼에 무관.
    *
    * @example
-   * // canvas 모드 (상한 클램프): 장평 0.8, 글자 폭 4mm → min(4, 3.2) = 3.2mm
-   * // opentype 모드 (곱셈):     장평 0.8, 글자 폭 4mm → 4 × 0.8   = 3.2mm
-   * // canvas 모드: 장평 0.8, 글자 폭 3mm → min(3, 3.2) = 3mm (장평 무시)
-   * // opentype 모드: 장평 0.8, 글자 폭 3mm → 3 × 0.8   = 2.4mm (정확히 적용)
+   * // 장평 0.8, 글자 폭 4mm → 4 × 0.8 = 3.2mm
+   * // 장평 0.8, 글자 폭 3mm → 3 × 0.8 = 2.4mm
    */
   private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle): number {
     const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-    const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
-    const minWidthEm = (char === ' ') ? this.spaceRatio : (!isHalfWidth ? 0.15 : 0.35);
-    const minWidthMm = minWidthEm * fontSize;
+    const minWidthMm = this.spaceRatio * fontSize;
 
     if (char === ' ') {
-      return this.spaceRatio * fontSize;
+      return minWidthMm;
     }
 
-    const otWidth = this._charWidthMmViaOpentype(char, textBlockStyle, fontSize);
-    if (otWidth !== null) {
-      return Math.max(otWidth, minWidthMm);
+    const fontWidth = this._charWidthMmFromFont(char, textBlockStyle, fontSize);
+    if (fontWidth !== null) {
+      return Math.max(fontWidth, minWidthMm);
     }
 
     return minWidthMm;
   }
 
   /**
-   * opentype.js 기반 문자 폭 측정.
+   * 폰트 메트릭 기반 문자 폭 측정.
    *
-   * `FontLoader.getOpenTypeFont()`로 파싱된 폰트 객체에서 `charToGlyph(char)`로
+   * `FontLoader`에서 파싱된 폰트 객체에서 `charToGlyph(char)`로
    * 글리프를 조회하고, `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 폭을
    * 계산한다. **장평(`widthRatio`) 곱셈은 호출자에서 적용**하므로 여기서는
    * 원본 폰트 메트릭 기반 값만 반환한다.
@@ -237,20 +224,20 @@ export class TextLayoutEngine {
    * @param char - 측정할 문자
    * @param textBlockStyle - 블록 레벨 스타일 오버라이드
    * @param fontSize - 폰트 크기 (mm 단위)
-   * @returns 문자 폭 (mm, 장평 미적용). 폰트/글리프 조회 실패 시 `null` (canvas 폴백)
+   * @returns 문자 폭 (mm, 장평 미적용). 폰트/글리프 조회 실패 시 `null`
    */
-  private _charWidthMmViaOpentype(char: string, textBlockStyle: TextBlockStyle | undefined, fontSize: number): number | null {
+  private _charWidthMmFromFont(char: string, textBlockStyle: TextBlockStyle | undefined, fontSize: number): number | null {
     const fontLoader = FontLoader.getInstance();
     const fontName = textBlockStyle?.fontFamily;
-    const otFont = fontLoader.getOpenTypeFont(fontName);
-    if (!otFont) return null;
+    const parsedFont = fontLoader.getParsedFont(fontName);
+    if (!parsedFont) return null;
 
-    const glyph = otFont.charToGlyph(char);
+    const glyph = parsedFont.charToGlyph(char);
     if (!glyph || glyph.advanceWidth === undefined || glyph.advanceWidth === null) {
       return null;
     }
 
-    return (glyph.advanceWidth / otFont.unitsPerEm) * fontSize;
+    return (glyph.advanceWidth / parsedFont.unitsPerEm) * fontSize;
   }
 
   /** 마지막 줄의 모든 파트가 비어 있으면 해당 줄을 제거한다. */
@@ -437,8 +424,7 @@ export class TextLayoutEngine {
     // 좁은 자유 영역 필터링: 글자 하나가 들어갈 수 없는 좁은 자유 영역은 제외한다.
     // 이 필터링이 없으면 무한 루프 가드가 좁은 틈에 글자를 강제 배치하여
     // 파트 폭을 넘어 렌더링되는 현상이 발생한다.
-    // 기준: 전각 문자 폭 상한(widthRatio × fontSize) + letterSpacing.
-    // 반각 문자는 더 좁지만, 안전하게 전각 기준으로 필터링한다.
+    // 기준: 가장 넓은 글자 폭 상한(widthRatio × fontSize) + letterSpacing.
     const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
     const letterSpacingEm = this._textStyle?.letterSpacing || this._inheritStyle?.letterSpacing || DEFAULT_LETTER_SPACING;
     const minCharWidthMm = this.widthRatio * fontSize + letterSpacingEm * fontSize;
@@ -986,68 +972,19 @@ export class TextLayoutEngine {
   }
 
   /**
-   * 글자 스타일 생성.
+   * 글자 외부 span 스타일 생성.
    *
-   * - `widthRatio` → CSS `scale` 적용 (장평)
-   * - 반각 문자/공백 → `minWidth` 차등 적용
-   *
-   * `isHalfWidth`는 Latin-1 범위(128-255)의 전각 문자를 반각으로 오분류할 수 있다.
-   * 정밀한 분류가 필요하면 Unicode East Asian Width 범위 기반 판별로 교체해야 한다.
-   */
-
-  public genCharStyle = (char: string): Partial<CSSStyleDeclaration> => {
-    return this._genOpentypeOuterStyle(char);
-  }
-
-  /**
-   * 내부 span 스타일 생성. `scale` transform으로 glyph 시각 축소.
-   * 외부 span과 분리되어 레이아웃 박스 크기에 영향을 주지 않는다.
-   */
-  public genCharInnerStyle = (): Partial<CSSStyleDeclaration> => {
-    const wr = this.widthRatio;
-    const key = `inner|${wr}`;
-    if (key === this._opentypeInnerStyleKey) return this._opentypeInnerStyle;
-    this._opentypeInnerStyleKey = key;
-    this._opentypeInnerStyle = {
-      display: 'inline-block',
-      scale: `${wr * 0.88} 1`,
-      transformOrigin: '0 center',
-    };
-    return this._opentypeInnerStyle;
-  }
-
-  /**
-   * opentype 모드에서 문자의 원본 폭(mm, 장평 미적용)과 장평 적용 폭(mm)을 반환한다.
-   * 디버깅용 data 속성 저장에 사용된다.
-   * @param char - 대상 문자
-   * @returns `{ owidth: 원본 폭 mm, swidth: 장평 적용 폭 mm }`
-   */
-  public getCharWidths = (char: string): { owidth: number; swidth: number } => {
-    const wr = this.widthRatio;
-    const fontSize = this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-    const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
-    const lsMm = lsEm * fontSize;
-    let owidth: number;
-    if (char === ' ') {
-      owidth = this.spaceRatio * fontSize;
-    } else {
-      owidth = this._charWidthMm(char);
-    }
-    const swidth = owidth * wr + lsMm;
-    return { owidth, swidth };
-  }
-
-  /**
-   * opentype 모드용 외부 span 스타일 생성.
-   *
-   * `_charWidthMm`으로 원본 폭을 측정한 뒤 `widthRatio`를 곱해 `width`를 정확히 고정한다.
-   * `overflow: hidden`으로 내부 glyph의 넘침을 숨긴다. 내부 span이 `scale`로 glyph를 축소한다.
+   * `_charWidthMm`으로 원본 폭을 측정한 뒤 `widthRatio`를 곱해 `width`를 고정한다.
+   * 내부 span(`genCharInnerStyle`)이 `scale`로 glyph 축소를 담당한다.
    * 공백은 `fontSize × spaceRatio`로 고정한다.
+   *
+   * @param char - 대상 문자
+   * @returns 외부 span CSS 스타일 객체
    */
-  private _genOpentypeOuterStyle(char: string): Partial<CSSStyleDeclaration> {
+  public genCharStyle = (char: string): Partial<CSSStyleDeclaration> => {
     const wr = this.widthRatio;
     const cacheKey = `${char}|${wr}`;
-    const cached = this._opentypeOuterStyleCache.get(cacheKey);
+    const cached = this._charOuterStyleCache.get(cacheKey);
     if (cached) return cached;
 
     const fontSize = this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
@@ -1065,17 +1002,63 @@ export class TextLayoutEngine {
     const style: Partial<CSSStyleDeclaration> = {
       display: 'inline-block',
       width: widthCss,
-      minWidth: widthCss,
+      minWidth: `${this.spaceRatio * fontSize}mm`,
       maxWidth: widthCss,
-      overflow: 'hidden',
       textAlign: 'center',
     };
 
-    if (this._opentypeOuterStyleCache.size > 5000) {
-      this._opentypeOuterStyleCache.clear();
+    if (this._charOuterStyleCache.size > 5000) {
+      this._charOuterStyleCache.clear();
     }
-    this._opentypeOuterStyleCache.set(cacheKey, style);
+    this._charOuterStyleCache.set(cacheKey, style);
     return style;
+  }
+
+  /**
+   * 내부 span 스타일 생성. `scale` transform으로 glyph 시각 축소.
+   * 외부 span과 분리되어 레이아웃 박스 크기에 영향을 주지 않는다.
+   *
+   * **보정 계수 `0.88`**: opentype.js가 폰트 메트릭에서 읽은 `advanceWidth`와
+   * 브라우저가 동일 폰트를 렌더링했을 때의 실제 glyph 너비 간에 미세한 차이가
+   * 존재한다. opentype.js의 advance width는 글리프의 Layout 폭(side bearing
+   * 포함)이고, 브라우저 렌더링은 hinting/subpixel 등으로 약간 좁게 그려진다.
+   * 이 차이를 보정하지 않으면 `widthRatio`로 산정한 외부 span의 `width`보다
+   * 내부 glyph가 약간 넓게 렌더링되어 글자가 오버플로우하거나 인접 글자와
+   * 살짝 겹치는 현상이 발생한다. `0.88`은 이 격차를 메우는 경험적 보정값으로,
+   * 절대 변경하거나 제거해서는 안 된다. 제거 시 시각적 정렬이 깨진다.
+   */
+  public genCharInnerStyle = (): Partial<CSSStyleDeclaration> => {
+    const wr = this.widthRatio;
+    const key = `inner|${wr}`;
+    if (key === this._charInnerStyleKey) return this._charInnerStyle;
+    this._charInnerStyleKey = key;
+    this._charInnerStyle = {
+      display: 'inline-block',
+      scale: `${wr * 0.88} 1`,
+      transformOrigin: '0 center',
+    };
+    return this._charInnerStyle;
+  }
+
+  /**
+   * 문자의 원본 폭(mm, 장평 미적용)과 장평 적용 폭(mm)을 반환한다.
+   * 디버깅용 data 속성 저장에 사용된다.
+   * @param char - 대상 문자
+   * @returns `{ owidth: 원본 폭 mm, swidth: 장평 적용 폭 mm }`
+   */
+  public getCharWidths = (char: string): { owidth: number; swidth: number } => {
+    const wr = this.widthRatio;
+    const fontSize = this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+    const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
+    const lsMm = lsEm * fontSize;
+    let owidth: number;
+    if (char === ' ') {
+      owidth = this.spaceRatio * fontSize;
+    } else {
+      owidth = this._charWidthMm(char);
+    }
+    const swidth = owidth * wr + lsMm;
+    return { owidth, swidth };
   }
 
   set inheritStyle(inheritStyle: InheritStyle) {

@@ -1,6 +1,6 @@
 import { Font } from "@/types";
 import opentype from "opentype.js";
-import type { Font as OpentypeFont } from "opentype.js";
+import type { Font as ParsedFont } from "opentype.js";
 
 /**
  * 폰트 로드 함수 타입.
@@ -42,18 +42,18 @@ export class FontLoader {
   private _lastFontsSignature?: string;
 
   /**
-   * opentype.js 파싱 결과 캐시.
-   * 폰트 패밀리명(`Font.family`)을 키로, 파싱된 opentype.js `Font` 객체를 값으로 저장한다.
+   * 폰트 메트릭 파싱 결과 캐시.
+   * 폰트 패밀리명(`Font.family`)을 키로, 파싱된 폰트 객체를 값으로 저장한다.
    * `init()` 시 `base64Data`가 있는 폰트를 한 번 파싱하여 캐싱한다.
-   * `_opentypeEnabled === false`이면 항상 빈 맵이다.
+   * `_parsed === false`이면 항상 빈 맵이다.
    */
-  private _opentypeFonts: Map<string, OpentypeFont> = new Map();
+  private _parsedFonts: Map<string, ParsedFont> = new Map();
 
   /**
-   * opentype.js 모드 활성화 여부.
-   * `init()` 후 `true`로 설정되며, `getOpenTypeFont()` 호출 시 활성화 상태를 확인한다.
+   * 폰트 메트릭 파싱 활성화 여부.
+   * `init()` 후 `true`로 설정되며, `getParsedFont()` 호출 시 활성화 상태를 확인한다.
    */
-  private _opentypeEnabled: boolean = false;
+  private _parsed: boolean = false;
 
   private constructor() {
     this._isPrint = window.matchMedia("print").matches;
@@ -162,7 +162,7 @@ export class FontLoader {
       this._ready = true;
       this._lastFontsSignature = this._computeFontsSignature(fonts);
 
-      await this._parseOpentypeFonts(fonts);
+      await this._parseFonts(fonts);
 
       return this._fontFaces;
     } catch (e) {
@@ -172,8 +172,7 @@ export class FontLoader {
   }
 
   /**
-  /**
-   * 폰트 배열에서 opentype.js `Font` 객체를 파싱하여 캐싱한다.
+   * 폰트 배열에서 폰트 메트릭 객체를 파싱하여 캐싱한다.
    *
    * `base64Data`가 있는 폰트는 base64에서 직접 파싱하고, `ttfFilename`만 있는
    * 폰트는 fetch로 ArrayBuffer를 로드하여 파싱한다. 화면 모드에서는 대부분
@@ -181,9 +180,9 @@ export class FontLoader {
    *
    * @param fonts - 파싱할 폰트 배열
    */
-  private async _parseOpentypeFonts(fonts: Font[]): Promise<void> {
-    this._opentypeEnabled = true;
-    this._opentypeFonts.clear();
+  private async _parseFonts(fonts: Font[]): Promise<void> {
+    this._parsed = true;
+    this._parsedFonts.clear();
 
     for (const f of fonts) {
       if (!f.base64Data && !f.ttfFilename) continue;
@@ -200,32 +199,27 @@ export class FontLoader {
           const res = await fetch(f.ttfFilename!);
           buffer = await res.arrayBuffer();
         }
-        const otFont = opentype.parse(buffer);
-        this._opentypeFonts.set(f.family, otFont);
+        const parsed = opentype.parse(buffer);
+        this._parsedFonts.set(f.family, parsed);
       } catch (e) {
-        console.warn(`opentype.js parse failed for font "${f.family}"`, e);
+        console.warn(`font parse failed for "${f.family}"`, e);
       }
     }
   }
 
   /**
-   * opentype.js로 파싱된 폰트 객체를 반환한다.
+   * 파싱된 폰트 메트릭 객체를 반환한다.
    *
    * @param fontName - 요청할 폰트 패밀리명. 생략 시 첫 번째 폰트.
-   * @returns opentype.js `Font` 객체. 파싱 실패/해당 폰트 누락 시 `null` (canvas 모드 폴백).
+   * @returns 파싱된 폰트 객체. 파싱 실패/해당 폰트 누락 시 `null`.
    */
-  public getOpenTypeFont(fontName?: string): OpentypeFont | null {
-    if (!this._opentypeEnabled) return null;
+  public getParsedFont(fontName?: string): ParsedFont | null {
+    if (!this._parsed) return null;
     if (fontName) {
-      return this._opentypeFonts.get(fontName) || null;
+      return this._parsedFonts.get(fontName) || null;
     }
-    const first = this._opentypeFonts.values().next();
+    const first = this._parsedFonts.values().next();
     return first.done ? null : first.value;
-  }
-
-  /** opentype.js 모드 활성화 여부. `init()` 완료 후 `true`. */
-  public get opentypeEnabled(): boolean {
-    return this._opentypeEnabled;
   }
 
   /**
