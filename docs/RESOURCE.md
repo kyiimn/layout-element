@@ -172,8 +172,9 @@ FontLoader.resetLoader();
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `init(fonts?)` | `(fonts?: Font[]) => Promise<FontFace[]>` | 폰트를 로드하고 브라우저에 등록한다. 인쇄 모드에서는 `fonts`를 직접 주입받는다. 화면 모드에서는 `_loadServer()`로 데이터를 가져온다. **이미 초기화된 상태에서 동일한 폰트 데이터로 재호출하면 스킵하고 기존 `_fontFaces`를 그대로 반환한다.** 동일성 판단은 `_computeFontsSignature()`로 생성한 signature 문자열 비교를 통해 수행한다. 화면 모드에서 `fonts` 파라미터 없이 호출한 경우에는 signature 비교가 불가능하므로 항상 재로드한다. |
+| `init(fonts?)` | `(fonts?: Font[]) => Promise<FontFace[]>` | 폰트를 로드하고 브라우저에 등록한다. 인쇄 모드에서는 `fonts`를 직접 주입받는다. 화면 모드에서는 `_loadServer()`로 데이터를 가져온다. **이미 초기화된 상태에서 동일한 폰트 데이터로 재호출하면 스킵하고 기존 `_fontFaces`를 그대로 반환한다.** 동일성 판단은 `_computeFontsSignature()`로 생성한 signature 문자열 비교를 통해 수행한다. 화면 모드에서 `fonts` 파라미터 없이 호출한 경우에는 signature 비교가 불가능하므로 항상 재로드한다. **opentype.js 파싱**: `init()` 완료 후 `base64Data`가 있는 폰트를 opentype.js로 파싱하여 캐싱한다. `TEXT_MEASUREMENT_MODE === 'opentype'`일 때 `TextLayoutEngine._charWidthMm`이 사용한다. |
 | `getFontFamily(fontName?)` | `(fontName?: string) => string` | 폰트 패밀리명을 반환한다. 등록된 `Font` 중 `family`가 `fontName`과 일치하는 폰트를 찾아 해당 `FontFace.family`를 반환한다. 일치하는 폰트가 없으면 등록된 첫 번째 폰트의 `FontFace.family`로 폴백된다. |
+| `getOpenTypeFont(fontName?)` | `(fontName?: string) => OpentypeFont \| null` | opentype.js로 파싱된 폰트 객체를 반환한다. `fontName`이 주어지면 해당 폰트, 생략 시 첫 번째 폰트. 파싱 실패/해당 폰트 누락 시 `null`을 반환하여 호출자가 canvas 모드로 폴백하도록 한다. |
 
 #### 게터
 
@@ -181,6 +182,7 @@ FontLoader.resetLoader();
 |------|------|------|
 | `fontFaces` | `FontFace[]` | 등록된 `FontFace` 배열을 반환한다. `ready`가 `true`가 아니면 에러를 던진다. |
 | `ready` | `boolean` | 초기화 완료 여부. `init()`이 성공하면 `true`가 된다. |
+| `opentypeEnabled` | `boolean` | opentype.js 모드 활성화 여부. `init()` 완료 후 `true`. |
 
 ### 2.7 중복 초기화 스킵
 
@@ -196,6 +198,15 @@ FontLoader.resetLoader();
 - `init()` 호출 전 `getFontFamily()`, `fontFaces`에 접근하면 `'font map is not ready'` 에러가 발생한다.
 - 인쇄 모드에서 `fonts` 파라미터 없이 `init()`을 호출하면 `'not given fonts'` 에러가 발생한다.
 - `fetch` 실패 또는 커스텀 로더 예외 시 `'server connection error'` 에러가 발생한다.
+
+### 2.9 opentype.js 연동
+
+`FontLoader`는 opentype.js를 필수 의존성으로 사용한다. `TEXT_MEASUREMENT_MODE === 'opentype'`일 때 `TextLayoutEngine._charWidthMm`이 폰트 메트릭 테이블에서 직접 advance width를 읽어 환경에 무관한 측정 결과를 보장한다.
+
+- **정적 import**: `opentype.js`는 번들에 포함되어 항상 사용 가능하다. IIFE 빌드에 포함되며, React ESM 빌드에도 포함된다.
+- **파싱**: `_parseOpentypeFonts()`가 `base64Data`가 있는 폰트만 `opentype.parse()`로 파싱하여 `Map<family, OpentypeFont>`에 캐싱한다. `ttfFilename` 경로의 폰트는 별도 fetch가 필요하므로 캐시에서 누락되며, 해당 폰트로 측정 시 canvas 모드로 폴백한다.
+- **폴백**: 특정 폰트 파싱 실패 또는 글리프 누락 시 자동으로 canvas 모드로 폴백한다. `FontLoader.opentypeEnabled`로 활성화 여부를 확인할 수 있다.
+- **패키지 의존**: `opentype.js`는 `peerDependencies`로 선언되어 있다. 사용처 프로젝트에서 반드시 설치해야 한다.
 
 ---
 
