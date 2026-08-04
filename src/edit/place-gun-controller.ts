@@ -594,11 +594,8 @@ export class PlaceGunController {
     const editAreaLeft = columnCoords[0]?.x1 ?? 0;
     const editAreaTop = columnCoords[0]?.y1 ?? 0;
 
-    const nearestColumn = Math.max(0, Math.min(
-      Math.round((leftMm - editAreaLeft) / avgColWidth),
-      columnCount - 1,
-    ));
-    const nearestLine = Math.max(0, Math.round((topMm - editAreaTop) / lineHeight));
+    const nearestColumn = Math.round((leftMm - editAreaLeft) / avgColWidth);
+    const nearestLine = Math.round((topMm - editAreaTop) / lineHeight);
 
     return { left: nearestColumn, top: nearestLine };
   }
@@ -735,7 +732,7 @@ export class PlaceGunController {
     }
 
     this._updateHighlight(container);
-    this._updatePreview(event.clientX, event.clientY, container, position, boxData);
+    this._updatePreview(event.clientX, event.clientY, position, boxData);
   }
 
   /**
@@ -809,7 +806,6 @@ export class PlaceGunController {
   private _updatePreview(
     clientX: number,
     clientY: number,
-    container: LayoutDocumentElement | LayoutBoxElement,
     position: 'static' | 'absolute',
     boxData: BoxData,
   ): void {
@@ -817,16 +813,13 @@ export class PlaceGunController {
       this._previewEl = this._createPreview();
     }
 
-    const rect = container.getBoundingClientRect();
     const manager = this._manager;
+    const docEl = manager.docEl;
+    const rect = docEl.getBoundingClientRect();
     const screenPpm = GridCalculator.ppm * manager.scale;
 
     let containerPaddingLeft = 0;
     let containerPaddingTop = 0;
-    if (container instanceof LayoutBoxElement) {
-      containerPaddingLeft = container.paddingLeft ?? 0;
-      containerPaddingTop = container.paddingTop ?? 0;
-    }
 
     if (position === 'absolute') {
       const leftMm = Math.max(0, manager.screenPxToMm(clientX - rect.left) - containerPaddingLeft);
@@ -845,8 +838,7 @@ export class PlaceGunController {
       return;
     }
 
-    // static: mm → 컬럼 인덱스/줄 수 변환 후 컬럼 너비/lineHeight로 화면 px 계산
-    const model = container.model;
+    const model = docEl.model;
     if (!model) {
       this._previewEl.style.display = 'none';
       return;
@@ -855,19 +847,27 @@ export class PlaceGunController {
     const leftMm = Math.max(0, manager.screenPxToMm(clientX - rect.left) - containerPaddingLeft);
     const topMm = Math.max(0, manager.screenPxToMm(clientY - rect.top) - containerPaddingTop);
 
-    const staticResult = this._mmToStatic(leftMm, topMm, container);
-    const { columnCoords, lineHeight, columnCount } = model;
-
-    const startCol = Math.max(0, Math.min(staticResult.left, columnCount - 1));
-    const span = Math.max(1, Math.min(boxData.width, columnCount - startCol));
-    const endCol = Math.min(columnCount - 1, startCol + span - 1);
-
-    const snapLeftMm = columnCoords[startCol]?.x1 ?? 0;
-    const snapRightMm = columnCoords[endCol]?.x2 ?? 0;
+    const { columnCoords, lineHeight, editableWidth, columnCount } = model;
+    const avgColWidth = editableWidth / columnCount;
+    const editAreaLeftMm = columnCoords[0]?.x1 ?? 0;
     const editAreaTopMm = columnCoords[0]?.y1 ?? 0;
 
+    const nearestColumn = Math.round((leftMm - editAreaLeftMm) / avgColWidth);
+    const nearestLine = Math.round((topMm - editAreaTopMm) / lineHeight);
+    const span = Math.max(1, Math.min(boxData.width, columnCount));
+
+    const containerLineCount = lineHeight > 0
+      ? Math.floor(Math.round((model.editableHeight / lineHeight) * 1e6) / 1e6) + 1
+      : 0;
+    const clampedLine = Math.max(0, Math.min(Math.max(0, containerLineCount - boxData.height), nearestLine));
+
+    const startCol = Math.max(0, Math.min(nearestColumn, columnCount - span));
+    const endCol = Math.min(columnCount - 1, startCol + span - 1);
+    const snapLeftMm = columnCoords[startCol]?.x1 ?? 0;
+    const snapRightMm = columnCoords[endCol]?.x2 ?? 0;
+
     const leftPx = rect.left + (snapLeftMm + containerPaddingLeft) * screenPpm;
-    const topPx = rect.top + (editAreaTopMm + containerPaddingTop + staticResult.top * lineHeight) * screenPpm;
+    const topPx = rect.top + (editAreaTopMm + containerPaddingTop + clampedLine * lineHeight) * screenPpm;
     const widthPx = (snapRightMm - snapLeftMm) * screenPpm;
     const heightPx = boxData.height * lineHeight * screenPpm;
 

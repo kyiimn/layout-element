@@ -18,7 +18,7 @@ export class InsertController {
   private _currentClientX = 0;
   private _currentClientY = 0;
   private _previewEl: HTMLDivElement | null = null;
-  private _startContainer: LayoutDocumentElement | LayoutBoxElement | null = null;
+  private _lastPreviewRect: { left: number; top: number; width: number; height: number } | null = null;
   /**
    * 삽입 드래그 중 현재 하이라이트된 컨테이너.
    * `null`이면 하이라이트 없음. 드래그 영역이 다른 컨테이너를 가리키면 이전 하이라이트를
@@ -94,10 +94,8 @@ export class InsertController {
     this._currentClientX = event.clientX;
     this._currentClientY = event.clientY;
 
-    this._startContainer = this._findTargetContainer(event.clientX, event.clientY, event.clientX, event.clientY);
-
     this._previewEl = this._createPreview();
-    this._updatePreview(this._startClientX, this._startClientY, this._startClientX, this._startClientY);
+    this._lastPreviewRect = this._updatePreview(this._startClientX, this._startClientY, this._startClientX, this._startClientY);
 
     this._isDragging = true;
 
@@ -109,8 +107,8 @@ export class InsertController {
   private _onMouseMove(event: MouseEvent): void {
     this._currentClientX = event.clientX;
     this._currentClientY = event.clientY;
-    this._updatePreview(this._startClientX, this._startClientY, this._currentClientX, this._currentClientY);
-    this._updateInsertHighlight();
+    this._lastPreviewRect = this._updatePreview(this._startClientX, this._startClientY, this._currentClientX, this._currentClientY);
+    this._updateInsertHighlight(this._lastPreviewRect);
   }
 
   private _onMouseUp(event: MouseEvent): void {
@@ -124,7 +122,7 @@ export class InsertController {
       return;
     }
 
-    this._finishInsert(event.clientX, event.clientY);
+    this._finishInsert();
   }
 
   private _onKeyDown(event: KeyboardEvent): void {
@@ -143,7 +141,7 @@ export class InsertController {
   }
 
   /** 삽입을 완료하고 요소를 생성한다. */
-  private _finishInsert(endClientX: number, endClientY: number): void {
+  private _finishInsert(): void {
     if (!this._mode) {
       this._cleanup();
       return;
@@ -151,27 +149,29 @@ export class InsertController {
 
     const mode = this._mode;
 
-    const startX = Math.min(this._startClientX, endClientX);
-    const startY = Math.min(this._startClientY, endClientY);
-    const endX = Math.max(this._startClientX, endClientX);
-    const endY = Math.max(this._startClientY, endClientY);
+    const previewRect = this._lastPreviewRect;
+    if (!previewRect || previewRect.width <= 1 || previewRect.height <= 1) {
+      this._cleanup();
+      return;
+    }
 
-    // 드래그 영역을 완전히 포함하는 가장 안쪽 컨테이너를 찾는다
+    const startX = previewRect.left;
+    const startY = previewRect.top;
+    const endX = previewRect.left + previewRect.width;
+    const endY = previewRect.top + previewRect.height;
+
     const container = this._resolveInsertContainer(startX, startY, endX, endY);
     if (!container) {
       this._cleanup();
       return;
     }
 
-    // 컨테이너의 편집 영역을 구한다. 드래그 영역이 컨테이너보다 큰 경우
-    // left+width, top+height가 컨테이너 영역을 초과하지 않도록 클램핑한다.
     const containerRect = container.getBoundingClientRect();
     const manager = this._manager;
     const containerModel = container.model;
     const containerContentW = containerModel ? containerModel.editableWidth : 0;
     const containerContentH = containerModel ? containerModel.contentHeight : 0;
 
-    // 드래그 시작/끝점을 컨테이너 rect 내부로 클램핑
     const clampedStartX = Math.max(containerRect.left, Math.min(startX, containerRect.right));
     const clampedEndX = Math.max(containerRect.left, Math.min(endX, containerRect.right));
     const clampedStartY = Math.max(containerRect.top, Math.min(startY, containerRect.bottom));
@@ -293,51 +293,46 @@ export class InsertController {
       ? this._document.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null
       : null;
 
-    // static 모드에서는 마우스 픽셀 위치가 그리드 스냅 후 의미가 없으므로,
-    // 드래그 영역의 중심점으로 컨테이너를 식별한다. 꼭짓점은 box 경계선 밖에
-    // 놓일 수 있지만 중심점은 box 내부에 있으므로 box를 컨테이너로 찾을 수 있다.
-    // absolute 모드에서는 mm 좌표가 정확하므로 기존 4꼭짓점 containment를 사용한다.
     if (this._mode?.position === 'static') {
-      const centerX = (startX + endX) / 2;
-      const centerY = (startY + endY) / 2;
-
-      // elementsFromPoint는 가장 안쪽 요소부터 바깥쪽 순으로 반환한다.
-      // 안쪽 box가 paragraph/image 자식을 가지면 삽입 불가능하므로 거르고,
-      // 더 바깥의 box-only 컨테이너를 찾을 때까지 순회한다.
-      const centerElements = document.elementsFromPoint(centerX, centerY);
-
-      // 중심점이 안쪽 box에 있더라도 요소 영역이 그 box의 컬럼/라인 경계를
-      // 벗어나면 더 바깥 컨테이너로 폴백해야 한다.
+      const leftPx = Math.min(startX, endX);
+      const topPx = Math.min(startY, endY);
       const widthPx = Math.abs(endX - startX);
       const heightPx = Math.abs(endY - startY);
       const widthMm = manager.screenPxToMm(widthPx);
       const heightMm = manager.screenPxToMm(heightPx);
 
-      for (const el of centerElements) {
-        if (el instanceof LayoutBoxElement) {
-          if (el.lock) continue;
-          const hasNonBoxChild = el.items.some(item => item.type !== 'box');
-          if (hasNonBoxChild) continue;
-          // editableRootId가 설정된 경우 root box 내부의 box만 허용
-          if (rootBox && !rootBox.contains(el)) continue;
+      const allBoxes = this._document.querySelectorAll<LayoutBoxElement>('x-layout-box');
+      const validCandidates: LayoutBoxElement[] = [];
+      for (const box of allBoxes) {
+        if (box.lock) continue;
+        if (box.items.some(item => item.type !== 'box')) continue;
+        if (rootBox && !rootBox.contains(box)) continue;
 
-          const { left: leftMm, top: topMm } = this._screenToContainerMm(
-            Math.min(startX, endX),
-            Math.min(startY, endY),
-            el,
-          );
-          const staticCoords = this._mmToStatic(leftMm, topMm, widthMm, heightMm, el);
-          if (!staticGridContains(el, staticCoords.left, staticCoords.top, staticCoords.width, staticCoords.height)) {
-            continue;
-          }
-          return el;
-        }
-        if (el instanceof LayoutDocumentElement) {
-          // document보다 먼저 유효한 box가 나오면 그 box를 쓴다.
-          // document가 먼저 나오면(드래그 영역 중심이 box 밖) document로 폴백.
-          break;
+        const { left: leftMm, top: topMm } = this._screenToContainerMm(leftPx, topPx, box);
+        const staticCoords = this._mmToStatic(leftMm, topMm, widthMm, heightMm, box);
+        if (staticGridContains(box, staticCoords.left, staticCoords.top, staticCoords.width, staticCoords.height)) {
+          validCandidates.push(box);
         }
       }
+
+      let deepest: LayoutBoxElement | null = null;
+      let deepestDepth = -1;
+      for (const box of validCandidates) {
+        let depth = 0;
+        let parent: Element | null = box.parentElement;
+        while (parent) {
+          if (parent instanceof LayoutBoxElement) depth++;
+          parent = parent.parentElement;
+        }
+        if (depth > deepestDepth) {
+          deepestDepth = depth;
+          deepest = box;
+        }
+      }
+      if (deepest) return deepest;
+
+      if (rootBox && !rootBox.lock) return rootBox;
+      return this._document;
     }
 
     const corners = [
@@ -413,40 +408,21 @@ export class InsertController {
       }
     }
 
-    // 사각형이 각 후보의 경계 내에 완전히 포함되는지 확인
-    // 가장 안쪽(깊이 중첩된) 유효 컨테이너를 찾는다
-    const isStatic = this._mode?.position === 'static';
-    const widthPxFallback = Math.abs(endX - startX);
-    const heightPxFallback = Math.abs(endY - startY);
-    const widthMmFallback = manager.screenPxToMm(widthPxFallback);
-    const heightMmFallback = manager.screenPxToMm(heightPxFallback);
     for (const el of fullyHit) {
       if (el instanceof LayoutDocumentElement) {
-        // Document는 항상 포함하므로, 더 안쪽 box가 없을 때의 대상
         continue;
       }
       if (el instanceof LayoutBoxElement) {
         if (el.lock) continue;
         const items = el.items;
         const hasNonBoxChild = items.some(item => item.type !== 'box');
-        if (hasNonBoxChild) continue; // 비-box 자식이 있으면 삽입 불가
+        if (hasNonBoxChild) continue;
 
         const rect = el.getBoundingClientRect();
         if (
           startX >= rect.left && endX <= rect.right &&
           startY >= rect.top && endY <= rect.bottom
         ) {
-          if (isStatic) {
-            const { left: leftMm, top: topMm } = this._screenToContainerMm(
-              Math.min(startX, endX),
-              Math.min(startY, endY),
-              el,
-            );
-            const staticCoords = this._mmToStatic(leftMm, topMm, widthMmFallback, heightMmFallback, el);
-            if (!staticGridContains(el, staticCoords.left, staticCoords.top, staticCoords.width, staticCoords.height)) {
-              continue;
-            }
-          }
           return el;
         }
       }
@@ -509,8 +485,8 @@ export class InsertController {
       containerPaddingTop = container.paddingTop ?? 0;
     }
 
-    const leftMm = Math.max(0, manager.screenPxToMm(clientX - rect.left) - containerPaddingLeft);
-    const topMm = Math.max(0, manager.screenPxToMm(clientY - rect.top) - containerPaddingTop);
+    const leftMm = manager.screenPxToMm(clientX - rect.left) - containerPaddingLeft;
+    const topMm = manager.screenPxToMm(clientY - rect.top) - containerPaddingTop;
 
     return { left: leftMm, top: topMm };
   }
@@ -530,22 +506,14 @@ export class InsertController {
 
     const nearestColumn = Math.round((leftMm - editAreaLeft) / avgColWidth);
     const nearestLine = Math.round((topMm - editAreaTop) / lineHeight);
-
-    // width/height를 컨테이너의 남은 공간을 초과하지 않도록 클램핑
-    const maxCols = Math.max(1, Math.min(
-      Math.round(widthMm / avgColWidth),
-      columnCount - nearestColumn,
-    ));
-    const maxLines = Math.max(1, Math.round(heightMm / lineHeight));
-
-    const clampedColumn = Math.max(0, Math.min(columnCount - maxCols, nearestColumn));
-    const clampedLine = Math.max(0, nearestLine);
+    const widthCols = Math.max(1, Math.round(widthMm / avgColWidth));
+    const heightLines = Math.max(1, Math.round(heightMm / lineHeight));
 
     return {
-      left: clampedColumn,
-      top: clampedLine,
-      width: maxCols,
-      height: maxLines,
+      left: nearestColumn,
+      top: nearestLine,
+      width: widthCols,
+      height: heightLines,
     };
   }
 
@@ -622,9 +590,9 @@ export class InsertController {
     return el;
   }
 
-  /** 미리보기 사각형의 위치와 크기를 업데이트한다. */
-  private _updatePreview(startX: number, startY: number, currentX: number, currentY: number): void {
-    if (!this._previewEl) return;
+  /** 미리보기 사각형의 위치와 크기를 업데이트하고 스냅된 픽셀 좌표를 반환한다. */
+  private _updatePreview(startX: number, startY: number, currentX: number, currentY: number): { left: number; top: number; width: number; height: number } | null {
+    if (!this._previewEl) return null;
 
     const left = Math.min(startX, currentX);
     const top = Math.min(startY, currentY);
@@ -633,23 +601,23 @@ export class InsertController {
 
     if (width <= 1 && height <= 1) {
       this._previewEl.style.display = 'none';
-      return;
+      return null;
     }
 
-    if (this._mode?.position === 'static' && this._startContainer) {
-      const snapped = this._snapPreviewToGrid(left, top, width, height, this._startContainer);
-      this._previewEl.style.left = `${snapped.left}px`;
-      this._previewEl.style.top = `${snapped.top}px`;
-      this._previewEl.style.width = `${snapped.width}px`;
-      this._previewEl.style.height = `${snapped.height}px`;
+    let rect: { left: number; top: number; width: number; height: number };
+    if (this._mode?.position === 'static') {
+      rect = this._snapPreviewToGrid(left, top, width, height, this._document);
     } else {
-      this._previewEl.style.left = `${left}px`;
-      this._previewEl.style.top = `${top}px`;
-      this._previewEl.style.width = `${width}px`;
-      this._previewEl.style.height = `${height}px`;
+      rect = { left, top, width, height };
     }
 
+    this._previewEl.style.left = `${rect.left}px`;
+    this._previewEl.style.top = `${rect.top}px`;
+    this._previewEl.style.width = `${rect.width}px`;
+    this._previewEl.style.height = `${rect.height}px`;
     this._previewEl.style.display = 'block';
+
+    return rect;
   }
 
   /** static 모드에서 미리보기를 컬럼/라인 그리드에 스냅한다. */
@@ -660,7 +628,8 @@ export class InsertController {
     }
 
     const manager = this._manager;
-    const { columnCoords, lineHeight, columnCount } = model;
+    const { columnCoords, lineHeight, editableWidth, columnCount } = model;
+    const avgColWidth = editableWidth / columnCount;
 
     const rect = container.getBoundingClientRect();
     let containerPaddingLeft = 0;
@@ -670,26 +639,35 @@ export class InsertController {
       containerPaddingTop = container.paddingTop ?? 0;
     }
 
+    const editAreaLeftMm = columnCoords[0]?.x1 ?? 0;
     const editAreaTopMm = columnCoords[0]?.y1 ?? 0;
     const screenPpm = GridCalculator.ppm * manager.scale;
-    const editAreaTopPx = rect.top + editAreaTopMm * screenPpm;
 
     const leftMm = Math.max(0, manager.screenPxToMm(leftPx - rect.left) - containerPaddingLeft);
     const topMm = Math.max(0, manager.screenPxToMm(topPx - rect.top) - containerPaddingTop);
     const widthMm = manager.screenPxToMm(widthPx);
     const heightMm = manager.screenPxToMm(heightPx);
 
-    const staticCoords = this._mmToStatic(leftMm, topMm, widthMm, heightMm, container);
+    const nearestColumn = Math.round((leftMm - editAreaLeftMm) / avgColWidth);
+    const nearestLine = Math.round((topMm - editAreaTopMm) / lineHeight);
+    const widthCols = Math.max(1, Math.min(Math.round(widthMm / avgColWidth), columnCount));
+    const heightLines = Math.max(1, Math.round(heightMm / lineHeight));
 
-    // columnCoords를 직접 사용하여 gap을 정확히 반영
-    const startCol = staticCoords.left;
-    const endCol = Math.min(columnCount - 1, startCol + staticCoords.width - 1);
+    const containerLineCount = lineHeight > 0
+      ? Math.floor(Math.round((model.editableHeight / lineHeight) * 1e6) / 1e6) + 1
+      : 0;
+
+    const clampedColumn = Math.max(0, Math.min(columnCount - widthCols, nearestColumn));
+    const clampedLine = Math.max(0, Math.min(Math.max(0, containerLineCount - heightLines), nearestLine));
+
+    const startCol = Math.max(0, Math.min(clampedColumn, columnCount - 1));
+    const endCol = Math.min(columnCount - 1, startCol + widthCols - 1);
     const snapLeftMm = columnCoords[startCol]?.x1 ?? 0;
     const snapRightMm = columnCoords[endCol]?.x2 ?? 0;
     const snapLeftPx = rect.left + (snapLeftMm + containerPaddingLeft) * screenPpm;
     const snapWidthPx = (snapRightMm - snapLeftMm) * screenPpm;
-    const snapTopPx = editAreaTopPx + staticCoords.top * lineHeight * screenPpm;
-    const snapHeightPx = staticCoords.height * lineHeight * screenPpm;
+    const snapTopPx = rect.top + (editAreaTopMm + containerPaddingTop + clampedLine * lineHeight) * screenPpm;
+    const snapHeightPx = heightLines * lineHeight * screenPpm;
 
     return {
       left: Math.round(snapLeftPx),
@@ -719,19 +697,18 @@ export class InsertController {
    * // 드래그 중 mousemove 마다 호출되어 후보 컨테이너를 주황색 테두리로 표시
    * controller._onMouseMove(event);  // → _updateInsertHighlight() 내부 호출
    */
-  private _updateInsertHighlight(): void {
+  private _updateInsertHighlight(previewRect: { left: number; top: number; width: number; height: number } | null): void {
     if (!this._isDragging) return;
 
-    const startX = Math.min(this._startClientX, this._currentClientX);
-    const startY = Math.min(this._startClientY, this._currentClientY);
-    const endX = Math.max(this._startClientX, this._currentClientX);
-    const endY = Math.max(this._startClientY, this._currentClientY);
-
-    // 드래그 임계값 미만이면 하이라이트를 갱신하지 않는다 (미리보기와 동일)
-    if (endX - startX <= 1 && endY - startY <= 1) {
+    if (!previewRect || previewRect.width <= 1 || previewRect.height <= 1) {
       this._clearInsertHighlight();
       return;
     }
+
+    const startX = previewRect.left;
+    const startY = previewRect.top;
+    const endX = previewRect.left + previewRect.width;
+    const endY = previewRect.top + previewRect.height;
 
     const target = this._resolveInsertContainer(startX, startY, endX, endY);
 
@@ -760,7 +737,7 @@ export class InsertController {
   /** 이벤트 리스너와 미리보기를 정리한다. */
   private _cleanup(): void {
     this._isDragging = false;
-    this._startContainer = null;
+    this._lastPreviewRect = null;
     this._clearInsertHighlight();
     this._removePreview();
     document.removeEventListener('mousemove', this._boundOnMouseMove);

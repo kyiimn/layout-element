@@ -13,6 +13,10 @@ import type { LayoutDocumentElement } from "@/components/layout/document.element
  * 컬럼 수를 초과하거나, `top + height`(라인 인덱스 + 라인 수)가 컨테이너의
  * 라인 수를 초과하면 컨테이너 밖으로 벗어나므로 `false`를 반환한다.
  *
+ * `editableHeight`는 마지막 줄의 `lineHeight`를 제외한 높이다. 마지막 줄은 그 아래에
+ * 위치하지만 `lineHeight`만큼의 공간이 없으므로 높이가 `lineHeight`보다 짧다.
+ * 따라서 라인 수는 `Math.floor(editableHeight / lineHeight) + 1`로 계산한다.
+ *
  * @param container - 삽입 대상 컨테이너 (LayoutDocumentElement 또는 LayoutBoxElement)
  * @param elementLeft - 요소의 static left (컬럼 인덱스, 0부터)
  * @param elementTop - 요소의 static top (라인 인덱스, 0부터)
@@ -26,6 +30,9 @@ import type { LayoutDocumentElement } from "@/components/layout/document.element
  * staticGridContains(box, 2, 5, 3, 10); // false
  * // 4컬럼 box에 left=1, width=3 → 컬럼 1,2,3 (인덱스 3 이내) → true
  * staticGridContains(box, 1, 5, 3, 10); // true
+ * // editableHeight=180, lineHeight=5 → 36줄 + 1(마지막 줄) = 37줄
+ * // top=22, height=15 → bottom=37 ≤ 37 → true
+ * staticGridContains(box, 0, 22, 3, 15); // true
  * ```
  */
 export function staticGridContains(
@@ -41,7 +48,7 @@ export function staticGridContains(
   const { columnCount, lineHeight, editableHeight } = model;
 
   const containerLineCount = lineHeight > 0
-    ? Math.floor(Math.round((editableHeight / lineHeight) * 1e6) / 1e6)
+    ? Math.floor(Math.round((editableHeight / lineHeight) * 1e6) / 1e6) + 1
     : 0;
 
   if (elementLeft < 0) return false;
