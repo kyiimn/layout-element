@@ -378,10 +378,11 @@ private _charWidthMmViaOpentype(char: string, textBlockStyle: TextBlockStyle | u
 - **canvas 모드**: `metrics.width`(advance width, px)를 `ppm`으로 나누어 mm로 변환한다. Canvas `measureText().width`는 폰트 메트릭에 의해 `fontSizePx`에 정확히 선형 비례하므로, `measureText().width / ppm`은 **scale(ppm)에 완전히 무관**한 mm 값을 반환한다.
 - **opentype 모드**: `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 폭을 직접 계산한다. ppm 변환을 거치지 않으므로 환경(브라우저 엔진/OS/DPI)에 완전히 무관하며, 같은 TTF 파일을 사용하는 한 클라이언트 ↔ 서버 간 동일한 결과를 보장한다.
 - **장평(`widthRatio`) 처리 — 모드별 차이**:
-  - **canvas 모드**: `widthRatio * fontSize`를 **상한 클램프**로 적용. canvas는 glyph의 실제 렌더링 폭을 모르므로 상한선으로 휴리스틱하게 장평을 강제한다. 원본 폭이 상한보다 좁으면 장평이 적용되지 않는 근본적 한계가 있다.
-  - **opentype 모드**: `widthRatio`를 **곱셈**으로 적용. `glyph.advanceWidth`가 정확한 원본 폭이므로, `rawWidth × widthRatio`로 모든 글자에 정확히 장평이 반영된다. 상한 클램프가 없으므로 좁은 글자도 정확히 축소된다.
+  - **canvas 모드**: `widthRatio * fontSize`를 **상한 클램프**로 적용. canvas는 glyph의 실제 렌더링 폭을 모르므로 상한선으로 휴리스틱하게 장평을 강제한다. 원본 폭이 상한보다 좁으면 장평이 적용되지 않는 근본적 한계가 있다. DOM도 `maxWidth` 상한 + `scale`로 대응하지만, 측정값과 실제 렌더링 폭이 불일치하여 마지막 글자가 틀을 넘어갈 수 있다.
+  - **opentype 모드**: `_charWidthMm`은 **원본 폭(장평 미적용)**을 반환. 장평 곱셈은 호출자(`_layoutTextIntoColumns` 줄바꿈 계산, `_genOpentypeOuterStyle` DOM `width`)에서 각각 적용한다. DOM은 외부 span에 `width`로 정확히 고정하고 내부 span에 `scale`로 glyph 축소를 적용하여 측정값과 렌더링을 결정론적으로 일치시킨다 — 마지막 글자가 틀을 넘어가는 현상을 방지한다.
 - **`Math.round()`를 사용하지 않는다.** 부동소수점 정밀도를 보존하여 서로 다른 scale에서 동일한 줄바꿈 결과를 보장한다.
-- **최소 폭(`minWidthMm`)**: 양쪽 모드 공통. 결함 글리프(0폭/비정상적 narrow) 방어. 공백은 `spaceRatio` em, 반각 0.35em, 전각 0.15em. 장평 적용 후에 바닥값으로 적용.
+- **최소 폭(`minWidthMm`)**: 양쪽 모드 공통. 결함 글리프(0폭/비정상적 narrow) 방어. 반각 0.35em, 전각 0.15em.
+- **공백 처리**: opentype 모드에서 공백은 폰트 메트릭이 아닌 `spaceRatio * fontSize`로 고정한다. canvas 모드는 `minWidthMm` 바닥값으로 보정한다.
 - 반각 판정은 `char.charCodeAt(0) <= 255`로 이루어진다. Latin-1 전각 문자(128-255)는 반각으로 오분류될 수 있다.
 
 ### 6.3 모드 전환 및 폴백
@@ -734,11 +735,13 @@ public genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaratio
 
 ### 11.4 `genCharStyle(char)`
 
-글자(char) 요소의 스타일을 생성한다.
+글자(char) 요소의 스타일을 생성한다. 측정 모드(`TEXT_MEASUREMENT_MODE`)에 따라 다른 스타일을 반환한다.
 
 ```ts
 public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
 ```
+
+#### canvas 모드
 
 - `display: 'inline-block'`
 - `maxWidth`: `${widthRatio}em` (장평 비율만큼 레이아웃 박스 너비 제한)
@@ -751,6 +754,36 @@ public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
 - `maxWidth: ${wr}em`은 레이아웃 박스 너비를 `wr * fontSize`로 제한한다. 글자 사이 간격이 줄어든다.
 - `scale: ${wr} 1`은 글자 모양(glyph) 자체를 수평으로 `wr`배 축소한다. 글자가 좁아진다.
 - 둘 다 `widthRatio`를 적용하므로, 장평 0.8이면 레이아웃 박스도 0.8em, 글자 모양도 80%로 축소된다.
+
+#### opentype 모드 (이중 span 구조)
+
+opentype 모드에서는 외부 span과 내부 span의 이중 구조를 사용한다:
+
+```html
+<span data-source-offset="N" style="width: 3.2mm; overflow: hidden; display: inline-block;">
+  <span data-char-inner style="scale: 0.8 1; display: inline-block;">
+    한
+  </span>
+</span>
+```
+
+**외부 span** (`genCharStyle` 반환):
+- `display: 'inline-block'`
+- `width`: `${rawWidth × widthRatio}mm` (정확한 폭 고정)
+- `overflow: 'hidden'` (glyph 넘침 방지)
+- `textAlign`: `'center'`
+
+**내부 span** (`genCharInnerStyle` 반환):
+- `display: 'inline-block'`
+- `scale`: `${widthRatio} 1` (glyph 모양 수평 축소 — 장평)
+- `transformOrigin`: `'0 center'`
+
+`width`와 `scale`은 분리되어 작동한다:
+- 외부 span의 `width`는 `_charWidthMm(char)`으로 측정한 원본 폭에 장평을 곱해 정확히 고정한다. 측정값과 DOM 렌더링이 결정론적으로 일치하며, 마지막 글자가 틀을 넘어가는 현상을 방지한다.
+- 내부 span의 `scale`은 glyph 모양을 수평으로 `wr`배 축소한다. 시각적 장평 효과.
+- `overflow: hidden`으로 내부 glyph가 외부 박스를 넘어도 잘려서 보이지 않는다.
+- 공백은 `fontSize × spaceRatio`로 고정한다 (폰트 메트릭 무시).
+- 문자별 Map 캐시(`_opentypeOuterStyleCache`, 키 `${char}|${widthRatio}`)로 재계산을 생략한다.
 
 ---
 
