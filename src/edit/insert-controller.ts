@@ -606,7 +606,7 @@ export class InsertController {
 
     let rect: { left: number; top: number; width: number; height: number };
     if (this._mode?.position === 'static') {
-      rect = this._snapPreviewToGrid(left, top, width, height, this._document);
+      rect = this._snapPreviewToGrid(left, top, width, height, this._getRootContainer());
     } else {
       rect = { left, top, width, height };
     }

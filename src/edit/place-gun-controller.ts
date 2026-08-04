@@ -814,19 +814,27 @@ export class PlaceGunController {
     }
 
     const manager = this._manager;
-    const docEl = manager.docEl;
-    const rect = docEl.getBoundingClientRect();
+    const rootId = manager.editableRootId;
+    const rootEl = rootId
+      ? manager.docEl.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null
+      : null;
+    const root = (rootEl && !rootEl.lock) ? rootEl : manager.docEl;
+    const rect = root.getBoundingClientRect();
     const screenPpm = GridCalculator.ppm * manager.scale;
 
-    let containerPaddingLeft = 0;
-    let containerPaddingTop = 0;
+    let rootPaddingLeft = 0;
+    let rootPaddingTop = 0;
+    if (root instanceof LayoutBoxElement) {
+      rootPaddingLeft = root.paddingLeft ?? 0;
+      rootPaddingTop = root.paddingTop ?? 0;
+    }
 
     if (position === 'absolute') {
-      const leftMm = Math.max(0, manager.screenPxToMm(clientX - rect.left) - containerPaddingLeft);
-      const topMm = Math.max(0, manager.screenPxToMm(clientY - rect.top) - containerPaddingTop);
+      const leftMm = Math.max(0, manager.screenPxToMm(clientX - rect.left) - rootPaddingLeft);
+      const topMm = Math.max(0, manager.screenPxToMm(clientY - rect.top) - rootPaddingTop);
 
-      const leftPx = rect.left + (leftMm + containerPaddingLeft) * screenPpm;
-      const topPx = rect.top + (topMm + containerPaddingTop) * screenPpm;
+      const leftPx = rect.left + (leftMm + rootPaddingLeft) * screenPpm;
+      const topPx = rect.top + (topMm + rootPaddingTop) * screenPpm;
       const widthPx = boxData.width * screenPpm;
       const heightPx = boxData.height * screenPpm;
 
@@ -838,14 +846,14 @@ export class PlaceGunController {
       return;
     }
 
-    const model = docEl.model;
+    const model = root.model;
     if (!model) {
       this._previewEl.style.display = 'none';
       return;
     }
 
-    const leftMm = Math.max(0, manager.screenPxToMm(clientX - rect.left) - containerPaddingLeft);
-    const topMm = Math.max(0, manager.screenPxToMm(clientY - rect.top) - containerPaddingTop);
+    const leftMm = Math.max(0, manager.screenPxToMm(clientX - rect.left) - rootPaddingLeft);
+    const topMm = Math.max(0, manager.screenPxToMm(clientY - rect.top) - rootPaddingTop);
 
     const { columnCoords, lineHeight, editableWidth, columnCount } = model;
     const avgColWidth = editableWidth / columnCount;
@@ -866,8 +874,8 @@ export class PlaceGunController {
     const snapLeftMm = columnCoords[startCol]?.x1 ?? 0;
     const snapRightMm = columnCoords[endCol]?.x2 ?? 0;
 
-    const leftPx = rect.left + (snapLeftMm + containerPaddingLeft) * screenPpm;
-    const topPx = rect.top + (editAreaTopMm + containerPaddingTop + clampedLine * lineHeight) * screenPpm;
+    const leftPx = rect.left + (snapLeftMm + rootPaddingLeft) * screenPpm;
+    const topPx = rect.top + (editAreaTopMm + rootPaddingTop + clampedLine * lineHeight) * screenPpm;
     const widthPx = (snapRightMm - snapLeftMm) * screenPpm;
     const heightPx = boxData.height * lineHeight * screenPpm;
 
