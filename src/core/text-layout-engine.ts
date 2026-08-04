@@ -1,4 +1,4 @@
-import { DEFAULT_FONT_SIZE, DEFAULT_LETTER_SPACING, DEFAULT_LINE_GAP, DEFAULT_SPACE_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, DEFAULT_WIDTH_RATIO, isLineEndForbidden, isLineStartForbidden } from "@/constants";
+import { DEFAULT_FONT_SIZE, DEFAULT_LETTER_SPACING, DEFAULT_LINE_GAP, DEFAULT_SPACE_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, DEFAULT_WIDTH_RATIO, TEXT_MEASUREMENT_MODE, isLineEndForbidden, isLineStartForbidden } from "@/constants";
 import type { LayoutBoxElement, LayoutParagraphElement } from "@/components";
 import type { LayoutVirtualColumnElement } from "@/components/layout/v-column.element";
 import {
@@ -229,26 +229,74 @@ export class TextLayoutEngine {
    * scale 변경 시 줄바꿈이 어긋나는 원인이 된다. 단일 ppm을 사용하면 모든 컬럼에서
    * 동일한 문자 폭을 보장하여 컬럼 간 일관성과 scale 무관성을 동시에 달성한다.
    *
+   * **장평(`widthRatio`) 처리 — 모드별 차이**:
+   * - **canvas 모드**: `widthRatio * fontSize`를 상한 클램프로 적용. canvas는 glyph의
+   *   실제 렌더링 폭을 모르므로 상한선으로 휴리스틱하게 장평을 강제한다. 원본 폭이
+   *   상한보다 좁으면 장평이 적용되지 않는 근본적 한계가 있다.
+   * - **opentype 모드**: `widthRatio`를 곱셈으로 적용. `glyph.advanceWidth`가 정확한
+   *   원본 폭이므로, `rawWidth × widthRatio`로 모든 글자에 정확히 장평이 반영된다.
+   *   상한 클램프가 없으므로 좁은 글자도 정확히 축소된다.
+   *
+   * **최소 폭(`minWidthMm`)**: 양쪽 모드 공통. 결함 글리프(0폭/비정상적 narrow) 방어.
+   * 공백은 `spaceRatio` em, 반각 0.35em, 전각 0.15em. 장평 적용 후에 바닥값으로 적용.
+   *
    * @param char - 측정할 문자
    * @param textBlockStyle - 블록 레벨 스타일 오버라이드
    * @returns 문자 폭 (mm). scale 및 컬럼에 무관.
    *
    * @example
-   * // scale=1 (ppm=3.78): measureText('한') = 15.12px → 15.12/3.78 = 4.0mm
-   * // scale=2 (ppm=7.56): measureText('한') = 30.24px → 30.24/7.56 = 4.0mm
-   * // 두 경우 모두 4.0mm를 반환하여 동일한 줄바꿈 결과를 보장한다.
+   * // canvas 모드 (상한 클램프): 장평 0.8, 글자 폭 4mm → min(4, 3.2) = 3.2mm
+   * // opentype 모드 (곱셈):     장평 0.8, 글자 폭 4mm → 4 × 0.8   = 3.2mm
+   * // canvas 모드: 장평 0.8, 글자 폭 3mm → min(3, 3.2) = 3mm (장평 무시)
+   * // opentype 모드: 장평 0.8, 글자 폭 3mm → 3 × 0.8   = 2.4mm (정확히 적용)
    */
   private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle): number {
+    const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+    const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
+    const minWidthEm = (char === ' ') ? this.spaceRatio : (!isHalfWidth ? 0.15 : 0.35);
+    const minWidthMm = minWidthEm * fontSize;
+
+    if (TEXT_MEASUREMENT_MODE === 'opentype') {
+      const otWidth = this._charWidthMmViaOpentype(char, textBlockStyle, fontSize);
+      if (otWidth !== null) {
+        const widthWithRatio = otWidth * this.widthRatio;
+        return Math.max(widthWithRatio, minWidthMm);
+      }
+    }
+
+    const maxWidthMm = this.widthRatio * fontSize;
     const ppm = this._columnPpm[0] || GridCalculator.ppm;
     this._ctx.font = this._getCachedFontString(textBlockStyle, ppm);
     const metrics = this._ctx.measureText(char);
     const rawWidthMm = metrics.width / ppm;
-    const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-    const maxWidthMm = this.widthRatio * fontSize;
-    const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
-    const minWidthEm = (char === ' ') ? this.spaceRatio : (!isHalfWidth ? 0.15 : 0.35);
-    const minWidthMm = minWidthEm * fontSize;
     return Math.min(Math.max(rawWidthMm, minWidthMm), maxWidthMm);
+  }
+
+  /**
+   * opentype.js 기반 문자 폭 측정.
+   *
+   * `FontLoader.getOpenTypeFont()`로 파싱된 폰트 객체에서 `charToGlyph(char)`로
+   * 글리프를 조회하고, `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 폭을
+   * 계산한다. **장평(`widthRatio`) 곱셈은 호출자에서 적용**하므로 여기서는
+   * 원본 폰트 메트릭 기반 값만 반환한다.
+   *
+   * @param char - 측정할 문자
+   * @param textBlockStyle - 블록 레벨 스타일 오버라이드
+   * @param fontSize - 폰트 크기 (mm 단위)
+   * @returns 문자 폭 (mm, 장평 미적용). 폰트/글리프 조회 실패 시 `null` (canvas 폴백)
+   */
+  private _charWidthMmViaOpentype(char: string, textBlockStyle: TextBlockStyle | undefined, fontSize: number): number | null {
+    const fontLoader = FontLoader.getInstance();
+    const fontName = textBlockStyle?.fontFamily;
+    const otFont = fontLoader.getOpenTypeFont(fontName);
+    if (!otFont) return null;
+
+    const glyph = otFont.charToGlyph(char);
+    if (!glyph || glyph.advanceWidth === undefined || glyph.advanceWidth === null) {
+      return null;
+    }
+
+    return (glyph.advanceWidth / otFont.unitsPerEm) * fontSize;
   }
 
   /** 마지막 줄의 모든 파트가 비어 있으면 해당 줄을 제거한다. */

@@ -1,4 +1,6 @@
 import { Font } from "@/types";
+import opentype from "opentype.js";
+import type { Font as OpentypeFont } from "opentype.js";
 
 /**
  * 폰트 로드 함수 타입.
@@ -38,6 +40,20 @@ export class FontLoader {
   private _ready: boolean = false;
   private _isPrint: boolean = false;
   private _lastFontsSignature?: string;
+
+  /**
+   * opentype.js 파싱 결과 캐시.
+   * 폰트 패밀리명(`Font.family`)을 키로, 파싱된 opentype.js `Font` 객체를 값으로 저장한다.
+   * `init()` 시 `base64Data`가 있는 폰트를 한 번 파싱하여 캐싱한다.
+   * `_opentypeEnabled === false`이면 항상 빈 맵이다.
+   */
+  private _opentypeFonts: Map<string, OpentypeFont> = new Map();
+
+  /**
+   * opentype.js 모드 활성화 여부.
+   * `init()` 후 `true`로 설정되며, `getOpenTypeFont()` 호출 시 활성화 상태를 확인한다.
+   */
+  private _opentypeEnabled: boolean = false;
 
   private constructor() {
     this._isPrint = window.matchMedia("print").matches;
@@ -146,11 +162,64 @@ export class FontLoader {
       this._ready = true;
       this._lastFontsSignature = this._computeFontsSignature(fonts);
 
+      await this._parseOpentypeFonts(fonts);
+
       return this._fontFaces;
     } catch (e) {
       console.error(e);
       throw e;
     }
+  }
+
+  /**
+   * 폰트 배열에서 opentype.js `Font` 객체를 파싱하여 캐싱한다.
+   *
+   * `base64Data`가 있는 폰트만 파싱한다. `ttfFilename` 경로의 폰트는 별도 fetch가
+   * 필요하므로 여기서는 처리하지 않는다 — 화면 모드에서 `base64Data`가 우선되므로
+   * 대부분의 케이스가 커버된다. `base64Data`가 없는 폰트는 opentype.js 캐시에서
+   * 누락되며, 해당 폰트로 측정 시 canvas 모드로 폴백한다.
+   *
+   * @param fonts - 파싱할 폰트 배열
+   */
+  private async _parseOpentypeFonts(fonts: Font[]): Promise<void> {
+    this._opentypeEnabled = true;
+    this._opentypeFonts.clear();
+
+    for (const f of fonts) {
+      if (!f.base64Data) continue;
+      try {
+        const binaryString = atob(f.base64Data);
+        const buffer = new ArrayBuffer(binaryString.length);
+        const view = new Uint8Array(buffer);
+        for (let i = 0; i < binaryString.length; i++) {
+          view[i] = binaryString.charCodeAt(i);
+        }
+        const otFont = opentype.parse(buffer);
+        this._opentypeFonts.set(f.family, otFont);
+      } catch (e) {
+        console.warn(`opentype.js parse failed for font "${f.family}", falling back to canvas mode for this font`, e);
+      }
+    }
+  }
+
+  /**
+   * opentype.js로 파싱된 폰트 객체를 반환한다.
+   *
+   * @param fontName - 요청할 폰트 패밀리명. 생략 시 첫 번째 폰트.
+   * @returns opentype.js `Font` 객체. 파싱 실패/해당 폰트 누락 시 `null` (canvas 모드 폴백).
+   */
+  public getOpenTypeFont(fontName?: string): OpentypeFont | null {
+    if (!this._opentypeEnabled) return null;
+    if (fontName) {
+      return this._opentypeFonts.get(fontName) || null;
+    }
+    const first = this._opentypeFonts.values().next();
+    return first.done ? null : first.value;
+  }
+
+  /** opentype.js 모드 활성화 여부. `init()` 완료 후 `true`. */
+  public get opentypeEnabled(): boolean {
+    return this._opentypeEnabled;
   }
 
   /**
