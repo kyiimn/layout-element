@@ -594,10 +594,16 @@ export class InsertController {
   private _updatePreview(startX: number, startY: number, currentX: number, currentY: number): { left: number; top: number; width: number; height: number } | null {
     if (!this._previewEl) return null;
 
-    const left = Math.min(startX, currentX);
-    const top = Math.min(startY, currentY);
-    const width = Math.abs(currentX - startX);
-    const height = Math.abs(currentY - startY);
+    const rootRect = this._getRootContainer().getBoundingClientRect();
+    const cx = Math.max(rootRect.left, Math.min(currentX, rootRect.right));
+    const cy = Math.max(rootRect.top, Math.min(currentY, rootRect.bottom));
+    const sx = Math.max(rootRect.left, Math.min(startX, rootRect.right));
+    const sy = Math.max(rootRect.top, Math.min(startY, rootRect.bottom));
+
+    const left = Math.min(sx, cx);
+    const top = Math.min(sy, cy);
+    const width = Math.abs(cx - sx);
+    const height = Math.abs(cy - sy);
 
     if (width <= 1 && height <= 1) {
       this._previewEl.style.display = 'none';

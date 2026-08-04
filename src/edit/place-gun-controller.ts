@@ -829,6 +829,9 @@ export class PlaceGunController {
     const rect = root.getBoundingClientRect();
     const screenPpm = GridCalculator.ppm * manager.scale;
 
+    const cx = Math.max(rect.left, Math.min(clientX, rect.right));
+    const cy = Math.max(rect.top, Math.min(clientY, rect.bottom));
+
     let rootPaddingLeft = 0;
     let rootPaddingTop = 0;
     if (root instanceof LayoutBoxElement) {
@@ -837,8 +840,8 @@ export class PlaceGunController {
     }
 
     if (position === 'absolute') {
-      const leftMm = Math.max(0, manager.screenPxToMm(clientX - rect.left) - rootPaddingLeft);
-      const topMm = Math.max(0, manager.screenPxToMm(clientY - rect.top) - rootPaddingTop);
+      const leftMm = Math.max(0, manager.screenPxToMm(cx - rect.left) - rootPaddingLeft);
+      const topMm = Math.max(0, manager.screenPxToMm(cy - rect.top) - rootPaddingTop);
 
       const leftPx = rect.left + (leftMm + rootPaddingLeft) * screenPpm;
       const topPx = rect.top + (topMm + rootPaddingTop) * screenPpm;
@@ -859,8 +862,8 @@ export class PlaceGunController {
       return;
     }
 
-    const leftMm = Math.max(0, manager.screenPxToMm(clientX - rect.left) - rootPaddingLeft);
-    const topMm = Math.max(0, manager.screenPxToMm(clientY - rect.top) - rootPaddingTop);
+    const leftMm = Math.max(0, manager.screenPxToMm(cx - rect.left) - rootPaddingLeft);
+    const topMm = Math.max(0, manager.screenPxToMm(cy - rect.top) - rootPaddingTop);
 
     const { columnCoords, lineHeight, editableWidth, columnCount } = model;
     const avgColWidth = editableWidth / columnCount;
