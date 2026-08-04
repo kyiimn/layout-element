@@ -140,7 +140,20 @@ export class LayoutColumnElement extends HTMLElement {
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, charStyle);
     charEl.dataset.offset = String(renderedOffset);
     charEl.dataset.sourceOffset = String(sourceOffset);
-    charEl.innerText = char;
+
+    const { owidth, swidth } = this.model!.getCharWidths(char);
+    charEl.dataset.owidth = String(owidth);
+    charEl.dataset.swidth = String(swidth);
+    let inner = charEl.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
+    if (!inner) {
+      inner = document.createElement('span');
+      inner.dataset.charInner = 'true';
+      charEl.appendChild(inner);
+    }
+    const innerStyle = this.model!.genCharInnerStyle();
+    inner.style.cssText = '';
+    Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(inner.style, innerStyle);
+    inner.textContent = char;
   }
 
   /**

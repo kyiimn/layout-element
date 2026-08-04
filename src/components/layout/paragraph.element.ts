@@ -679,13 +679,14 @@ export class LayoutParagraphElement extends HTMLElement {
         for (const partDiv of partDivs) {
           const spans = partDiv.querySelectorAll<HTMLSpanElement>(':scope > span[data-source-offset]');
           for (const span of spans) {
-            const char = span.innerText;
+            const inner = span.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
+            const char = inner ? inner.textContent : span.textContent;
             if (char.length === 0) continue;
 
             const spanRect = span.getBoundingClientRect();
             const style = window.getComputedStyle(span);
 
-            const scaleValue = style.scale || '1 1';
+            const scaleValue = (inner ? window.getComputedStyle(inner).scale : style.scale) || '1 1';
             const widthRatio = parseFloat(scaleValue.split(' ')[0] || '1');
             if (Number.isNaN(widthRatio)) continue;
 
