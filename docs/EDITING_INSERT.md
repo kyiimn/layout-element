@@ -34,14 +34,14 @@
 │  ├── _document: LayoutDocumentElement                                 │
 │  ├── _mode: InsertMode | null                                          │
 │  ├── _isDragging: boolean                                             │
-│  ├── _startContainer: LayoutDocumentElement | LayoutBoxElement | null  │
+│  ├── _lastPreviewRect: { left, top, width, height } | null             │
 │  ├── _insertHighlightTarget: LayoutBoxElement | LayoutDocumentElement | null │
 │  ├── startDrag(event)                                                  │
 │  ├── _findTargetContainer(startX, startY, endX, endY)                  │
-│  ├── _finishInsert(endX, endY)                                        │
+│  ├── _finishInsert()                                                   │
 │  ├── _cancel()                                                        │
-│  ├── _createPreview() / _updatePreview()                              │
-│  ├── _updateInsertHighlight() / _clearInsertHighlight()                │
+│  ├── _createPreview() / _updatePreview() → rect | null                │
+│  ├── _updateInsertHighlight(previewRect) / _clearInsertHighlight()    │
 │  └── _removePreview() / _cleanup()                                    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -197,8 +197,8 @@ export interface InsertEventDetail {
 │     │       ├── _isDragging? → 무시 (중복 실행 방지)         │
 │     │       ├── event.preventDefault() + stopPropagation()   │
 │     │       ├── _startClientX/Y = event.clientX/Y            │
-│     │       ├── _startContainer = _findTargetContainer(x,y,x,y) │
 │     │       ├── _createPreview()                             │
+│     │       ├── _lastPreviewRect = _updatePreview(x,y,x,y)   │
 │     │       ├── _isDragging = true                           │
 │     │       └── document에 mousemove, mouseup, keydown 등록  │
 │     └── return (이후 레이아웃 선택/드래그 로직 건너뜀)      │
@@ -214,11 +214,12 @@ export interface InsertEventDetail {
 │  ③ mousemove (드래그 중)                                      │
 │     │                                                        │
 │     ├── _currentClientX/Y 업데이트                            │
-│     └── _updatePreview()                                     │
-│         → 점선 테두리 반투명 파란색 사각형 위치/크기 갱신     │
-│         → static 모드: 컬럼/라인 그리드 스냅                │
-│     └── _updateInsertHighlight()                             │
-│         → 드래그 영역을 완전히 포함하는 가장 안쪽 컨테이너 탐색 │
+│     ├── _lastPreviewRect = _updatePreview()                  │
+│     │   → 점선 테두리 반투명 파란색 사각형 위치/크기 갱신     │
+│     │   → static 모드: root 요소의 컬럼/라인 그리드에 스냅    │
+│     │   → 스냅된 픽셀 rect 반환                              │
+│     └── _updateInsertHighlight(_lastPreviewRect)              │
+│         → preview rect로 컨테이너 판정                        │
 │         → 이전 하이라이트 제거, 새 컨테이너에 reparent-target 설정 │
 │         → 레이아웃 편집 reparent와 동일한 주황색 테두리       │
 │                                                             │
@@ -226,10 +227,9 @@ export interface InsertEventDetail {
 │     │                                                        │
 │     ├── 이동 거리 < 3px? → _cleanup(), return (클릭으로 간주) │
 │     │   (_cleanup이 _clearInsertHighlight() 호출)            │
-│     ├── 드래그 영역의 네 꼭짓점으로 컨테이너 탐색          │
-│     ├── _findTargetContainer(startX, startY, endX, endY)      │
-│     │   → 네 꼭짓점 모두 hit된 후보 수집                    │
-│     │   → 사각형이 경계 내에 완전히 포함되는지 확인          │
+│     ├── _finishInsert()                                      │
+│     │   → _lastPreviewRect로 컨테이너 탐색                    │
+│     │   → _resolveInsertContainer(previewRect)               │
 │     │   → 가장 안쪽 유효 컨테이너 반환                     │
 │     │   → 없으면 EditManager 루트로 폴백                     │
 │     ├── screen 픽셀 → container 내부 mm 변환                 │
@@ -268,37 +268,39 @@ export interface InsertEventDetail {
 
 ### 5.1 개요
 
-드래그 영역(사각형)을 완전히 포함하는 가장 안쪽 유효 컨테이너를 찾는다. 이전에는 드래그 영역의 중심점을 기준으로 컨테이너를 찾았으나, 현재는 **네 꼭짓점 모두**가 포함되는 컨테이너를 선택하여 작은 컨테이너가 큰 삽입을 받아들여 크기가 조정되는 문제를 해결한다.
+드래그 영역(또는 스냅된 preview 영역)을 완전히 포함하는 가장 안쪽 유효 컨테이너를 찾는다. **preview rect 기반 판정**: `_updateInsertHighlight`와 `_finishInsert` 모두 `_updatePreview`가 반환한 스냅된 픽셀 rect를 사용하여 컨테이너를 판정한다. 마우스 커서의 raw 픽셀 위치가 아닌, preview가 실제로 그려진 위치를 기준으로 한다.
 
-> **static 모드 그리드 containment 검증**: static 모드(`position: 'static'`)에서는 중심점 히트테스트로 후보 box를 찾은 후, 추가로 **생성될 요소의 static 그리드 영역(컬럼 인덱스 + 스팬, 라인 인덱스 + 라인 수)이 후보 box의 컬럼/라인 그리드 안에 완전히 들어오는지** `staticGridContains()`로 검증한다. 요소가 후보 box의 컬럼 수나 라인 수를 초과하면 더 바깥 컨테이너로 폴백한다. 이는 absolute 모드의 네 꼭짓점 containment와 대응되며, static 좌표계(컬럼×라인)에서 동일한 경계 검증을 수행한다.
+> **static 모드 그리드 containment 검증**: static 모드(`position: 'static'`)에서는 문서 내 모든 box-only 박스를 순회하며, 각 박스에 대해 `_mmToStatic` + `staticGridContains()`로 요소의 static 그리드 영역(컬럼 인덱스 + 스팬, 라인 인덱스 + 라인 수)이 후보 box의 컬럼/라인 그리드 안에 완전히 들어오는지 검증한다. 통과한 박스들 중 가장 깊이 중첩된(deepest) 박스를 선택한다. `elementsFromPoint` hit test를 사용하지 않고, 오직 그리드 containment로만 판정한다.
 
-> **경계 일치 폴백**: 드래그 영역이 박스 경계에 딱 맞아떨어지면 `elementsFromPoint`가 경계선 위 꼭짓점을 hit하지 못할 수 있다. 이 경우 기하학적 rect containment(1px 허용 오차)로 후보를 보충하여, 경계에 정확히 맞춘 드래그도 의도한 박스 내부로 들어간다.
+> **음수 좌표 처리**: `_screenToContainerMm`이 음수 좌표를 클램핑하지 않고 그대로 반환한다. 요소가 박스 바깥에 있으면 `leftMm`/`topMm`이 음수가 되고, `_mmToStatic`이 음수 `nearestColumn`/`nearestLine`을 반환하여 `staticGridContains`가 `elementLeft < 0` / `elementTop < 0`으로 거부한다. 이로 인해 박스 바깥의 요소가 박스 안으로 잘못 끌려오는 것을 방지한다.
 
 ### 5.2 선택 알고리즘
 
 ```
 _findTargetContainer(startX, startY, endX, endY)
     │
-    ├── 0. static 모드 빠른 경로 (position === 'static')
-    │   center = (드래그 영역 중심점)
-    │   elements = document.elementsFromPoint(center.x, center.y)
+    ├── 0. static 모드 (position === 'static')
+    │   leftPx = min(startX, endX), topPx = min(startY, endY)
     │   widthMm = screenPxToMm(|endX - startX|)
     │   heightMm = screenPxToMm(|endY - startY|)
-    │   for each el in elements (가장 안쪽부터 바깥쪽 순):
-    │     if el instanceof LayoutBoxElement:
-    │       if el.lock → continue (다음 바깥 box 시도)
-    │       if el.items has non-box child → continue (다음 바깥 box 시도)
-    │       if rootBox && !rootBox.contains(el) → continue
-    │       staticCoords = _mmToStatic(_screenToContainerMm(minX, minY, el), widthMm, heightMm, el)
-    │       if !staticGridContains(el, staticCoords.left, staticCoords.top,
-    │                              staticCoords.width, staticCoords.height):
-    │         continue (요소가 이 box의 그리드를 벗어남 → 다음 바깥 box 시도)
-    │       return el  (첫 번째 유효 + 그리드 containment 통과 box-only 컨테이너)
-    │     if el instanceof LayoutDocumentElement:
-    │       break (document보다 먼저 유효 box가 없으면 document로 폴백)
-    │   → 유효 box를 찾지 못하면 absolute 경로로 폴백
+    │   allBoxes = _document.querySelectorAll('x-layout-box')
+    │   validCandidates = []
+    │   for each box in allBoxes:
+    │     if box.lock → skip
+    │     if box.items has non-box child → skip
+    │     if rootBox && !rootBox.contains(box) → skip
+    │     { leftMm, topMm } = _screenToContainerMm(leftPx, topPx, box)  // 음수 클램핑 없음
+    │     staticCoords = _mmToStatic(leftMm, topMm, widthMm, heightMm, box)  // 클램핑 없음
+    │     if staticGridContains(box, staticCoords.left, staticCoords.top,
+    │                            staticCoords.width, staticCoords.height):
+    │       validCandidates.push(box)
+    │   // 가장 깊이 중첩된 박스 선택
+    │   deepest = validCandidates 중 parent chain의 LayoutBoxElement 수가 가장 많은 박스
+    │   if deepest → return deepest
+    │   if rootBox && !rootBox.lock → return rootBox
+    │   return _document
     │
-    ├── 1. 네 꼭짓점 정의
+    ├── 1. absolute 모드: 네 꼭짓점 정의
     │   corners = [(startX, startY), (endX, startY), (startX, endY), (endX, endY)]
     │
     ├── 2. 각 꼭짓점에서 elementsFromPoint 호출하여 후보 수집
@@ -319,18 +321,12 @@ _findTargetContainer(startX, startY, endX, endY)
     │     for each box in allBoxes:
     │       if box.lock → skip
     │       if box.items has non-box child → skip
-    │       if candidates.has(box) → skip (이미 hit test에서 처리됨)
+    │       if candidates.has(box) → skip
     │       rect = box.getBoundingClientRect()
     │       if startX >= rect.left-1 && endX <= rect.right+1 &&
     │          startY >= rect.top-1 && endY <= rect.bottom+1:
     │         if fullyHit의 다른 박스가 이 box를 포함하지 않음:
     │           fullyHit.push(box)
-    │
-    │   ※ 폴백 조건이 "fullyHit에 box가 없음"이 아니라
-    │      "fullyHit에 유효한 box 후보가 없음"인 이유:
-    │      안쪽 box가 paragraph/image 자식을 가지면 삽입 불가능하므로 거절되지만,
-    │      이 경우 부모 box-only 컨테이너를 찾아야 한다. 단순히 "box가 있음"만
-    │      검사하면 부모 컨테이너를 찾지 못하고 document로 폴백하는 버그가 발생한다.
     │
     ├── 4. 사각형이 각 후보의 경계 내에 완전히 포함되는지 확인
     │   for each el in fullyHit (box 우선, document는 후순위):
@@ -340,12 +336,6 @@ _findTargetContainer(startX, startY, endX, endY)
     │       rect = el.getBoundingClientRect()
     │       if startX >= rect.left && endX <= rect.right &&
     │          startY >= rect.top && endY <= rect.bottom:
-    │         if position === 'static':
-    │           staticCoords = _mmToStatic(_screenToContainerMm(minX, minY, el),
-    │                                       widthMm, heightMm, el)
-    │           if !staticGridContains(el, staticCoords.left, staticCoords.top,
-    │                                  staticCoords.width, staticCoords.height):
-    │             skip (그리드 벗어남 → 다음 후보)
     │         return el
     │
     ├── 5. Document 요소도 포함 여부 확인
@@ -471,16 +461,16 @@ return Math.max(...items.map(i => i.zIndex ?? 0)) + 1;
 containerPaddingLeft/Top = container instanceof LayoutBoxElement ? container.paddingLeft/Top ?? 0 : 0
 rect = container.getBoundingClientRect()
 
-leftMm = max(0, screenPxToMm(clientX - rect.left) - containerPaddingLeft)
-topMm  = max(0, screenPxToMm(clientY - rect.top)  - containerPaddingTop)
+leftMm = screenPxToMm(clientX - rect.left) - containerPaddingLeft
+topMm  = screenPxToMm(clientY - rect.top)  - containerPaddingTop
 ```
 
-- 음수 좌표는 0으로 클램핑
+- 음수 좌표 클램핑 없음 — 컨테이너 바깥의 좌표는 음수로 반환되어 `staticGridContains`가 거부
 - `screenPxToMm(px) = px / (GridCalculator.ppm * manager.scale)` — scale 보정 적용
 
 ### 7.2 `_mmToStatic(leftMm, topMm, widthMm, heightMm, container)`
 
-mm 좌표를 static 그리드 좌표로 변환한다.
+mm 좌표를 static 그리드 좌표로 변환한다. **클램핑 없이 raw 변환만 수행** — 컨테이너 안으로 요소를 끌어당기지 않고, `staticGridContains`가 판정을 담당한다.
 
 ```
 model = container.model
@@ -495,21 +485,17 @@ editAreaTop  = columnCoords[0].y1
 
 nearestColumn = round((leftMm - editAreaLeft) / avgColWidth)
 nearestLine = round((topMm - editAreaTop) / lineHeight)
+widthCols   = max(1, round(widthMm / avgColWidth))
+heightLines = max(1, round(heightMm / lineHeight))
 
-// width/height를 컨테이너의 남은 공간을 초과하지 않도록 클램핑
-maxCols = max(1, min(round(widthMm / avgColWidth), columnCount - nearestColumn))
-maxLines = max(1, round(heightMm / lineHeight))
-
-clampedColumn = clamp(nearestColumn, 0, columnCount - maxCols)
-clampedLine = max(0, nearestLine)
-
-return { left: clampedColumn, top: clampedLine, width: maxCols, height: maxLines }
+return { left: nearestColumn, top: nearestLine, width: widthCols, height: heightLines }
 ```
 
-- `left`: 가장 가까운 컬럼 인덱스로 스냅, `[0, columnCount - width]` 범위로 클램핑
-- `top`: 가장 가까운 라인 인덱스로 스냅, 최소 0
-- `width`: `round(widthMm / avgColWidth)`와 `columnCount - nearestColumn`(시작 컬럼부터 남은 컬럼 수) 중 작은 값. 최소 1컬럼. 드래그 영역이 컨테이너 컬럼 수를 넘어가지 않도록 클램핑
-- `height`: 최소 1라인
+- `left`: 가장 가까운 컬럼 인덱스 (음수 가능 — 컨테이너 바깥)
+- `top`: 가장 가까운 라인 인덱스 (음수 가능)
+- `width`: 드래그 영역의 컬럼 수 (최소 1)
+- `height`: 드래그 영역의 라인 수 (최소 1)
+- **컨테이너 안으로 클램핑하지 않음** — 요소가 컨테이너를 벗어나면 `staticGridContains`가 `false`를 반환하여 더 바깥 컨테이너로 폴백
 
 ### 7.3 absolute 모드 최종 값
 
@@ -572,75 +558,99 @@ height = abs(currentY - startY)
 
 if width <= 1 && height <= 1:
   previewEl.style.display = 'none'
-  return
+  return null
 
-if mode.position === 'static' && _startContainer:
-  snapped = _snapPreviewToGrid(left, top, width, height, _startContainer)
-  set left/top/width/height = snapped.*
+if mode.position === 'static':
+  rect = _snapPreviewToGrid(left, top, width, height, _getRootContainer())
 else:
-  set left/top/width/height = (left, top, width, height)
+  rect = { left, top, width, height }
 
+set previewEl style = rect.*
 previewEl.style.display = 'block'
+return rect
 ```
+
+**반환값**: 스냅된 픽셀 rect `{ left, top, width, height }` 또는 `null`(드래그 임계값 미만). 이 rect는 `_updateInsertHighlight`와 `_finishInsert`에서 컨테이너 판정에 사용된다.
 
 ### 8.3 static 모드 스냅: `_snapPreviewToGrid`
 
-`position: 'static'`으로 삽입할 때, 미리보기 사각형이 컬럼/라인 그리드에 스냅되어 실제 생성될 영역과 정확히 일치하게 표시된다.
+`position: 'static'`으로 삽입할 때, 미리보기 사각형이 **root 요소**(editableRootId가 지정한 박스, 없으면 document)의 컬럼/라인 그리드에 스냅된다. 특정 박스가 아닌 root 요소 기준이므로, 드래그가 박스 경계를 넘어도 preview가 자유롭게 따라간다.
 
 ```
+container = _getRootContainer()  // editableRootId 박스 또는 document
+model = container.model
+columnCoords = model.columnCoords
+lineHeight, editableWidth, columnCount = model.*
+avgColWidth = editableWidth / columnCount
+
+editAreaLeftMm = columnCoords[0].x1
+editAreaTopMm  = columnCoords[0].y1
 screenPpm = GridCalculator.ppm * manager.scale
-editAreaLeftPx = rect.left + editAreaLeftMm * screenPpm
-editAreaTopPx  = rect.top  + editAreaTopMm  * screenPpm
 
 leftMm  = max(0, screenPxToMm(leftPx - rect.left) - containerPaddingLeft)
 topMm   = max(0, screenPxToMm(topPx  - rect.top)  - containerPaddingTop)
 widthMm  = screenPxToMm(widthPx)
 heightMm = screenPxToMm(heightPx)
 
-staticCoords = _mmToStatic(leftMm, topMm, widthMm, heightMm, container)
+nearestColumn = round((leftMm - editAreaLeftMm) / avgColWidth)
+nearestLine = round((topMm - editAreaTopMm) / lineHeight)
+widthCols  = max(1, min(round(widthMm / avgColWidth), columnCount))
+heightLines = max(1, round(heightMm / lineHeight))
 
-snapLeftPx  = editAreaLeftPx + staticCoords.left * avgColWidth * screenPpm
-snapTopPx   = editAreaTopPx  + staticCoords.top  * lineHeight  * screenPpm
-snapWidthPx  = staticCoords.width  * avgColWidth * screenPpm
-snapHeightPx = staticCoords.height * lineHeight  * screenPpm
+containerLineCount = floor(editableHeight / lineHeight) + 1  // 마지막 줄 포함
+
+clampedColumn = clamp(nearestColumn, 0, columnCount - widthCols)
+clampedLine   = clamp(nearestLine, 0, containerLineCount - heightLines)
+
+startCol = clamp(clampedColumn, 0, columnCount - 1)
+endCol   = min(columnCount - 1, startCol + widthCols - 1)
+snapLeftMm  = columnCoords[startCol].x1
+snapRightMm = columnCoords[endCol].x2
+snapLeftPx  = rect.left + (snapLeftMm + containerPaddingLeft) * screenPpm
+snapWidthPx = (snapRightMm - snapLeftMm) * screenPpm
+snapTopPx   = rect.top + (editAreaTopMm + containerPaddingTop + clampedLine * lineHeight) * screenPpm
+snapHeightPx = heightLines * lineHeight * screenPpm
 
 return { left: round(snapLeftPx), top: round(snapTopPx),
          width: round(snapWidthPx), height: round(snapHeightPx) }
 ```
 
-픽셀 단위로 자유롭게 그리는 대신, 드래그한 영역을 컬럼과 라인 단위로 반올림하여 컨테이너의 편집 영역 내에 클램핑된 위치와 크기로 미리보기가 표시된다.
+- **root 요소 기준**: `_getRootContainer()`가 반환한 요소(editableRootId 박스 또는 document)의 그리드로 스냅
+- **갭(gap) 반영**: `columnCoords` 배열을 직접 사용하여 컬럼 간 gap을 정확히 반영
+- **마지막 라인**: `containerLineCount = floor(editableHeight / lineHeight) + 1` — 마지막 줄은 `lineHeight`보다 짧아도 유효한 배치 영역
+- **라인 상한 클램핑**: `clampedLine`을 `containerLineCount - heightLines`로 상한 클램핑하여 preview가 root 하단을 넘지 않도록 함
 
 ### 8.4 `_removePreview()` / `_cleanup()`
 
-`_removePreview()`는 미리보기 사각형을 DOM에서 제거하고 `_previewEl`을 `null`로 설정한다. `_cleanup()`은 `_isDragging`과 `_startContainer`를 초기화하고, `_clearInsertHighlight()`로 컨테이너 하이라이트를 제거한 뒤, `_removePreview()`를 호출하고, `document`에 등록된 `mousemove`/`mouseup`/`keydown` 리스너를 모두 제거한다.
+`_removePreview()`는 미리보기 사각형을 DOM에서 제거하고 `_previewEl`을 `null`로 설정한다. `_cleanup()`은 `_isDragging`과 `_lastPreviewRect`를 초기화하고, `_clearInsertHighlight()`로 컨테이너 하이라이트를 제거한 뒤, `_removePreview()`를 호출하고, `document`에 등록된 `mousemove`/`mouseup`/`keydown` 리스너를 모두 제거한다.
 
 ### 8.5 컨테이너 하이라이트 (삽입 드래그 중)
 
-삽입 드래그 중에는 미리보기 사각형과 함께, 현재 드래그 영역이 어느 컨테이너에 들어갈 수 있는지를 시각적으로 표시한다. 레이아웃 편집 모드의 reparent 하이라이트와 동일한 `reparent-target` DOM 속성과 주황색(`#ff9800`, 2px) 테두리 CSS를 재사용하여 일관된 시각적 피드백을 제공한다.
+삽입 드래그 중에는 미리보기 사각형과 함께, 현재 preview 영역이 어느 컨테이너에 들어갈 수 있는지를 시각적으로 표시한다. 레이아웃 편집 모드의 reparent 하이라이트와 동일한 `reparent-target` DOM 속성과 주황색(`#ff9800`, 2px) 테두리 CSS를 재사용하여 일관된 시각적 피드백을 제공한다.
 
 | 속성 | 색상 | 적용 대상 | 조건 |
 |------|------|----------|------|
-| `reparent-target` | 주황 (`#ff9800`, 2px) | box 또는 document | 삽입 드래그 중 드래그 영역을 완전히 포함하는 가장 안쪽 유효 컨테이너 |
+| `reparent-target` | 주황 (`#ff9800`, 2px) | box 또는 document | 삽입 드래그 중 preview 영역을 완전히 포함하는 가장 안쪽 유효 컨테이너 |
 
-#### `_updateInsertHighlight()`
+#### `_updateInsertHighlight(previewRect)`
 
-`_onMouseMove`에서 `_updatePreview()` 직후에 호출된다. 현재 드래그 영역으로 `_resolveInsertContainer()`를 호출하여 대상 컨테이너를 찾는다 — 이는 mouseup 시점의 `_finishInsert`가 호출하는 것과 **동일한 메서드**(`_resolveInsertContainer`)를 사용하므로, 하이라이트가 가리키는 컨테이너와 실제 삽입되는 컨테이너가 항상 일치한다.
+`_onMouseMove`에서 `_updatePreview()` 직후에 호출된다. **마우스 커서 위치가 아닌 preview rect**로 `_resolveInsertContainer()`를 호출하여 대상 컨테이너를 찾는다 — 이는 mouseup 시점의 `_finishInsert`가 호출하는 것과 **동일한 메서드**(`_resolveInsertContainer`)를 사용하므로, 하이라이트가 가리키는 컨테이너와 실제 삽입되는 컨테이너가 항상 일치한다.
 
 ```
-_updateInsertHighlight()
+_updateInsertHighlight(previewRect)
     │
     ├── _isDragging? → 아니면 return
-    ├── startX/Y, endX/Y = 현재 드래그 영역 (min/max 보정)
-    ├── 드래그 영역 ≤ 1px? → _clearInsertHighlight(); return
+    ├── previewRect null 또는 width/height ≤ 1? → _clearInsertHighlight(); return
+    ├── startX/Y, endX/Y = previewRect 기준 (left, top, left+width, top+height)
     ├── target = _resolveInsertContainer(startX, startY, endX, endY)
-    │        → _findTargetContainer와 동일 (단일 진실 공급원)
+    │        → _findTargetContainer과 동일 (단일 진실 공급원)
     ├── _insertHighlightTarget === target? → return (변경 없음)
     ├── 이전 _insertHighlightTarget이 있으면 reparent-target 제거
     ├── target이 있으면 reparent-target 설정
     └── _insertHighlightTarget = target
 ```
 
-> **단일 진실 공급원 (single source of truth)**: `_resolveInsertContainer()`는 `_finishInsert`(드랍)와 `_updateInsertHighlight`(하이라이트)가 공유하는 컨테이너 결정 메서드다. 내부적으로 `_findTargetContainer`를 호출한다. 이를 통해 하이라이트가 가리키는 컨테이너와 실제 삽입되는 컨테이너가 알고리즘 수준에서 일치함을 보장한다. 단, mouseup 시점의 마우스 좌표가 mousemove 시점과 다를 수 있으므로, 드래그 중 이탈하는 경우 최종 드랍 컨테이너는 달라질 수 있다 — 이는 정상 동작이다.
+> **단일 진실 공급원 (single source of truth)**: `_resolveInsertContainer()`는 `_finishInsert`(드랍)와 `_updateInsertHighlight`(하이라이트)가 공유하는 컨테이너 결정 메서드다. 내부적으로 `_findTargetContainer`를 호출한다. 두 곳 모두 preview rect를 사용하므로 하이라이트가 가리키는 컨테이너와 실제 삽입되는 컨테이너가 일치한다.
 
 #### `_clearInsertHighlight()`
 
@@ -648,9 +658,7 @@ _updateInsertHighlight()
 
 #### 정적 모드에서의 컨테이너 탐색
 
-`_findTargetContainer()`는 `position: 'static'` 모드에서 드래그 영역의 **중심점**으로 컨테이너를 식별하고, `position: 'absolute'` 모드에서는 **네 꼭짓점 containment**로 식별한다. static 모드에서는 중심점 히트테스트로 후보 box를 찾은 후, 추가로 `staticGridContains()`로 요소의 static 그리드 영역(컬럼 인덱스 + 스팬, 라인 인덱스 + 라인 수)이 후보 box의 컬럼/라인 그리드 안에 완전히 들어오는지 검증한다. 요소가 후보 box의 그리드를 벗어나면 더 바깥 컨테이너로 폴백한다. 따라서 하이라이트 역시 모드에 따라 동일하게 동작한다 — static 모드에서는 그리드 스냅 전의 픽셀 영역 중심점 + 그리드 containment 기준, absolute 모드에서는 픽셀 영역의 네 꼭짓점 기준으로 컨테이너가 결정된다. 미리보기 사각형은 그리드 스냅된 영역을 표시하지만, 컨테이너 하이라이트는 스냅 전 드래그 영역을 기준으로 결정되므로 미리보기 경계와 하이라이트 컨테이너 경계가 일치하지 않을 수 있다.
-
-> **static 모드 중심점 순회**: `elementsFromPoint`는 가장 안쪽 요소부터 바깥쪽 순으로 반환한다. 안쪽 box가 paragraph/image 자식을 가지면 삽입 불가능하므로 거르고, 더 바깥의 box-only 컨테이너를 찾을 때까지 순회한다. document가 먼저 나오면(중심점이 box 밖) document로 폴백한다. 각 후보 box에 대해 `staticGridContains()` 검증을 통과하지 못하면(요소 영역이 box의 컬럼/라인 수를 초과하면) 건너뛰고 다음 바깥 box를 시도한다.
+`_findTargetContainer()`는 `position: 'static'` 모드에서 **문서 내 모든 box-only 박스**를 순회하며, 각 박스에 대해 `staticGridContains()`로 요소의 static 그리드 영역(컬럼 인덱스 + 스팬, 라인 인덱스 + 라인 수)이 후보 box의 컬럼/라인 그리드 안에 완전히 들어오는지 검증한다. 통과한 박스들 중 가장 깊이 중첩된(deepest) 박스를 선택한다. `elementsFromPoint` hit test를 사용하지 않고, 오직 그리드 containment로만 판정한다. `position: 'absolute'` 모드에서는 **네 꼭짓점 containment**로 식별한다.
 
 #### 레이아웃 편집 reparent와의 관계
 
@@ -749,7 +757,7 @@ ESC 키 이외의 입력은 무시한다.
 
 | 파일 | 역할 |
 |------|------|
-| `src/edit/insert-controller.ts` | `InsertController`: 삽입 모드의 드래그, 좌표 변환, 요소 생성, 미리보기 관리, 컨테이너 하이라이트(`_updateInsertHighlight`/`_clearInsertHighlight`/`_resolveInsertContainer`), 대상 컨테이너 찾기(`_findTargetContainer` — static 모드 중심점 순회 + `staticGridContains` 그리드 containment 검증, absolute 모드 4꼭짓점 containment + 유효 box 후보 폴백) |
+| `src/edit/insert-controller.ts` | `InsertController`: 삽입 모드의 드래그, 좌표 변환, 요소 생성, 미리보기 관리, 컨테이너 하이라이트(`_updateInsertHighlight(previewRect)`/`_clearInsertHighlight`/`_resolveInsertContainer`), 대상 컨테이너 찾기(`_findTargetContainer` — static 모드: 문서 내 모든 box-only 박스 순회 + `staticGridContains` 그리드 containment 검증, 가장 깊이 중첩된 박스 선택; absolute 모드: 4꼭짓점 containment + 유효 box 후보 폴백), 미리보기 스냅(`_snapPreviewToGrid` — root 요소 기준, `columnCoords`로 갭 반영, 마지막 라인 `lineHeight` 제외) |
 | `src/edit/edit-manager.ts` | `insertMode` getter/setter, `activateInsert`, `deactivateInsert`, `handleInsertMouseDown`, `_dispatchInsert`, `_dispatchInsertCancel`, `insert`/`insertCancel` 이벤트 발송, `_suppressNextClick` 플래그 |
 | `src/types/edit/insert.type.ts` | `InsertType`, `InsertPosition`, `InsertMode`, `InsertEventDetail` 타입 정의 |
 
@@ -765,5 +773,7 @@ ESC 키 이외의 입력은 무시한다.
 - 삽입 모드 중에는 레이아웃 선택과 드래그 이동, 리사이즈가 모두 비활성화된다.
 - `boxData.children` 설정은 `appendChild`보다 먼저 이루어져야 `connectedCallback` 시점에 올바른 초기 상태를 갖는다.
 - **mousedown 캡처/버블링**: `LayoutEditController`의 `mousedown` 리스너는 캡처 단계로 `document.documentElement`에 등록된다. box 위에서 mousedown하면 먼저 `LayoutEditController._onMouseDown`이 `EditManager.handleInsertMouseDown()`을 호출하여 `InsertController.startDrag()`를 위임 실행하고, `startDrag()` 내부의 `_isDragging` 가드로 중복 실행을 방지한다. `InsertController`의 `mousedown` 리스너는 문서(document)에 버블링 단계로 등록되어, box가 없는 문서 빈 공간에서도 삽입 드래그가 시작되도록 한다.
-- **대상 컨테이너 선택은 드래그 영역 기반**: absolute 모드에서는 네 꼭짓점 모두가 포함되는 가장 안쪽 컨테이너를 선택한다. static 모드에서는 중심점 히트테스트 후 `staticGridContains()`로 요소의 컬럼/라인 영역이 컨테이너 그리드 안에 완전히 들어오는지 검증한다. 작은 컨테이너 위에 큰 요소를 그려도 작은 컨테이너가 아닌 상위 컨테이너에 삽입된다.
-- **폴백은 EditManager 루트**: 어떤 컨테이너도 드래그 사각형을 완전히 포함하지 못하면 `editableRootId`의 루트 box, 또는 document 루트로 폴백한다.
+- **대상 컨테이너 선택은 preview rect 기반**: `_updateInsertHighlight`와 `_finishInsert` 모두 `_updatePreview`가 반환한 스냅된 픽셀 rect를 사용하여 컨테이너를 판정한다. 마우스 커서의 raw 위치가 아닌, preview가 실제로 그려진 위치를 기준으로 한다. absolute 모드에서는 네 꼭짓점 모두가 포함되는 가장 안쪽 컨테이너를 선택한다. static 모드에서는 문서 내 모든 box-only 박스를 순회하며 `staticGridContains()`로 요소의 컬럼/라인 영역이 컨테이너 그리드 안에 완전히 들어오는지 검증하고, 통과한 박스 중 가장 깊이 중첩된 박스를 선택한다. 작은 컨테이너 위에 큰 요소를 그려도 작은 컨테이너가 아닌 상위 컨테이너에 삽입된다.
+- **폴백은 EditManager 루트**: 어떤 컨테이너도 preview 영역을 완전히 포함하지 못하면 `editableRootId`의 루트 box, 또는 document 루트로 폴백한다.
+- **미리보기는 root 요소 기준 스냅**: static 모드의 preview는 특정 박스가 아닌 root 요소(`_getRootContainer()` — editableRootId 박스 또는 document)의 그리드에 스냅한다. 따라서 드래그가 박스 경계를 넘어도 preview가 자유롭게 따라간다. 갭(gap)은 `columnCoords` 배열로 정확히 반영되며, 마지막 라인의 `lineHeight`는 제외된다.
+- **음수 좌표 처리**: `_screenToContainerMm`이 음수 좌표를 클램핑하지 않고 그대로 반환한다. 요소가 박스 바깥에 있으면 `leftMm`/`topMm`이 음수가 되어 `staticGridContains`가 거부하므로, 박스 바깥의 요소가 박스 안으로 잘못 끌려오는 것을 방지한다.

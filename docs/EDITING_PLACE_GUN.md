@@ -230,7 +230,12 @@ export type PlaceGunChangeEventDetail = {
 │     ├── _injectItem(item, target)                           │
 │     │   ├── text → paragraph.content = item.content.body      │
 │     │   │        + EditManager.notifyTextChange(paragraph)    │
-│     │   └── image → image.url = subType별 URL               │
+│     │   ├── image → image.url = subType별 URL               │
+│     │   │        + box.contentUid = uid → boxPropertyChange  │
+│     │   ├── element → container.appendChild(newBox)          │
+│     │   │        + EditManager._dispatchLayoutAdd            │
+│     │   └── style → paragraph.data = {...}                   │
+│     │            + EditManager.notifyTextChange(paragraph)   │
 │     └── manager._suppressLayoutClick()                      │
 │         → 후속 클릭 이벤트가 선택을 해제하지 않도록 방지      │
 │                                                             │
@@ -292,7 +297,7 @@ box의 paragraph에 `article.body`를 주입하고, box의 `contentUid`에 기�
 
 `paragraph.data` setter로 content를 설정하고, model이 있으면 `model.textContent`를 직접 갱신한 후 `markStructureChangedAndRender()`로 재렌더링한다. `model.textContent`를 직접 설정하는 이유: `paragraph.data` setter는 `_sourceContent`만 설정하고 `layout()`을 호출하지만, model이 이미 존재하면 `_layoutStructure()`가 `model.textContent`(이전 텍스트)를 사용하고 `_sourceContent`를 무시한다.
 
-부모 box의 `requestRerenderAffectedParagraphs()`로 오버랩된 다른 paragraph를 갱신한다.
+부모 box의 `requestRerenderAffectedParagraphs()`로 오버랩된 다른 paragraph를 갱신한다. `notifyTextChange()`로 `textChange` 이벤트가 발생하므로 호스트는 `documentData` 동기화와 undo/redo 히스토리 push를 수행할 수 있다. `box.contentUid` 설정 시 `boxPropertyChange` 이벤트도 발생한다.
 
 ### 4.4 이미지/광고(image) 데이터 주입
 
@@ -326,11 +331,13 @@ box 내의 image 요소가 있으면 `_applyImageToElement`로 이미지 데이�
 
 이미지 주입은 `_applyImageToElement(imageEl, image, box)` 헬퍼를 사용한다. 이 헬퍼는 `imageEl.data`를 `{ ...data, dpi, url, originalWidth, originalHeight, objectFit: 'cover' }`로 갱신한다 — 단순히 `url` setter만 호출하는 것이 아니라 원본 이미지 픽셀 크기(`originalWidth`/`originalHeight`)와 `dpi`, `objectFit: 'cover'`를 함께 설정하여 `LayoutImageElement.render()`에서 `_computeObjectFit`이 자동으로 크롭 영역을 계산하도록 한다. 이후 `void imageEl.render()`로 렌더링을 트리거한다.
 
-paragraph 주입은 `_injectText` 헬퍼를 사용한다. 부모 box의 `requestRerenderAffectedParagraphs()`로 오버랩된 다른 paragraph를 갱신한다.
+paragraph 주입은 `_injectText` 헬퍼를 사용한다. 부모 box의 `requestRerenderAffectedParagraphs()`로 오버랩된 다른 paragraph를 갱신한다. 이미지 주입(`_applyImageToElement`) 자체는 EditManager 이벤트를 발생시키지 않지만, 호출부에서 `box.contentUid = uid`를 설정해 `boxPropertyChange` 이벤트가 발생하므로 호스트는 `documentData` 동기화와 undo/redo 히스토리 push를 수행할 수 있다.
 
 ### 4.5 요소 패턴(element) 주입
 
 요소 패턴 항목(`contentType === 'element'`)은 클릭한 box의 부모 컨테이너에 새 box를 생성하여 주입한다. `ElementPatternContent`의 `boxData`와 `position`을 사용한다.
+
+주입 완료 후 `EditManager._dispatchLayoutAdd({ element, container, source: 'insert' })`로 `layoutAdd` 이벤트를 발생시킨다. 호스트(예: `LayoutEditor`)는 이 이벤트를 구독하여 `documentData` 동기화와 undo/redo 히스토리 push를 수행한다.
 
 #### 컨테이너 찾기: `_findPatternContainer`
 
@@ -343,8 +350,9 @@ paragraph 주입은 `_injectText` 헬퍼를 사용한다. 부모 box의 `request
 Place Gun이 활성 상태이고 다음으로 쏠 항목의 `contentType === 'element'`일 때, 마우스 커서를 따라 점선 박스 미리보기가 표시된다. Insert 모드의 미리보기와 동일한 스타일(`2px dashed #1a73e8`, `rgba(26, 115, 232, 0.1)` 배경, `Z_INDEX_INSERT_PREVIEW`)을 사용한다.
 
 - **mousemove**: `PlaceGunController._onMouseMove`가 마우스 위치에서 배치될 컨테이너(`_findPatternContainer`)와 좌표를 계산하여 preview 박스의 화면 위치/크기를 갱신한다. 동시에 `_updateHighlight`로 배치될 부모 컨테이너에 `reparent-target` 속성(주황색 `#ff9800` 2px 테두리)을 설정하여 시각적으로 표시한다. 이전 하이라이트 대상과 다르면 이전 속성을 제거하고 새 컨테이너에 설정한다.
-- **absolute 패턴**: 마우스 위치를 컨테이너 mm 좌표로 변환 → 점선 박스 좌상단을 마우스 위치로, 크기는 `boxData.width`/`height`(mm)를 `GridCalculator.ppm × scale`로 화면 px 변환.
-- **static 패턴**: `_mmToStatic`으로 컬럼 인덱스/줄 수를 계산하고, `columnCoords[startCol].x1` ~ `columnCoords[endCol].x2`로 스냅된 x범위, `줄 수 × lineHeight`로 높이를 화면 px로 변환. 컬럼 span은 `boxData.width`(컬럼 개수)를 사용하며 컨테이너의 남은 컬럼 수를 초과하지 않도록 클램핑.
+- **absolute 패턴**: 마우스 위치를 root 요소 기준 mm 좌표로 변환 → 점선 박스 좌상단을 마우스 위치로, 크기는 `boxData.width`/`height`(mm)를 `GridCalculator.ppm × scale`로 화면 px 변환.
+- **static 패턴**: root 요소의 컬럼/라인 그리드에 스냅. `columnCoords[startCol].x1` ~ `columnCoords[endCol].x2`로 스냅된 x범위, `줄 수 × lineHeight`로 높이를 화면 px로 변환. 컬럼 span은 `boxData.width`(컬럼 개수)를 사용하며 컨테이너의 컬럼 수를 초과하지 않도록 클램핑. 라인 상한은 `containerLineCount - boxData.height`로 클램핑하여 preview가 root 하단을 넘지 않도록 함.
+- **root 요소 기준**: preview는 `editableRootId`가 지정한 박스(없으면 document)의 그리드에 스냅한다. 특정 박스 기준이 아니므로 마우스가 박스 경계를 넘어도 자유롭게 따라간다.
 - **표시 조건**: `placeGunActive === true` && 다음 항목 `contentType === 'element'` && 마우스 커서가 `<x-layout-document>` 영역 내 && `_findPatternContainer`가 컨테이너를 반환. 항목이 없거나 element가 아니거나 커서가 문서 밖이거나 컨테이너를 찾지 못하면 preview 및 하이라이트 제거.
 - **제거 시점**: `detach()`(Place Gun 비활성화), `handleBoxMouseDown`/`handleDocumentMouseDown` 배치 직전, mousemove에서 조건 불만족 시. preview 제거와 하이라이트 제거는 항상 함께 수행된다.
 
@@ -362,7 +370,7 @@ Place Gun이 활성 상태이고 다음으로 쏠 항목의 `contentType === 'el
 
 ### 4.6 스타일 패턴(style) 주입
 
-스타일 패턴 항목(`contentType === 'style'`)은 클릭한 box 내의 첫 번째 paragraph를 찾아 `StylePatternContent`의 `textStyle`/`paragraphStyle`을 기존 스타일에 덮어쓴다. `paragraph.data` setter로 갱신 후 `markStructureChangedAndRender()`로 재렌더링한다.
+스타일 패턴 항목(`contentType === 'style'`)은 클릭한 box 내의 첫 번째 paragraph를 찾아 `StylePatternContent`의 `textStyle`/`paragraphStyle`을 기존 스타일에 덮어쓴다. `paragraph.data` setter로 갱신 후 `markStructureChangedAndRender()`로 재렌더링한다. 이후 `EditManager.notifyTextChange(paragraph)`로 `textChange` 이벤트를 발생시켜 호스트가 `documentData` 동기화와 undo/redo 히스토리 push를 수행하도록 한다.
 
 ---
 
