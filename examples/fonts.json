@@ -10,5 +10,11 @@
     "weight": 400,
     "style": "normal",
     "ttfFilename": "fonts/KMIBMyoungjo.ttf"
+  },
+  {
+    "family": "중앙신문명조",
+    "weight": 400,
+    "style": "normal",
+    "ttfFilename": "fonts/KMIBMyoungjo.ttf"
   }
 ]

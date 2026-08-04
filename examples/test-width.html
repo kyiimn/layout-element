@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<style>
+  body { margin: 20px; background: #fff; }
+  #test { width: 500px; }
+</style>
+</head>
+<body>
+<div id="test"></div>
+<script src="dist/layout-element.iife.js"></script>
+<script>
+(async () => {
+  const { FontLoader, ColorRegistry, exampleData } = window.LayoutElement;
+  await FontLoader.getInstance().init();
+  await ColorRegistry.getInstance().init();
+
+  const doc = document.createElement('x-layout-document');
+  document.getElementById('test').appendChild(doc);
+  doc.data = exampleData;
+  await doc.render();
+
+  setTimeout(() => {
+    const paras = document.querySelectorAll('x-layout-paragraph');
+    let overflow = [];
+    
+    paras.forEach((para, pi) => {
+      const cols = para.querySelectorAll('x-layout-column');
+      cols.forEach((col, ci) => {
+        const sr = col.shadowRoot;
+        if (!sr) return;
+        const spans = sr.querySelectorAll('span[data-source-offset]');
+        const colRect = col.getBoundingClientRect();
+        spans.forEach(s => {
+          const r = s.getBoundingClientRect();
+          if (r.right > colRect.right + 1) {
+            const inner = s.querySelector('span[data-char-inner]');
+            overflow.push({
+              pi, ci,
+              char: inner ? inner.textContent : s.textContent,
+              diff: Math.round((r.right - colRect.right) * 100) / 100
+            });
+          }
+        });
+      });
+    });
+    
+    document.title = overflow.length === 0 ? 'OK' : 'OVERFLOW:' + overflow.length;
+  }, 2000);
+})();
+</script>
+</body>
+</html>
