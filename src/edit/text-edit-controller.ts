@@ -1574,21 +1574,28 @@ export class TextEditController {
     if (!this._isComposing) return;
 
     if (event.data && this._compositionSpan) {
-      this._compositionSpan.innerText = event.data;
-
-      // 조합 글자의 스타일 업데이트 (글자가 바뀌면 너비도 변함)
       const model = this._paragraph.model;
       if (model) {
         const charStyle = model.genCharStyle(event.data);
-      // genCharStyle does not include textDecoration — underline must be re-applied after Object.assign
         Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(this._compositionSpan.style, charStyle);
         this._compositionSpan.style.textDecoration = "underline";
         this._compositionSpan.style.textUnderlineOffset = "2px";
+
+        let inner = this._compositionSpan.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
+        if (!inner) {
+          inner = document.createElement('span');
+          inner.dataset.charInner = 'true';
+          const innerStyle = model.genCharInnerStyle();
+          Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(inner.style, innerStyle);
+          this._compositionSpan.appendChild(inner);
+        }
+        inner.textContent = event.data;
       }
 
       this._cursorModel.offset = this._compositionStartOffset + event.data.length;
     } else if (this._compositionSpan) {
-      this._compositionSpan.innerText = "";
+      const inner = this._compositionSpan.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
+      if (inner) inner.textContent = "";
       this._cursorModel.offset = this._compositionStartOffset;
     }
     if (!this._positionCursorFromCompositionSpan()) {
@@ -1762,7 +1769,14 @@ export class TextEditController {
     }
     span.dataset.offset = String(sourceOffset); // temporary offset; will be corrected on re-render
     span.dataset.temporary = "true";
-    span.innerText = char;
+    const inner = document.createElement('span');
+    inner.dataset.charInner = 'true';
+    const innerStyle = model?.genCharInnerStyle();
+    if (innerStyle) {
+      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(inner.style, innerStyle);
+    }
+    inner.textContent = char;
+    span.appendChild(inner);
     return span;
   }
 
