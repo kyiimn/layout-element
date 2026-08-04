@@ -326,37 +326,69 @@ freeRegions = [
 
 ---
 
-## 6. 글자 폭 측정 (`_charWidthMm()`)
+## 6. 글자 폭 측정 (`_charWidthMm()``)
 
 ### 6.1 개요
 
-`_charWidthMm()`는 Canvas 2D `measureText()`를 사용해 문자의 **advance width**를 측정한 뒤 **mm 단위**로 반환한다.
+`_charWidthMm()`는 `TEXT_MEASUREMENT_MODE` 상수(`src/constants/defaults.ts`)에 따라 두 가지 측정 모드를 지원한다.
+
+- **`'canvas'` (기본값)**: Canvas 2D `measureText()`를 사용해 문자의 **advance width**를 측정한 뒤 **mm 단위**로 반환한다. 브라우저 렌더링 파이프라인에 의존하므로 환경(브라우저 엔진/OS/DPI/hinting)마다 미세하게 다른 결과를 낼 수 있다. 모니터 내에서 scale 무관성은 보장되지만, 클라이언트 ↔ 서버(Playwright) 간 일치성은 보장되지 않는다.
+- **`'opentype'`**: opentype.js로 폰트 메트릭 테이블(`hmtx`)을 직접 파싱하여 `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 폭을 계산한다. 같은 TTF 파일을 사용하는 한 환경에 무관하게 동일한 값을 반환하므로, 모니터 작업 결과가 서버 재렌더링/윤전기 인쇄물과 동일하게 보장된다. 폰트/글리프 조회 실패 시 자동으로 canvas 모드로 폴백한다.
 
 ```ts
-private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle, ppm?: number): number {
-  const effectivePpm = ppm ?? (this._columnPpm[0] || GridCalculator.ppm);
-  this._ctx.font = this._getCachedFontString(textBlockStyle, effectivePpm);
-  const metrics = this._ctx.measureText(char);
-  const rawWidthMm = metrics.width / effectivePpm;
+private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle): number {
   const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-  const maxWidthMm = this.widthRatio * fontSize;
   const isHalfWidth = char.length === 1 && char.charCodeAt(0) <= 255;
   const minWidthEm = (char === ' ') ? this.spaceRatio : (!isHalfWidth ? 0.15 : 0.35);
   const minWidthMm = minWidthEm * fontSize;
+
+  if (TEXT_MEASUREMENT_MODE === 'opentype') {
+    const otWidth = this._charWidthMmViaOpentype(char, textBlockStyle, fontSize);
+    if (otWidth !== null) {
+      const widthWithRatio = otWidth * this.widthRatio;
+      return Math.max(widthWithRatio, minWidthMm);
+    }
+  }
+
+  const maxWidthMm = this.widthRatio * fontSize;
+  const ppm = this._columnPpm[0] || GridCalculator.ppm;
+  this._ctx.font = this._getCachedFontString(textBlockStyle, ppm);
+  const metrics = this._ctx.measureText(char);
+  const rawWidthMm = metrics.width / ppm;
   return Math.min(Math.max(rawWidthMm, minWidthMm), maxWidthMm);
+}
+
+private _charWidthMmViaOpentype(char: string, textBlockStyle: TextBlockStyle | undefined, fontSize: number): number | null {
+  const fontLoader = FontLoader.getInstance();
+  const fontName = textBlockStyle?.fontFamily;
+  const otFont = fontLoader.getOpenTypeFont(fontName);
+  if (!otFont) return null;
+
+  const glyph = otFont.charToGlyph(char);
+  if (!glyph || glyph.advanceWidth === undefined || glyph.advanceWidth === null) {
+    return null;
+  }
+
+  return (glyph.advanceWidth / otFont.unitsPerEm) * fontSize;
 }
 ```
 
 ### 6.2 핵심 포인트
 
-- `metrics.width`(advance width, px)를 `ppm`으로 나누어 mm로 변환한다. Canvas `measureText().width`는 폰트 메트릭에 의해 `fontSizePx`에 정확히 선형 비례하므로, `measureText().width / ppm`은 **scale(ppm)에 완전히 무관**한 mm 값을 반환한다.
+- **canvas 모드**: `metrics.width`(advance width, px)를 `ppm`으로 나누어 mm로 변환한다. Canvas `measureText().width`는 폰트 메트릭에 의해 `fontSizePx`에 정확히 선형 비례하므로, `measureText().width / ppm`은 **scale(ppm)에 완전히 무관**한 mm 값을 반환한다.
+- **opentype 모드**: `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 폭을 직접 계산한다. ppm 변환을 거치지 않으므로 환경(브라우저 엔진/OS/DPI)에 완전히 무관하며, 같은 TTF 파일을 사용하는 한 클라이언트 ↔ 서버 간 동일한 결과를 보장한다.
+- **장평(`widthRatio`) 처리 — 모드별 차이**:
+  - **canvas 모드**: `widthRatio * fontSize`를 **상한 클램프**로 적용. canvas는 glyph의 실제 렌더링 폭을 모르므로 상한선으로 휴리스틱하게 장평을 강제한다. 원본 폭이 상한보다 좁으면 장평이 적용되지 않는 근본적 한계가 있다.
+  - **opentype 모드**: `widthRatio`를 **곱셈**으로 적용. `glyph.advanceWidth`가 정확한 원본 폭이므로, `rawWidth × widthRatio`로 모든 글자에 정확히 장평이 반영된다. 상한 클램프가 없으므로 좁은 글자도 정확히 축소된다.
 - **`Math.round()`를 사용하지 않는다.** 부동소수점 정밀도를 보존하여 서로 다른 scale에서 동일한 줄바꿈 결과를 보장한다.
-- `maxWidthMm = widthRatio * fontSize`(mm)로 상한 클램프 — 장평 비율 반영.
-- `minWidthMm` 바닥값을 두어 0 폭 문자가 되는 것을 방지한다.
-  - 공백 문자: `spaceRatio` em (기본값 0.15, `TextStyle.spaceRatio`로 설정 가능)
-  - 반각이 아닌 문자: `0.15em`
-  - 반각 문자: `0.35em`
+- **최소 폭(`minWidthMm`)**: 양쪽 모드 공통. 결함 글리프(0폭/비정상적 narrow) 방어. 공백은 `spaceRatio` em, 반각 0.35em, 전각 0.15em. 장평 적용 후에 바닥값으로 적용.
 - 반각 판정은 `char.charCodeAt(0) <= 255`로 이루어진다. Latin-1 전각 문자(128-255)는 반각으로 오분류될 수 있다.
+
+### 6.3 모드 전환 및 폴백
+
+- `TEXT_MEASUREMENT_MODE` 상수를 변경하여 두 모드를 전환할 수 있다. 모드 변경 후에는 모든 단락을 재렌더링해야 결과가 반영된다.
+- **opentype → canvas 폴백**: opentype.js가 로드되지 않았거나, 폰트 파싱에 실패했거나, 특정 글리프를 찾을 수 없는 경우 자동으로 canvas 모드로 폴백한다. 이때 `FontLoader.opentypeEnabled`가 `false`이면 이후 모든 opentype 시도가 즉시 `null`을 반환하여 불필요한 오버헤드를 방지한다.
+- **`base64Data`가 없는 폰트**: `ttfFilename` 경로의 폰트는 별도 fetch가 필요하므로 opentype.js 캐시에서 누락된다. 해당 폰트로 측정 시 canvas 모드로 폴백한다. 화면 모드에서 `base64Data`가 우선되므로 대부분의 케이스가 커버된다.
 
 ### 6.3 폰트 문자열 캐시
 
@@ -1066,7 +1098,7 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 - `overlapPadding`이 설정된 이미지는 타원 기반 감지를 사용한다. 캔버스가 없으면 기하학적 확장 사각형으로 폴백하며, 이 경우 투명 영역 구분이 불가능하다.
 - 텍스트 오버플로우는 마지막 컬럼에서 `_overflow`로 집계되며 `render-error` 이벤트로 통지된다. 오버플로우된 라인은 `renderText()`에서 `display: none` 처리되어 시각적으로 숨겨진다. `_createLineWithParts()`가 overflow를 반환한 경우에도 라인 데이터를 `columnContent`에 포함시켜, `_computeRenderStats()`가 라인 기반 오버플로우를 감지할 수 있도록 한다. 이는 텍스트 끝의 `\n`으로 인해 발생하는 빈 라인 오버플로우도 감지하기 위함이다.
 - 오버플로우 발생 시 `LayoutParagraphElement`의 `:host`에 하단 8px 빨간 inset shadow(`inset 0 -8px 0 0 #ff0000`)가 자동 적용되어 사용자에게 오버플로우를 시각적으로 알린다. 인쇄 모드에서는 적용되지 않는다. 오버플로우가 해제되면 shadow도 자동 제거된다.
-- Canvas 폰트 측정은 실제 DOM 렌더링과 약간 다를 수 있으나, `widthRatio`와 `minWidth` 보정으로 대부분의 경우 일치한다.
+- Canvas 폰트 측정은 실제 DOM 렌더링과 약간 다를 수 있으나, `widthRatio`와 `minWidth` 보정으로 대부분의 경우 일치한다. **opentype 모드**(`TEXT_MEASUREMENT_MODE === 'opentype'`)에서는 폰트 메트릭 테이블에서 직접 읽은 advance width를 사용하므로 브라우저 렌더링 파이프라인 차이에서 오는 불일치가 발생하지 않는다. 단, opentype.js가 로드되지 않았거나 폰트 파싱에 실패하면 자동으로 canvas 모드로 폴백한다.
 - `LayoutParagraphElement.render()` 완료 후 항상 `render-complete` 커스텀 이벤트가 디스패치된다. 오버플로우 발생 여부와 무관하게 렌더링 결과를 통지하며, 페이로드는 `RenderCompleteEventDetail` 타입을 따른다. 배치된 글자/라인 수(`placed.chars`, `placed.lines`), 오버플로우 여부 및 통계(`overflow.hasOverflow`, `overflow.chars`, `overflow.lines`), 컬럼 수(`columnCount`)를 포함한다. `render-error`와 독립적으로 동작하며 기존 이벤트에 영향을 주지 않는다.
 
 ---
