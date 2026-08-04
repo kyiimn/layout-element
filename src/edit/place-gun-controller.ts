@@ -643,6 +643,12 @@ export class PlaceGunController {
     newBoxEl.data = newBoxData;
     container.appendChild(newBoxEl);
     newBoxEl.requestRerenderAffectedParagraphs();
+
+    this._manager._dispatchLayoutAdd({
+      element: newBoxEl,
+      container,
+      source: 'insert',
+    });
   }
 
   /**
@@ -665,6 +671,7 @@ export class PlaceGunController {
       paragraphStyle: { ...data.paragraphStyle, ...content.paragraphStyle },
     };
     paragraph.markStructureChangedAndRender();
+    this._manager.notifyTextChange(paragraph);
   }
 
   /**
