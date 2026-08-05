@@ -354,16 +354,26 @@ export class TextEditController {
     }
 
     if (this._wasFocused) {
-      this._textarea.focus();
+      // preventScroll: textarea 자동 스크롤이 스크롤 컨테이너를 좌상단으로 점프시키는 버그 방지.
+      this._textarea.focus({ preventScroll: true });
       this._wasFocused = false;
     }
   }
 
   /**
    * 숨겨진 textarea에 포커스를 준다.
+   *
+   * `preventScroll: true`로 브라우저 기본 스크롤-인토-뷰를 억제한다. textarea는
+   * 1x1 투명 요소이므로 자동 스크롤 시 컨테이너가 좌상단으로 점프한다. 커서/선택의
+   * 시각적 위치는 `_updateCursorPosition()`/`_updateSelection()`이 별도 관리한다.
+   *
+   * @example
+   * controller.focus(); // 커서 표시, 스크롤 점프 없음
+   *
+   * @returns void
    */
   focus(): void {
-    this._textarea.focus();
+    this._textarea.focus({ preventScroll: true });
   }
 
   /**

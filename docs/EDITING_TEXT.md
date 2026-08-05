@@ -304,7 +304,7 @@ flowchart LR
 5. `_updateCursorPosition()` — 커서를 새 DOM 위치에 재배치.
 6. `_updateSelection()` — 선택 영역을 새 DOM 위치에 재배치.
 7. 조합 중이면 `_compositionSpan`을 새 DOM에 재부착. `renderedOffset(_compositionStartOffset)`으로 위치를 찾고, 실패하면 이전/다음 문자 또는 첫 컬럼 첫 요소에 폴백한다.
-8. `_wasFocused`가 true면 `textarea.focus()`로 포커스 복원.
+8. `_wasFocused`가 true면 `textarea.focus({ preventScroll: true })`로 포커스 복원. `preventScroll: true`로 스크롤 컨테이너의 좌상단 점프를 방지한다.
 
 #### `setCursor()`
 
@@ -342,7 +342,7 @@ const { textStyle, paragraphStyle } = controller.currentStyle;
 
 #### `focus()` / `blur()`
 
-- `focus()`: `this._textarea.focus()`를 호출한다. 포커스를 받으면 `_onFocus()` 콜백이 실행되고, 선택 영역이 없을 때만 커서를 보이게 한다.
+- `focus()`: `this._textarea.focus({ preventScroll: true })`를 호출한다. `preventScroll: true` 옵션으로 브라우저의 기본 스크롤-인토-뷰 동작을 억제하여, 포커스 시 스크롤 컨테이너가 textarea 위치(paragraph shadow root의 1x1 투명 요소)로 강제 스크롤되어 좌상단으로 점프하는 부작용을 방지한다. 커서/선택의 시각적 위치는 `_updateCursorPosition()`과 `_updateSelection()`이 별도로 관리하므로 포커스 자체의 스크롤은 불필요하다. 포커스를 받으면 `_onFocus()` 콜백이 실행되고, 선택 영역이 없을 때만 커서를 보이게 한다.
 - `blur()`: `this._textarea.blur()`를 호출한다. 포커스를 잃으면 `_onBlur()` 콜백이 실행되고, 진행 중인 IME 조합이 있으면 완료 처리한 뒤 커서를 숨긴다.
 
 ### 3.4 `TextEditCoordinateMapper`
