@@ -194,6 +194,9 @@ export class EditManager {
   /** 편집 루트 box id. null이면 제한 없음. 지정 시 해당 box 내부 요소만 편집 가능, Root 자체는 편집 불가. */
   private _editableRootId: string | null = null;
 
+  /** 드래그/리사이즈 시 그리드 스냅 활성 여부. true면 스냅, false면 자유 이동/크기. */
+  private _snapEnabled = true;
+
   /**
    * 이 EditManager가 관리하는 문서 요소.
    *
@@ -352,6 +355,7 @@ export class EditManager {
     this._selectableBoxIds = null;
     this._selectableRootId = null;
     this._editableRootId = null;
+    this._snapEnabled = true;
 
     if (this._layoutEditController) {
       this._layoutEditController.destroy();
@@ -1291,6 +1295,15 @@ export class EditManager {
 
   get editableRootId(): string | null {
     return this._editableRootId;
+  }
+
+  /** 드래그/리사이즈 시 그리드 스냅 활성 여부. */
+  get snapEnabled(): boolean {
+    return this._snapEnabled;
+  }
+
+  set snapEnabled(value: boolean) {
+    this._snapEnabled = value;
   }
 
   /**

@@ -206,15 +206,19 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 11);
       styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 12);
       styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="right"] { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 13);
-      styleEl.sheet.insertRule('@media screen { .type-label { position: absolute; top: 0; left: 0; padding: 0px 0px 0px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: auto; user-select: none; cursor: grab; z-index: ' + Z_INDEX_TYPE_LABEL + '; display: none; white-space: nowrap; } }', 14);
-      styleEl.sheet.insertRule('@media screen { :host([selected]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 0, 0, 0.85); cursor: grab; } }', 15);
-      styleEl.sheet.insertRule('@media screen { :host([hovered]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); cursor: grab; } }', 16);
-      styleEl.sheet.insertRule('@media screen { :host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); cursor: grab; } }', 17);
-      styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .type-label:active, :host([editable-layout][hovered]) .type-label:active { cursor: grabbing; } }', 18);
-      styleEl.sheet.insertRule('@media screen { :host([text-focused]) .type-label { display: none; } }', 19);
-      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }', 20);
-      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn:hover { opacity: 1; } }', 21);
-      styleEl.sheet.insertRule('@media print { .type-label { display: none !important; } }', 22);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="nw"] { top: -4px; left: -4px; cursor: nwse-resize; } }', 14);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="ne"] { top: -4px; right: -4px; cursor: nesw-resize; } }', 15);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="sw"] { bottom: -4px; left: -4px; cursor: nesw-resize; } }', 16);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="se"] { bottom: -4px; right: -4px; cursor: nwse-resize; } }', 17);
+      styleEl.sheet.insertRule('@media screen { .type-label { position: absolute; top: 0; left: 0; padding: 0px 0px 0px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: auto; user-select: none; cursor: grab; z-index: ' + Z_INDEX_TYPE_LABEL + '; display: none; white-space: nowrap; } }', 18);
+      styleEl.sheet.insertRule('@media screen { :host([selected]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 0, 0, 0.85); cursor: grab; } }', 19);
+      styleEl.sheet.insertRule('@media screen { :host([hovered]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); cursor: grab; } }', 20);
+      styleEl.sheet.insertRule('@media screen { :host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); cursor: grab; } }', 21);
+      styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .type-label:active, :host([editable-layout][hovered]) .type-label:active { cursor: grabbing; } }', 22);
+      styleEl.sheet.insertRule('@media screen { :host([text-focused]) .type-label { display: none; } }', 23);
+      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }', 24);
+      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn:hover { opacity: 1; } }', 25);
+      styleEl.sheet.insertRule('@media print { .type-label { display: none !important; } }', 26);
       this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));
@@ -258,12 +262,12 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   private _ensureResizeHandles(): void {
-    if (this._resizeHandles.length === 4) return;
+    if (this._resizeHandles.length === 8) return;
 
     this._resizeHandles = [];
     this._shadowRoot.querySelectorAll('.resize-handle').forEach((h) => h.remove());
 
-    for (const dir of ['top', 'bottom', 'left', 'right'] as const) {
+    for (const dir of ['top', 'bottom', 'left', 'right', 'nw', 'ne', 'sw', 'se'] as const) {
       const handle = document.createElement('div');
       handle.classList.add('resize-handle');
       handle.setAttribute('data-handle', dir);

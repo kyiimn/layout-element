@@ -12,7 +12,8 @@ import type { GridCalculator } from "@/core";
  *
  * absolute box를 드래그/리사이즈 중 부모 그리드의 컬럼/라인 경계에 이 값보다 가까이
  * 접근하면 해당 경계로 흡착한다. `EditManager.screenPxToMm()`을 통해 mm로 환산하여
- * 비교한다. Shift 키를 누른 상태에서는 이 한계를 무시하고 자유 이동/리사이즈한다.
+ * 비교한다. 스냅은 `EditManager.snapEnabled`로 토글한다 (기본값: 활성).
+ * Shift 키는 스냅 토글이 아니라 비례 제한(리사이즈)/수평수직 제한(이동)으로 동작한다.
  *
  * 값 조정 시 이 상수만 변경하면 된다.
  */
@@ -82,10 +83,16 @@ interface BoxDragState {
   } | null;
   /**
    * 최신 mousemove 이벤트의 Shift 키 누름 상태.
-   * `true`이면 자석(Snap) 기능을 비활성화하여 자유 이동한다.
+   * `true`이면 이동 시 주축(수평/수직) 제한, 리사이즈 시 비례 제한(코너 핸들)으로 동작한다.
    * rAF 콜백에서 읽기 위해 state에 보관한다.
    */
   shiftKey: boolean;
+  /**
+   * Shift 누름 중 이동 제한을 위한 고정 축. `null`이면 미결정.
+   * 드래그 시작 후 유의미한 이동이 처음 감지된 시점에 한 번 결정되며,
+   * 드래그 종료 시까지 유지된다 (사용자가 의도치 않게 축이 전환되는 현상 방지).
+   */
+  lockAxis: 'x' | 'y' | null;
 }
 
 /**
@@ -96,8 +103,8 @@ interface BoxDragState {
 interface BoxResizeState {
   /** 현재 리사이즈 중인지 여부 */
   isResizing: boolean;
-  /** 리사이즈 핸들 방향 ('top' | 'bottom' | 'left' | 'right'). null이면 비활성 */
-  handle: 'top' | 'bottom' | 'left' | 'right' | null;
+  /** 리사이즈 핸들 방향. null이면 비활성. 코너 핸들(nw/ne/sw/se)은 absolute box만 지원. */
+  handle: 'top' | 'bottom' | 'left' | 'right' | 'nw' | 'ne' | 'sw' | 'se' | null;
   /** 리사이즈 임계값(3px)을 넘어 실제로 크기 변경이 발생했는지 여부 */
   moved: boolean;
   /** 리사이즈 시작 시점의 마우스 X 좌표 (clientX) */
@@ -122,7 +129,7 @@ interface BoxResizeState {
   affectedParagraphs: Set<LayoutParagraphElement> | null;
   /**
    * 최신 mousemove 이벤트의 Shift 키 누름 상태.
-   * `true`이면 자석(Snap) 기능을 비활성화하여 자유 리사이즈한다.
+   * `true`이면 코너 핸들 리사이즈 시 가로세로 비율을 유지(비례 제한)한다.
    * rAF 콜백에서 읽기 위해 state에 보관한다.
    */
   shiftKey: boolean;
@@ -153,6 +160,7 @@ function createDragState(): BoxDragState {
     affectedParagraphs: null,
     reparentOutside: null,
     shiftKey: false,
+    lockAxis: null,
   };
 }
 
@@ -507,6 +515,7 @@ export class LayoutEditController {
     state.isDragging = true;
     state.dragMoved = false;
     state.wasSelectedOnMouseDown = wasSelected;
+    state.lockAxis = null;
     state.startMouseX = event.clientX;
     state.startMouseY = event.clientY;
     state.startLeft = box.left;
@@ -1117,10 +1126,23 @@ export class LayoutEditController {
     const isDocumentChild = box.parentElement?.type === 'document';
 
     if (box.position === 'absolute') {
+      // Shift 누름 시 주축(수평/수직) 제한. 축은 첫 유의미 이동 시 한 번 결정되어
+      // 드래그 종료 시까지 유지된다 (사용자 의도치 않은 축 전환 방지).
+      let dxMm = deltaMmX;
+      let dyMm = deltaMmY;
+      if (state?.shiftKey) {
+        if (state.lockAxis === null) {
+          if (Math.abs(deltaMmX) >= 1 || Math.abs(deltaMmY) >= 1) {
+            state.lockAxis = Math.abs(deltaMmX) >= Math.abs(deltaMmY) ? 'x' : 'y';
+          }
+        }
+        if (state.lockAxis === 'x') dyMm = 0;
+        else if (state.lockAxis === 'y') dxMm = 0;
+      }
       // 문서 직계 자식 absolute 요소는 편집 영역 밖으로 자유롭게 이동 가능
       if (isDocumentChild) {
-        const raw = { left: sLeft + deltaMmX, top: sTop + deltaMmY };
-        if (state?.shiftKey) return raw;
+        const raw = { left: sLeft + dxMm, top: sTop + dyMm };
+        if (!manager.snapEnabled) return raw;
         const snapped = this._snapAbsolutePosition(
           raw.left, raw.top, box.width, box.height, box.parentModel ?? null,
           manager.screenPxToMm(SNAP_THRESHOLD_PX),
@@ -1141,10 +1163,10 @@ export class LayoutEditController {
         ? Math.max(0, parentModel.contentHeight - box.height)
         : Math.max(0, (box.inheritStyle?.parentHeight || 0) - box.height);
       const clamped = {
-        left: Math.max(0, Math.min(maxLeft, sLeft + deltaMmX)),
-        top: Math.max(0, Math.min(maxTop, sTop + deltaMmY)),
+        left: Math.max(0, Math.min(maxLeft, sLeft + dxMm)),
+        top: Math.max(0, Math.min(maxTop, sTop + dyMm)),
       };
-      if (state?.shiftKey) return clamped;
+      if (!manager.snapEnabled) return clamped;
       const snapped = this._snapAbsolutePosition(
         clamped.left, clamped.top, box.width, box.height, parentModel,
         manager.screenPxToMm(SNAP_THRESHOLD_PX),
@@ -1166,14 +1188,38 @@ export class LayoutEditController {
     const editableTextHeight = parentModel.editableTextHeight;
     const startX = columnCoords[sLeft].x1;
     const startY = columnCoords[sLeft].y1 + lineHeight * sTop;
-    const newLeftMm = startX + deltaMmX;
-    const newTopMm = startY + deltaMmY;
+
+    // Shift 누름 시 주축(수평/수직) 제한. 축은 첫 유의미 이동 시 한 번 결정되어
+    // 드래그 종료 시까지 유지된다.
+    let dxMm = deltaMmX;
+    let dyMm = deltaMmY;
+    if (state?.shiftKey) {
+      if (state.lockAxis === null) {
+        if (Math.abs(deltaMmX) >= 1 || Math.abs(deltaMmY) >= 1) {
+          state.lockAxis = Math.abs(deltaMmX) >= Math.abs(deltaMmY) ? 'x' : 'y';
+        }
+      }
+      if (state.lockAxis === 'x') dyMm = 0;
+      else if (state.lockAxis === 'y') dxMm = 0;
+    }
+    const newLeftMm = startX + dxMm;
+    const newTopMm = startY + dyMm;
+
+    const maxTop = Math.floor((editableTextHeight - (lineHeight * box.height - (lineHeight - parentModel.fontSize))) / lineHeight);
+
+    if (!manager.snapEnabled) {
+      // 스냅 비활성화: 컬럼/라인을 정수로 반올림하되 자유 배치
+      const avgColWidth = parentModel.editableWidth / parentModel.columnCount;
+      const freeLeft = Math.max(0, Math.min(columnCount - box.width, Math.round((newLeftMm - columnCoords[0]!.x1) / avgColWidth)));
+      const freeTop = Math.max(0, Math.min(maxTop, Math.round((newTopMm - columnCoords[freeLeft]!.y1) / lineHeight)));
+      return { left: freeLeft, top: freeTop };
+    }
 
     // 가장 가까운 컬럼 인덱스 찾기 (스냅)
     let newLeft = 0;
     let minDist = Infinity;
     for (let i = 0; i <= columnCount - box.width; i++) {
-      const dist = Math.abs(newLeftMm - columnCoords[i].x1);
+      const dist = Math.abs(newLeftMm - columnCoords[i]!.x1);
       if (dist < minDist) {
         minDist = dist;
         newLeft = i;
@@ -1182,8 +1228,7 @@ export class LayoutEditController {
     newLeft = Math.max(0, Math.min(columnCount - box.width, newLeft));
 
     // 세로 라인 스냅 및 클램핑
-    const maxTop = Math.floor((editableTextHeight - (lineHeight * box.height - (lineHeight - parentModel.fontSize))) / lineHeight);
-    const newTop = Math.max(0, Math.min(maxTop, Math.round((newTopMm - columnCoords[newLeft].y1) / lineHeight)));
+    const newTop = Math.max(0, Math.min(maxTop, Math.round((newTopMm - columnCoords[newLeft]!.y1) / lineHeight)));
 
     return { left: newLeft, top: newTop };
   }
@@ -1455,7 +1500,7 @@ export class LayoutEditController {
         ? parentModel.contentHeight
         : (box.inheritStyle?.parentHeight || 0);
       const thresholdMm = manager.screenPxToMm(SNAP_THRESHOLD_PX);
-      const snapEnabled = !state.shiftKey;
+      const snapEnabled = manager.snapEnabled;
 
       switch (handle) {
         case 'right': {
@@ -1491,6 +1536,75 @@ export class LayoutEditController {
           const result = { left: sLeft, top, width: sWidth, height };
           if (!snapEnabled) return result;
           return this._snapAbsoluteResize('top', result.left, result.top, result.width, result.height, parentModel, thresholdMm);
+        }
+        case 'nw':
+        case 'ne':
+        case 'sw':
+        case 'se': {
+          // 코너 핸들: 두 축 동시 리사이즈. 고정점은 대각 코너.
+          // Shift 키 시 가로세로 비율 유지 (시작 크기 기준).
+          const isLeftHandle = handle === 'nw' || handle === 'sw';
+          const isTopHandle = handle === 'nw' || handle === 'ne';
+          // 고정 대각점
+          const fixedRight = sLeft + sWidth;
+          const fixedBottom = sTop + sHeight;
+          // 가로축 새 값
+          let newWidth: number;
+          let newLeft = sLeft;
+          if (isLeftHandle) {
+            newWidth = Math.max(1, Math.min(fixedRight, sWidth - deltaMmX));
+            newLeft = Math.max(0, Math.min(fixedRight - 1, sLeft + deltaMmX));
+          } else {
+            const maxWidth = parentW - sLeft;
+            newWidth = Math.max(1, Math.min(maxWidth, sWidth + deltaMmX));
+          }
+          // 세로축 새 값
+          let newHeight: number;
+          let newTop = sTop;
+          if (isTopHandle) {
+            newHeight = Math.max(1, Math.min(fixedBottom, sHeight - deltaMmY));
+            newTop = Math.max(0, Math.min(fixedBottom - 1, sTop + deltaMmY));
+          } else {
+            const maxHeight = parentH - sTop;
+            newHeight = Math.max(1, Math.min(maxHeight, sHeight + deltaMmY));
+          }
+          // Shift 비례 제한 (absolute 전용)
+          if (state.shiftKey && sWidth > 0 && sHeight > 0) {
+            const ratio = sWidth / sHeight;
+            const widthDelta = Math.abs(newWidth - sWidth);
+            const heightDelta = Math.abs(newHeight - sHeight);
+            if (widthDelta >= heightDelta) {
+              const derivedHeight = newWidth / ratio;
+              if (isTopHandle) {
+                newTop = fixedBottom - derivedHeight;
+                newHeight = derivedHeight;
+              } else {
+                newHeight = derivedHeight;
+              }
+            } else {
+              const derivedWidth = newHeight * ratio;
+              if (isLeftHandle) {
+                newLeft = fixedRight - derivedWidth;
+                newWidth = derivedWidth;
+              } else {
+                newWidth = derivedWidth;
+              }
+            }
+            // 클램핑 재적용
+            if (isLeftHandle) {
+              newLeft = Math.max(0, Math.min(fixedRight - 1, newLeft));
+              newWidth = Math.max(1, Math.min(fixedRight - newLeft, newWidth));
+            } else {
+              newWidth = Math.max(1, Math.min(parentW - sLeft, newWidth));
+            }
+            if (isTopHandle) {
+              newTop = Math.max(0, Math.min(fixedBottom - 1, newTop));
+              newHeight = Math.max(1, Math.min(fixedBottom - newTop, newHeight));
+            } else {
+              newHeight = Math.max(1, Math.min(parentH - sTop, newHeight));
+            }
+          }
+          return { left: newLeft, top: newTop, width: newWidth, height: newHeight };
         }
       }
     }
@@ -1533,6 +1647,36 @@ export class LayoutEditController {
         const height = Math.max(1, Math.min(maxHeight, sHeight - deltaLines));
         const top = Math.max(0, Math.min(sTop + sHeight - 1, sTop + deltaLines));
         return { left: sLeft, top, width: sWidth, height };
+      }
+      case 'nw':
+      case 'ne':
+      case 'sw':
+      case 'se': {
+        // static 코너 핸들: 가로(left/right) + 세로(top/bottom) 동작 조합.
+        // 비례 제한 불가 (단/라인 정수 단위이므로).
+        const isLeftHandle = handle === 'nw' || handle === 'sw';
+        const isTopHandle = handle === 'nw' || handle === 'ne';
+        let newLeft = sLeft;
+        let newWidth = sWidth;
+        let newTop = sTop;
+        let newHeight = sHeight;
+        if (isLeftHandle) {
+          const maxWidth = sLeft + sWidth;
+          newWidth = Math.max(1, Math.min(maxWidth, sWidth - deltaCols));
+          newLeft = Math.max(0, Math.min(sLeft + sWidth - 1, sLeft + deltaCols));
+        } else {
+          const maxWidth = columnCount - sLeft;
+          newWidth = Math.max(1, Math.min(maxWidth, sWidth + deltaCols));
+        }
+        if (isTopHandle) {
+          const maxHeight = sTop + sHeight;
+          newHeight = Math.max(1, Math.min(maxHeight, sHeight - deltaLines));
+          newTop = Math.max(0, Math.min(sTop + sHeight - 1, sTop + deltaLines));
+        } else {
+          const maxHeightForBox = maxLines - sTop;
+          newHeight = Math.max(1, Math.min(maxHeightForBox, sHeight + deltaLines));
+        }
+        return { left: newLeft, top: newTop, width: newWidth, height: newHeight };
       }
     }
 
@@ -2118,12 +2262,12 @@ export class LayoutEditController {
    *
    * @param event - 마우스 이벤트
    * @param _box - box 요소 (현재 사용되지 않음)
-   * @returns 핸들 방향 ('top' | 'bottom' | 'left' | 'right'). 없으면 `null`
+   * @returns 핸들 방향. 없으면 `null`
    */
-  private _getResizeHandle(event: MouseEvent, _box: LayoutBoxElement): 'top' | 'bottom' | 'left' | 'right' | null {
+  private _getResizeHandle(event: MouseEvent, _box: LayoutBoxElement): 'top' | 'bottom' | 'left' | 'right' | 'nw' | 'ne' | 'sw' | 'se' | null {
     for (const el of event.composedPath()) {
       if (el instanceof HTMLElement && el.classList.contains('resize-handle')) {
-        return (el.getAttribute('data-handle') as 'top' | 'bottom' | 'left' | 'right') ?? null;
+        return (el.getAttribute('data-handle') as 'top' | 'bottom' | 'left' | 'right' | 'nw' | 'ne' | 'sw' | 'se') ?? null;
       }
     }
     return null;
