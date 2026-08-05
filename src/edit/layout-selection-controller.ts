@@ -1,7 +1,30 @@
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
+import { Z_INDEX_MARQUEE_RECT } from "@/constants";
 import { EditManager } from "./edit-manager";
+
+/**
+ * 마키(고무줄) 선택 중 상태.
+ */
+interface MarqueeState {
+  /** 마키 시작 시점의 마우스 clientX. */
+  startX: number;
+  /** 마키 시작 시점의 마우스 clientY. */
+  startY: number;
+  /** 3px 임계값을 넘어 실제 마키 드래그가 시작되었는지 여부. */
+  active: boolean;
+  /** 마키 사각형 DOM 요소. null이면 아직 생성되지 않음. */
+  rectEl: HTMLDivElement | null;
+  /** 마우스가 눌려 있는 동안의 최신 clientX. */
+  lastX: number;
+  /** 마우스가 눌려 있는 동안의 최신 clientY. */
+  lastY: number;
+  /** rAF ID. 중복 스케줄링 방지. */
+  rafId: number | null;
+  /** 드래그 중 하이라이트된 박스 목록 (DOM 속성만 조작, EditManager state 미반영). */
+  highlightedBoxes: Set<LayoutBoxElement>;
+}
 
 /**
  * 레이아웃 선택 컨트롤러.
@@ -29,6 +52,13 @@ export class LayoutSelectionController {
   /** 컨트롤러 활성화 여부. `attach()`/`detach()`로 토글된다 */
   private _attached = false;
 
+  /** 마키 선택 상태. null이면 마키 진행 중 아님. */
+  private _marquee: MarqueeState | null = null;
+  /** 마키 시작 시 mousedown이 빈 영역(box가 아닌 곳)에서 발생했는지. */
+  private _marqueePending = false;
+  /** 마키 시작 시점의 Ctrl/Meta 키 상태 (기존 선택에 추가 여부 결정). */
+  private _marqueeAdditive = false;
+
   /**
    * @param doc - 이벤트 리스너가 등록될 루트 HTMLElement
    * @param manager - 이 컨트롤러가 속한 EditManager 인스턴스
@@ -41,13 +71,14 @@ export class LayoutSelectionController {
   /**
    * 컨트롤러를 활성화하여 문서 레벨 click 이벤트 리스너를 등록한다.
    *
-   * `click`을 capture phase(`true`)로 등록하여
+   * `click`과 `mousedown`을 capture phase(`true`)로 등록하여
    * box의 shadow DOM 내부에서 발생한 이벤트도 먼저 가로챌 수 있도록 한다.
    * 이미 활성화된 경우(`_attached === true`) 중복 등록을 방지한다.
    */
   attach(): void {
     if (this._attached) return;
     this._attached = true;
+    this._document.addEventListener('pointerdown', this._onMouseDown, true);
     this._document.addEventListener('click', this._onClick, true);
     this._document.addEventListener('dblclick', this._onDblClick, true);
     this._document.addEventListener('contextmenu', this._onContextMenu, true);
@@ -59,9 +90,11 @@ export class LayoutSelectionController {
   detach(): void {
     if (!this._attached) return;
     this._attached = false;
+    this._document.removeEventListener('pointerdown', this._onMouseDown, true);
     this._document.removeEventListener('click', this._onClick, true);
     this._document.removeEventListener('dblclick', this._onDblClick, true);
     this._document.removeEventListener('contextmenu', this._onContextMenu, true);
+    this._cancelMarquee();
   }
 
   /**
@@ -69,6 +102,304 @@ export class LayoutSelectionController {
    */
   destroy(): void {
     this.detach();
+  }
+
+  // ─── Marquee Selection ─────────────────────────────────────────
+
+  /**
+   * 마키 선택을 시작할지 결정하기 위해 pointerdown을 감지한다.
+   *
+   * 삽입 모드, 텍스트 편집 모드, 편집 가능 box에서는 마키를 시작하지 않는다.
+   * 문서 내부의 빈 영역(box가 아닌 곳)에서 pointerdown이 발생하면 마키 후보로 기록한다.
+   * window 레벨에 pointermove/up을 capture phase로 등록하여 빠른 드래그에도 이벤트를 보장한다.
+   *
+   * @param event - pointerdown 포인터 이벤트
+   */
+  private _onMouseDown = (event: PointerEvent): void => {
+    const manager = this._manager;
+    if (manager.insertMode) return;
+    if (manager.textEditMode && manager.focusedParagraph) return;
+    if (event.button !== 0) return;
+
+    const box = this._findSelectableBoxFromEvent(event);
+    if (box) return;
+
+    const isInsideDocument = event.composedPath().some(
+      (el) => el instanceof LayoutDocumentElement
+    );
+    if (!isInsideDocument) return;
+
+    this._marqueePending = true;
+    this._marqueeAdditive = event.ctrlKey || event.metaKey;
+    event.preventDefault();
+    this._marquee = {
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+      rectEl: null,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      rafId: null,
+      highlightedBoxes: new Set(),
+    };
+
+    window.addEventListener('pointermove', this._onMarqueeMouseMove, true);
+    window.addEventListener('pointerup', this._onMarqueeMouseUp, true);
+    window.addEventListener('pointercancel', this._onMarqueeMouseUp, true);
+  };
+
+  /**
+   * 마키 진행 중 pointermove 이벤트 핸들러.
+   *
+   * 3px 임계값을 넘으면 마키 사각형을 생성하고 표시한다.
+   * 이후 rAF로 스로틀링하여 마키 사각형 갱신과 교차 박스 선택을 처리한다.
+   *
+   * @param event - pointermove 포인터 이벤트
+   */
+  private _onMarqueeMouseMove = (event: PointerEvent): void => {
+    const marquee = this._marquee;
+    if (!marquee) return;
+    marquee.lastX = event.clientX;
+    marquee.lastY = event.clientY;
+
+    if (!marquee.active) {
+      const dx = event.clientX - marquee.startX;
+      const dy = event.clientY - marquee.startY;
+      if (Math.abs(dx) <= 3 && Math.abs(dy) <= 3) return;
+      marquee.active = true;
+      marquee.rectEl = this._createMarqueeRect();
+      this._manager._suppressLayoutClick();
+    }
+
+    if (marquee.rafId !== null) return;
+    marquee.rafId = requestAnimationFrame(() => {
+      if (!marquee || !marquee.rectEl) return;
+      marquee.rafId = null;
+      this._updateMarqueeRect(marquee.rectEl, marquee.startX, marquee.startY, marquee.lastX, marquee.lastY);
+      this._highlightIntersectingBoxes(marquee, this._marqueeAdditive);
+    });
+  };
+
+  /**
+   * 마키 종료 pointerup 이벤트 핸들러.
+   *
+   * 마키가 활성화되지 않았으면(단순 클릭) 빈 영역 클릭으로 처리한다.
+   * 활성화되었으면 최종 교차 박스를 선택하고 마키를 정리한다.
+   */
+  private _onMarqueeMouseUp = (_event: PointerEvent): void => {
+    this._removeMarqueeListeners();
+
+    const marquee = this._marquee;
+    this._marquee = null;
+
+    if (!marquee) return;
+
+    if (marquee.rafId !== null) {
+      cancelAnimationFrame(marquee.rafId);
+      marquee.rafId = null;
+    }
+
+    if (!marquee.active) {
+      this._removeMarqueeRect(marquee);
+      this._manager.clearLayoutSelection(false);
+      this._manager.blurParagraph();
+      this._marqueePending = false;
+      return;
+    }
+
+    this._selectIntersectingBoxes(marquee, this._marqueeAdditive);
+    this._removeMarqueeRect(marquee);
+    // _marqueePending은 후속 click 이벤트를 _onClick에서 무시하기 위해 true로 유지.
+    // _onClick이 호출되면 _marqueePending을 false로 소비한다.
+    // click이 발생하지 않을 수 있으므로 타임아웃으로 안전망 제공.
+    window.setTimeout(() => { this._marqueePending = false; }, 300);
+  };
+
+  /**
+   * 마키 관련 window 리스너를 제거한다.
+   */
+  private _removeMarqueeListeners(): void {
+    window.removeEventListener('pointermove', this._onMarqueeMouseMove, true);
+    window.removeEventListener('pointerup', this._onMarqueeMouseUp, true);
+    window.removeEventListener('pointercancel', this._onMarqueeMouseUp, true);
+  }
+
+  /**
+   * 마키 사각형 DOM 요소를 생성하여 body에 추가한다.
+   *
+   * @returns 생성된 마키 사각형 div 요소
+   */
+  private _createMarqueeRect(): HTMLDivElement {
+    const rect = document.createElement('div');
+    rect.className = 'layout-marquee-rect';
+    rect.style.position = 'fixed';
+    rect.style.border = '1px dashed #4a90d9';
+    rect.style.background = 'rgba(74, 144, 217, 0.1)';
+    rect.style.pointerEvents = 'none';
+    rect.style.zIndex = String(Z_INDEX_MARQUEE_RECT);
+    rect.style.left = '0px';
+    rect.style.top = '0px';
+    rect.style.width = '0px';
+    rect.style.height = '0px';
+    document.body.appendChild(rect);
+    return rect;
+  }
+
+  /**
+   * 마키 사각형의 위치와 크기를 갱신한다.
+   *
+   * @param rectEl - 마키 사각형 DOM 요소
+   * @param startX - 시작 X (clientX)
+   * @param startY - 시작 Y (clientY)
+   * @param currentX - 현재 X (clientX)
+   * @param currentY - 현재 Y (clientY)
+   */
+  private _updateMarqueeRect(
+    rectEl: HTMLDivElement,
+    startX: number,
+    startY: number,
+    currentX: number,
+    currentY: number,
+  ): void {
+    const left = Math.min(startX, currentX);
+    const top = Math.min(startY, currentY);
+    const width = Math.abs(currentX - startX);
+    const height = Math.abs(currentY - startY);
+    rectEl.style.left = `${left}px`;
+    rectEl.style.top = `${top}px`;
+    rectEl.style.width = `${width}px`;
+    rectEl.style.height = `${height}px`;
+  }
+
+  /**
+   * 마키 사각형 DOM 요소를 제거한다.
+   *
+   * @param marquee - 마키 상태
+   */
+  private _removeMarqueeRect(marquee: MarqueeState): void {
+    if (marquee.rectEl && marquee.rectEl.parentElement) {
+      marquee.rectEl.parentElement.removeChild(marquee.rectEl);
+    }
+    marquee.rectEl = null;
+  }
+
+  /**
+   * 마키 영역과 교차하는 선택 가능한 box를 찾는다.
+   *
+   * @param marqueeRect - 마키 사각형의 화면 좌표
+   * @returns 교차하는 선택 가능 박스 목록
+   */
+  private _findIntersectingBoxes(marqueeRect: DOMRect): LayoutBoxElement[] {
+    if (marqueeRect.width === 0 || marqueeRect.height === 0) return [];
+    const manager = this._manager;
+    const docEl = manager.docEl;
+    const candidates: LayoutBoxElement[] = [];
+    const allBoxes = docEl.querySelectorAll('x-layout-box');
+    for (const box of allBoxes) {
+      if (!(box instanceof LayoutBoxElement)) continue;
+      if (!manager.isBoxSelectable(box)) continue;
+      const boxRect = box.getBoundingClientRect();
+      if (boxRect.width === 0 || boxRect.height === 0) continue;
+      const intersects =
+        marqueeRect.left < boxRect.right &&
+        marqueeRect.right > boxRect.left &&
+        marqueeRect.top < boxRect.bottom &&
+        marqueeRect.bottom > boxRect.top;
+      if (intersects) candidates.push(box);
+    }
+    return candidates;
+  }
+
+  /**
+   * 마키 영역과 교차하는 박스에 `selected` 속성을 직접 부여하여 실시간 하이라이트한다.
+   *
+   * EditManager의 선택 state(`_selectedLayouts`)는 건드리지 않고 DOM 속성만 조작한다.
+   * 이전 하이라이트에서 벗어난 박스는 `selected`를 제거하고, 새로 진입한 박스는 추가한다.
+   * Ctrl/Cmd(additive) 모드에서는 마키 시작 시점의 기존 선택 박스를 유지한다.
+   *
+   * @param marquee - 마키 상태
+   * @param additive - true면 기존 선택 유지 위에 하이라이트, false면 마키 영역만 하이라이트
+   */
+  private _highlightIntersectingBoxes(marquee: MarqueeState, additive: boolean): void {
+    const rectEl = marquee.rectEl;
+    if (!rectEl) return;
+    const marqueeRect = rectEl.getBoundingClientRect();
+    const candidates = this._findIntersectingBoxes(marqueeRect);
+    const candidateSet = new Set(candidates);
+
+    const manager = this._manager;
+    const existing = additive ? new Set(manager.selectedLayouts) : null;
+
+    const desired = new Set<LayoutBoxElement>();
+    for (const box of candidateSet) {
+      if (existing && existing.has(box)) continue;
+      desired.add(box);
+    }
+
+    const prev = marquee.highlightedBoxes;
+    for (const box of prev) {
+      if (!desired.has(box)) {
+        box.removeAttribute('selected');
+      }
+    }
+    for (const box of desired) {
+      box.setAttribute('selected', '');
+    }
+    marquee.highlightedBoxes = desired;
+  }
+
+  /**
+   * 마키 영역과 교차하는 선택 가능한 box를 찾아 선택한다.
+   *
+   * @param marquee - 마키 상태
+   * @param additive - true면 기존 선택에 추가, false면 기존 선택 해제 후 새로 선택
+   */
+  private _selectIntersectingBoxes(marquee: MarqueeState, additive: boolean): void {
+    const rectEl = marquee.rectEl;
+    if (!rectEl) return;
+    const marqueeRect = rectEl.getBoundingClientRect();
+    const candidates = this._findIntersectingBoxes(marqueeRect);
+
+    const manager = this._manager;
+    for (const box of marquee.highlightedBoxes) {
+      box.removeAttribute('selected');
+    }
+    marquee.highlightedBoxes.clear();
+
+    if (!additive) {
+      manager.clearLayoutSelection(false);
+      if (candidates.length === 0) return;
+      manager._setMultiSelect(true);
+      for (const box of candidates) manager.selectLayout(box);
+      manager._setMultiSelect(false);
+      return;
+    }
+
+    manager._setMultiSelect(true);
+    for (const box of candidates) {
+      if (!manager.selectedLayouts.includes(box)) {
+        manager.selectLayout(box);
+      }
+    }
+    manager._setMultiSelect(false);
+  }
+
+  /**
+   * 진행 중인 마키를 취소하고 정리한다.
+   */
+  private _cancelMarquee(): void {
+    if (this._marquee) {
+      if (this._marquee.rafId !== null) {
+        cancelAnimationFrame(this._marquee.rafId);
+      }
+      for (const box of this._marquee.highlightedBoxes) {
+        box.removeAttribute('selected');
+      }
+      this._removeMarqueeRect(this._marquee);
+      this._marquee = null;
+    }
+    this._marqueePending = false;
+    this._removeMarqueeListeners();
   }
 
   // ─── Event Detection Helpers ──────────────────────────────────
@@ -157,6 +488,11 @@ export class LayoutSelectionController {
     const manager = this._manager;
     if (manager.insertMode) return;
     if (manager._consumeSuppressNextClick()) return;
+
+    if (this._marqueePending) {
+      this._marqueePending = false;
+      return;
+    }
 
     // 타입 라벨의 상위 선택 버튼(.parent-btn) 클릭은 선택 로직에서 제외한다.
     // 버튼 자체 핸들러가 부모 박스 선택을 처리한다.

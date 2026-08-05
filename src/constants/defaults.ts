@@ -29,6 +29,9 @@ export const Z_INDEX_AI_PROCESSING = 99996;
 /** 예약: 텍스트 편집 textarea (IME 입력) z-index */
 export const Z_INDEX_TEXTAREA = 9999;
 
+/** 마키(고무줄) 선택 사각형 z-index */
+export const Z_INDEX_MARQUEE_RECT = 99995;
+
 /** 역할 고정 z-index: 광고 (ad) */
 export const Z_INDEX_ROLE_AD = 91000;
 
