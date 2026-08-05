@@ -119,6 +119,7 @@ export class LayoutSelectionController {
     const manager = this._manager;
     if (manager.insertMode) return;
     if (manager.placeGunActive) return;
+    if (manager.spacePressed) return;
     if (manager.textEditMode && manager.focusedParagraph) return;
     if (event.button !== 0) return;
 

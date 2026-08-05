@@ -197,6 +197,9 @@ export class EditManager {
   /** 드래그/리사이즈 시 그리드 스냅 활성 여부. true면 스냅, false면 자유 이동/크기. */
   private _snapEnabled = true;
 
+  /** 스페이스 키 누름 여부. 팬 모드에서 마키/드래그를 억제한다. 외부에서 설정. */
+  private _spacePressed = false;
+
   /**
    * 이 EditManager가 관리하는 문서 요소.
    *
@@ -356,6 +359,7 @@ export class EditManager {
     this._selectableRootId = null;
     this._editableRootId = null;
     this._snapEnabled = true;
+    this._spacePressed = false;
 
     if (this._layoutEditController) {
       this._layoutEditController.destroy();
@@ -1304,6 +1308,15 @@ export class EditManager {
 
   set snapEnabled(value: boolean) {
     this._snapEnabled = value;
+  }
+
+  /** 스페이스 키 누름 여부. 팬 모드에서 마키/드래그 억제용. */
+  get spacePressed(): boolean {
+    return this._spacePressed;
+  }
+
+  set spacePressed(value: boolean) {
+    this._spacePressed = value;
   }
 
   /**
