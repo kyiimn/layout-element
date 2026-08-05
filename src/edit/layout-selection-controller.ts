@@ -118,6 +118,7 @@ export class LayoutSelectionController {
   private _onMouseDown = (event: PointerEvent): void => {
     const manager = this._manager;
     if (manager.insertMode) return;
+    if (manager.placeGunActive) return;
     if (manager.textEditMode && manager.focusedParagraph) return;
     if (event.button !== 0) return;
 
