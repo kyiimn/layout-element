@@ -1792,6 +1792,73 @@ export class EditManager {
   }
 
   /**
+   * 선택된 박스들을 방향키로 누지(nudge) 이동한다.
+   *
+   * - `position: 'static'` 박스: 단/라인 단위로 1씩 이동 (Shift 여부 무관).
+   * - `position: 'absolute'` 박스: `deltaMm`만큼 이동 (Shift 시 `shiftDeltaMm`).
+   *
+   * 부모 편집 영역 경계를 벗어나지 않도록 클램핑한다.
+   * 각 박스에 대해 `_dispatchLayoutMove` 이벤트를 발생시켜 undo/redo 스택에 push한다.
+   *
+   * @param directionX - 가로 방향 (-1, 0, 1)
+   * @param directionY - 세로 방향 (-1, 0, 1)
+   * @param deltaMm - 기본 이동량 (mm). absolute 박스에 적용.
+   * @param shiftDeltaMm - Shift 누름 시 이동량 (mm). absolute 박스에만 적용.
+   * @example
+   * ```ts
+   * // ArrowUp: 위로 1mm (absolute), 위로 1라인 (static)
+   * manager.nudgeSelectedLayouts(0, -1, 1, 10);
+   * // Shift+ArrowUp: 위로 10mm (absolute), 위로 1라인 (static)
+   * manager.nudgeSelectedLayouts(0, -1, 1, 10);
+   * ```
+   */
+  nudgeSelectedLayouts(
+    directionX: number,
+    directionY: number,
+    deltaMm: number,
+    shiftDeltaMm: number,
+    shiftKey: boolean,
+  ): void {
+    if (this._isPrint) return;
+    const targets = this.getTopLevelDragTargets();
+    if (targets.length === 0) return;
+
+    const mm = shiftKey ? shiftDeltaMm : deltaMm;
+
+    for (const box of targets) {
+      const prevLeft = box.left;
+      const prevTop = box.top;
+
+      if (box.position === 'absolute') {
+        const parentModel = box.parentModel;
+        const parentW = box.inheritStyle?.parentWidth ?? 0;
+        const parentH = parentModel ? parentModel.contentHeight : (box.inheritStyle?.parentHeight ?? 0);
+        const maxLeft = Math.max(0, parentW - box.width);
+        const maxTop = Math.max(0, parentH - box.height);
+        box.left = Math.max(0, Math.min(maxLeft, prevLeft + directionX * mm));
+        box.top = Math.max(0, Math.min(maxTop, prevTop + directionY * mm));
+      } else {
+        const parentModel = box.parentModel;
+        if (!parentModel) continue;
+        const { columnCount } = parentModel;
+        const editableTextHeight = parentModel.editableTextHeight;
+        const lineHeight = parentModel.lineHeight;
+        const maxTop = Math.floor(
+          (editableTextHeight - (lineHeight * box.height - (lineHeight - parentModel.fontSize))) / lineHeight,
+        );
+        const newLeft = Math.max(0, Math.min(columnCount - box.width, prevLeft + directionX));
+        const newTop = Math.max(0, Math.min(maxTop, prevTop + directionY));
+        box.left = newLeft;
+        box.top = newTop;
+      }
+
+      if (box.left !== prevLeft || box.top !== prevTop) {
+        this._dispatchLayoutMove(box, prevLeft, prevTop, box.left, box.top, false);
+      }
+    }
+  }
+
+  /**
    * 주어진 레이아웃 요소 목록에서 중첩 관계의 하위 요소를 제거하고
    * 최상위 요소만 필터링한다.
    *
