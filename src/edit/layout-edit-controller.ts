@@ -4,8 +4,10 @@ import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
+import { genUUID } from "@/utils";
 import { EditManager } from "./edit-manager";
 import type { GridCalculator } from "@/core";
+import type { BoxData } from "@/types/layout/box.type";
 
 /**
  * 자석(Snap) 기능의 임계값 (단위: 화면 픽셀).
@@ -413,6 +415,7 @@ export class LayoutEditController {
    * @param event - mousedown 마우스 이벤트
    */
   private _onMouseDown = (event: MouseEvent): void => {
+    if (event.altKey) event.preventDefault();
     const box = this._findEditableBoxFromEvent(event);
     if (!box) return;
     const manager = this._manager;
@@ -439,7 +442,71 @@ export class LayoutEditController {
       return;
     }
 
+    if (event.altKey) {
+      const clonedBox = this._cloneBoxForAltDrag(box);
+      if (clonedBox) {
+        this._startDrag(event, clonedBox);
+        return;
+      }
+    }
+
     this._startDrag(event, box);
+  }
+
+  /**
+   * Alt+드래그용으로 박스(및 다중 선택된 형제 박스들)를 복제한다.
+   *
+   * 클릭한 박스가 미선택 상태면 먼저 단일 선택으로 전환한 뒤,
+   * 선택된 모든 최상위 박스를 동일한 부모 내에 복제한다.
+   * 복제본은 새 ID, 새 z-index(형제 최대 + 1)를 가지며,
+   * 원본은 유지되고 복제본만 선택된다.
+   *
+   * @param box - 복제를 시작할 기준 box 요소
+   * @returns 복제된 기준 box. 실패 시 `null`
+   */
+  private _cloneBoxForAltDrag(box: LayoutBoxElement): LayoutBoxElement | null {
+    const manager = this._manager;
+    const wasSelected = box.hasAttribute('selected');
+    if (!wasSelected) {
+      manager.selectLayout(box);
+    }
+
+    const targets = manager.getTopLevelDragTargets();
+    if (targets.length === 0) return null;
+
+    const clonedTargets: LayoutBoxElement[] = [];
+    for (const target of targets) {
+      const parent = target.parentElement;
+      if (!(parent instanceof LayoutBoxElement) && !(parent instanceof LayoutDocumentElement)) continue;
+      const data = target.data;
+      const siblings = Array.from(parent.children).filter(
+        (c): c is LayoutBoxElement => c instanceof LayoutBoxElement && c !== target,
+      );
+      const maxZ = siblings
+        .filter((c) => !c.lock && (c.zIndex ?? 0) < Z_INDEX_MAX_LAYOUT)
+        .reduce((max, c) => Math.max(max, c.zIndex ?? 0), 0);
+      const newData: BoxData = {
+        ...data,
+        id: genUUID(),
+        zIndex: Math.min(maxZ + 1, Z_INDEX_MAX_LAYOUT),
+      };
+      const created = parent.appendChildData(newData);
+      if (created instanceof LayoutBoxElement) {
+        clonedTargets.push(created);
+      }
+    }
+
+    if (clonedTargets.length === 0) return null;
+
+    manager.clearLayoutSelection(false);
+    manager._setMultiSelect(true);
+    for (const cloned of clonedTargets) {
+      manager.selectLayout(cloned);
+    }
+    manager._setMultiSelect(false);
+
+    const originalBox = clonedTargets[targets.indexOf(box)] ?? clonedTargets[0]!;
+    return originalBox;
   }
 
   // ─── Drag (Move) ──────────────────────────────────────────────
