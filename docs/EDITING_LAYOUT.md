@@ -1147,6 +1147,7 @@ LayoutEditController._onMouseUp(event)
 │  ③' ESC 키 (드래그 취소)                                              │
 │     │                                                               │
 │     ├── LayoutEditController._onKeyDown                              │
+│     ├── event.preventDefault() + stopPropagation() ← 모드 전환 차단  │
 │     ├── rAF 취소 (있으면)                                             │
 │     ├── document 리스너 제거 (mousemove, mouseup, keydown)            │
 │     ├── BoxDragState.isDragging = false                              │
@@ -1681,12 +1682,13 @@ _collectParagraphs(element, set)
 
 드래그 중 ESC 키를 누르면:
 
-1. **rAF 취소**: 대기 중인 `requestAnimationFrame` 콜백을 취소한다.
-2. **리스너 해제**: `document`에 등록된 `mousemove`, `mouseup`, `keydown` 리스너를 모두 제거한다.
-3. **상태 초기화**: `BoxDragState.isDragging = false`, `BoxDragState.dragMoved = false`로 설정한다.
-4. **커서 복원**: `box.style.cursor`를 `'grab'`(편집 가능 시) 또는 `''`(편집 불가 시)로 복원한다.
-5. **위치/크기/position 복원**: `_applyPositionConversion(box, originalPosition, originalLeft, originalTop, originalWidth, originalHeight)`를 호출하여 원래 상태로 복원한다. `applyPositionConversion()`은 private 필드를 원자적으로 갱신하고 `layout()` + `_renderAffectedParagraphs()`를 한 번만 실행하여 텍스트도 원래 배치로 복원한다. `LayoutEditController`는 `box.applyPositionConversion()` public wrapper를 호출한다.
-6. **다중 선택 복원**: 모든 드래그 대상의 시작 상태를 `applyPositionConversion()`으로 복원한다.
+1. **이벤트 전파 차단**: `event.preventDefault()` + `event.stopPropagation()`을 호출한다. `stopPropagation()`은 ESC가 window keydown 리스너(호스트 프로그램의 모드 전환 핸들러)까지 전파되어 편집 모드가 select로 빠지는 부작용을 막는다. `InsertController._onKeyDown`과 동일 정책으로, 동작 취소만 수행하고 모드는 유지한다.
+2. **rAF 취소**: 대기 중인 `requestAnimationFrame` 콜백을 취소한다.
+3. **리스너 해제**: `document`에 등록된 `mousemove`, `mouseup`, `keydown` 리스너를 모두 제거한다.
+4. **상태 초기화**: `BoxDragState.isDragging = false`, `BoxDragState.dragMoved = false`로 설정한다.
+5. **커서 복원**: `box.style.cursor`를 `'grab'`(편집 가능 시) 또는 `''`(편집 불가 시)로 복원한다.
+6. **위치/크기/position 복원**: `_applyPositionConversion(box, originalPosition, originalLeft, originalTop, originalWidth, originalHeight)`를 호출하여 원래 상태로 복원한다. `applyPositionConversion()`은 private 필드를 원자적으로 갱신하고 `layout()` + `_renderAffectedParagraphs()`를 한 번만 실행하여 텍스트도 원래 배치로 복원한다. `LayoutEditController`는 `box.applyPositionConversion()` public wrapper를 호출한다.
+7. **다중 선택 복원**: 모든 드래그 대상의 시작 상태를 `applyPositionConversion()`으로 복원한다.
 
 ### 6.2 구현
 
@@ -1699,6 +1701,7 @@ private _onKeyDown = (event: KeyboardEvent): void => {
   if (event.key !== 'Escape') return;
 
   event.preventDefault();
+  event.stopPropagation();
   if (state.rafId !== null) {
     cancelAnimationFrame(state.rafId);
     state.rafId = null;
@@ -2263,6 +2266,7 @@ mouseup
 │  ③' ESC 키 (리사이즈 취소)                                           │
 │     │                                                               │
 │     ├── LayoutEditController._onResizeKeyDown                        │
+│     ├── event.preventDefault() + stopPropagation() ← 모드 전환 차단  │
 │     ├── rAF 취소 (있으면)                                             │
 │     ├── document 리스너 제거 (mousemove, mouseup, keydown)            │
 │     ├── BoxResizeState.isResizing = false, BoxResizeState.handle = null│

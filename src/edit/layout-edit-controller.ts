@@ -899,7 +899,11 @@ export class LayoutEditController {
     if (!state || !state.isDragging) return;
     if (event.key !== 'Escape') return;
 
+    // stopPropagation: 드래그 취소 ESC가 window keydown 리스너(호스트의 모드 전환)
+    // 까지 전파되면 모드가 select로 빠지는 부작용이 발생한다. 동작 취소만 수행하고
+    // 모드는 유지되어야 하므로 전파를 차단한다. InsertController._onKeyDown와 동일 정책.
     event.preventDefault();
+    event.stopPropagation();
     if (state.rafId !== null) {
       cancelAnimationFrame(state.rafId);
       state.rafId = null;
@@ -1129,7 +1133,10 @@ export class LayoutEditController {
     if (!state || !state.isResizing) return;
     if (event.key !== 'Escape') return;
 
+    // stopPropagation: 리사이즈 취소 ESC가 window keydown 리스너(호스트 모드 전환)까지
+    // 전파되면 모드가 select로 빠진다. _onKeyDown(드래그 취소)과 동일 정책.
     event.preventDefault();
+    event.stopPropagation();
     if (state.rafId !== null) {
       cancelAnimationFrame(state.rafId);
       state.rafId = null;
