@@ -919,6 +919,7 @@ class TextLayoutEngine {
   get previousOverflow: number;
   get widthRatio: number;        // 장평 (기본 0.8)
   get spaceRatio: number;        // 공백 너비 (em, 기본 0.25)
+  get indent: number;             // 문단 첫 줄 들여쓰기 비율 (fontSize 대비, 기본 0)
   get columnWidths: number[];
 
   // 세터
@@ -2305,6 +2306,7 @@ type TextStyle = {
   letterSpacing?: number;  // em
   widthRatio?: number;     // 장평, 기본 0.8
   spaceRatio?: number;     // 공백 최소 너비 (em), 기본 0.25
+  indent?: number;         // 문단 첫 줄 들여쓰기 (fontSize 대비 비율, 0.0~1.0), 기본 0
 };
 ```
 

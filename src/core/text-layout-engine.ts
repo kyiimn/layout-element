@@ -1,4 +1,4 @@
-import { DEFAULT_FONT_SIZE, DEFAULT_LETTER_SPACING, DEFAULT_LINE_GAP, DEFAULT_SPACE_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, DEFAULT_WIDTH_RATIO, isLineEndForbidden, isLineStartForbidden } from "@/constants";
+import { DEFAULT_FONT_SIZE, DEFAULT_INDENT, DEFAULT_LETTER_SPACING, DEFAULT_LINE_GAP, DEFAULT_SPACE_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, DEFAULT_WIDTH_RATIO, isLineEndForbidden, isLineStartForbidden } from "@/constants";
 import type { LayoutBoxElement, LayoutParagraphElement } from "@/components";
 import type { LayoutVirtualColumnElement } from "@/components/layout/v-column.element";
 import {
@@ -384,6 +384,7 @@ export class TextLayoutEngine {
     ppm: number,
     columnIndex: number,
     isFirstInColumn: boolean,
+    isFirstOfBlock: boolean,
   ): {
     cover: boolean;
     overflow: boolean;
@@ -421,14 +422,19 @@ export class TextLayoutEngine {
 
     const freeRegions = this._computeFreeRegions(lineWidthMm, overlapPartsMm);
 
+    const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+    const indentMm = isFirstOfBlock ? fontSize * this.indent : 0;
+    const adjustedFreeRegions = indentMm > 0
+      ? freeRegions.map((r, i) => i === 0 ? { start: r.start + indentMm, end: r.end } : r)
+      : freeRegions;
+
     // 좁은 자유 영역 필터링: 글자 하나가 들어갈 수 없는 좁은 자유 영역은 제외한다.
     // 이 필터링이 없으면 무한 루프 가드가 좁은 틈에 글자를 강제 배치하여
     // 파트 폭을 넘어 렌더링되는 현상이 발생한다.
     // 기준: 가장 넓은 글자 폭 상한(widthRatio × fontSize) + letterSpacing.
-    const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
     const letterSpacingEm = this._textStyle?.letterSpacing || this._inheritStyle?.letterSpacing || DEFAULT_LETTER_SPACING;
     const minCharWidthMm = this.widthRatio * fontSize + letterSpacingEm * fontSize;
-    const usableRegions = freeRegions.filter(r => (r.end - r.start) >= minCharWidthMm);
+    const usableRegions = adjustedFreeRegions.filter(r => (r.end - r.start) >= minCharWidthMm);
 
     // 자유 영역이 없으면 라인 전체가 오버랩으로 덮인 것.
     // 호출자에서는 이미지가 영역을 덮든 COVER든 freeRegions가 없든 상관없이
@@ -593,7 +599,7 @@ export class TextLayoutEngine {
           let isFirstLineInLoop = true;
           while (true) {
             const isFirstInColumn = curColumn === 0 && columnContent.length < 1 && isFirstLineInLoop;
-            const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, curColumn, isFirstInColumn);
+            const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, curColumn, isFirstInColumn, idxContentOfBlock === 0);
 
             // M2: COVER 라인은 실제 텍스트가 없으므로 이전 라인에 endOfBlock을 설정하지 않음
             if (columnContent.length > 0 && !result.cover) {
@@ -706,7 +712,7 @@ export class TextLayoutEngine {
           }
 
           while (true) {
-            const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, curColumn, false);
+            const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, curColumn, false, false);
 
             if (result.cover) {
               columnContent.push(result.lineData);
@@ -1158,6 +1164,11 @@ export class TextLayoutEngine {
   /** 공백 너비 비율 (em 단위) */
   public get spaceRatio() {
     return this.textStyle?.spaceRatio ?? this.inheritStyle?.spaceRatio ?? DEFAULT_SPACE_RATIO;
+  }
+
+  /** 첫 줄 들여쓰기 비율 (fontSize 대비) */
+  public get indent() {
+    return this.textStyle?.indent ?? this.inheritStyle?.indent ?? DEFAULT_INDENT;
   }
 
   public get columnWidths() {

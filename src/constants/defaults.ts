@@ -8,6 +8,7 @@ export const DEFAULT_IMAGE_DPI = 72;
 export const DEFAULT_SPACE_RATIO = 0.25;
 export const DEFAULT_LETTER_SPACING = -0.1;
 export const DEFAULT_WIDTH_RATIO = 0.8;
+export const DEFAULT_INDENT = 0;
 export const DEFAULT_TEXT_ALIGN = 'justify';
 export const DEFAULT_VERTICAL_ALIGN = 'top';
 

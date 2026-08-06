@@ -250,6 +250,7 @@ private _createLineWithParts(
   textBlockStyle: TextBlockStyle | undefined,
   ppm: number,
   isFirstInColumn: boolean,
+  isFirstOfBlock: boolean,
 ): {
   cover: boolean;
   overflow: boolean;
@@ -269,9 +270,10 @@ private _createLineWithParts(
 5. `lineWidth`를 px에서 mm로 변환 (`getBoundingClientRect().width / ppm`)
 6. `overlapParts`를 px에서 mm로 변환 (`x1 / ppm`, `x2 / ppm`)
 7. `_computeFreeRegions()`로 자유 영역 계산 (mm 단위)
-8. **좁은 자유 영역 필터링**: 글자 하나가 들어갈 수 없는 좁은 자유 영역은 제외한다. 기준은 전각 문자 폭 상한(`widthRatio × fontSize + letterSpacing × fontSize`). 이 필터링이 없으면 무한 루프 가드가 좁은 틈에 글자를 강제 배치하여 파트 폭을 넘어 렌더링되는 현상이 발생한다. 필터링 후 남은 자유 영역이 없으면 COVER로 처리된다.
-9. 자유 영역별 `TextPartData`, `partEls`, `partWidths` 생성 (모두 mm 단위)
-10. 파트 사이 간격은 `marginLeft`로 설정 (mm 단위 CSS)
+8. **문단 첫 줄 들여쓰기**: `isFirstOfBlock`이 `true`이면(각 문단/block의 첫 줄) 첫 자유 영역의 `start`를 `fontSize × indent`만큼 오른쪽으로 밀어준다. `indent`는 `TextStyle.indent`(0.0~1.0)이며 `fontSize`에 대한 비율이다.
+9. **좁은 자유 영역 필터링**: 글자 하나가 들어갈 수 없는 좁은 자유 영역은 제외한다. 기준은 전각 문자 폭 상한(`widthRatio × fontSize + letterSpacing × fontSize`). 이 필터링이 없으면 무한 루프 가드가 좁은 틈에 글자를 강제 배치하여 파트 폭을 넘어 렌더링되는 현상이 발생한다. 필터링 후 남은 자유 영역이 없으면 COVER로 처리된다.
+10. 자유 영역별 `TextPartData`, `partEls`, `partWidths` 생성 (모두 mm 단위)
+11. 파트 사이 간격은 `marginLeft`로 설정 (mm 단위 CSS)
 
 ### 5.5 COVER vs PART 시각적 예시
 
@@ -830,6 +832,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `overflow` | `number` | 오버플로우된 문자 수 |
 | `widthRatio` | `number` | 장평 비율 |
 | `spaceRatio` | `number` | 공백 너비 비율 (em 단위). 기본값: 0.15 |
+| `indent` | `number` | 첫 줄 들여쓰기 비율 (fontSize 대비, 0.0~1.0). 기본값: 0 |
 | `columnWidths` | `number[]` | 컬럼별 너비(mm) 배열 |
 | `textContent` | `string \| (string \| TextBlockData)[]` | 현재 입력 콘텐츠 |
 | `previousLineCount` | `number` | 이전 렌더링 사이클의 총 줄 수 |
