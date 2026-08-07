@@ -412,6 +412,7 @@ export type GridResolution = {
  *
  * @param rows - 행 데이터 배열 (TableRowData[])
  * @param contentWidth - 부모 box의 콘텐츠 폭 (mm). colWidths 정규화 기준.
+ * @param contentHeight - 부모 box의 콘텐츠 높이 (mm). rowHeights 정규화 기준.
  * @param colWidthsInput - 사용자 지정 colWidths (number | number[] | undefined)
  * @returns 그리드 해석 결과
  *
@@ -422,6 +423,7 @@ export type GridResolution = {
  *     { type: 'td', children: [...] },
  *   ]}],
  *   100, // contentWidth mm
+ *   80,  // contentHeight mm
  *   [60, 40], // colWidths
  * );
  * // result.placements[0] → { gridCol: 0, gridRow: 0, spanCols: 2, x: 0, y: 0, width: 100, height: 10 }
@@ -431,6 +433,7 @@ export type GridResolution = {
 export function resolveTableGrid(
   rows: TableRowData[],
   contentWidth: number,
+  contentHeight: number,
   colWidthsInput: number | number[] | undefined,
 ): GridResolution;
 ```
@@ -438,7 +441,7 @@ export function resolveTableGrid(
 ### 4.2 구현 의사 코드 (개발자용)
 
 ```
-function resolveTableGrid(rows, contentWidth, colWidthsInput):
+function resolveTableGrid(rows, contentWidth, contentHeight, colWidthsInput):
   rowHeights = rows.map(r => r.height)
 
   // 1. 컬럼 수 계산
@@ -450,15 +453,116 @@ function resolveTableGrid(rows, contentWidth, colWidthsInput):
   else: // undefined
     colCount = maxCellsInRow
 
-  // 2. colWidths 정규화
+  // 2. colWidths 정규화 — 엄격한 크기 관리
+  //    규칙: 합 = contentWidth, 최소 MIN_TABLE_COL_WIDTH 보장
   if colWidthsInput is number[]:
-    colWidths = colWidthsInput
+    colWidths = normalizeWidths(colWidthsInput, contentWidth, MIN_TABLE_COL_WIDTH)
   else if colWidthsInput is number:
+    // 단일 값: 모든 컬럼 동일 너비
     colWidths = new Array(colCount).fill(colWidthsInput)
+    colWidths = normalizeWidths(colWidths, contentWidth, MIN_TABLE_COL_WIDTH)
   else:
+    // undefined: 균등 분할
     eachWidth = contentWidth / colCount
     colWidths = new Array(colCount).fill(eachWidth)
 
+  // 3. rowHeights 정규화 — 합 = contentHeight, 최소 MIN_TABLE_ROW_HEIGHT 보장
+  rowHeights = normalizeWidths(rowHeights, contentHeight, MIN_TABLE_ROW_HEIGHT)
+
+  // ... 이하 기존 점유 배열 + 배치 로직 ...
+```
+
+#### normalizeWidths — 셀 크기 정규화 알고리즘
+
+```
+/**
+ * 셀 너비/높이 배열을 정규화한다.
+ *
+ * 규칙:
+ * 1. 합 = targetSize (테이블 크기를 넘지 않음)
+ * 2. 각 셀 >= minSize (최소 크기 보장)
+ * 3. 최초 데이터 주입 시: 앞순서 셀의 크기를 우선시, 나머지 조정
+ * 4. 최소 크기로도 targetSize 초과 시: 균등하게 축소
+ *
+ * 알고리즘:
+ * 1. 각 셀 크기를 minSize로 clamp (최소 보장).
+ * 2. 앞순서 셀부터 순회하며 크기 확정:
+ *    - remaining = targetSize - (이미 확정된 셀 크기 합)
+ *    - remainingCount = 아직 확정되지 않은 셀 수
+ *    - 현재 셀 크기 = min(original, remaining - (remainingCount-1) * minSize)
+ *      (남은 셀들이 최소 크기를 가질 공간을 남겨둠)
+ *    - 현재 셀 크기 < minSize → minSize로 설정 (최소 보장)
+ * 3. 마지막 셀: remaining 전부 할당 (나머지).
+ * 4. 정규화 후 합이 targetSize와 일치하는지 확인.
+ * 5. 모든 셀이 minSize인데 합 > targetSize → 균등 축소:
+ *    - scale = targetSize / sum
+ *    - 각 셀 = max(minSize, original * scale)
+ *    - 단, scale 후에도 minSize 보장 (이 경우 합 > targetSize 가능 → warning)
+ *
+ * @param inputs - 원본 셀 크기 배열
+ * @param targetSize - 목표 합 (contentWidth 또는 contentHeight)
+ * @param minSize - 최소 셀 크기 (MIN_TABLE_COL_WIDTH 또는 MIN_TABLE_ROW_HEIGHT)
+ * @returns 정규화된 셀 크기 배열
+ *
+ * @example
+ * // 3개 셀, 합 100mm, 최소 5mm
+ * // 원본 [60, 30, 30] → 합 120 > 100
+ * // 앞순서 우선: 셀0 = min(60, 100 - 2*5) = 60 → 남은 40
+ * //   셀1 = min(30, 40 - 1*5) = 30 → 남은 10
+ * //   셀2 = 10 (나머지)
+ * // 결과: [60, 30, 10] (합=100)
+ *
+ * // 원본 [50, 50, 50] → 합 150 > 100, 앞순서 우선 시도:
+ * //   셀0 = min(50, 100 - 2*5) = 50 → 남은 50
+ * //   셀1 = min(50, 50 - 1*5) = 45 → 남은 5
+ * //   셀2 = 5 (나머지)
+ * // 결과: [50, 45, 5] (합=100, 최소 5mm 보장)
+ *
+ * // 원본 [100, 100, 100] → 합 300 >> 100, 앞순서 우선:
+ * //   셀0 = min(100, 100 - 2*5) = 90 → 남은 10
+ * //   셀1 = min(100, 10 - 5) = 5 → 남은 5
+ * //   셀2 = 5
+ * // 결과: [90, 5, 5] (합=100, 최소 보장)
+ */
+function normalizeWidths(inputs, targetSize, minSize):
+  n = inputs.length
+
+  // 케이스 1: 합이 targetSize 이하 → 그대로 사용 (부족분은 마지막 셀에 추가 또는 비율 배분)
+  sum = inputs.reduce((a, b) => a + b, 0)
+  if sum === targetSize:
+    // 각 셀 minSize 보장
+    result = inputs.map(v => Math.max(v, minSize))
+    // minSize 보정 후 합이 변할 수 있으므로 마지막 셀로 조정
+    diff = targetSize - result.reduce((a, b) => a + b, 0)
+    result[n-1] += diff
+    return result
+
+  // 케이스 2: 합 > targetSize → 앞순서 우선 정규화
+  result = new Array(n).fill(0)
+  remaining = targetSize
+  for i = 0 to n - 2:
+    remainingCount = n - i - 1
+    // 남은 셀들이 최소 크기를 가질 공간 확보
+    maxForThis = remaining - remainingCount * minSize
+    result[i] = Math.max(minSize, Math.min(inputs[i], maxForThis))
+    remaining -= result[i]
+  // 마지막 셀: 나머지 전부 (최소 보장)
+  result[n-1] = Math.max(minSize, remaining)
+
+  // 케이스 3: 모든 셀이 minSize인데 합 > targetSize → 균등 축소
+  if result.every(v => v === minSize) AND result.reduce(...) > targetSize:
+    // n * minSize > targetSize → 비례 축소
+    scale = targetSize / (n * minSize)
+    result = result.map(v => Math.max(minSize, v * scale))
+    // 경고: 최소 크기를 보장하면 합이 targetSize 초과 불가피
+    warnings.push(`Cannot fit ${n} cells (min ${minSize}mm each) into ${targetSize}mm`)
+
+  return result
+```
+
+#### 점유 배열 + 셀 배치 로직
+
+```
   // 3. 점유 배열 (colCount × rowCount)
   occupied = 2D array [rowCount][colCount] = false
 
@@ -510,6 +614,17 @@ function resolveTableGrid(rows, contentWidth, colWidthsInput):
 `src/core/index.ts`:
 ```typescript
 export * from "./table-grid-resolver";
+```
+
+`resolveTableGrid`와 함께 `normalizeWidths`도 export되어 `TableStructureEditor`가 insertRowOrCol 시 사용:
+
+```typescript
+// src/core/table-grid-resolver.ts
+export function normalizeWidths(
+  inputs: number[],
+  targetSize: number,
+  minSize: number,
+): number[];
 ```
 
 ---
@@ -2875,6 +2990,1885 @@ private _notifyTablePropertyChange(): void {
 
 ---
 
+## 8B. 키보드 기반 레이아웃 편집 (Cell Block, Resize, Structure)
+
+layout 편집 모드에서 **키보드**로 셀 블록 지정, 셀 크기 조절, 셀 구조 변경(merge/split/insert/delete)을 수행하는 기능. 마우스 기반 리사이즈(8A)와 상호 보완하며, 외부 편집기 툴바에서도 동일 기능을 호출할 수 있도록 **외부 함수 API를 함께 제공**한다.
+
+### 8B.0 설계 개요
+
+| 기능 그룹 | 트리거 | 설명 |
+|---|---|---|
+| 셀 블록 지정 | F5 (1/2/3회), F7, F8 | 단일 셀 → 범위 선택 → 전체 선택. F7=열, F8=행 |
+| 셀 크기 조절 | Alt + 방향키 | 표 전체 크기 유지하며 해당 줄/칸 크기 조절 |
+| 셀 구조 변경 | M, S, W, H, Alt+Insert, Alt+Delete | merge, split, 너비 균등, 높이 균등, 행/열 추가·삭제 |
+| 외부 API | `TableKeyboardController` + `TableStructureEditor` public 메서드 | 툴바/외부 편집기에서 동일 기능 호출 |
+
+**활성 조건**: `editManager.layoutEditMode === true` 이고 포커스가 table 내부에 있을 때. **텍스트 편집 모드에서도 셀 블록 지정(F5/F7/F8)과 방향키 범위 확장, ESC 해제, Alt+방향키 크기 조절은 동작**한다. 단, **셀 구조 변경(M/S/W/H/Alt+Insert/Alt+Delete)은 셀 블록 선택이 활성 상태일 때만 동작**하므로, 텍스트 편집 중 일반 키 입력과 충돌하지 않는다.
+
+**더블클릭 텍스트 편집 진입과 셀 블록의 관계**:
+- 더블클릭은 셀 블록 활성 여부와 무관하게 텍스트 편집 모드로 진입한다 (`_onDblClick`은 셀 블록을 해제하지 않음).
+- 텍스트 편집 모드 진입 후 셀 블록이 활성 상태이면 **테이블 제어가 우선** — 방향키는 셀 블록 range 확장으로 동작하고, 텍스트 커서 이동으로 처리되지 않는다.
+- 셀 블록이 비활성 상태이면 방향키는 텍스트 커서 이동으로 동작한다 (TableKeyboardController가 미처리 → TextEditController로 전파).
+- 즉, 더블클릭 텍스트 편집 진입은 우선시하되, 셀 블록이 활성화되어 있으면 테이블 제어가 우선한다.
+
+### 8B.1 셀 블록 지정 모델 — `TableCellSelection`
+
+#### 신규 타입: `src/types/edit/table-selection.type.ts`
+
+```typescript
+/**
+ * 셀 블록 선택 모드.
+ * F5 입력 횟수에 따라 전환.
+ */
+export type CellBlockMode = 'single' | 'range' | 'all';
+
+/**
+ * 셀 블록 선택 상태.
+ * F5(1/2/3회)로 모드 전환, 방향키로 범위 확장, F7/F8으로 행/열 전체 선택.
+ *
+ * @example
+ * // F5 1회 → 현재 셀 1개 선택 (회색 원)
+ * { mode: 'single', anchor: { row: 0, col: 0 }, focus: { row: 0, col: 0 } }
+ * // F5 2회 → 범위 선택 모드 (빨간 원), 방향키로 확장
+ * { mode: 'range', anchor: { row: 0, col: 0 }, focus: { row: 2, col: 1 } }
+ * // F5 3회 → 전체 셀 선택
+ * { mode: 'all', anchor: { row: 0, col: 0 }, focus: { row: maxRow, col: maxCol } }
+ */
+export type TableCellSelection = {
+  /** 선택 모드 */
+  mode: CellBlockMode;
+  /** 선택 시작점 (anchor). 단일/범위 모드에서 사용. */
+  anchor: CellCoord;
+  /** 선택 끝점 (focus = 커서 위치). 범위 모드에서 방향키로 이동. */
+  focus: CellCoord;
+  /** 행 전체 선택 (F8). mode='range'이고 anchor.col=0, focus.col=colCount-1 */
+  /** 열 전체 선택 (F7). mode='range'이고 anchor.row=0, focus.row=rowCount-1 */
+  /** 행/열 전체 선택 플래그 (F7/F8 판별용) */
+  selectMode?: 'cell' | 'row' | 'col';
+};
+
+/**
+ * 셀 그리드 좌표 (row, col). colspan/rowspan을 고려한 **논리 좌표**.
+ * 물리적 TD 요소는 하나의 셀이 여러 좌표를 점유할 수 있음 (colspan/rowspan).
+ */
+export type CellCoord = {
+  /** 행 인덱스 (0부터) */
+  row: number;
+  /** 열 인덱스 (0부터) */
+  col: number;
+};
+
+/**
+ * 셀 블록 선택 변경 이벤트 페이로드.
+ * EditManager를 통해 `tableCellSelectionChange` 이벤트로 dispatch.
+ */
+export type TableCellSelectionChangeDetail = {
+  /** 선택 상태 (null = 선택 해제) */
+  selection: TableCellSelection | null;
+  /** 선택된 셀 요소 배열 (논리 좌표 → 물리 TD 매핑 결과) */
+  selectedCells: LayoutTableCellElement[];
+  /** 이벤트 소스 */
+  source: 'keyboard' | 'programmatic';
+};
+```
+
+#### `src/types/edit/index.ts`에 export 추가:
+```typescript
+export * from "./table-selection";
+```
+
+### 8B.2 셀 블록 시각 표시
+
+선택된 셀에 **원(circle) 표시**를 shadow DOM에 렌더링. 기존 box의 `<x-layout-selection>`과 유사하나, table 전용으로 TD shadow root가 아닌 **table shadow root의 별도 레이어**에 배치 (TD는 border/배경만 소유, 선택 표시는 table이 중앙 관리).
+
+| 모드 | 시각 | 설명 |
+|---|---|---|
+| `single` | 회색 원 | 선택된 셀 1개에 회색 원 오버레이 |
+| `range` | 빨간 원 | 선택된 범위의 모든 셀에 빨간 원 오버레이 |
+| `all` | 빨간 원 | 전체 셀에 빨간 원 오버레이 |
+| F7 (열 전체) | 빨간 원 | 선택된 열의 모든 셀에 빨간 원 |
+| F8 (행 전체) | 빨간 원 | 선택된 행의 모든 셀에 빨간 원 |
+
+#### 선택 레이어 DOM 구조 (table shadow root 내부)
+```html
+<!-- shadow root 내부, border-layer 위, resize-layer 아래 -->
+<div class="table-selection-layer">
+  <!-- 각 선택된 셀마다 원 div -->
+  <div class="table-selection-circle" data-cell="0-0"
+       style="left:0; top:0; width:60px; height:50px; border-radius:50%; border:2px solid gray;">
+  </div>
+  <div class="table-selection-circle" data-cell="0-1"
+       style="left:60px; top:0; width:40px; height:50px; border-radius:50%; border:2px solid red;">
+  </div>
+</div>
+```
+
+CSS 규칙 (`styleEl.sheet.insertRule()`):
+```css
+@media screen {
+  .table-selection-layer {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 99989;
+  }
+}
+@media screen {
+  .table-selection-circle {
+    position: absolute; pointer-events: none;
+    border-radius: 50%; border-width: 2px; border-style: solid;
+    box-sizing: border-box; opacity: 0.5;
+  }
+}
+@media print {
+  .table-selection-layer { display: none !important; }
+}
+```
+
+> **z-index**: `Z_INDEX_TABLE_SELECTION = 99989` (신규 상수). border-layer(99990) **아래**에 배치하여 보더 라인이 선택 원 위에 표시되도록 함. resize-layer(99992)보다 아래.
+
+### 8B.3 TableKeyboardController — 키보드 입력 처리
+
+#### 신규 파일: `src/edit/table-keyboard-controller.ts`
+
+`LayoutTableElement`가 소유하는 컨트롤러. 편집 모드 진입 시 생성, 종료 시 파괴. 키보드 이벤트를 셀 블록 선택/크기 조절/구조 변경 액션으로 라우팅.
+
+```typescript
+import type { EditManager } from "./edit-manager";
+import type { LayoutTableElement } from "@/components/layout/table.element";
+import type { TableCellSelection, CellCoord, CellBlockMode } from "@/types";
+
+/**
+ * 테이블 키보드 편집 컨트롤러.
+ *
+ * layout 편집 모드에서 키보드 입력을 처리:
+ * - F5: 셀 블록 지정 (1회=단일, 2회=범위, 3회=전체)
+ * - F7: 열 전체 선택 (F5 상태에서)
+ * - F8: 행 전체 선택 (F5 상태에서)
+ * - Alt+방향키: 셀 크기 조절 (표 전체 크기 유지)
+ * - M: 셀 병합 (merge)
+ * - S: 셀 분할 (split) — 대화상자 호출
+ * - W: 선택 셀 너비 균등 배분
+ * - H: 선택 셀 높이 균등 배분
+ * - Alt+Insert: 행/열 추가
+ * - Alt+Delete: 행/열 삭제
+ * - 방향키: 범위 선택 모드에서 focus 이동
+ * - ESC: 셀 블록 선택 해제
+ *
+ * 구조 변경(M/S/W/H/Insert/Delete)은 `TableStructureEditor`의 public 메서드로 위임.
+ * 외부 툴바도 동일 메서드를 호출하여 일관된 동작 보장.
+ */
+export class TableKeyboardController {
+  private _tableEl: LayoutTableElement;
+  private _editManager: EditManager;
+  private _selection: TableCellSelection | null = null;
+  private _structureEditor: TableStructureEditor;
+  private _active: boolean = false;
+
+  /**
+   * @param tableEl - 제어할 테이블 요소
+   * @param editManager - 소속 EditManager
+   */
+  constructor(tableEl: LayoutTableElement, editManager: EditManager);
+
+  /** 컨트롤러 활성화 (편집 모드 진입 시) */
+  activate(): void;
+
+  /** 컨트롤러 비활성화 (편집 모드 종료 시) */
+  deactivate(): void;
+
+  /** 현재 셀 블록 선택 상태 */
+  get selection(): TableCellSelection | null;
+  set selection(value: TableCellSelection | null);
+
+  // ─── 키보드 이벤트 핸들러 ───
+  /**
+   * keydown 이벤트 처리. table 요소의 keydown 리스너로 등록.
+   * @returns true = 이벤트 처리됨(handled), false = 미처리(전파 허용)
+   */
+  handleKeyDown(event: KeyboardEvent): boolean;
+
+  // ─── F5 셀 블록 지정 ───
+  /**
+   * F5 입력 처리. 입력 횟수에 따라 모드 전환.
+   *
+   * @param currentCell - 현재 커서 위치의 셀 (또는 anchor 셀)
+   * @example
+   * // F5 1회: single 모드 → 현재 셀 1개 (회색 원)
+   * controller.handleF5({ row: 0, col: 0 });
+   * // → selection = { mode: 'single', anchor: {0,0}, focus: {0,0} }
+   *
+   * // F5 2회: range 모드 (빨간 원), 방향키로 확장 가능
+   * controller.handleF5({ row: 0, col: 0 });
+   * // → selection = { mode: 'range', anchor: {0,0}, focus: {0,0} }
+   *
+   * // F5 3회: all 모드 (전체 셀 빨간 원)
+   * controller.handleF5({ row: 0, col: 0 });
+   * // → selection = { mode: 'all', anchor: {0,0}, focus: {maxRow,maxCol} }
+   */
+  handleF5(currentCell: CellCoord): void;
+
+  /**
+   * F7: 열 전체 선택.
+   * 현재 focus.col의 모든 행을 선택.
+   * @param currentCell - 현재 커서 위치
+   */
+  handleF7(currentCell: CellCoord): void;
+
+  /**
+   * F8: 행 전체 선택.
+   * 현재 focus.row의 모든 열을 선택.
+   * @param currentCell - 현재 커서 위치
+   */
+  handleF8(currentCell: CellCoord): void;
+
+  // ─── 방향키 (범위 선택 모드) ───
+  /**
+   * 범위 선택 모드에서 focus 이동.
+   * single/all 모드에서는 무시.
+   *
+   * @param direction - 이동 방향
+   * @returns true = 이동 성공, false = 경계 도달
+   */
+  handleArrowKey(direction: 'up' | 'down' | 'left' | 'right'): boolean;
+
+  // ─── Alt+방향키 (셀 크기 조절) ───
+  /**
+   * Alt+방향키: 표 전체 크기를 유지하면서 해당 셀의 줄/칸 크기 조절.
+   *
+   * - Alt+Left/Right: focus.col의 너비 축소/확장 (인접 col에서 차감/추가, 총폭 유지)
+   * - Alt+Up/Down: focus.row의 높이 축소/확장 (인접 row에서 차감/추가, 총높이 유지)
+   *
+   * 단위: 1mm per key press. 연속 입력 시 1mm씩 누적.
+   * 최소 크기(MIN_TABLE_COL_WIDTH/MIN_TABLE_ROW_HEIGHT) 보장.
+   *
+   * @param direction - 조절 방향
+   * @example
+   * // focus.col=1, Alt+Right → col 1 너비 +1mm, col 2 너비 -1mm
+   * controller.handleAltArrowKey('right');
+   */
+  handleAltArrowKey(direction: 'up' | 'down' | 'left' | 'right'): void;
+
+  // ─── 구조 변경 (TableStructureEditor 위임) ───
+  /**
+   * M: 선택한 셀들을 하나로 합침.
+   * range/all 모드에서만 동작. 선택된 셀들의 논리 영역을 모두 커버하는
+   * 단일 셀로 병합 (colspan = 선택 열 수, rowspan = 선택 행 수).
+   */
+  handleMerge(): void;
+
+  /**
+   * S: 현재 셀을 지정한 줄/칸 수로 나누는 대화상자 호출.
+   * 사용자에게 행/열 분할 수를 입력받은 후 `TableStructureEditor.splitCell()` 실행.
+   * 대화상자는 외부에서 제공하는 것을 전제로, 콜백 기반으로 구현.
+   */
+  handleSplit(): void;
+
+  /**
+   * W: 선택한 셀들의 너비를 균등하게 배분.
+   * 선택된 열들의 총 너비를 선택 열 수로 균등 분할.
+   */
+  handleEqualizeWidth(): void;
+
+  /**
+   * H: 선택한 셀들의 높이를 균등하게 배분.
+   * 선택된 행들의 총 높이를 선택 행 수로 균등 분할.
+   */
+  handleEqualizeHeight(): void;
+
+  /**
+   * Alt+Insert: 현재 위치에 줄(행) 또는 칸(열)을 추가.
+   * @param target - 'row' | 'col'. 지정하지 않으면 focus 위치 기준
+   *                 (focus.row인 경우 행, focus.col인 경우 열 — 외부에서 지정)
+   */
+  handleInsertRowOrCol(target: 'row' | 'col'): void;
+
+  /**
+   * Alt+Delete: 현재 위치의 줄(행) 또는 칸(열)을 삭제.
+   * @param target - 'row' | 'col'
+   */
+  handleDeleteRowOrCol(target: 'row' | 'col'): void;
+
+  // ─── ESC ───
+  /** 셀 블록 선택 해제 */
+  handleEscape(): void;
+
+  // ─── 내부 유틸 ───
+  /**
+   * 논리 좌표(row, col) → 물리 TD 요소 매핑.
+   * colspan/rowspan으로 인해 여러 논리 좌표가 동일 TD에 매핑될 수 있음.
+   * @param coord - 논리 좌표
+   * @returns 해당 좌표를 점유하는 TD 요소 (없으면 null)
+   */
+  private _getCellAt(coord: CellCoord): LayoutTableCellElement | null;
+
+  /**
+   * 선택 영역에 포함되는 모든 물리 TD 요소 배열 반환.
+   * range 모드: anchor~focus 사각형 영역 내 모든 논리 좌표 → TD 매핑.
+   * all 모드: 전체 셀.
+   * single 모드: focus 셀 1개.
+   * @returns 선택된 TD 요소 배열 (중복 제거)
+   */
+  private _getSelectedCells(): LayoutTableCellElement[];
+
+  /**
+   * 선택 상태를 갱신하고 시각 표시 + 이벤트 dispatch.
+   */
+  private _updateSelection(selection: TableCellSelection | null): void;
+
+  /**
+   * table shadow root의 selection-layer에 원 표시 렌더링.
+   * 기존 원 div 제거 후 새 선택 영역에 맞춰 생성.
+   */
+  private _renderSelectionOverlay(): void;
+}
+```
+
+#### `handleKeyDown` 라우팅 로직
+
+```typescript
+/**
+ * keydown 이벤트 처리.
+ *
+ * 동작 규칙:
+ * - **모든 모드에서 동작**: F5(셀 블록), F7/F8(행/열 선택), ESC(해제), Alt+방향키(크기 조절).
+ *   이 키들은 텍스트 편집 모드에서도 동작한다 (기능키 + Alt 조합은 텍스트 입력과 충돌하지 않음).
+ * - **셀 블록 선택 활성 시에만 동작**: 방향키(범위 확장), M/S/W/H(구조 변경), Alt+Insert/Delete(행/열 추가/삭제).
+ *   셀 블록이 비활성 상태에서는 무시 → 텍스트 편집 모드의 일반 키 입력으로 전파.
+ *
+ * 이벤트 등록은 **capture phase** 로 등록하여 TextEditController의 textarea keydown보다
+ * 먼저 수신한다. 처리한 키는 `stopPropagation()` 으로 textarea 전파를 차단.
+ *
+ * @returns true = 처리됨, false = 미처리 (전파 허용)
+ */
+handleKeyDown(event: KeyboardEvent): boolean {
+  if (!this._active) return false;
+
+  const key = event.key;
+  const alt = event.altKey;
+  const ctrl = event.ctrlKey;
+  const shift = event.shiftKey;
+
+  // ESC: 셀 블록 선택 해제 (모든 모드에서 동작)
+  // 셀 블록이 활성 → 해제하고 이벤트 소비
+  // 셀 블록 비활성 → 미처리 (TextEditController ESC가 처리: 선택 해제 또는 textEditMode=false)
+  if (key === 'Escape') {
+    if (this._selection) {
+      this.handleEscape();
+      return true;
+    }
+    return false;
+  }
+
+  // F5: 셀 블록 지정 (모든 모드에서 동작)
+  if (key === 'F5') {
+    event.preventDefault();
+    event.stopPropagation();
+    const current = this._getCurrentCellCoord();
+    if (current) this.handleF5(current);
+    return true;
+  }
+
+  // F7: 열 전체 선택 (모든 모드에서 동작)
+  if (key === 'F7') {
+    event.preventDefault();
+    event.stopPropagation();
+    const current = this._getCurrentCellCoord();
+    if (current) this.handleF7(current);
+    return true;
+  }
+
+  // F8: 행 전체 선택 (모든 모드에서 동작)
+  if (key === 'F8') {
+    event.preventDefault();
+    event.stopPropagation();
+    const current = this._getCurrentCellCoord();
+    if (current) this.handleF8(current);
+    return true;
+  }
+
+  // Alt + 방향키: 셀 크기 조절 (모든 모드에서 동작)
+  if (alt && !ctrl && !shift) {
+    if (key === 'ArrowLeft') { event.preventDefault(); event.stopPropagation(); this.handleAltArrowKey('left'); return true; }
+    if (key === 'ArrowRight') { event.preventDefault(); event.stopPropagation(); this.handleAltArrowKey('right'); return true; }
+    if (key === 'ArrowUp') { event.preventDefault(); event.stopPropagation(); this.handleAltArrowKey('up'); return true; }
+    if (key === 'ArrowDown') { event.preventDefault(); event.stopPropagation(); this.handleAltArrowKey('down'); return true; }
+    // Alt+Insert: 행/열 추가 (셀 블록 활성 시에만)
+    if (key === 'Insert' && this._selection) {
+      event.preventDefault();
+      event.stopPropagation();
+      const target = this._selection.selectMode === 'col' ? 'col' : 'row';
+      this.handleInsertRowOrCol(target);
+      return true;
+    }
+    // Alt+Delete: 행/열 삭제 (셀 블록 활성 시에만)
+    if (key === 'Delete' && this._selection) {
+      event.preventDefault();
+      event.stopPropagation();
+      const target = this._selection.selectMode === 'col' ? 'col' : 'row';
+      this.handleDeleteRowOrCol(target);
+      return true;
+    }
+    return false;
+  }
+
+  // 이하 키들은 셀 블록 선택이 활성 상태일 때만 동작
+  // 텍스트 편집 모드 + 셀 블록 비활성 → 미처리 → TextEditController로 전파 (텍스트 커서 이동)
+  // 텍스트 편집 모드 + 셀 블록 활성 → 테이블 제어 우선 (방향키 range 확장, M/S/W/H 구조 변경)
+  if (!this._selection) return false;
+
+  // 방향키: 범위 선택 모드에서 focus 이동 (range 모드만)
+  // 텍스트 편집 모드에서도 셀 블록이 활성이면 테이블 제어 우선 —
+  // 텍스트 커서 이동이 아닌 셀 블록 range 확장으로 동작.
+  if (!alt && !ctrl && !shift && this._selection.mode === 'range') {
+    if (key === 'ArrowLeft') { event.preventDefault(); event.stopPropagation(); this.handleArrowKey('left'); return true; }
+    if (key === 'ArrowRight') { event.preventDefault(); event.stopPropagation(); this.handleArrowKey('right'); return true; }
+    if (key === 'ArrowUp') { event.preventDefault(); event.stopPropagation(); this.handleArrowKey('up'); return true; }
+    if (key === 'ArrowDown') { event.preventDefault(); event.stopPropagation(); this.handleArrowKey('down'); return true; }
+  }
+
+  // 구조 변경 키 (대소문자 구분 없음, 셀 블록 활성 시에만)
+  if (!alt && !ctrl && !shift) {
+    const lowerKey = key.toLowerCase();
+    if (lowerKey === 'm') { event.preventDefault(); event.stopPropagation(); this.handleMerge(); return true; }
+    if (lowerKey === 's') { event.preventDefault(); event.stopPropagation(); this.handleSplit(); return true; }
+    if (lowerKey === 'w') { event.preventDefault(); event.stopPropagation(); this.handleEqualizeWidth(); return true; }
+    if (lowerKey === 'h') { event.preventDefault(); event.stopPropagation(); this.handleEqualizeHeight(); return true; }
+  }
+
+  return false;
+}
+```
+
+#### F5 모드 전환 알고리즘
+
+```typescript
+/**
+ * F5 입력 처리. 입력 횟수에 따라 모드 전환.
+ *
+ * 알고리즘:
+ * 1. 현재 selection이 null 또는 mode !== single → single 모드 (1회)
+ * 2. 현재 mode === single → range 모드 (2회)
+ * 3. 현재 mode === range → all 모드 (3회)
+ * 4. 현재 mode === all → single 모드 (다시 1회부터)
+ */
+handleF5(currentCell: CellCoord): void {
+  const grid = this._tableEl.gridResolution;
+  if (!grid) return;
+
+  const maxRow = grid.rowCount - 1;
+  const maxCol = grid.colCount - 1;
+
+  if (!this._selection || this._selection.mode === 'all') {
+    // 1회 (또는 all → 재시작): single
+    this._updateSelection({
+      mode: 'single',
+      anchor: { ...currentCell },
+      focus: { ...currentCell },
+      selectMode: 'cell',
+    });
+  } else if (this._selection.mode === 'single') {
+    // 2회: range
+    this._updateSelection({
+      mode: 'range',
+      anchor: { ...currentCell },
+      focus: { ...currentCell },
+      selectMode: 'cell',
+    });
+  } else if (this._selection.mode === 'range') {
+    // 3회: all
+    this._updateSelection({
+      mode: 'all',
+      anchor: { row: 0, col: 0 },
+      focus: { row: maxRow, col: maxCol },
+      selectMode: 'cell',
+    });
+  }
+}
+```
+
+#### F7/F8 행/열 전체 선택 알고리즘
+
+```typescript
+/**
+ * F7: 열 전체 선택.
+ * focus.col의 모든 행을 선택.
+ */
+handleF7(currentCell: CellCoord): void {
+  const grid = this._tableEl.gridResolution;
+  if (!grid) return;
+  const maxRow = grid.rowCount - 1;
+
+  this._updateSelection({
+    mode: 'range',
+    anchor: { row: 0, col: currentCell.col },
+    focus: { row: maxRow, col: currentCell.col },
+    selectMode: 'col',
+  });
+}
+
+/**
+ * F8: 행 전체 선택.
+ * focus.row의 모든 열을 선택.
+ */
+handleF8(currentCell: CellCoord): void {
+  const grid = this._tableEl.gridResolution;
+  if (!grid) return;
+  const maxCol = grid.colCount - 1;
+
+  this._updateSelection({
+    mode: 'range',
+    anchor: { row: currentCell.row, col: 0 },
+    focus: { row: currentCell.row, col: maxCol },
+    selectMode: 'row',
+  });
+}
+```
+
+#### 방향키 (범위 선택 모드) 알고리즘
+
+```typescript
+/**
+ * 범위 선택 모드에서 focus 이동.
+ * anchor는 고정, focus만 이동.
+ */
+handleArrowKey(direction: 'up' | 'down' | 'left' | 'right'): boolean {
+  if (!this._selection || this._selection.mode !== 'range') return false;
+  const grid = this._tableEl.gridResolution;
+  if (!grid) return false;
+
+  const focus = { ...this._selection.focus };
+  switch (direction) {
+    case 'up':    focus.row = Math.max(0, focus.row - 1); break;
+    case 'down':  focus.row = Math.min(grid.rowCount - 1, focus.row + 1); break;
+    case 'left':  focus.col = Math.max(0, focus.col - 1); break;
+    case 'right': focus.col = Math.min(grid.colCount - 1, focus.col + 1); break;
+  }
+
+  // selectMode가 'row'면 열 이동 무시, 'col'이면 행 이동 무시
+  if (this._selection.selectMode === 'row' && (direction === 'left' || direction === 'right')) {
+    return false;
+  }
+  if (this._selection.selectMode === 'col' && (direction === 'up' || direction === 'down')) {
+    return false;
+  }
+
+  this._updateSelection({
+    ...this._selection,
+    focus,
+  });
+  return true;
+}
+```
+
+#### Alt+방향키 (셀 크기 조절) 알고리즘
+
+```typescript
+/**
+ * Alt+방향키: 표 전체 크기를 유지하면서 해당 셀의 줄/칸 크기 조절.
+ *
+ * - Alt+Right: focus.col 너비 +1mm, focus.col+1 너비 -1mm (총폭 유지)
+ * - Alt+Left:  focus.col 너비 -1mm, focus.col+1 너비 +1mm (총폭 유지)
+ * - Alt+Down:  focus.row 높이 +1mm, focus.row+1 높이 -1mm (총높이 유지)
+ * - Alt+Up:    focus.row 높이 -1mm, focus.row+1 높이 +1mm (총높이 유지)
+ *
+ * 단위: 1mm per key press.
+ * 최소 크기 보장: MIN_TABLE_COL_WIDTH / MIN_TABLE_ROW_HEIGHT.
+ * 경계 도달 시 인접 col/row가 없으면 무시.
+ */
+handleAltArrowKey(direction: 'up' | 'down' | 'left' | 'right'): void {
+  if (!this._selection) return;
+  const grid = this._tableEl.gridResolution;
+  if (!grid) return;
+
+  const STEP_MM = 1; // 1mm per key press
+  const focus = this._selection.focus;
+
+  if (direction === 'right' || direction === 'left') {
+    // 컬럼 너비 조절
+    const col = focus.col;
+    const adjacentCol = direction === 'right' ? col + 1 : col;
+    const targetCol = direction === 'right' ? col : col - 1;
+
+    // 인접 col이 없으면 무시 (경계)
+    if (targetCol < 0 || adjacentCol >= grid.colCount) return;
+
+    const currentWidth = grid.colWidths[targetCol];
+    const adjacentWidth = grid.colWidths[adjacentCol];
+    const total = currentWidth + adjacentWidth;
+    const minSize = MIN_TABLE_COL_WIDTH;
+
+    let newTarget: number;
+    let newAdjacent: number;
+    if (direction === 'right') {
+      // targetCol 확장, adjacentCol 축소
+      newTarget = Math.min(currentWidth + STEP_MM, total - minSize);
+      newAdjacent = total - newTarget;
+    } else {
+      // targetCol 축소, adjacentCol 확장
+      newTarget = Math.max(currentWidth - STEP_MM, minSize);
+      newAdjacent = total - newTarget;
+    }
+
+    if (newTarget === currentWidth) return; // 변경 없음
+
+    // colWidths 갱신 → table._colWidths setter
+    const newColWidths = [...grid.colWidths];
+    newColWidths[targetCol] = newTarget;
+    newColWidths[adjacentCol] = newAdjacent;
+    this._tableEl.colWidths = newColWidths;
+    // table.layout() + render()는 colWidths setter가 호출
+    this._tableEl.notifyTablePropertyChange();
+  } else {
+    // 행 높이 조절
+    const row = focus.row;
+    const adjacentRow = direction === 'down' ? row + 1 : row;
+    const targetRow = direction === 'down' ? row : row - 1;
+
+    if (targetRow < 0 || adjacentRow >= grid.rowCount) return;
+
+    const currentHeight = grid.rowHeights[targetRow];
+    const adjacentHeight = grid.rowHeights[adjacentRow];
+    const total = currentHeight + adjacentHeight;
+    const minSize = MIN_TABLE_ROW_HEIGHT;
+
+    let newTarget: number;
+    let newAdjacent: number;
+    if (direction === 'down') {
+      newTarget = Math.min(currentHeight + STEP_MM, total - minSize);
+      newAdjacent = total - newTarget;
+    } else {
+      newTarget = Math.max(currentHeight - STEP_MM, minSize);
+      newAdjacent = total - newTarget;
+    }
+
+    if (newTarget === currentHeight) return;
+
+    // TR height 갱신
+    const trEl = this._tableEl.children[targetRow] as LayoutTableRowElement | undefined;
+    const adjacentTrEl = this._tableEl.children[adjacentRow] as LayoutTableRowElement | undefined;
+    if (trEl) trEl.height = newTarget;
+    if (adjacentTrEl) adjacentTrEl.height = newAdjacent;
+    this._tableEl.layout();
+    void this._tableEl.render();
+    this._tableEl.notifyTablePropertyChange();
+  }
+}
+```
+
+### 8B.4 TableStructureEditor — 셀 구조 변경 (외부 API)
+
+#### 신규 파일: `src/edit/table-structure-editor.ts`
+
+구조 변경(merge/split/insert/delete/equalize) 로직을 캡슐화. `TableKeyboardController`가 내부적으로 호출하며, **외부 편집기 툴바에서도 동일 인스턴스의 public 메서드를 직접 호출**할 수 있다.
+
+```typescript
+import type { LayoutTableElement } from "@/components/layout/table.element";
+import type { LayoutTableCellElement } from "@/components/layout/td.element";
+import type { TableCellSelection, CellCoord } from "@/types";
+import type { TableData, TableRowData, TableCellData, BoxData } from "@/types";
+
+/**
+ * 테이블 구조 변경 편집기.
+ *
+ * 셀 병합(merge), 분할(split), 너비/높이 균등 배분(equalize),
+ * 행/열 추가(insert), 행/열 삭제(delete)를 수행한다.
+ *
+ * 키보드 컨트롤러(TableKeyboardController)와 외부 편집기 툴바가
+ * 동일한 public 메서드를 호출하여 일관된 동작을 보장한다.
+ *
+ * 모든 구조 변경 후:
+ * - table.data 갱신 (data setter → reconciliation → layout + render)
+ * - boxPropertyChange 이벤트 dispatch (외부 undo/redo 감지)
+ * - tableCellSelectionChange 이벤트 dispatch (선택 상태 갱신)
+ */
+export class TableStructureEditor {
+  private _tableEl: LayoutTableElement;
+  private _editManager: EditManager;
+
+  /**
+   * @param tableEl - 대상 테이블 요소
+   * @param editManager - 소속 EditManager
+   */
+  constructor(tableEl: LayoutTableElement, editManager: EditManager);
+
+  // ─── Merge ───
+  /**
+   * 선택한 셀들을 하나로 합친다.
+   *
+   * 알고리즘:
+   * 1. 선택 영역(anchor~focus 사각형)의 모든 논리 좌표를 수집.
+   * 2. 영역 내 첫 번째 셀(좌상단)을 병합 셀로 사용.
+   * 3. 병합 셀의 colspan = 선택 열 수, rowspan = 선택 행 수.
+   * 4. 영역 내 나머지 셀들의 children(box)을 병합 셀로 이동.
+   * 5. 나머지 셀들을 children 배열에서 제거.
+   * 6. table.data 갱신.
+   *
+   * @param selection - 셀 블록 선택 상태
+   * @throws {Error} selection이 null이거나 single 모드인 경우
+   * @example
+   * // 2×2 영역 병합
+   * editor.mergeCells({ mode: 'range', anchor: {row:0,col:0}, focus: {row:1,col:1} });
+   * // → (0,0) 셀이 colspan=2, rowspan=2로 변경, (0,1)/(1,0)/(1,1) 셀 제거
+   */
+  mergeCells(selection: TableCellSelection): void;
+
+  // ─── Split ───
+  /**
+   * 현재 셀을 지정한 줄/칸 수로 나눈다.
+   *
+   * 알고리즘:
+   * 1. 대상 셀의 colspan/rowspan을 읽어 현재 점유 영역 계산.
+   * 2. splitRows × splitCols 만큼 새 셀 생성.
+   * 3. 원본 셀의 children(box)을 첫 번째 새 셀로 이동.
+   * 4. 나머지 새 셀은 빈 children([])으로 생성.
+   * 5. 원본 셀을 첫 번째 새 셀로 교체, 나머지 새 셀들을 TR에 추가.
+   * 6. colWidths/rowHeights 재계산 (필요 시).
+   * 7. table.data 갱신.
+   *
+   * @param cellCoord - 분할할 셀의 논리 좌표
+   * @param splitRows - 분할할 행 수
+   * @param splitCols - 분할할 열 수
+   * @throws {Error} splitRows/splitCols가 1 미만이거나 원본 셀 영역을 초과하는 경우
+   * @example
+   * // (0,0) 셀(colspan=2, rowspan=2)을 2×2로 분할
+   * editor.splitCell({row:0,col:0}, 2, 2);
+   * // → 4개의 1×1 셀로 분할
+   */
+  splitCell(cellCoord: CellCoord, splitRows: number, splitCols: number): void;
+
+  // ─── Equalize Width ───
+  /**
+   * 선택한 셀들의 너비를 균등하게 배분한다.
+   *
+   * 알고리즘:
+   * 1. 선택된 열들의 총 너비 계산 (colWidths 합).
+   * 2. 선택 열 수로 균등 분할.
+   * 3. colWidths 갱신.
+   * 4. table.layout() + render().
+   *
+   * @param selection - 셀 블록 선택 상태
+   * @example
+   * // 3개 열 너비 균등 배분
+   * editor.equalizeWidth({ mode: 'range', anchor: {row:0,col:0}, focus: {row:0,col:2} });
+   */
+  equalizeWidth(selection: TableCellSelection): void;
+
+  // ─── Equalize Height ───
+  /**
+   * 선택한 셀들의 높이를 균등하게 배분한다.
+   *
+   * 알고리즘:
+   * 1. 선택된 행들의 총 높이 계산 (rowHeights 합).
+   * 2. 선택 행 수로 균등 분할.
+   * 3. 각 TR의 height 갱신.
+   * 4. table.layout() + render().
+   *
+   * @param selection - 셀 블록 선택 상태
+   */
+  equalizeHeight(selection: TableCellSelection): void;
+
+  // ─── Insert Row/Col ───
+  /**
+   * 현재 위치에 줄(행) 또는 칸(열)을 추가한다.
+   *
+   * 행 추가 알고리즘:
+   * 1. rowIndex 위치에 새 TableRowData 추가.
+   * 2. 새 행의 children: 각 col에 빈 TD 생성 (colspan=1, rowspan=1, children=[]).
+   * 3. colWidths 유지 (행 추가는 colWidths 영향 없음).
+   * 4. 기존 행 중 rowspan이 추가 위치를 걸치는 셀이 있으면 rowspan 증가.
+   * 5. table.data 갱신.
+   *
+   * 열 추가 알고리즘:
+   * 1. colIndex 위치에 새 컬럼 추가.
+   * 2. 모든 행의 TD 사이에 빈 TD 삽입.
+   * 3. colWidths에 새 너비 추가 (인접 col에서 균등 분할 또는 기본값).
+   * 4. 기존 셀 중 colspan이 추가 위치를 걸치는 셀이 있으면 colspan 증가.
+   * 5. table.data 갱신.
+   *
+   * @param target - 'row' | 'col'
+   * @param index - 추가할 위치 (0부터). 생략 시 현재 focus 위치 기준.
+   * @param count - 추가할 개수. 기본 1.
+   * @example
+   * // 2행 위치에 1행 추가
+   * editor.insertRowOrCol('row', 2, 1);
+   */
+  insertRowOrCol(target: 'row' | 'col', index?: number, count?: number): void;
+
+  // ─── Delete Row/Col ───
+  /**
+   * 현재 위치의 줄(행) 또는 칸(열)을 삭제한다.
+   *
+   * 행 삭제 알고리즘:
+   * 1. rowIndex 위치의 TableRowData 제거.
+   * 2. 삭제된 행에 rowspan 셀이 있던 경우:
+   *    - rowspan > 1인 셀이 위 행에 걸쳐 있으면 rowspan 감소.
+   *    - 삭제된 행이 셀의 시작 행이면 셀을 다음 행으로 이동 + rowspan 감소.
+   * 3. table.data 갱신.
+   *
+   * 열 삭제 알고리즘:
+   * 1. 모든 행의 TD 중 colIndex 위치 셀 제거.
+   * 2. colspan/rowspan 조정 (행 삭제와 동일 로직).
+   * 3. colWidths에서 해당 열 너비 제거.
+   * 4. table.data 갱신.
+   *
+   * @param target - 'row' | 'col'
+   * @param index - 삭제할 위치. 생략 시 현재 focus 위치 기준.
+   * @param count - 삭제할 개수. 기본 1.
+   * @throws {Error} 마지막 행/열 삭제 시도 (최소 1개 유지)
+   */
+  deleteRowOrCol(target: 'row' | 'col', index?: number, count?: number): void;
+
+  // ─── 내부 유틸 ───
+  /**
+   * 현재 table.data를 읽어 구조 변경 후 새 TableData를 반환.
+   * data setter를 통해 reconciliation + layout + render 수행.
+   */
+  private _applyNewData(newData: TableData): void;
+
+  /**
+   * 논리 좌표 → 물리 TD 요소 + 해당 행/열에서의 인덱스 매핑.
+   */
+  private _getPhysicalCell(coord: CellCoord): {
+    tdEl: LayoutTableCellElement;
+    trIndex: number;
+    tdIndex: number;
+  } | null;
+
+  /**
+   * 선택 영역의 논리 좌표 집합 반환.
+   * anchor~focus 사각형 내 모든 (row, col) 쌍.
+   */
+  private _getSelectionCoords(selection: TableCellSelection): CellCoord[];
+
+  /**
+   * 빈 TD 데이터 생성.
+   * @param colWidth - 기본 너비 (열 추가 시 사용)
+   */
+  private _createEmptyCell(): TableCellData;
+
+  /**
+   * 빈 행 데이터 생성.
+   * @param colCount - 열 수
+   */
+  private _createEmptyRow(colCount: number, colWidth?: number): TableRowData;
+}
+```
+
+#### Merge 알고리즘 상세
+
+```typescript
+/**
+ * 선택한 셀들을 하나로 합친다.
+ *
+ * 알고리즘:
+ * 1. 선택 영역의 모든 논리 좌표 수집 (anchor~focus 사각형).
+ * 2. 영역 내 첫 번째 셀(좌상단)을 병합 셀로 사용.
+ * 3. 병합 셀의 colspan = 선택 열 수, rowspan = 선택 행 수.
+ * 4. 영역 내 나머지 셀들의 children(box)을 병합 셀로 이동.
+ * 5. 나머지 셀들을 children 배열에서 제거.
+ * 6. table.data 갱신.
+ */
+mergeCells(selection: TableCellSelection): void {
+  if (!selection || selection.mode === 'single') {
+    throw new Error("mergeCells requires range or all selection");
+  }
+
+  const coords = this._getSelectionCoords(selection);
+  if (coords.length < 2) return; // 단일 셀은 병합 불필요
+
+  // 선택 영역의 행/열 범위
+  const minRow = Math.min(...coords.map(c => c.row));
+  const maxRow = Math.max(...coords.map(c => c.row));
+  const minCol = Math.min(...coords.map(c => c.col));
+  const maxCol = Math.max(...coords.map(c => c.col));
+  const spanRows = maxRow - minRow + 1;
+  const spanCols = maxCol - minCol + 1;
+
+  // 현재 table.data 읽기
+  const currentData = this._tableEl.data;
+  const newRows = currentData.children.map(tr => ({
+    ...tr,
+    children: tr.children.map(td => ({ ...td, children: [...td.children] })),
+  }));
+
+  // 병합 대상 셀 찾기 (좌상단)
+  const mergeCell = this._getPhysicalCell({ row: minRow, col: minCol });
+  if (!mergeCell) return;
+
+  const mergeTd = newRows[mergeCell.trIndex].children[mergeCell.tdIndex];
+  mergeTd.colspan = spanCols;
+  mergeTd.rowspan = spanRows;
+
+  // 영역 내 나머지 셀의 children을 병합 셀로 이동 + 제거
+  const allChildren: BoxData[] = [...mergeTd.children];
+  for (const coord of coords) {
+    if (coord.row === minRow && coord.col === minCol) continue;
+    const phys = this._getPhysicalCell(coord);
+    if (!phys) continue;
+    const td = newRows[phys.trIndex].children[phys.tdIndex];
+    allChildren.push(...td.children);
+  }
+  mergeTd.children = allChildren;
+
+  // 나머지 셀 제거 (각 TR에서 중복 셀 제거)
+  // 주의: colspan/rowspan으로 인해 한 셀이 여러 좌표를 점유할 수 있음.
+  // 제거 대상: mergeCell이 아닌, 선택 영역 내 물리 셀.
+  const removeSet = new Set<string>();
+  for (const coord of coords) {
+    if (coord.row === minRow && coord.col === minCol) continue;
+    const phys = this._getPhysicalCell(coord);
+    if (!phys) continue;
+    const key = `${phys.trIndex}-${phys.tdIndex}`;
+    removeSet.add(key);
+  }
+
+  // 각 TR에서 제거 대상 TD 제거
+  for (let r = 0; r < newRows.length; r++) {
+    const tdIndicesToRemove: number[] = [];
+    for (let c = 0; c < newRows[r].children.length; c++) {
+      if (removeSet.has(`${r}-${c}`)) {
+        tdIndicesToRemove.push(c);
+      }
+    }
+    // 역순 제거 (인덱스 밀림 방지)
+    for (const idx of tdIndicesToRemove.reverse()) {
+      newRows[r].children.splice(idx, 1);
+    }
+  }
+
+  this._applyNewData({ ...currentData, children: newRows });
+}
+```
+
+#### Split 알고리즘 상세
+
+```typescript
+/**
+ * 현재 셀을 지정한 줄/칸 수로 나눈다.
+ *
+ * 알고리즘:
+ * 1. 대상 셀의 colspan/rowspan을 읽어 현재 점유 영역 계산.
+ * 2. splitRows × splitCols 만큼 새 셀 생성.
+ * 3. 원본 셀의 children(box)을 첫 번째 새 셀로 이동.
+ * 4. 나머지 새 셀은 빈 children([])으로 생성.
+ * 5. 원본 셀을 새 셀들로 교체 — **각 행마다 적절한 위치에 배치**:
+ *    - splitRows=1: 모든 새 셀을 원본 셀이 있던 행의 같은 위치에 나열.
+ *    - splitRows>1: splitCols개씩 각 행에 분산 배치.
+ *      원본 셀이 row R~R+rowspan-1 을 점유하고 있으면,
+ *      행 R에 splitCols개의 새 셀, 행 R+1에 splitCols개, ... 행 R+splitRows-1에 splitCols개.
+ *      단, 원본 셀이 단일 행의 셀(rowspan=1)이었는데 splitRows>1이면
+ *      새 행이 필요하므로 TR 자체를 추가 생성해야 함 (이 케이스는 지원하지 않음 —
+ *      splitRows는 원본 rowspan 이하만 허용).
+ * 6. colWidths/rowHeights 재계산 (필요 시).
+ * 7. table.data 갱신.
+ *
+ * @throws {Error} splitRows > 원본 rowspan 인 경우 (새 행 생성 불가)
+ * @throws {Error} splitCols > 원본 colspan 인 경우
+ */
+splitCell(cellCoord: CellCoord, splitRows: number, splitCols: number): void {
+  if (splitRows < 1 || splitCols < 1) {
+    throw new Error("splitRows and splitCols must be >= 1");
+  }
+  if (splitRows === 1 && splitCols === 1) return; // 분할 불필요
+
+  const phys = this._getPhysicalCell(cellCoord);
+  if (!phys) return;
+
+  const currentData = this._tableEl.data;
+  const newRows = currentData.children.map(tr => ({
+    ...tr,
+    children: tr.children.map(td => ({ ...td, children: [...td.children] })),
+  }));
+
+  const originalTd = newRows[phys.trIndex].children[phys.tdIndex];
+  const originalColspan = originalTd.colspan ?? 1;
+  const originalRowspan = originalTd.rowspan ?? 1;
+
+  if (splitCols > originalColspan) {
+    throw new Error(`splitCols (${splitCols}) exceeds cell colspan (${originalColspan})`);
+  }
+  if (splitRows > originalRowspan) {
+    throw new Error(`splitRows (${splitRows}) exceeds cell rowspan (${originalRowspan}) — cannot create new rows`);
+  }
+
+  // 새 셀들의 colspan/rowspan 계산
+  // 각 새 셀의 colspan = floor(originalColspan / splitCols), 나머지 분배
+  // 각 새 셀의 rowspan = floor(originalRowspan / splitRows), 나머지 분배
+  const baseColspan = Math.floor(originalColspan / splitCols);
+  const colRemainder = originalColspan % splitCols;
+  const baseRowspan = Math.floor(originalRowspan / splitRows);
+  const rowRemainder = originalRowspan % splitRows;
+
+  // 새 셀 배열 생성 (splitRows × splitCols)
+  // [r][c] 형태의 2D 배열
+  const newCellsGrid: TableCellData[][] = [];
+  for (let r = 0; r < splitRows; r++) {
+    const row: TableCellData[] = [];
+    const cellRowspan = baseRowspan + (r < rowRemainder ? 1 : 0);
+    for (let c = 0; c < splitCols; c++) {
+      const cellColspan = baseColspan + (c < colRemainder ? 1 : 0);
+      if (r === 0 && c === 0) {
+        // 첫 번째 새 셀: 원본 셀의 children 이동
+        row.push({
+          ...originalTd,
+          colspan: cellColspan,
+          rowspan: cellRowspan,
+          children: [...originalTd.children],
+        });
+      } else {
+        // 나머지: 빈 셀
+        row.push({
+          ...this._createEmptyCell(),
+          colspan: cellColspan,
+          rowspan: cellRowspan,
+        });
+      }
+    }
+    newCellsGrid.push(row);
+  }
+
+  // 원본 셀 제거
+  newRows[phys.trIndex].children.splice(phys.tdIndex, 1);
+
+  // 새 셀들을 각 행에 배치
+  // splitRows=1: 첫 행(원본 행)에 splitCols개의 셀을 원본 위치에 삽입
+  // splitRows>1: 각 행(원본 rowspan 범위 내)에 splitCols개씩 삽입
+  //
+  // 주의: 원본 셀이 row R에 있고 rowspan=originalRowspan이면,
+  // 분할된 셀들은 행 R, R+1, ..., R+splitRows-1 에 배치.
+  // 각 행의 삽입 위치는 원본 셀의 gridCol 위치에 해당하는 곳.
+  //
+  // 단순화 전략: 각 행의 children 배열 끝에 추가 (HTML table의 느슨한 배치 허용).
+  // TableGridResolver가 점유 배열 기반으로 재배치하므로, TD의 물리적 순서가
+  // 논리적 순서와 정확히 일치할 필요는 없음 — 첫 빈 슬롯에 배치되기 때문.
+  for (let r = 0; r < splitRows; r++) {
+    const targetRowIndex = phys.trIndex + r;
+    if (targetRowIndex >= newRows.length) {
+      // 원본 rowspan 범위 내이므로 이 케이스는 발생하지 않아야 함
+      throw new Error(`split target row ${targetRowIndex} out of range`);
+    }
+    // 각 행의 원본 셀 위치(phys.tdIndex)에 분할된 셀들 삽입
+    // 첫 행만 원래 위치에, 나머지 행은 적절한 위치(빈 슬롯)에 추가
+    if (r === 0) {
+      // 원본 행: 원본 위치에 splitCols개 삽입
+      newRows[targetRowIndex].children.splice(phys.tdIndex, 0, ...newCellsGrid[r]);
+    } else {
+      // rowspan으로 걸친 행: 해당 행의 적절한 위치에 삽입
+      // gridCol 위치를 기준으로 삽입 위치 결정
+      // 단순화: children 배열의 원본 gridCol에 해당하는 위치에 추가
+      // (TableGridResolver가 재배치하므로 정확한 위치 보장 불필요)
+      // → 행의 끝에 추가하는 것이 가장 안전
+      newRows[targetRowIndex].children.push(...newCellsGrid[r]);
+    }
+  }
+
+  this._applyNewData({ ...currentData, children: newRows });
+}
+```
+
+> **주의**: `splitRows > 1`이면 분할된 셀들이 여러 행에 걸쳐 배치됩니다. 원본 셀이 `rowspan > 1`인 경우에만 `splitRows > 1`이 허용되며, 원본 `rowspan=1`인 셀을 행 방향으로 분할하려면 새 행이 필요하므로 에러를 발생시킵니다. `TableGridResolver`는 점유 배열 기반으로 셀을 첫 빈 슬롯에 배치하므로, TD의 물리적 순서가 논리적 순서와 정확히 일치하지 않아도 됩니다 — 행 내에서 빈 슬롯을 순서대로 채우기 때문입니다.
+
+#### Insert Row 알고리즘 상세
+
+```typescript
+/**
+ * 현재 위치에 줄(행) 또는 칸(열)을 추가한다.
+ *
+ * 행 추가:
+ * 1. rowIndex 위치에 새 TableRowData 추가.
+ * 2. 새 행의 height: **사용자 지정값을 존중**, 나머지 행 균등 축소 (최소 보장).
+ *    - 새 행 height = rowIndex 행의 height 복사 (또는 외부에서 지정)
+ *    - 기존 행들의 height 합 + 새 행 height > contentHeight → 기존 행들 축소
+ *    - normalizeWidths([기존 height들..., 새 height], contentHeight, MIN_TABLE_ROW_HEIGHT)
+ * 3. 새 행의 children: 각 col에 빈 TD 생성 (colspan=1, rowspan=1, children=[]).
+ * 4. 기존 행 중 rowspan이 추가 위치를 걸치는 셀이 있으면 rowspan 증가.
+ * 5. table.data 갱신.
+ *
+ * 열 추가:
+ * 1. colIndex 위치에 새 컬럼 추가.
+ * 2. 새 열 너비: **사용자 지정값을 존중**, 나머지 열 균등 축소 (최소 보장).
+ *    - 새 열 너비 = 인접 col의 너비 또는 외부에서 지정
+ *    - 기존 colWidths + 새 열 너비 > contentWidth → 기존 colWidths 축소
+ *    - normalizeWidths([기존 colWidths..., 새 너비], contentWidth, MIN_TABLE_COL_WIDTH)
+ * 3. 모든 행의 TD 사이에 빈 TD 삽입.
+ * 4. 기존 셀 중 colspan이 추가 위치를 걸치는 셀이 있으면 colspan 증가.
+ * 5. table.data 갱신.
+ *
+ * @param target - 'row' | 'col'
+ * @param index - 추가할 위치 (0부터). 생략 시 현재 focus 위치 기준.
+ * @param count - 추가할 개수. 기본 1.
+ * @param size - 새 행/열의 크기(mm). 생략 시 인접 행/열의 크기 복사.
+ */
+insertRowOrCol(target: 'row' | 'col', index?: number, count: number = 1, size?: number): void {
+  const grid = this._tableEl.gridResolution;
+  if (!grid) return;
+
+  const currentData = this._tableEl.data;
+
+  if (target === 'row') {
+    const rowIndex = index ?? this._tableEl.keyboardController?.selection?.focus.row ?? 0;
+    const colCount = grid.colCount;
+    const newRows = [...currentData.children];
+
+    // 새 행의 height 결정: 사용자 지정값 존중, 미지정 시 인접 행 복사
+    const newRowHeight = size ?? newRows[rowIndex]?.height ?? MIN_TABLE_ROW_HEIGHT;
+
+    // 기존 rowHeights + 새 행 height 정규화 (총 contentHeight 유지, 최소 보장)
+    const allHeights = [...grid.rowHeights];
+    for (let i = 0; i < count; i++) {
+      allHeights.splice(rowIndex + i, 0, newRowHeight);
+    }
+    const normalizedHeights = normalizeWidths(allHeights, allHeights.reduce((a, b) => a + b, 0), MIN_TABLE_ROW_HEIGHT);
+
+    // 새 행 생성
+    for (let i = 0; i < count; i++) {
+      const insertIndex = rowIndex + i;
+      const newRow = this._createEmptyRow(colCount);
+      newRow.height = normalizedHeights[insertIndex];
+      newRows.splice(insertIndex, 0, newRow);
+    }
+
+    // 기존 행들의 height 정규화 결과 반영
+    for (let r = 0; r < newRows.length; r++) {
+      if (r >= rowIndex && r < rowIndex + count) continue; // 새 행은 이미 설정됨
+      // 기존 행의 height를 정규화된 값으로 갱신
+      const origIndex = r < rowIndex ? r : r - count;
+      newRows[r].height = normalizedHeights[r];
+    }
+
+    // rowspan이 추가 위치를 걸치는 셀의 rowspan 증가
+    for (let r = 0; r < rowIndex; r++) {
+      for (const td of newRows[r].children) {
+        const rowspan = td.rowspan ?? 1;
+        if (r + rowspan > rowIndex) {
+          td.rowspan = rowspan + count;
+        }
+      }
+    }
+
+    this._applyNewData({ ...currentData, children: newRows });
+  } else {
+    // 열 추가
+    const colIndex = index ?? this._tableEl.keyboardController?.selection?.focus.col ?? 0;
+    const newRows = currentData.children.map(tr => ({ ...tr, children: [...tr.children] }));
+
+    // 새 열 너비 결정: 사용자 지정값 존중, 미지정 시 인접 col 복사
+    const newColWidth = size ?? grid.colWidths[colIndex] ?? MIN_TABLE_COL_WIDTH;
+
+    // 기존 colWidths + 새 열 너비 정규화 (총 contentWidth 유지, 최소 보장)
+    const allWidths = [...grid.colWidths];
+    for (let i = 0; i < count; i++) {
+      allWidths.splice(colIndex + i, 0, newColWidth);
+    }
+    const contentWidth = allWidths.reduce((a, b) => a + b, 0);
+    const normalizedWidths = normalizeWidths(allWidths, contentWidth, MIN_TABLE_COL_WIDTH);
+
+    for (const tr of newRows) {
+      const newCell = this._createEmptyCell();
+      tr.children.splice(colIndex, 0, newCell);
+    }
+
+    // colspan이 추가 위치를 걸치는 셀의 colspan 증가
+    for (const tr of newRows) {
+      for (const td of tr.children) {
+        const colspan = td.colspan ?? 1;
+        // 셀의 시작 열이 colIndex 이전이고, 끝 열이 colIndex 이후면 colspan 증가
+        // (실제 구현 시 논리 좌표 기반 판별)
+      }
+    }
+
+    this._applyNewData({ ...currentData, colWidths: normalizedWidths, children: newRows });
+  }
+}
+```
+
+#### Delete Row 알고리즘 상세
+
+```typescript
+/**
+ * 현재 위치의 줄(행) 또는 칸(열)을 삭제한다.
+ *
+ * 행 삭제:
+ * 1. rowIndex 위치의 TableRowData 제거.
+ * 2. 삭제된 행에 rowspan 셀이 있던 경우 rowspan 조정.
+ * 3. table.data 갱신.
+ */
+deleteRowOrCol(target: 'row' | 'col', index?: number, count: number = 1): void {
+  const grid = this._tableEl.gridResolution;
+  if (!grid) return;
+
+  const currentData = this._tableEl.data;
+
+  if (target === 'row') {
+    if (grid.rowCount <= count) {
+      throw new Error("Cannot delete all rows — at least 1 row must remain");
+    }
+    const rowIndex = index ?? this._tableEl.keyboardController?.selection?.focus.row ?? 0;
+    const newRows = [...currentData.children];
+
+    // 삭제할 행의 셀 중 rowspan > 1인 셀 처리
+    for (const td of newRows[rowIndex].children) {
+      const rowspan = td.rowspan ?? 1;
+      if (rowspan > 1) {
+        // 셀이 아래 행까지 걸쳐 있음 → 다음 행으로 셀 이동 + rowspan 감소
+        if (rowIndex + 1 < newRows.length) {
+          const movedTd: TableCellData = {
+            ...td,
+            rowspan: rowspan - 1,
+            children: td.children, // children은 이미 복사됨
+          };
+          // 다음 행의 적절한 위치에 삽입
+          // (단순화: 다음 행의 children 앞에 추가)
+          newRows[rowIndex + 1].children.unshift(movedTd);
+        }
+      }
+    }
+
+    // 행 제거
+    newRows.splice(rowIndex, count);
+
+    this._applyNewData({ ...currentData, children: newRows });
+  } else {
+    // 열 삭제
+    if (grid.colCount <= count) {
+      throw new Error("Cannot delete all columns — at least 1 column must remain");
+    }
+    const colIndex = index ?? this._tableEl.keyboardController?.selection?.focus.col ?? 0;
+    const newRows = currentData.children.map(tr => ({ ...tr, children: [...tr.children] }));
+    const newColWidths = [...grid.colWidths];
+
+    for (let i = 0; i < count; i++) {
+      const deleteIndex = colIndex;
+      newColWidths.splice(deleteIndex, 1);
+      for (const tr of newRows) {
+        if (deleteIndex < tr.children.length) {
+          tr.children.splice(deleteIndex, 1);
+        }
+      }
+    }
+
+    this._applyNewData({ ...currentData, colWidths: newColWidths, children: newRows });
+  }
+}
+```
+
+### 8B.5 LayoutTableElement 통합
+
+`LayoutTableElement`에 키보드 컨트롤러 + 구조 편집기 통합.
+
+#### 클래스 멤버 추가
+
+```typescript
+// LayoutTableElement에 추가
+
+/** 키보드 편집 컨트롤러 (편집 모드에서만 활성) */
+private _keyboardController: TableKeyboardController | null = null;
+
+/** 구조 편집기 (편집 모드에서만 활성) */
+private _structureEditor: TableStructureEditor | null = null;
+
+/** 셀 블록 선택 레이어 div */
+private _selectionLayerEl: HTMLDivElement | null = null;
+
+/** 선택 원 div 맵 (key → div) */
+private _selectionCircleMap: Map<string, HTMLDivElement> = new Map();
+
+/**
+ * 그리드 해석 결과 getter (외부 접근용).
+ * TableKeyboardController/TableStructureEditor가 gridResolution에 접근할 때 사용.
+ * private 필드 `_gridResolution` 을 안전하게 노출.
+ * @returns 현재 그리드 해석 결과 (미연결 시 undefined)
+ */
+get gridResolution(): GridResolution | undefined {
+  return this._gridResolution;
+}
+
+/**
+ * 정규화된 colWidths getter (외부 접근용).
+ * 리사이즈/키보드 크기 조절 시 현재 colWidths를 읽을 때 사용.
+ */
+get resolvedColWidths(): number[] {
+  return this._resolvedColWidths;
+}
+
+/**
+ * 키보드 컨트롤러 getter (외부 접근용).
+ * 외부 편집기 툴바가 structureEditor의 public 메서드를 호출할 때 사용.
+ */
+get keyboardController(): TableKeyboardController | null {
+  return this._keyboardController;
+}
+
+/**
+ * 구조 편집기 getter (외부 접근용).
+ * 외부 편집기 툴바가 merge/split/insert/delete/equalize를 호출할 때 사용.
+ * @example
+ * // 외부 툴바에서 병합 실행
+ * const editor = tableEl.structureEditor;
+ * if (editor && tableEl.keyboardController?.selection) {
+ *   editor.mergeCells(tableEl.keyboardController.selection);
+ * }
+ */
+get structureEditor(): TableStructureEditor | null {
+  return this._structureEditor;
+}
+
+/**
+ * boxPropertyChange 이벤트 dispatch (외부 접근용).
+ * TableKeyboardController/TableStructureEditor가 구조 변경 후 외부 통지할 때 사용.
+ * private 메서드 `_notifyTablePropertyChange` 를 안전하게 노출.
+ */
+notifyTablePropertyChange(): void {
+  this._notifyTablePropertyChange();
+}
+```
+
+#### 편집 모드 진입/종료 시 컨트롤러 생성/파괴
+
+```typescript
+/**
+ * 편집 모드 진입 시 키보드 컨트롤러 + 구조 편집기 활성화.
+ * EditManager의 modeChange 이벤트 리스너 또는
+ * 부모 box의 editableLayout setter에서 호출.
+ */
+private _activateTableEditing(): void {
+  if (this._isPrint) return;
+  const editManager = this.editManager;
+  if (!editManager?.layoutEditMode) return;
+
+  if (!this._structureEditor) {
+    this._structureEditor = new TableStructureEditor(this, editManager);
+  }
+  if (!this._keyboardController) {
+    this._keyboardController = new TableKeyboardController(this, editManager);
+  }
+  this._keyboardController.activate();
+  // capture phase 로 등록: TextEditController의 textarea keydown보다
+  // 먼저 수신하여 F5/F7/F8/Alt+방향키/셀 블록 제어 키를 우선 처리.
+  // capture=true 이므로 textarea(자식)로 이벤트가 전달되기 전에 가로챔.
+  this.addEventListener('keydown', this._onTableKeyDown, true);
+}
+
+/**
+ * 편집 모드 종료 시 컨트롤러 비활성화.
+ */
+private _deactivateTableEditing(): void {
+  // capture phase 로 등록했으므로 capture=true 로 제거
+  this.removeEventListener('keydown', this._onTableKeyDown, true);
+  this._keyboardController?.deactivate();
+  // selection 해제
+  this._clearSelectionOverlay();
+}
+
+/**
+ * keydown 이벤트 리스너 (바인딩된 화살표 함수).
+ * capture phase 에서 호출됨.
+ */
+private _onTableKeyDown = (event: KeyboardEvent): void => {
+  if (this._keyboardController) {
+    const handled = this._keyboardController.handleKeyDown(event);
+    if (handled) {
+      // 처리된 이벤트는 더 이상 전파하지 않음 (textarea 도달 차단)
+      event.stopPropagation();
+    }
+  }
+};
+```
+
+#### 선택 오버레이 렌더링
+
+```typescript
+/**
+ * 셀 블록 선택 오버레이를 렌더링.
+ * TableKeyboardController._renderSelectionOverlay()에서 호출.
+ * @param selection - 선택 상태 (null = 해제)
+ */
+_renderSelectionOverlay(selection: TableCellSelection | null): void {
+  // 기존 원 제거
+  this._clearSelectionOverlay();
+  if (!selection) return;
+
+  const grid = this.gridResolution;
+  if (!grid) return;
+
+  // selection-layer 보장
+  if (!this._selectionLayerEl) {
+    const layer = document.createElement('div');
+    layer.classList.add('table-selection-layer');
+    layer.style.position = 'absolute';
+    layer.style.top = '0';
+    layer.style.left = '0';
+    layer.style.width = '100%';
+    layer.style.height = '100%';
+    layer.style.pointerEvents = 'none';
+    layer.style.zIndex = String(Z_INDEX_TABLE_SELECTION);
+    this._shadowRoot.appendChild(layer);
+    this._selectionLayerEl = layer;
+  }
+
+  const ppm = GridCalculator.ppm;
+  const coords = this._getSelectionCoords(selection);
+  const color = selection.mode === 'single' ? 'gray' : 'red';
+
+  for (const coord of coords) {
+    const placement = this._findPlacementAt(coord);
+    if (!placement) continue;
+
+    const circle = document.createElement('div');
+    circle.classList.add('table-selection-circle');
+    circle.style.position = 'absolute';
+    circle.style.left = `${placement.x * ppm}px`;
+    circle.style.top = `${placement.y * ppm}px`;
+    circle.style.width = `${placement.width * ppm}px`;
+    circle.style.height = `${placement.height * ppm}px`;
+    circle.style.borderRadius = '50%';
+    circle.style.border = `2px solid ${color}`;
+    circle.style.boxSizing = 'border-box';
+    circle.style.opacity = '0.5';
+    circle.style.pointerEvents = 'none';
+    circle.setAttribute('data-cell', `${coord.row}-${coord.col}`);
+
+    this._selectionLayerEl.appendChild(circle);
+    this._selectionCircleMap.set(`${coord.row}-${coord.col}`, circle);
+  }
+}
+
+private _clearSelectionOverlay(): void {
+  for (const [, circle] of this._selectionCircleMap) {
+    circle.remove();
+  }
+  this._selectionCircleMap.clear();
+}
+
+/**
+ * 논리 좌표에 해당하는 CellPlacement 반환.
+ */
+private _findPlacementAt(coord: CellCoord): CellPlacement | null {
+  const grid = this.gridResolution;
+  if (!grid) return null;
+  for (const p of grid.placements) {
+    if (coord.row >= p.gridRow && coord.row < p.gridRow + p.spanRows
+      && coord.col >= p.gridCol && coord.col < p.gridCol + p.spanCols) {
+      return p;
+    }
+  }
+  return null;
+}
+
+/**
+ * 선택 영역의 모든 논리 좌표 반환.
+ */
+private _getSelectionCoords(selection: TableCellSelection): CellCoord[] {
+  const minRow = Math.min(selection.anchor.row, selection.focus.row);
+  const maxRow = Math.max(selection.anchor.row, selection.focus.row);
+  const minCol = Math.min(selection.anchor.col, selection.focus.col);
+  const maxCol = Math.max(selection.anchor.col, selection.focus.col);
+  const coords: CellCoord[] = [];
+  for (let r = minRow; r <= maxRow; r++) {
+    for (let c = minCol; c <= maxCol; c++) {
+      coords.push({ row: r, col: c });
+    }
+  }
+  return coords;
+}
+```
+
+### 8B.6 EditManager 이벤트 확장
+
+#### 신규 이벤트: `tableCellSelectionChange`
+
+```typescript
+// src/edit/edit-manager.ts에 추가
+
+/** 테이블 셀 블록 선택 변경 이벤트 타입 */
+export const TABLE_CELL_SELECTION_CHANGE = 'tableCellSelectionChange' as const;
+
+// 이벤트 리스너 타입에 추가
+type EditManagerEventListener = (
+  event: CustomEvent<TableCellSelectionChangeDetail>
+) => void;
+
+// dispatch 허용 타입에 추가
+type DispatchableEvent = 'tableCellSelectionChange' | ...기존;
+```
+
+`TableKeyboardController._updateSelection()`에서 dispatch:
+```typescript
+private _updateSelection(selection: TableCellSelection | null): void {
+  this._selection = selection;
+  this._renderSelectionOverlay();
+  const selectedCells = selection ? this._getSelectedCells() : [];
+  this._editManager.dispatchEvent(new CustomEvent('tableCellSelectionChange', {
+    detail: {
+      selection,
+      selectedCells,
+      source: 'keyboard',
+    },
+  }));
+}
+```
+
+외부(React/툴바)는 `editManager.addEventListener('tableCellSelectionChange', listener)`로 선택 상태 변화를 감지.
+
+### 8B.7 상수 추가
+
+`src/constants/defaults.ts`:
+```typescript
+/** 테이블 셀 블록 선택 레이어 z-index. border-layer(99990) 아래. */
+export const Z_INDEX_TABLE_SELECTION = 99989;
+
+/** 키보드 셀 크기 조절 단위 (mm per key press). */
+export const TABLE_KEYBOARD_RESIZE_STEP = 1;
+```
+
+### 8B.8 외부 API 사용 예시
+
+외부 편집기 툴바에서 키보드 기능을 직접 호출하는 예시:
+
+```typescript
+/**
+ * 외부 툴바에서 테이블 셀 병합 실행.
+ * @param tableEl - 대상 테이블 요소
+ * @example
+ * // 툴바의 "셀 병합" 버튼 클릭 시
+ * function onMergeButtonClick(tableEl: LayoutTableElement) {
+ *   const editor = tableEl.structureEditor;
+ *   const controller = tableEl.keyboardController;
+ *   if (!editor || !controller) return;
+ *   const selection = controller.selection;
+ *   if (!selection || selection.mode === 'single') {
+ *     alert('병합할 셀을 먼저 선택하세요 (F5).');
+ *     return;
+ *   }
+ *   editor.mergeCells(selection);
+ * }
+ */
+```
+
+```typescript
+/**
+ * 외부 툴바에서 행 추가 실행.
+ * @param tableEl - 대상 테이블 요소
+ * @param index - 추가할 행 위치 (생략 시 현재 선택 위치)
+ * @example
+ * // 툴바의 "행 추가" 버튼 클릭 시
+ * function onInsertRowClick(tableEl: LayoutTableElement, index?: number) {
+ *   const editor = tableEl.structureEditor;
+ *   if (!editor) return;
+ *   editor.insertRowOrCol('row', index, 1);
+ * }
+ */
+```
+
+```typescript
+/**
+ * 외부 툴바에서 셀 분할 실행.
+ * @param tableEl - 대상 테이블 요소
+ * @param splitRows - 분할할 행 수
+ * @param splitCols - 분할할 열 수
+ * @example
+ * // 툴바의 "셀 분할" 버튼 클릭 시 (대화상자에서 입력받은 값)
+ * function onSplitButtonClick(tableEl: LayoutTableElement, splitRows: number, splitCols: number) {
+ *   const editor = tableEl.structureEditor;
+ *   const controller = tableEl.keyboardController;
+ *   if (!editor || !controller?.selection) return;
+ *   const focus = controller.selection.focus;
+ *   editor.splitCell(focus, splitRows, splitCols);
+ * }
+ */
+```
+
+### 8B.9 편집 모드 진입/종료 연동
+
+`LayoutTableElement`는 부모 box의 `editableLayout` 상태 변화를 감지하여 컨트롤러를 활성화/비활성화한다. 이 연동은 두 가지 방식으로 구현 가능:
+
+**방식 A (권장): EditManager modeChange 이벤트 리스너**
+```typescript
+// LayoutTableElement.connectedCallback()에서
+this.editManager?.addEventListener('modeChange', this._onModeChange);
+
+private _onModeChange = (event: CustomEvent): void => {
+  const { mode } = event.detail;
+  if (mode.layoutEditMode) {
+    this._activateTableEditing();
+  } else {
+    this._deactivateTableEditing();
+  }
+};
+```
+
+**방식 B: 부모 box editableLayout 전파**
+- `LayoutBoxElement._applyEditableLayout()`가 table 자식에게 `[editable-layout]` 속성 부여 시 table이 `attributeChangedCallback`에서 컨트롤러 활성화.
+
+> **권장**: 방식 A. EditManager가 중앙에서 편집 상태를 관리하므로, modeChange 이벤트가 가장 신뢰할 수 있는 트리거.
+
+### 8B.10 셀 블록 선택과 box 선택의 공존 정책
+
+셀 블록(F5)이 활성 상태에서 TD 내 box를 마우스로 클릭할 때의 동작 정책.
+
+#### 정책
+
+1. **셀 블록 선택 영역 내의 TD에 속한 box 클릭** → **셀 블록 유지**
+   - 셀 블록 선택 상태를 해제하지 않음.
+   - box 선택으로 전환하지 않음.
+   - box 클릭 이벤트는 `stopPropagation()` 없이 전파되되, LayoutSelectionController가 셀 블록 활성 상태를 확인하고 box 선택을 수행하지 않음.
+   - 사용자는 셀 블록 유지 상태에서 구조 변경(M/S/W/H) 등을 계속 수행 가능.
+
+2. **셀 블록 선택 영역 외부의 box 또는 빈 공간 클릭** → **box 선택으로 전환**
+   - 셀 블록 선택 해제 (`selection = null`, 원 제거).
+   - 기존 LayoutSelectionController가 box 선택 수행.
+   - 일반적인 box 편집 동작으로 전환.
+
+3. **table 외부 클릭** → **셀 블록 + box 선택 모두 해제**
+   - 셀 블록 선택 해제.
+   - 기존 box 선택 해제 (빈 공간 클릭 규칙).
+   - table 내부는 TD가 absolute로 가득 채우므로 "TD 외부 빈 공간"은 존재하지 않음.
+4. **마키 선택 시작** → **셀 블록 해제**
+   - 마키는 table 외부 빈 공간에서 시작되므로, 마키 시작 시점(`_onMouseDown`)에 셀 블록 해제.
+   - 마키 도중 셀 블록이 시각적으로 유지되는 혼선 방지.
+5. **더블클릭 텍스트 편집 진입** → **셀 블록 유지**
+   - `_onDblClick`은 셀 블록 활성 여부와 무관하게 텍스트 편집 모드로 진입.
+   - 텍스트 편집 모드 진입 후 셀 블록이 활성이면 **테이블 제어 우선** (방향키 = 셀 블록 range 확장).
+   - 셀 블록이 비활성이면 방향키 = 텍스트 커서 이동.
+
+#### 구현 — `LayoutSelectionController._onMouseDown` 확장
+
+> **주의**: 기존 `_onMouseDown`은 `pointerdown` 이벤트에 등록되어 있으며 시그니처가 `PointerEvent` 이다 (MouseEvent가 아님). 또한 box 선택은 `_onClick`에서 수행하므로, 셀 블록 유지 시 `stopPropagation()` 으로 `_onClick` 도달을 차단해야 한다.
+
+```typescript
+/**
+ * 셀 블록이 활성 상태인지 확인하고, 클릭 대상이 선택 영역 내인지 판별.
+ * @param target - 클릭 대상 요소
+ * @returns true = 셀 블록 유지 (box 선택 수행 안 함), false = 기존 동작
+ */
+private _shouldPreserveCellBlock(target: Element): boolean {
+  // table 요소 탐색
+  const tableEl = target.closest('x-layout-table') as LayoutTableElement | null;
+  if (!tableEl) return false; // table 외부
+
+  const controller = tableEl.keyboardController;
+  if (!controller?.selection) return false; // 셀 블록 비활성
+
+  // table 내부 클릭은 항상 TD 내부 (TD가 absolute로 table 콘텐츠 영역을 가득 분할)
+  // TD가 셀 블록 선택 영역 내인지 확인
+  const tdEl = target.closest('x-layout-td') as LayoutTableCellElement | null;
+  if (!tdEl) return false; // 안전장치 (정상적으로는 발생하지 않음)
+
+  const selectedCells = controller.getSelectedCells();
+  return selectedCells.includes(tdEl);
+}
+
+// _onMouseDown 내부 수정:
+// 기존: pointerdown 이벤트, 시그니처 PointerEvent
+// 수정: 셀 블록 공존 체크를 textEditMode 조기 return **이전**에 배치
+//       (텍스트 편집 모드에서도 셀 블록 유지 동작해야 하므로)
+private _onMouseDown = (event: PointerEvent): void => {
+  const manager = this._manager;
+  if (manager.insertMode) return;
+  if (manager.placeGunActive) return;
+  if (manager.spacePressed) return;
+  if (event.button !== 0) return;
+
+  // ─── 셀 블록 공존 체크 (textEditMode 조기 return 이전) ───
+  // 텍스트 편집 모드에서도 셀 블록이 활성이면 유지 동작 수행
+  const target = event.target as Element;
+  if (this._shouldPreserveCellBlock(target)) {
+    // 선택 영역 내 TD의 box 클릭 → 셀 블록 유지, box 선택 방지
+    event.preventDefault();
+    event.stopPropagation(); // _onClick 도달 차단 → box 선택 수행 안 함
+    return;
+  }
+
+  // ─── 기존 로직 ───
+  if (manager.textEditMode && manager.focusedParagraph) return;
+
+  const box = this._findSelectableBoxFromEvent(event);
+  if (box) return;
+
+  const isInsideDocument = event.composedPath().some(
+    (el) => el instanceof LayoutDocumentElement
+  );
+  if (!isInsideDocument) return;
+
+  // ─── 마키 시작 시 셀 블록 해제 ───
+  // 마키 선택은 table 외부 빈 공간에서 시작되므로, 셀 블록이 활성이면 해제.
+  // (table 내부는 TD가 가득 채우므로 마키 시작 위치는 항상 table 외부)
+  const path = event.composedPath();
+  const tableEl = path.find(
+    (el) => el instanceof LayoutTableElement
+  ) as LayoutTableElement | undefined;
+  if (tableEl?.keyboardController?.selection) {
+    tableEl.keyboardController.selection = null;
+  }
+
+  this._marqueePending = true;
+  this._marqueeAdditive = event.ctrlKey || event.metaKey;
+  event.preventDefault();
+  this._marquee = {
+    startX: event.clientX,
+    startY: event.clientY,
+    active: false,
+    rectEl: null,
+    lastX: event.clientX,
+    lastY: event.clientY,
+    rafId: null,
+    highlightedBoxes: new Set(),
+  };
+
+  window.addEventListener('pointermove', this._onMarqueeMouseMove, true);
+  window.addEventListener('pointerup', this._onMarqueeMouseUp, true);
+  window.addEventListener('pointercancel', this._onMarqueeMouseUp, true);
+};
+```
+
+#### `_onClick` 확장 — 영역 외부/빈 공간 클릭 시 셀 블록 해제
+
+기존 `_onClick`에서 box를 찾지 못한 경우(빈 공간) 또는 셀 블록 영역 외부 box 클릭 시, 셀 블록을 해제한다.
+
+```typescript
+private _onClick = (event: MouseEvent): void => {
+  const manager = this._manager;
+  if (manager.insertMode) return;
+  if (manager._consumeSuppressNextClick()) return;
+
+  if (this._marqueePending) {
+    this._marqueePending = false;
+    return;
+  }
+
+  const path = event.composedPath();
+  if (path.some((el) => el instanceof Element && el.closest('.parent-btn'))) return;
+
+  const box = this._findSelectableBoxFromEvent(event);
+
+  if (!box) {
+    // 빈 공간 클릭
+    const isInsideDocument = event.composedPath().some(
+      (el) => el instanceof LayoutDocumentElement
+    );
+    if (isInsideDocument) {
+      // ─── 셀 블록 해제 (기존 clearLayoutSelection 이전) ───
+      // table 외부 클릭 시 셀 블록 해제
+      // (table 내부는 TD가 가득 채우므로 빈 공간 = table 외부)
+      const tableEl = path.find(
+        (el) => el instanceof LayoutTableElement
+      ) as LayoutTableElement | undefined;
+      if (tableEl?.keyboardController?.selection) {
+        tableEl.keyboardController.selection = null;
+      }
+      // ─── 기존 box 선택 해제 ───
+      manager.clearLayoutSelection(false);
+      manager.blurParagraph();
+    }
+    return;
+  }
+
+  // ─── 셀 블록 영역 외부 box 클릭 시 해제 ───
+  // box가 table 내부에 있지만 셀 블록 선택 영역 외부인 경우
+  // (_onMouseDown에서 _shouldPreserveCellBlock=false로 통과한 경우)
+  const tableEl = path.find(
+    (el) => el instanceof LayoutTableElement
+  ) as LayoutTableElement | undefined;
+  if (tableEl?.keyboardController?.selection) {
+    // 영역 외부 box 클릭 → 셀 블록 해제
+    tableEl.keyboardController.selection = null;
+  }
+
+  // ─── 기존 box 선택 로직 ───
+  if (manager.layoutEditMode && manager.isBoxEditable(box)) return;
+  if (box.hasAttribute('text-focused')) return;
+
+  event.stopPropagation();
+  if (this._isEventFromDescendantLayout(event, box)) return;
+
+  box.removeAttribute('hovered');
+  manager._setMultiSelect(event.ctrlKey || event.metaKey);
+  manager.selectLayout(box);
+  manager._setMultiSelect(false);
+};
+```
+
+#### `TableKeyboardController.getSelectedCells()` public 메서드
+
+`_getSelectedCells()` private 메서드를 public으로 노출:
+
+```typescript
+/**
+ * 선택 영역에 포함되는 모든 물리 TD 요소 배열 반환.
+ * LayoutSelectionController가 셀 블록 유지 판별 시 사용.
+ * @returns 선택된 TD 요소 배열 (중복 제거)
+ */
+getSelectedCells(): LayoutTableCellElement[] {
+  return this._getSelectedCells();
+}
+```
+
+#### 동작 흐름 예시
+
+```
+시나리오: 3×3 테이블, F5로 (0,0)~(1,1) 범위 선택 (빨간 원 4개)
+
+1. 사용자가 (0,0) TD 내 box 클릭
+   → _onMouseDown: _shouldPreserveCellBlock → true (선택 영역 내 TD)
+   → stopPropagation() → _onClick 도달 차단
+   → 셀 블록 유지, box 선택 수행 안 함
+   → 텍스트 편집 모드여도 동일 (textEditMode 조기 return 이전에 체크)
+
+2. 사용자가 (2,2) TD 내 box 클릭 (선택 영역 외부)
+   → _onMouseDown: _shouldPreserveCellBlock → false (선택 영역 아님)
+   → _onClick 도달 → box 찾음 → 셀 블록 해제 → 기존 box 선택 수행
+
+3. 사용자가 table 외부 빈 공간 클릭
+   → _onMouseDown: _shouldPreserveCellBlock → false (table 외부)
+   → 마키 시작 전 셀 블록 해제
+   → _onClick 도달 → box 못 찾음 → 셀 블록 해제(이미 해제됨) + clearLayoutSelection
+
+4. 사용자가 table 외부 빈 공간 드래그 (마키 선택)
+   → _onMouseDown: _shouldPreserveCellBlock → false (table 외부)
+   → 마키 시작 전 셀 블록 해제
+   → 마키 선택 진행
+
+5. 사용자가 paragraph 더블클릭 (텍스트 편집 진입)
+   → _onDblClick: textEditMode = true (셀 블록 유지)
+   → 텍스트 편집 모드 + 셀 블록 활성 → 방향키 = 셀 블록 range 확장 (테이블 제어 우선)
+   → 텍스트 편집 모드 + 셀 블록 비활성 → 방향키 = 텍스트 커서 이동
+```
+
+### 8B.11 검증 시나리오
+
+| 시나리오 | 트리거 | 기대 동작 | 검증 방법 |
+|---|---|---|---|
+| F5 1회 | F5 | 현재 셀 1개 선택, 회색 원 표시 | selection.mode='single', 원 1개 |
+| F5 2회 | F5 | 범위 선택 모드, 빨간 원 표시 | selection.mode='range', 방향키로 확장 |
+| F5 3회 | F5 | 전체 셀 선택, 빨간 원 | selection.mode='all', 모든 셀에 원 |
+| F5 4회 | F5 | single 모드로 재시작 | 모드 순환 |
+| F7 | F7 | 열 전체 선택 | selectMode='col', 해당 열 모든 셀 |
+| F8 | F8 | 행 전체 선택 | selectMode='row', 해당 행 모든 셀 |
+| 방향키 (range) | ↑↓←→ | focus 이동, 선택 영역 확장 | focus 좌표 변경 |
+| Alt+→ | Alt+Right | focus.col 너비 +1mm, 인접 col -1mm | colWidths 변경, 총폭 유지 |
+| Alt+← | Alt+Left | focus.col 너비 -1mm, 인접 col +1mm | colWidths 변경, 총폭 유지 |
+| Alt+↓ | Alt+Down | focus.row 높이 +1mm, 인접 row -1mm | rowHeights 변경, 총높이 유지 |
+| Alt+↑ | Alt+Up | focus.row 높이 -1mm, 인접 row +1mm | rowHeights 변경, 총높이 유지 |
+| M | M | 선택 셀 병합 | colspan/rowspan 증가, 셀 수 감소 |
+| S | S | 분할 대화상자 호출 | 콜백으로 splitCell 실행 |
+| W | W | 선택 열 너비 균등 배분 | colWidths 균등 |
+| H | H | 선택 행 높이 균등 배분 | rowHeights 균등 |
+| Alt+Insert | Alt+Insert | 행/열 추가 | 행/열 수 증가 |
+| Alt+Delete | Alt+Delete | 행/열 삭제 | 행/열 수 감소 |
+| ESC | ESC | 셀 블록 선택 해제 | selection=null, 원 제거 |
+| 선택된 TD 내 box 클릭 | 마우스 | 셀 블록 유지, box 선택 수행 안 함 | selection 유지, box 선택 미발생 |
+| 선택 영역 외부 box 클릭 | 마우스 | 셀 블록 해제, box 선택으로 전환 | selection=null, box 선택 발생 |
+| table 외부 클릭 | 마우스 | 셀 블록 + box 선택 모두 해제 | selection=null, box 선택 해제 |
+| 텍스트 편집 중 F5 | F5 | 셀 블록 지정 동작 | selection 갱신 (텍스트 입력과 충돌 없음) |
+| 텍스트 편집 중 M | M | 셀 블록 활성 시에만 동작 | 셀 블록 비활성 → 무시, 텍스트 입력으로 처리 |
+| 텍스트 편집 중 Alt+→ | Alt+Right | 셀 크기 조절 동작 | colWidths 변경 (텍스트 입력과 충돌 없음) |
+| 외부 API: mergeCells | 툴바 버튼 | 키보드 M과 동일 동작 | 동일 결과 |
+| 외부 API: insertRowOrCol | 툴바 버튼 | 키보드 Alt+Insert와 동일 | 동일 결과 |
+| 외부 API: splitCell | 툴바 버튼 | 키보드 S와 동일 (대화상자 없이 직접 호출) | 동일 결과 |
+| 텍스트 편집 모드 | F5 | 비활성 (이벤트 무시) | 처리 안 됨 |
+| 인쇄 모드 | F5 | 비활성 | 컨트롤러 미생성 |
+
+---
+
 ## 9. React 래퍼
 
 ### 9.1 신규 파일: `src/react/components/layout-table.tsx`
@@ -2925,6 +4919,9 @@ export * from "./components/layout-table";
 | `src/components/layout/tr.element.ts` | LayoutTableRowElement — 행, `type`/`items`/`overlayElements`/`printPostData` getter |
 | `src/components/layout/td.element.ts` | LayoutTableCellElement — 셀 (box-equivalent), `_updateChildBoxResizeVisibility()` (전략 B), `isBoxFillingCell` 판별, `type`/`overlayElements`/`printPostData` getter |
 | `src/utils/table-utils.ts` | `isBoxFillingCell` 유틸 (전략 B — TD 꽉 채움 판별) |
+| `src/types/edit/table-selection.type.ts` | `TableCellSelection`, `CellBlockMode`, `CellCoord`, `TableCellSelectionChangeDetail` 타입 (섹션 8B) |
+| `src/edit/table-keyboard-controller.ts` | `TableKeyboardController` — 키보드 입력 처리 (F5/F7/F8/Alt+방향키/M/S/W/H/Alt+Insert/Delete/ESC), 셀 블록 선택 관리, 선택 오버레이 렌더링 (섹션 8B) |
+| `src/edit/table-structure-editor.ts` | `TableStructureEditor` — 셀 구조 변경 (merge/split/equalize/insert/delete), 외부 API public 메서드 제공 (섹션 8B) |
 | `src/react/components/layout-table.tsx` | LayoutTable, LayoutTR, LayoutTD React 래퍼 |
 
 ### 수정 파일
@@ -2933,14 +4930,15 @@ export * from "./components/layout-table";
 | `src/types/layout/box.type.ts` | `BoxData.children` 유니온에 `TableData` 추가 |
 | `src/types/layout/index.ts` | `table.type` export 추가 |
 | `src/types/print/post-data.type.ts` | `PrintPostData` 제네릭에 `TableData`/`TableRowData`/`TableCellData` 추가, `PrintPostBorderEdge`/`PrintPostDiagonal` 신규 타입 |
-| `src/constants/defaults.ts` | `Z_INDEX_TABLE_BORDER`, `Z_INDEX_TABLE_DIAGONAL`, `Z_INDEX_TABLE_RESIZE`, `MIN_TABLE_COL_WIDTH`, `MIN_TABLE_ROW_HEIGHT` 상수 |
+| `src/constants/defaults.ts` | `Z_INDEX_TABLE_BORDER`, `Z_INDEX_TABLE_DIAGONAL`, `Z_INDEX_TABLE_RESIZE`, `Z_INDEX_TABLE_SELECTION`, `MIN_TABLE_COL_WIDTH` (5mm), `MIN_TABLE_ROW_HEIGHT` (5mm), `TABLE_KEYBOARD_RESIZE_STEP` 상수 |
 | `src/core/index.ts` | table-grid-resolver, border-resolver export |
 | `src/components/layout/box.element.ts` | `appendChildData`, `_appendChildData`, `data` setter, `_serializeChildren`, `contentType`, `contentElement`에 table 분기 추가, `[hide-resize]` 속성 지원 (전략 B), `hideResizeHandles` setter, `_collectParagraphs`에 table/TR/TD 재귀 추가 (섹션 8.8.5), `printPostData` 순회 시 table/TR/TD 포함 (섹션 8.9.9) |
 | `src/components/layout/index.ts` | table/tr/td export |
-| `src/edit/edit-manager.ts` | `LayoutElement` 타입에 `LayoutTableCellElement` 추가, 관련 함수 시그니처 일반화 |
+| `src/edit/edit-manager.ts` | `LayoutElement` 타입에 `LayoutTableCellElement` 추가, 관련 함수 시그니처 일반화, `tableCellSelectionChange` 이벤트 추가 (섹션 8B) |
 | `src/edit/layout-selection-controller.ts` | TD 선택 인식 |
 | `src/edit/layout-edit-controller.ts` | TD 드래그 시 부모 box 승격, TD 개별 리사이즈 비활성화 (테이블 리사이즈는 LayoutTableElement가 자체 처리) |
 | `src/edit/insert-controller.ts` | TD를 insert 타겟으로 인식 |
+| `src/components/layout/table.element.ts` | `TableKeyboardController`/`TableStructureEditor` 통합, `_activateTableEditing`/`_deactivateTableEditing`, 선택 오버레이 렌더링 (`_renderSelectionOverlay`/`_clearSelectionOverlay`/`_findPlacementAt`/`_getSelectionCoords`), `keyboardController`/`structureEditor` getter (섹션 8B) |
 | `src/react/index.ts` | table 래퍼 export |
 | `docs/API.md` | table/tr/td API 문서 |
 | `docs/TEXT_ENGINE.md` | TD 내 paragraph 렌더링 설명 |
@@ -2991,21 +4989,31 @@ export * from "./components/layout-table";
 26. `src/edit/edit-manager.ts` `_dispatchBoxPropertyChange`에 `table-grid` property 지원
 27. `npm run dev` 로 리사이즈 동작 확인 (수직/수평 핸들, colspan/rowspan 비활성, ESC 취소, 최소 크기, TD 꽉 채운 box resizer 숨김)
 
+### Phase 4.6: 키보드 기반 레이아웃 편집 (섹션 8B)
+28. `src/types/edit/table-selection.type.ts` 작성 (`TableCellSelection`, `CellBlockMode`, `CellCoord`, `TableCellSelectionChangeDetail`)
+29. `src/types/edit/index.ts` export 추가
+30. `src/constants/defaults.ts` `Z_INDEX_TABLE_SELECTION`/`TABLE_KEYBOARD_RESIZE_STEP` 상수 추가
+31. `src/edit/table-structure-editor.ts` 작성 — `TableStructureEditor` 클래스 (merge/split/equalizeWidth/equalizeHeight/insertRowOrCol/deleteRowOrCol public 메서드)
+32. `src/edit/table-keyboard-controller.ts` 작성 — `TableKeyboardController` 클래스 (handleKeyDown 라우팅, F5/F7/F8 모드 전환, 방향키 focus 이동, Alt+방향키 크기 조절, 구조 변경 키 위임, ESC 해제, 선택 오버레이 렌더링)
+33. `src/components/layout/table.element.ts`에 `_keyboardController`/`_structureEditor`/`_selectionLayerEl`/`_selectionCircleMap` 멤버 추가, `keyboardController`/`structureEditor` getter, `_activateTableEditing`/`_deactivateTableEditing`/`_onTableKeyDown`/`_renderSelectionOverlay`/`_clearSelectionOverlay`/`_findPlacementAt`/`_getSelectionCoords` 구현, EditManager modeChange 이벤트 리스너 연동
+34. `src/edit/edit-manager.ts` `tableCellSelectionChange` 이벤트 타입 + dispatch 지원 추가
+35. `npm run dev`로 키보드 편집 동작 확인 (F5 1/2/3회 모드 전환, F7/F8 행/열 선택, 방향키 범위 확장, Alt+방향키 크기 조절, M/S/W/H/Alt+Insert/Alt+Delete, ESC 해제, 외부 API 호출)
+
 ### Phase 5: React 래퍼
-26. `src/react/components/layout-table.tsx` 작성
-27. `src/react/index.ts` export 추가
+36. `src/react/components/layout-table.tsx` 작성
+37. `src/react/index.ts` export 추가
 
 ### Phase 6: 빌드 검증
-28. `npm run build` — IIFE + React ESM + .d.ts 생성 확인
-29. `npm run build:obfuscate` — 난독화 빌드 확인
+38. `npm run build` — IIFE + React ESM + .d.ts 생성 확인
+39. `npm run build:obfuscate` — 난독화 빌드 확인
 
 ### Phase 7: 문서화
-30. `docs/API.md` 갱신
-31. `docs/TEXT_ENGINE.md` 갱신
-32. `docs/EDITING_LAYOUT.md` 갱신 (셀/행 리사이즈 동작 포함)
-33. `docs/EDITING_INSERT.md` 갱신
-34. `docs/REACT_COMPONENT.md` 갱신
-35. `AGENTS.md` 갱신
+40. `docs/API.md` 갱신
+41. `docs/TEXT_ENGINE.md` 갱신
+42. `docs/EDITING_LAYOUT.md` 갱신 (셀/행 리사이즈 동작, 키보드 편집 포함)
+43. `docs/EDITING_INSERT.md` 갱신
+44. `docs/REACT_COMPONENT.md` 갱신
+45. `AGENTS.md` 갱신
 
 ---
 
@@ -3040,6 +5048,25 @@ export * from "./components/layout-table";
 - [ ] override 주입 시 최우선
 - [ ] 보더 없음 (선언 누락) → 엣지 생략
 - [ ] 인쇄 모드에서 보더 숨김
+
+### 12.2A 셀 크기 관리 (정규화 규칙)
+- [ ] 최소 셀 너비 = 5mm (MIN_TABLE_COL_WIDTH)
+- [ ] 최소 셀 높이 = 5mm (MIN_TABLE_ROW_HEIGHT)
+- [ ] 최초 데이터 주입 시 colWidths 합 = contentWidth (테이블 크기 유지)
+- [ ] 최초 데이터 주입 시 rowHeights 합 = contentHeight (테이블 크기 유지)
+- [ ] 최초 주입 시 colWidths 합 > contentWidth → 앞순서 셀 우선, 나머지 조정
+- [ ] 최초 주입 시 rowHeights 합 > contentHeight → 앞순서 셀 우선, 나머지 조정
+- [ ] 앞순서 셀 우선 시 나머지 셀 최소 5mm 보장
+- [ ] 최소 크기로도 contentWidth 초과 시 균등 축소 + warning
+- [ ] 최소 크기로도 contentHeight 초과 시 균등 축소 + warning
+- [ ] 마우스 리사이즈 시 colWidths 합 = contentWidth 유지 (인접 col에서 차감/추가)
+- [ ] 마우스 리사이즈 시 rowHeights 합 = contentHeight 유지 (인접 row에서 차감/추가)
+- [ ] 마우스 리사이즈 시 최소 5mm 이하 축소 불가
+- [ ] Alt+방향키 리사이즈 시 총폭/총높이 유지
+- [ ] Alt+방향키 리사이즈 시 최소 5mm 이하 축소 불가
+- [ ] 행/열 추가 시 새 행/열 크기 존중, 나머지 균등 축소
+- [ ] 행/열 추가 시 나머지 셀 최소 5mm 보장
+- [ ] 행/열 삭제 시 남은 셀들 크기 재분배 (총 크기 유지)
 
 ### 12.4 대각선
 - [ ] tl-br 대각선
@@ -3080,6 +5107,56 @@ export * from "./components/layout-table";
 - [ ] box 선택 시 table resizer 유지 (숨기지 않음)
 - [ ] TD 꽉 채움 판별 정확성 (static/absolute 모두)
 
+### 12.5C 키보드 기반 레이아웃 편집 (섹션 8B)
+- [ ] F5 1회 → single 모드, 현재 셀 1개 선택 (회색 원)
+- [ ] F5 2회 → range 모드 (빨간 원), 방향키로 확장 가능
+- [ ] F5 3회 → all 모드, 전체 셀 선택 (빨간 원)
+- [ ] F5 4회 → single 모드로 재시작 (모드 순환)
+- [ ] F7 → 열 전체 선택 (selectMode='col')
+- [ ] F8 → 행 전체 선택 (selectMode='row')
+- [ ] 범위 선택 모드에서 방향키 → focus 이동, 선택 영역 확장
+- [ ] F7 상태에서 좌우 방향키 → 열 이동 (행 이동 무시)
+- [ ] F8 상태에서 상하 방향키 → 행 이동 (열 이동 무시)
+- [ ] Alt+→ → focus.col 너비 +1mm, 인접 col -1mm (총폭 유지)
+- [ ] Alt+← → focus.col 너비 -1mm, 인접 col +1mm (총폭 유지)
+- [ ] Alt+↓ → focus.row 높이 +1mm, 인접 row -1mm (총높이 유지)
+- [ ] Alt+↑ → focus.row 높이 -1mm, 인접 row +1mm (총높이 유지)
+- [ ] Alt+방향키 최소 크기 보장 (MIN_TABLE_COL_WIDTH/MIN_TABLE_ROW_HEIGHT)
+- [ ] M → 선택 셀 병합 (colspan/rowspan 증가, 셀 수 감소)
+- [ ] M → 병합된 셀의 children(box) 이동 정상
+- [ ] S → 분할 대화상자 호출 → splitCell 실행
+- [ ] S → 분할 후 셀 수 증가, colspan/rowspan 감소
+- [ ] W → 선택 열 너비 균등 배분
+- [ ] H → 선택 행 높이 균등 배분
+- [ ] Alt+Insert → 행/열 추가 (행/열 수 증가)
+- [ ] Alt+Delete → 행/열 삭제 (행/열 수 감소)
+- [ ] Alt+Delete → 마지막 행/열 삭제 시 에러 (최소 1개 유지)
+- [ ] ESC → 셀 블록 선택 해제 (selection=null, 원 제거)
+- [ ] 텍스트 편집 모드에서 F5 → 셀 블록 지정 동작 (텍스트 입력과 충돌 없음)
+- [ ] 텍스트 편집 모드에서 F7/F8 → 행/열 선택 동작
+- [ ] 텍스트 편집 모드에서 Alt+방향키 → 셀 크기 조절 동작
+- [ ] 텍스트 편집 모드에서 ESC → 셀 블록 활성 시 해제, 비활성 시 TextEditController ESC 전파
+- [ ] 텍스트 편집 모드에서 M/S/W/H → 셀 블록 활성 시에만 동작, 비활성 시 텍스트 입력으로 처리
+- [ ] 텍스트 편집 모드에서 Alt+Insert/Delete → 셀 블록 활성 시에만 동작
+- [ ] 인쇄 모드에서 키보드 컨트롤러 미생성
+- [ ] 셀 블록 선택된 TD 내 box 클릭 → 셀 블록 유지, box 선택 수행 안 함
+- [ ] 셀 블록 선택된 TD 내 box 클릭 시 _onClick 도달 차단 (stopPropagation)
+- [ ] 셀 블록 선택된 TD 내 box 클릭 시 텍스트 편집 모드여도 셀 블록 유지 동작
+- [ ] 셀 블록 선택 영역 외부 box 클릭 → 셀 블록 해제, box 선택으로 전환
+- [ ] table 외부 클릭 → 셀 블록 + box 선택 모두 해제
+- [ ] 마키 선택 시작 시 셀 블록 해제 (_onMouseDown)
+- [ ] 더블클릭 텍스트 편집 진입 시 셀 블록 유지 (_onDblClick이 셀 블록 해제 안 함)
+- [ ] 텍스트 편집 모드 + 셀 블록 활성 → 방향키 = 셀 블록 range 확장 (테이블 제어 우선)
+- [ ] 텍스트 편집 모드 + 셀 블록 비활성 → 방향키 = 텍스트 커서 이동 (TextEditController로 전파)
+- [ ] 외부 API: `tableEl.structureEditor.mergeCells(selection)` → 키보드 M과 동일
+- [ ] 외부 API: `tableEl.structureEditor.insertRowOrCol('row')` → 키보드 Alt+Insert와 동일
+- [ ] 외부 API: `tableEl.structureEditor.splitCell(coord, rows, cols)` → 키보드 S와 동일
+- [ ] 외부 API: `tableEl.structureEditor.equalizeWidth(selection)` → 키보드 W와 동일
+- [ ] 외부 API: `tableEl.structureEditor.equalizeHeight(selection)` → 키보드 H와 동일
+- [ ] 외부 API: `tableEl.structureEditor.deleteRowOrCol('col')` → 키보드 Alt+Delete와 동일
+- [ ] `tableCellSelectionChange` 이벤트 dispatch 정상
+- [ ] 편집 모드 종료 시 컨트롤러 비활성화 + 선택 오버레이 제거
+
 ### 12.6 데이터 직렬화
 - [ ] `box.data` getter → TableData 포함
 - [ ] `td.data` getter → TableCellData
@@ -3115,12 +5192,17 @@ export * from "./components/layout-table";
 
 ## 13. 해결 필요 설계 포인트 (구현 전 결정)
 
-1. **~~TD 리사이즈 UX~~** → **해결**: 마우스 드래그로 셀 너비/행 높이 조정 지원 (섹션 8A 참조). 부모 box 리사이즈 + 개별 colWidths/rowHeights 핸들 조정 모두 1차 구현에 포함.
+1. **~~TD 리사이즈 UX~~** → **해결**: 마우스 드래그로 셀 너비/행 높이 조정 지원 (섹션 8A 참조). 부모 box 리사이즈 + 개별 colWidths/rowHeights 핸들 조정 모두 1차 구현에 포함. 키보드 기반 크기 조절(Alt+방향키)도 섹션 8B에 추가.
 2. **행 높이 합 vs box 높이**: `sum(rowHeights)` ≠ box 콘텐츠 높이일 때 비례 정규화 권장 + `render-error` 경고.
 3. **대각선 색상/두께 소스**: 1차는 `borderTop`(또는 첫 선언된 보더 엣지) 재사용. 별도 `diagonalColor`/`diagonalWidth` 필드 추가 검토.
 4. **중첩 테이블 깊이 제한**: 무한 중첩 방지를 위한 깊이 제한 (예: 5단계) 검토.
 5. **TD lock**: `TableCellData`에 `lock?: boolean` 필드 추가 여부. 추가 시 `_isBoxOrAncestorLocked` 확장 필수.
 6. **`LayoutElement` 타입 확장 영향도**: `edit-manager.ts`/`layout-edit-controller.ts`의 box-특화 함수들을 TD로 일반화하는 작업 범위. 1차는 TD 편집 기능을 최소화(선택만)하여 영향도 제한 권장.
+7. **~~Split 대화상자 UI~~** → **해결**: `handleSplit()`은 콜백 기반으로 설계되어 있으나, 실제 대화상자 UI(행/열 분할 수 입력)는 외부에서 제공해야 함. 외부 편집기가 대화상자를 띄우고 `splitCell(coord, rows, cols)`를 직접 호출하는 방식. 1차 구현은 대화상자 없이 `splitCell()` public API만 제공.
+8. **~~Alt+Insert/Delete 행/열 판별~~** → **해결**: `selectMode`가 `'col'`(F7)이면 열, `'row'`(F8)이면 행, 기본(`'cell'`)은 행으로 판별. `handleKeyDown`에서 `selectMode` 기반 분기.
+9. **~~셀 블록 선택과 box 선택의 공존~~** → **해결**: 섹션 8B.10에서 정책 확정 — 선택된 TD 내 box 클릭 시 셀 블록 유지, 영역 외부 클릭 시 셀 블록 해제 + box 선택으로 전환. `LayoutSelectionController._shouldPreserveCellBlock()`으로 판별.
+10. **~~키보드 컨트롤러 활성화 조건~~** → **해결**: 텍스트 편집 모드에서도 F5/F7/F8/Alt+방향키/ESC 동작 (셀 블록 지정은 텍스트 입력과 충돌하지 않음). 구조 변경(M/S/W/H/Alt+Insert/Delete)은 셀 블록 활성 시에만 동작. keydown 리스너는 capture phase로 등록하여 TextEditController보다 먼저 수신.
+11. **Insert/Delete 시 colspan/rowspan 조정 알고리즘**: 행/열 추가·삭제 시 기존 셀의 colspan/rowspan이 추가/삭제 위치를 걸치면 증가/감소시켜야 함. 1차 구현은 기본 케이스(단일 span 셀)만 처리하고, 복잡한 중첩 span 케이스는 warning + 클램프. 구체 알고리즘은 구현 단계에서 보강.
 
 ---
 
