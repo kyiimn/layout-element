@@ -3070,6 +3070,27 @@ export type TableCellSelectionChangeDetail = {
   /** 이벤트 소스 */
   source: 'keyboard' | 'programmatic';
 };
+
+/**
+ * Split 대화상자 콜백.
+ * `TableKeyboardController.handleSplit()` 호출 시 외부 대화상자를 띄우기 위해 사용.
+ * 콜백 내에서 `TableStructureEditor.splitCell(coord, rows, cols)`을 호출한다.
+ *
+ * @param coord - 분할할 셀의 논리 좌표
+ * @param editor - 구조 편집기 인스턴스 (splitCell 호출용)
+ *
+ * @example
+ * const callback: SplitDialogCallback = (coord, editor) => {
+ *   const result = showSplitDialog(coord);
+ *   if (result) {
+ *     editor.splitCell(coord, result.rows, result.cols);
+ *   }
+ * };
+ */
+export type SplitDialogCallback = (
+  coord: CellCoord,
+  editor: TableStructureEditor,
+) => void;
 ```
 
 #### `src/types/edit/index.ts`에 export 추가:
@@ -3164,15 +3185,56 @@ export class TableKeyboardController {
   private _active: boolean = false;
 
   /**
+   * Split 대화상자 콜백.
+   * 외부 편집기가 대화상자를 띄우고 사용자에게 행/열 분할 수를 입력받은 후
+   * `TableStructureEditor.splitCell(coord, rows, cols)`을 호출한다.
+   * 미등록 시 `handleSplit()`은 no-op (아무 동작 안 함).
+   *
+   * @example
+   * // 외부 편집기에서 콜백 등록
+   * controller.setSplitDialogCallback((coord, editor) => {
+   *   const { rows, cols } = await showSplitDialog();
+   *   editor.splitCell(coord, rows, cols);
+   * });
+   */
+  private _splitDialogCallback: SplitDialogCallback | null = null;
+
+  /**
    * @param tableEl - 제어할 테이블 요소
    * @param editManager - 소속 EditManager
    */
   constructor(tableEl: LayoutTableElement, editManager: EditManager);
 
-  /** 컨트롤러 활성화 (편집 모드 진입 시) */
+  /**
+   * 컨트롤러 활성화 (편집 모드 진입 시).
+   *
+   * 활성화 조건:
+   * - `editManager.layoutEditMode === true`일 때 `_activateTableEditing()`에서 호출.
+   * - `_active = true`로 설정. 이후 table 요소의 keydown 이벤트를 수신.
+   *
+   * 포커스 요구사항:
+   * - `activate()` 자체는 포커스 상태와 무관하게 동작한다.
+   * - keydown 이벤트는 table 요소에 capture phase로 등록되므로,
+   *   **포커스가 table 내부에 없어도** 키 이벤트를 수신한다.
+   *   단, 실제 DOM 포커스가 table 외부(예: 툴바 입력)에 있으면
+   *   keydown 이벤트가 table 요소에 도달하지 않으므로 handleKeyDown이 호출되지 않는다.
+   * - table 내부의 paragraph가 포커스된 경우(텍스트 편집 모드):
+   *   keydown 이벤트가 textarea → 버블링 → table 요소에 도달하므로
+   *   handleKeyDown이 정상적으로 수신한다. capture phase이므로
+   *   textarea보다 먼저 수신한다.
+   * - table 내부를 마우스로 클릭한 경우(비텍스트 편집):
+   *   클릭된 TD/box가 포커스를 받지 않으므로 keydown이 발생하지 않을 수 있다.
+   *   이 경우 F5 등을 수신하려면 table 요소에 `tabindex="-1"`을 부여하여
+   *   포커스 가능 상태로 만들거나, document 레벨 keydown 리스너를
+   *   추가로 등록하여 table 내부 클릭 시 포커스를 table로 이동시킨다.
+   *
+   * 권장 구현: table 요소에 `tabindex="-1"` 속성 부여.
+   * `connectedCallback`에서 `this.setAttribute('tabindex', '-1')` 설정.
+   * TD/box 클릭 시 table이 포커스를 받아 keydown 이벤트 수신 가능.
+   */
   activate(): void;
 
-  /** 컨트롤러 비활성화 (편집 모드 종료 시) */
+  /** 컨트롤러 비활성화 (편집 모드 종료 시). `_active = false`, selection 해제. */
   deactivate(): void;
 
   /** 현재 셀 블록 선택 상태 */
@@ -3256,11 +3318,41 @@ export class TableKeyboardController {
   handleMerge(): void;
 
   /**
-   * S: 현재 셀을 지정한 줄/칸 수로 나누는 대화상자 호출.
-   * 사용자에게 행/열 분할 수를 입력받은 후 `TableStructureEditor.splitCell()` 실행.
-   * 대화상자는 외부에서 제공하는 것을 전제로, 콜백 기반으로 구현.
+   * S: 현재 셀을 지정한 줄/칸 수로 나눈다.
+   *
+   * 동작:
+   * - `_splitDialogCallback`이 등록된 경우: 콜백 호출.
+   *   콜백은 현재 셀 좌표와 `TableStructureEditor` 인스턴스를 받아
+   *   외부 대화상자를 띄우고 `splitCell(coord, rows, cols)`을 호출한다.
+   * - `_splitDialogCallback`이 미등록인 경우: no-op (아무 동작 안 함).
+   *   외부 편집기가 `setSplitDialogCallback()`으로 콜백을 등록하기 전까지
+   *   S 키는 무시된다. 콘솔 warning 출력 권장.
+   *
+   * @example
+   * // 콜백 등록된 경우
+   * controller.handleSplit();
+   * // → _splitDialogCallback({row:0,col:0}, structureEditor) 호출
+   * // → 외부 대화상자 → splitCell(coord, 2, 2)
+   *
+   * // 콜백 미등록인 경우
+   * controller.handleSplit();
+   * // → no-op (console.warn('Split dialog callback not registered'))
    */
   handleSplit(): void;
+
+  /**
+   * Split 대화상자 콜백을 등록한다.
+   * 외부 편집기 툴바에서 대화상자를 제공할 때 호출.
+   *
+   * @param callback - Split 대화상자 콜백. null 전달 시 등록 해제.
+   * @example
+   * controller.setSplitDialogCallback((coord, editor) => {
+   *   showSplitDialog(coord).then(({ rows, cols }) => {
+   *     editor.splitCell(coord, rows, cols);
+   *   });
+   * });
+   */
+  setSplitDialogCallback(callback: SplitDialogCallback | null): void;
 
   /**
    * W: 선택한 셀들의 너비를 균등하게 배분.
@@ -3292,6 +3384,28 @@ export class TableKeyboardController {
   handleEscape(): void;
 
   // ─── 내부 유틸 ───
+  /**
+   * 현재 커서 위치의 셀 논리 좌표를 반환한다.
+   *
+   * 알고리즘:
+   * 1. EditManager.focusedParagraph로 포커스된 paragraph 획득.
+   * 2. paragraph → 부모 체인 탐색으로 TD 요소 획득 (closest('x-layout-td')).
+   * 3. TD → gridResolution placements 매핑으로 논리 좌표 계산.
+   *
+   * 텍스트 편집 모드가 아닐 때:
+   * - 셀 블록이 이미 활성이면 selection.focus를 반환.
+   * - 셀 블록이 비활성이면 table의 첫 번째 셀(0,0)을 기본값으로 반환.
+   *
+   * @returns 현재 셀 논리 좌표. table이 연결되지 않았거나 gridResolution이 없으면 null.
+   *
+   * @example
+   * // 텍스트 편집 모드: paragraph → TD(0,0) → {row:0, col:0}
+   * controller._getCurrentCellCoord() // → {row:0, col:0}
+   * // 셀 블록 활성: selection.focus 반환
+   * controller._getCurrentCellCoord() // → {row:1, col:2}
+   */
+  private _getCurrentCellCoord(): CellCoord | null;
+
   /**
    * 논리 좌표(row, col) → 물리 TD 요소 매핑.
    * colspan/rowspan으로 인해 여러 논리 좌표가 동일 TD에 매핑될 수 있음.
@@ -3435,6 +3549,65 @@ handleKeyDown(event: KeyboardEvent): boolean {
   }
 
   return false;
+}
+```
+
+#### `_getCurrentCellCoord` 구현
+
+```typescript
+/**
+ * 현재 커서 위치의 셀 논리 좌표를 반환한다.
+ *
+ * 알고리즘:
+ * 1. 셀 블록이 이미 활성이면 selection.focus 반환 (가장 최근 위치).
+ * 2. 텍스트 편집 모드: EditManager.focusedParagraph → 부모 TD 탐색 → 논리 좌표 매핑.
+ * 3. 텍스트 편집 모드가 아님: table의 첫 번째 셀(0,0) 반환 (기본값).
+ *
+ * 논리 좌표 매핑:
+ * - TD 요소를 gridResolution.placements에서 탐색하여
+ *   placement.gridRow, placement.gridCol을 반환.
+ * - colspan/rowspan 셀의 경우 시작 좌표(gridRow, gridCol) 반환.
+ */
+private _getCurrentCellCoord(): CellCoord | null {
+  // 1. 셀 블록 활성 시 focus 반환
+  if (this._selection) {
+    return { ...this._selection.focus };
+  }
+
+  const grid = this._tableEl.gridResolution;
+  if (!grid) return null;
+
+  // 2. 텍스트 편집 모드: paragraph → TD 매핑
+  const focusedParagraph = this._editManager.focusedParagraph;
+  if (focusedParagraph) {
+    const tdEl = focusedParagraph.closest('x-layout-td') as LayoutTableCellElement | null;
+    if (tdEl) {
+      // TD → gridResolution placements에서 논리 좌표 찾기
+      for (const placement of grid.placements) {
+        // placement.cell과 TD 요소의 data 매핑
+        // TD 요소의 data.id 또는 DOM 순서로 매칭
+        const tdData = tdEl.data;
+        if (tdData.id && placement.cell.id === tdData.id) {
+          return { row: placement.gridRow, col: placement.gridCol };
+        }
+      }
+      // id 매칭 실패 시 DOM 순서 기반 매칭
+      // (id가 없는 경우 — table 내 TR/TD 순서로 논리 좌표 추정)
+      const trEl = tdEl.parentElement as LayoutTableRowElement | null;
+      if (trEl) {
+        const trIndex = this._tableEl.items.indexOf(trEl);
+        const tdIndex = trEl.items.indexOf(tdEl);
+        if (trIndex >= 0 && tdIndex >= 0) {
+          // 주의: tdIndex는 DOM 순서이므로 colspan/rowspan으로 인해
+          // 논리 좌표와 다를 수 있음. placements에서 재확인 권장.
+          return { row: trIndex, col: tdIndex };
+        }
+      }
+    }
+  }
+
+  // 3. 기본값: 첫 번째 셀(0,0)
+  return { row: 0, col: 0 };
 }
 ```
 
@@ -4335,6 +4508,11 @@ private _activateTableEditing(): void {
   const editManager = this.editManager;
   if (!editManager?.layoutEditMode) return;
 
+  // table 요소에 tabindex="-1" 부여하여 포커스 가능 상태로 만듦.
+  // 비텍스트 편집 모드에서 TD/box 클릭 시 table이 포커스를 받아
+  // keydown 이벤트를 수신할 수 있도록 보장.
+  this.setAttribute('tabindex', '-1');
+
   if (!this._structureEditor) {
     this._structureEditor = new TableStructureEditor(this, editManager);
   }
@@ -4357,6 +4535,8 @@ private _deactivateTableEditing(): void {
   this._keyboardController?.deactivate();
   // selection 해제
   this._clearSelectionOverlay();
+  // tabindex 제거 (비편집 모드에서는 포커스 불필요)
+  this.removeAttribute('tabindex');
 }
 
 /**
@@ -4919,7 +5099,7 @@ export * from "./components/layout-table";
 | `src/components/layout/tr.element.ts` | LayoutTableRowElement — 행, `type`/`items`/`overlayElements`/`printPostData` getter |
 | `src/components/layout/td.element.ts` | LayoutTableCellElement — 셀 (box-equivalent), `_updateChildBoxResizeVisibility()` (전략 B), `isBoxFillingCell` 판별, `type`/`overlayElements`/`printPostData` getter |
 | `src/utils/table-utils.ts` | `isBoxFillingCell` 유틸 (전략 B — TD 꽉 채움 판별) |
-| `src/types/edit/table-selection.type.ts` | `TableCellSelection`, `CellBlockMode`, `CellCoord`, `TableCellSelectionChangeDetail` 타입 (섹션 8B) |
+| `src/types/edit/table-selection.type.ts` | `TableCellSelection`, `CellBlockMode`, `CellCoord`, `TableCellSelectionChangeDetail`, `SplitDialogCallback` 타입 (섹션 8B) |
 | `src/edit/table-keyboard-controller.ts` | `TableKeyboardController` — 키보드 입력 처리 (F5/F7/F8/Alt+방향키/M/S/W/H/Alt+Insert/Delete/ESC), 셀 블록 선택 관리, 선택 오버레이 렌더링 (섹션 8B) |
 | `src/edit/table-structure-editor.ts` | `TableStructureEditor` — 셀 구조 변경 (merge/split/equalize/insert/delete), 외부 API public 메서드 제공 (섹션 8B) |
 | `src/react/components/layout-table.tsx` | LayoutTable, LayoutTR, LayoutTD React 래퍼 |
@@ -4990,7 +5170,7 @@ export * from "./components/layout-table";
 27. `npm run dev` 로 리사이즈 동작 확인 (수직/수평 핸들, colspan/rowspan 비활성, ESC 취소, 최소 크기, TD 꽉 채운 box resizer 숨김)
 
 ### Phase 4.6: 키보드 기반 레이아웃 편집 (섹션 8B)
-28. `src/types/edit/table-selection.type.ts` 작성 (`TableCellSelection`, `CellBlockMode`, `CellCoord`, `TableCellSelectionChangeDetail`)
+28. `src/types/edit/table-selection.type.ts` 작성 (`TableCellSelection`, `CellBlockMode`, `CellCoord`, `TableCellSelectionChangeDetail`, `SplitDialogCallback`)
 29. `src/types/edit/index.ts` export 추가
 30. `src/constants/defaults.ts` `Z_INDEX_TABLE_SELECTION`/`TABLE_KEYBOARD_RESIZE_STEP` 상수 추가
 31. `src/edit/table-structure-editor.ts` 작성 — `TableStructureEditor` 클래스 (merge/split/equalizeWidth/equalizeHeight/insertRowOrCol/deleteRowOrCol public 메서드)
@@ -5125,6 +5305,8 @@ export * from "./components/layout-table";
 - [ ] M → 선택 셀 병합 (colspan/rowspan 증가, 셀 수 감소)
 - [ ] M → 병합된 셀의 children(box) 이동 정상
 - [ ] S → 분할 대화상자 호출 → splitCell 실행
+- [ ] S → 콜백 미등록 시 no-op (console.warn)
+- [ ] setSplitDialogCallback 등록 후 S → 콜백 호출 → splitCell 실행
 - [ ] S → 분할 후 셀 수 증가, colspan/rowspan 감소
 - [ ] W → 선택 열 너비 균등 배분
 - [ ] H → 선택 행 높이 균등 배분
@@ -5198,7 +5380,7 @@ export * from "./components/layout-table";
 4. **중첩 테이블 깊이 제한**: 무한 중첩 방지를 위한 깊이 제한 (예: 5단계) 검토.
 5. **TD lock**: `TableCellData`에 `lock?: boolean` 필드 추가 여부. 추가 시 `_isBoxOrAncestorLocked` 확장 필수.
 6. **`LayoutElement` 타입 확장 영향도**: `edit-manager.ts`/`layout-edit-controller.ts`의 box-특화 함수들을 TD로 일반화하는 작업 범위. 1차는 TD 편집 기능을 최소화(선택만)하여 영향도 제한 권장.
-7. **~~Split 대화상자 UI~~** → **해결**: `handleSplit()`은 콜백 기반으로 설계되어 있으나, 실제 대화상자 UI(행/열 분할 수 입력)는 외부에서 제공해야 함. 외부 편집기가 대화상자를 띄우고 `splitCell(coord, rows, cols)`를 직접 호출하는 방식. 1차 구현은 대화상자 없이 `splitCell()` public API만 제공.
+7. **~~Split 대화상자 UI~~** → **해결**: `handleSplit()`은 `SplitDialogCallback` 기반으로 동작. 외부 편집기가 `setSplitDialogCallback()`으로 콜백을 등록하면 대화상자를 띄우고 `splitCell(coord, rows, cols)`을 호출. 미등록 시 no-op (console.warn). `SplitDialogCallback` 타입은 `table-selection.type.ts`에 정의.
 8. **~~Alt+Insert/Delete 행/열 판별~~** → **해결**: `selectMode`가 `'col'`(F7)이면 열, `'row'`(F8)이면 행, 기본(`'cell'`)은 행으로 판별. `handleKeyDown`에서 `selectMode` 기반 분기.
 9. **~~셀 블록 선택과 box 선택의 공존~~** → **해결**: 섹션 8B.10에서 정책 확정 — 선택된 TD 내 box 클릭 시 셀 블록 유지, 영역 외부 클릭 시 셀 블록 해제 + box 선택으로 전환. `LayoutSelectionController._shouldPreserveCellBlock()`으로 판별.
 10. **~~키보드 컨트롤러 활성화 조건~~** → **해결**: 텍스트 편집 모드에서도 F5/F7/F8/Alt+방향키/ESC 동작 (셀 블록 지정은 텍스트 입력과 충돌하지 않음). 구조 변경(M/S/W/H/Alt+Insert/Delete)은 셀 블록 활성 시에만 동작. keydown 리스너는 capture phase로 등록하여 TextEditController보다 먼저 수신.
