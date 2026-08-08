@@ -1,6 +1,7 @@
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
+import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { GridCalculator } from "@/core";
 import type { TextEditController, CurrentStyle } from "./text-edit-controller";
 import { InsertController } from "./insert-controller";
@@ -11,8 +12,8 @@ import type { SelectionRange } from "@/types/edit";
 import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail, ContextMenuEventDetail, PlaceGunItem, PlaceGunChangeEventDetail, PlaceGunBeforeEventDetail, PlaceGunAfterEventDetail } from "@/types/edit";
 import type { BoxRole } from "@/types/layout";
 
-/** 레이아웃 편집 대상 요소 (box만 해당) */
-export type LayoutElement = LayoutBoxElement;
+/** 레이아웃 편집 대상 요소 (box 및 TD) */
+export type LayoutElement = LayoutBoxElement | LayoutTableCellElement;
 
 /**
  * 글로벌 편집 관리 이벤트 타입.
@@ -930,11 +931,13 @@ export class EditManager {
    * @param box - 확인할 box 요소
    * @returns lock된 box가 하나라도 있으면 `true`
    */
-  private _isBoxOrAncestorLocked(box: LayoutBoxElement): boolean {
-    let current: LayoutBoxElement | null = box;
+  private _isBoxOrAncestorLocked(box: LayoutElement): boolean {
+    let current: LayoutElement | null = box;
     while (current) {
-      if (current.lock) return true;
-      current = current.parentElement instanceof LayoutBoxElement ? current.parentElement : null;
+      if (current instanceof LayoutBoxElement && current.lock) return true;
+      current = current.parentElement instanceof LayoutBoxElement || current.parentElement instanceof LayoutTableCellElement
+        ? (current.parentElement as LayoutElement)
+        : null;
     }
     return false;
   }
@@ -1374,12 +1377,14 @@ export class EditManager {
    * @param box - 판별할 box 요소
    * @returns 편집 가능 여부
    */
-  isBoxEditable(box: LayoutBoxElement): boolean {
+  isBoxEditable(box: LayoutElement): boolean {
     if (!this._layoutEditMode) return false;
     if (this._isBoxOrAncestorLocked(box)) return false;
     if (!this._isWithinEditableRoot(box)) return false;
-    if (this._editableRoles !== null && !this._editableRoles.has(box.role)) return false;
-    if (this._editableBoxIds !== null && !this._editableBoxIds.has(box.id)) return false;
+    if (box instanceof LayoutBoxElement) {
+      if (this._editableRoles !== null && !this._editableRoles.has(box.role)) return false;
+      if (this._editableBoxIds !== null && !this._editableBoxIds.has(box.id)) return false;
+    }
     return true;
   }
 
@@ -1395,7 +1400,7 @@ export class EditManager {
    * @param box - 판별할 box 요소
    * @returns 선택 가능 여부
    */
-  isBoxSelectable(box: LayoutBoxElement): boolean {
+  isBoxSelectable(box: LayoutElement): boolean {
     if (this._isBoxOrAncestorLocked(box)) return false;
     const rootId = this._selectableRootId ?? this._editableRootId;
     if (rootId !== null) {
@@ -1408,10 +1413,12 @@ export class EditManager {
       }
       if (!found) return false;
     }
-    const roles = this._selectableRoles ?? this._editableRoles;
-    if (roles !== null && !roles.has(box.role)) return false;
-    const ids = this._selectableBoxIds ?? this._editableBoxIds;
-    if (ids !== null && !ids.has(box.id)) return false;
+    if (box instanceof LayoutBoxElement) {
+      const roles = this._selectableRoles ?? this._editableRoles;
+      if (roles !== null && !roles.has(box.role)) return false;
+      const ids = this._selectableBoxIds ?? this._editableBoxIds;
+      if (ids !== null && !ids.has(box.id)) return false;
+    }
     return true;
   }
 
