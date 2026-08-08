@@ -5,3 +5,5 @@ export * from "./insert-controller";
 export * from "./layout-edit-controller";
 export * from "./layout-selection-controller";
 export * from "./place-gun-controller";
+export * from "./table-keyboard-controller";
+export * from "./table-structure-editor";
