@@ -53,6 +53,7 @@ export class LayoutTableCellElement extends HTMLElement {
   private _children: BoxData[] = [];
 
   private _diagonalEls: HTMLDivElement[] = [];
+  private _placeholderBorderEls: HTMLDivElement[] = [];
 
   private _inheritStyle?: InheritStyle;
 
@@ -251,6 +252,7 @@ export class LayoutTableCellElement extends HTMLElement {
     this._layoutStructure();
     this._applyStyle();
     this._renderDiagonals();
+    this._renderPlaceholderBorder();
     this._propagateInheritStyle();
     for (const box of this.items) {
       box.layout();
@@ -374,6 +376,136 @@ export class LayoutTableCellElement extends HTMLElement {
       this._shadowRoot.appendChild(div);
       this._diagonalEls.push(div);
     }
+  }
+
+  /**
+   * 셀 border가 선언되지 않은 면에 빨간 점선 placeholder border를 렌더링한다.
+   *
+   * - 위쪽, 왼쪽: 항상 표시 (해당 면 border 없을 때)
+   * - 오른쪽: 셀이 논리적으로 마지막 열에 닿을 때만 (해당 면 border 없을 때)
+   * - 아랫쪽: 셀이 논리적으로 마지막 행에 닿을 때만 (해당 면 border 없을 때)
+   *
+   * 인쇄 모드에서는 렌더링하지 않는다. 레이아웃에 영향을 주지 않도록
+   * shadow DOM 내부에 div 요소로 점선을 그린다.
+   */
+  private _renderPlaceholderBorder(): void {
+    for (const el of this._placeholderBorderEls) el.remove();
+    this._placeholderBorderEls = [];
+
+    if (this._isPrint) return;
+    if (!this.isConnected) return;
+
+    const parentTable = this._getParentTableElement();
+    if (!parentTable) return;
+    const grid = parentTable.gridResolution;
+    if (!grid) return;
+
+    const maxRow = this._getMaxLogicalRow();
+    const maxCol = this._getMaxLogicalCol();
+    const isLastRow = maxRow >= grid.rowCount - 1;
+    const isLastCol = maxCol >= grid.colCount - 1;
+
+    const ppm = GridCalculator.ppm;
+    const widthPx = this._width * ppm;
+    const heightPx = this._height * ppm;
+    const borderWidth = '1px';
+    const borderStyle = 'dashed';
+    const borderColor = 'red';
+
+    const sides: Array<{ side: 'top' | 'bottom' | 'left' | 'right' }> = [];
+    if (!this._borderTop) sides.push({ side: 'top' });
+    if (!this._borderLeft) sides.push({ side: 'left' });
+    if (isLastCol && !this._borderRight) sides.push({ side: 'right' });
+    if (isLastRow && !this._borderBottom) sides.push({ side: 'bottom' });
+
+    for (const { side } of sides) {
+      const div = document.createElement('div');
+      div.style.position = 'absolute';
+      div.style.pointerEvents = 'none';
+      div.style.boxSizing = 'border-box';
+
+      if (side === 'top') {
+        div.style.left = '0';
+        div.style.top = '0';
+        div.style.width = `${widthPx}px`;
+        div.style.height = '0';
+        div.style.borderTop = `${borderWidth} ${borderStyle} ${borderColor}`;
+      } else if (side === 'bottom') {
+        div.style.left = '0';
+        div.style.top = `${heightPx}px`;
+        div.style.width = `${widthPx}px`;
+        div.style.height = '0';
+        div.style.borderTop = `${borderWidth} ${borderStyle} ${borderColor}`;
+      } else if (side === 'left') {
+        div.style.left = '0';
+        div.style.top = '0';
+        div.style.width = '0';
+        div.style.height = `${heightPx}px`;
+        div.style.borderLeft = `${borderWidth} ${borderStyle} ${borderColor}`;
+      } else {
+        div.style.left = `${widthPx}px`;
+        div.style.top = '0';
+        div.style.width = '0';
+        div.style.height = `${heightPx}px`;
+        div.style.borderLeft = `${borderWidth} ${borderStyle} ${borderColor}`;
+      }
+
+      this._shadowRoot.appendChild(div);
+      this._placeholderBorderEls.push(div);
+    }
+  }
+
+  /**
+   * 부모 테이블 요소를 반환한다.
+   * 순환 의존성을 피하기 위해 `instanceof` 대신 `gridResolution` getter로 판별한다.
+   */
+  private _getParentTableElement(): { gridResolution: { rowCount: number; colCount: number } | undefined } | null {
+    let el: Element | null = this.parentElement;
+    while (el) {
+      const maybeTable = el as unknown as { gridResolution?: unknown };
+      if (maybeTable.gridResolution !== undefined && 'gridResolution' in el) {
+        return el as unknown as { gridResolution: { rowCount: number; colCount: number } | undefined };
+      }
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  /**
+   * `_cellLabels`에서 이 셀이 커버하는 최대 논리 행 인덱스를 추출한다.
+   *
+   * @returns 최대 논리 행 인덱스 (0-based). 라벨이 없으면 0
+   */
+  private _getMaxLogicalRow(): number {
+    let maxRow = 0;
+    for (const label of this._cellLabels) {
+      const match = /^([A-Z]+)(\d+)$/.exec(label);
+      if (!match) continue;
+      const rowPart = match[1];
+      let rowIdx = 0;
+      for (let i = 0; i < rowPart.length; i++) {
+        rowIdx = rowIdx * 26 + (rowPart.charCodeAt(i) - 64);
+      }
+      rowIdx -= 1;
+      if (rowIdx > maxRow) maxRow = rowIdx;
+    }
+    return maxRow;
+  }
+
+  /**
+   * `_cellLabels`에서 이 셀이 커버하는 최대 논리 열 인덱스를 추출한다.
+   *
+   * @returns 최대 논리 열 인덱스 (0-based). 라벨이 없으면 0
+   */
+  private _getMaxLogicalCol(): number {
+    let maxCol = 0;
+    for (const label of this._cellLabels) {
+      const match = /^([A-Z]+)(\d+)$/.exec(label);
+      if (!match) continue;
+      const colIdx = parseInt(match[2], 10) - 1;
+      if (colIdx > maxCol) maxCol = colIdx;
+    }
+    return maxCol;
   }
 
   private _propagateInheritStyle(): void {

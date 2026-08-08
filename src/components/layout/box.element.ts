@@ -227,18 +227,18 @@ export class LayoutBoxElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
-      styleEl.sheet.insertRule("@media screen { :host(:not([border])) { outline: red dashed 1px; outline-offset: -1px; box-shadow: none; } }", 1);
-      styleEl.sheet.insertRule("@media screen { :host(:not([border])[hovered]) { outline: none; box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; } }", 2);
-      styleEl.sheet.insertRule("@media screen { :host(:not([border])[selected]) { outline: none; box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; } }", 3);
-      styleEl.sheet.insertRule("@media screen { :host(:not([border])[editable-layout][hovered]) { outline: none; box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; } }", 4);
-      styleEl.sheet.insertRule("@media screen { :host(:not([border])[editable-layout][selected]) { outline: none; box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; } }", 5);
-      styleEl.sheet.insertRule("@media screen { :host(:not([border])[reparent-target]) { outline: none; box-shadow: #ff9800 0px 0px 0px 2px inset, #ff9800 0px 0px 0px 2px; } }", 6);
+      styleEl.sheet.insertRule("@media screen { :host(:not([border]):not([td-static])) { outline: red dashed 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 1);
+      styleEl.sheet.insertRule("@media screen { :host([hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 2);
+      styleEl.sheet.insertRule("@media screen { :host([selected]) { outline: red solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 3);
+      styleEl.sheet.insertRule("@media screen { :host([editable-layout][hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 4);
+      styleEl.sheet.insertRule("@media screen { :host([editable-layout][selected]) { outline: red solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 5);
+      styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { outline: #ff9800 solid 2px !important; outline-offset: -2px !important; box-shadow: none !important; } }", 6);
       styleEl.sheet.insertRule(`@media print { [border] { display: none !important; } }`, 7);
       styleEl.sheet.insertRule('@media screen { .resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: ' + Z_INDEX_RESIZE_HANDLE + '; pointer-events: auto; display: none; } }', 8);
       styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .resize-handle { display: block; } }', 9);
       styleEl.sheet.insertRule('@media screen { :host([td-static]) .resize-handle { display: none !important; } }', 10);
-      styleEl.sheet.insertRule('@media screen { :host(:not([border])[td-static][selected]) { outline: none; box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; } }', 11);
-      styleEl.sheet.insertRule('@media screen { :host(:not([border])[td-static][hovered]) { outline: none; box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; } }', 12);
+      styleEl.sheet.insertRule('@media screen { :host([td-static][selected]) { outline: red solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 11);
+      styleEl.sheet.insertRule('@media screen { :host([td-static][hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 12);
       styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 13);
       styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 14);
       styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 15);
