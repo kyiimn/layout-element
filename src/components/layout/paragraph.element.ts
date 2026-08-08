@@ -268,6 +268,7 @@ export class LayoutParagraphElement extends HTMLElement {
         columnEl.index = i;
 
         this.appendChild(columnEl);
+        columnEl.renderText();
       }
     } else {
       const columnContents = this._model.columnContents;

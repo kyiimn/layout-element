@@ -1,0 +1,903 @@
+import {
+  TableData,
+  TableRowData,
+  CellBorderEdge,
+  InheritStyle,
+  PrintPostData,
+  PrintPostBorderEdge,
+} from "@/types";
+import {
+  GridCalculator,
+  GridResolution,
+  BorderResolution,
+  ResolvedBorderEdge,
+  resolveTableGrid,
+  resolveTableBorders,
+} from "@/core";
+import { ColorRegistry } from "@/resource";
+import { Z_INDEX_TABLE_BORDER, Z_INDEX_TABLE_RESIZE, Z_INDEX_TABLE_SELECTION, MIN_TABLE_COL_WIDTH, MIN_TABLE_ROW_HEIGHT } from "@/constants";
+import { genUUID } from "@/utils";
+import { EditManager } from "@/edit/edit-manager";
+import { TableKeyboardController } from "@/edit/table-keyboard-controller";
+import { TableStructureEditor } from "@/edit/table-structure-editor";
+import { LayoutDocumentElement } from "./document.element";
+import { LayoutBoxElement } from "./box.element";
+import { LayoutTableRowElement } from "./tr.element";
+
+interface TableResizeState {
+  isResizing: boolean;
+  handle: string | null;
+  moved: boolean;
+  startMouseX: number;
+  startMouseY: number;
+  startColWidths: number[];
+  startRowHeights: number[];
+  lastClientX: number;
+  lastClientY: number;
+  rafId: number | null;
+}
+
+const HIT_WIDTH = 8;
+
+/**
+ * 테이블 요소. `<x-layout-table>` 커스텀 엘리먼트.
+ *
+ * box의 콘텐츠 타입으로, 부모 box의 콘텐츠 영역을 가득 채우며
+ * 내부를 colWidths × 행 높이 그리드로 분할한다.
+ * 보더 레이어를 shadow root에 렌더링하고, 자식 TR/TD에 메트릭을 부여한다.
+ */
+export class LayoutTableElement extends HTMLElement {
+  private _shadowRoot: ShadowRoot;
+  private _styleRule?: CSSStyleRule;
+
+  private _borderLayerEl: HTMLDivElement | null = null;
+  private _borderEdgeMap: Map<string, HTMLDivElement> = new Map();
+
+  private _childObserver: MutationObserver | null = null;
+  private _rebuildingChildren = false;
+
+  private _colWidths?: number | number[];
+  private _rows: TableRowData[] = [];
+
+  get rows(): TableRowData[] { return this._rows; }
+
+  private _inheritStyle?: InheritStyle;
+
+  private _gridResolution?: GridResolution;
+  private _borderResolution?: BorderResolution;
+
+  private _borderOverrides: Map<string, CellBorderEdge> = new Map();
+
+  private _resolvedColWidths: number[] = [];
+
+  private _resizeHandleLayerEl: HTMLDivElement | null = null;
+  private _resizeHandleEls: HTMLDivElement[] = [];
+  private _resizeState: TableResizeState | null = null;
+  private _resizeListenerRegistered: boolean = false;
+  private _keyboardController: TableKeyboardController | null = null;
+  private _structureEditor: TableStructureEditor | null = null;
+  private _selectionLayerEl: HTMLDivElement | null = null;
+  private _selectionCircleMap: Map<string, HTMLDivElement> = new Map();
+
+  constructor() {
+    super();
+    this._shadowRoot = this.attachShadow({ mode: "open" });
+  }
+
+  connectedCallback(): void {
+    if (!this.id) this.id = genUUID();
+    this._startChildObserver();
+    this.layout();
+    const editManager = this.editManager;
+    if (editManager) {
+      editManager.addEventListener('modeChange', this._onModeChange);
+      this._activateKeyboardEditing();
+      if (editManager.layoutEditMode) {
+        this._activateTableEditing();
+      }
+    }
+  }
+
+  disconnectedCallback(): void {
+    this._stopChildObserver();
+    const editManager = this.editManager;
+    if (editManager) {
+      editManager.removeEventListener('modeChange', this._onModeChange);
+    }
+    this._deactivateKeyboardEditing();
+    this._deactivateTableEditing();
+  }
+
+  private _onModeChange = (event: { mode?: { layoutEditMode?: boolean } }): void => {
+    const mode = event?.mode;
+    if (mode?.layoutEditMode) {
+      this._activateTableEditing();
+    } else {
+      this._deactivateTableEditing();
+    }
+  };
+
+  private _activateKeyboardEditing(): void {
+    const editManager = this.editManager;
+    if (!editManager) return;
+    if (!this._structureEditor) {
+      this._structureEditor = new TableStructureEditor(this, editManager);
+    }
+    if (!this._keyboardController) {
+      this._keyboardController = new TableKeyboardController(this, editManager, this._structureEditor);
+    }
+    this._keyboardController.activate();
+    this.setAttribute('tabindex', '-1');
+    document.addEventListener('keydown', this._onTableKeyDown, true);
+  }
+
+  private _deactivateKeyboardEditing(): void {
+    document.removeEventListener('keydown', this._onTableKeyDown, true);
+    this._keyboardController?.deactivate();
+    this.removeAttribute('tabindex');
+  }
+
+  static get observedAttributes(): readonly string[] {
+    return [];
+  }
+
+  attributeChangedCallback(
+    _name: string,
+    _oldVal: string | null,
+    _newVal: string | null,
+  ): void {
+  }
+
+  get data(): TableData {
+    const result: TableData = {
+      type: 'table',
+      children: this._serializeChildren(),
+    };
+    if (this.id) result.id = this.id;
+    if (this._colWidths !== undefined) result.colWidths = this._colWidths;
+    return result;
+  }
+
+  set data(data: TableData) {
+    this._rebuildingChildren = true;
+    try {
+      if (data.id !== undefined) this.id = data.id;
+      this._colWidths = data.colWidths;
+      this._rows = data.children ?? [];
+
+      this._layoutStructure();
+
+      const existingChildren = this.items;
+      const existingById = new Map<string, LayoutTableRowElement>();
+      for (const child of existingChildren) {
+        if (child.id) existingById.set(child.id, child);
+      }
+
+      const usedIds = new Set<string>();
+      for (let i = 0; i < this._rows.length; i++) {
+        const rowData = this._rows[i];
+        const rowId = rowData.id;
+
+        if (rowId && existingById.has(rowId)) {
+          const existingEl = existingById.get(rowId)!;
+          usedIds.add(rowId);
+          existingEl.data = rowData;
+          if (existingEl !== this.children[i]) {
+            this.appendChild(existingEl);
+          }
+        } else {
+          this._appendChildData(rowData);
+          if (rowId) usedIds.add(rowId);
+        }
+      }
+
+      for (const child of existingChildren) {
+        if (child.id && !usedIds.has(child.id)) {
+          child.remove();
+        }
+      }
+
+      this.layout();
+      requestAnimationFrame(() => { void this.render(); });
+    } finally {
+      this._rebuildingChildren = false;
+    }
+  }
+
+  get colWidths(): number | number[] | undefined { return this._colWidths; }
+  set colWidths(value: number | number[] | undefined) {
+    this._colWidths = value;
+    if (this.isConnected) {
+      this.layout();
+      void this.render();
+    }
+  }
+
+  get gridResolution(): GridResolution | undefined {
+    return this._gridResolution;
+  }
+
+  get resolvedColWidths(): number[] {
+    return this._resolvedColWidths;
+  }
+
+  get keyboardController(): TableKeyboardController | null {
+    return this._keyboardController;
+  }
+
+  get structureEditor(): TableStructureEditor | null {
+    return this._structureEditor;
+  }
+
+  get inheritStyle(): InheritStyle | undefined {
+    return this._inheritStyle;
+  }
+
+  set inheritStyle(style: InheritStyle | undefined) {
+    this._inheritStyle = style;
+    if (this.isConnected) this._propagateInheritStyle();
+  }
+
+  layout(): void {
+    if (!this.isConnected) return;
+    this._layoutStructure();
+    this._applyStyle();
+    this._renderBorder();
+    this._renderResizeHandles();
+    this._propagateInheritStyle();
+    for (const tr of this.items) {
+      tr.layout();
+    }
+    if (this._keyboardController?.selection) {
+      this._renderSelectionOverlay(this._keyboardController.selection);
+    }
+  }
+
+  async render(): Promise<void> {
+    if (!this.isConnected) return;
+    for (const tr of this.items) {
+      await tr.render();
+    }
+  }
+
+  private _layoutStructure(): void {
+    if (!this.isConnected) return;
+
+    const parentBox = this.parentElement;
+    if (!(parentBox instanceof LayoutBoxElement)) {
+      this._gridResolution = undefined;
+      return;
+    }
+
+    const contentWidth = parentBox.absWidth
+      - (parentBox.paddingLeft ?? 0) - (parentBox.paddingRight ?? 0);
+    const contentHeight = parentBox.absHeight
+      - (parentBox.paddingTop ?? 0) - (parentBox.paddingBottom ?? 0);
+
+    this._gridResolution = resolveTableGrid(
+      this._rows,
+      contentWidth,
+      contentHeight,
+      this._colWidths,
+    );
+
+    this._resolvedColWidths = this._gridResolution.colWidths;
+
+    if (this._gridResolution.warnings.length > 0) {
+      this.dispatchEvent(new CustomEvent('render-error', {
+        detail: { type: 'table-grid', warnings: this._gridResolution.warnings },
+      }));
+    }
+
+    for (let r = 0; r < this._rows.length; r++) {
+      const trEl = this.children[r] as LayoutTableRowElement | undefined;
+      if (trEl && trEl.localName === 'x-layout-tr') {
+        const rowHeight = this._gridResolution.rowHeights[r];
+        const y = this._gridResolution.rowHeights
+          .slice(0, r).reduce((sum, h) => sum + h, 0);
+        trEl._setRowMetrics(y, rowHeight, contentWidth, r);
+      }
+    }
+
+    const placementByRow = new Map<number, typeof this._gridResolution.placements>();
+    for (const placement of this._gridResolution.placements) {
+      const existing = placementByRow.get(placement.gridRow) ?? [];
+      existing.push(placement);
+      placementByRow.set(placement.gridRow, existing);
+    }
+
+    for (const [rowIdx, rowPlacements] of placementByRow) {
+      const trEl = this.children[rowIdx] as LayoutTableRowElement | undefined;
+      if (!trEl) continue;
+      const trY = this._gridResolution.rowHeights
+        .slice(0, rowIdx).reduce((sum, h) => sum + h, 0);
+      const tdEls = trEl.items;
+      const rowLabel = trEl.rowLabel;
+      for (let i = 0; i < rowPlacements.length && i < tdEls.length; i++) {
+        const placement = rowPlacements[i];
+        const tdEl = tdEls[i];
+        const colLabel = String(placement.gridCol + 1);
+        const cellLabel = `${rowLabel}${colLabel}`;
+        const labels: string[] = [];
+        for (let dr = 0; dr < placement.spanRows; dr++) {
+          let subRowLabel = '';
+          let n = placement.gridRow + dr;
+          do {
+            subRowLabel = String.fromCharCode(65 + (n % 26)) + subRowLabel;
+            n = Math.floor(n / 26) - 1;
+          } while (n >= 0);
+          for (let dc = 0; dc < placement.spanCols; dc++) {
+            labels.push(`${subRowLabel}${placement.gridCol + dc + 1}`);
+          }
+        }
+        tdEl._setCellMetrics(placement.x, placement.y - trY, placement.width, placement.height, cellLabel, labels);
+      }
+    }
+  }
+
+  private _applyStyle(): void {
+    if (!this.isConnected) return;
+
+    if (!this._styleRule) {
+      const styleEl = document.createElement('style');
+      this._shadowRoot.appendChild(styleEl);
+      if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
+      styleEl.sheet.insertRule(":host { display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; }", 0);
+      styleEl.sheet.insertRule("@media print { .border-layer { display: none !important; } }", 1);
+      this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
+
+      this._shadowRoot.appendChild(document.createElement('slot'));
+    }
+  }
+
+  private _renderBorder(): void {
+    if (!this.isConnected) return;
+
+    this._borderResolution = this._resolveBorders();
+    if (!this._borderResolution) return;
+
+    if (!this._borderLayerEl) {
+      const layer = document.createElement('div');
+      layer.classList.add('border-layer');
+      layer.style.position = 'absolute';
+      layer.style.top = '0';
+      layer.style.left = '0';
+      layer.style.width = '100%';
+      layer.style.height = '100%';
+      layer.style.pointerEvents = 'none';
+      layer.style.zIndex = String(Z_INDEX_TABLE_BORDER);
+      this._shadowRoot.appendChild(layer);
+      this._borderLayerEl = layer;
+    }
+
+    this._renderBorderLayer(this._borderResolution.edges);
+  }
+
+  private _renderBorderLayer(edges: ResolvedBorderEdge[]): void {
+    const ppm = GridCalculator.ppm;
+    const colorRegistry = ColorRegistry.getInstance();
+    const layer = this._borderLayerEl!;
+    const newKeys = new Set<string>();
+
+    for (const edge of edges) {
+      newKeys.add(edge.key);
+
+      let div = this._borderEdgeMap.get(edge.key);
+      if (!div || !div.isConnected) {
+        div = document.createElement('div');
+        div.style.position = 'absolute';
+        div.style.pointerEvents = 'none';
+        layer.appendChild(div);
+        this._borderEdgeMap.set(edge.key, div);
+      }
+
+      const cssColor = colorRegistry.getCSSColor(edge.color);
+      const widthPx = Math.ceil(edge.width * ppm);
+      const lengthPx = edge.length * ppm;
+
+      if (edge.direction === 'horizontal') {
+        div.style.left = `${edge.x * ppm}px`;
+        div.style.top = `${edge.y * ppm}px`;
+        div.style.width = `${lengthPx}px`;
+        div.style.height = '0';
+        div.style.borderTop = `${widthPx}px ${edge.style} ${cssColor}`;
+        div.style.borderBottom = 'none';
+        div.style.borderLeft = 'none';
+        div.style.borderRight = 'none';
+      } else {
+        div.style.left = `${edge.x * ppm}px`;
+        div.style.top = `${edge.y * ppm}px`;
+        div.style.width = '0';
+        div.style.height = `${lengthPx}px`;
+        div.style.borderLeft = `${widthPx}px ${edge.style} ${cssColor}`;
+        div.style.borderTop = 'none';
+        div.style.borderBottom = 'none';
+        div.style.borderRight = 'none';
+      }
+    }
+
+    for (const [key, div] of this._borderEdgeMap) {
+      if (!newKeys.has(key)) {
+        div.remove();
+        this._borderEdgeMap.delete(key);
+      }
+    }
+  }
+
+  private _resolveBorders(): BorderResolution | undefined {
+    if (!this._gridResolution) return undefined;
+    return resolveTableBorders(this._gridResolution, this._borderOverrides);
+  }
+
+  setBorderOverride(key: string, edge: CellBorderEdge): void {
+    this._borderOverrides.set(key, edge);
+    if (this.isConnected) {
+      this._renderBorder();
+    }
+  }
+
+  clearBorderOverride(key: string): void {
+    this._borderOverrides.delete(key);
+    if (this.isConnected) {
+      this._renderBorder();
+    }
+  }
+
+  notifyTablePropertyChange(): void {
+    this._notifyTablePropertyChange();
+  }
+
+  private _notifyTablePropertyChange(): void {
+    const parentBox = this.parentElement;
+    if (parentBox instanceof LayoutBoxElement) {
+      const editManager = parentBox.editManager;
+      editManager?._dispatchBoxPropertyChange({
+        element: parentBox,
+        property: 'table-grid',
+      } as unknown as Parameters<typeof editManager._dispatchBoxPropertyChange>[0]);
+    }
+  }
+
+  private _renderResizeHandles(): void {
+    if (!this._gridResolution) return;
+    const editManager = this.editManager;
+    if (!editManager?.layoutEditMode) return;
+    const grid = this._gridResolution;
+    const ppm = GridCalculator.ppm;
+
+    if (!this._resizeHandleLayerEl) {
+      const layer = document.createElement('div');
+      layer.classList.add('table-resize-layer');
+      layer.style.position = 'absolute';
+      layer.style.top = '0';
+      layer.style.left = '0';
+      layer.style.width = '100%';
+      layer.style.height = '100%';
+      layer.style.pointerEvents = 'none';
+      layer.style.zIndex = String(Z_INDEX_TABLE_RESIZE);
+      layer.style.userSelect = 'none';
+      this._shadowRoot.appendChild(layer);
+      this._resizeHandleLayerEl = layer;
+    }
+
+    if (!this._resizeListenerRegistered) {
+      this.addEventListener('pointerdown', this._startTableResize);
+      this._resizeListenerRegistered = true;
+    }
+
+    for (const h of this._resizeHandleEls) h.remove();
+    this._resizeHandleEls = [];
+
+    for (let c = 1; c < grid.colCount; c++) {
+      const xMm = grid.colWidths.slice(0, c).reduce((a, b) => a + b, 0);
+      const xPx = xMm * ppm;
+      const totalHeightPx = grid.rowHeights.reduce((a, b) => a + b, 0) * ppm;
+      const handle = document.createElement('div');
+      handle.classList.add('table-resize-handle');
+      handle.style.position = 'absolute';
+      handle.style.left = `${xPx - HIT_WIDTH / 2}px`;
+      handle.style.top = '0';
+      handle.style.width = `${HIT_WIDTH}px`;
+      handle.style.height = `${totalHeightPx}px`;
+      handle.style.cursor = 'ew-resize';
+      handle.style.pointerEvents = 'auto';
+      handle.style.userSelect = 'none';
+      handle.setAttribute('data-handle', `v-${c}`);
+      this._resizeHandleLayerEl.appendChild(handle);
+      this._resizeHandleEls.push(handle);
+    }
+
+    for (let r = 1; r < grid.rowCount; r++) {
+      const yMm = grid.rowHeights.slice(0, r).reduce((a, b) => a + b, 0);
+      const yPx = yMm * ppm;
+      const totalWidthPx = grid.colWidths.reduce((a, b) => a + b, 0) * ppm;
+      const handle = document.createElement('div');
+      handle.classList.add('table-resize-handle');
+      handle.style.position = 'absolute';
+      handle.style.left = '0';
+      handle.style.top = `${yPx - HIT_WIDTH / 2}px`;
+      handle.style.width = `${totalWidthPx}px`;
+      handle.style.height = `${HIT_WIDTH}px`;
+      handle.style.cursor = 'ns-resize';
+      handle.style.pointerEvents = 'auto';
+      handle.style.userSelect = 'none';
+      handle.setAttribute('data-handle', `h-${r}`);
+      this._resizeHandleLayerEl.appendChild(handle);
+      this._resizeHandleEls.push(handle);
+    }
+  }
+
+  private _startTableResize = (event: PointerEvent): void => {
+    const editManager = this.editManager;
+    if (!editManager?.layoutEditMode) return;
+
+    let handleEl: HTMLElement | null = null;
+    for (const el of event.composedPath()) {
+      if (el instanceof HTMLElement && el.classList.contains('table-resize-handle')) {
+        handleEl = el as HTMLElement;
+        break;
+      }
+    }
+    if (!handleEl) return;
+    if (handleEl.hasAttribute('disabled')) return;
+
+    const handle = handleEl.getAttribute('data-handle')!;
+
+    const grid = this._gridResolution!;
+    this._resizeState = {
+      isResizing: true,
+      handle,
+      moved: false,
+      startMouseX: event.clientX,
+      startMouseY: event.clientY,
+      startColWidths: [...this._resolvedColWidths],
+      startRowHeights: [...grid.rowHeights],
+      lastClientX: event.clientX,
+      lastClientY: event.clientY,
+      rafId: null,
+    };
+
+    event.preventDefault();
+
+    document.addEventListener('pointermove', this._onTableResizeMouseMove);
+    document.addEventListener('pointerup', this._onTableResizeMouseUp);
+    document.addEventListener('keydown', this._onTableResizeKeyDown);
+  };
+
+  private _onTableResizeMouseMove = (event: PointerEvent): void => {
+    if (!this._resizeState || !this._resizeState.isResizing) return;
+    event.preventDefault();
+    this._resizeState.lastClientX = event.clientX;
+    this._resizeState.lastClientY = event.clientY;
+
+    const dx = event.clientX - this._resizeState.startMouseX;
+    const dy = event.clientY - this._resizeState.startMouseY;
+    if (!this._resizeState.moved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+      this._resizeState.moved = true;
+    }
+    if (!this._resizeState.moved) return;
+    if (this._resizeState.rafId !== null) return;
+
+    this._resizeState.rafId = requestAnimationFrame(() => {
+      if (!this._resizeState) return;
+      this._resizeState.rafId = null;
+      const ppm = GridCalculator.ppm;
+      const handle = this._resizeState.handle!;
+      if (handle.startsWith('v-')) {
+        const col = parseInt(handle.slice(2), 10);
+        const deltaMm = (this._resizeState.lastClientX - this._resizeState.startMouseX) / ppm;
+        this._applyColumnResize(col, deltaMm);
+      } else if (handle.startsWith('h-')) {
+        const row = parseInt(handle.slice(2), 10);
+        const deltaMm = (this._resizeState.lastClientY - this._resizeState.startMouseY) / ppm;
+        this._applyRowResize(row, deltaMm);
+      }
+    });
+  };
+
+  private _applyColumnResize(col: number, deltaMm: number): void {
+    if (!this._resizeState) return;
+    const state = this._resizeState;
+    const leftIdx = col - 1;
+    const rightIdx = col;
+    const oldLeft = state.startColWidths[leftIdx];
+    const oldRight = state.startColWidths[rightIdx];
+    const total = oldLeft + oldRight;
+    const newLeft = Math.max(MIN_TABLE_COL_WIDTH, Math.min(oldLeft + deltaMm, total - MIN_TABLE_COL_WIDTH));
+    const newRight = total - newLeft;
+    if (newLeft === oldLeft) return;
+    const newColWidths = [...state.startColWidths];
+    newColWidths[leftIdx] = newLeft;
+    newColWidths[rightIdx] = newRight;
+    this._colWidths = newColWidths;
+    this.layout();
+    void this.render();
+    this._notifyTablePropertyChange();
+  }
+
+  private _applyRowResize(row: number, deltaMm: number): void {
+    if (!this._resizeState) return;
+    const state = this._resizeState;
+    const topIdx = row - 1;
+    const bottomIdx = row;
+    const oldTop = state.startRowHeights[topIdx];
+    const oldBottom = state.startRowHeights[bottomIdx];
+    const total = oldTop + oldBottom;
+    const newTop = Math.max(MIN_TABLE_ROW_HEIGHT, Math.min(oldTop + deltaMm, total - MIN_TABLE_ROW_HEIGHT));
+    const newBottom = total - newTop;
+    if (newTop === oldTop) return;
+    this._rows[topIdx].height = newTop;
+    this._rows[bottomIdx].height = newBottom;
+    this.layout();
+    void this.render();
+    this._notifyTablePropertyChange();
+  }
+
+  private _onTableResizeMouseUp = (_event: PointerEvent): void => {
+    if (!this._resizeState) return;
+    if (this._resizeState.rafId !== null) {
+      cancelAnimationFrame(this._resizeState.rafId);
+      this._resizeState.rafId = null;
+    }
+    this._resizeState = null;
+    document.removeEventListener('pointermove', this._onTableResizeMouseMove);
+    document.removeEventListener('pointerup', this._onTableResizeMouseUp);
+    document.removeEventListener('keydown', this._onTableResizeKeyDown);
+    if (this._keyboardController?.selection) {
+      this._renderSelectionOverlay(this._keyboardController.selection);
+    }
+  };
+
+  private _onTableResizeKeyDown = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape' || !this._resizeState) return;
+    if (this._resizeState.rafId !== null) {
+      cancelAnimationFrame(this._resizeState.rafId);
+      this._resizeState.rafId = null;
+    }
+    const state = this._resizeState;
+    this._resizeState = null;
+    if (state.handle!.startsWith('v-')) {
+      this._colWidths = state.startColWidths;
+    } else if (state.handle!.startsWith('h-')) {
+      for (let i = 0; i < state.startRowHeights.length; i++) {
+        const trEl = this.children[i] as LayoutTableRowElement | undefined;
+        if (trEl) trEl.height = state.startRowHeights[i];
+      }
+    }
+    this.layout();
+    void this.render();
+    document.removeEventListener('pointermove', this._onTableResizeMouseMove);
+    document.removeEventListener('pointerup', this._onTableResizeMouseUp);
+    document.removeEventListener('keydown', this._onTableResizeKeyDown);
+  };
+
+  _activateTableEditing(): void {
+    const editManager = this.editManager;
+    if (!editManager?.layoutEditMode) return;
+    this.layout();
+  }
+
+  _deactivateTableEditing(): void {
+    if (this._resizeState) {
+      this._resizeState = null;
+      document.removeEventListener('pointermove', this._onTableResizeMouseMove);
+      document.removeEventListener('pointerup', this._onTableResizeMouseUp);
+      document.removeEventListener('keydown', this._onTableResizeKeyDown);
+    }
+    for (const h of this._resizeHandleEls) h.remove();
+    this._resizeHandleEls = [];
+    if (this._resizeHandleLayerEl) {
+      this._resizeHandleLayerEl.remove();
+      this._resizeHandleLayerEl = null;
+    }
+    this.removeEventListener('pointerdown', this._startTableResize);
+    this._resizeListenerRegistered = false;
+    this.layout();
+  }
+
+  private _onTableKeyDown = (event: KeyboardEvent): void => {
+    const target = event.target as Node;
+    const inTable = this.contains(target) || target === this;
+    const em = this.editManager;
+    const hasSelectedBoxInTd = em?.selectedLayouts.some(box => {
+      return box instanceof LayoutBoxElement && box.closest('x-layout-td') !== null;
+    });
+    if (!inTable && !hasSelectedBoxInTd) return;
+    if (this._keyboardController) {
+      const handled = this._keyboardController.handleKeyDown(event);
+      if (handled) {
+        event.stopPropagation();
+      }
+    }
+  };
+
+  private _propagateInheritStyle(): void {
+    if (!this._inheritStyle) return;
+    for (const tr of this.items) {
+      tr.inheritStyle = this._inheritStyle;
+    }
+  }
+
+  _renderSelectionOverlay(selection: { mode: string; anchor: { row: number; col: number }; focus: { row: number; col: number } } | null): void {
+    this._clearSelectionOverlay();
+    if (!selection || !this._gridResolution) return;
+
+    if (!this._selectionLayerEl) {
+      const layer = document.createElement('div');
+      layer.style.position = 'absolute';
+      layer.style.top = '0';
+      layer.style.left = '0';
+      layer.style.width = '100%';
+      layer.style.height = '100%';
+      layer.style.pointerEvents = 'none';
+      layer.style.zIndex = String(Z_INDEX_TABLE_SELECTION);
+      this._shadowRoot.appendChild(layer);
+      this._selectionLayerEl = layer;
+    }
+
+    const ppm = GridCalculator.ppm;
+    const coords = this._getSelectionCoords(selection as { anchor: { row: number; col: number }; focus: { row: number; col: number } });
+    const focusCell = (selection as { focus: { row: number; col: number } }).focus;
+
+    for (const coord of coords) {
+      const placement = this._findPlacementAt(coord);
+      if (!placement) continue;
+
+      const overlay = document.createElement('div');
+      overlay.style.position = 'absolute';
+      overlay.style.left = `${placement.x * ppm}px`;
+      overlay.style.top = `${placement.y * ppm}px`;
+      overlay.style.width = `${placement.width * ppm}px`;
+      overlay.style.height = `${placement.height * ppm}px`;
+      overlay.style.backgroundColor = 'rgba(0, 100, 200, 0.3)';
+      overlay.style.pointerEvents = 'none';
+      overlay.setAttribute('data-cell', `${coord.row}-${coord.col}`);
+
+      this._selectionLayerEl.appendChild(overlay);
+      this._selectionCircleMap.set(`${coord.row}-${coord.col}`, overlay);
+
+      if (selection.mode === 'range' && coord.row === focusCell.row && coord.col === focusCell.col) {
+        const dot = document.createElement('div');
+        dot.style.position = 'absolute';
+        dot.style.left = `${(placement.x + placement.width / 2) * ppm - 5}px`;
+        dot.style.top = `${(placement.y + placement.height / 2) * ppm - 5}px`;
+        dot.style.width = '10px';
+        dot.style.height = '10px';
+        dot.style.borderRadius = '50%';
+        dot.style.backgroundColor = 'red';
+        dot.style.pointerEvents = 'none';
+        dot.setAttribute('data-cell-cursor', `${coord.row}-${coord.col}`);
+        this._selectionLayerEl.appendChild(dot);
+        this._selectionCircleMap.set(`cursor-${coord.row}-${coord.col}`, dot);
+      }
+    }
+  }
+
+  _clearSelectionOverlay(): void {
+    for (const [, circle] of this._selectionCircleMap) {
+      circle.remove();
+    }
+    this._selectionCircleMap.clear();
+  }
+
+  private _findPlacementAt(coord: { row: number; col: number }): { x: number; y: number; width: number; height: number } | null {
+    if (!this._gridResolution) return null;
+    for (const p of this._gridResolution.placements) {
+      if (coord.row >= p.gridRow && coord.row < p.gridRow + p.spanRows
+        && coord.col >= p.gridCol && coord.col < p.gridCol + p.spanCols) {
+        return { x: p.x, y: p.y, width: p.width, height: p.height };
+      }
+    }
+    return null;
+  }
+
+  private _getSelectionCoords(selection: { anchor: { row: number; col: number }; focus: { row: number; col: number } }): { row: number; col: number }[] {
+    const minRow = Math.min(selection.anchor.row, selection.focus.row);
+    const maxRow = Math.max(selection.anchor.row, selection.focus.row);
+    const minCol = Math.min(selection.anchor.col, selection.focus.col);
+    const maxCol = Math.max(selection.anchor.col, selection.focus.col);
+    const coords: { row: number; col: number }[] = [];
+    for (let r = minRow; r <= maxRow; r++) {
+      for (let c = minCol; c <= maxCol; c++) {
+        coords.push({ row: r, col: c });
+      }
+    }
+    return coords;
+  }
+
+  appendChildData(child: TableRowData): LayoutTableRowElement {
+    const trEl = document.createElement('x-layout-tr') as LayoutTableRowElement;
+    trEl.data = child;
+    this.appendChild(trEl);
+    return trEl;
+  }
+
+  private _appendChildData(child: TableRowData): void {
+    const trEl = document.createElement('x-layout-tr') as LayoutTableRowElement;
+    trEl.data = child;
+    this.appendChild(trEl);
+  }
+
+  private _serializeChildren(): TableRowData[] {
+    return this.items.map((e) => e.data).filter((e): e is TableRowData => !!e);
+  }
+
+  private _startChildObserver(): void {
+    if (this._childObserver) return;
+    this._childObserver = new MutationObserver(() => {
+      if (this._rebuildingChildren) return;
+      this.layout();
+      void this.render();
+    });
+    this._childObserver.observe(this, { childList: true });
+  }
+
+  private _stopChildObserver(): void {
+    this._childObserver?.disconnect();
+    this._childObserver = null;
+  }
+
+  get editManager(): EditManager | null {
+    let el: Element | null = this.parentElement;
+    while (el) {
+      if (el instanceof LayoutDocumentElement) return el.editManager;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  get type(): 'table' { return 'table'; }
+
+  get items(): LayoutTableRowElement[] {
+    return Array.from(this.children).filter(
+      (c): c is LayoutTableRowElement => c instanceof LayoutTableRowElement,
+    );
+  }
+
+  get overlayElements(): LayoutBoxElement[] {
+    if (!this.parentElement) return [];
+    const parent = this.parentElement as unknown as { overlayElements?: LayoutBoxElement[] };
+    return parent.overlayElements ?? [];
+  }
+
+  get printPostData(): PrintPostData[] {
+    const data: PrintPostData[] = [];
+    const ppm = GridCalculator.ppm;
+    const colorRegistry = ColorRegistry.getInstance();
+    const tableRect = this.getBoundingClientRect();
+
+    const borderEdges: PrintPostBorderEdge[] = [];
+    if (this._borderResolution) {
+      for (const edge of this._borderResolution.edges) {
+        borderEdges.push({
+          direction: edge.direction,
+          x: tableRect.x + window.scrollX + edge.x * ppm,
+          y: tableRect.y + window.scrollY + edge.y * ppm,
+          length: edge.length * ppm,
+          width: Math.ceil(edge.width * ppm),
+          color: colorRegistry.get(edge.color),
+          style: edge.style,
+        });
+      }
+    }
+
+    data.push({
+      data: this.data,
+      rect: {
+        x: tableRect.x + window.scrollX,
+        y: tableRect.y + window.scrollY,
+        width: tableRect.width,
+        height: tableRect.height,
+      },
+      borderEdges: borderEdges.length > 0 ? borderEdges : undefined,
+    });
+
+    for (const tr of this.items) {
+      data.push(...tr.printPostData);
+    }
+
+    return data;
+  }
+}
+
+customElements.define('x-layout-table', LayoutTableElement);
