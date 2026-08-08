@@ -3,6 +3,7 @@ import { GridCalculator } from "@/core";
 import { EditManager } from "./edit-manager";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
+import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { BoxData } from "@/types";
 import { staticGridContains } from "@/utils";
 import type { InsertMode, InsertEventDetail } from "@/types/edit";
@@ -25,7 +26,7 @@ export class InsertController {
    * 제거하고 새 컨테이너에 `reparent-target` 속성을 설정한다.
    * 레이아웃 편집 모드의 reparent 하이라이트와 동일한 속성/CSS를 재사용한다.
    */
-  private _insertHighlightTarget: LayoutDocumentElement | LayoutBoxElement | null = null;
+  private _insertHighlightTarget: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement | null = null;
   private _boundStartDrag: (event: MouseEvent) => void;
   private _boundOnMouseMove: (event: MouseEvent) => void;
   private _boundOnMouseUp: (event: MouseEvent) => void;
@@ -193,11 +194,22 @@ export class InsertController {
     let height: number;
 
     if (mode.position === 'static') {
-      const staticCoords = this._mmToStatic(leftMm, topMm, widthMm, heightMm, container);
-      left = staticCoords.left;
-      top = staticCoords.top;
-      width = staticCoords.width;
-      height = staticCoords.height;
+      if (container instanceof LayoutTableCellElement) {
+        if (widthMm > containerContentW || heightMm > containerContentH) {
+          this._cleanup();
+          return;
+        }
+        left = 0;
+        top = 0;
+        width = 1;
+        height = 1;
+      } else {
+        const staticCoords = this._mmToStatic(leftMm, topMm, widthMm, heightMm, container);
+        left = staticCoords.left;
+        top = staticCoords.top;
+        width = staticCoords.width;
+        height = staticCoords.height;
+      }
     } else {
       left = Math.round(leftMm * 100) / 100;
       top = Math.round(topMm * 100) / 100;
@@ -270,7 +282,7 @@ export class InsertController {
     startY: number,
     endX: number,
     endY: number,
-  ): LayoutDocumentElement | LayoutBoxElement | null {
+  ): LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement | null {
     return this._findTargetContainer(startX, startY, endX, endY);
   }
 
@@ -286,7 +298,7 @@ export class InsertController {
    * @param endY - 드래그 영역 아래쪽 화면 y좌표 (px)
    * @returns 유효한 컨테이너 요소, 또는 루트 요소
    */
-  private _findTargetContainer(startX: number, startY: number, endX: number, endY: number): LayoutDocumentElement | LayoutBoxElement {
+  private _findTargetContainer(startX: number, startY: number, endX: number, endY: number): LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement {
     const manager = this._manager;
     const rootId = manager.editableRootId;
     const rootBox = rootId
@@ -301,16 +313,52 @@ export class InsertController {
       const widthMm = manager.screenPxToMm(widthPx);
       const heightMm = manager.screenPxToMm(heightPx);
 
+      const allTds = this._document.querySelectorAll<LayoutTableCellElement>('x-layout-td');
+      const tdCandidates: LayoutTableCellElement[] = [];
+      for (const td of allTds) {
+        if (td.items.length > 0) continue;
+        if (rootBox && !rootBox.contains(td)) continue;
+
+        const rect = td.getBoundingClientRect();
+        if (
+          startX >= rect.left && endX <= rect.right &&
+          startY >= rect.top && endY <= rect.bottom
+        ) {
+          const { left: leftMm, top: topMm } = this._screenToContainerMm(leftPx, topPx, td);
+          const staticCoords = this._mmToStatic(leftMm, topMm, widthMm, heightMm, td);
+          if (staticGridContains(td, staticCoords.left, staticCoords.top, staticCoords.width, staticCoords.height)) {
+            tdCandidates.push(td);
+          }
+        }
+      }
+
+      let deepestTd: LayoutTableCellElement | null = null;
+      let deepestTdDepth = -1;
+      for (const td of tdCandidates) {
+        let depth = 0;
+        let parent: Element | null = td.parentElement;
+        while (parent) {
+          if (parent instanceof LayoutBoxElement || parent instanceof LayoutTableCellElement) depth++;
+          parent = parent.parentElement;
+        }
+        if (depth > deepestTdDepth) {
+          deepestTdDepth = depth;
+          deepestTd = td;
+        }
+      }
+      if (deepestTd) return deepestTd;
+
       const allBoxes = this._document.querySelectorAll<LayoutBoxElement>('x-layout-box');
       const validCandidates: LayoutBoxElement[] = [];
       for (const box of allBoxes) {
         if (box.lock) continue;
-        if (box.items.some(item => item.type !== 'box')) continue;
-        if (rootBox && !rootBox.contains(box)) continue;
+      if (box.items.some(item => item.type !== 'box')) continue;
+      if (box.contentType === 'table') continue;
+      if (rootBox && !rootBox.contains(box)) continue;
 
-        const { left: leftMm, top: topMm } = this._screenToContainerMm(leftPx, topPx, box);
-        const staticCoords = this._mmToStatic(leftMm, topMm, widthMm, heightMm, box);
-        if (staticGridContains(box, staticCoords.left, staticCoords.top, staticCoords.width, staticCoords.height)) {
+      const { left: leftMm, top: topMm } = this._screenToContainerMm(leftPx, topPx, box);
+      const staticCoords = this._mmToStatic(leftMm, topMm, widthMm, heightMm, box);
+      if (staticGridContains(box, staticCoords.left, staticCoords.top, staticCoords.width, staticCoords.height)) {
           validCandidates.push(box);
         }
       }
@@ -343,10 +391,15 @@ export class InsertController {
     ];
 
     // 네 꼭짓점에서 hit test하여 후보 컨테이너 수집
-    const candidates = new Map<LayoutDocumentElement | LayoutBoxElement, number>();
+    const candidates = new Map<LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement, number>();
     for (const corner of corners) {
       const elements = document.elementsFromPoint(corner.x, corner.y);
       for (const el of elements) {
+        if (el instanceof LayoutTableCellElement) {
+          const existing = candidates.get(el) ?? 0;
+          candidates.set(el, existing + 1);
+          break;
+        }
         if (el instanceof LayoutBoxElement || el instanceof LayoutDocumentElement) {
           const existing = candidates.get(el) ?? 0;
           candidates.set(el, existing + 1);
@@ -356,7 +409,7 @@ export class InsertController {
     }
 
     // 네 꼭짓점 모두에서 hit된 후보만 필터링
-    const fullyHit: (LayoutDocumentElement | LayoutBoxElement)[] = [];
+    const fullyHit: (LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement)[] = [];
     for (const [el, count] of candidates) {
       if (count === 4) {
         fullyHit.push(el);
@@ -373,7 +426,7 @@ export class InsertController {
     // 가져서 삽입 불가능하다면 폴백을 실행해야 한다. 그렇지 않으면 안쪽 box가
     // 거절된 후 부모 box-only 컨테이너를 찾지 못하고 document로 폴백한다.
     const hasValidBoxCandidate = fullyHit.some(
-      el => el instanceof LayoutBoxElement && !el.lock && !el.items.some(i => i.type !== 'box'),
+      el => el instanceof LayoutBoxElement && !el.lock && !el.items.some(i => i.type !== 'box') && el.contentType !== 'table',
     );
     if (!hasValidBoxCandidate) {
       const allBoxes = this._document.querySelectorAll<LayoutBoxElement>('x-layout-box');
@@ -385,6 +438,7 @@ export class InsertController {
         const items = box.items;
         const hasNonBoxChild = items.some(item => item.type !== 'box');
         if (hasNonBoxChild) continue;
+        if (box.contentType === 'table') continue;
 
         const rect = box.getBoundingClientRect();
         // 작은 허용 오차(1px)로 경계선 위 점의 서브픽셀 문제를 흡수한다.
@@ -412,11 +466,21 @@ export class InsertController {
       if (el instanceof LayoutDocumentElement) {
         continue;
       }
+      if (el instanceof LayoutTableCellElement) {
+        const rect = el.getBoundingClientRect();
+        if (
+          startX >= rect.left && endX <= rect.right &&
+          startY >= rect.top && endY <= rect.bottom
+        ) {
+          return el;
+        }
+      }
       if (el instanceof LayoutBoxElement) {
         if (el.lock) continue;
         const items = el.items;
         const hasNonBoxChild = items.some(item => item.type !== 'box');
         if (hasNonBoxChild) continue;
+        if (el.contentType === 'table') continue;
 
         const rect = el.getBoundingClientRect();
         if (
@@ -473,7 +537,7 @@ export class InsertController {
   }
 
   /** 화면 좌표를 컨테이너 내부 mm 좌표로 변환한다. */
-  private _screenToContainerMm(clientX: number, clientY: number, container: LayoutDocumentElement | LayoutBoxElement): { left: number; top: number } {
+  private _screenToContainerMm(clientX: number, clientY: number, container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement): { left: number; top: number } {
     const rect = container.getBoundingClientRect();
     const manager = this._manager;
 
@@ -492,7 +556,7 @@ export class InsertController {
   }
 
   /** mm 좌표를 static 그리드 좌표로 변환한다. */
-  private _mmToStatic(leftMm: number, topMm: number, widthMm: number, heightMm: number, container: LayoutDocumentElement | LayoutBoxElement): { left: number; top: number; width: number; height: number } {
+  private _mmToStatic(leftMm: number, topMm: number, widthMm: number, heightMm: number, container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement): { left: number; top: number; width: number; height: number } {
     const model = container.model;
     if (!model) {
       return { left: 0, top: 0, width: 1, height: 1 };
@@ -535,7 +599,7 @@ export class InsertController {
    * // ad의 zIndex 게터는 91000이지만 0으로 취급 → max(5, 0) + 1 = 6
    * _getNextZIndex(container); // → 6
    */
-  private _getNextZIndex(container: LayoutDocumentElement | LayoutBoxElement): number {
+  private _getNextZIndex(container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement): number {
     const items = container.items;
     if (items.length === 0) return 1;
     const maxZ = Math.max(...items.map(i => {
@@ -547,7 +611,7 @@ export class InsertController {
   }
 
   /** 삽입할 DOM 요소를 생성한다. */
-  private _createElement(mode: InsertMode, container: LayoutDocumentElement | LayoutBoxElement, left: number, top: number, width: number, height: number, zIndex: number): HTMLElement {
+  private _createElement(mode: InsertMode, container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement, left: number, top: number, width: number, height: number, zIndex: number): HTMLElement {
     const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
 
     const boxData: BoxData = {
@@ -612,7 +676,27 @@ export class InsertController {
 
     let rect: { left: number; top: number; width: number; height: number };
     if (this._mode?.position === 'static') {
-      rect = this._snapPreviewToGrid(left, top, width, height, this._getRootContainer());
+      const centerX = left + width / 2;
+      const centerY = top + height / 2;
+      const elements = document.elementsFromPoint(centerX, centerY);
+      let td: LayoutTableCellElement | null = null;
+      for (const el of elements) {
+        if (el instanceof LayoutTableCellElement && el.items.length === 0) {
+          td = el;
+          break;
+        }
+      }
+      if (td) {
+        const tdRect = td.getBoundingClientRect();
+        rect = {
+          left: Math.max(tdRect.left, Math.min(left, tdRect.right - width)),
+          top: Math.max(tdRect.top, Math.min(top, tdRect.bottom - height)),
+          width: Math.min(width, tdRect.width),
+          height: Math.min(height, tdRect.height),
+        };
+      } else {
+        rect = this._snapPreviewToGrid(left, top, width, height, this._getRootContainer());
+      }
     } else {
       rect = { left, top, width, height };
     }
@@ -627,7 +711,7 @@ export class InsertController {
   }
 
   /** static 모드에서 미리보기를 컬럼/라인 그리드에 스냅한다. */
-  private _snapPreviewToGrid(leftPx: number, topPx: number, widthPx: number, heightPx: number, container: LayoutDocumentElement | LayoutBoxElement): { left: number; top: number; width: number; height: number } {
+  private _snapPreviewToGrid(leftPx: number, topPx: number, widthPx: number, heightPx: number, container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement): { left: number; top: number; width: number; height: number } {
     const model = container.model;
     if (!model) {
       return { left: leftPx, top: topPx, width: widthPx, height: widthPx };

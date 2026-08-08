@@ -3,6 +3,7 @@ import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
+import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { GridCalculator } from "@/core";
 import { staticGridContains } from "@/utils";
 import { DEFAULT_IMAGE_DPI, Z_INDEX_INSERT_PREVIEW, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER, Z_INDEX_MAX_LAYOUT } from "@/constants";
@@ -53,7 +54,7 @@ export class PlaceGunController {
    * `reparent-target` DOM 속성(주황색 테두리)으로 배치될 부모를 표시한다.
    * InsertController 삽입 하이라이트와 동일한 속성/CSS를 재사용한다.
    */
-  private _highlightTarget: LayoutDocumentElement | LayoutBoxElement | null = null;
+  private _highlightTarget: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement | null = null;
 
   private _boundOnMouseMove: (event: MouseEvent) => void;
 
@@ -503,7 +504,7 @@ export class PlaceGunController {
     position: 'static' | 'absolute',
     patternWidth: number,
     patternHeight: number,
-  ): LayoutDocumentElement | LayoutBoxElement | null {
+  ): LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement | null {
     const manager = this._manager;
     const rootId = manager.editableRootId;
     const rootBox = rootId
@@ -512,10 +513,30 @@ export class PlaceGunController {
 
     const elements = document.elementsFromPoint(clientX, clientY);
     for (const el of elements) {
+      if (el instanceof LayoutTableCellElement) {
+        if (position === 'static' && el.items.length > 0) continue;
+        if (rootBox && !rootBox.contains(el)) continue;
+        if (position === 'static') {
+          const model = el.model;
+          const colCount = model?.columnCount ?? 1;
+          const lineCount = model?.contentHeight && model.lineHeight
+            ? Math.floor(model.contentHeight / model.lineHeight) + 1
+            : patternHeight;
+          const span = Math.max(1, Math.min(patternWidth, colCount));
+          if (patternHeight > lineCount) continue;
+          const { left: leftMm, top: topMm } = this._screenToContainerMm(clientX, clientY, el);
+          const staticCoords = this._mmToStatic(leftMm, topMm, el);
+          if (!staticGridContains(el, staticCoords.left, staticCoords.top, span, patternHeight)) {
+            continue;
+          }
+        }
+        return el;
+      }
       if (el instanceof LayoutBoxElement) {
         if (el.lock) continue;
         const hasNonBoxChild = el.items.some(item => item.type !== 'box');
         if (hasNonBoxChild) continue;
+        if (el.contentType === 'table') continue;
         if (rootBox && !rootBox.contains(el)) continue;
 
         if (position === 'static') {
@@ -552,7 +573,7 @@ export class PlaceGunController {
   private _screenToContainerMm(
     clientX: number,
     clientY: number,
-    container: LayoutDocumentElement | LayoutBoxElement,
+    container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement,
   ): { left: number; top: number } {
     const rect = container.getBoundingClientRect();
     const manager = this._manager;
@@ -583,7 +604,7 @@ export class PlaceGunController {
   private _mmToStatic(
     leftMm: number,
     topMm: number,
-    container: LayoutDocumentElement | LayoutBoxElement,
+    container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement,
   ): { left: number; top: number } {
     const model = container.model;
     if (!model) return { left: 0, top: 0 };
@@ -621,9 +642,16 @@ export class PlaceGunController {
 
     let left: number;
     let top: number;
+    let width = boxData.width;
+    let height = boxData.height;
     if (position === 'absolute') {
       left = Math.max(0, Math.round(leftMm * 100) / 100);
       top = Math.max(0, Math.round(topMm * 100) / 100);
+    } else if (container instanceof LayoutTableCellElement) {
+      left = 0;
+      top = 0;
+      width = 1;
+      height = 1;
     } else {
       const result = this._mmToStatic(leftMm, topMm, container);
       left = result.left;
@@ -636,6 +664,8 @@ export class PlaceGunController {
       ...boxData,
       left,
       top,
+      width,
+      height,
       zIndex,
     };
 
@@ -682,7 +712,7 @@ export class PlaceGunController {
    * @param container - 주입 대상 컨테이너
    * @returns 새 box의 zIndex
    */
-  private _getNextZIndex(container: LayoutDocumentElement | LayoutBoxElement): number {
+  private _getNextZIndex(container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement): number {
     const items = container.items;
     if (items.length === 0) return 1;
     const maxZ = Math.max(...items.map(i => {
@@ -776,9 +806,9 @@ export class PlaceGunController {
    * 배치될 부모 컨테이너를 `reparent-target` 속성으로 하이라이트한다.
    * 이전 하이라이트 대상과 다르면 이전 속성을 제거하고 새 컨테이너에 설정한다.
    *
-   * @param target - 하이라이트할 컨테이너 (box 또는 document)
+   * @param target - 하이라이트할 컨테이너 (box, document 또는 TD)
    */
-  private _updateHighlight(target: LayoutDocumentElement | LayoutBoxElement): void {
+  private _updateHighlight(target: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement): void {
     if (this._highlightTarget === target) return;
     this._clearHighlight();
     target.setAttribute('reparent-target', '');
