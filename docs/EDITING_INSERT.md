@@ -12,7 +12,7 @@
 
 - **삽입 가능한 요소**: `box`, `text`, `paragraph`, `image`, `table`
 - **배치 모드**: `absolute`(mm 좌표) 또는 `static`(컬럼/라인 그리드)
-- **테이블**: `type: 'table'` 시 `tableRows`/`tableCols`로 행/열 수 지정 (기본값 3×3)
+- **테이블**: `type: 'table'` 시 `tableRows`/`tableCols`로 행/열 수 지정 (기본값 3×3), `tableFillCells`로 각 셀을 paragraph box로 채울지 여부 지정 (기본값 `true`)
 - **취소**: 드래그 중 `ESC` 키를 누르면 미리보기 사각형이 제거되고 `insertCancel` 이벤트가 발생한다.
 
 삽입 모드가 활성화되면 문서 요소의 커서가 `crosshair`로 바뀌고, 기존 레이아웃 선택은 자동으로 해제된다. 삽입 모드 중에는 레이아웃 선택과 드래그 이동이 동작하지 않아 삽입 동작과 충돌하지 않는다.
@@ -113,22 +113,28 @@ controller.isDragging;  // boolean
 import type { InsertMode } from 'layout-element';
 
 interface InsertMode {
-  type: 'box' | 'text' | 'paragraph' | 'image';
+  type: 'box' | 'text' | 'paragraph' | 'image' | 'table';
   position: 'absolute' | 'static';
+  tableRows?: number;       // type === 'table'일 때만 사용 (기본값 3)
+  tableCols?: number;       // type === 'table'일 때만 사용 (기본값 3)
+  tableFillCells?: boolean; // type === 'table'일 때만 사용 (기본값 true)
 }
 ```
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
-| `type` | `'box' \| 'text' \| 'paragraph' \| 'image'` | 삽입할 요소의 종류 |
+| `type` | `'box' \| 'text' \| 'paragraph' \| 'image' \| 'table'` | 삽입할 요소의 종류 |
 | `position` | `'absolute' \| 'static'` | 새 요소의 배치 모드 |
+| `tableRows` | `number` | 테이블 행 수 (`type === 'table'`일 때만, 기본값 3) |
+| `tableCols` | `number` | 테이블 열 수 (`type === 'table'`일 때만, 기본값 3) |
+| `tableFillCells` | `boolean` | 각 셀을 paragraph box로 채울지 여부 (`type === 'table'`일 때만, 기본값 `true`). `false`면 빈 셀(`children: []`)로 생성 |
 
 `text`와 `paragraph`는 모두 `<x-layout-paragraph>`를 내부에 생성하지만, `text`는 `type: 'text'` 데이터로, `paragraph`는 `type: 'paragraph'` 데이터로 변환된다. `text` 타입은 `box.element.ts`의 `data` 세터에서 `{ ...child, type: 'paragraph' }`로 변환되며, 이때 `column`/`gap`을 명시적으로 설정하지 않아 부모 모델에서 상속받는다. 실제 렌더링에서는 둘 다 단락 요소로 표시된다.
 
 ### 3.2 `InsertType`
 
 ```typescript
-export type InsertType = 'box' | 'text' | 'paragraph' | 'image';
+export type InsertType = 'box' | 'text' | 'paragraph' | 'image' | 'table';
 ```
 
 삽입할 요소의 타입.
@@ -137,6 +143,7 @@ export type InsertType = 'box' | 'text' | 'paragraph' | 'image';
 - `'text'`: 텍스트 (내부적으로 paragraph로 변환됨)
 - `'paragraph'`: 단락
 - `'image'`: 이미지
+- `'table'`: 표 (`tableRows`/`tableCols`/`tableFillCells` 옵션 사용)
 
 ### 3.3 `InsertPosition`
 
@@ -417,7 +424,7 @@ private _getRootContainer(): LayoutDocumentElement | LayoutBoxElement {
 
 ### 5.5 모든 삽입 타입에 동일 적용
 
-이 로직은 모든 삽입 타입(`box`, `text`, `paragraph`, `image`)에 동일하게 적용된다.
+이 로직은 모든 삽입 타입(`box`, `text`, `paragraph`, `image`, `table`)에 동일하게 적용된다.
 
 ---
 
@@ -446,6 +453,7 @@ const boxData: BoxData = {
 | `text` | `{ type: 'text', content: '' }` | `<x-layout-paragraph>` (`type`을 `'paragraph'`으로 변환, `column`/`gap` 생략 → 부모 모델에서 상속) |
 | `paragraph` | `{ type: 'paragraph', content: '' }` | `<x-layout-paragraph>` (단락 데이터, `column`/`gap` 생략 → 부모 모델에서 상속) |
 | `image` | `{ type: 'image', x: 0, y: 0, width: 100, height: 100, dpi: 72, url: '' }` | `<x-layout-image>` (100×100px, 72dpi, 빈 url) |
+| `table` | `_createTableData(rows, cols, fillCells)` | `<x-layout-table>` (행 높이 5mm, 열 너비 자동 균등 분할). `tableFillCells !== false`(기본값)면 각 셀에 빈 paragraph box, `false`면 빈 셀(`children: []`) |
 
 ### 6.2 `column`/`gap` 상속
 

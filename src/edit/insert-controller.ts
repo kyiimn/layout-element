@@ -633,7 +633,8 @@ export class InsertController {
     } else if (mode.type === 'table') {
       const rows = mode.tableRows ?? 3;
       const cols = mode.tableCols ?? 3;
-      boxData.children = this._createTableData(rows, cols);
+      const fillCells = mode.tableFillCells ?? true;
+      boxData.children = this._createTableData(rows, cols, fillCells);
     }
 
     boxEl.data = boxData;
@@ -645,21 +646,23 @@ export class InsertController {
     return boxEl;
   }
 
-  private _createTableData(rows: number, cols: number): TableData {
+  private _createTableData(rows: number, cols: number, fillCells: boolean): TableData {
     const children: TableRowData[] = [];
     for (let r = 0; r < rows; r++) {
       const cells: TableCellData[] = [];
       for (let c = 0; c < cols; c++) {
         cells.push({
           type: 'td',
-          children: [{
-            type: 'box',
-            left: 0, top: 0,
-            width: 1, height: 1,
-            position: 'static',
-            zIndex: 1,
-            children: { type: 'paragraph', content: '' },
-          }],
+          children: fillCells
+            ? [{
+                type: 'box',
+                left: 0, top: 0,
+                width: 1, height: 1,
+                position: 'static',
+                zIndex: 1,
+                children: { type: 'paragraph', content: '' },
+              }]
+            : [],
         });
       }
       children.push({ type: 'tr', height: 5, children: cells });

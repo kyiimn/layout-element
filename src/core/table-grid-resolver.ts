@@ -106,9 +106,19 @@ export function normalizeWidths(
   }
 
   if (sum < targetSize) {
+    // 비례 분배: 남은 공간을 각 셀의 원래 비율에 따라 분배.
+    // 모든 입력이 동일하면(삽입 시점) 자동으로 균등 분할되고,
+    // 사용자가 명시한 비율(예: [10, 20])은 1:2 비율로 유지됨.
     const result = inputs.map((v) => Math.max(v, minSize));
-    const diff = targetSize - result.reduce((a, b) => a + b, 0);
-    result[n - 1] += diff;
+    const currentSum = result.reduce((a, b) => a + b, 0);
+    const diff = targetSize - currentSum;
+    if (currentSum > 0 && diff > 0) {
+      for (let i = 0; i < n; i++) {
+        result[i] += diff * (result[i] / currentSum);
+      }
+    } else {
+      result[n - 1] += diff;
+    }
     return result;
   }
 

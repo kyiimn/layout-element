@@ -28,6 +28,12 @@ export interface InsertMode {
   tableRows?: number;
   /** 테이블 생성 시 열 수 (type === 'table'일 때만 사용, 기본값 3) */
   tableCols?: number;
+  /**
+   * 테이블 생성 시 각 셀을 paragraph box로 채울지 여부
+   * (type === 'table'일 때만 사용, 기본값 true).
+   * false면 빈 셀(children: [])로 생성.
+   */
+  tableFillCells?: boolean;
 }
 
 /**
