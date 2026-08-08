@@ -1,5 +1,6 @@
 import { ImageData } from "./image.type";
 import { ParagraphData } from "./paragraph.type";
+import { TableData } from "./table.type";
 import { TextData } from "./text.type";
 
 /**
@@ -171,6 +172,6 @@ export type BoxData = {
    */
   lock?: boolean;
 
-  /** 자식 요소들. 복수의 중첩 박스이거나 단일 컨텐츠(문단, 텍스트, 이미지)이다. */
-  children?: BoxData[] | ParagraphData | TextData | ImageData;
+  /** 자식 요소들. 복수의 중첩 박스이거나 단일 컨텐츠(문단, 텍스트, 이미지, 테이블)이다. */
+  children?: BoxData[] | ParagraphData | TextData | ImageData | TableData;
 };

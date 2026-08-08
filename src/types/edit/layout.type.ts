@@ -2,6 +2,7 @@ import type { InsertMode } from "./insert.type";
 import type { BoxRole } from "@/types/layout";
 import type { LayoutBoxElement } from "@/components/layout/box.element";
 import type { LayoutDocumentElement } from "@/components/layout/document.element";
+import type { LayoutTableCellElement } from "@/components/layout/td.element";
 
 /**
  * 레이아웃 편집 모드의 동작 타입.
@@ -108,13 +109,13 @@ export type BoxPropertyName = 'role' | 'contentUid' | 'groupMember' | 'priority'
  */
 export interface ContextMenuEventDetail {
   /** 우클릭이 발생한 요소 (box 또는 document). `null`이면 빈 공간 우클릭 */
-  element: LayoutBoxElement | LayoutDocumentElement | null;
+  element: LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement | null;
   /** 뷰포트 기준 마우스 X 좌표 (clientX) */
   mouseX: number;
   /** 뷰포트 기준 마우스 Y 좌표 (clientY) */
   mouseY: number;
   /** 이벤트 발생 시 선택된 레이아웃 요소들 (선택 갱신 후) */
-  selectedLayouts: LayoutBoxElement[];
+  selectedLayouts: (LayoutBoxElement | LayoutTableCellElement)[];
 }
 
 /**
