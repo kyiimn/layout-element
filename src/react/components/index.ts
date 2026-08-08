@@ -4,4 +4,6 @@ export { LayoutParagraph, type LayoutParagraphProps } from './layout-paragraph';
 export { LayoutImage, type LayoutImageProps } from './layout-image';
 export { LayoutGuideColumn, type LayoutGuideColumnProps } from './layout-guide-column';
 export { LayoutTable, type LayoutTableProps } from './layout-table';
+export { LayoutTableRow, type LayoutTableRowProps } from './layout-table-row';
+export { LayoutTableCell, type LayoutTableCellProps } from './layout-table-cell';
 export { Logo, type LogoProps } from './logo';

@@ -6,11 +6,12 @@ import { useLayoutElement } from '@/react/hooks';
 export interface LayoutTableProps {
   data: TableData;
   colWidths?: number | number[];
+  inheritStyle?: Record<string, unknown>;
   children?: React.ReactNode;
 }
 
 export const LayoutTable = forwardRef<LayoutTableElement, LayoutTableProps>(
-  function LayoutTable({ data, children }, _ref) {
+  function LayoutTable({ data, colWidths, inheritStyle, children }, ref) {
     const { ref: innerRef, define } = useLayoutElement<LayoutTableElement>();
 
     useEffect(() => {
@@ -22,6 +23,33 @@ export const LayoutTable = forwardRef<LayoutTableElement, LayoutTableProps>(
       if (!element) return;
       element.data = data;
     }, [innerRef, data]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || colWidths === undefined) return;
+      element.colWidths = colWidths;
+    }, [innerRef, colWidths]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || inheritStyle === undefined) return;
+      element.inheritStyle = inheritStyle as never;
+    }, [innerRef, inheritStyle]);
+
+    useEffect(() => {
+      if (typeof ref === 'function') {
+        ref(innerRef.current);
+      } else if (ref) {
+        ref.current = innerRef.current;
+      }
+      return () => {
+        if (typeof ref === 'function') {
+          ref(null);
+        } else if (ref) {
+          ref.current = null;
+        }
+      };
+    }, [ref, innerRef]);
 
     return (
       <x-layout-table ref={innerRef as unknown as React.Ref<LayoutTableElement>}>
