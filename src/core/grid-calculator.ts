@@ -1,4 +1,4 @@
-import { LayoutBoxElement, LayoutDocumentElement } from "@/components";
+import { LayoutBoxElement, LayoutDocumentElement, LayoutTableCellElement } from "@/components";
 import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/constants";
 import { ParagraphStyle, TextStyle } from "@/types";
 
@@ -21,7 +21,7 @@ export type Rect = {
 };
 
 type GridCalculatorOptions = {
-  element: LayoutBoxElement | LayoutDocumentElement;
+  element: LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement;
   width: number;
   height: number;
   paddingTop?: number;
@@ -54,7 +54,7 @@ type GridCalculatorOptions = {
 export class GridCalculator {
   private static _ppm: number | undefined;
 
-  private _element!: LayoutBoxElement | LayoutDocumentElement;
+  private _element!: LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement;
 
   private _columnCoords: Rect[];
   private _columnWidths: number[];
