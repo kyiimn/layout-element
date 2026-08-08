@@ -341,9 +341,16 @@ paragraph 주입은 `_injectText` 헬퍼를 사용한다. 부모 box의 `request
 
 #### 컨테이너 찾기: `_findPatternContainer`
 
-`_findPatternContainer(clientX, clientY, position, patternWidth, patternHeight)`는 클릭 위치에서 요소 패턴을 주입할 컨테이너를 찾는다. `elementsFromPoint`로 클릭 위치의 요소 목록을 가져와, box-only 컨테이너(비-box 자식이 없는 box)를 찾는다. 찾지 못하면 document로 폴백한다. `editableRootId`가 설정된 경우 root box 내부의 box만 허용한다.
+`_findPatternContainer(clientX, clientY, position, patternWidth, patternHeight)`는 클릭 위치에서 요소 패턴을 주입할 컨테이너를 찾는다. `elementsFromPoint`로 클릭 위치의 요소 목록을 가져와, box-only 컨테이너(비-box 자식이 없는 box) 또는 `<x-layout-td>` 셀을 찾는다. 찾지 못하면 document로 폴백한다. `editableRootId`가 설정된 경우 root box 내부의 컨테이너만 허용한다.
 
-**static 모드 그리드 containment 검증**: `position === 'static'`일 때는 추가로, 클릭 좌표 + 패턴 크기(`patternWidth` 컬럼 스팬, `patternHeight` 라인 수)로 계산한 요소 영역이 후보 box의 컬럼/라인 그리드 안에 완전히 들어오는지 `staticGridContains()`로 검증한다. 요소가 후보 box의 컬럼 수나 라인 수를 초과하면 더 바깥 컨테이너로 폴백한다. 이는 InsertController의 static 모드 containment 검증과 동일한 로직이며, absolute 모드의 네 꼭짓점 containment와 대응된다.
+| 컨테이너 | static 모드 | absolute 모드 |
+|----------|-------------|---------------|
+| `<x-layout-td>` | `items.length === 0`일 때만 허용, 패턴이 TD 그리드(1컬럼) 안에 들어와야 함 | 제한 없이 허용 |
+| `<x-layout-box>` | 비-box 자식이 없어야 하며, 패턴이 box 그리드 안에 들어와야 함 | 비-box 자식이 없어야 함 |
+
+**static 모드 그리드 containment 검증**: `position === 'static'`일 때는 추가로, 클릭 좌표 + 패턴 크기(`patternWidth` 컬럼 스팬, `patternHeight` 라인 수)로 계산한 요소 영역이 후보 컨테이너의 컬럼/라인 그리드 안에 완전히 들어오는지 `staticGridContains()`로 검증한다. 요소가 후보 컨테이너의 컬럼 수나 라인 수를 초과하면 더 바깥 컨테이너로 폴백한다. 이는 InsertController의 static 모드 containment 검증과 동일한 로직이며, absolute 모드의 네 꼭짓점 containment와 대응된다.
+
+**TD 내 static 패턴 주입**: 컨테이너가 `<x-layout-td>`이고 `position === 'static'`이면, 최종 `boxData.left = 0`, `boxData.top = 0`, `boxData.width = 1`, `boxData.height = 1`로 설정되어 셀 전체를 채운다. absolute 모드로는 지정된 `boxData.left`/`boxData.top`(mm)과 원래 크기로 주입된다.
 
 #### element 패턴 미리보기 (preview)
 

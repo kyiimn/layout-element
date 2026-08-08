@@ -32,6 +32,7 @@ Before working on any feature, you **must** read the corresponding documentation
 | Insert mode | `docs/EDITING_INSERT.md` | Any request, modification, or work involving InsertController, insert mode activation, drag-to-insert, target container selection, or element creation during insert |
 | EditManager events | `docs/EDITING_EVENTS.md` | Any request, modification, or work involving EditManager event types, payload fields, event dispatch, `addEventListener`/`removeEventListener`, `_dispatching` reentrancy guard, or `_suppressNextClick` click suppression |
 | Place Gun | `docs/EDITING_PLACE_GUN.md` | Any request, modification, or work involving Place Gun, PlaceGunItem, PlaceGunController, item loading/unloading, click-to-place, pause, or reorder |
+| Table editing | `docs/EDITING_TABLE.md` | Any request, modification, or work involving table element, cell block selection (F5/F7/F8), cell merge/split, table resize handles, TableKeyboardController, TableStructureEditor, TD/TR element behavior, or table keyboard shortcuts |
 | Vanilla JS API reference | `docs/API.md` | Any request, modification, or work involving Custom Element public API (properties, methods, events), paragraph/image element public properties, utility functions, or constants |
 | React component layer | `docs/REACT_COMPONENT.md` | Any request, modification, or work involving React wrapper components (`LayoutDocument`, `LayoutBox`, `LayoutParagraph`, `LayoutImage`), their props, or hooks (`useEditManager`, `useLayoutElement`, `useEditableText`) |
 
@@ -76,6 +77,10 @@ When you make **any** of the following changes, you **must** update the correspo
     <x-layout-paragraph>     ← Multi-column text area with wrapping; owns TextEditController when editableText
       <x-layout-column>      ← Individual text column (rendered text lines)
     <x-layout-image>         ← Canvas-based image crop element
+    <x-layout-table>         ← Table container (box content type). Grid + border layer + resize handles
+      <x-layout-tr>          ← Table row. height(mm)
+        <x-layout-td>        ← Table cell. colspan/rowspan, box-equivalent container
+          <x-layout-box>     ← Cell content (paragraph/image/nested-table wrapped in box)
   <x-layout-vcolumn>         ← Virtual column (temporary, used only during layoutText)
 
 Edit mode elements (in shadow DOM of <x-layout-paragraph>):
@@ -168,12 +173,17 @@ src/
       guide-column.element.ts
       image.element.ts
       paragraph.element.ts
+      table.element.ts          # <x-layout-table> (table container, border layer, resize handles)
+      tr.element.ts             # <x-layout-tr> (table row)
+      td.element.ts             # <x-layout-td> (table cell, box-equivalent)
       v-column.element.ts
       index.ts
     index.ts
   core/
     grid-calculator.ts       # GridCalculator (column grid calculation)
     text-layout-engine.ts    # TextLayoutEngine (text wrapping engine)
+    table-grid-resolver.ts   # resolveTableGrid, normalizeWidths (table grid placement + cell size normalization)
+    border-resolver.ts       # resolveTableBorders (table border-collapse edge resolution)
     index.ts
   edit/
     text-edit-context-adapter.ts  # TextEditContextAdapter (Browser EditContext API adapter)
@@ -184,6 +194,8 @@ src/
     layout-selection-controller.ts # LayoutSelectionController (click-to-select)
     insert-controller.ts     # InsertController (drag-to-insert)
     place-gun-controller.ts  # PlaceGunController (click-to-place from loaded items)
+    table-keyboard-controller.ts  # TableKeyboardController (F5/F7/F8 cell block, Alt+arrow resize, M/S/W/H structure)
+    table-structure-editor.ts     # TableStructureEditor (merge/split/insert/delete/equalize, external API)
     index.ts
   resource/
     color-registry.ts        # ColorRegistry (CMYK→RGB singleton)
@@ -196,6 +208,7 @@ src/
       guide-column.type.ts
       image.type.ts
       paragraph.type.ts
+      table.type.ts            # TableData, TableRowData, TableCellData, CellBorderEdge
       text.type.ts
       render-complete-event.type.ts  # RenderCompleteEventDetail (render-complete event payload)
       text/
@@ -212,14 +225,15 @@ src/
       index.ts
     print/                   # PrintPostData (for post-processing)
       color-map.type.ts
-      post-data.type.ts
+      post-data.type.ts      # PrintPostData, PrintPostBorderEdge, PrintPostDiagonal
       index.ts
-    edit/                    # CursorPosition, SelectionRange, EditModel, InsertMode, LayoutEditType, PlaceGunItem, PlaceGunChangeEventDetail
+    edit/                    # CursorPosition, SelectionRange, EditModel, InsertMode, LayoutEditType, PlaceGunItem, TableCellSelection, SplitDialogCallback
       cursor.type.ts
       selection.type.ts
       insert.type.ts
       layout.type.ts
       place-gun.type.ts
+      table-selection.type.ts # TableCellSelection, CellBlockMode, CellCoord, SplitDialogCallback
       index.ts
     index.ts
   constants/                 # Constants: DEFAULT_FONT_SIZE, DEFAULT_PPM, z-index reservations, etc.
@@ -245,6 +259,7 @@ random.ts                  # genRandom() helper (not exported by utils/index.ts)
       layout-paragraph.tsx
       layout-image.tsx
       layout-guide-column.tsx
+      layout-table.tsx          # LayoutTable React wrapper
       logo.tsx                 # Logo (SVG mark component for dev/demo)
       index.ts
     hooks/                   # React hooks for editable text state and manager access

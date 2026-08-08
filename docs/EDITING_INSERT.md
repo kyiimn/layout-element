@@ -270,19 +270,34 @@ export interface InsertEventDetail {
 
 드래그 영역(또는 스냅된 preview 영역)을 완전히 포함하는 가장 안쪽 유효 컨테이너를 찾는다. **preview rect 기반 판정**: `_updateInsertHighlight`와 `_finishInsert` 모두 `_updatePreview`가 반환한 스냅된 픽셀 rect를 사용하여 컨테이너를 판정한다. 마우스 커서의 raw 픽셀 위치가 아닌, preview가 실제로 그려진 위치를 기준으로 한다.
 
-> **static 모드 그리드 containment 검증**: static 모드(`position: 'static'`)에서는 문서 내 모든 box-only 박스를 순회하며, 각 박스에 대해 `_mmToStatic` + `staticGridContains()`로 요소의 static 그리드 영역(컬럼 인덱스 + 스팬, 라인 인덱스 + 라인 수)이 후보 box의 컬럼/라인 그리드 안에 완전히 들어오는지 검증한다. 통과한 박스들 중 가장 깊이 중첩된(deepest) 박스를 선택한다. `elementsFromPoint` hit test를 사용하지 않고, 오직 그리드 containment로만 판정한다.
+> **static 모드 그리드 containment 검증**: static 모드(`position: 'static'`)에서는 문서 내 모든 빈(empty) `<x-layout-td>` 셀과 box-only 박스를 순회하며, 각 컨테이너에 대해 `_mmToStatic` + `staticGridContains()`로 요소의 static 그리드 영역(컬럼 인덱스 + 스팬, 라인 인덱스 + 라인 수)이 후보의 컬럼/라인 그리드 안에 완전히 들어오는지 검증한다. 통과한 후보들 중 가장 깊이 중첩된(deepest) 컨테이너를 선택한다. TD 후보는 box 후보보다 우선순위가 높다. `elementsFromPoint` hit test를 사용하지 않고, 오직 그리드 containment로만 판정한다.
 
 > **음수 좌표 처리**: `_screenToContainerMm`이 음수 좌표를 클램핑하지 않고 그대로 반환한다. 요소가 박스 바깥에 있으면 `leftMm`/`topMm`이 음수가 되고, `_mmToStatic`이 음수 `nearestColumn`/`nearestLine`을 반환하여 `staticGridContains`가 `elementLeft < 0` / `elementTop < 0`으로 거부한다. 이로 인해 박스 바깥의 요소가 박스 안으로 잘못 끌려오는 것을 방지한다.
 
 ### 5.2 선택 알고리즘
 
 ```
-_findTargetContainer(startX, startY, endX, endY)
+  _findTargetContainer(startX, startY, endX, endY)
     │
     ├── 0. static 모드 (position === 'static')
     │   leftPx = min(startX, endX), topPx = min(startY, endY)
     │   widthMm = screenPxToMm(|endX - startX|)
     │   heightMm = screenPxToMm(|endY - startY|)
+    │   // 1) 빈 TD 후보 검사 (box보다 더 깊은 중첩)
+    │   allTds = _document.querySelectorAll('x-layout-td')
+    │   tdCandidates = []
+    │   for each td in allTds:
+    │     if td.items.length > 0 → skip
+    │     if rootBox && !rootBox.contains(td) → skip
+    │     rect = td.getBoundingClientRect()
+    │     if startX >= rect.left && endX <= rect.right &&
+    │        startY >= rect.top && endY <= rect.bottom:
+    │       staticCoords = _mmToStatic(leftMm, topMm, widthMm, heightMm, td)
+    │       if staticGridContains(td, staticCoords):
+    │         tdCandidates.push(td)
+    │   deepestTd = tdCandidates 중 parent chain의 LayoutBoxElement/TD 수가 가장 많은 TD
+    │   if deepestTd → return deepestTd
+    │   // 2) box 후보 검사
     │   allBoxes = _document.querySelectorAll('x-layout-box')
     │   validCandidates = []
     │   for each box in allBoxes:
@@ -356,10 +371,15 @@ _findTargetContainer(startX, startY, endX, endY)
 | 현재 요소 | 조건 | 결과 |
 |-----------|------|------|
 | `<x-layout-document>` | 항상 | 유효한 컨테이너로 간주 (최후보) |
+| `<x-layout-td>` | static 모드, `items.length === 0` | 유효한 컨테이너 (box보다 우선) |
+| `<x-layout-td>` | static 모드, 자식이 있음 | 유효하지 않음 |
+| `<x-layout-td>` | absolute 모드 | 제한 없이 유효 |
 | `<x-layout-box>` | `lock` 설정됨 | 건너뜀 |
 | `<x-layout-box>` | 자식이 없거나 모든 자식이 `type === 'box'` | 유효한 컨테이너 |
 | `<x-layout-box>` | 자식 중 `paragraph`나 `image`가 있음 | 유효하지 않음 |
 | `<x-layout-box>` (static 모드) | 요소의 static 그리드 영역이 box의 컬럼/라인 수를 초과 | 유효하지 않음 (더 바깥 컨테이너로 폴백) |
+
+**TD 내 static 삽입 크기 제한**: 컨테이너가 `<x-layout-td>`이고 `position === 'static'`이면, 드래그 박스의 mm 크기(`widthMm`, `heightMm`)가 `td.model.editableWidth`/`td.model.contentHeight`를 초과하면 삽입이 거부된다. 크기가 적합하면 `left=0, top=0, width=1, height=1`로 설정되어 셀을 가득 채운다. absolute 모드로는 제한 없이 기존 절대좌표 로직을 따른다.
 
 단락이나 이미지가 이미 들어 있는 박스 안에 새 박스를 추가하면 기존 콘텐츠와의 모순이 생길 수 있으므로, 그 경우 상위 컨테이너로 거슬러 올라간다. static 모드에서는 추가로, 요소가 차지할 컬럼/라인 영역이 후보 box의 그리드를 벗어나면 상위 컨테이너로 거슬러 올라간다.
 
@@ -574,6 +594,8 @@ return rect
 
 ### 8.3 static 모드 스냅: `_snapPreviewToGrid`
 
+`position: 'static'`으로 삽입할 때, 미리보기 사각형은 기본적으로 root 요소의 컬럼/라인 그리드에 스냅된다. 단, preview 중심점 아래에 **빈 `<x-layout-td>`**가 있으면 preview를 해당 TD의 경계矩形(bounding rect)으로 클램핑하여 TD에 맞춰진다. 이 경우 그리드 스냅 대신 TD rect 스냅이 적용되며, 사용자가 셀 영역에 정확히 맞춰 삽입할 수 있도록 돕는다.
+
 `position: 'static'`으로 삽입할 때, 미리보기 사각형이 **root 요소**(editableRootId가 지정한 박스, 없으면 document)의 컬럼/라인 그리드에 스냅된다. 특정 박스가 아닌 root 요소 기준이므로, 드래그가 박스 경계를 넘어도 preview가 자유롭게 따라간다.
 
 ```
@@ -658,7 +680,7 @@ _updateInsertHighlight(previewRect)
 
 #### 정적 모드에서의 컨테이너 탐색
 
-`_findTargetContainer()`는 `position: 'static'` 모드에서 **문서 내 모든 box-only 박스**를 순회하며, 각 박스에 대해 `staticGridContains()`로 요소의 static 그리드 영역(컬럼 인덱스 + 스팬, 라인 인덱스 + 라인 수)이 후보 box의 컬럼/라인 그리드 안에 완전히 들어오는지 검증한다. 통과한 박스들 중 가장 깊이 중첩된(deepest) 박스를 선택한다. `elementsFromPoint` hit test를 사용하지 않고, 오직 그리드 containment로만 판정한다. `position: 'absolute'` 모드에서는 **네 꼭짓점 containment**로 식별한다.
+`_findTargetContainer()`는 `position: 'static'` 모드에서 **문서 내 모든 빈 `<x-layout-td>` 셀과 box-only 박스**를 순회하며, 각 컨테이너에 대해 `staticGridContains()`로 요소의 static 그리드 영역(컬럼 인덱스 + 스팬, 라인 인덱스 + 라인 수)이 컨테이너의 컬럼/라인 그리드 안에 완전히 들어오는지 검증한다. 통과한 후보들 중 가장 깊이 중첩된(deepest) 컨테이너를 선택하며, TD 후보가 box 후보보다 우선한다. `elementsFromPoint` hit test를 사용하지 않고, 오직 그리드 containment로만 판정한다. `position: 'absolute'` 모드에서는 **네 꼭짓점 containment**로 식별하며, TD 역시 일반 컨테이너로 포함된다.
 
 #### 레이아웃 편집 reparent와의 관계
 

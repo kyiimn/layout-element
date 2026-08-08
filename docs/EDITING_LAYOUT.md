@@ -1409,7 +1409,7 @@ _updateReparentHighlight(box, clientX, clientY)
 
 | 속성 | 색상 | 적용 대상 | 조건 |
 |------|------|----------|------|
-| `reparent-target` | 주황 (`#ff9800`, 2px) | box 또는 document | reparent 드래그 중 들어갈 수 있는 컨테이너. **삽입 모드**에서도 동일한 속성/CSS로 컨테이너 하이라이트 표시 (`InsertController._updateInsertHighlight`) |
+| `reparent-target` | 주황 (`#ff9800`, 2px) | box, document 또는 `<x-layout-td>` | reparent 드래그 중 들어갈 수 있는 컨테이너. **삽입 모드**에서도 동일한 속성/CSS로 컨테이너 하이라이트 표시 (`InsertController._updateInsertHighlight`)|
 
 하이라이트는 `_onMouseUp`, `_onKeyDown`(ESC), `_cancelAllDrags`(detach)에서 `_clearReparentHighlight()`로 제거된다.
 
@@ -1426,12 +1426,14 @@ _tryReparent(box, clientX, clientY, state)
     ├── 1. _findReparentContainer(box, clientX, clientY) → newContainer
     │   ├── elementsFromPoint로 후보 수집
     │   ├── box 자신/자손, lock, 비-box 자식이 있는 box 제외
-    │   ├── editableRootId 설정 시 root box 내부의 box만 후보 (root 밖 reparent 금지)
-    │   ├── 기하학적 rect containment 폴백 (elementsFromPoint가 박스를 찾지 못한 경우)
-    │   │   ├── 드래그 중인 box의 rect를 완전히 포함하는 박스를 querySelectorAll로 순회
-    │   │   ├── editableRootId 설정 시 root box 내부의 box만 후보
+    │   ├── `<x-layout-td>` 셀도 후보: static position box는 빈 TD만, absolute box는 모든 TD 허용
+    │   ├── editableRootId 설정 시 root box 내부의 컨테이너만 후보 (root 밖 reparent 금지)
+    │   ├── 기하학적 rect containment 폴백 (elementsFromPoint가 컨테이너를 찾지 못한 경우)
+    │   │   ├── 드래그 중인 box의 rect를 완전히 포함하는 가장 안쪽의 TD, 그다음 box를 querySelectorAll로 순회
+    │   │   ├── static box가 아닌 비-box 자식이 있는 TD는 제외; static box는 자식이 있는 TD 제외
+    │   │   ├── editableRootId 설정 시 root box 내부의 컨테이너만 후보
     │   │   ├── 1px 허용 오차로 서브픽셀 경계 문제 흡수
-    │   │   └── 가장 작은 면적(가장 안쪽) 박스를 선택
+    │   │   └── 가장 작은 면적(가장 안쪽) 컨테이너를 선택
     │   └── 없으면 EditManager 루트(editableRootId 또는 document)로 폴백
     │       (editableRootId 설정 시 document가 아닌 root box로 폴백)
     │
@@ -1446,7 +1448,9 @@ _tryReparent(box, clientX, clientY, state)
     ├── 5. box.data 추출 (자손 트리 포함, 원래 position/width/height 유지)
     │
     ├── 6. boxData 좌표 변환 (position 유지):
-    │   ├── static + newContainer.model → 컬럼/라인 스냅 (left/top만 변환, width/height 유지)
+    │   ├── static + newContainer.model →
+    │   │   ├── newContainer가 `<x-layout-td>` → left=0, top=0, width=1, height=1 (셀 가득)
+    │   │   └── 그 외 → 컬럼/라인 스냅 (left/top만 변환, width/height 유지)
     │   └── absolute (또는 모델 없음) → absolute mm 좌표 (left/top만 변환, width/height 유지)
     │
     ├── 7. boxData.zIndex = 새 컨테이너 최대 z-index + 1
@@ -1459,7 +1463,7 @@ _tryReparent(box, clientX, clientY, state)
     └── 10. return { container: newContainer, newBox }
 ```
 
-**position 유지**: 원래 `static`인 box는 새 컨테이너에서도 `static`으로 유지되며, 컬럼/라인 스냅이 적용된다. 원래 `absolute`인 box는 `absolute`로 유지되며 mm 좌표로 변환된다.
+**position 유지**: 원래 `static`인 box는 새 컨테이너에서도 `static`으로 유지되며, 컬럼/라인 스냅이 적용된다. 새 컨테이너가 `<x-layout-td>`이면 `left=0, top=0, width=1, height=1`로 설정되어 셀을 가득 채운다. 원래 `absolute`인 box는 `absolute`로 유지되며 mm 좌표로 변환된다.
 
 **width/height 보존**: `box.data`에서 추출한 원래 `width`/`height`가 그대로 유지된다. 화면 위치(`getBoundingClientRect`)에서 다시 계산하지 않으므로, 부모 밖으로 드래그하여 box 렌더링 크기가 찌그러진 상태에서도 올바른 크기로 새 box가 생성된다.
 
@@ -1467,7 +1471,7 @@ _tryReparent(box, clientX, clientY, state)
 
 **id 보존**: `box.data`의 `id`가 그대로 전달되므로, 새 box도 동일한 `id`를 갖는다.
 
-**`appendChildData`**: `LayoutBoxElement`와 `LayoutDocumentElement`의 public 메서드로, `BoxData`를 받아 `<x-layout-box>` 요소를 생성하고 `data` setter의 전체 초기화 파이프라인(`_layoutStructure` → `_applyStyle` → `_renderBorder` → `_propagateInheritStyle` → `render`)을 실행하여 반환한다.
+**`appendChildData`**: `LayoutBoxElement`, `LayoutDocumentElement`, `LayoutTableCellElement`의 public 메서드로, `BoxData`를 받아 `<x-layout-box>` 요소를 생성하고 `data` setter의 전체 초기화 파이프라인(`_layoutStructure` → `_applyStyle` → `_renderBorder` → `_propagateInheritStyle` → `render`)을 실행하여 반환한다.
 
 **레이아웃 추가/제거 이벤트**: `_tryReparent`는 기존 box 제거 후 `_dispatchLayoutRemove`, 새 box 생성 후 `_dispatchLayoutAdd`를 호출하여 레이아웃 변경을 외부에 알린다. `source` 필드는 `'reparent'`로 설정된다.
 
