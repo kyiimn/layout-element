@@ -82,6 +82,7 @@ export class LayoutDocumentElement extends HTMLElement {
     if (this._isPrint) return;
     this._startChildObserver();
     this.addEventListener('mousedown', this._onPlaceGunMouseDown);
+    window.addEventListener('keydown', this._onWindowKeyDown, true);
     this.layout();
     this.render();
   }
@@ -89,8 +90,34 @@ export class LayoutDocumentElement extends HTMLElement {
   disconnectedCallback() {
     this._stopChildObserver();
     this.removeEventListener('mousedown', this._onPlaceGunMouseDown);
+    window.removeEventListener('keydown', this._onWindowKeyDown, true);
     this._editManager.reset();
   }
+
+  private _onWindowKeyDown = (event: KeyboardEvent): void => {
+    const path = event.composedPath();
+    const inTable = path.some((el) => el instanceof HTMLElement && el.closest('x-layout-table'));
+    const hasSelectedBoxInTd = this._editManager.selectedLayouts.some(box =>
+      box instanceof HTMLElement && box.closest('x-layout-td')
+    );
+
+    if (event.key === 'F5') {
+      if (this._editManager.layoutEditMode && (inTable || hasSelectedBoxInTd)) {
+        event.preventDefault();
+      }
+    }
+    if (event.altKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+      if (!hasSelectedBoxInTd) return;
+      const tables = this.querySelectorAll('x-layout-table');
+      for (const table of tables) {
+        const kc = (table as unknown as { keyboardController?: { selection: unknown } }).keyboardController;
+        if (kc && kc.selection) {
+          event.preventDefault();
+          break;
+        }
+      }
+    }
+  };
 
   /**
    * Place Gun 활성 상태일 때 document 빈 공간 mousedown을 EditManager에 위임한다.
