@@ -1,5 +1,6 @@
 import type { LayoutBoxElement } from "@/components/layout/box.element";
 import type { LayoutDocumentElement } from "@/components/layout/document.element";
+import type { LayoutTableCellElement } from "@/components/layout/td.element";
 
 /**
  * static 좌표계(컬럼 인덱스 × 라인 수)에서 요소의 영역이 컨테이너의
@@ -36,7 +37,7 @@ import type { LayoutDocumentElement } from "@/components/layout/document.element
  * ```
  */
 export function staticGridContains(
-  container: LayoutDocumentElement | LayoutBoxElement,
+  container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement,
   elementLeft: number,
   elementTop: number,
   elementWidth: number,
