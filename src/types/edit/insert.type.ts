@@ -4,8 +4,9 @@
  * - `'text'`: 텍스트 (내부적으로 paragraph로 변환됨)
  * - `'paragraph'`: 단락
  * - `'image'`: 이미지
+ * - `'table'`: 표
  */
-export type InsertType = 'box' | 'text' | 'paragraph' | 'image';
+export type InsertType = 'box' | 'text' | 'paragraph' | 'image' | 'table';
 
 /**
  * 삽입할 요소의 배치 모드.
@@ -23,6 +24,10 @@ export interface InsertMode {
   type: InsertType;
   /** 배치 모드 */
   position: InsertPosition;
+  /** 테이블 생성 시 행 수 (type === 'table'일 때만 사용, 기본값 3) */
+  tableRows?: number;
+  /** 테이블 생성 시 열 수 (type === 'table'일 때만 사용, 기본값 3) */
+  tableCols?: number;
 }
 
 /**

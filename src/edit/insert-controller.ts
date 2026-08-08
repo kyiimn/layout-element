@@ -4,7 +4,7 @@ import { EditManager } from "./edit-manager";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
-import { BoxData } from "@/types";
+import { BoxData, TableData, TableRowData, TableCellData } from "@/types";
 import { staticGridContains } from "@/utils";
 import type { InsertMode, InsertEventDetail } from "@/types/edit";
 
@@ -630,6 +630,10 @@ export class InsertController {
       boxData.children = { type: 'paragraph', content: '' };
     } else if (mode.type === 'image') {
       boxData.children = { type: 'image', dpi: 72, url: '' };
+    } else if (mode.type === 'table') {
+      const rows = mode.tableRows ?? 3;
+      const cols = mode.tableCols ?? 3;
+      boxData.children = this._createTableData(rows, cols);
     }
 
     boxEl.data = boxData;
@@ -639,6 +643,28 @@ export class InsertController {
     boxEl.requestRerenderAffectedParagraphs();
 
     return boxEl;
+  }
+
+  private _createTableData(rows: number, cols: number): TableData {
+    const children: TableRowData[] = [];
+    for (let r = 0; r < rows; r++) {
+      const cells: TableCellData[] = [];
+      for (let c = 0; c < cols; c++) {
+        cells.push({
+          type: 'td',
+          children: [{
+            type: 'box',
+            left: 0, top: 0,
+            width: 1, height: 1,
+            position: 'static',
+            zIndex: 1,
+            children: { type: 'paragraph', content: '' },
+          }],
+        });
+      }
+      children.push({ type: 'tr', height: 5, children: cells });
+    }
+    return { type: 'table', children };
   }
 
   /** 미리보기 사각형 DOM 요소를 생성한다. */
