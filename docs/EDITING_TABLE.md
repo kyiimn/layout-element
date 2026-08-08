@@ -927,3 +927,44 @@ const TABLE_KEYBOARD_RESIZE_STEP = 1;    // mm (Alt+arrow)
 
 const HIT_WIDTH = 8;                     // px (resize handle 히트 영역)
 ```
+
+---
+
+## 15. 요소 삽입 모드를 통한 테이블 생성
+
+### 15.1 InsertMode 확장
+
+`InsertType`에 `'table'`이 추가되었다. `InsertMode`에 `tableRows`/`tableCols` optional 필드가 추가되었다.
+
+```typescript
+interface InsertMode {
+  type: 'box' | 'text' | 'paragraph' | 'image' | 'table';
+  position: 'absolute' | 'static';
+  tableRows?: number;  // 기본값 3
+  tableCols?: number;  // 기본값 3
+}
+```
+
+### 15.2 테이블 생성 동작
+
+`InsertController._createElement`에서 `mode.type === 'table'`일 때:
+- `_createTableData(rows, cols)`로 `TableData` 생성
+- 각 셀은 빈 box(빈 paragraph 포함)를 자식으로 가짐
+- 행 높이 기본값: 5mm
+- 열 너비: 자동 균등 분할 (생성 후 `colWidths`로 조정 가능)
+- box의 `children`에 `TableData`를 설정
+
+### 15.3 사용 방법
+
+```typescript
+// 기본값 (3행 3열)으로 테이블 생성
+editManager.insertMode = { type: 'table', position: 'static' };
+
+// 5행 4열 테이블 생성
+editManager.insertMode = { type: 'table', position: 'static', tableRows: 5, tableCols: 4 };
+
+// absolute 위치에 테이블 생성
+editManager.insertMode = { type: 'table', position: 'absolute', tableRows: 2, tableCols: 2 };
+```
+
+드래그로 영역을 그린 후 mouseup하면 해당 영역에 테이블이 생성된다. `tableRows`/`tableCols`를 생략하면 기본값(3×3)이 사용된다. 생성 후 `insertRowBelow`/`insertColRight`/`deleteRow`/`deleteCol` 등으로 행/열을 조정할 수 있다.
