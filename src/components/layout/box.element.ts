@@ -1,12 +1,14 @@
 import { DEFAULT_BORDER_STYLE, Z_INDEX_RESIZE_HANDLE, Z_INDEX_TYPE_LABEL, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER, Z_INDEX_MAX_LAYOUT } from "@/constants";
 import { GridCalculator } from "@/core";
 import { ColorRegistry } from "@/resource";
-import { InheritStyle, BoxData, ParagraphData, TextData, ImageData, ParagraphStyle, TextStyle, PrintPostData, BoxPosition, BoxBorderStyle, BoxRole } from "@/types";
+import { InheritStyle, BoxData, ParagraphData, TextData, ImageData, TableData, ParagraphStyle, TextStyle, PrintPostData, BoxPosition, BoxBorderStyle, BoxRole } from "@/types";
 import { checkOverlap, genUUID } from "@/utils";
 import { EditManager } from "@/edit/edit-manager";
 import { LayoutDocumentElement } from "./document.element";
 import { LayoutImageElement } from "./image.element";
 import { LayoutParagraphElement } from "./paragraph.element";
+import { LayoutTableElement } from "./table.element";
+import { LayoutTableCellElement } from "./td.element";
 
 /**
  * 위치 지정 가능한 컨테이너 요소. `<x-layout-box>` 커스텀 엘리먼트.
@@ -95,6 +97,7 @@ export class LayoutBoxElement extends HTMLElement {
     this.addEventListener('mouseleave', this._onLayoutMouseLeave);
     this.addEventListener('mousedown', this._onPlaceGunMouseDown);
     this.layout();
+    this._updateTdStaticAttr();
   }
 
   /**
@@ -155,6 +158,37 @@ export class LayoutBoxElement extends HTMLElement {
   private _layoutStructure() {
     if (!this.isConnected || !this.parentModel) return;
 
+    const tdParent = this.parentElement instanceof LayoutTableCellElement
+      ? this.parentElement as LayoutTableCellElement
+      : null;
+
+    if (tdParent && this.position !== 'absolute') {
+      const tdModel = tdParent.model;
+      if (tdModel) {
+        const tdContentWidth = tdModel.editableWidth;
+        const tdContentHeight = tdModel.contentHeight;
+
+      this._model ??= GridCalculator.create({
+        element: this,
+        width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}
+      });
+      this._model.data = {
+        element: this,
+        paddingTop: this.paddingTop,
+        paddingRight: this.paddingRight,
+        paddingBottom: this.paddingBottom,
+        paddingLeft: this.paddingLeft,
+        columns: [tdContentWidth],
+        gap: [],
+        paragraphStyle: this.paragraphStyle,
+        textStyle: this.textStyle,
+        height: tdContentHeight,
+        width: tdContentWidth,
+      };
+      return;
+      }
+    }
+
     const { columnWidth, gaps } = this.parentModel;
 
     this._model ??= GridCalculator.create({
@@ -202,23 +236,27 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule(`@media print { [border] { display: none !important; } }`, 7);
       styleEl.sheet.insertRule('@media screen { .resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: ' + Z_INDEX_RESIZE_HANDLE + '; pointer-events: auto; display: none; } }', 8);
       styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .resize-handle { display: block; } }', 9);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 10);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 11);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 12);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="right"] { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 13);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="nw"] { top: -4px; left: -4px; cursor: nwse-resize; } }', 14);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="ne"] { top: -4px; right: -4px; cursor: nesw-resize; } }', 15);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="sw"] { bottom: -4px; left: -4px; cursor: nesw-resize; } }', 16);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="se"] { bottom: -4px; right: -4px; cursor: nwse-resize; } }', 17);
-      styleEl.sheet.insertRule('@media screen { .type-label { position: absolute; top: 0; left: 0; padding: 0px 0px 0px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: auto; user-select: none; cursor: grab; z-index: ' + Z_INDEX_TYPE_LABEL + '; display: none; white-space: nowrap; } }', 18);
-      styleEl.sheet.insertRule('@media screen { :host([selected]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 0, 0, 0.85); cursor: grab; } }', 19);
-      styleEl.sheet.insertRule('@media screen { :host([hovered]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); cursor: grab; } }', 20);
-      styleEl.sheet.insertRule('@media screen { :host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); cursor: grab; } }', 21);
-      styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .type-label:active, :host([editable-layout][hovered]) .type-label:active { cursor: grabbing; } }', 22);
-      styleEl.sheet.insertRule('@media screen { :host([text-focused]) .type-label { display: none; } }', 23);
-      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }', 24);
-      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn:hover { opacity: 1; } }', 25);
-      styleEl.sheet.insertRule('@media print { .type-label { display: none !important; } }', 26);
+      styleEl.sheet.insertRule('@media screen { :host([td-static]) .resize-handle { display: none !important; } }', 10);
+      styleEl.sheet.insertRule('@media screen { :host([td-static]) .type-label { display: none !important; } }', 11);
+      styleEl.sheet.insertRule('@media screen { :host([td-static][selected]) { box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px; } }', 12);
+      styleEl.sheet.insertRule('@media screen { :host([td-static][hovered]) { box-shadow: #4a90d9 0px 0px 0px 1px inset, #4a90d9 0px 0px 0px 1px; } }', 13);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 14);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 15);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 16);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="right"] { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 17);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="nw"] { top: -4px; left: -4px; cursor: nwse-resize; } }', 18);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="ne"] { top: -4px; right: -4px; cursor: nesw-resize; } }', 19);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="sw"] { bottom: -4px; left: -4px; cursor: nesw-resize; } }', 20);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="se"] { bottom: -4px; right: -4px; cursor: nwse-resize; } }', 21);
+      styleEl.sheet.insertRule('@media screen { .type-label { position: absolute; top: 0; left: 0; padding: 0px 0px 0px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: auto; user-select: none; cursor: grab; z-index: ' + Z_INDEX_TYPE_LABEL + '; display: none; white-space: nowrap; } }', 22);
+      styleEl.sheet.insertRule('@media screen { :host([selected]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 0, 0, 0.85); cursor: grab; } }', 23);
+      styleEl.sheet.insertRule('@media screen { :host([hovered]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); cursor: grab; } }', 24);
+      styleEl.sheet.insertRule('@media screen { :host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); cursor: grab; } }', 25);
+      styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .type-label:active, :host([editable-layout][hovered]) .type-label:active { cursor: grabbing; } }', 26);
+      styleEl.sheet.insertRule('@media screen { :host([text-focused]) .type-label { display: none; } }', 27);
+      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }', 28);
+      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn:hover { opacity: 1; } }', 29);
+      styleEl.sheet.insertRule('@media print { .type-label { display: none !important; } }', 30);
       this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));
@@ -242,16 +280,31 @@ export class LayoutBoxElement extends HTMLElement {
 
     this._ensureResizeHandles();
     const colorRegistry = ColorRegistry.getInstance();
+
+    const tdParent = this.parentElement instanceof LayoutTableCellElement
+      ? this.parentElement as LayoutTableCellElement
+      : null;
+    const isStaticInTd = !!tdParent && this.position !== 'absolute';
+
+    const styleHeight = isStaticInTd && this._model
+      ? `${this._model.editableHeight}mm`
+      : `${this.absHeight}mm`;
+    const styleWidth = isStaticInTd && this._model
+      ? `${this._model.editableWidth}mm`
+      : `${this.absWidth}mm`;
+    const styleLeft = isStaticInTd ? '0mm' : `${this.relLeft}mm`;
+    const styleTop = isStaticInTd ? '0mm' : `${this.relTop}mm`;
+
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
       this._styleRule.style,
       {
         display: 'inline-block',
         boxSizing: 'border-box',
-        height: `${this.absHeight}mm`,
-        left: `${this.relLeft}mm`,
+        height: styleHeight,
+        left: styleLeft,
         position: 'absolute',
-        top: `${this.relTop}mm`,
-        width: `${this.absWidth}mm`,
+        top: styleTop,
+        width: styleWidth,
         zIndex: `${this.zIndex + 100}`,
         backgroundColor: this._backgroundColor
           ? colorRegistry.getCSSColor(this._backgroundColor) +
@@ -510,7 +563,7 @@ export class LayoutBoxElement extends HTMLElement {
       this._layoutStructure();
 
       const existingChildren = this.items;
-      const existingById = new Map<string, LayoutBoxElement | LayoutParagraphElement | LayoutImageElement>();
+      const existingById = new Map<string, LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | HTMLElement>();
       for (const child of existingChildren) {
         if (child.id) existingById.set(child.id, child);
       }
@@ -530,7 +583,7 @@ export class LayoutBoxElement extends HTMLElement {
           usedIds.add(childId);
           const targetType = child.type === 'text' ? 'paragraph' : child.type;
           if (existingEl.localName === 'x-layout-' + targetType) {
-            existingEl.data = child.type === 'text'
+            (existingEl as unknown as { data: typeof child }).data = child.type === 'text'
               ? { ...child, type: 'paragraph' as const, column: 1, gap: 0 }
               : child;
             if (existingEl !== this.children[i]) {
@@ -585,7 +638,7 @@ export class LayoutBoxElement extends HTMLElement {
     * `requestRerenderAffectedParagraphs()`를 호출한다. 새 자식이 높은 zIndex를 가지면
     * 기존 단락들이 새 자식과 겹치는 영역을 회피하도록 재렌더링된다.
     */
-  appendChildData(child: BoxData | ParagraphData | TextData | ImageData): LayoutBoxElement | LayoutParagraphElement | LayoutImageElement {
+  appendChildData(child: BoxData | ParagraphData | TextData | ImageData | TableData): LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | HTMLElement {
     if (child.type === 'box') {
       const boxEl = document.createElement('x-layout-box');
       boxEl.data = child;
@@ -609,6 +662,12 @@ export class LayoutBoxElement extends HTMLElement {
       this.appendChild(paragraphEl);
       this.requestRerenderAffectedParagraphs();
       return paragraphEl;
+    } else if (child.type === 'table') {
+      const tableEl = document.createElement('x-layout-table');
+      (tableEl as unknown as { data: TableData }).data = child;
+      this.appendChild(tableEl);
+      this.requestRerenderAffectedParagraphs();
+      return tableEl;
     } else {
       const imageEl = document.createElement('x-layout-image');
       imageEl.data = child;
@@ -618,7 +677,7 @@ export class LayoutBoxElement extends HTMLElement {
     }
   }
 
-  private _appendChildData(child: BoxData | ParagraphData | TextData | ImageData): void {
+  private _appendChildData(child: BoxData | ParagraphData | TextData | ImageData | TableData): void {
     if (child.type === 'box') {
       const boxEl = document.createElement('x-layout-box');
       boxEl.data = child;
@@ -636,6 +695,10 @@ export class LayoutBoxElement extends HTMLElement {
         gap: 0,
       };
       this.appendChild(paragraphEl);
+    } else if (child.type === 'table') {
+      const tableEl = document.createElement('x-layout-table');
+      (tableEl as unknown as { data: TableData }).data = child;
+      this.appendChild(tableEl);
     } else if (child.type === 'image') {
       const imageEl = document.createElement('x-layout-image');
       imageEl.data = child;
@@ -647,8 +710,13 @@ export class LayoutBoxElement extends HTMLElement {
    * 자식 요소들을 `BoxData[] | ParagraphData | TextData | ImageData` 형태로 직렬화한다.
    * 자식이 1개이고 box가 아닌 경우 단일 객체를 반환하고, 그 외에는 배열을 반환한다.
    */
-  private _serializeChildren(): BoxData[] | ParagraphData | TextData | ImageData | undefined {
-    const items = this.items.map(e => e.data).filter(e => !!e) as (BoxData | ParagraphData | TextData | ImageData)[];
+  private _serializeChildren(): BoxData[] | ParagraphData | TextData | ImageData | TableData | undefined {
+    const allChildren = Array.from(this.children).filter(
+      (c): c is HTMLElement & { data: BoxData | ParagraphData | TextData | ImageData | TableData } =>
+        c instanceof LayoutBoxElement || c instanceof LayoutTableElement
+        || c instanceof LayoutParagraphElement || c instanceof LayoutImageElement,
+    );
+    const items = allChildren.map(e => e.data).filter(e => !!e) as (BoxData | ParagraphData | TextData | ImageData | TableData)[];
     if (items.length === 0) return undefined;
     if (items.length === 1 && items[0].type !== 'box') return items[0];
     return items as BoxData[];
@@ -685,6 +753,7 @@ export class LayoutBoxElement extends HTMLElement {
   set position(value: BoxPosition) {
     if (this._position === value) return;
     this._position = value;
+    this._updateTdStaticAttr();
     this.layout();
   }
 
@@ -1089,9 +1158,14 @@ export class LayoutBoxElement extends HTMLElement {
     // PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로,
     // CSS z-index 동작(낮은 것이 먼저 그려지고 높은 것이 위에 덮임)과
     // 일치하려면 낮은 z-index부터 배열에 들어가야 한다.
-    const sortedItems = [...this.items].sort((a, b) => a.zIndex - b.zIndex);
-    for (const item of sortedItems) {
-      data.push(...item.printPostData);
+    const allChildren = Array.from(this.children).filter(
+      (c): c is HTMLElement & { printPostData: PrintPostData[]; zIndex: number } =>
+        c instanceof LayoutBoxElement || c instanceof LayoutTableElement
+        || c instanceof LayoutParagraphElement || c instanceof LayoutImageElement,
+    );
+    const sortedChildren = allChildren.sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    for (const child of sortedChildren) {
+      data.push(...child.printPostData);
     }
 
     return data;
@@ -1099,9 +1173,15 @@ export class LayoutBoxElement extends HTMLElement {
 
   get type() { return 'box' as const; }
 
-  get contentType(): 'image' | 'paragraph' | null {
-    if (this.items.length !== 1) return null;
+  get contentType(): 'image' | 'paragraph' | 'table' | null {
+    if (this.items.length !== 1) {
+      const tableChild = Array.from(this.children).find(
+        (c): c is LayoutTableElement => c instanceof LayoutTableElement,
+      );
+      return tableChild ? 'table' : null;
+    }
     if (this.items[0].type === 'box') return this.items[0].contentType;
+    if (this.items[0] instanceof LayoutTableElement) return 'table';
     return this.items[0].type;
   }
 
@@ -1145,7 +1225,9 @@ export class LayoutBoxElement extends HTMLElement {
       ? '이미지'
       : contentType === 'paragraph'
         ? '텍스트'
-        : '박스';
+        : contentType === 'table'
+          ? '표'
+          : '박스';
     const role = this._role && this._role !== 'none' ? this._role : undefined;
     const text = role ? `${base}[role=${role}]` : base;
     const span = this._labelEl.firstElementChild as HTMLSpanElement | null;
@@ -1166,11 +1248,26 @@ export class LayoutBoxElement extends HTMLElement {
   private _selectParent(): void {
     const manager = this.editManager;
     if (!manager) return;
-    const parent = this.parentElement;
+    let parent: HTMLElement | null = this.parentElement;
+    while (parent && !(parent instanceof LayoutBoxElement)) {
+      parent = parent.parentElement;
+    }
     if (!parent || !(parent instanceof LayoutBoxElement)) return;
     manager.clearLayoutSelection(false);
     manager.selectLayout(parent);
     this._onLayoutMouseEnter();
+  }
+
+  private _updateTdStaticAttr(): void {
+    if (!this._editableLayout) {
+      this.removeAttribute('td-static');
+      return;
+    }
+    if (this.parentElement instanceof LayoutTableCellElement && this._position === 'static') {
+      this.setAttribute('td-static', '');
+    } else {
+      this.removeAttribute('td-static');
+    }
   }
 
   get editableLayout() { return this._editableLayout; }
@@ -1183,6 +1280,7 @@ export class LayoutBoxElement extends HTMLElement {
     if (value) {
       this.style.cursor = 'grab';
       this.setAttribute('editable-layout', '');
+      this._updateTdStaticAttr();
     } else {
       this.removeAttribute('hovered');
       this.removeAttribute('editable-layout');
@@ -1421,6 +1519,13 @@ export class LayoutBoxElement extends HTMLElement {
       this._collectParagraphs(item, affected);
     }
 
+    const tableChild = Array.from(this.children).find(
+      (c): c is LayoutTableElement => c instanceof LayoutTableElement,
+    );
+    if (tableChild) {
+      this._collectParagraphs(tableChild, affected);
+    }
+
     if (this.parentElement) {
       const myRect = this._getRectInParentForCollection();
       if (!myRect) {
@@ -1513,7 +1618,7 @@ export class LayoutBoxElement extends HTMLElement {
 
   /** 요소 트리를 재귀적으로 탐색하여 모든 단락 요소를 수집한다. */
   private _collectParagraphs(
-    element: LayoutBoxElement | LayoutParagraphElement | LayoutImageElement,
+    element: LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | LayoutTableElement,
     set: Set<LayoutParagraphElement>
   ): void {
     if (element.type === 'paragraph') {
@@ -1523,6 +1628,16 @@ export class LayoutBoxElement extends HTMLElement {
     if (element.type === 'box') {
       for (const child of (element as LayoutBoxElement).items) {
         this._collectParagraphs(child, set);
+      }
+      return;
+    }
+    if (element.type === 'table') {
+      for (const tr of (element as LayoutTableElement).items) {
+        for (const td of tr.items) {
+          for (const box of td.items) {
+            this._collectParagraphs(box, set);
+          }
+        }
       }
     }
   }
