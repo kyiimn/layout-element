@@ -137,27 +137,6 @@ export class LayoutSelectionController {
     const tableEl = path.find((el) => el instanceof LayoutTableElement) as LayoutTableElement | undefined;
     if (tableEl) {
       const kc = tableEl.keyboardController;
-      if (kc?.selection && manager.layoutEditMode) {
-        const tdEl = path.find((el) => el instanceof LayoutTableCellElement) as LayoutTableCellElement | undefined;
-        if (tdEl && tdEl.cellLabel) {
-          const kcInternal = kc as unknown as { _labelToCoord: (label: string) => CellCoord | null };
-          const coord = kcInternal._labelToCoord ? kcInternal._labelToCoord(tdEl.cellLabel) : null;
-          if (coord) {
-            kc.selection = {
-              mode: 'single',
-              anchor: { ...coord },
-              focus: { ...coord },
-              selectMode: 'cell',
-            };
-            (tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })._renderSelectionOverlay(kc.selection);
-            const box = tdEl.items[0];
-            if (box) manager.selectLayout(box);
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            return;
-          }
-        }
-      }
 
       const tdElForDrag = path.find((el) => el instanceof LayoutTableCellElement) as LayoutTableCellElement | undefined;
       if (tdElForDrag && tdElForDrag.cellLabel && kc && manager.layoutEditMode) {
@@ -166,18 +145,11 @@ export class LayoutSelectionController {
         if (coord) {
           for (const t of document.querySelectorAll('x-layout-table')) {
             const otherKc = (t as LayoutTableElement).keyboardController;
-            if (otherKc && otherKc !== kc && otherKc.selection) {
+            if (otherKc && otherKc.selection) {
               otherKc.selection = null;
               (t as unknown as { _renderSelectionOverlay: (sel: null) => void })._renderSelectionOverlay(null);
             }
           }
-          kc.selection = {
-            mode: 'range',
-            anchor: { ...coord },
-            focus: { ...coord },
-            selectMode: 'cell',
-          };
-          (tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })._renderSelectionOverlay(kc.selection);
           const box = tdElForDrag.items[0];
           if (box) manager.selectLayout(box);
           this._cellDrag = { tableEl, anchor: { ...coord }, moved: false, startX: event.clientX, startY: event.clientY };
@@ -257,6 +229,16 @@ export class LayoutSelectionController {
     const coord = kcInternal._labelToCoord ? kcInternal._labelToCoord(targetTd.cellLabel) : null;
     if (!coord) return;
 
+    // anchor 셀과 동일한 셀 위에서는 셀 블록을 표시하지 않는다.
+    // 마우스가 다른 셀로 넘어간 순간부터 range 셀 블록을 설정한다.
+    if (coord.row === anchor.row && coord.col === anchor.col) {
+      if (kc.selection) {
+        kc.selection = null;
+        (tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })._renderSelectionOverlay(null);
+      }
+      return;
+    }
+
     if (kc.selection && kc.selection.focus.row === coord.row && kc.selection.focus.col === coord.col) return;
 
     kc.selection = {
@@ -279,13 +261,8 @@ export class LayoutSelectionController {
       if (!this._cellDrag.moved) {
         const kc = this._cellDrag.tableEl.keyboardController;
         if (kc && kc.selection) {
-          kc.selection = {
-            mode: 'single',
-            anchor: { ...this._cellDrag.anchor },
-            focus: { ...this._cellDrag.anchor },
-            selectMode: 'cell',
-          };
-          (this._cellDrag.tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })._renderSelectionOverlay(kc.selection);
+          kc.selection = null;
+          (this._cellDrag.tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })._renderSelectionOverlay(null);
         }
       }
       this._cellDrag = null;

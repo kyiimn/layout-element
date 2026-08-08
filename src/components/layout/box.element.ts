@@ -455,7 +455,7 @@ export class LayoutBoxElement extends HTMLElement {
         parentWidth: this._model!.editableWidth,
         parentHeight: this._model!.editableHeight,
       };
-      if (childEl.type === 'box') {
+      if (childEl.type === 'box' || childEl.type === 'table') {
         childEl.inheritStyle = childInheritStyle;
       } else if (childEl.type === 'paragraph') {
         childEl.inheritStyle = {
@@ -1032,7 +1032,7 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   get items() {
-    return Array.from(this.querySelectorAll<LayoutBoxElement | LayoutParagraphElement | LayoutImageElement>(":scope > x-layout-box, :scope > x-layout-paragraph, :scope > x-layout-image"));
+    return Array.from(this.querySelectorAll<LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | LayoutTableElement>(":scope > x-layout-box, :scope > x-layout-paragraph, :scope > x-layout-image, :scope > x-layout-table"));
   }
 
   get textStyle(): TextStyle {

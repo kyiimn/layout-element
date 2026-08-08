@@ -1805,6 +1805,16 @@ export class TextEditController {
     const content = this._paragraph.model?.textContent as string | undefined;
     const offset = this._cursorModel.offset;
 
+    // overflow 시 textarea가 컨테이너 밖에 배치되어 브라우저가
+    // 포커스/입력 시 스크롤을 유발하는 것을 방지하기 위해
+    // textarea 위치를 paragraph visible 영역으로 클램핑.
+    const scale = this._manager.scale || 1;
+    const visibleHeightPx = this._paragraph.getBoundingClientRect().height / scale;
+    const clampTop = (top: number): number => {
+      if (visibleHeightPx <= 0) return top;
+      return Math.max(0, Math.min(top, visibleHeightPx - 1));
+    };
+
     if (this._optimisticSpan && this._optimisticSpan.parentNode) {
       const spanRect = this._optimisticSpan.getBoundingClientRect();
       const paragraphRect = this._paragraph.getBoundingClientRect();
@@ -1820,7 +1830,7 @@ export class TextEditController {
       const hasVisibleSelection = this._cursorModel.selection !== null &&
         this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
       this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
-      this._textarea.style.top = `${(spanRect.top - paragraphRect.top) / scale}px`;
+      this._textarea.style.top = `${clampTop((spanRect.top - paragraphRect.top) / scale)}px`;
       this._textarea.style.left = `${localLeft}px`;
       return;
     }
@@ -1905,7 +1915,7 @@ export class TextEditController {
             const hasVisibleSelection = this._cursorModel.selection !== null &&
               this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
             this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
-            this._textarea.style.top = `${lineRect.top}px`;
+            this._textarea.style.top = `${clampTop(lineRect.top)}px`;
             this._textarea.style.left = `${left}px`;
             return;
           }
@@ -1922,7 +1932,7 @@ export class TextEditController {
         const hasVisibleSelection = this._cursorModel.selection !== null &&
           this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
         this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
-        this._textarea.style.top = `${firstCol.top}px`;
+        this._textarea.style.top = `${clampTop(firstCol.top)}px`;
         this._textarea.style.left = `${firstCol.left}px`;
         return;
       }
@@ -1949,7 +1959,7 @@ export class TextEditController {
       this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
     this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
 
-    this._textarea.style.top = `${rect.top}px`;
+    this._textarea.style.top = `${clampTop(rect.top)}px`;
     this._textarea.style.left = `${rect.left}px`;
   }
 

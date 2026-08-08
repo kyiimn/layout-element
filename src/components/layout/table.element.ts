@@ -283,6 +283,20 @@ export class LayoutTableElement extends HTMLElement {
 
     this._resolvedColWidths = this._gridResolution.colWidths;
 
+    // 계산된 rowHeights/colWidths를 원본 데이터에 write-back하여
+    // 이후 layout(부모 box 리사이즈 등)에서 리사이즈된 값이 입력으로 사용되도록 한다.
+    // 리사이즈 핸들 드래그 중에는 핸들러가 직접 _colWidths/_rows.height를
+    // 관리하므로 write-back하지 않는다.
+    if (!this._resizeState) {
+      const resolvedRowHeights = this._gridResolution.rowHeights;
+      for (let r = 0; r < this._rows.length && r < resolvedRowHeights.length; r++) {
+        this._rows[r].height = resolvedRowHeights[r];
+      }
+      if (this._colWidths === undefined || typeof this._colWidths === 'number') {
+        this._colWidths = [...this._gridResolution.colWidths];
+      }
+    }
+
     if (this._gridResolution.warnings.length > 0) {
       this.dispatchEvent(new CustomEvent('render-error', {
         detail: { type: 'table-grid', warnings: this._gridResolution.warnings },
@@ -847,6 +861,9 @@ export class LayoutTableElement extends HTMLElement {
   }
 
   get type(): 'table' { return 'table'; }
+
+  /** 테이블은 부모 box의 zIndex를 따르므로 정렬 시 영향을 주지 않는 0을 반환 */
+  get zIndex(): number { return 0; }
 
   get items(): LayoutTableRowElement[] {
     return Array.from(this.children).filter(
