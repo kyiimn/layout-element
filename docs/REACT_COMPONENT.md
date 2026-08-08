@@ -22,6 +22,9 @@
    - [`<LayoutParagraph>`](#layoutparagraph)
    - [`<LayoutImage>`](#layoutimage)
    - [`<LayoutGuideColumn>`](#layoutguidecolumn)
+   - [`<LayoutTable>`](#layouttable)
+   - [`<LayoutTableRow>`](#layouttablerow)
+   - [`<LayoutTableCell>`](#layouttablecell)
    - [`<Logo>`](#logo)
 5. [Hooks](#hooks)
    - [`useEditManager`](#useeditmanager)
@@ -465,6 +468,74 @@ import type { LayoutGuideColumnProps } from 'layout-element/react';
 
 > 일반적으로 사용자가 직접 사용하지 않습니다. `<LayoutDocument>`가 자동으로
 > 자식으로 만듭니다.
+
+---
+
+### `<LayoutTable>`
+
+`<x-layout-table>` 요소의 React 래퍼. 표 컨테이너.
+
+```tsx
+import { LayoutTable } from 'layout-element/react';
+
+<LayoutTable data={tableData} colWidths={[30, 40, 30]} />
+```
+
+#### Props
+
+| Prop           | Type                    | 설명                                    |
+| -------------- | ----------------------- | --------------------------------------- |
+| `data`         | `TableData`             | 표 데이터 (필수)                         |
+| `colWidths`    | `number \| number[]`    | 열 너비 (mm). number=균등, number[]=개별 |
+| `inheritStyle` | `Record<string, unknown>` | 상속 스타일                            |
+| `children`     | `React.ReactNode`       | 자식 요소                               |
+
+---
+
+### `<LayoutTableRow>`
+
+`<x-layout-tr>` 요소의 React 래퍼. 표 행.
+
+```tsx
+import { LayoutTableRow } from 'layout-element/react';
+
+<LayoutTableRow data={rowData} height={10} />
+```
+
+#### Props
+
+| Prop       | Type            | 설명              |
+| ---------- | --------------- | ----------------- |
+| `data`     | `TableRowData`  | 행 데이터 (필수)  |
+| `height`   | `number`        | 행 높이 (mm)      |
+| `children` | `React.ReactNode` | 자식 요소       |
+
+---
+
+### `<LayoutTableCell>`
+
+`<x-layout-td>` 요소의 React 래퍼. 표 셀.
+
+```tsx
+import { LayoutTableCell } from 'layout-element/react';
+
+<LayoutTableCell data={cellData} colspan={2} backgroundColor="black" />
+```
+
+#### Props
+
+| Prop               | Type              | 설명                         |
+| ------------------ | ----------------- | ---------------------------- |
+| `data`             | `TableCellData`   | 셀 데이터 (필수)             |
+| `colspan`          | `number`          | 열 병합 수                   |
+| `rowspan`          | `number`          | 행 병합 수                   |
+| `backgroundColor`  | `string`          | 배경색 (ColorRegistry 이름)  |
+| `backgroundOpacity`| `number`          | 배경 투명도 (0~1)            |
+| `paddingTop`       | `number`          | 상단 여백 (mm)               |
+| `paddingRight`     | `number`          | 우측 여백 (mm)              |
+| `paddingBottom`    | `number`          | 하단 여백 (mm)              |
+| `paddingLeft`      | `number`          | 좌측 여백 (mm)              |
+| `children`         | `React.ReactNode` | 자식 요소                    |
 
 ---
 
