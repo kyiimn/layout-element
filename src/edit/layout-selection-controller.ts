@@ -1,8 +1,11 @@
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
+import { LayoutTableCellElement } from "@/components/layout/td.element";
+import { LayoutTableElement } from "@/components/layout/table.element";
 import { Z_INDEX_MARQUEE_RECT } from "@/constants";
 import { EditManager } from "./edit-manager";
+import type { TableCellSelection, CellCoord } from "@/types";
 
 /**
  * 마키(고무줄) 선택 중 상태.
@@ -58,6 +61,7 @@ export class LayoutSelectionController {
   private _marqueePending = false;
   /** 마키 시작 시점의 Ctrl/Meta 키 상태 (기존 선택에 추가 여부 결정). */
   private _marqueeAdditive = false;
+  private _cellDrag: { tableEl: LayoutTableElement; anchor: CellCoord; moved: boolean; startX: number; startY: number } | null = null;
 
   /**
    * @param doc - 이벤트 리스너가 등록될 루트 HTMLElement
@@ -78,7 +82,7 @@ export class LayoutSelectionController {
   attach(): void {
     if (this._attached) return;
     this._attached = true;
-    this._document.addEventListener('pointerdown', this._onMouseDown, true);
+    this._document.addEventListener('mousedown', this._onMouseDown, true);
     this._document.addEventListener('click', this._onClick, true);
     this._document.addEventListener('dblclick', this._onDblClick, true);
     this._document.addEventListener('contextmenu', this._onContextMenu, true);
@@ -90,7 +94,7 @@ export class LayoutSelectionController {
   detach(): void {
     if (!this._attached) return;
     this._attached = false;
-    this._document.removeEventListener('pointerdown', this._onMouseDown, true);
+    this._document.removeEventListener('mousedown', this._onMouseDown, true);
     this._document.removeEventListener('click', this._onClick, true);
     this._document.removeEventListener('dblclick', this._onDblClick, true);
     this._document.removeEventListener('contextmenu', this._onContextMenu, true);
@@ -115,7 +119,7 @@ export class LayoutSelectionController {
    *
    * @param event - pointerdown 포인터 이벤트
    */
-  private _onMouseDown = (event: PointerEvent): void => {
+  private _onMouseDown = (event: MouseEvent): void => {
     const manager = this._manager;
     if (manager.insertMode) return;
     if (manager.placeGunActive) return;
@@ -123,8 +127,84 @@ export class LayoutSelectionController {
     if (manager.textEditMode && manager.focusedParagraph) return;
     if (event.button !== 0) return;
 
+    for (const el of event.composedPath()) {
+      if (el instanceof HTMLElement && el.classList.contains('table-resize-handle')) {
+        return;
+      }
+    }
+
+    const path = event.composedPath();
+    const tableEl = path.find((el) => el instanceof LayoutTableElement) as LayoutTableElement | undefined;
+    if (tableEl) {
+      const kc = tableEl.keyboardController;
+      if (kc?.selection && manager.layoutEditMode) {
+        const tdEl = path.find((el) => el instanceof LayoutTableCellElement) as LayoutTableCellElement | undefined;
+        if (tdEl && tdEl.cellLabel) {
+          const kcInternal = kc as unknown as { _labelToCoord: (label: string) => CellCoord | null };
+          const coord = kcInternal._labelToCoord ? kcInternal._labelToCoord(tdEl.cellLabel) : null;
+          if (coord) {
+            kc.selection = {
+              mode: 'single',
+              anchor: { ...coord },
+              focus: { ...coord },
+              selectMode: 'cell',
+            };
+            (tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })._renderSelectionOverlay(kc.selection);
+            const box = tdEl.items[0];
+            if (box) manager.selectLayout(box);
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return;
+          }
+        }
+      }
+
+      const tdElForDrag = path.find((el) => el instanceof LayoutTableCellElement) as LayoutTableCellElement | undefined;
+      if (tdElForDrag && tdElForDrag.cellLabel && kc && manager.layoutEditMode) {
+        const kcInternal = kc as unknown as { _labelToCoord: (label: string) => CellCoord | null };
+        const coord = kcInternal._labelToCoord ? kcInternal._labelToCoord(tdElForDrag.cellLabel) : null;
+        if (coord) {
+          for (const t of document.querySelectorAll('x-layout-table')) {
+            const otherKc = (t as LayoutTableElement).keyboardController;
+            if (otherKc && otherKc !== kc && otherKc.selection) {
+              otherKc.selection = null;
+              (t as unknown as { _renderSelectionOverlay: (sel: null) => void })._renderSelectionOverlay(null);
+            }
+          }
+          kc.selection = {
+            mode: 'range',
+            anchor: { ...coord },
+            focus: { ...coord },
+            selectMode: 'cell',
+          };
+          (tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })._renderSelectionOverlay(kc.selection);
+          const box = tdElForDrag.items[0];
+          if (box) manager.selectLayout(box);
+          this._cellDrag = { tableEl, anchor: { ...coord }, moved: false, startX: event.clientX, startY: event.clientY };
+          window.addEventListener('pointermove', this._onCellDragMove, true);
+          window.addEventListener('pointerup', this._onCellDragUp, true);
+          window.addEventListener('pointercancel', this._onCellDragUp, true);
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return;
+        }
+      }
+    }
+
+    let clearedTable = false;
+    for (const t of document.querySelectorAll('x-layout-table')) {
+      const kc = (t as LayoutTableElement).keyboardController;
+      if (kc?.selection) {
+        kc.selection = null;
+        (t as unknown as { _renderSelectionOverlay: (sel: null) => void })._renderSelectionOverlay(null);
+        clearedTable = true;
+      }
+    }
+
     const box = this._findSelectableBoxFromEvent(event);
     if (box) return;
+
+    if (tableEl && !clearedTable) return;
 
     const isInsideDocument = event.composedPath().some(
       (el) => el instanceof LayoutDocumentElement
@@ -148,6 +228,68 @@ export class LayoutSelectionController {
     window.addEventListener('pointermove', this._onMarqueeMouseMove, true);
     window.addEventListener('pointerup', this._onMarqueeMouseUp, true);
     window.addEventListener('pointercancel', this._onMarqueeMouseUp, true);
+  };
+
+  private _onCellDragMove = (event: PointerEvent): void => {
+    if (!this._cellDrag) return;
+    const { tableEl, anchor, startX, startY } = this._cellDrag;
+    const kc = tableEl.keyboardController;
+    if (!kc) return;
+
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+    if (!this._cellDrag.moved) {
+      if (Math.abs(dx) <= 3 && Math.abs(dy) <= 3) return;
+      this._cellDrag.moved = true;
+    }
+
+    const elements = document.elementsFromPoint(event.clientX, event.clientY);
+    let targetTd: LayoutTableCellElement | null = null;
+    for (const el of elements) {
+      if (el instanceof LayoutTableCellElement && tableEl.contains(el)) {
+        targetTd = el;
+        break;
+      }
+    }
+    if (!targetTd || !targetTd.cellLabel) return;
+
+    const kcInternal = kc as unknown as { _labelToCoord: (label: string) => CellCoord | null };
+    const coord = kcInternal._labelToCoord ? kcInternal._labelToCoord(targetTd.cellLabel) : null;
+    if (!coord) return;
+
+    if (kc.selection && kc.selection.focus.row === coord.row && kc.selection.focus.col === coord.col) return;
+
+    kc.selection = {
+      mode: 'range',
+      anchor: { ...anchor },
+      focus: { ...coord },
+      selectMode: 'cell',
+    };
+    (tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })._renderSelectionOverlay(kc.selection);
+    const selectedCells = kc.getSelectedCells();
+    const boxes = selectedCells.map(c => c.items[0]).filter(Boolean);
+    if (boxes.length > 0) this._manager.selectLayout(boxes);
+  };
+
+  private _onCellDragUp = (_event: PointerEvent): void => {
+    window.removeEventListener('pointermove', this._onCellDragMove, true);
+    window.removeEventListener('pointerup', this._onCellDragUp, true);
+    window.removeEventListener('pointercancel', this._onCellDragUp, true);
+    if (this._cellDrag) {
+      if (!this._cellDrag.moved) {
+        const kc = this._cellDrag.tableEl.keyboardController;
+        if (kc && kc.selection) {
+          kc.selection = {
+            mode: 'single',
+            anchor: { ...this._cellDrag.anchor },
+            focus: { ...this._cellDrag.anchor },
+            selectMode: 'cell',
+          };
+          (this._cellDrag.tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })._renderSelectionOverlay(kc.selection);
+        }
+      }
+      this._cellDrag = null;
+    }
   };
 
   /**
@@ -416,9 +558,15 @@ export class LayoutSelectionController {
    * @param event - 마우스 이벤트
    * @returns 선택 가능한 box 요소. 없으면 `null`
    */
-  private _findSelectableBoxFromEvent(event: MouseEvent): LayoutBoxElement | null {
+  private _findSelectableBoxFromEvent(event: MouseEvent): LayoutBoxElement | LayoutTableCellElement | null {
     const path = event.composedPath();
     for (const el of path) {
+      if (el instanceof LayoutTableCellElement) {
+        const manager = this._manager;
+        if (manager.isBoxSelectable(el)) {
+          return el;
+        }
+      }
       if (el instanceof LayoutBoxElement) {
         const manager = this._manager;
         if (manager.isBoxSelectable(el)) {
@@ -439,7 +587,7 @@ export class LayoutSelectionController {
    * @param box - 기준이 되는 box 요소
    * @returns 자손 box에서 발생한 이벤트이면 `true`
    */
-  private _isEventFromDescendantLayout(event: MouseEvent, box: LayoutBoxElement): boolean {
+  private _isEventFromDescendantLayout(event: MouseEvent, box: LayoutBoxElement | LayoutTableCellElement): boolean {
     const path = event.composedPath();
     const manager = this._manager;
     for (const el of path) {
@@ -496,17 +644,20 @@ export class LayoutSelectionController {
       return;
     }
 
-    // 타입 라벨의 상위 선택 버튼(.parent-btn) 클릭은 선택 로직에서 제외한다.
-    // 버튼 자체 핸들러가 부모 박스 선택을 처리한다.
-    // composedPath()를 사용해 shadow DOM 경계를 넘어 실제 클릭 대상을 검사한다.
     const path = event.composedPath();
     if (path.some((el) => el instanceof Element && el.closest('.parent-btn'))) return;
+
+    const tableEl = path.find((el) => el instanceof LayoutTableElement) as LayoutTableElement | undefined;
+    if (tableEl) {
+      const kc = tableEl.keyboardController;
+      if (kc?.selection) {
+        return;
+      }
+    }
 
     const box = this._findSelectableBoxFromEvent(event);
 
     if (!box) {
-      // 문서 영역 내부의 빈 공간 클릭만 선택 해제로 처리한다.
-      // 툴바 버튼 등 문서 영역 밖의 클릭은 무시한다.
       const isInsideDocument = event.composedPath().some(
         (el) => el instanceof LayoutDocumentElement
       );
@@ -519,8 +670,6 @@ export class LayoutSelectionController {
 
     if (manager.layoutEditMode && manager.isBoxEditable(box)) return;
 
-    // 텍스트 편집 중인 paragraph의 부모 box를 다시 클릭해도
-    // selectLayout이 재실행되어 text-focused가 풀리지 않도록 한다.
     if (box.hasAttribute('text-focused')) return;
 
     event.stopPropagation();
