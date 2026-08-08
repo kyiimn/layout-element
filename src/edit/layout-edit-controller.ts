@@ -4,10 +4,13 @@ import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
+import { LayoutTableCellElement } from "@/components/layout/td.element";
+import { LayoutTableElement } from "@/components/layout/table.element";
 import { genUUID } from "@/utils";
 import { EditManager } from "./edit-manager";
 import type { GridCalculator } from "@/core";
 import type { BoxData } from "@/types/layout/box.type";
+import type { TableCellSelection, CellCoord } from "@/types";
 
 /**
  * 자석(Snap) 기능의 임계값 (단위: 화면 픽셀).
@@ -240,7 +243,7 @@ export class LayoutEditController {
    * `null`이면 하이라이트 없음. 커서가 새 컨테이너로 이동하면 이전 하이라이트를 제거하고
    * 새 컨테이너에 `reparent-target` 속성을 설정한다.
    */
-  private _reparentHighlightTarget: LayoutBoxElement | LayoutDocumentElement | null = null;
+  private _reparentHighlightTarget: LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement | null = null;
 
   /**
    * @param doc - 이벤트 리스너가 등록될 루트 HTMLElement
@@ -416,6 +419,47 @@ export class LayoutEditController {
    */
   private _onMouseDown = (event: MouseEvent): void => {
     if (event.altKey) event.preventDefault();
+
+    for (const el of event.composedPath()) {
+      if (el instanceof HTMLElement && el.classList.contains('table-resize-handle')) {
+        return;
+      }
+    }
+
+    const path = event.composedPath();
+    const tableEl = path.find((el) => el instanceof LayoutTableElement) as LayoutTableElement | undefined;
+    if (tableEl) {
+      const kc = tableEl.keyboardController;
+      if (kc?.selection) {
+        const tdEl = path.find((el) => el instanceof LayoutTableCellElement) as LayoutTableCellElement | undefined;
+        if (!tdEl) {
+          kc.selection = null;
+          (tableEl as unknown as { _renderSelectionOverlay: (sel: null) => void })._renderSelectionOverlay(null);
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        if (tdEl.cellLabel) {
+          const kcInternal = kc as unknown as { _labelToCoord: (label: string) => CellCoord | null };
+          const coord = kcInternal._labelToCoord ? kcInternal._labelToCoord(tdEl.cellLabel) : null;
+          if (coord) {
+            kc.selection = {
+              mode: 'single',
+              anchor: { ...coord },
+              focus: { ...coord },
+              selectMode: 'cell',
+            };
+            (tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })._renderSelectionOverlay(kc.selection);
+            const box = tdEl.items[0];
+            if (box) this._manager.selectLayout(box);
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+        }
+      }
+    }
+
     const box = this._findEditableBoxFromEvent(event);
     if (!box) return;
     const manager = this._manager;
@@ -1926,7 +1970,7 @@ export class LayoutEditController {
    * @param set - 단락 요소를 추가할 Set
    */
   private _collectParagraphs(
-    element: LayoutBoxElement | LayoutParagraphElement | LayoutImageElement,
+    element: LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | LayoutTableElement,
     set: Set<LayoutParagraphElement>,
   ): void {
     if (element.type === 'paragraph') {
@@ -1936,6 +1980,16 @@ export class LayoutEditController {
     if (element.type === 'box') {
       for (const child of (element as LayoutBoxElement).items) {
         this._collectParagraphs(child, set);
+      }
+      return;
+    }
+    if (element.type === 'table') {
+      for (const tr of (element as LayoutTableElement).items) {
+        for (const td of tr.items) {
+          for (const box of td.items) {
+            this._collectParagraphs(box, set);
+          }
+        }
       }
     }
   }
@@ -2008,7 +2062,7 @@ export class LayoutEditController {
     clientX: number,
     clientY: number,
     _state: BoxDragState,
-  ): { container: LayoutBoxElement | LayoutDocumentElement; newBox: LayoutBoxElement } | null {
+  ): { container: LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement; newBox: LayoutBoxElement } | null {
     const newContainer = this._findReparentContainer(box, clientX, clientY);
 
     if (!newContainer || newContainer === box.parentElement) return null;
@@ -2045,19 +2099,26 @@ export class LayoutEditController {
 
     // 원래 position 유지: static은 static으로 스냅, absolute는 absolute로 좌표 변환
     if (boxData.position === 'static' && newContainer.model) {
-      const { columnCoords, lineHeight, editableWidth, columnCount } = newContainer.model;
-      const avgColWidth = editableWidth / columnCount;
-      const editAreaLeft = columnCoords[0]?.x1 ?? 0;
-      const editAreaTop = columnCoords[0]?.y1 ?? 0;
+      if (newContainer instanceof LayoutTableCellElement) {
+        boxData.left = 0;
+        boxData.top = 0;
+        boxData.width = 1;
+        boxData.height = 1;
+      } else {
+        const { columnCoords, lineHeight, editableWidth, columnCount } = newContainer.model;
+        const avgColWidth = editableWidth / columnCount;
+        const editAreaLeft = columnCoords[0]?.x1 ?? 0;
+        const editAreaTop = columnCoords[0]?.y1 ?? 0;
 
-      const nearestColumn = Math.round((leftMm - editAreaLeft) / avgColWidth);
-      const clampedColumn = Math.max(0, Math.min(columnCount - boxData.width, nearestColumn));
-      const nearestLine = Math.round((topMm - editAreaTop) / lineHeight);
-      const clampedLine = Math.max(0, nearestLine);
+        const nearestColumn = Math.round((leftMm - editAreaLeft) / avgColWidth);
+        const clampedColumn = Math.max(0, Math.min(columnCount - boxData.width, nearestColumn));
+        const nearestLine = Math.round((topMm - editAreaTop) / lineHeight);
+        const clampedLine = Math.max(0, nearestLine);
 
-      // width/height는 원래 static 값(컬럼/라인 수) 유지
-      boxData.left = clampedColumn;
-      boxData.top = clampedLine;
+        // width/height는 원래 static 값(컬럼/라인 수) 유지
+        boxData.left = clampedColumn;
+        boxData.top = clampedLine;
+      }
     } else {
       // absolute 요소는 absolute 좌표로 변환. width/height는 원래 mm 값 유지
       boxData.position = 'absolute';
@@ -2099,7 +2160,7 @@ export class LayoutEditController {
    * box 자신/자손, lock된 box, 비-box 자식이 있는 box는 제외한다.
    * 적합한 컨테이너가 없으면 EditManager 루트로 폴백한다.
    */
-  private _findReparentContainer(box: LayoutBoxElement, clientX: number, clientY: number): LayoutBoxElement | LayoutDocumentElement | null {
+  private _findReparentContainer(box: LayoutBoxElement, clientX: number, clientY: number): LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement | null {
     const manager = this._manager;
     const rootId = manager.editableRootId;
     const rootBox = rootId
@@ -2108,22 +2169,26 @@ export class LayoutEditController {
 
     const elements = document.elementsFromPoint(clientX, clientY);
 
-    // 후보 컨테이너: box 자신과 box의 자손이 아닌 첫 번째 box 또는 document
-    let newContainer: LayoutBoxElement | LayoutDocumentElement | null = null;
+    let newContainer: LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement | null = null;
     for (const el of elements) {
       if (el === box) continue;
       if (box.contains(el)) continue;
+      if (el instanceof LayoutTableCellElement) {
+        if (box.position === 'static' && el.items.length > 0) continue;
+        if (rootBox && !rootBox.contains(el)) continue;
+        newContainer = el;
+        break;
+      }
       if (el instanceof LayoutBoxElement) {
         if (el.lock) continue;
         const hasNonBoxChild = el.items.some(item => item.type !== 'box');
         if (hasNonBoxChild) continue;
-        // editableRootId가 설정된 경우 root box 내부의 box만 허용
+        if (el.contentType === 'table') continue;
         if (rootBox && !rootBox.contains(el)) continue;
         newContainer = el;
         break;
       }
       if (el instanceof LayoutDocumentElement) {
-        // editableRootId가 설정된 경우 document로의 reparent 금지
         if (rootBox) continue;
         newContainer = el;
         break;
@@ -2138,33 +2203,60 @@ export class LayoutEditController {
       const boxRect = box.getBoundingClientRect();
       const docEl = box.closest('x-layout-document') as LayoutDocumentElement | null;
       if (docEl) {
-        const allBoxes = docEl.querySelectorAll<LayoutBoxElement>('x-layout-box');
-        let bestCandidate: LayoutBoxElement | null = null;
-        let bestArea = Infinity;
-        for (const candidate of allBoxes) {
-          if (candidate === box) continue;
-          if (box.contains(candidate)) continue;
-          if (candidate.lock) continue;
-          // editableRootId가 설정된 경우 root box 내부의 box만 후보
-          if (rootBox && !rootBox.contains(candidate)) continue;
-          const hasNonBoxChild = candidate.items.some(item => item.type !== 'box');
-          if (hasNonBoxChild) continue;
+        const allTds = docEl.querySelectorAll<LayoutTableCellElement>('x-layout-td');
+        let bestTd: LayoutTableCellElement | null = null;
+        let bestTdArea = Infinity;
+        for (const td of allTds) {
+          if (box.position === 'static' && td.items.length > 0) continue;
+          if (rootBox && !rootBox.contains(td)) continue;
+          if (box.contains(td)) continue;
 
-          const rect = candidate.getBoundingClientRect();
-          // 1px 허용 오차로 서브픽셀 경계 문제를 흡수한다.
+          const rect = td.getBoundingClientRect();
           if (
             boxRect.left >= rect.left - 1 && boxRect.right <= rect.right + 1 &&
             boxRect.top >= rect.top - 1 && boxRect.bottom <= rect.bottom + 1
           ) {
             const area = (rect.right - rect.left) * (rect.bottom - rect.top);
-            if (area < bestArea) {
-              bestArea = area;
-              bestCandidate = candidate;
+            if (area < bestTdArea) {
+              bestTdArea = area;
+              bestTd = td;
             }
           }
         }
-        if (bestCandidate) {
-          newContainer = bestCandidate;
+        if (bestTd) {
+          newContainer = bestTd;
+        }
+
+        if (!newContainer) {
+          const allBoxes = docEl.querySelectorAll<LayoutBoxElement>('x-layout-box');
+          let bestCandidate: LayoutBoxElement | null = null;
+          let bestArea = Infinity;
+          for (const candidate of allBoxes) {
+            if (candidate === box) continue;
+            if (box.contains(candidate)) continue;
+            if (candidate.lock) continue;
+            // editableRootId가 설정된 경우 root box 내부의 box만 후보
+            if (rootBox && !rootBox.contains(candidate)) continue;
+            const hasNonBoxChild = candidate.items.some(item => item.type !== 'box');
+            if (hasNonBoxChild) continue;
+            if (candidate.contentType === 'table') continue;
+
+            const rect = candidate.getBoundingClientRect();
+            // 1px 허용 오차로 서브픽셀 경계 문제를 흡수한다.
+            if (
+              boxRect.left >= rect.left - 1 && boxRect.right <= rect.right + 1 &&
+              boxRect.top >= rect.top - 1 && boxRect.bottom <= rect.bottom + 1
+            ) {
+              const area = (rect.right - rect.left) * (rect.bottom - rect.top);
+              if (area < bestArea) {
+                bestArea = area;
+                bestCandidate = candidate;
+              }
+            }
+          }
+          if (bestCandidate) {
+            newContainer = bestCandidate;
+          }
         }
       }
     }
@@ -2321,6 +2413,12 @@ export class LayoutEditController {
   private _findEditableBoxFromEvent(event: MouseEvent): LayoutBoxElement | null {
     const path = event.composedPath();
     for (const el of path) {
+      if (el instanceof LayoutTableCellElement) {
+        const parentBox = el.closest('x-layout-box') as LayoutBoxElement | null;
+        if (parentBox && this._isBoxEditable(parentBox)) {
+          return parentBox;
+        }
+      }
       if (el instanceof LayoutBoxElement && this._isBoxEditable(el)) {
         return el;
       }
