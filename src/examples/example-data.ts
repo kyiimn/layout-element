@@ -44,6 +44,152 @@ const block1: BoxData = {
   }]
 };
 
+const tableBlock: BoxData = {
+  type: 'box',
+  left: 3, top: 20,
+  width: 2,
+  height: 15,
+  borderColor: 'black',
+  borderTopWidth: .1,
+  borderRightWidth: .1,
+  borderBottomWidth: .1,
+  borderLeftWidth: .1,
+  children: {
+    type: 'table',
+    colWidths: [50, 50],
+    children: [
+      {
+        type: 'tr',
+        height: 5,
+        children: [
+          {
+            type: 'td',
+            borderTop: { width: 0.1, color: 'black' },
+            borderRight: { width: 0.1, color: 'black' },
+            borderBottom: { width: 0.1, color: 'black' },
+            borderLeft: { width: 0.1, color: 'black' },
+            backgroundColor: 'black',
+            children: [{
+              type: 'box',
+              left: 0, top: 0,
+              width: 1, height: 5,
+              children: {
+                type: 'text',
+                content: '항목',
+                textStyle: { fontSize: 4, color: 'white' },
+                paragraphStyle: { textAlign: 'center', verticalAlign: 'center' },
+              },
+            }],
+          },
+          {
+            type: 'td',
+            borderTop: { width: 0.1, color: 'black' },
+            borderRight: { width: 0.1, color: 'black' },
+            borderBottom: { width: 0.1, color: 'black' },
+            borderLeft: { width: 0.1, color: 'black' },
+            backgroundColor: 'black',
+            children: [{
+              type: 'box',
+              left: 0, top: 0,
+              width: 1, height: 5,
+              children: {
+                type: 'text',
+                content: '내용',
+                textStyle: { fontSize: 4, color: 'white' },
+                paragraphStyle: { textAlign: 'center', verticalAlign: 'center' },
+              },
+            }],
+          },
+        ],
+      },
+      {
+        type: 'tr',
+        height: 5,
+        children: [
+          {
+            type: 'td',
+            borderTop: { width: 0.1, color: 'black' },
+            borderRight: { width: 0.1, color: 'black' },
+            borderBottom: { width: 0.1, color: 'black' },
+            borderLeft: { width: 0.1, color: 'black' },
+            children: [{
+              type: 'box',
+              left: 0, top: 0,
+              width: 1, height: 5,
+              children: {
+                type: 'text',
+                content: '대출한도',
+                textStyle: { fontSize: 4 },
+                paragraphStyle: { textAlign: 'center', verticalAlign: 'center' },
+              },
+            }],
+          },
+          {
+            type: 'td',
+            borderTop: { width: 0.1, color: 'black' },
+            borderRight: { width: 0.1, color: 'black' },
+            borderBottom: { width: 0.1, color: 'black' },
+            borderLeft: { width: 0.1, color: 'black' },
+            children: [{
+              type: 'box',
+              left: 0, top: 0,
+              width: 1, height: 5,
+              children: {
+                type: 'text',
+                content: '최대 1억원',
+                textStyle: { fontSize: 4 },
+                paragraphStyle: { textAlign: 'center', verticalAlign: 'center' },
+              },
+            }],
+          },
+        ],
+      },
+      {
+        type: 'tr',
+        height: 5,
+        children: [
+          {
+            type: 'td',
+            borderTop: { width: 0.1, color: 'black' },
+            borderRight: { width: 0.1, color: 'black' },
+            borderBottom: { width: 0.1, color: 'black' },
+            borderLeft: { width: 0.1, color: 'black' },
+            children: [{
+              type: 'box',
+              left: 0, top: 0,
+              width: 1, height: 5,
+              children: {
+                type: 'text',
+                content: '금리',
+                textStyle: { fontSize: 4 },
+                paragraphStyle: { textAlign: 'center', verticalAlign: 'center' },
+              },
+            }],
+          },
+          {
+            type: 'td',
+            borderTop: { width: 0.1, color: 'black' },
+            borderRight: { width: 0.1, color: 'black' },
+            borderBottom: { width: 0.1, color: 'black' },
+            borderLeft: { width: 0.1, color: 'black' },
+            children: [{
+              type: 'box',
+              left: 0, top: 0,
+              width: 1, height: 5,
+              children: {
+                type: 'text',
+                content: '연 4.5% 이내',
+                textStyle: { fontSize: 4 },
+                paragraphStyle: { textAlign: 'center', verticalAlign: 'center' },
+              },
+            }],
+          },
+        ],
+      },
+    ],
+  },
+};
+
 const block2: BoxData = {
   type: 'box',
   left: 3, top: 0,
@@ -307,6 +453,7 @@ export const exampleData = {
 
   children: [
     block1,
+    tableBlock,
     block2,
     block3,
     block4,
