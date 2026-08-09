@@ -78,10 +78,10 @@ export type TableRowData = {
  * {
  *   type: 'td',
  *   colspan: 2,
- *   borderTop: { width: 1, color: 'black' },
- *   borderRight: { width: 1, color: 'black' },
- *   borderBottom: { width: 1, color: 'black' },
- *   borderLeft: { width: 1, color: 'black' },
+ *   borderTopWidth: 1, borderTopColor: 'black', borderTopStyle: 'solid',
+ *   borderRightWidth: 1, borderRightColor: 'black', borderRightStyle: 'solid',
+ *   borderBottomWidth: 1, borderBottomColor: 'black', borderBottomStyle: 'solid',
+ *   borderLeftWidth: 1, borderLeftColor: 'black', borderLeftStyle: 'solid',
  *   backgroundColor: 'lightgray',
  *   diagonals: ['tl-br'],
  *   children: [{ type: 'box', ... }],
@@ -101,15 +101,38 @@ export type TableCellData = {
   rowspan?: number;
 
   /**
-   * 방향별 테두리 엣지 선언.
-   * 인접 셀과 공유됨 — A.borderRight와 B.borderLeft는 동일 엣지.
+   * 방향별 테두리 두께/색상/스타일.
+   *
+   * 인접 셀과 공유됨 — A의 우측 보더와 B의 좌측 보더는 동일 엣지.
    * 테이블 렌더 단계에서 border-collapse 레이어로 한 번만 그려진다.
    * 셀 자체는 테두리를 렌더링하지 않고 선언만 보유한다.
+   *
+   * 각 방향별로 `width`/`color`/`style`을 독립적으로 지정한다.
+   * `width`가 0이거나 `color`가 누락되면 해당 방향 보더는 렌더링하지 않는다.
+   *
+   * @unit width: mm
+   *
+   * @example
+   * // 모든 방향 0.1mm 검은 실선
+   * {
+   *   borderTopWidth: 0.1, borderTopColor: 'black', borderTopStyle: 'solid',
+   *   borderRightWidth: 0.1, borderRightColor: 'black', borderRightStyle: 'solid',
+   *   borderBottomWidth: 0.1, borderBottomColor: 'black', borderBottomStyle: 'solid',
+   *   borderLeftWidth: 0.1, borderLeftColor: 'black', borderLeftStyle: 'solid',
+   * }
    */
-  borderTop?: CellBorderEdge;
-  borderRight?: CellBorderEdge;
-  borderBottom?: CellBorderEdge;
-  borderLeft?: CellBorderEdge;
+  borderTopWidth?: number;
+  borderTopColor?: string;
+  borderTopStyle?: BoxBorderStyle;
+  borderRightWidth?: number;
+  borderRightColor?: string;
+  borderRightStyle?: BoxBorderStyle;
+  borderBottomWidth?: number;
+  borderBottomColor?: string;
+  borderBottomStyle?: BoxBorderStyle;
+  borderLeftWidth?: number;
+  borderLeftColor?: string;
+  borderLeftStyle?: BoxBorderStyle;
 
   /**
    * 배경색. ColorRegistry에 등록된 CMYK 색상 이름 사용.
@@ -152,6 +175,11 @@ export type TableCellData = {
 
 /**
  * 단일 엣지 테두리 선언.
+ *
+ * `border-resolver`의 override 메커니즘(`resolveTableBorders`의 `overrides` 파라미터,
+ * `LayoutTableElement.setBorderOverride`)에서 키 → 엣지 매핑을 위해 사용된다.
+ * `TableCellData` 본체에서는 방향별 개별 속성(`borderTopWidth`/`borderTopColor`/...)
+ * 로 풀어서 선언하므로 `CellBorderEdge`를 직접 사용하지 않는다.
  *
  * @example
  * { width: 1, color: 'black', style: 'solid' }

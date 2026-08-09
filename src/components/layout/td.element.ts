@@ -2,8 +2,8 @@ import { GridCalculator } from "@/core";
 import { ColorRegistry } from "@/resource";
 import {
   TableCellData,
-  CellBorderEdge,
   BoxData,
+  BoxBorderStyle,
   InheritStyle,
   PrintPostData,
   PrintPostDiagonal,
@@ -38,10 +38,18 @@ export class LayoutTableCellElement extends HTMLElement {
 
   private _colspan: number = 1;
   private _rowspan: number = 1;
-  private _borderTop?: CellBorderEdge;
-  private _borderRight?: CellBorderEdge;
-  private _borderBottom?: CellBorderEdge;
-  private _borderLeft?: CellBorderEdge;
+  private _borderTopWidth?: number;
+  private _borderTopColor?: string;
+  private _borderTopStyle?: BoxBorderStyle;
+  private _borderRightWidth?: number;
+  private _borderRightColor?: string;
+  private _borderRightStyle?: BoxBorderStyle;
+  private _borderBottomWidth?: number;
+  private _borderBottomColor?: string;
+  private _borderBottomStyle?: BoxBorderStyle;
+  private _borderLeftWidth?: number;
+  private _borderLeftColor?: string;
+  private _borderLeftStyle?: BoxBorderStyle;
   private _backgroundColor?: string;
   private _backgroundOpacity?: number;
   private _diagonals?: Array<'tl-br' | 'tr-bl'>;
@@ -107,10 +115,18 @@ export class LayoutTableCellElement extends HTMLElement {
       children: this._serializeChildren(),
     };
     if (this.id) result.id = this.id;
-    if (this._borderTop) result.borderTop = this._borderTop;
-    if (this._borderRight) result.borderRight = this._borderRight;
-    if (this._borderBottom) result.borderBottom = this._borderBottom;
-    if (this._borderLeft) result.borderLeft = this._borderLeft;
+    if (this._borderTopWidth !== undefined) result.borderTopWidth = this._borderTopWidth;
+    if (this._borderTopColor !== undefined) result.borderTopColor = this._borderTopColor;
+    if (this._borderTopStyle !== undefined) result.borderTopStyle = this._borderTopStyle;
+    if (this._borderRightWidth !== undefined) result.borderRightWidth = this._borderRightWidth;
+    if (this._borderRightColor !== undefined) result.borderRightColor = this._borderRightColor;
+    if (this._borderRightStyle !== undefined) result.borderRightStyle = this._borderRightStyle;
+    if (this._borderBottomWidth !== undefined) result.borderBottomWidth = this._borderBottomWidth;
+    if (this._borderBottomColor !== undefined) result.borderBottomColor = this._borderBottomColor;
+    if (this._borderBottomStyle !== undefined) result.borderBottomStyle = this._borderBottomStyle;
+    if (this._borderLeftWidth !== undefined) result.borderLeftWidth = this._borderLeftWidth;
+    if (this._borderLeftColor !== undefined) result.borderLeftColor = this._borderLeftColor;
+    if (this._borderLeftStyle !== undefined) result.borderLeftStyle = this._borderLeftStyle;
     if (this._backgroundColor) result.backgroundColor = this._backgroundColor;
     if (this._backgroundOpacity !== undefined) result.backgroundOpacity = this._backgroundOpacity;
     if (this._diagonals) result.diagonals = this._diagonals;
@@ -131,10 +147,18 @@ export class LayoutTableCellElement extends HTMLElement {
       this._rowspan = data.rowspan ?? 1;
       this.setAttribute('colspan', String(this._colspan));
       this.setAttribute('rowspan', String(this._rowspan));
-      this._borderTop = data.borderTop;
-      this._borderRight = data.borderRight;
-      this._borderBottom = data.borderBottom;
-      this._borderLeft = data.borderLeft;
+      this._borderTopWidth = data.borderTopWidth;
+      this._borderTopColor = data.borderTopColor;
+      this._borderTopStyle = data.borderTopStyle;
+      this._borderRightWidth = data.borderRightWidth;
+      this._borderRightColor = data.borderRightColor;
+      this._borderRightStyle = data.borderRightStyle;
+      this._borderBottomWidth = data.borderBottomWidth;
+      this._borderBottomColor = data.borderBottomColor;
+      this._borderBottomStyle = data.borderBottomStyle;
+      this._borderLeftWidth = data.borderLeftWidth;
+      this._borderLeftColor = data.borderLeftColor;
+      this._borderLeftStyle = data.borderLeftStyle;
       this._backgroundColor = data.backgroundColor;
       this._backgroundOpacity = data.backgroundOpacity;
       this._diagonals = data.diagonals;
@@ -269,27 +293,75 @@ export class LayoutTableCellElement extends HTMLElement {
 
   get cellLabels(): string[] { return this._cellLabels; }
 
-  get borderTop(): CellBorderEdge | undefined { return this._borderTop; }
-  set borderTop(value: CellBorderEdge | undefined) {
-    this._borderTop = value;
+  get borderTopWidth(): number | undefined { return this._borderTopWidth; }
+  set borderTopWidth(value: number | undefined) {
+    this._borderTopWidth = value;
     this._refreshParentTableBorder();
   }
 
-  get borderRight(): CellBorderEdge | undefined { return this._borderRight; }
-  set borderRight(value: CellBorderEdge | undefined) {
-    this._borderRight = value;
+  get borderTopColor(): string | undefined { return this._borderTopColor; }
+  set borderTopColor(value: string | undefined) {
+    this._borderTopColor = value;
     this._refreshParentTableBorder();
   }
 
-  get borderBottom(): CellBorderEdge | undefined { return this._borderBottom; }
-  set borderBottom(value: CellBorderEdge | undefined) {
-    this._borderBottom = value;
+  get borderTopStyle(): BoxBorderStyle | undefined { return this._borderTopStyle; }
+  set borderTopStyle(value: BoxBorderStyle | undefined) {
+    this._borderTopStyle = value;
     this._refreshParentTableBorder();
   }
 
-  get borderLeft(): CellBorderEdge | undefined { return this._borderLeft; }
-  set borderLeft(value: CellBorderEdge | undefined) {
-    this._borderLeft = value;
+  get borderRightWidth(): number | undefined { return this._borderRightWidth; }
+  set borderRightWidth(value: number | undefined) {
+    this._borderRightWidth = value;
+    this._refreshParentTableBorder();
+  }
+
+  get borderRightColor(): string | undefined { return this._borderRightColor; }
+  set borderRightColor(value: string | undefined) {
+    this._borderRightColor = value;
+    this._refreshParentTableBorder();
+  }
+
+  get borderRightStyle(): BoxBorderStyle | undefined { return this._borderRightStyle; }
+  set borderRightStyle(value: BoxBorderStyle | undefined) {
+    this._borderRightStyle = value;
+    this._refreshParentTableBorder();
+  }
+
+  get borderBottomWidth(): number | undefined { return this._borderBottomWidth; }
+  set borderBottomWidth(value: number | undefined) {
+    this._borderBottomWidth = value;
+    this._refreshParentTableBorder();
+  }
+
+  get borderBottomColor(): string | undefined { return this._borderBottomColor; }
+  set borderBottomColor(value: string | undefined) {
+    this._borderBottomColor = value;
+    this._refreshParentTableBorder();
+  }
+
+  get borderBottomStyle(): BoxBorderStyle | undefined { return this._borderBottomStyle; }
+  set borderBottomStyle(value: BoxBorderStyle | undefined) {
+    this._borderBottomStyle = value;
+    this._refreshParentTableBorder();
+  }
+
+  get borderLeftWidth(): number | undefined { return this._borderLeftWidth; }
+  set borderLeftWidth(value: number | undefined) {
+    this._borderLeftWidth = value;
+    this._refreshParentTableBorder();
+  }
+
+  get borderLeftColor(): string | undefined { return this._borderLeftColor; }
+  set borderLeftColor(value: string | undefined) {
+    this._borderLeftColor = value;
+    this._refreshParentTableBorder();
+  }
+
+  get borderLeftStyle(): BoxBorderStyle | undefined { return this._borderLeftStyle; }
+  set borderLeftStyle(value: BoxBorderStyle | undefined) {
+    this._borderLeftStyle = value;
     this._refreshParentTableBorder();
   }
 
@@ -488,10 +560,10 @@ export class LayoutTableCellElement extends HTMLElement {
     const borderColor = 'red';
 
     const sides: Array<{ side: 'top' | 'bottom' | 'left' | 'right' }> = [];
-    if (!this._borderTop?.width || !this._borderTop?.color) sides.push({ side: 'top' });
-    if (!this._borderLeft?.width || !this._borderLeft?.color) sides.push({ side: 'left' });
-    if (isLastCol && (!this._borderRight?.width || !this._borderRight?.color)) sides.push({ side: 'right' });
-    if (isLastRow && (!this._borderBottom?.width || !this._borderBottom?.color)) sides.push({ side: 'bottom' });
+    if (!this._borderTopWidth || !this._borderTopColor) sides.push({ side: 'top' });
+    if (!this._borderLeftWidth || !this._borderLeftColor) sides.push({ side: 'left' });
+    if (isLastCol && (!this._borderRightWidth || !this._borderRightColor)) sides.push({ side: 'right' });
+    if (isLastRow && (!this._borderBottomWidth || !this._borderBottomColor)) sides.push({ side: 'bottom' });
 
     for (const { side } of sides) {
       const div = document.createElement('div');

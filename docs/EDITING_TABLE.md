@@ -80,10 +80,18 @@ type TableCellData = {
   id?: string;
   colspan?: number;        // 기본 1
   rowspan?: number;        // 기본 1
-  borderTop?: CellBorderEdge;
-  borderRight?: CellBorderEdge;
-  borderBottom?: CellBorderEdge;
-  borderLeft?: CellBorderEdge;
+  borderTopWidth?: number;       // mm
+  borderTopColor?: string;        // ColorRegistry CMYK 색상 이름
+  borderTopStyle?: BoxBorderStyle; // 'solid' | 'dotted' | 'dashed', 기본 'solid'
+  borderBottomWidth?: number;
+  borderBottomColor?: string;
+  borderBottomStyle?: BoxBorderStyle;
+  borderLeftWidth?: number;
+  borderLeftColor?: string;
+  borderLeftStyle?: BoxBorderStyle;
+  borderRightWidth?: number;
+  borderRightColor?: string;
+  borderRightStyle?: BoxBorderStyle;
   backgroundColor?: string;     // ColorRegistry CMYK 색상 이름
   backgroundOpacity?: number;   // 0~1, 기본 1
   diagonals?: Array<'tl-br' | 'tr-bl'>;
@@ -96,6 +104,8 @@ type TableCellData = {
 ```
 
 ### 2.4 CellBorderEdge
+
+`CellBorderEdge`는 `border-resolver`의 override 메커니즘(`resolveTableBorders`의 `overrides` 파라미터, `LayoutTableElement.setBorderOverride`)에서 키 → 엣지 매핑을 위해 사용되는 타입이다. `TableCellData` 본체에서는 방향별 개별 속성(`borderTopWidth`/`borderTopColor`/...)으로 풀어서 선언하므로 `CellBorderEdge`를 직접 사용하지 않는다.
 
 ```typescript
 type CellBorderEdge = {
@@ -571,9 +581,10 @@ Selection overlay는 다음 시점에 갱신된다:
 
 `src/core/border-resolver.ts`의 `resolveTableBorders(edges)`는 인접 셀의 border 선언을 바탕으로 border-collapse 규칙으로 단일 border 라인을 결정한다.
 
-- 각 셀은 `borderTop`, `borderRight`, `borderBottom`, `borderLeft`를 선언
-- 인접한 두 셀의 border는 동일 엣지를 공유 (A.borderRight ↔ B.borderLeft)
+- 각 셀은 방향별로 `borderTopWidth`/`borderTopColor`/`borderTopStyle`, `borderRightWidth`/..., `borderBottomWidth`/..., `borderLeftWidth`/... 의 개별 속성을 선언한다
+- 인접한 두 셀의 border는 동일 엣지를 공유 (A의 우측 보더 ↔ B의 좌측 보더)
 - border-collapse: 더 두꺼운 border가 우선, 같으면 첫 번째 셀의 border 사용
+- `border-resolver` 내부의 `getCellBorderEdge()` 도우미가 `TableCellData`의 개별 필드에서 `CellBorderEdge` 구조를 조립하여 처리한다
 
 ### 9.2 Border 레이어
 
@@ -905,10 +916,30 @@ class LayoutTableCellElement extends HTMLElement {
   get cellLabel(): string;
   get cellLabels(): string[];
 
-  get borderTop(): CellBorderEdge | undefined;
-  get borderRight(): CellBorderEdge | undefined;
-  get borderBottom(): CellBorderEdge | undefined;
-  get borderLeft(): CellBorderEdge | undefined;
+  get borderTopWidth(): number | undefined;
+  set borderTopWidth(value: number | undefined);
+  get borderTopColor(): string | undefined;
+  set borderTopColor(value: string | undefined);
+  get borderTopStyle(): BoxBorderStyle | undefined;
+  set borderTopStyle(value: BoxBorderStyle | undefined);
+  get borderRightWidth(): number | undefined;
+  set borderRightWidth(value: number | undefined);
+  get borderRightColor(): string | undefined;
+  set borderRightColor(value: string | undefined);
+  get borderRightStyle(): BoxBorderStyle | undefined;
+  set borderRightStyle(value: BoxBorderStyle | undefined);
+  get borderBottomWidth(): number | undefined;
+  set borderBottomWidth(value: number | undefined);
+  get borderBottomColor(): string | undefined;
+  set borderBottomColor(value: string | undefined);
+  get borderBottomStyle(): BoxBorderStyle | undefined;
+  set borderBottomStyle(value: BoxBorderStyle | undefined);
+  get borderLeftWidth(): number | undefined;
+  set borderLeftWidth(value: number | undefined);
+  get borderLeftColor(): string | undefined;
+  set borderLeftColor(value: string | undefined);
+  get borderLeftStyle(): BoxBorderStyle | undefined;
+  set borderLeftStyle(value: BoxBorderStyle | undefined);
 
   get backgroundColor(): string | undefined;
   set backgroundColor(value: string | undefined);

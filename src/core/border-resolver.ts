@@ -1,5 +1,5 @@
 import type { CellPlacement, GridResolution } from "./table-grid-resolver";
-import type { CellBorderEdge } from "@/types";
+import type { CellBorderEdge, TableCellData } from "@/types";
 
 /**
  * 해석된 단일 보더 엣지.
@@ -40,6 +40,46 @@ export type BorderResolution = {
   /** 충돌 경고 */
   warnings: string[];
 };
+
+/**
+ * `TableCellData`의 방향별 개별 보더 필드에서 `CellBorderEdge`를 조립한다.
+ *
+ * `width`가 0 이하이거나 `color`가 누락된 경우 `undefined`를 반환하여
+ * 해당 방향 보더가 없음을 나타낸다.
+ *
+ * @param cell - 셀 데이터
+ * @param side - 보더 방향
+ * @returns 조립된 엣지 선언, 또는 보더가 없으면 `undefined`
+ */
+function getCellBorderEdge(
+  cell: TableCellData,
+  side: 'top' | 'right' | 'bottom' | 'left',
+): CellBorderEdge | undefined {
+  let width: number | undefined;
+  let color: string | undefined;
+  let style: 'solid' | 'dotted' | 'dashed' | undefined;
+
+  if (side === 'top') {
+    width = cell.borderTopWidth;
+    color = cell.borderTopColor;
+    style = cell.borderTopStyle;
+  } else if (side === 'right') {
+    width = cell.borderRightWidth;
+    color = cell.borderRightColor;
+    style = cell.borderRightStyle;
+  } else if (side === 'bottom') {
+    width = cell.borderBottomWidth;
+    color = cell.borderBottomColor;
+    style = cell.borderBottomStyle;
+  } else {
+    width = cell.borderLeftWidth;
+    color = cell.borderLeftColor;
+    style = cell.borderLeftStyle;
+  }
+
+  if (width === undefined || width <= 0 || !color) return undefined;
+  return { width, color, style: style ?? 'solid' };
+}
 
 function makeVerticalEdge(
   key: string,
@@ -125,7 +165,7 @@ export function resolveTableBorders(
       const leftCol = p.gridCol;
       if (leftCol === 0) {
         const edgeKey = `v-${r}-${leftCol}`;
-        let candidate = cell.borderLeft;
+        let candidate = getCellBorderEdge(cell, 'left');
         if (ov.has(edgeKey)) {
           candidate = ov.get(edgeKey)!;
         }
@@ -144,13 +184,16 @@ export function resolveTableBorders(
       const rightCol = p.gridCol + p.spanCols;
       {
         const edgeKey = `v-${r}-${rightCol}`;
-        let candidate = cell.borderRight;
+        let candidate = getCellBorderEdge(cell, 'right');
         if (ov.has(edgeKey)) {
           candidate = ov.get(edgeKey)!;
         }
         const nextP = cellMap.get(`${r}-${rightCol}`);
-        if (nextP && nextP.cell.borderLeft) {
-          candidate = nextP.cell.borderLeft;
+        if (nextP) {
+          const nextLeft = getCellBorderEdge(nextP.cell, 'left');
+          if (nextLeft) {
+            candidate = nextLeft;
+          }
         }
         if (candidate && candidate.width > 0) {
           const yStart = grid.rowHeights.slice(0, r).reduce((a, b) => a + b, 0);
@@ -167,7 +210,7 @@ export function resolveTableBorders(
       const topRow = p.gridRow;
       if (topRow === 0) {
         const edgeKey = `h-${topRow}-${c}`;
-        let candidate = cell.borderTop;
+        let candidate = getCellBorderEdge(cell, 'top');
         if (ov.has(edgeKey)) {
           candidate = ov.get(edgeKey)!;
         }
@@ -186,13 +229,16 @@ export function resolveTableBorders(
       const bottomRow = p.gridRow + p.spanRows;
       {
         const edgeKey = `h-${bottomRow}-${c}`;
-        let candidate = cell.borderBottom;
+        let candidate = getCellBorderEdge(cell, 'bottom');
         if (ov.has(edgeKey)) {
           candidate = ov.get(edgeKey)!;
         }
         const nextP = cellMap.get(`${bottomRow}-${c}`);
-        if (nextP && nextP.cell.borderTop) {
-          candidate = nextP.cell.borderTop;
+        if (nextP) {
+          const nextTop = getCellBorderEdge(nextP.cell, 'top');
+          if (nextTop) {
+            candidate = nextTop;
+          }
         }
         if (candidate && candidate.width > 0) {
           const xStart = grid.colWidths.slice(0, c).reduce((a, b) => a + b, 0);

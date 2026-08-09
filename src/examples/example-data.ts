@@ -64,10 +64,10 @@ const tableBlock: BoxData = {
         children: [
           {
             type: 'td',
-            borderTop: { width: 0.1, color: 'black' },
-            borderRight: { width: 0.1, color: 'black' },
-            borderBottom: { width: 0.1, color: 'black' },
-            borderLeft: { width: 0.1, color: 'black' },
+            borderTopWidth: 0.1, borderTopColor: 'black',
+            borderRightWidth: 0.1, borderRightColor: 'black',
+            borderBottomWidth: 0.1, borderBottomColor: 'black',
+            borderLeftWidth: 0.1, borderLeftColor: 'black',
             backgroundColor: 'black',
             children: [{
               type: 'box',
@@ -83,10 +83,10 @@ const tableBlock: BoxData = {
           },
           {
             type: 'td',
-            borderTop: { width: 0.1, color: 'black' },
-            borderRight: { width: 0.1, color: 'black' },
-            borderBottom: { width: 0.1, color: 'black' },
-            borderLeft: { width: 0.1, color: 'black' },
+            borderTopWidth: 0.1, borderTopColor: 'black',
+            borderRightWidth: 0.1, borderRightColor: 'black',
+            borderBottomWidth: 0.1, borderBottomColor: 'black',
+            borderLeftWidth: 0.1, borderLeftColor: 'black',
             backgroundColor: 'black',
             children: [{
               type: 'box',
@@ -108,10 +108,10 @@ const tableBlock: BoxData = {
         children: [
           {
             type: 'td',
-            borderTop: { width: 0.1, color: 'black' },
-            borderRight: { width: 0.1, color: 'black' },
-            borderBottom: { width: 0.1, color: 'black' },
-            borderLeft: { width: 0.1, color: 'black' },
+            borderTopWidth: 0.1, borderTopColor: 'black',
+            borderRightWidth: 0.1, borderRightColor: 'black',
+            borderBottomWidth: 0.1, borderBottomColor: 'black',
+            borderLeftWidth: 0.1, borderLeftColor: 'black',
             children: [{
               type: 'box',
               left: 0, top: 0,
@@ -126,10 +126,10 @@ const tableBlock: BoxData = {
           },
           {
             type: 'td',
-            borderTop: { width: 0.1, color: 'black' },
-            borderRight: { width: 0.1, color: 'black' },
-            borderBottom: { width: 0.1, color: 'black' },
-            borderLeft: { width: 0.1, color: 'black' },
+            borderTopWidth: 0.1, borderTopColor: 'black',
+            borderRightWidth: 0.1, borderRightColor: 'black',
+            borderBottomWidth: 0.1, borderBottomColor: 'black',
+            borderLeftWidth: 0.1, borderLeftColor: 'black',
             children: [{
               type: 'box',
               left: 0, top: 0,
@@ -150,10 +150,10 @@ const tableBlock: BoxData = {
         children: [
           {
             type: 'td',
-            borderTop: { width: 0.1, color: 'black' },
-            borderRight: { width: 0.1, color: 'black' },
-            borderBottom: { width: 0.1, color: 'black' },
-            borderLeft: { width: 0.1, color: 'black' },
+            borderTopWidth: 0.1, borderTopColor: 'black',
+            borderRightWidth: 0.1, borderRightColor: 'black',
+            borderBottomWidth: 0.1, borderBottomColor: 'black',
+            borderLeftWidth: 0.1, borderLeftColor: 'black',
             children: [{
               type: 'box',
               left: 0, top: 0,
@@ -168,10 +168,10 @@ const tableBlock: BoxData = {
           },
           {
             type: 'td',
-            borderTop: { width: 0.1, color: 'black' },
-            borderRight: { width: 0.1, color: 'black' },
-            borderBottom: { width: 0.1, color: 'black' },
-            borderLeft: { width: 0.1, color: 'black' },
+            borderTopWidth: 0.1, borderTopColor: 'black',
+            borderRightWidth: 0.1, borderRightColor: 'black',
+            borderBottomWidth: 0.1, borderBottomColor: 'black',
+            borderLeftWidth: 0.1, borderLeftColor: 'black',
             children: [{
               type: 'box',
               left: 0, top: 0,
