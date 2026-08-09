@@ -706,6 +706,7 @@ export class EditManager {
     options?: { cursorOffset?: number; selection?: SelectionRange },
   ): boolean {
     if (this._isPrint) return false;
+    if (!this._textEditMode) return false;
     let paragraph: LayoutParagraphElement | null;
 
     if (typeof target === 'string') {
