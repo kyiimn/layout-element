@@ -382,9 +382,11 @@ export class TableKeyboardController {
       const box = cell.items[0];
       if (box) {
         this._editManager.selectLayout(box);
-        const para = box.items.find((c): c is LayoutParagraphElement => c instanceof LayoutParagraphElement);
-        if (para && para instanceof LayoutParagraphElement) {
-          this._editManager.focusParagraph(para);
+        if (this._editManager.textEditMode) {
+          const para = box.items.find((c): c is LayoutParagraphElement => c instanceof LayoutParagraphElement);
+          if (para && para instanceof LayoutParagraphElement) {
+            this._editManager.focusParagraph(para);
+          }
         }
       }
     }
