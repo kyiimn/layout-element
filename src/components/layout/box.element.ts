@@ -1106,7 +1106,21 @@ export class LayoutBoxElement extends HTMLElement {
     }
   }
 
-  get absHeight() {
+  get absHeight(): number {
+    // TD 내부 static box는 height가 line count(=1)가 아닌 TD의 content height로
+    // 해석되어야 한다. 그렇지 않으면 lineHeight * 1 - (lineHeight - fontSize) =
+    // fontSize가 되어, 이 box를 부모로 하는 중첩 표의 contentHeight가 폰트 크기
+    // 수준으로 붕괴한다. TD의 GridCalculator.contentHeight가 곧 box의 높이다.
+    const tdParent: LayoutTableCellElement | null = this.parentElement instanceof LayoutTableCellElement
+      ? this.parentElement as LayoutTableCellElement
+      : null;
+    if (tdParent && this.position !== 'absolute') {
+      const tdModel: GridCalculator | undefined = tdParent.model;
+      if (tdModel) {
+        return Math.max(0, tdModel.contentHeight);
+      }
+    }
+
     let calcHeight = 0;
     if (this.position !== 'absolute') {
       if (this.parentModel) {

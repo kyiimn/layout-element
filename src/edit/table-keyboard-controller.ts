@@ -458,7 +458,7 @@ export class TableKeyboardController {
     const focused = this._editManager.focusedParagraph;
     if (!focused) return false;
     const currentTd = focused.closest('x-layout-td') as LayoutTableCellElement | null;
-    if (!currentTd || !currentTd.cellLabel) return false;
+    if (!currentTd || !currentTd.cellLabel || !this._ownsTd(currentTd)) return false;
     const currentCoord = this._labelToCoord(currentTd.cellLabel);
     if (!currentCoord) return false;
 
@@ -508,7 +508,7 @@ export class TableKeyboardController {
     const focusedParagraph = this._editManager.focusedParagraph;
     if (focusedParagraph) {
       const tdEl = focusedParagraph.closest('x-layout-td') as LayoutTableCellElement | null;
-      if (tdEl && tdEl.cellLabel) {
+      if (tdEl && tdEl.cellLabel && this._ownsTd(tdEl)) {
         const coord = this._labelToCoord(tdEl.cellLabel);
         if (coord) return coord;
       }
@@ -517,13 +517,34 @@ export class TableKeyboardController {
     const selectedLayouts = this._editManager.selectedLayouts;
     for (const box of selectedLayouts) {
       const tdEl = (box as HTMLElement).closest?.('x-layout-td') as LayoutTableCellElement | null;
-      if (tdEl && tdEl.cellLabel) {
+      if (tdEl && tdEl.cellLabel && this._ownsTd(tdEl)) {
         const coord = this._labelToCoord(tdEl.cellLabel);
         if (coord) return coord;
       }
     }
 
     return { row: 0, col: 0 };
+  }
+
+  /**
+   * TD 요소가 이 컨트롤러의 표(`_tableEl`)에 직접 속하는 셀인지 검증한다.
+   *
+   * 중첩 표 환경에서 `closest('x-layout-td')`는 가장 안쪽 TD를 반환하지만,
+   * 부모 표의 컨트롤러가 자식 표의 TD를 자신의 셀로 오인하면 cellLabel 좌표가
+   * 부모 표 좌표계로 잘못 변환되어 셀 블록이 가장 바깥 표를 기준으로 작동한다.
+   * TD의 owning table이 `this._tableEl`인지 확인하여 이 오염을 차단한다.
+   *
+   * @param td - 검증할 TD 요소
+   * @returns td가 이 표의 직접 자식 셀이면 true
+   *
+   * @example
+   * // 부모 표(P) → 셀 → box → 자식 표(C) → 셀
+   * // P.keyboardController._ownsTd(childCell) → false
+   * // C.keyboardController._ownsTd(childCell) → true
+   */
+  private _ownsTd(td: LayoutTableCellElement): boolean {
+    const owningTable = td.closest('x-layout-table');
+    return owningTable === this._tableEl;
   }
 
   private _getCellAt(coord: CellCoord): LayoutTableCellElement | null {

@@ -200,6 +200,8 @@ F5 키는 다음 순서로 모드를 전환한다:
 3. `EditManager.selectedLayouts`에서 TD 내부 box를 찾으면 해당 셀 좌표 반환
 4. 위 모두 실패 시 `{row: 0, col: 0}` 반환
 
+**중첩 표에서의 기준 표**: 2, 3단계에서 TD의 owning table(`td.closest('x-layout-table')`)이 `this._tableEl`인지 `_ownsTd()`로 검증한다. 중첩 표에서 부모 표의 컨트롤러가 자식 표의 TD cellLabel을 부모 표 좌표로 잘못 변환하는 것을 차단하여, 항상 현재 포커스/선택된 셀이 속한 **가장 안쪽 표**를 기준으로 셀 블록이 작동한다.
+
 **진입 시**: `handleF5`는 `EditManager.focusedParagraph`가 있으면 `blurParagraph()`를 호출하여 텍스트 편집 포커스를 해제한다. 이는 셀 블록 모드가 텍스트 편집과 충돌하지 않도록 보장한다.
 
 ### 4.3 F7 — 열 선택
@@ -310,9 +312,11 @@ focus:  { row: currentCell.row, col: maxCol }
 `_startTableResize` (pointerdown 리스너):
 1. `editManager.layoutEditMode`가 true인지 확인
 2. `composedPath()`에서 `.table-resize-handle`을 찾음
-3. `data-handle` 속성에서 방향(v/h)과 인덱스 추출
-4. `_resizeState` 저장 (시작 마우스 좌표, 시작 colWidths/rowHeights)
-5. document에 `pointermove`, `pointerup`, `keydown` 리스너 추가
+3. handle이 `this._resizeHandleEls`에 포함되는지 검증 (중첩 표에서 부모 표가 자식 표의 handle을 가로채지 않도록 차단)
+4. `event.stopPropagation()`으로 부모 표로의 전파 차단
+5. `data-handle` 속성에서 방향(v/h)과 인덱스 추출
+6. `_resizeState` 저장 (시작 마우스 좌표, 시작 colWidths/rowHeights)
+7. document에 `pointermove`, `pointerup`, `keydown` 리스너 추가
 
 `_onTableResizeMouseMove`:
 - 3px 이상 이동 시 `moved = true`
@@ -763,14 +767,23 @@ if (element.type === 'table') {
 
 ### 12.5 중첩 표 지원
 
-TD 내부 box에 다시 표를 넣을 수 있다 (중첩 표). `_collectParagraphs`, `contentType` getter, `_selectParent` 모두 중첩 표를 재귀적으로 처리한다. 단, 중첩 표의 keydown 이벤트는 부모 표의 `_onTableKeyDown`도 수신할 수 있다 (DOM 트리에 둘 다 포함되므로 `inTable`이 true).
+TD 내부 box에 다시 표를 넣을 수 있다 (중첩 표). `_collectParagraphs`, `contentType` getter, `_selectParent` 모두 중첩 표를 재귀적으로 처리한다.
+
+**중첩 표 이벤트 라우팅**: 각 표의 `_onTableKeyDown`은 `target.closest('x-layout-table') === this`로 검증하여 자신의 표 안의 이벤트만 처리한다. 부모 표의 `this.contains(target)`가 자식 표의 이벤트까지 true를 반환하는 것을 차단한다. `hasSelectedBoxInTd`도 TD의 owning table이 `this`인지 검증한다.
+
+**셀 블록 좌표 검증**: `TableKeyboardController._ownsTd(td)`는 TD의 `closest('x-layout-table')`이 `this._tableEl`인지 검증한다. `_getCurrentCellCoord`와 `handleTab`은 이 헬퍼로 TD가 자신의 표에 속하는지 확인한 후 cellLabel을 좌표로 변환한다. 이 검증이 없으면 부모 표의 컨트롤러가 자식 표의 TD cellLabel(예: "A1")을 부모 표 좌표로 잘못 변환하여 셀 블록이 가장 바깥 표를 기준으로 작동한다.
+
+**리사이즈 핸들 소유권 검증**: `_startTableResize`는 `composedPath()`에서 찾은 handle이 `this._resizeHandleEls`에 포함되는지 검증하고 `event.stopPropagation()`을 호출한다. 중첩 표에서 `composedPath()`가 shadow DOM 경계를 넘어 자식 표의 handle을 부모 표의 pointerdown 리스너까지 전달하는 것을 차단한다.
+
+**중첩 표 크기 계산**: TD 내부 static box의 `absHeight`는 TD의 `GridCalculator.contentHeight`를 반환한다. 일반 static box처럼 `lineHeight * height` 공식을 적용하면 height=1(라인 수)이므로 `fontSize` 수준으로 붕괴하여, 이 box를 부모로 하는 중첩 표의 `contentHeight`가 폰트 크기 수준으로 고장난다.
 
 ### 12.6 다중 표 처리
 
 document 내 여러 표가 있을 때:
 - 각 표는 자체 `TableKeyboardController`와 `_onTableKeyDown` 리스너를 가진다
-- `_onTableKeyDown`의 `inTable` 체크(`this.contains(target)`)로 자신의 표 내부 이벤트만 처리
-- `hasSelectedBoxInTd`는 모든 표의 TD 내부 box를 확인하므로, 다른 표의 cell block도 처리할 수 있다 — 하지만 `handleKeyDown`에서 `_selection` 체크로 자신의 selection만 처리
+- `_onTableKeyDown`의 `inTable` 체크(`target.closest('x-layout-table') === this`)로 자신의 표 내부 이벤트만 처리
+- `hasSelectedBoxInTd`도 TD의 owning table이 `this`인지 검증하여 중첩 표에서 부모 표가 자식 표의 셀 선택을 가로채지 않도록 차단
+- `handleKeyDown`에서 `_selection` 체크로 자신의 selection만 처리
 - window keydown 블로커는 모든 표를 순회하여 `kc.selection`이 있는 경우 `preventDefault`
 
 ### 12.7 printPostData

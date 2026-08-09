@@ -570,6 +570,11 @@ export class LayoutTableElement extends HTMLElement {
     }
     if (!handleEl) return;
     if (handleEl.hasAttribute('disabled')) return;
+    // 중첩 표 환경에서 composedPath()는 부모 표의 pointerdown 리스너까지
+    // 자식 표의 handle을 전달한다. 이 표가 소유한 handle인지 검증하지 않으면
+    // 부모 표가 자식 표의 handle을 자신의 것으로 오인하여 잘못된 열/행을
+    // 리사이즈하고, 두 표 모두 _resizeState에 진입해 경쟁 상태가 발생한다.
+    if (!this._resizeHandleEls.includes(handleEl as HTMLDivElement)) return;
 
     const handle = handleEl.getAttribute('data-handle')!;
 
@@ -588,6 +593,7 @@ export class LayoutTableElement extends HTMLElement {
     };
 
     event.preventDefault();
+    event.stopPropagation();
 
     document.addEventListener('pointermove', this._onTableResizeMouseMove);
     document.addEventListener('pointerup', this._onTableResizeMouseUp);
@@ -727,10 +733,18 @@ export class LayoutTableElement extends HTMLElement {
 
   private _onTableKeyDown = (event: KeyboardEvent): void => {
     const target = event.target as Node;
-    const inTable = this.contains(target) || target === this;
+    // this.contains(target)는 중첩 표에서 부모 표가 자식 표의 이벤트까지
+    // 수신하게 만든다. target이 속한 가장 안쪽 표가 this인지 검증하여
+    // 각 표가 자신의 셀 이벤트만 처리하도록 제한한다.
+    const inTable = (target instanceof Element && target.closest?.('x-layout-table') === this)
+      || target === this;
     const em = this.editManager;
     const hasSelectedBoxInTd = em?.selectedLayouts.some(box => {
-      return box instanceof LayoutBoxElement && box.closest('x-layout-td') !== null;
+      if (!(box instanceof LayoutBoxElement)) return false;
+      const td = box.closest('x-layout-td');
+      if (!td) return false;
+      const owningTable = td.closest('x-layout-table');
+      return owningTable === this;
     });
     if (!inTable && !hasSelectedBoxInTd) return;
     if (this._keyboardController) {
