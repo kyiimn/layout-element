@@ -44,6 +44,8 @@ box.render() → table.render() → tr.render() → td.render() → box.render()
 
 `table.layout()`은 자식 TR의 `layout()`을 순차 호출하고, 각 TR은 TD의 `layout()`을, 각 TD는 내부 box의 `layout()`을 호출한다. `layout()` 완료 후 `render()`가 비동기로 실행된다.
 
+**스타일 상속**: 부모 box의 `_propagateInheritStyle()`은 `items` getter를 순회하며 자식에게 `inheritStyle`을 전달한다. `items` getter는 `x-layout-table`을 포함하므로, table → tr → td → 셀 내부 box로 상속 체인이 완전히 연결된다. `LayoutTableElement`는 `zIndex` getter(0 반환)를 가지며, box의 `render()` 정렬에서 `NaN`이 발생하지 않는다.
+
 ---
 
 ## 2. 데이터 모델
@@ -119,12 +121,20 @@ type CellBorderEdge = {
 - `rowHeights`: 정규화된 행 높이 배열 (mm). 합 = containerHeight
 - `placements`: 각 셀의 배치 정보 (`gridRow`, `gridCol`, `spanRows`, `spanCols`, `x`, `y`, `width`, `height`, `cell`)
 
+### 3.1.1 rowHeights/colWidths write-back
+
+`LayoutTableElement._layoutStructure()`는 `resolveTableGrid()` 호출 후 산출된 `rowHeights`/`colWidths`를 원본 데이터에 write-back한다:
+- `this._rows[r].height = resolvedRowHeights[r]` — 이후 `layout()` 호출 시 리사이즈된 행 높이를 입력으로 사용
+- `this._colWidths = [...resolvedColWidths]` — `undefined`/`number` 단일값일 때만 산출된 배열로 확정. `number[]`는 사용자 지정값이므로 보존
+
+이로 인해 삽입 시점의 임시값(`tr.height = 5`, `colWidths = undefined`)이 첫 layout에서 실제 mm값으로 고정되며, 부모 box 리사이즈 시 재정규화만 일어나고 값이 틀어지지 않는다. **리사이즈 핸들 드래그 중에는 write-back하지 않는다**(`_resizeState` 활성 시 skip) — 핸들러가 직접 `_colWidths`/`_rows.height`를 관리하므로.
+
 ### 3.2 normalizeWidths
 
 `normalizeWidths(values, targetSize, minSize)`는 배열의 합을 `targetSize`로 맞추되, 각 값이 `minSize` 이하로 내려가지 않도록 보장한다.
 
 - 합이 targetSize보다 크면: 비례 축소, 단 minSize 미만 값은 minSize로 고정하고 남은 여분을 다른 값에서 차감
-- 합이 targetSize보다 작으면: 비례 확대
+- 합이 targetSize보다 작으면: **비례 분배** — 남은 공간을 각 셀의 원래 비율에 따라 분배. 모든 입력이 동일하면 자동 균등 분할되고, 사용자 지정 비율(예: `[10, 20]`)은 1:2 비율로 유지됨
 - minSize 보장: `MIN_TABLE_COL_WIDTH = 5mm`, `MIN_TABLE_ROW_HEIGHT = 5mm`
 
 ### 3.3 colspan/rowspan 처리
@@ -221,28 +231,33 @@ focus:  { row: currentCell.row, col: maxCol }
 
 이렇게 하면 ESC 후 텍스트 편집 모드로 자연스럽게 전환되어 해당 셀의 텍스트를 바로 편집할 수 있다.
 
-### 4.7 셀 클릭 — range 모드에서 single 전환
+### 4.7 셀 클릭 — 셀 블록 미설정
 
-**레이아웃 편집 모드에서만 동작**. 셀 블록이 활성(range 또는 all) 상태에서 마우스로 다른 셀을 클릭하면:
-- `LayoutEditController._onMouseDown`과 `LayoutSelectionController._onMouseDown` 모두 클릭된 TD의 `cellLabel`을 좌표로 변환
-- `kc.selection`을 `{ mode: 'single', anchor: coord, focus: coord, selectMode: 'cell' }`로 설정
+**레이아웃 편집 모드에서만 동작**. 셀을 단순 클릭(드래그 없음)하면:
+- `LayoutSelectionController._onMouseDown`에서 클릭된 TD의 `cellLabel`을 좌표로 변환
+- 모든 테이블의 기존 셀 블록을 해제(`kc.selection = null` + overlay 클리어)
 - 클릭된 TD의 첫 번째 box를 `selectLayout(box)`로 선택
-- `event.preventDefault()` + `event.stopPropagation()`으로 다른 핸들러 실행 차단
+- `event.preventDefault()` + `event.stopImmediatePropagation()`으로 다른 핸들러 실행 차단
+- **셀 블록은 설정하지 않음** — 단일 클릭으로는 셀 블록이 활성화되지 않는다
 
-비편집 모드에서는 셀 클릭 시 셀 블록 전환이 동작하지 않고, 기존 box 선택 동작이 우선한다.
+비편집 모드에서는 셀 클릭 시 셀 블록이 동작하지 않고, 기존 box 선택 동작이 우선한다.
 
 **제약**: Playwright의 `mouse.click()`은 shadow DOM 내부에서 `mousedown` 이벤트를 발생시키지 않을 수 있어, 자동화 테스트에서는 `pointerdown`을 직접 dispatch해야 정상 동작한다.
 
 ### 4.8 셀 드래그 — range 모드 셀 블록 선택
 
 **레이아웃 편집 모드에서만 동작**. table 내부 TD에서 마우스 드래그를 시작하면:
-- 시작 셀을 anchor로 `range` 모드 셀 블록 설정
+- 모든 테이블의 기존 셀 블록을 해제(자신 포함)
+- 클릭된 TD의 첫 번째 box를 `selectLayout(box)`로 선택
 - `_cellDrag` 상태 시작 (tableEl, anchor, startX/Y, moved=false)
+- **mousedown에서는 셀 블록을 설정하지 않음** — 깜빡임 방지
 - `pointermove` 리스너 등록
 - 드래그 중(3px 이상 이동): `elementsFromPoint`로 마우스 아래 TD를 찾아 focus 좌표 갱신
+  - **anchor 셀과 동일한 셀 위에서는 셀 블록을 표시하지 않음** — 마우스가 다른 셀로 넘어간 순간부터 `range` 셀 블록 설정
+  - 다시 anchor 셀로 돌아가면 셀 블록 해제
   - range 영역 확장 + overlay 갱신
   - 선택된 모든 셀의 box를 `selectLayout(boxes)` 배열로 EditManager selection에 동기화
-- 드래그 없음(단일 클릭): `single` 모드로 전환
+- 드래그 없음(단일 클릭): 셀 블록 설정 안 함 (4.7 참조)
 - `pointerup` 시 리스너 제거 + `_cellDrag` 해제
 
 ### 4.9 테이블 외부 클릭 — 셀 블록 해제

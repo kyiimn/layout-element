@@ -926,6 +926,8 @@ flowchart TD
     - `_crossLeftState === 'sticking'`: `renderedOffset(offset)` 사용, `atEndOfChar = false` → 현재 라인 첫 번째 문자 왼쪽에 커서 표시.
     - 위 조건에 해당하지 않으면 기본 로직(`renderedOffset(offset)`, `atEndOfChar = false`)으로 커서 위치 결정.
 
+  - **overflow 시 textarea 위치 클램핑**: `_updateCursorPosition()`은 paragraph visible 영역 높이(`getBoundingClientRect().height / scale`)를 구하고, `textarea.style.top`을 `0 ~ visibleHeightPx - 1`로 클램핑한다. 커서 요소(`_cursorEl`)는 overflow 영역에 그대로 표시되지만, textarea(브라우저 스크롤 유발원)만 visible 영역 내에 머물러 `focus()`/`setSelectionRange()` 시 브라우저가 상위 스크롤 컨테이너를 강제 스크롤하는 것을 방지한다.
+
 - **`Shift`**: 스틱 동작 없이 `offset ± 1`로 선택 영역을 확장한다. `_extendSelection(targetOffset)` 호출.
 - **`Ctrl`/`Cmd`**: 단어 단위 이동 (`_findWordStart` / `_findWordEnd`). 스틱 동작 없음.
 - 마지막으로 `_syncTextareaSelection()`으로 textarea의 선택 영역을 동기화하고, `_updateCursorPosition()`과 `_updateSelection()`을 호출한다.

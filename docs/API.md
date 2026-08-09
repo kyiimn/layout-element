@@ -1427,6 +1427,10 @@ class EditManager {
   get currentStyle: CurrentStyle | null;
   get controllers: Set<TextEditController>;
 
+  // 휘발성 표시 토글
+  get showPlaceholderBorders: boolean;
+  set showPlaceholderBorders(value: boolean): void;
+
   // 판별
   isParagraphEditable(paragraph: LayoutParagraphElement): boolean;
   isBoxEditable(box: LayoutBoxElement): boolean;
@@ -1436,6 +1440,20 @@ class EditManager {
   reset(): void;
 }
 ```
+
+#### `showPlaceholderBorders`
+
+```ts
+get showPlaceholderBorders(): boolean;
+set showPlaceholderBorders(value: boolean): void;
+```
+
+보더가 없는 box/td의 빨간 점선 placeholder border 및 document 가이드 컬럼 표시 여부를 토글한다. **휘발성** — `BoxData`/`TableData`에 저장되지 않으며 편집 세션 중에만 적용된다. 기본값 `true`.
+
+- `true`: 보더 없는 box/td에 placeholder border 표시, 가이드 컬럼 표시
+- `false`: placeholder border 숨김, 가이드 컬럼 숨김
+
+setter 호출 시 기존 box/td에 즉시 적용되며, 이후 추가되는 요소도 `connectedCallback`에서 현재 상태를 상속받는다. 편집 중 실제 내역만 확인하고 싶을 때 `false`로 설정한다.
 
 #### 이벤트
 
