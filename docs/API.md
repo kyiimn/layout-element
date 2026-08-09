@@ -41,6 +41,8 @@
     - [`InsertController`](#insertcontroller)
     - [`LayoutEditController`](#layouteditcontroller)
     - [`PlaceGunController`](#placeguncontroller)
+    - [`TableKeyboardController`](#tablekeyboardcontroller)
+    - [`TableStructureEditor`](#tablestructureeditor)
 6. [Types](#types)
    - [Layout](#layout-types)
    - [Style](#style-types)
@@ -662,6 +664,10 @@ class LayoutTableElement extends HTMLElement
 | `type` | `'table'` | 요소 타입 식별자. |
 | `zIndex` | `number` | 항상 `0` — 부모 box의 zIndex를 따르므로 정렬에 영향 없음. |
 | `editManager` | `EditManager \| null` | 부모 체인에서 `LayoutDocumentElement.editManager` 조회. |
+| `absLeft` | `number` | 문서 기준 절대 X 좌표(mm). 부모 box에서 상속. |
+| `absTop` | `number` | 문서 기준 절대 Y 좌표(mm). 부모 box에서 상속. |
+| `absWidth` | `number` | 절대 너비(mm). 부모 box의 콘텐츠 영역 너비. |
+| `absHeight` | `number` | 절대 높이(mm). 부모 box의 콘텐츠 영역 높이. |
 
 #### 메서드
 
@@ -710,6 +716,10 @@ class LayoutTableRowElement extends HTMLElement
 | `items` | `LayoutTableCellElement[]` | 직계 자식 TD 요소 배열. |
 | `inheritStyle` | `InheritStyle \| undefined` | 부모 table에서 전달받은 상속 스타일. |
 | `editManager` | `EditManager \| null` | 부모 체인에서 조회. |
+| `absLeft` | `number` | 문서 기준 절대 X 좌표(mm). 부모 table에서 상속. |
+| `absTop` | `number` | 문서 기준 절대 Y 좌표(mm). 부모 table의 `absTop` + 자체 `_y`. |
+| `absWidth` | `number` | 절대 너비(mm). 자체 `_width`. |
+| `absHeight` | `number` | 절대 높이(mm). 자체 `_height`. |
 
 #### 메서드
 
@@ -767,6 +777,10 @@ class LayoutTableCellElement extends HTMLElement
 | `items` | `LayoutBoxElement[]` | 직계 자식 box 요소 배열. |
 | `inheritStyle` | `InheritStyle \| undefined` | 부모 tr에서 전달받은 상속 스타일. |
 | `editManager` | `EditManager \| null` | 부모 체인에서 조회. |
+| `absLeft` | `number` | 문서 기준 절대 X 좌표(mm). 부모 TR의 `absLeft` + 자체 `_x`. |
+| `absTop` | `number` | 문서 기준 절대 Y 좌표(mm). 부모 TR의 `absTop` + 자체 `_y`. |
+| `absWidth` | `number` | 절대 너비(mm). 자체 `_width`. |
+| `absHeight` | `number` | 절대 높이(mm). 자체 `_height`. |
 
 #### 메서드
 
@@ -2293,6 +2307,85 @@ class PlaceGunController {
 | `'image'` | `image.url = subType === 'ad' ? /storage/ad/{uid} : /storage/image/{uid}` (url setter가 자동으로 `render()` 호출) |
 
 자세한 내용은 [`EDITING_PLACE_GUN.md`](./EDITING_PLACE_GUN.md) 참조.
+
+---
+
+### `TableKeyboardController`
+
+표 키보드 단축키·셀 블록 선택·구조 편집 컨트롤러. `LayoutTableElement.keyboardController`로 접근.
+
+```ts
+class TableKeyboardController {
+  // 셀 블록 selection
+  get selection(): TableCellSelection | null;
+  set selection(value: TableCellSelection | null): void;
+
+  get active(): boolean;
+  activate(): void;
+  deactivate(): void;
+
+  // 셀 블록 설정 (외부 호출)
+  selectCell(td: LayoutTableCellElement): void;
+
+  getSelectedCells(): LayoutTableCellElement[];
+  handleKeyDown(event: KeyboardEvent): boolean;
+
+  // 구조 편집 (selection이 null이면 no-op)
+  handleMerge(): void;
+  insertRowBelow(): void;
+  insertRowAbove(): void;
+  insertColRight(): void;
+  insertColLeft(): void;
+  deleteRow(): void;
+  deleteCol(): void;
+}
+```
+
+#### `selectCell(td)`
+
+TD 요소를 전달하여 셀 블록 단일 선택을 설정한다. TD의 `cellLabel`에서 좌표를 추출하여 `selection`을 설정하고 overlay를 갱신한다. 다른 테이블의 기존 selection은 해제한다.
+
+```ts
+const td = tableEl.querySelector('x-layout-td');
+tableEl.keyboardController.selectCell(td);
+```
+
+#### selection 가드
+
+`insertRowBelow`/`insertRowAbove`/`insertColRight`/`insertColLeft`/`deleteRow`/`deleteCol`은 `selection`이 `null`이면 즉시 return한다. 셀 블록 모드에서만 동작한다.
+
+자세한 내용은 [`EDITING_TABLE.md`](./EDITING_TABLE.md) 참조.
+
+---
+
+### `TableStructureEditor`
+
+표 구조 편집 외부 API. `LayoutTableElement.structureEditor`로 접근. selection 가드 없이 직접 호출 가능.
+
+```ts
+class TableStructureEditor {
+  mergeCells(selection: TableCellSelection): void;
+  unmergeCell(cellCoord: CellCoord): void;
+
+  insertRowBelow(): void;
+  insertRowAbove(): void;
+  insertColRight(): void;
+  insertColLeft(): void;
+
+  deleteRow(): void;
+  deleteCol(): void;
+
+  equalizeWidth(selection: TableCellSelection): void;
+  equalizeHeight(selection: TableCellSelection): void;
+}
+```
+
+#### 행/열 삽입 동작
+
+- 행 삽입: 현재 행의 높이를 1/2로 분할 (기존 행 절반, 새 행 절반). `MIN_TABLE_ROW_HEIGHT`(5mm) 보장.
+- 열 삽입: 현재 열의 너비를 1/2로 분할 (기존 열 절반, 새 열 절반). `MIN_TABLE_COL_WIDTH`(5mm) 보장.
+
+자세한 내용은 [`EDITING_TABLE.md`](./EDITING_TABLE.md) 참조.
 
 ---
 
