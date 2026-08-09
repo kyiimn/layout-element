@@ -753,6 +753,8 @@ if (element.type === 'table') {
 
 테이블은 부모 box의 content 영역(box width/height - padding)을 가득 채운다. row heights의 합은 containerHeight에 맞춰 정규화되고, col widths의 합은 containerWidth에 맞춰 정규화된다. 개별 행/열의 크기를 독립적으로 설정할 수 없다 — 항상 비율로 동작한다.
 
+부모 box의 width/height가 변경되면 `LayoutBoxElement.layout()` 끝에서 자식 `LayoutTableElement`의 `layout()`을 호출하여 내부 셀 크기를 재계산한다. `table._layoutStructure()`는 부모의 `absWidth`/`absHeight`에서 padding을 뺀 contentWidth/contentHeight를 기반으로 `resolveTableGrid()`를 다시 실행하므로, 부모 크기 변경 시 모든 셀의 비율이 유지되며 전체 스케일만 조정된다.
+
 ### 12.4 MIN_TABLE_COL_WIDTH / MIN_TABLE_ROW_HEIGHT
 
 - 열 너비 최소: 5mm (`MIN_TABLE_COL_WIDTH`)
