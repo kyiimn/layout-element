@@ -639,7 +639,6 @@ export class LayoutSelectionController {
   private _onClick = (event: MouseEvent): void => {
     const manager = this._manager;
     if (manager.insertMode) return;
-    if (manager._consumeSuppressNextClick()) return;
 
     if (this._marqueePending) {
       this._marqueePending = false;
@@ -754,8 +753,7 @@ export class LayoutSelectionController {
     if (box) {
       const isSelected = manager.selectedLayouts.includes(box);
       if (!isSelected) {
-        manager.clearLayoutSelection(false);
-        manager.selectLayout(box);
+        manager.selectLayoutExclusive(box);
       }
     } else {
       const isInsideDocument = event.composedPath().some(

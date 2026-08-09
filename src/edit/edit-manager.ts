@@ -48,8 +48,8 @@ export interface EditManagerEvent {
   type: EditManagerEventType;
   /** 이벤트가 발생한 단락 요소 (포커스된 단락) */
   paragraph: LayoutParagraphElement;
-  /** 이벤트가 발생한 편집 컨트롤러 */
-  controller: TextEditController;
+  /** 이벤트가 발생한 편집 컨트롤러 (레이아웃/삽입/PlaceGun 이벤트에서는 null) */
+  controller: TextEditController | null;
   /** 이전 포커스 단락 (focusChange 이벤트에서만) */
   previousParagraph?: LayoutParagraphElement | null;
   /** 이전 편집 컨트롤러 (focusChange 이벤트에서만) */
@@ -162,7 +162,6 @@ export class EditManager {
   private _isLayoutResizing = false;
   private _insertController: InsertController | null = null;
   private _insertMode: InsertMode | null = null;
-  private _suppressNextClick = false;
   private _clickConsumeHandler: ((e: MouseEvent) => void) | null = null;
   private _clickConsumeTimer: ReturnType<typeof setTimeout> | null = null;
   private _layoutEditMode: boolean = false;
@@ -273,7 +272,7 @@ export class EditManager {
           listener({
             type: 'modeChange',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as TextEditController,
+            controller: null,
             previousMode,
             mode,
           });
@@ -354,10 +353,11 @@ export class EditManager {
     this._dragTargets = [];
     this._dragStartPositions.clear();
 
-    this._textEditMode = false;
-    this._layoutEditMode = false;
-    this._layoutEditType = 'move';
-    this._insertMode = null;
+    this._modeChangeSuppressed = true;
+    this.textEditMode = false;
+    this.layoutEditMode = false;
+    this.insertMode = null;
+    this._modeChangeSuppressed = false;
 
     this._editableRoles = null;
     this._editableBoxIds = null;
@@ -379,23 +379,11 @@ export class EditManager {
     this._placeGunController = null;
 
     this._removeClickConsumeHandler();
-    this._suppressNextClick = false;
 
     this._placeGunItems = [];
     this._placeGunPaused = false;
     this._multiSelect = false;
     this._scale = 1;
-
-    this._docEl.querySelectorAll('x-layout-box[editable-layout]').forEach((el) => {
-      if (el instanceof LayoutBoxElement) {
-        el.editableLayout = false;
-      }
-    });
-    this._docEl.querySelectorAll('x-layout-paragraph[editable-text]').forEach((el) => {
-      if (el instanceof LayoutParagraphElement) {
-        el.editableText = false;
-      }
-    });
 
     this._dispatchModeChange({
       textEditMode: false,
@@ -481,9 +469,18 @@ export class EditManager {
     if (this._focusedController === controller) {
       const previousParagraph = controller['_paragraph'] as LayoutParagraphElement;
       this._clearBoxSelectionForParagraph(previousParagraph);
+
+      const parentBox = previousParagraph?.parentElement;
+      if (parentBox instanceof LayoutBoxElement && this._selectedLayouts.includes(parentBox)) {
+        const previousLayouts = [...this._selectedLayouts];
+        parentBox.removeAttribute('selected');
+        this._selectedLayouts = this._selectedLayouts.filter(el => el !== parentBox);
+        this._dispatchLayoutSelection(previousLayouts);
+      }
+
       this._lastFocusedBox = null;
       this._focusedController = null;
-      this._dispatch('focusChange', controller, previousParagraph, controller);
+      this._dispatch('focusChange', null, previousParagraph, controller);
     }
   }
 
@@ -531,7 +528,11 @@ export class EditManager {
     const previousParagraph = controller['_paragraph'] as LayoutParagraphElement;
     this._clearBoxSelectionForParagraph(previousParagraph);
     this._focusedController = null;
-    this._dispatch('focusChange', controller, previousParagraph, controller);
+    this._dispatch('focusChange', null, previousParagraph, controller);
+
+    if (controller._consumePendingTextChange()) {
+      this._dispatch('textChange', controller);
+    }
   }
 
   /**
@@ -569,7 +570,7 @@ export class EditManager {
     const event: EditManagerEvent = {
       type: 'textChange',
       paragraph,
-      controller: null as unknown as TextEditController,
+      controller: null,
     };
 
     this._dispatching = true;
@@ -1032,18 +1033,17 @@ export class EditManager {
     const parentBox = paragraph.parentElement;
     if (!(parentBox instanceof LayoutBoxElement)) return;
 
-    if (this._selectedLayouts.length === 1 && this._selectedLayouts[0] === parentBox) {
-      parentBox.setAttribute('text-focused', '');
-      return;
-    }
-
     const previousLayouts = [...this._selectedLayouts];
-    for (const prev of this._selectedLayouts) {
-      prev.removeAttribute('selected');
-      prev.removeAttribute('text-focused');
+    const isAlreadySelected = this._selectedLayouts.length === 1 && this._selectedLayouts[0] === parentBox;
+
+    if (!isAlreadySelected) {
+      for (const prev of this._selectedLayouts) {
+        prev.removeAttribute('selected');
+        prev.removeAttribute('text-focused');
+      }
+      this._selectedLayouts = [parentBox];
+      parentBox.setAttribute('selected', '');
     }
-    this._selectedLayouts = [parentBox];
-    parentBox.setAttribute('selected', '');
     parentBox.setAttribute('text-focused', '');
     this._dispatchLayoutSelection(previousLayouts);
   }
@@ -1540,6 +1540,43 @@ export class EditManager {
   }
 
   /**
+   * 단일 요소를 명시적으로 선택한다. `multiSelect` 상태와 무관하게
+   * 기존 선택을 모두 제거하고 대상 요소만 선택하여 `layoutSelectionChange`를 1회 발생시킨다.
+   *
+   * 컨텍스트 메뉴 우클릭 등 clear+select를 원자적으로 수행해야 하는 경우 사용한다.
+   *
+   * @param target - 선택할 단일 레이아웃 요소.
+   * @returns 선택 성공 여부. 대상이 검증을 통과하지 못하면 `false`를 반환하고
+   *   기존 선택은 유지된다.
+   */
+  selectLayoutExclusive(target: LayoutElement | string): boolean {
+    if (this._isPrint) return false;
+    const element = this._resolveLayoutElement(target);
+    if (!element) return false;
+    if (this._isBoxOrAncestorLocked(element)) return false;
+    if (!this._isWithinSelectableRoot(element)) return false;
+    if (!this.isBoxSelectable(element)) return false;
+
+    if (this._selectedLayouts.length === 1 && this._selectedLayouts[0] === element) return true;
+
+    const previousLayouts = [...this._selectedLayouts];
+    const focusedParentBox = this._getFocusedParentBox();
+
+    for (const prev of this._selectedLayouts) {
+      prev.removeAttribute('selected');
+      if (prev !== focusedParentBox) {
+        prev.removeAttribute('text-focused');
+      }
+    }
+
+    this._selectedLayouts = [element];
+    element.setAttribute('selected', '');
+
+    this._dispatchLayoutSelection(previousLayouts);
+    return true;
+  }
+
+  /**
    * 레이아웃 선택을 모두 해제한다.
    *
    * `preserveFocusedBox`가 `true`(기본값)이면 텍스트 편집 포커스가 있는
@@ -1622,11 +1659,14 @@ export class EditManager {
     const prevMode = this._getModeState();
 
     if (mode) {
+      // 다른 편집 모드는 드래그 중에도 반드시 비활성화한다.
+      // isDragging 우회는 커서 변경/선택 해제 등 드래그를 방해하는 부작용에만 적용한다.
+      this._modeChangeSuppressed = true;
+      this.layoutEditMode = false;
+      this.textEditMode = false;
+      this._modeChangeSuppressed = false;
+
       if (!isDragging) {
-        this._modeChangeSuppressed = true;
-        this.layoutEditMode = false;
-        this.textEditMode = false;
-        this._modeChangeSuppressed = false;
         this.clearLayoutSelection(false);
       }
 
@@ -1709,7 +1749,7 @@ export class EditManager {
     const listeners = this._listeners.get('insert');
     if (!listeners || listeners.size === 0) return;
 
-    this._suppressNextClick = true;
+    this._suppressLayoutClick();
     this._dispatching = true;
     try {
       for (const listener of listeners) {
@@ -1718,7 +1758,7 @@ export class EditManager {
             ...detail,
             type: 'insert',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as TextEditController,
+            controller: null,
           });
         } catch (e) {
           console.error(e);
@@ -1738,7 +1778,7 @@ export class EditManager {
     const listeners = this._listeners.get('insertCancel');
     if (!listeners || listeners.size === 0) return;
 
-    this._suppressNextClick = true;
+    this._suppressLayoutClick();
     this._dispatching = true;
     try {
       for (const listener of listeners) {
@@ -1746,7 +1786,7 @@ export class EditManager {
           listener({
             type: 'insertCancel',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as TextEditController,
+            controller: null,
           });
         } catch (e) {
           console.error(e);
@@ -1809,24 +1849,6 @@ export class EditManager {
       clearTimeout(this._clickConsumeTimer);
       this._clickConsumeTimer = null;
     }
-  }
-
-  /**
-   * 삽입 완료/취소 및 드래그/리사이즈 완료 직후 발생하는 클릭 이벤트를
-   * 무시하기 위한 플래그를 소비한다.
-   *
-   * `_dispatchInsert`, `_dispatchInsertCancel`에서 `true`로 설정되며,
-   * `LayoutSelectionController._onClick`에서 한 번만 소비된다.
-   * 드래그/리사이즈 완료 후 클릭 억제는 `_suppressLayoutClick()`이
-   * 별도의 window capture 리스너로 처리하므로 이 플래그를 사용하지 않는다.
-   * @internal
-   */
-  _consumeSuppressNextClick(): boolean {
-    if (this._suppressNextClick) {
-      this._suppressNextClick = false;
-      return true;
-    }
-    return false;
   }
 
   /**
@@ -2074,7 +2096,7 @@ export class EditManager {
           listener({
             type: 'layoutMove',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as TextEditController,
+            controller: null,
             layoutElement: element,
             previousLeft,
             previousTop,
@@ -2120,7 +2142,7 @@ export class EditManager {
           listener({
             type: 'layoutResize',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as TextEditController,
+            controller: null,
             layoutElement: element,
             previousLeft,
             previousTop,
@@ -2169,7 +2191,7 @@ export class EditManager {
           listener({
             type: 'layoutAdd',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as TextEditController,
+            controller: null,
             layoutAddDetail: detail,
           });
         } catch (e) {
@@ -2198,7 +2220,7 @@ export class EditManager {
           listener({
             type: 'layoutRemove',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as TextEditController,
+            controller: null,
             layoutRemoveDetail: detail,
           });
         } catch (e) {
@@ -2227,7 +2249,7 @@ export class EditManager {
           listener({
             type: 'boxPropertyChange',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as TextEditController,
+            controller: null,
             boxPropertyDetail: detail,
           });
         } catch (e) {
@@ -2251,7 +2273,7 @@ export class EditManager {
           listener({
             type: 'layoutSelectionChange',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as TextEditController,
+            controller: null,
             selectedLayouts: [...this._selectedLayouts],
             previousLayouts,
           });
@@ -2282,7 +2304,7 @@ export class EditManager {
           listener({
             type: 'contextMenu',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as TextEditController,
+            controller: null,
             contextMenuDetail: detail,
           });
         } catch (e) {
@@ -2316,7 +2338,7 @@ export class EditManager {
           listener({
             type: 'cellSelectionChange',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as TextEditController,
+            controller: null,
             cellSelectionDetail: detail,
           });
         } catch (e) {
@@ -2333,17 +2355,17 @@ export class EditManager {
    */
   private _dispatch(
     type: EditManagerEventType,
-    controller: TextEditController,
+    controller: TextEditController | null,
     previousParagraph?: LayoutParagraphElement | null,
     previousController?: TextEditController | null,
   ): void {
     if (this._dispatching) return;
     const listeners = this._listeners.get(type);
-    if (!listeners) return;
+    if (!listeners || listeners.size === 0) return;
 
     const event: EditManagerEvent = {
       type,
-      paragraph: controller['_paragraph'] as LayoutParagraphElement,
+      paragraph: controller ? controller['_paragraph'] as LayoutParagraphElement : null as unknown as LayoutParagraphElement,
       controller,
       previousParagraph: previousParagraph ?? undefined,
       previousController: previousController ?? undefined,
@@ -2564,7 +2586,7 @@ export class EditManager {
           listener({
             type: 'placeGunChange',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as TextEditController,
+            controller: null,
             placeGunDetail: detail,
           });
         } catch (e) {
@@ -2598,7 +2620,7 @@ export class EditManager {
           listener({
             type: 'placeGunBefore',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as TextEditController,
+            controller: null,
             placeGunBeforeDetail: detail,
           });
         } catch (e) {
@@ -2633,7 +2655,7 @@ export class EditManager {
           listener({
             type: 'placeGunAfter',
             paragraph: null as unknown as LayoutParagraphElement,
-            controller: null as unknown as TextEditController,
+            controller: null,
             placeGunAfterDetail: detail,
           });
         } catch (e) {

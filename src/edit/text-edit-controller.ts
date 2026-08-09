@@ -45,7 +45,6 @@ export class TextEditController {
   private _handleFocus: () => void;
   private _handleBlur: () => void;
   private _handleKeydown: (event: KeyboardEvent) => void;
-  private _handleKeyup: (event: KeyboardEvent) => void;
 
   private _handleInput: (event: InputEvent) => void;
   private _handleCompositionStart: () => void;
@@ -78,6 +77,7 @@ export class TextEditController {
   private _isMouseDown: boolean = false;
   private _wasDragged: boolean = false;
   private _isFocused: boolean = false;
+  private _pendingTextChangeOnBlur: boolean = false;
   private _mousemoveRafId: number | null = null;
   private _lastMouseX: number = 0;
   private _lastMouseY: number = 0;
@@ -95,7 +95,6 @@ export class TextEditController {
     this._handleFocus = () => this._onFocus();
     this._handleBlur = () => this._onBlur();
     this._handleKeydown = (event: KeyboardEvent) => this._onKeydown(event);
-    this._handleKeyup = (event: KeyboardEvent) => this._onKeyup(event);
 
     this._handleInput = (event: InputEvent) => this._onInput(event);
     this._handleCompositionStart = () => this._onCompositionStart();
@@ -136,7 +135,6 @@ export class TextEditController {
     this._textarea.addEventListener("compositionend", this._handleCompositionEnd as EventListener);
     this._textarea.addEventListener("compositioncancel", this._handleCompositionCancel);
     this._textarea.addEventListener("keydown", this._handleKeydown);
-    this._textarea.addEventListener("keyup", this._handleKeyup);
     this._textarea.addEventListener("paste", this._handlePaste as EventListener);
 
     this._handleVisibilityChange = () => {
@@ -260,7 +258,6 @@ export class TextEditController {
     this._textarea.removeEventListener("focus", this._handleFocus);
     this._textarea.removeEventListener("blur", this._handleBlur);
     this._textarea.removeEventListener("keydown", this._handleKeydown);
-    this._textarea.removeEventListener("keyup", this._handleKeyup);
     this._textarea.removeEventListener("input", this._handleInput as EventListener);
     this._textarea.removeEventListener("compositionstart", this._handleCompositionStart);
     this._textarea.removeEventListener("compositionupdate", this._handleCompositionUpdate as EventListener);
@@ -393,6 +390,15 @@ export class TextEditController {
     this._cursorEl.visible = false;
 
     this._manager._releaseFocus(this);
+  }
+
+  /** blur 중 대기 중인 textChange를 소비한다. `_releaseFocus`가 focusChange 이후에 호출. @internal */
+  _consumePendingTextChange(): boolean {
+    if (this._pendingTextChangeOnBlur) {
+      this._pendingTextChangeOnBlur = false;
+      return true;
+    }
+    return false;
   }
 
   private _createTextarea(): HTMLTextAreaElement {
@@ -713,7 +719,7 @@ export class TextEditController {
           this._debounceTimer = null;
         }
         this._paragraph.render();
-        this._manager._notifyTextChange(this);
+        this._pendingTextChangeOnBlur = true;
       }
     }
 
@@ -1044,15 +1050,6 @@ export class TextEditController {
     }
   }
 
-  private _onKeyup(event: KeyboardEvent): void {
-    if (this._isComposing) return;
-
-    const cursorKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
-    if (cursorKeys.includes(event.key)) {
-      this._manager._notifyCursorMove(this);
-    }
-  }
-
   private _extendSelection(newOffset: number): void {
     const current = this._cursorModel;
     const anchor = current.selection?.anchor.textOffset ?? current.offset;
@@ -1164,13 +1161,19 @@ export class TextEditController {
     this._textarea.setSelectionRange(0, content.length);
     this._updateCursorPosition();
     this._updateSelection();
+    this._manager._notifySelectionStart(this);
+    this._manager._notifySelectionEnd(this);
   }
 
   _clearSelection(): void {
+    const hadSelection = this._cursorModel.selection !== null;
     this._cursorModel.selection = null;
     this._selectionEl.setRanges([]);
     this._textarea.setSelectionRange(this._cursorModel.offset, this._cursorModel.offset);
     this._updateCursorPosition();
+    if (hadSelection) {
+      this._manager._notifySelectionEnd(this);
+    }
   }
 
   private _computeVerticalOffset(direction: -1 | 1): number | null {
@@ -1650,6 +1653,8 @@ export class TextEditController {
       }
       this._paragraph.render();
       this._updateCursorPosition();
+      this._manager._notifyTextChange(this);
+      this._manager._notifyCursorMove(this);
     }
   }
 

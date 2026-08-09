@@ -537,6 +537,11 @@ export class LayoutEditController {
       const created = parent.appendChildData(newData);
       if (created instanceof LayoutBoxElement) {
         clonedTargets.push(created);
+        manager._dispatchLayoutAdd({
+          element: created,
+          container: parent,
+          source: 'insert',
+        });
       }
     }
 
@@ -2129,12 +2134,8 @@ export class LayoutEditController {
 
     // 기존 box 제거
     const previousContainer = box.parentElement;
-    box.remove();
 
-    // 새 컨테이너에 데이터 주입하여 새 box 생성
-    const newBox = newContainer.appendChildData(boxData) as LayoutBoxElement;
-
-    // layoutRemove 이벤트: 이전 컨테이너에서 제거됨
+    // layoutRemove 이벤트: box.remove() 이전에 발생해야 리스너가 DOM 분리 전 컨텍스트에 접근 가능
     if (previousContainer) {
       manager._dispatchLayoutRemove({
         element: box,
@@ -2142,6 +2143,11 @@ export class LayoutEditController {
         source: 'reparent',
       });
     }
+
+    box.remove();
+
+    // 새 컨테이너에 데이터 주입하여 새 box 생성
+    const newBox = newContainer.appendChildData(boxData) as LayoutBoxElement;
 
     // layoutAdd 이벤트: 새 컨테이너에 추가됨
     manager._dispatchLayoutAdd({
