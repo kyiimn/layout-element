@@ -19,6 +19,9 @@
    - [`<x-layout-box>`](#x-layout-box)
    - [`<x-layout-paragraph>`](#x-layout-paragraph)
    - [`<x-layout-image>`](#x-layout-image)
+   - [`<x-layout-table>`](#x-layout-table)
+   - [`<x-layout-tr>`](#x-layout-tr)
+   - [`<x-layout-td>`](#x-layout-td)
    - [`<x-layout-column>`](#x-layout-column)
    - [`<x-layout-vcolumn>`](#x-layout-vcolumn)
    - [`<x-layout-guide-column>`](#x-layout-guide-column)
@@ -622,6 +625,162 @@ img.overlapPadding = 5;
 // 비대칭 패딩
 img.overlapPadding = { top: 2, right: 8, bottom: 2, left: 3 };
 ```
+
+---
+
+### `<x-layout-table>`
+
+**표 컨테이너**. `<x-layout-box>`의 `children`에 `TableData`로 지정되면, 부모 box의
+콘텐츠 영역을 가득 채우며 내부를 `colWidths` × 행 높이 그리드로 분할한다.
+렌더링·셀 블록 선택·리사이즈·구조 편집(병합/삽입/삭제)에 대한 상세 명세는
+`EDITING_TABLE.md`를 참조.
+
+#### Class: `LayoutTableElement`
+
+```ts
+class LayoutTableElement extends HTMLElement
+```
+
+#### 데이터 프로퍼티 (setter / getter)
+
+| 프로퍼티 | 타입 | 설명 |
+|---|---|---|
+| `data` | `TableData` | 표 데이터. setter에서 `id`·`colWidths`·`rows`를 설정하고 `layout()` + `render()`를 트리거. ID 기반 diff 재구성. |
+
+#### 게터 (계산 프로퍼티)
+
+| 게터 | 타입 | 설명 |
+|---|---|---|
+| `rows` | `TableRowData[]` | 현재 행 데이터 배열. 리사이즈/구조 편집 후에도 최신값 유지. |
+| `colWidths` | `number \| number[] \| undefined` | 컬럼별 너비. `undefined`=자동 균등 분할, `number`=모든 열 동일, `number[]`=개별. |
+| `resolvedColWidths` | `number[]` | `resolveTableGrid`로 정규화된 실제 열 너비 배열(mm). |
+| `gridResolution` | `GridResolution \| undefined` | 현재 그리드 해석 결과. |
+| `keyboardController` | `TableKeyboardController \| null` | 셀 블록 선택·키보드 단축키 컨트롤러. 레이아웃 편집 모드에서 활성. |
+| `structureEditor` | `TableStructureEditor \| null` | 행/열 삽입·삭제·병합·분할 외부 API. 레이아웃 편집 모드에서 활성. |
+| `inheritStyle` | `InheritStyle \| undefined` | 부모 box에서 전달받은 상속 스타일. `tr` → `td` → 셀 내부 box로 전파. |
+| `items` | `LayoutTableRowElement[]` | 직계 자식 TR 요소 배열. |
+| `type` | `'table'` | 요소 타입 식별자. |
+| `zIndex` | `number` | 항상 `0` — 부모 box의 zIndex를 따르므로 정렬에 영향 없음. |
+| `editManager` | `EditManager \| null` | 부모 체인에서 `LayoutDocumentElement.editManager` 조회. |
+
+#### 메서드
+
+| 메서드 | 시그니처 | 설명 |
+|---|---|---|
+| `layout()` | `(): void` | 그리드 재계산 + 스타일 적용 + 보더 렌더 + 리사이즈 핸들 + 상속 전파. |
+| `render()` | `(): Promise<void>` | 자식 TR의 `render()`를 순차 호출. |
+| `appendChildData(child)` | `(child: TableRowData): LayoutTableRowElement` | 새 TR을 생성하여 추가. |
+| `setBorderOverride(key, edge)` | `(key: string, edge: CellBorderEdge): void` | 보더 엣지 수동 오버라이드. |
+| `clearBorderOverride(key)` | `(key: string): void` | 보더 오버라이드 제거. |
+| `notifyTablePropertyChange()` | `(): void` | `boxPropertyChange` 이벤트 트리거. |
+
+#### 그리드 계산
+
+`_layoutStructure()`에서 `resolveTableGrid()` 호출 후 산출된 `rowHeights`/`colWidths`를
+원본 데이터에 write-back하여, 이후 `layout()`이 리사이즈된 값을 입력으로 사용하도록 한다.
+리사이즈 핸들 드래그 중(`_resizeState` 활성)에는 write-back하지 않는다.
+
+자세한 알고리즘은 `EDITING_TABLE.md` §3 참조.
+
+---
+
+### `<x-layout-tr>`
+
+**표 행**. `<x-layout-table>`의 직계 자식으로, `height`(mm)와 셀 배열을 가진다.
+
+#### Class: `LayoutTableRowElement`
+
+```ts
+class LayoutTableRowElement extends HTMLElement
+```
+
+#### 데이터 프로퍼티
+
+| 프로퍼티 | 타입 | 설명 |
+|---|---|---|
+| `data` | `TableRowData` | 행 데이터. `height` + `children`(TableCellData[]). ID 기반 diff 재구성. |
+| `height` | `number` | 행 높이(mm). 변경 시 `layout()`. |
+
+#### 게터
+
+| 게터 | 타입 | 설명 |
+|---|---|---|
+| `rowIndex` | `number` | 0-based 행 인덱스. |
+| `rowLabel` | `string` | 행 라벨 (A, B, C, ...). |
+| `items` | `LayoutTableCellElement[]` | 직계 자식 TD 요소 배열. |
+| `inheritStyle` | `InheritStyle \| undefined` | 부모 table에서 전달받은 상속 스타일. |
+| `editManager` | `EditManager \| null` | 부모 체인에서 조회. |
+
+#### 메서드
+
+| 메서드 | 시그니처 | 설명 |
+|---|---|---|
+| `layout()` | `(): void` | 구조 + 스타일 + 상속 전파 + 자식 TD `layout()`. |
+| `render()` | `(): Promise<void>` | 자식 TD의 `render()` 순차 호출. |
+| `appendChildData(child)` | `(child: TableCellData): LayoutTableCellElement` | 새 TD 생성하여 추가. |
+
+---
+
+### `<x-layout-td>`
+
+**표 셀**. `<x-layout-tr>`의 자식으로, box 배치 컨텍스트(`GridCalculator` `columns=1`)를
+가지며 paragraph/image/nested-table을 box로 감싸서 자식으로 둔다.
+
+#### Class: `LayoutTableCellElement`
+
+```ts
+class LayoutTableCellElement extends HTMLElement
+```
+
+#### Attributes
+
+| 속성 | 타입 | 설명 |
+|---|---|---|
+| `colspan` | `number` | 열 병합 수. 기본 1. |
+| `rowspan` | `number` | 행 병합 수. 기본 1. |
+
+#### 데이터 프로퍼티
+
+| 프로퍼티 | 타입 | 설명 |
+|---|---|---|
+| `data` | `TableCellData` | 셀 데이터. `colspan`/`rowspan`/보더/배경/대각선/패딩/`children`(BoxData[]). ID 기반 diff 재구성. |
+
+#### 게터
+
+| 게터 | 타입 | 설명 |
+|---|---|---|
+| `colspan` | `number` | 열 병합 수. |
+| `rowspan` | `number` | 행 병합 수. |
+| `borderTop` | `CellBorderEdge \| undefined` | 상단 보더 엣지. |
+| `borderRight` | `CellBorderEdge \| undefined` | 우측 보더 엣지. |
+| `borderBottom` | `CellBorderEdge \| undefined` | 하단 보더 엣지. |
+| `borderLeft` | `CellBorderEdge \| undefined` | 좌측 보더 엣지. |
+| `backgroundColor` | `string \| undefined` | 배경색 (ColorRegistry CMYK 이름). |
+| `backgroundOpacity` | `number \| undefined` | 배경색 투명도 (0~1). |
+| `diagonals` | `Array<'tl-br' \| 'tr-bl'> \| undefined` | 대각선 방향. |
+| `paddingTop/Right/Bottom/Left` | `number` | 셀 내부 여백(mm). |
+| `cellLabel` | `string` | 셀 라벨 (예: "A1"). |
+| `cellLabels` | `string[]` | 병합된 전체 셀 라벨 배열. |
+| `model` | `GridCalculator \| undefined` | 셀 내부 그리드 계산기. |
+| `contentType` | `'box' \| 'paragraph' \| 'image' \| 'table' \| undefined` | 첫 번째 자식 box의 콘텐츠 타입. |
+| `contentElement` | `LayoutBoxElement \| LayoutParagraphElement \| LayoutImageElement \| null` | 가장 깊은 콘텐츠 요소. |
+| `items` | `LayoutBoxElement[]` | 직계 자식 box 요소 배열. |
+| `inheritStyle` | `InheritStyle \| undefined` | 부모 tr에서 전달받은 상속 스타일. |
+| `editManager` | `EditManager \| null` | 부모 체인에서 조회. |
+
+#### 메서드
+
+| 메서드 | 시그니처 | 설명 |
+|---|---|---|
+| `layout()` | `(): void` | 구조 + 스타일 + 대각선 + placeholder border + 상속 전파 + 자식 box `layout()`. |
+| `render()` | `(): Promise<void>` | 자식 box의 `render()` 순차 호출. |
+| `appendChildData(child)` | `(child: BoxData): LayoutBoxElement` | 새 box 생성하여 추가. |
+
+#### Placeholder border
+
+보더가 선언되지 않은 면에 빨간 점선 placeholder border를 렌더링한다.
+`EditManager.showPlaceholderBorders`가 `false`면 렌더링하지 않는다.
+인쇄 모드에서도 렌더링하지 않는다. 자세한 내용은 `EDITING_TABLE.md` 참조.
 
 ---
 
@@ -2189,7 +2348,7 @@ type BoxData = {
   groupMember?: string;
   priority?: number;
   lock?: boolean;
-  children?: BoxData[] | ParagraphData | TextData | ImageData;
+  children?: BoxData[] | ParagraphData | TextData | ImageData | TableData;
 };
 
 type BoxPosition = 'static' | 'absolute';
@@ -2291,6 +2450,75 @@ type ImageData = {
    * 편집 UI가 이 값으로 x/y/width/height를 계산. 기본값 'cover'.
    */
   objectFit?: ImageObjectFit;
+};
+```
+
+#### `TableData`
+
+표 데이터. `BoxData.children`에 직접 지정. 테이블 자체의 위치/크기는 부모 box가 정의하며,
+테이블은 부모 box의 콘텐츠 영역을 가득 채운다.
+
+```ts
+type TableData = {
+  type: 'table';
+  id?: string;
+  /**
+   * 컬럼별 너비(mm).
+   * - `number` = 모든 컬럼 동일 너비
+   * - `number[]` = 컬럼별 개별 너비. 합이 부모 box 콘텐츠 폭과 일치 권장.
+   * - 누락 시 콘텐츠 폭을 컬럼 수로 균등 분할.
+   */
+  colWidths?: number | number[];
+  /** 행 데이터. */
+  children: TableRowData[];
+};
+```
+
+#### `TableRowData`
+
+```ts
+type TableRowData = {
+  type: 'tr';
+  id?: string;
+  /** 행 높이(mm). */
+  height: number;
+  /** 셀 데이터. */
+  children: TableCellData[];
+};
+```
+
+#### `TableCellData`
+
+각 셀은 box들을 자식으로 가지며(paragraph/image/nested-table은 항상 box로 감싸임),
+자체 `GridCalculator`(columns=1)를 보유하여 cell 내부를 box 배치 컨텍스트로 동작시킨다.
+
+```ts
+type CellBorderEdge = {
+  width: number;                                    // 두께(mm)
+  color: string;                                    // ColorRegistry CMYK 이름
+  style?: 'solid' | 'dotted' | 'dashed';            // 기본 'solid'
+};
+
+type TableCellData = {
+  type: 'td';
+  id?: string;
+  colspan?: number;                                 // 열 병합. 기본 1
+  rowspan?: number;                                 // 행 병합. 기본 1
+  /** 방향별 보더 엣지 선언. 인접 셀과 공유됨. 테이블 렌더 단계에서 border-collapse로 한 번만 그려짐. */
+  borderTop?: CellBorderEdge;
+  borderRight?: CellBorderEdge;
+  borderBottom?: CellBorderEdge;
+  borderLeft?: CellBorderEdge;
+  backgroundColor?: string;                         // ColorRegistry CMYK 이름
+  backgroundOpacity?: number;                       // 0~1, 생략 시 1
+  /** 대각선. 셀 내부에 그려짐. 복수 지정 가능(X 표시). */
+  diagonals?: Array<'tl-br' | 'tr-bl'>;
+  paddingTop?: number;                             // mm, 기본 0
+  paddingRight?: number;                            // mm, 기본 0
+  paddingBottom?: number;                           // mm, 기본 0
+  paddingLeft?: number;                             // mm, 기본 0
+  /** 셀 내용. BoxData[]만 허용. */
+  children: BoxData[];
 };
 ```
 
