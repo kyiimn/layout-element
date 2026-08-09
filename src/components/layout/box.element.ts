@@ -488,6 +488,10 @@ export class LayoutBoxElement extends HTMLElement {
     this._renderBorder();
     this._propagateInheritStyle();
     this._updateLabelText();
+
+    for (const child of this.children) {
+      if (child instanceof LayoutTableElement) child.layout();
+    }
   }
 
   /**

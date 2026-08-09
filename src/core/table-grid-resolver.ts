@@ -140,26 +140,38 @@ export function normalizeWidths(
     return result;
   }
 
-  const result = new Array<number>(n).fill(0);
-  let remaining = targetSize;
+  // sum > targetSize: 비례 축소. scale = targetSize / sum으로 각 항목을 축소하되
+  // minSize에 걸리는 항목은 minSize로 고정하고 남은 분량을 여유가 있는 항목에서 재차감.
+  {
+    const scale = targetSize / sum;
+    const scaled = inputs.map((v) => v * scale);
 
-  for (let i = 0; i < n - 1; i++) {
-    const remainingCount = n - i - 1;
-    const maxForThis = remaining - remainingCount * minSize;
-    result[i] = Math.max(minSize, Math.min(inputs[i], maxForThis));
-    remaining -= result[i];
-  }
-
-  result[n - 1] = Math.max(minSize, remaining);
-
-  if (result.every((v) => v === minSize) && result.reduce((a, b) => a + b, 0) > targetSize) {
-    const scale = targetSize / (n * minSize);
+    const clamped: number[] = [];
+    let clampedSum = 0;
+    let unclampedSum = 0;
+    const unclampedIndices: number[] = [];
     for (let i = 0; i < n; i++) {
-      result[i] = Math.max(minSize, result[i] * scale);
+      if (scaled[i] < minSize) {
+        clamped[i] = minSize;
+        clampedSum += minSize;
+      } else {
+        unclampedIndices.push(i);
+        unclampedSum += scaled[i];
+      }
     }
-  }
 
-  return result;
+    const remaining = targetSize - clampedSum;
+    if (unclampedIndices.length === 0 || remaining <= 0) {
+      for (const i of unclampedIndices) clamped[i] = 0;
+      return clamped.map((v) => Math.max(v, minSize));
+    }
+
+    const factor = remaining / unclampedSum;
+    for (const i of unclampedIndices) {
+      clamped[i] = scaled[i] * factor;
+    }
+    return clamped.map((v) => Math.max(v, minSize));
+  }
 }
 
 /**

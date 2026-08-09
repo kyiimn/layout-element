@@ -80,6 +80,16 @@ export class TableKeyboardController {
     const ctrl = event.ctrlKey;
     const shift = event.shiftKey;
 
+    if (key === 'Tab' && !alt && !ctrl) {
+      if (!this._editManager.textEditMode || !this._editManager.focusedParagraph) return false;
+      const handled = this.handleTab(shift);
+      if (handled) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      return handled;
+    }
+
     if (key === 'Escape') {
       if (this._selection) {
         this.handleEscape();
@@ -428,6 +438,66 @@ export class TableKeyboardController {
         }
       }
     }
+  }
+
+  /**
+   * Tab/Shift+Tab으로 표 내부 단락 간 포커스 이동.
+   *
+   * 텍스트 편집 모드에서 포커스된 단락이 표 내부에 있을 때만 동작한다.
+   * 셀 순서는 A1 → A2 → A3 → B1 → ... 순(gridRow, gridCol 오름차순)이며,
+   * 머지된 셀은 하나의 placement로 취급되어 자연스럽게 건너뛴다.
+   * 마지막 셀에서 Tab → 첫 셀로 순환, 첫 셀에서 Shift+Tab → 마지막 셀로 순환.
+   *
+   * @param shiftKey - true면 역방향(Shift+Tab), false면 순방향(Tab)
+   * @returns 포커스 이동 성공 여부. 표 내부 단락이 아니면 false.
+   */
+  handleTab(shiftKey: boolean): boolean {
+    const grid = this._tableEl.gridResolution;
+    if (!grid || grid.placements.length === 0) return false;
+
+    const focused = this._editManager.focusedParagraph;
+    if (!focused) return false;
+    const currentTd = focused.closest('x-layout-td') as LayoutTableCellElement | null;
+    if (!currentTd || !currentTd.cellLabel) return false;
+    const currentCoord = this._labelToCoord(currentTd.cellLabel);
+    if (!currentCoord) return false;
+
+    const sorted = [...grid.placements].sort((a, b) =>
+      a.gridRow - b.gridRow || a.gridCol - b.gridCol,
+    );
+
+    let currentIdx = -1;
+    for (let i = 0; i < sorted.length; i++) {
+      const p = sorted[i];
+      if (currentCoord.row >= p.gridRow && currentCoord.row < p.gridRow + p.spanRows
+        && currentCoord.col >= p.gridCol && currentCoord.col < p.gridCol + p.spanCols) {
+        currentIdx = i;
+        break;
+      }
+    }
+    if (currentIdx === -1) return false;
+
+    const nextIdx = shiftKey
+      ? (currentIdx - 1 + sorted.length) % sorted.length
+      : (currentIdx + 1) % sorted.length;
+    const targetPlacement = sorted[nextIdx];
+    if (!targetPlacement) return false;
+
+    const targetTd = this._getCellAt({
+      row: targetPlacement.gridRow,
+      col: targetPlacement.gridCol,
+    });
+    if (!targetTd) return false;
+
+    const box = targetTd.items[0];
+    if (!box) return false;
+    const para = box.items.find(
+      (c): c is LayoutParagraphElement => c instanceof LayoutParagraphElement,
+    );
+    if (!para) return false;
+
+    this._editManager.focusParagraph(para);
+    return true;
   }
 
   private _getCurrentCellCoord(): CellCoord | null {

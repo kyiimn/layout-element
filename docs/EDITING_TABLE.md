@@ -362,6 +362,15 @@ colspan/rowspan이 있는 행/열도 리사이즈 가능하다. 이전에는 col
 
 F5/F7/F8은 `_getCurrentCellCoord()`로 현재 셀을 결정한 후 처리한다. 셀 블록이 없어도 TD 내부 box가 선택되어 있으면 현재 셀을 찾을 수 있다.
 
+### 6.1a 텍스트 편집 모드에서 동작 (셀 블록 비활성)
+
+| 키       | 조건                                       | 동작                                   |
+| -------- | ------------------------------------------ | -------------------------------------- |
+| Tab      | textEditMode + focusedParagraph이 표 내부  | 다음 셀 단락으로 포커스 이동 (순환)    |
+| Shift+Tab | textEditMode + focusedParagraph이 표 내부  | 이전 셀 단락으로 포커스 이동 (순환)    |
+
+Tab/Shift+Tab은 `handleTab(shiftKey)`로 처리한다. `gridResolution.placements`를 `(gridRow, gridCol)` 오름차순 정렬하고 현재 셀의 placement 인덱스를 찾아 ±1로 이동한다. 머지된 셀은 하나의 placement로 취급되어 자연스럽게 건너뛴다. 마지막 셀에서 Tab → 첫 셀, 첫 셀에서 Shift+Tab → 마지막 셀로 순환한다. 포커스는 `editManager.focusParagraph(target)`로 이동한다.
+
 ### 6.2 셀 블록 활성 시 동작 (모든 모드)
 
 | 키              | 모드             | 동작                           |
@@ -854,6 +863,13 @@ class TableKeyboardController {
 
   getSelectedCells(): LayoutTableCellElement[];
   handleKeyDown(event: KeyboardEvent): boolean;
+
+  /**
+   * Tab/Shift+Tab으로 표 내부 단락 간 포커스 이동.
+   * textEditMode + focusedParagraph이 표 내부일 때만 동작.
+   * placements 정렬 순서로 순환 이동 (머지된 셀 건너뜀).
+   */
+  handleTab(shiftKey: boolean): boolean;
 
   /**
    * TD 요소를 전달하여 셀 블록 단일 선택을 설정한다.
