@@ -394,6 +394,7 @@ export class LayoutTableCellElement extends HTMLElement {
 
     if (this._isPrint) return;
     if (!this.isConnected) return;
+    if (!this.editManager?.showPlaceholderBorders) return;
 
     const parentTable = this._getParentTableElement();
     if (!parentTable) return;

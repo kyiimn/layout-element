@@ -1,9 +1,7 @@
 import type { EditManager } from "./edit-manager";
 import type { LayoutTableElement } from "@/components/layout/table.element";
 import type { LayoutTableCellElement } from "@/components/layout/td.element";
-import type { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
-import type { LayoutImageElement } from "@/components/layout/image.element";
 import type { TableCellSelection, CellCoord } from "@/types";
 import { MIN_TABLE_COL_WIDTH, MIN_TABLE_ROW_HEIGHT, TABLE_KEYBOARD_RESIZE_STEP } from "@/constants";
 import type { TableStructureEditor } from "./table-structure-editor";
@@ -193,9 +191,9 @@ export class TableKeyboardController {
     for (let i = 0; i < grid.colCount * grid.rowCount; i++) {
       const prev = { ...focus };
       switch (direction) {
-        case 'up':    focus.row = Math.max(0, focus.row - 1); break;
-        case 'down':  focus.row = Math.min(grid.rowCount - 1, focus.row + 1); break;
-        case 'left':  focus.col = Math.max(0, focus.col - 1); break;
+        case 'up': focus.row = Math.max(0, focus.row - 1); break;
+        case 'down': focus.row = Math.min(grid.rowCount - 1, focus.row + 1); break;
+        case 'left': focus.col = Math.max(0, focus.col - 1); break;
         case 'right': focus.col = Math.min(grid.colCount - 1, focus.col + 1); break;
       }
       if (focus.row === prev.row && focus.col === prev.col) return false;
@@ -384,7 +382,7 @@ export class TableKeyboardController {
       const box = cell.items[0];
       if (box) {
         this._editManager.selectLayout(box);
-        const para = box.items.find((c: LayoutBoxElement | LayoutParagraphElement | LayoutImageElement) => c.type === 'paragraph');
+        const para = box.items.find((c): c is LayoutParagraphElement => c.type === 'paragraph');
         if (para && para instanceof LayoutParagraphElement) {
           this._editManager.focusParagraph(para);
         }

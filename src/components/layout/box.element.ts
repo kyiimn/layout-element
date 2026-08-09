@@ -96,6 +96,9 @@ export class LayoutBoxElement extends HTMLElement {
     this.addEventListener('mouseenter', this._onLayoutMouseEnter);
     this.addEventListener('mouseleave', this._onLayoutMouseLeave);
     this.addEventListener('mousedown', this._onPlaceGunMouseDown);
+    if (this._editManagerRef?.showPlaceholderBorders) {
+      this.setAttribute('show-placeholder-borders', '');
+    }
     this.layout();
     this._updateTdStaticAttr();
   }
@@ -227,7 +230,7 @@ export class LayoutBoxElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
-      styleEl.sheet.insertRule("@media screen { :host(:not([border]):not([td-static])) { outline: red dashed 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 1);
+      styleEl.sheet.insertRule("@media screen { :host([show-placeholder-borders]:not([border]):not([td-static])) { outline: red dashed 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 1);
       styleEl.sheet.insertRule("@media screen { :host([hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 2);
       styleEl.sheet.insertRule("@media screen { :host([selected]) { outline: red solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 3);
       styleEl.sheet.insertRule("@media screen { :host([editable-layout][hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 4);

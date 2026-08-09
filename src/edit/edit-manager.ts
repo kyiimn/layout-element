@@ -184,6 +184,12 @@ export class EditManager {
   private _scale: number = 1;
 
   /**
+   * 편집 중 보더가 없는 box/td에 빨간 점선 placeholder border를 표시할지 여부.
+   * 휘발성 — 데이터에 저장되지 않으며 편집 세션 중에만 적용된다.
+   */
+  private _showPlaceholderBorders: boolean = true;
+
+  /**
    * 모드 전환 이벤트 억제 플래그.
    *
    * 모드 setter가 내부에서 다른 모드 setter를 호출할 때 중간 상태의
@@ -399,6 +405,35 @@ export class EditManager {
   /** 현재 scale 보정 계수를 반환한다. */
   get scale(): number {
     return this._scale;
+  }
+
+  /** 보더 없는 box/td의 placeholder border 표시 여부를 반환한다. */
+  get showPlaceholderBorders(): boolean {
+    return this._showPlaceholderBorders;
+  }
+
+  /**
+   * 보더 없는 box/td의 placeholder border 표시 여부를 설정한다.
+   * 변경 시 모든 box/td에 `[show-placeholder-borders]` 속성을 토글하여
+   * CSS 규칙이 즉시 반응하도록 하고, document의 가이드 컬럼 표시도
+   * 함께 토글한다.
+   */
+  set showPlaceholderBorders(value: boolean) {
+    if (this._showPlaceholderBorders === value) return;
+    this._showPlaceholderBorders = value;
+    const boxes = this._docEl.querySelectorAll('x-layout-box');
+    for (const el of boxes) {
+      if (value) {
+        el.setAttribute('show-placeholder-borders', '');
+      } else {
+        el.removeAttribute('show-placeholder-borders');
+      }
+    }
+    const tds = this._docEl.querySelectorAll('x-layout-td');
+    for (const el of tds) {
+      (el as unknown as { layout: () => void }).layout();
+    }
+    this._docEl.visibleGuide = value;
   }
 
   /**
