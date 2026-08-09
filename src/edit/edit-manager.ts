@@ -9,7 +9,7 @@ import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
 import { PlaceGunController } from "./place-gun-controller";
 import type { SelectionRange } from "@/types/edit";
-import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail, ContextMenuEventDetail, PlaceGunItem, PlaceGunChangeEventDetail, PlaceGunBeforeEventDetail, PlaceGunAfterEventDetail } from "@/types/edit";
+import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail, ContextMenuEventDetail, PlaceGunItem, PlaceGunChangeEventDetail, PlaceGunBeforeEventDetail, PlaceGunAfterEventDetail, TableCellSelectionChangeDetail } from "@/types/edit";
 import type { BoxRole } from "@/types/layout";
 
 /** 레이아웃 편집 대상 요소 (box 및 TD) */
@@ -37,7 +37,8 @@ export type EditManagerEventType =
   | 'contextMenu'
   | 'placeGunChange'
   | 'placeGunBefore'
-  | 'placeGunAfter';
+  | 'placeGunAfter'
+  | 'cellSelectionChange';
 
 /**
  * 글로벌 편집 관리 이벤트.
@@ -107,6 +108,8 @@ export interface EditManagerEvent {
   placeGunBeforeDetail?: PlaceGunBeforeEventDetail;
   /** Place Gun 발사 후 상세 정보 (placeGunAfter 이벤트에서만) */
   placeGunAfterDetail?: PlaceGunAfterEventDetail;
+  /** 셀 블록 선택 변경 상세 정보 (cellSelectionChange 이벤트에서만) */
+  cellSelectionDetail?: TableCellSelectionChangeDetail;
 }
 
 /**
@@ -2281,6 +2284,40 @@ export class EditManager {
             paragraph: null as unknown as LayoutParagraphElement,
             controller: null as unknown as TextEditController,
             contextMenuDetail: detail,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
+
+  /**
+   * 셀 블록 선택 변경 이벤트를 디스패치한다.
+   *
+   * `TableKeyboardController._updateSelection`이 셀 블록(mode/anchor/focus)을
+   * 변경한 직후 호출한다. 기존 `layoutSelectionChange`와는 독립적으로 동작하며,
+   * 셀 블록 메타데이터와 실제 선택된 TD 요소 배열을 전달한다.
+   *
+   * @param detail - 셀 블록 선택 변경 상세 정보
+   * @internal
+   */
+  _dispatchCellSelectionChange(detail: TableCellSelectionChangeDetail): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('cellSelectionChange');
+    if (!listeners || listeners.size === 0) return;
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'cellSelectionChange',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null as unknown as TextEditController,
+            cellSelectionDetail: detail,
           });
         } catch (e) {
           console.error(e);

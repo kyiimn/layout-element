@@ -8,7 +8,7 @@
 
 ## 1. 개요 (Overview)
 
-`EditManager`는 `layout-element`의 글로벌 편집 관리 싱글톤으로, 텍스트 편집, 레이아웃 선택, 드래그 이동, 리사이즈, 요소 삽입, Box 속성 변경 등의 상태 변화를 외부 UI에 알리기 위해 15가지 이벤트 타입을 제공한다. 외부 편집 UI는 `addEventListener`로 이벤트를 수신하여 상태 동기화, undo/redo 스택, 스타일 패널 갱신 등을 수행한다.
+`EditManager`는 `layout-element`의 글로벌 편집 관리 싱글톤으로, 텍스트 편집, 레이아웃 선택, 드래그 이동, 리사이즈, 요소 삽입, Box 속성 변경, 셀 블록 선택 등의 상태 변화를 외부 UI에 알리기 위해 16가지 이벤트 타입을 제공한다. 외부 편집 UI는 `addEventListener`로 이벤트를 수신하여 상태 동기화, undo/redo 스택, 스타일 패널 갱신 등을 수행한다.
 
 > **참고: 요소 자체 CustomEvent와의 관계**
 >
@@ -167,7 +167,8 @@ export type EditManagerEventType =
   | 'contextMenu'
   | 'placeGunChange'
   | 'placeGunBefore'
-  | 'placeGunAfter';
+  | 'placeGunAfter'
+  | 'cellSelectionChange';
 ```
 
 ### 3.2 `EditManagerEvent`
@@ -213,6 +214,12 @@ export interface EditManagerEvent {
   contextMenuDetail?: ContextMenuEventDetail;
   /** Place Gun 상태 변경 상세 정보 (placeGunChange 이벤트에서만) */
   placeGunDetail?: PlaceGunChangeEventDetail;
+  /** Place Gun 발사 전 상세 정보 (placeGunBefore 이벤트에서만) */
+  placeGunBeforeDetail?: PlaceGunBeforeEventDetail;
+  /** Place Gun 발사 후 상세 정보 (placeGunAfter 이벤트에서만) */
+  placeGunAfterDetail?: PlaceGunAfterEventDetail;
+  /** 셀 블록 선택 변경 상세 정보 (cellSelectionChange 이벤트에서만) */
+  cellSelectionDetail?: TableCellSelectionChangeDetail;
 }
 ```
 
@@ -236,6 +243,7 @@ export type EditManagerEventListener = (event: EditManagerEvent) => void;
 | **모드 전환** | `modeChange` | `EditManager` (textEditMode/layoutEditMode/insertMode setter) |
 | **Box 속성 변경** | `boxPropertyChange` | `LayoutBoxElement` (role/contentUid/groupMember/priority/zIndex setter) |
 | **Place Gun** | `placeGunChange`, `placeGunBefore`, `placeGunAfter` | `EditManager` (load/unload/remove/reorder/pause), `PlaceGunController` (click-to-place) |
+| **셀 블록 선택** | `cellSelectionChange` | `TableKeyboardController._updateSelection` (F5/F7/F8/화살표/M/S/ESC, `selectCell` API) |
 
 ---
 
@@ -810,6 +818,54 @@ manager.addEventListener('contextMenu', (event) => {
 
 ---
 
+## 9.4 `cellSelectionChange`
+
+셀 블록(F5/F7/F8) 선택 상태가 변경될 때 발생한다. `layoutSelectionChange`와는 독립적으로 동작하며, 셀 블록 메타데이터(mode/anchor/focus/selectMode)와 실제 선택된 TD 요소 배열을 함께 전달한다.
+
+**발생 트리거**: `TableKeyboardController._updateSelection()` — F5(모드 전환), F7(열 선택), F8(행 선택), 화살표 이동, M(병합/해제), S(열 분할), ESC(해제), `selectCell(td)` (프로그래밍 API).
+
+**페이로드**: `TableCellSelectionChangeDetail`
+
+```typescript
+editManager.addEventListener('cellSelectionChange', (event) => {
+  const detail = event.cellSelectionDetail!;
+  if (detail.selection) {
+    console.log('모드:', detail.selection.mode);       // 'single' | 'range' | 'all'
+    console.log('앵커:', detail.selection.anchor);     // { row, col }
+    console.log('포커스:', detail.selection.focus);    // { row, col }
+    console.log('선택 모드:', detail.selection.selectMode); // 'cell' | 'row' | 'col'
+  }
+  console.log('선택된 TD:', detail.selectedCells);     // LayoutTableCellElement[]
+  console.log('원인:', detail.source);                 // 'keyboard' | 'programmatic'
+});
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `type` | `'cellSelectionChange'` | 이벤트 타입 |
+| `cellSelectionDetail.selection` | `TableCellSelection \| null` | 현재 셀 블록 선택 상태. 해제 시 `null` |
+| `cellSelectionDetail.selectedCells` | `LayoutTableCellElement[]` | 선택된 TD 요소 배열. `selection`이 `null`이면 빈 배열 |
+| `cellSelectionDetail.source` | `'keyboard' \| 'programmatic'` | 변경 원인. 키보드 조작(F5/F7/F8/화살표/M/S/ESC) 또는 `selectCell()` API |
+
+### `TableCellSelection` 타입
+
+```typescript
+type TableCellSelection = {
+  mode: 'single' | 'range' | 'all';  // 셀 블록 모드 (F5 입력 횟수)
+  anchor: { row: number; col: number };  // 선택 시작 좌표
+  focus: { row: number; col: number };   // 선택 끝 좌표
+  selectMode?: 'cell' | 'row' | 'col';    // 선택 단위 (F7=row, F8=col)
+};
+```
+
+### `layoutSelectionChange`와의 관계
+
+`_updateSelection`은 셀 블록 변경 후 `cellSelectionChange`를 먼저 디스패치하고, 이어서 선택된 box들을 `editManager.selectLayout()`으로 넘겨 `layoutSelectionChange`도 발생시킨다. 두 이벤트는 독립적이므로 리스너는 각각 구독할 수 있다.
+
+**재진입 보호**: 다른 이벤트 디스패치 중에는 `cellSelectionChange` 이벤트가 발생하지 않는다 (`_dispatching` 플래그).
+
+---
+
 ## 10. 모드 전환 이벤트
 
 모드 전환 이벤트는 `EditManager`의 `textEditMode`/`layoutEditMode`/`insertMode` setter에서 모드가 실제로 변경된 후 `_dispatchModeChange()`를 통해 발생한다. `paragraph`와 `controller`는 항상 `null as unknown as ...`이다.
@@ -1130,6 +1186,7 @@ LayoutSelectionController._onClick
 | `placeGunChange` | Place Gun | `placeGunDetail.items`, `placeGunDetail.paused` | Place Gun 장전/비우기/삭제/재정렬/일시정지/소비 |
 | `placeGunBefore` | Place Gun | `placeGunBeforeDetail.item`, `placeGunBeforeDetail.box` | Place Gun 항목 주입 직전 (클릭 배치 시작) |
 | `placeGunAfter` | Place Gun | `placeGunAfterDetail.item`, `placeGunAfterDetail.box`, `placeGunAfterDetail.success` | Place Gun 항목 주입 완료 직후 |
+| `cellSelectionChange` | 셀 블록 | `cellSelectionDetail.selection`, `cellSelectionDetail.selectedCells`, `cellSelectionDetail.source` | 셀 블록(F5/F7/F8) 선택 변경 |
 
 ---
 

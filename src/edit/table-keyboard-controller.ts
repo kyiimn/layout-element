@@ -65,7 +65,7 @@ export class TableKeyboardController {
       anchor: { ...coord },
       focus: { ...coord },
       selectMode: 'cell',
-    });
+    }, 'programmatic');
   }
 
   getSelectedCells(): LayoutTableCellElement[] {
@@ -538,19 +538,29 @@ export class TableKeyboardController {
     return coords;
   }
 
-  private _updateSelection(selection: TableCellSelection | null): void {
+  private _updateSelection(
+    selection: TableCellSelection | null,
+    source: 'keyboard' | 'programmatic' = 'keyboard',
+  ): void {
     this._selection = selection;
     if (this._tableEl) {
       (this._tableEl as unknown as { _renderSelectionOverlay(selection: TableCellSelection | null): void })
         ._renderSelectionOverlay(selection);
     }
+
+    const selectedCells: LayoutTableCellElement[] = selection ? this._getSelectedCells() : [];
+    this._editManager._dispatchCellSelectionChange({
+      selection,
+      selectedCells,
+      source,
+    });
+
     if (!selection) {
       this._editManager.clearLayoutSelection(false);
       return;
     }
     if (selection.mode === 'range' || selection.mode === 'all') {
-      const cells = this._getSelectedCells();
-      const boxes = cells.map(c => c.items[0]).filter(Boolean);
+      const boxes = selectedCells.map(c => c.items[0]).filter(Boolean);
       if (boxes.length > 0) {
         this._editManager.selectLayout(boxes);
       }

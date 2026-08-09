@@ -148,6 +148,11 @@ export class LayoutSelectionController {
             if (otherKc && otherKc.selection) {
               otherKc.selection = null;
               (t as unknown as { _renderSelectionOverlay: (sel: null) => void })._renderSelectionOverlay(null);
+              this._manager._dispatchCellSelectionChange({
+                selection: null,
+                selectedCells: [],
+                source: 'keyboard',
+              });
             }
           }
           const box = tdElForDrag.items[0];
@@ -170,6 +175,11 @@ export class LayoutSelectionController {
         kc.selection = null;
         (t as unknown as { _renderSelectionOverlay: (sel: null) => void })._renderSelectionOverlay(null);
         clearedTable = true;
+        this._manager._dispatchCellSelectionChange({
+          selection: null,
+          selectedCells: [],
+          source: 'keyboard',
+        });
       }
     }
 
@@ -235,6 +245,11 @@ export class LayoutSelectionController {
       if (kc.selection) {
         kc.selection = null;
         (tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })._renderSelectionOverlay(null);
+        this._manager._dispatchCellSelectionChange({
+          selection: null,
+          selectedCells: [],
+          source: 'keyboard',
+        });
       }
       return;
     }
@@ -249,6 +264,11 @@ export class LayoutSelectionController {
     };
     (tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })._renderSelectionOverlay(kc.selection);
     const selectedCells = kc.getSelectedCells();
+    this._manager._dispatchCellSelectionChange({
+      selection: kc.selection,
+      selectedCells,
+      source: 'keyboard',
+    });
     const boxes = selectedCells.map(c => c.items[0]).filter(Boolean);
     if (boxes.length > 0) this._manager.selectLayout(boxes);
   };
@@ -263,6 +283,11 @@ export class LayoutSelectionController {
         if (kc && kc.selection) {
           kc.selection = null;
           (this._cellDrag.tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })._renderSelectionOverlay(null);
+          this._manager._dispatchCellSelectionChange({
+            selection: null,
+            selectedCells: [],
+            source: 'keyboard',
+          });
         }
       }
       this._cellDrag = null;
