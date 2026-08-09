@@ -133,8 +133,9 @@ type CellBorderEdge = {
 
 `normalizeWidths(values, targetSize, minSize)`는 배열의 합을 `targetSize`로 맞추되, 각 값이 `minSize` 이하로 내려가지 않도록 보장한다.
 
-- 합이 targetSize보다 크면: 비례 축소, 단 minSize 미만 값은 minSize로 고정하고 남은 여분을 다른 값에서 차감
+- 합이 targetSize와 같으면: 각 값을 minSize로 clamp. clamp 후 합이 targetSize보다 커지면(deficit) **가장 큰 값부터 초과분을 차감**. 모든 값이 minSize이고 합이 여전히 targetSize를 초과하면 **비례 축소** (최소 크기를 보장할 수 없는 경우)
 - 합이 targetSize보다 작으면: **비례 분배** — 남은 공간을 각 셀의 원래 비율에 따라 분배. 모든 입력이 동일하면 자동 균등 분할되고, 사용자 지정 비율(예: `[10, 20]`)은 1:2 비율로 유지됨
+- 합이 targetSize보다 크면: 비례 축소, 단 minSize 미만 값은 minSize로 고정하고 남은 여분을 다른 값에서 차감
 - minSize 보장: `MIN_TABLE_COL_WIDTH = 5mm`, `MIN_TABLE_ROW_HEIGHT = 5mm`
 
 ### 3.3 colspan/rowspan 처리
@@ -227,26 +228,26 @@ focus:  { row: currentCell.row, col: maxCol }
 1. `selection.focus` 셀의 TD를 찾는다
 2. `_updateSelection(null)`로 셀 블록 해제
 3. TD 내부 첫 번째 box를 `selectLayout(box)`로 선택
-4. box 내부 첫 번째 paragraph를 `focusParagraph(para)`로 포커스
+4. `editManager.textEditMode`가 true일 때만 box 내부 첫 번째 paragraph를 `focusParagraph(para)`로 포커스
 
-이렇게 하면 ESC 후 텍스트 편집 모드로 자연스럽게 전환되어 해당 셀의 텍스트를 바로 편집할 수 있다.
+`textEditMode`가 false이면 paragraph 포커스를 설정하지 않는다 — 셀 블록 종료 후 레이아웃 편집 모드에서는 box 선택만 유지한다.
 
 ### 4.7 셀 클릭 — 셀 블록 미설정
 
-**레이아웃 편집 모드에서만 동작**. 셀을 단순 클릭(드래그 없음)하면:
+**모든 모드에서 동작** (레이아웃 편집 모드, 읽기 모드, 텍스트 편집 모드 포함; 삽입 모드, Place Gun, spacePressed 제외). 셀을 단순 클릭(드래그 없음)하면:
 - `LayoutSelectionController._onMouseDown`에서 클릭된 TD의 `cellLabel`을 좌표로 변환
 - 모든 테이블의 기존 셀 블록을 해제(`kc.selection = null` + overlay 클리어)
 - 클릭된 TD의 첫 번째 box를 `selectLayout(box)`로 선택
 - `event.preventDefault()` + `event.stopImmediatePropagation()`으로 다른 핸들러 실행 차단
 - **셀 블록은 설정하지 않음** — 단일 클릭으로는 셀 블록이 활성화되지 않는다
 
-비편집 모드에서는 셀 클릭 시 셀 블록이 동작하지 않고, 기존 box 선택 동작이 우선한다.
+비편집 모드에서도 셀 드래그가 동작한다 — 모든 모드(읽기, 레이아웃 편집, 텍스트 편집)에서 셀 드래그로 range 선택이 가능하다. 삽입 모드, Place Gun 활성, spacePressed 상태는 상위에서 차단된다.
 
 **제약**: Playwright의 `mouse.click()`은 shadow DOM 내부에서 `mousedown` 이벤트를 발생시키지 않을 수 있어, 자동화 테스트에서는 `pointerdown`을 직접 dispatch해야 정상 동작한다.
 
 ### 4.8 셀 드래그 — range 모드 셀 블록 선택
 
-**레이아웃 편집 모드에서만 동작**. table 내부 TD에서 마우스 드래그를 시작하면:
+**모든 모드에서 동작** (레이아웃 편집 모드, 읽기 모드, 텍스트 편집 모드 포함; 삽입 모드, Place Gun, spacePressed 제외). table 내부 TD에서 마우스 드래그를 시작하면:
 - 모든 테이블의 기존 셀 블록을 해제(자신 포함)
 - 클릭된 TD의 첫 번째 box를 `selectLayout(box)`로 선택
 - `_cellDrag` 상태 시작 (tableEl, anchor, startX/Y, moved=false)
@@ -366,7 +367,7 @@ F5/F7/F8은 `_getCurrentCellCoord()`로 현재 셀을 결정한 후 처리한다
 | W               | range            | 선택 영역 열 너비 균등 분할    |
 | H               | range            | 선택 영역 행 높이 균등 분할    |
 
-모든 단축키는 `editManager.layoutEditMode`와 무관하게 동작한다.
+모든 단축키는 `editManager.layoutEditMode`와 무관하게 동작한다. 행/열 삽입·삭제(`insertRowBelow`/`insertRowAbove`/`insertColRight`/`insertColLeft`/`deleteRow`/`deleteCol`)는 `TableKeyboardController`에서 `selection`이 null이면 동작하지 않는다 — 셀 블록 모드에서만 사용 가능. `TableStructureEditor`의 동일 메서드는 가드 없이 직접 호출 가능.
 
 ### 6.3 Alt+arrow 리사이즈 상세
 
@@ -424,10 +425,13 @@ F5/F7/F8은 `_getCurrentCellCoord()`로 현재 셀을 결정한 후 처리한다
 
 현재 셀 기준으로 아래/위에 행을 삽입. 외부에서도 호출 가능.
 
+**셀 블록 가드**: `TableKeyboardController.insertRowBelow()`/`insertRowAbove()`은 `selection`이 null이면 즉시 return. `TableStructureEditor`의 메서드는 가드 없이 직접 호출 가능.
+
 **삽입 규칙**:
-- 새 행의 높이: 현재 행의 높이를 상승
+- 새 행의 높이: 현재 행의 높이를 1/2로 분할 — 기존 행은 절반, 새 행은 절반
 - 새 행의 셀: 현재 행의 셀 구조(border, 배경색, padding, colspan)를 복제
 - `rowspanCovered` 맵을 사용하여 각 셀의 논리 위치 추적
+- **최소 높이 보장**: 분할 후 절반이 `MIN_TABLE_ROW_HEIGHT`(5mm) 미만이면 `normalizeWidths`가 다른 행에서 균등하게 차감하여 보장. 테이블 전체 크기로 최소 높이를 보장할 수 없으면 비례 축소
 - **병합된 셀 처리**:
   - 삽입 위치 이전 행에서 rowspan이 삽입 위치를 가로지르면 rowspan +1
   - 새 행에서 `insertOccupied` 위치(rowspan으로 덮인 위치)에는 셀을 생성하지 않음
@@ -447,10 +451,13 @@ tableEl.structureEditor.insertRowAbove();
 
 현재 셀 기준으로 오른쪽/왼쪽에 열을 삽입. 외부에서도 호출 가능.
 
+**셀 블록 가드**: `TableKeyboardController.insertColRight()`/`insertColLeft()`은 `selection`이 null이면 즉시 return. `TableStructureEditor`의 메서드는 가드 없이 직접 호출 가능.
+
 **삽입 규칙**:
-- 새 열의 너비: 현재 열의 너비를 복제
+- 새 열의 너비: 현재 열의 너비를 1/2로 분할 — 기존 열은 절반, 새 열은 절반
 - 새 열의 셀: 현재 열의 셀 구조(border, 배경색, padding)를 복제
 - `colspanCovered` 맵을 사용하여 각 셀의 논리 위치 추적
+- **최소 너비 보장**: 분할 후 절반이 `MIN_TABLE_COL_WIDTH`(5mm) 미만이면 `normalizeWidths`가 다른 열에서 균등하게 차감하여 보장. 테이블 전체 크기로 최소 너비를 보장할 수 없으면 비례 축소
 - **병합된 셀 처리**:
   - `isRight`일 때: focusCol이 병합 셀의 끝점이면 새 셀 추가, 중간이면 colspan +1
   - `!isRight`일 때: focusCol이 병합 셀의 시작점이면 새 셀 추가, 중간이면 colspan +1
@@ -468,6 +475,8 @@ tableEl.structureEditor.insertColLeft();
 #### deleteRow() / deleteCol()
 
 현재 셀 기준으로 행/열을 삭제. 외부에서도 호출 가능. 단축키는 없음.
+
+**셀 블록 가드**: `TableKeyboardController.deleteRow()`/`deleteCol()`은 `selection`이 null이면 즉시 return. 셀 블록 모드가 아닐 때는 동작하지 않는다. `TableStructureEditor.deleteRow()`/`deleteCol()`은 가드 없이 직접 호출 가능.
 
 **행 삭제 규칙**:
 - rowspan > 1인 셀이 삭제되면 다음 행으로 이동 (rowspan - 1)
@@ -762,7 +771,11 @@ cellLabel은 `{행 알파벳}{열 번호}` 형식이어야 한다 (예: `A1`, `B
 
 `_applyNewData`는 기존 TR을 모두 제거한 후 `table.data = newData`를 설정한다. 이는 ID 기반 reconciliation으로 인한 box shadow DOM style sheet 손상을 방지하기 위함이다. 병합/분할/삽입/삭제 후 항상 이 방식으로 데이터를 갱신한다.
 
-### 12.12 colspan/rowspan DOM attribute 동기화
+### 12.12 shadow DOM styleEl stale 참조 방지
+
+모든 레이아웃 요소(box, TR, TD, table, paragraph, image)는 `_styleRule` 클래스 변수 대신 `_applyStyle()` 호출 시마다 `shadowRoot.querySelector('style')`로 styleEl을 직접 조회한다. styleEl이 없거나 `cssRules.length === 0`이면 재초기화한다. 이는 `table.data` reconciliation 시 새 TR/TD의 styleEl 규칙이 0개가 되는 stale 참조 문제를 원천 차단한다.
+
+### 12.13 colspan/rowspan DOM attribute 동기화
 
 TR은 `height` attribute를, TD는 `colspan`/`rowspan` attribute를 `observedAttributes`로 감지한다. property → attribute, attribute → property 양방향 동기화가 구현되어 있다. `data` setter에서도 attribute를 설정한다.
 
@@ -789,6 +802,12 @@ class LayoutTableElement extends HTMLElement {
   get items(): LayoutTableRowElement[];
   get type(): 'table';
   get editManager(): EditManager | null;
+
+  // 절대 좌표 (부모 box에서 상속)
+  get absLeft(): number;
+  get absTop(): number;
+  get absWidth(): number;
+  get absHeight(): number;
 
   // 편집 제어
   get keyboardController(): TableKeyboardController | null;
@@ -825,7 +844,14 @@ class TableKeyboardController {
   getSelectedCells(): LayoutTableCellElement[];
   handleKeyDown(event: KeyboardEvent): boolean;
 
-  // 구조 편집 (외부 호출 가능)
+  /**
+   * TD 요소를 전달하여 셀 블록 단일 선택을 설정한다.
+   * TD의 cellLabel에서 좌표를 추출하여 selection을 설정하고 overlay를 갱신한다.
+   * 다른 테이블의 기존 selection은 해제한다.
+   */
+  selectCell(td: LayoutTableCellElement): void;
+
+  // 구조 편집 (selection 가드 — selection이 null이면 return)
   handleMerge(): void;
   insertRowBelow(): void;
   insertRowAbove(): void;
@@ -900,6 +926,12 @@ class LayoutTableCellElement extends HTMLElement {
   get contentType(): 'box' | 'paragraph' | 'image' | 'table' | undefined;
   get contentElement(): LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | null;
 
+  // 절대 좌표 (부모 TR 기준 + 자체 _x/_y/_width/_height)
+  get absLeft(): number;
+  get absTop(): number;
+  get absWidth(): number;
+  get absHeight(): number;
+
   appendChildData(child: BoxData): LayoutBoxElement;
   get printPostData(): PrintPostData[];
 }
@@ -920,6 +952,12 @@ class LayoutTableRowElement extends HTMLElement {
 
   get items(): LayoutTableCellElement[];
   get type(): 'tr';
+
+  // 절대 좌표 (부모 table 기준 + 자체 _y/_width/_height)
+  get absLeft(): number;
+  get absTop(): number;
+  get absWidth(): number;
+  get absHeight(): number;
 
   appendChildData(child: TableCellData): LayoutTableCellElement;
   get printPostData(): PrintPostData[];
