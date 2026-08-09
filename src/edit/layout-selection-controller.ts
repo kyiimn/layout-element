@@ -685,6 +685,7 @@ export class LayoutSelectionController {
   private _onDblClick = (event: MouseEvent): void => {
     const manager = this._manager;
     if (manager.insertMode) return;
+    if (manager.layoutEditMode) return;
 
     const paragraph = this._findParagraphFromEvent(event);
     if (!paragraph) return;
