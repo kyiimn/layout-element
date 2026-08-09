@@ -36,6 +36,38 @@ export class TableKeyboardController {
     this._selection = value;
   }
 
+  /**
+   * TD 요소를 전달하여 셀 블록 단일 선택을 설정한다.
+   *
+   * TD의 cellLabel에서 좌표를 추출하여 selection을 설정하고 overlay를 갱신한다.
+   * 다른 테이블의 기존 selection은 해제한다.
+   *
+   * @param td - 선택할 TD 요소
+   * @example
+   * const td = tableEl.querySelector('x-layout-td');
+   * tableEl.keyboardController.selectCell(td);
+   */
+  selectCell(td: LayoutTableCellElement): void {
+    if (!td.cellLabel) return;
+    const coord = this._labelToCoord(td.cellLabel);
+    if (!coord) return;
+
+    for (const t of document.querySelectorAll('x-layout-table')) {
+      const otherKc = (t as LayoutTableElement).keyboardController;
+      if (otherKc && otherKc !== this && otherKc.selection) {
+        otherKc.selection = null;
+        (t as unknown as { _renderSelectionOverlay: (sel: null) => void })._renderSelectionOverlay(null);
+      }
+    }
+
+    this._updateSelection({
+      mode: 'single',
+      anchor: { ...coord },
+      focus: { ...coord },
+      selectMode: 'cell',
+    });
+  }
+
   getSelectedCells(): LayoutTableCellElement[] {
     return this._getSelectedCells();
   }
@@ -352,26 +384,32 @@ export class TableKeyboardController {
   }
 
   insertRowBelow(): void {
+    if (!this._selection) return;
     this._structureEditor.insertRowBelow();
   }
 
   insertRowAbove(): void {
+    if (!this._selection) return;
     this._structureEditor.insertRowAbove();
   }
 
   insertColRight(): void {
+    if (!this._selection) return;
     this._structureEditor.insertColRight();
   }
 
   insertColLeft(): void {
+    if (!this._selection) return;
     this._structureEditor.insertColLeft();
   }
 
   deleteRow(): void {
+    if (!this._selection) return;
     this._structureEditor.deleteRow();
   }
 
   deleteCol(): void {
+    if (!this._selection) return;
     this._structureEditor.deleteCol();
   }
 

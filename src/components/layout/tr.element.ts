@@ -24,7 +24,6 @@ function indexToColumnLabel(index: number): string {
  */
 export class LayoutTableRowElement extends HTMLElement {
   private _shadowRoot: ShadowRoot;
-  private _styleRule?: CSSStyleRule;
 
   private _y: number = 0;
   private _height: number = 0;
@@ -173,18 +172,24 @@ export class LayoutTableRowElement extends HTMLElement {
   private _applyStyle(): void {
     if (!this.isConnected) return;
 
-    if (!this._styleRule) {
-      const styleEl = document.createElement('style');
+    let styleEl = this._shadowRoot.querySelector('style');
+    let needsInit = !styleEl
+      || !styleEl.sheet
+      || styleEl.sheet.cssRules.length === 0;
+
+    if (needsInit) {
+      if (styleEl) styleEl.remove();
+      styleEl = document.createElement('style');
       this._shadowRoot.appendChild(styleEl);
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
       styleEl.sheet.insertRule(":host { display: block; position: absolute; }", 0);
-      this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));
     }
 
+    const hostRule = styleEl!.sheet!.cssRules[0] as CSSStyleRule;
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
-      this._styleRule.style,
+      hostRule.style,
       {
         position: 'absolute',
         top: `${this._y}mm`,
@@ -253,6 +258,24 @@ export class LayoutTableRowElement extends HTMLElement {
   }
 
   get type(): 'tr' { return 'tr'; }
+
+  get absLeft(): number {
+    const parent = this.parentElement as unknown as { absLeft?: number } | null;
+    return parent?.absLeft ?? 0;
+  }
+
+  get absTop(): number {
+    const parent = this.parentElement as unknown as { absTop?: number } | null;
+    return (parent?.absTop ?? 0) + this._y;
+  }
+
+  get absWidth(): number {
+    return this._width;
+  }
+
+  get absHeight(): number {
+    return this._height;
+  }
 
   get items(): LayoutTableCellElement[] {
     return Array.from(this.children).filter(

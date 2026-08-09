@@ -59,7 +59,6 @@ export type URLLoader = (
  */
 export class LayoutImageElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
-  private _styleRule?: CSSStyleRule;
 
   private _canvas?: HTMLCanvasElement;
   private _shadowRoot: ShadowRoot;
@@ -145,14 +144,19 @@ export class LayoutImageElement extends HTMLElement {
 
     if (!this.parentModel || !this._inheritStyle) return;
 
-    if (!this._styleRule) {
-      const styleEl = document.createElement("style");
+    let styleEl = this._shadowRoot.querySelector('style');
+    let needsInit = !styleEl
+      || !styleEl.sheet
+      || styleEl.sheet.cssRules.length === 0;
+
+    if (needsInit) {
+      if (styleEl) styleEl.remove();
+      styleEl = document.createElement("style");
       this._shadowRoot.appendChild(styleEl);
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
       styleEl.sheet.insertRule(`@media print { :host { visibility: hidden; } }`, 1);
-      this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));
 
@@ -179,8 +183,10 @@ export class LayoutImageElement extends HTMLElement {
 
     const paddingTop = this._inheritStyle.paddingTop || 0;
 
+    const styleEl = this._shadowRoot.querySelector('style');
+    const hostRule = styleEl!.sheet!.cssRules[0] as CSSStyleRule;
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
-      this._styleRule!.style,
+      hostRule.style,
       {
         display: 'flex',
         height: `${this.absHeight}mm`,

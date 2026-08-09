@@ -25,7 +25,6 @@ export class LayoutBoxElement extends HTMLElement {
   private _model?: GridCalculator;
 
   private _shadowRoot: ShadowRoot;
-  private _styleRule?: CSSStyleRule;
 
   private _left: number = 0;
   private _top: number = 0;
@@ -224,8 +223,14 @@ export class LayoutBoxElement extends HTMLElement {
   private _applyStyle() {
     if (!this.isConnected || !this.parentModel) return;
 
-    if (!this._styleRule) {
-      const styleEl = document.createElement('style');
+    let styleEl = this._shadowRoot.querySelector('style');
+    let needsInit = !styleEl
+      || !styleEl.sheet
+      || styleEl.sheet.cssRules.length === 0;
+
+    if (needsInit) {
+      if (styleEl) styleEl.remove();
+      styleEl = document.createElement('style');
       this._shadowRoot.appendChild(styleEl);
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
@@ -259,7 +264,6 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule('@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }', 27);
       styleEl.sheet.insertRule('@media screen { .type-label .parent-btn:hover { opacity: 1; } }', 28);
       styleEl.sheet.insertRule('@media print { .type-label { display: none !important; } }', 29);
-      this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));
 
@@ -297,8 +301,9 @@ export class LayoutBoxElement extends HTMLElement {
     const styleLeft = isStaticInTd ? `${tdParent!.paddingLeft}mm` : `${this.relLeft}mm`;
     const styleTop = isStaticInTd ? `${tdParent!.paddingTop}mm` : `${this.relTop}mm`;
 
+    const hostRule = styleEl!.sheet!.cssRules[0] as CSSStyleRule;
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
-      this._styleRule.style,
+      hostRule.style,
       {
         display: 'inline-block',
         boxSizing: 'border-box',

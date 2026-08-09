@@ -20,7 +20,6 @@ import { LayoutColumnElement } from "./column.element";
 
 export class LayoutParagraphElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
-  private _styleRule?: CSSStyleRule;
 
   private _model?: TextLayoutEngine;
 
@@ -148,17 +147,22 @@ export class LayoutParagraphElement extends HTMLElement {
     const colorRegistry = ColorRegistry.getInstance();
     const fontLoader = FontLoader.getInstance();
 
-    if (!this._styleRule) {
-      const styleEl = document.createElement('style');
+    let styleEl = this._shadowRoot.querySelector('style');
+    let needsInit = !styleEl
+      || !styleEl.sheet
+      || styleEl.sheet.cssRules.length === 0;
+
+    if (needsInit) {
+      if (styleEl) styleEl.remove();
+      styleEl = document.createElement('style');
       this._shadowRoot.appendChild(styleEl);
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
       styleEl.sheet.insertRule(`@media print { :host { overflow: hidden; } }`, 1);
-      this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
-        this._styleRule.style,
+        (styleEl.sheet.cssRules[0] as CSSStyleRule).style,
         {
           display: 'flex',
           flexDirection: 'row',
@@ -168,8 +172,9 @@ export class LayoutParagraphElement extends HTMLElement {
       );
       this._shadowRoot.appendChild(document.createElement('slot'));
     }
+    const hostRule = styleEl!.sheet!.cssRules[0] as CSSStyleRule;
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
-      this._styleRule.style,
+      hostRule.style,
       {
         color: color !== undefined ? colorRegistry.getCSSColor(color) : undefined,
         fontFamily: fontFamily !== undefined ? fontLoader.getFontFamily(fontFamily) : undefined,

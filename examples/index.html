@@ -208,6 +208,22 @@
       <button id="btn-ai-image">🤖 이미지에만 표시</button>
       <button id="btn-ai-clear">🤖 모두 해제</button>
     </div>
+    <div style="
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          justify-content: center;
+          width: 100%;
+          margin-top: 8px;
+        ">
+      <button id="btn-tbl-insert-row-below">📋 행 아래에 삽입</button>
+      <button id="btn-tbl-insert-row-above">📋 행 위에 삽입</button>
+      <button id="btn-tbl-insert-col-right">📋 열 오른쪽에 삽입</button>
+      <button id="btn-tbl-insert-col-left">📋 열 왼쪽에 삽입</button>
+      <button id="btn-tbl-delete-row">📋 행 삭제</button>
+      <button id="btn-tbl-delete-col">📋 열 삭제</button>
+      <button id="btn-tbl-check">🔍 스타일 규칙 검사</button>
+    </div>
   </div>
 
   <div id="hint"></div>
@@ -1322,6 +1338,94 @@
           elSelectedLayoutIds.classList.add("empty");
         }
       }
+
+      // 테이블 테스트 버튼
+      const btnTblInsertRowBelow = document.getElementById("btn-tbl-insert-row-below");
+      const btnTblInsertRowAbove = document.getElementById("btn-tbl-insert-row-above");
+      const btnTblInsertColRight = document.getElementById("btn-tbl-insert-col-right");
+      const btnTblInsertColLeft = document.getElementById("btn-tbl-insert-col-left");
+      const btnTblDeleteRow = document.getElementById("btn-tbl-delete-row");
+      const btnTblDeleteCol = document.getElementById("btn-tbl-delete-col");
+      const btnTblCheck = document.getElementById("btn-tbl-check");
+
+      function getTableAndKc() {
+        const table = doc.querySelector("x-layout-table");
+        if (!table) {
+          hint.textContent = "테이블이 없습니다.";
+          return null;
+        }
+        const kc = table.keyboardController;
+        if (!kc) {
+          hint.textContent = "keyboardController가 없습니다.";
+          return null;
+        }
+        if (!kc.selection) {
+          hint.textContent = "셀을 먼저 선택하세요. (F5로 셀 블록 모드 진입 후 화살표로 선택)";
+          return null;
+        }
+        return { table, kc };
+      }
+
+      function runTableAction(label, fn) {
+        const ctx = getTableAndKc();
+        if (!ctx) return;
+        const { table, kc } = ctx;
+        const before = { rows: table.gridResolution?.rowCount, cols: table.gridResolution?.colWidths?.length };
+        try {
+          fn(kc);
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              const after = { rows: table.gridResolution?.rowCount, cols: table.gridResolution?.colWidths?.length };
+              const trs = table.querySelectorAll("x-layout-tr");
+              const badCells = [];
+              for (let r = 0; r < trs.length; r++) {
+                const tds = trs[r].querySelectorAll("x-layout-td");
+                for (let c = 0; c < tds.length; c++) {
+                  const box = tds[c].items[0];
+                  const styleEl = box?.shadowRoot?.querySelector("style");
+                  const ruleCount = styleEl?.sheet?.cssRules?.length ?? 0;
+                  if (ruleCount === 0) {
+                    badCells.push(`r${r}c${c}`);
+                  }
+                }
+              }
+              hint.textContent = `${label}: ${before.rows}x${before.cols} → ${after.rows}x${after.cols}` +
+                (badCells.length > 0 ? ` | 규칙 0개: ${badCells.join(", ")}` : " | 모든 셀 정상 ✅");
+            }, 100);
+          });
+        } catch (e) {
+          hint.textContent = `${label} 에러: ${e.message}`;
+        }
+      }
+
+      btnTblInsertRowBelow.addEventListener("click", () => runTableAction("행 아래 삽입", (kc) => kc.insertRowBelow()));
+      btnTblInsertRowAbove.addEventListener("click", () => runTableAction("행 위 삽입", (kc) => kc.insertRowAbove()));
+      btnTblInsertColRight.addEventListener("click", () => runTableAction("열 오른쪽 삽입", (kc) => kc.insertColRight()));
+      btnTblInsertColLeft.addEventListener("click", () => runTableAction("열 왼쪽 삽입", (kc) => kc.insertColLeft()));
+      btnTblDeleteRow.addEventListener("click", () => runTableAction("행 삭제", (kc) => kc.deleteRow()));
+      btnTblDeleteCol.addEventListener("click", () => runTableAction("열 삭제", (kc) => kc.deleteCol()));
+
+      btnTblCheck.addEventListener("click", () => {
+        const table = doc.querySelector("x-layout-table");
+        if (!table) {
+          hint.textContent = "테이블이 없습니다.";
+          return;
+        }
+        const trs = table.querySelectorAll("x-layout-tr");
+        const info = [];
+        for (let r = 0; r < trs.length; r++) {
+          const tds = trs[r].querySelectorAll("x-layout-td");
+          for (let c = 0; c < tds.length; c++) {
+            const box = tds[c].items[0];
+            const styleEl = box?.shadowRoot?.querySelector("style");
+            const ruleCount = styleEl?.sheet?.cssRules?.length ?? 0;
+            const hostRule = styleEl?.sheet?.cssRules?.[0];
+            const hostWidth = hostRule?.style?.width ?? "";
+            info.push(`r${r}c${c}:${ruleCount}규칙/${hostWidth}`);
+          }
+        }
+        hint.textContent = info.join(" | ");
+      });
 
       updateInfoPanel();
     })();

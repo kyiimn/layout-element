@@ -100,15 +100,33 @@ export function normalizeWidths(
 
   if (sum === targetSize) {
     const result = inputs.map((v) => Math.max(v, minSize));
-    const diff = targetSize - result.reduce((a, b) => a + b, 0);
-    result[n - 1] += diff;
+    let diff = targetSize - result.reduce((a, b) => a + b, 0);
+    if (diff === 0) return result;
+    if (diff < 0) {
+      let remaining = -diff;
+      const sorted = result
+        .map((v, i) => ({ v, i }))
+        .sort((a, b) => b.v - a.v);
+      for (const { i } of sorted) {
+        if (remaining <= 0) break;
+        const excess = result[i] - minSize;
+        const take = Math.min(excess, remaining);
+        result[i] -= take;
+        remaining -= take;
+      }
+      if (remaining > 0) {
+        const scale = targetSize / result.reduce((a, b) => a + b, 0);
+        for (let i = 0; i < n; i++) {
+          result[i] = Math.max(0, result[i] * scale);
+        }
+      }
+    } else {
+      result[n - 1] += diff;
+    }
     return result;
   }
 
   if (sum < targetSize) {
-    // 비례 분배: 남은 공간을 각 셀의 원래 비율에 따라 분배.
-    // 모든 입력이 동일하면(삽입 시점) 자동으로 균등 분할되고,
-    // 사용자가 명시한 비율(예: [10, 20])은 1:2 비율로 유지됨.
     const result = inputs.map((v) => Math.max(v, minSize));
     const currentSum = result.reduce((a, b) => a + b, 0);
     const diff = targetSize - currentSum;

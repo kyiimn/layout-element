@@ -26,7 +26,6 @@ import { LayoutParagraphElement } from "./paragraph.element";
  */
 export class LayoutTableCellElement extends HTMLElement {
   private _shadowRoot: ShadowRoot;
-  private _styleRule?: CSSStyleRule;
 
   private _model?: GridCalculator;
 
@@ -367,15 +366,19 @@ export class LayoutTableCellElement extends HTMLElement {
   private _applyStyle(): void {
     if (!this.isConnected) return;
 
-    if (!this._styleRule) {
-      const styleEl = document.createElement('style');
+    let styleEl = this._shadowRoot.querySelector('style');
+    let needsInit = !styleEl
+      || !styleEl.sheet
+      || styleEl.sheet.cssRules.length === 0;
+
+    if (needsInit) {
+      if (styleEl) styleEl.remove();
+      styleEl = document.createElement('style');
       this._shadowRoot.appendChild(styleEl);
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
       styleEl.sheet.insertRule("@media print { .diagonal { display: none !important; } }", 1);
-
-      this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));
     }
@@ -383,11 +386,12 @@ export class LayoutTableCellElement extends HTMLElement {
     const colorRegistry = ColorRegistry.getInstance();
     const bg = this._backgroundColor
       ? colorRegistry.getCSSColor(this._backgroundColor) +
-        colorRegistry.getOpacityHex(this._backgroundOpacity ?? 1)
+      colorRegistry.getOpacityHex(this._backgroundOpacity ?? 1)
       : 'transparent';
 
+    const hostRule = styleEl!.sheet!.cssRules[0] as CSSStyleRule;
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
-      this._styleRule.style,
+      hostRule.style,
       {
         display: 'block',
         boxSizing: 'border-box',
@@ -484,10 +488,10 @@ export class LayoutTableCellElement extends HTMLElement {
     const borderColor = 'red';
 
     const sides: Array<{ side: 'top' | 'bottom' | 'left' | 'right' }> = [];
-    if (!this._borderTop) sides.push({ side: 'top' });
-    if (!this._borderLeft) sides.push({ side: 'left' });
-    if (isLastCol && !this._borderRight) sides.push({ side: 'right' });
-    if (isLastRow && !this._borderBottom) sides.push({ side: 'bottom' });
+    if (!this._borderTop?.width || !this._borderTop?.color) sides.push({ side: 'top' });
+    if (!this._borderLeft?.width || !this._borderLeft?.color) sides.push({ side: 'left' });
+    if (isLastCol && (!this._borderRight?.width || !this._borderRight?.color)) sides.push({ side: 'right' });
+    if (isLastRow && (!this._borderBottom?.width || !this._borderBottom?.color)) sides.push({ side: 'bottom' });
 
     for (const { side } of sides) {
       const div = document.createElement('div');
@@ -641,6 +645,24 @@ export class LayoutTableCellElement extends HTMLElement {
   }
 
   get type(): 'td' { return 'td'; }
+
+  get absLeft(): number {
+    const parent = this.parentElement as unknown as { absLeft?: number } | null;
+    return (parent?.absLeft ?? 0) + this._x;
+  }
+
+  get absTop(): number {
+    const parent = this.parentElement as unknown as { absTop?: number } | null;
+    return (parent?.absTop ?? 0) + this._y;
+  }
+
+  get absWidth(): number {
+    return this._width;
+  }
+
+  get absHeight(): number {
+    return this._height;
+  }
 
   get overlayElements(): LayoutBoxElement[] {
     if (!this.parentElement) return [];

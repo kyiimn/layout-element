@@ -184,9 +184,11 @@ export class TableStructureEditor {
     const currentData = this._tableEl.data;
     const focusCol = this._getFocusCol();
     const sourceColWidth = grid.colWidths[focusCol] ?? MIN_TABLE_COL_WIDTH;
+    const halfWidth = sourceColWidth / 2;
 
     const allWidths = [...grid.colWidths];
-    allWidths.splice(insertIndex, 0, sourceColWidth);
+    allWidths[focusCol] = halfWidth;
+    allWidths.splice(insertIndex, 0, halfWidth);
     const totalWidth = allWidths.reduce((a, b) => a + b, 0);
     const normalizedWidths = normalizeWidths(allWidths, totalWidth, MIN_TABLE_COL_WIDTH);
 
@@ -292,7 +294,8 @@ export class TableStructureEditor {
     const currentData = this._tableEl.data;
     const focusRow = this._getFocusRow();
     const sourceRow = currentData.children[focusRow];
-    const newRowHeight = sourceRow?.height ?? MIN_TABLE_ROW_HEIGHT;
+    const sourceHeight = sourceRow?.height ?? grid.rowHeights[focusRow] ?? MIN_TABLE_ROW_HEIGHT;
+    const halfHeight = sourceHeight / 2;
 
     const rowspanCovered: boolean[][] = [];
     for (let r = 0; r < currentData.children.length; r++) {
@@ -321,7 +324,8 @@ export class TableStructureEditor {
     }));
 
     const allHeights = [...grid.rowHeights];
-    allHeights.splice(insertIndex, 0, newRowHeight);
+    allHeights[focusRow] = halfHeight;
+    allHeights.splice(insertIndex, 0, halfHeight);
     const totalHeight = allHeights.reduce((a, b) => a + b, 0);
     const normalizedHeights = normalizeWidths(allHeights, totalHeight, MIN_TABLE_ROW_HEIGHT);
 
@@ -333,7 +337,7 @@ export class TableStructureEditor {
 
     for (let r = 0; r < newRows.length; r++) {
       if (r === insertIndex) continue;
-      newRows[r].height = normalizedHeights[r > insertIndex ? r - 1 : r];
+      newRows[r].height = normalizedHeights[r];
     }
 
     for (let r = 0; r < newRows.length; r++) {

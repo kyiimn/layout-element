@@ -48,7 +48,6 @@ const HIT_WIDTH = 8;
  */
 export class LayoutTableElement extends HTMLElement {
   private _shadowRoot: ShadowRoot;
-  private _styleRule?: CSSStyleRule;
 
   private _borderLayerEl: HTMLDivElement | null = null;
   private _borderEdgeMap: Map<string, HTMLDivElement> = new Map();
@@ -352,13 +351,18 @@ export class LayoutTableElement extends HTMLElement {
   private _applyStyle(): void {
     if (!this.isConnected) return;
 
-    if (!this._styleRule) {
-      const styleEl = document.createElement('style');
+    let styleEl = this._shadowRoot.querySelector('style');
+    let needsInit = !styleEl
+      || !styleEl.sheet
+      || styleEl.sheet.cssRules.length === 0;
+
+    if (needsInit) {
+      if (styleEl) styleEl.remove();
+      styleEl = document.createElement('style');
       this._shadowRoot.appendChild(styleEl);
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
       styleEl.sheet.insertRule(":host { display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; }", 0);
       styleEl.sheet.insertRule("@media print { .border-layer { display: none !important; } }", 1);
-      this._styleRule = styleEl.sheet.cssRules[0] as CSSStyleRule;
 
       this._shadowRoot.appendChild(document.createElement('slot'));
     }
@@ -873,6 +877,26 @@ export class LayoutTableElement extends HTMLElement {
   }
 
   get type(): 'table' { return 'table'; }
+
+  get absLeft(): number {
+    const parent = this.parentElement as unknown as { absLeft?: number } | null;
+    return parent?.absLeft ?? 0;
+  }
+
+  get absTop(): number {
+    const parent = this.parentElement as unknown as { absTop?: number } | null;
+    return parent?.absTop ?? 0;
+  }
+
+  get absWidth(): number {
+    const parent = this.parentElement as unknown as { absWidth?: number } | null;
+    return parent?.absWidth ?? 0;
+  }
+
+  get absHeight(): number {
+    const parent = this.parentElement as unknown as { absHeight?: number } | null;
+    return parent?.absHeight ?? 0;
+  }
 
   /** 테이블은 부모 box의 zIndex를 따르므로 정렬 시 영향을 주지 않는 0을 반환 */
   get zIndex(): number { return 0; }
