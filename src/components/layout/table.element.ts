@@ -461,6 +461,18 @@ export class LayoutTableElement extends HTMLElement {
     this._notifyTablePropertyChange();
   }
 
+  /**
+   * TR/TD 요소에서 border/padding/diagonals 데이터를 직렬화하여 `_rows`를 갱신하고
+   * border 레이어만 재렌더링한다. 자식 요소 재생성 없이 TD 속성 변경을
+   * border resolver에 반영하기 위해 사용한다.
+   */
+  refreshBorder(): void {
+    if (!this.isConnected) return;
+    this._rows = this._serializeChildren();
+    this._layoutStructure();
+    this._renderBorder();
+  }
+
   private _notifyTablePropertyChange(): void {
     const parentBox = this.parentElement;
     if (parentBox instanceof LayoutBoxElement) {

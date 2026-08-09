@@ -46,6 +46,8 @@ export class LayoutTableCellElement extends HTMLElement {
   private _backgroundColor?: string;
   private _backgroundOpacity?: number;
   private _diagonals?: Array<'tl-br' | 'tr-bl'>;
+  private _diagonalWidth: number = 0.1;
+  private _diagonalColor?: string;
   private _paddingTop: number = 0;
   private _paddingRight: number = 0;
   private _paddingBottom: number = 0;
@@ -113,6 +115,8 @@ export class LayoutTableCellElement extends HTMLElement {
     if (this._backgroundColor) result.backgroundColor = this._backgroundColor;
     if (this._backgroundOpacity !== undefined) result.backgroundOpacity = this._backgroundOpacity;
     if (this._diagonals) result.diagonals = this._diagonals;
+    if (this._diagonalWidth !== 0.1) result.diagonalWidth = this._diagonalWidth;
+    if (this._diagonalColor !== undefined) result.diagonalColor = this._diagonalColor;
     if (this._paddingTop) result.paddingTop = this._paddingTop;
     if (this._paddingRight) result.paddingRight = this._paddingRight;
     if (this._paddingBottom) result.paddingBottom = this._paddingBottom;
@@ -135,6 +139,8 @@ export class LayoutTableCellElement extends HTMLElement {
       this._backgroundColor = data.backgroundColor;
       this._backgroundOpacity = data.backgroundOpacity;
       this._diagonals = data.diagonals;
+      this._diagonalWidth = data.diagonalWidth ?? 0.1;
+      this._diagonalColor = data.diagonalColor;
       this._paddingTop = data.paddingTop ?? 0;
       this._paddingRight = data.paddingRight ?? 0;
       this._paddingBottom = data.paddingBottom ?? 0;
@@ -195,25 +201,61 @@ export class LayoutTableCellElement extends HTMLElement {
   }
 
   get backgroundColor(): string | undefined { return this._backgroundColor; }
-  set backgroundColor(value: string | undefined) { this._backgroundColor = value; }
+  set backgroundColor(value: string | undefined) {
+    this._backgroundColor = value;
+    if (this.isConnected) this.layout();
+  }
 
   get backgroundOpacity(): number | undefined { return this._backgroundOpacity; }
-  set backgroundOpacity(value: number | undefined) { this._backgroundOpacity = value; }
+  set backgroundOpacity(value: number | undefined) {
+    this._backgroundOpacity = value;
+    if (this.isConnected) this.layout();
+  }
 
   get diagonals(): Array<'tl-br' | 'tr-bl'> | undefined { return this._diagonals; }
-  set diagonals(value: Array<'tl-br' | 'tr-bl'> | undefined) { this._diagonals = value; }
+  set diagonals(value: Array<'tl-br' | 'tr-bl'> | undefined) {
+    this._diagonals = value;
+    if (this.isConnected) {
+      this._renderDiagonals();
+      this._renderPlaceholderBorder();
+    }
+  }
+
+  get diagonalWidth(): number { return this._diagonalWidth; }
+  set diagonalWidth(value: number) {
+    this._diagonalWidth = value;
+    if (this.isConnected) this._renderDiagonals();
+  }
+
+  get diagonalColor(): string | undefined { return this._diagonalColor; }
+  set diagonalColor(value: string | undefined) {
+    this._diagonalColor = value;
+    if (this.isConnected) this._renderDiagonals();
+  }
 
   get paddingTop(): number { return this._paddingTop; }
-  set paddingTop(value: number) { this._paddingTop = value; }
+  set paddingTop(value: number) {
+    this._paddingTop = value;
+    if (this.isConnected) this.layout();
+  }
 
   get paddingRight(): number { return this._paddingRight; }
-  set paddingRight(value: number) { this._paddingRight = value; }
+  set paddingRight(value: number) {
+    this._paddingRight = value;
+    if (this.isConnected) this.layout();
+  }
 
   get paddingBottom(): number { return this._paddingBottom; }
-  set paddingBottom(value: number) { this._paddingBottom = value; }
+  set paddingBottom(value: number) {
+    this._paddingBottom = value;
+    if (this.isConnected) this.layout();
+  }
 
   get paddingLeft(): number { return this._paddingLeft; }
-  set paddingLeft(value: number) { this._paddingLeft = value; }
+  set paddingLeft(value: number) {
+    this._paddingLeft = value;
+    if (this.isConnected) this.layout();
+  }
 
   set inheritStyle(style: InheritStyle | undefined) {
     this._inheritStyle = style;
@@ -229,9 +271,40 @@ export class LayoutTableCellElement extends HTMLElement {
   get cellLabels(): string[] { return this._cellLabels; }
 
   get borderTop(): CellBorderEdge | undefined { return this._borderTop; }
+  set borderTop(value: CellBorderEdge | undefined) {
+    this._borderTop = value;
+    this._refreshParentTableBorder();
+  }
+
   get borderRight(): CellBorderEdge | undefined { return this._borderRight; }
+  set borderRight(value: CellBorderEdge | undefined) {
+    this._borderRight = value;
+    this._refreshParentTableBorder();
+  }
+
   get borderBottom(): CellBorderEdge | undefined { return this._borderBottom; }
+  set borderBottom(value: CellBorderEdge | undefined) {
+    this._borderBottom = value;
+    this._refreshParentTableBorder();
+  }
+
   get borderLeft(): CellBorderEdge | undefined { return this._borderLeft; }
+  set borderLeft(value: CellBorderEdge | undefined) {
+    this._borderLeft = value;
+    this._refreshParentTableBorder();
+  }
+
+  private _refreshParentTableBorder(): void {
+    if (!this.isConnected) return;
+    let el: Element | null = this.parentElement;
+    while (el) {
+      if (el instanceof HTMLElement && el.localName === 'x-layout-table' && 'refreshBorder' in el) {
+        (el as unknown as { refreshBorder: () => void }).refreshBorder();
+        break;
+      }
+      el = el.parentElement;
+    }
+  }
 
   _setCellMetrics(x: number, y: number, width: number, height: number, cellLabel: string = '', cellLabels: string[] = []): void {
     const changed = this._x !== x || this._y !== y
@@ -339,11 +412,8 @@ export class LayoutTableCellElement extends HTMLElement {
     const widthPx = this._width * ppm;
     const heightPx = this._height * ppm;
 
-    const edge = this._borderTop ?? this._borderLeft ?? this._borderRight ?? this._borderBottom;
-    if (!edge) return;
-
-    const cssColor = ColorRegistry.getInstance().getCSSColor(edge.color);
-    const widthPxBorder = Math.max(1, Math.ceil((edge.width ?? 1) * ppm));
+    const cssColor = ColorRegistry.getInstance().getCSSColor(this._diagonalColor ?? 'black');
+    const widthPxBorder = Math.max(1, Math.ceil(this._diagonalWidth * ppm));
 
     for (const dir of this._diagonals) {
       const div = document.createElement('div');
@@ -609,20 +679,17 @@ export class LayoutTableCellElement extends HTMLElement {
     const diagonals: PrintPostDiagonal[] = [];
     if (this._diagonals && this._diagonals.length > 0) {
       const ppm = GridCalculator.ppm;
-      const edge = this._borderTop ?? this._borderLeft ?? this._borderRight ?? this._borderBottom;
-      if (edge) {
-        const color = colorRegistry.get(edge.color);
-        const widthPx = Math.max(1, Math.ceil((edge.width ?? 1) * ppm));
-        const x1 = rect.x + window.scrollX;
-        const y1 = rect.y + window.scrollY;
-        const x2 = x1 + rect.width;
-        const y2 = y1 + rect.height;
-        for (const dir of this._diagonals) {
-          if (dir === 'tl-br') {
-            diagonals.push({ direction: 'tl-br', x1, y1, x2, y2, width: widthPx, color });
-          } else {
-            diagonals.push({ direction: 'tr-bl', x1: x2, y1, x2: x1, y2, width: widthPx, color });
-          }
+      const color = colorRegistry.get(this._diagonalColor ?? 'black');
+      const widthPx = Math.max(1, Math.ceil(this._diagonalWidth * ppm));
+      const x1 = rect.x + window.scrollX;
+      const y1 = rect.y + window.scrollY;
+      const x2 = x1 + rect.width;
+      const y2 = y1 + rect.height;
+      for (const dir of this._diagonals) {
+        if (dir === 'tl-br') {
+          diagonals.push({ direction: 'tl-br', x1, y1, x2, y2, width: widthPx, color });
+        } else {
+          diagonals.push({ direction: 'tr-bl', x1: x2, y1, x2: x1, y2, width: widthPx, color });
         }
       }
     }

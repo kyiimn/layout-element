@@ -128,6 +128,12 @@ export type TableCellData = {
    */
   diagonals?: Array<'tl-br' | 'tr-bl'>;
 
+  /** 대각선 두께. @unit mm. 생략 시 0.1mm */
+  diagonalWidth?: number;
+
+  /** 대각선 색상. ColorRegistry CMYK 색상 이름. 생략 시 'black' */
+  diagonalColor?: string;
+
   /** 셀 내부 상단 여백 (mm) */
   paddingTop?: number;
 

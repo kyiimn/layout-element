@@ -294,8 +294,8 @@ export class LayoutBoxElement extends HTMLElement {
     const styleWidth = isStaticInTd && this._model
       ? `${this._model.editableWidth}mm`
       : `${this.absWidth}mm`;
-    const styleLeft = isStaticInTd ? '0mm' : `${this.relLeft}mm`;
-    const styleTop = isStaticInTd ? '0mm' : `${this.relTop}mm`;
+    const styleLeft = isStaticInTd ? `${tdParent!.paddingLeft}mm` : `${this.relLeft}mm`;
+    const styleTop = isStaticInTd ? `${tdParent!.paddingTop}mm` : `${this.relTop}mm`;
 
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
       this._styleRule.style,
