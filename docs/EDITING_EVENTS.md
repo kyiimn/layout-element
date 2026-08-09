@@ -29,7 +29,6 @@
 │                                                                      │
 │  ├── _listeners: Map<EditManagerEventType, Set<EditManagerEventListener>>│
 │  ├── _dispatching: boolean (재진입 보호)                              │
-│  ├── _suppressNextClick: boolean (삽입 직후 클릭 억제)                │
 │  ├── _clickConsumeHandler: ((e: MouseEvent) => void) | null         │
 │  │   (드래그/리사이즈 후 window capture 클릭 소비 리스너)            │
 │  ├── _clickConsumeTimer: ReturnType<setTimeout> | null              │
@@ -129,14 +128,13 @@ React.useEffect(() => {
 | `_selectedLayouts` | `[]` |
 | 포커스된 컨트롤러 | `_blurFocusedParagraph()` + `_focusedController = null` + `_lastFocusedBox = null` |
 | 드래그/리사이즈 상태 | `_isLayoutDragging = false`, `_isLayoutResizing = false`, `_dragTargets = []`, `_dragStartPositions.clear()` |
-| 편집 모드 | `_textEditMode = false`, `_layoutEditMode = false`, `_layoutEditType = 'move'`, `_insertMode = null` |
+| 편집 모드 | `textEditMode = false`, `layoutEditMode = false`, `insertMode = null` (setter 호출, `_modeChangeSuppressed`로 중간 이벤트 억제) |
 | 필터 | `_editableRoles`/`_editableBoxIds`/`_editableTextRoles`/`_editableTextBoxIds`/`_editableParagraphIds`/`_selectableRoles`/`_selectableBoxIds`/`_selectableRootId`/`_editableRootId` = `null` |
 | 하위 컨트롤러 | `_layoutEditController.destroy()` 후 `null`, `_insertController = null`, `_placeGunController = null` |
-| 클릭 소비 | `_removeClickConsumeHandler()`, `_suppressNextClick = false` |
+| 클릭 소비 | `_removeClickConsumeHandler()` |
 | Place Gun 상태 | `_placeGunItems = []`, `_placeGunPaused = false` |
 | 멀티셀렉트 | `_multiSelect = false` |
 | scale | `1` |
-| 문서 내 편집 가능 속성 | `x-layout-box[editable-layout]`과 `x-layout-paragraph[editable-text]`를 순회하며 `editableLayout`/`editableText`를 `false`로 설정 |
 | 이벤트 리스너 | 제거하지 않음 (React `useEffect` cleanup이 담당) |
 
 `reset()` 종료 시 `modeChange` 이벤트가 발생한다 (`previousMode` = reset 전 모드, `mode` = 모두 비활성화 상태).
@@ -251,7 +249,7 @@ export type EditManagerEventListener = (event: EditManagerEvent) => void;
 
 텍스트 편집 이벤트는 `TextEditController`가 `EditManager._dispatch(type, controller, ...)`를 통해 발생시킨다. 모두 `paragraph`와 `controller` 필드를 가지며, `focusChange`는 추가로 `previousParagraph`와 `previousController`를 가진다.
 
-레이아웃/삽입 이벤트에서는 `paragraph`와 `controller`가 `null as unknown as ...`로 설정된다 (이벤트 payload에 불필요).
+레이아웃/삽입 이벤트에서는 `paragraph`와 `controller`가 `null`로 설정된다 (이벤트 payload에 불필요). `focusChange`의 blur/unregister 경로에서도 `controller`는 `null`이다 (M3 수정).
 
 ### 5.1 `focusChange`
 
@@ -281,10 +279,10 @@ manager.addEventListener('focusChange', (event) => {
 |--------|----------|---------------------|
 | 다른 단락 클릭/포커스 | `TextEditController._onFocus()` → `_requestFocus()` → `_dispatch('focusChange', controller, previousParagraph, previousController)` | 이전 포커스 단락 |
 | 포커스 해제 | `TextEditController._onBlur()` → `_releaseFocus()` → `_dispatch('focusChange', controller, previousParagraph, controller)` | 해제된 단락 |
-| 컨트롤러 파괴 | `_unregister(controller)` (포커스 중인 경우) → `_dispatch('focusChange', controller, previousParagraph, controller)` | 해제된 단락 |
+| 컨트롤러 파괴 | `_unregister(controller)` (포커스 중인 경우) → 부모 박스가 `_selectedLayouts`에 있으면 `selected` 제거 + `_dispatchLayoutSelection(previousLayouts)` → `_dispatch('focusChange', controller, previousParagraph, controller)` | 해제된 단락 |
 | `EditManager.focusParagraph(target, options?)` | 내부적으로 `_requestFocus()` 호출 | 이전 포커스 단락 |
 
-**주의**: `_releaseFocus`와 `_unregister`에서는 `controller` 인자가 "이전 컨트롤러"로 전달되므로, `event.controller`는 여전히 해제된 컨트롤러를 가리킨다. `event.paragraph`도 해제된 단락이다. 이 경우 외부 UI는 `manager.focusedParagraph === null`을 확인하여 포커스가 해제되었음을 감지해야 한다.
+**주의**: `_releaseFocus`와 `_unregister`에서는 `controller`가 `null`로 전달되어 `event.controller`는 `null`이다. `event.previousController`가 해제된 컨트롤러를, `event.paragraph`가 해제된 단락을 가리킨다. 외부 UI는 `manager.focusedController === null`을 확인하여 포커스가 해제되었음을 감지할 수 있다.
 
 ### 5.2 `textChange`
 
@@ -330,7 +328,7 @@ manager.addEventListener('styleChange', (event) => {
 
 ### 5.4 `selectionStart`
 
-마우스 드래그로 텍스트 선택이 시작될 때 발생한다.
+텍스트 선택이 생성될 때 발생한다. 마우스 드래그 선택 시작, 더블클릭 단어 선택, Ctrl+A 전체 선택, triple-click 전체 선택 시 발생한다.
 
 ```typescript
 manager.addEventListener('selectionStart', (event) => {
@@ -344,11 +342,17 @@ manager.addEventListener('selectionStart', (event) => {
 | `paragraph` | `LayoutParagraphElement` | 단락 |
 | `controller` | `TextEditController` | 편집 컨트롤러 |
 
-**발생 트리거**: `TextEditController`에서 마우스 드래그 선택이 시작될 때 `EditManager._notifySelectionStart(controller)` → `_dispatch('selectionStart', controller)`.
+**발생 트리거**:
+
+| 트리거 | 호출 경로 |
+|--------|----------|
+| 마우스 드래그 선택 시작 | `TextEditController._onMouseMove()` → `EditManager._notifySelectionStart(controller)` |
+| 더블클릭 단어 선택 | `TextEditController._onDoubleClick()` → `_selectAll()` → `_notifySelectionStart` + `_notifySelectionEnd` |
+| Ctrl+A 전체 선택 / triple-click 전체 선택 | `TextEditController._selectAll()` → `_notifySelectionStart` + `_notifySelectionEnd` |
 
 ### 5.5 `selectionEnd`
 
-마우스 드래그가 끝나고 텍스트 선택이 확정될 때 발생한다.
+텍스트 선택이 확정되거나 제거될 때 발생한다. 마우스 드래그 선택 종료, 더블클릭 단어 선택, Ctrl+A 전체 선택, triple-click 전체 선택, ESC 선택 해제 시 발생한다.
 
 ```typescript
 manager.addEventListener('selectionEnd', (event) => {
@@ -362,7 +366,14 @@ manager.addEventListener('selectionEnd', (event) => {
 | `paragraph` | `LayoutParagraphElement` | 단락 |
 | `controller` | `TextEditController` | 편집 컨트롤러 |
 
-**발생 트리거**: `TextEditController`에서 마우스 드래그 선택이 종료될 때 `EditManager._notifySelectionEnd(controller)` → `_dispatch('selectionEnd', controller)`.
+**발생 트리거**:
+
+| 트리거 | 호출 경로 |
+|--------|----------|
+| 마우스 드래그 선택 종료 | `TextEditController._onMouseUp()` → `EditManager._notifySelectionEnd(controller)` (선택이 존재할 때만) |
+| 더블클릭 단어 선택 | `TextEditController._onDoubleClick()` → `_selectAll()` → `_notifySelectionStart` + `_notifySelectionEnd` |
+| Ctrl+A 전체 선택 / triple-click 전체 선택 | `TextEditController._selectAll()` → `_notifySelectionStart` + `_notifySelectionEnd` |
+| ESC 선택 해제 | `TextEditController._clearSelection()` → `_notifySelectionEnd(controller)` (선택이 있었을 때만) |
 
 ### 5.6 `cursorMove`
 
@@ -383,7 +394,7 @@ manager.addEventListener('cursorMove', (event) => {
 
 **발생 트리거**: `TextEditController`에서 커서 위치가 변경될 때 `EditManager._notifyCursorMove(controller)` → `_dispatch('cursorMove', controller)`.
 
-**쓰로틀링**: 키보드 연속 입력(예: 한 글자씩 빠르게 타이핑) 중에는 매 입력마다 `cursorMove`가 발생하지 않고, 최초 KeyDown과 마지막 KeyUp에만 발생한다. 이는 편집 UI의 불필요한 갱신을 방지하기 위함이다.
+**쓰로틀링**: 키보드 연속 입력(예: 한 글자씩 빠르게 타이핑) 중에는 매 입력마다 `cursorMove`가 발생하지 않고, 최초 KeyDown에만 발생한다. 이는 편집 UI의 불필요한 갱신을 방지하기 위함이다.
 
 ---
 
@@ -415,8 +426,10 @@ manager.addEventListener('layoutSelectionChange', (event) => {
 | 트리거 | 호출 경로 |
 |--------|----------|
 | `EditManager.selectLayout(target, multi?)` | `_selectLayoutInternal()` → `_dispatchLayoutSelection(previousLayouts)`. 이전 선택에서 `text-focused` 속성을 제거할 때 포커스된 paragraph의 부모 box는 보존한다 |
+| `EditManager.selectLayoutExclusive(target)` | `multiSelect` 상태와 무관하게 기존 선택을 모두 제거하고 대상만 단일 선택 → `_dispatchLayoutSelection(previousLayouts)` 1회 발생. 컨텍스트 메뉴 우클릭에서 clear+select를 원자적으로 수행 |
 | `EditManager.clearLayoutSelection(preserveFocusedBox?)` | `_dispatchLayoutSelection(previousLayouts)`. `preserveFocusedBox=false` 시 `_lastFocusedBox`도 초기화 |
 | 요소가 DOM에서 제거됨 | `_unregisterLayout(element)` → `_dispatchLayoutSelection(previousLayouts)` |
+| 텍스트 편집 컨트롤러 파괴 (포커스 중) | `_unregister(controller)` → 부모 박스가 `_selectedLayouts`에 있으면 `selected` 제거 + `_dispatchLayoutSelection(previousLayouts)` |
 | 텍스트 편집 포커스로 인한 자동 선택 | `_selectBoxForParagraph()` → `_dispatchLayoutSelection(previousLayouts)` |
 | 텍스트 편집 포커스 해제 | `_clearBoxSelectionForParagraph()` (현재 no-op) |
 
@@ -563,7 +576,7 @@ manager.addEventListener('insert', (event) => {
 
 **`layoutAdd` 이벤트 동시 발생**: `_dispatchInsert` 호출 직후 `_dispatchLayoutAdd`도 함께 발생한다. `insert` 이벤트의 리스너에서 `layoutAdd` 이벤트도 함께 처리해야 하는 경우, 별도 리스너로 `layoutAdd`를 구독하면 된다.
 
-**`_suppressNextClick` 설정**: `_dispatchInsert`는 `_suppressNextClick = true`를 설정하여, 삽입 직후 발생하는 클릭 이벤트가 `LayoutSelectionController._onClick`에서 무시되도록 한다. 자세한 내용은 [9. 삽입 직후 클릭 억제](#9-삽입-직후-클릭-억제)를 참조한다.
+**`_suppressLayoutClick` 호출**: `_dispatchInsert`는 `_suppressLayoutClick()`을 호출하여, 삽입 직후 발생하는 클릭 이벤트를 window capture phase에서 소비(`stopPropagation()` + `preventDefault()`)하여 `LayoutSelectionController._onClick`에 도달하지 않도록 한다. click이 발생하지 않으면 200ms 타임아웃으로 자동 제거된다. 자세한 내용은 [9. 클릭 억제](#11-클릭-억제-_suppresslayoutclick)를 참조한다.
 
 ### 7.2 `insertCancel`
 
@@ -583,7 +596,7 @@ manager.addEventListener('insertCancel', (event) => {
 
 **발생 트리거**: `InsertController._cancel()` → `EditManager._dispatchInsertCancel()`.
 
-**`_suppressNextClick` 설정**: `_dispatchInsertCancel`도 `_suppressNextClick = true`를 설정한다. 취소 직후 발생하는 클릭이 레이아웃 선택을 해제하지 않도록 방지한다.
+**`_suppressLayoutClick` 호출**: `_dispatchInsertCancel`도 `_suppressLayoutClick()`을 호출한다. 취소 직후 발생하는 클릭이 레이아웃 선택을 해제하지 않도록 window capture phase에서 차단한다.
 
 ---
 
@@ -617,7 +630,7 @@ manager.addEventListener('layoutAdd', (event) => {
 
 | source | 트리거 | 호출 경로 |
 |--------|--------|----------|
-| `'insert'` | 삽입 모드로 새 요소 생성 | `InsertController._finishInsert()` → `EditManager._dispatchLayoutAdd({ source: 'insert' })` |
+| `'insert'` | 삽입 모드로 새 요소 생성, Alt+드래그 박스 복제 | `InsertController._finishInsert()` 또는 `LayoutEditController._cloneBoxForAltDrag()` → `EditManager._dispatchLayoutAdd({ source: 'insert' })` |
 | `'reparent'` | reparent 모드에서 box 이동 | `LayoutEditController._tryReparent()` → `EditManager._dispatchLayoutAdd({ source: 'reparent' })` |
 
 **재진입 보호**: 다른 이벤트 디스패치 중에는 `layoutAdd` 이벤트가 발생하지 않는다 (`_dispatching` 플래그).
@@ -648,7 +661,7 @@ manager.addEventListener('layoutRemove', (event) => {
 
 | source | 트리거 | 호출 경로 |
 |--------|--------|----------|
-| `'reparent'` | reparent 모드에서 이전 컨테이너로부터 box 제거 | `LayoutEditController._tryReparent()` → `box.remove()` → `EditManager._dispatchLayoutRemove({ source: 'reparent' })` |
+| `'reparent'` | reparent 모드에서 이전 컨테이너로부터 box 제거 | `LayoutEditController._tryReparent()` → `EditManager._dispatchLayoutRemove({ source: 'reparent' })` → `box.remove()` (이벤트가 DOM 제거 **이전**에 발생하여 리스너가 분리 전 컨텍스트에 접근 가능) |
 
 **재진입 보호**: 다른 이벤트 디스패치 중에는 `layoutRemove` 이벤트가 발생하지 않는다 (`_dispatching` 플래그).
 
@@ -810,7 +823,7 @@ manager.addEventListener('contextMenu', (event) => {
 ### 선택 룰
 
 1. **이미 선택된 box에서 우클릭** → 기존 selection 유지 (멀티 선택 포함)
-2. **선택되지 않은 box 우클릭** → 기존 selection 해제 후 해당 box만 선택
+2. **선택되지 않은 box 우클릭** → `selectLayoutExclusive(box)`로 기존 selection 해제 후 해당 box만 단일 선택 (`layoutSelectionChange` 1회 발생)
 3. **빈 공간 우클릭** (document 내부, box 외부) → selection 해제, `element`는 `LayoutDocumentElement`
 4. **document 외부 우클릭** → 이벤트 디스패치하지 않음
 
@@ -912,64 +925,44 @@ interface EditModeState {
 
 **중간 상태 이벤트 억제**: 모드 setter가 내부적으로 다른 모드 setter를 호출할 때(예: `textEditMode = true`가 `layoutEditMode = false`와 `insertMode = null`을 호출), `_modeChangeSuppressed` 플래그로 중간 상태의 이벤트를 억제한다. 최종적으로 모드가 확정된 후 한 번만 `modeChange` 이벤트가 발생한다.
 
+**교차 비활성화 불변 조건**: 세 모드 setter 중 하나를 활성화하면 나머지 두 모드는 반드시 비활성화된다. `insertMode` setter는 `InsertController.isDragging === true` 중에 non-null 값으로 설정될 때(예: static ↔ absolute 전환) 드래그를 이어가기 위해 커서 변경과 `clearLayoutSelection`을 건너뛰지만, `layoutEditMode = false`와 `textEditMode = false` 비활성화는 드래그 중에도 항상 실행된다. 자세한 내용은 `EDITING_INSERT.md` [2.1 insertMode getter/setter](#21-editmanagerinsertmode-getter--setter)를 참조한다.
+
 **동일 상태 no-op**: setter가 현재 값과 동일한 값을 받으면 `_dispatchModeChange`를 호출하지 않는다. 예: `textEditMode`가 이미 `true`일 때 `textEditMode = true`를 호출하면 이벤트가 발생하지 않는다.
 
 ---
 
-## 11. 클릭 억제 (`_suppressNextClick` / `_suppressLayoutClick`)
+## 11. 클릭 억제 (`_suppressLayoutClick`)
 
-### 10.1 `_suppressNextClick` 플래그 (삽입 완료/취소용)
+### 11.1 개요
 
-브라우저는 `mouseup` 이후 자동으로 `click` 이벤트를 발생시킨다. 삽입 완료/취소 직후 이 클릭이 `LayoutSelectionController._onClick`에 의해 레이아웃 선택을 해제하는 것을 방지하기 위해, `EditManager`는 `_suppressNextClick` 플래그를 사용한다.
+브라우저는 `mouseup` 이후 자동으로 `click` 이벤트를 발생시킨다. 편집 액션(삽입 완료/취소, 드래그/리사이즈 완료, Place Gun 배치) 직후 이 click이 `LayoutSelectionController._onClick`에 의해 레이아웃 선택을 해제하는 것을 방지하기 위해, `EditManager`는 `_suppressLayoutClick()` 메서드를 사용한다.
 
-플래그가 설정되는 상황:
+### 11.2 메커니즘
 
-1. **삽입 완료/취소 직후** (`_dispatchInsert` / `_dispatchInsertCancel`): 삽입 완료 또는 취소 직후의 클릭이 레이아웃 선택을 해제하지 않도록 방지한다.
+`_suppressLayoutClick()`은 **window capture phase 일회성 click 리스너**를 등록한다. 이 리스너는 `LayoutSelectionController._onClick`(document capture phase)보다 먼저 실행되어 click을 소비(`stopPropagation()` + `preventDefault()`)한다. click이 발생하지 않으면 200ms 타임아웃으로 리스너가 자동 제거된다.
 
-### 8.2 `_suppressLayoutClick()` (드래그/리사이즈 완료용)
+과거에는 삽입 완료/취소에 `_suppressNextClick` 불린 플래그를 사용했으나, 이 방식은 mousedown의 `preventDefault()`로 인해 브라우저가 click 이벤트를 발생시키지 않을 때 플래그가 소비되지 않고 남아 다음 정상 클릭을 잘못 무시하는 문제가 있었다 (EVENT_SYSTEM_AUDIT.md C1). 이를 해결하기 위해 삽입 경로도 `_suppressLayoutClick()`으로 통합되었다.
 
-드래그/리사이즈 완료 후에는 `_suppressNextClick` 플래그 방식 대신 **window capture phase 일회성 click 리스너**를 사용한다. 기존 플래그 방식은 mousedown의 `preventDefault()`로 인해 브라우저가 click 이벤트를 발생시키지 않을 때 플래그가 소비되지 않고 남아 다음 정상 클릭을 잘못 무시하는 문제가 있었다.
+### 11.3 호출 시점
 
-새 방식은:
+`_suppressLayoutClick()`이 호출되는 상황:
 
-1. **드래그 이동 완료 직후** (`LayoutEditController._onMouseUp`): `dragMoved === true`일 때 호출.
-2. **리사이즈 완료 직후** (`LayoutEditController._onResizeMouseUp`): `moved === true`일 때 호출.
-3. window capture phase에 일회성 click 리스너를 등록하여 `LayoutSelectionController._onClick`보다 먼저 실행되어 click을 소비(`stopPropagation()` + `preventDefault()`)한다.
-4. click이 발생하지 않으면 200ms 타임아웃으로 리스너가 자동 제거된다.
+1. **삽입 완료 직후** (`_dispatchInsert`): 삽입 완료 직후의 클릭이 레이아웃 선택을 해제하지 않도록 방지.
+2. **삽입 취소 직후** (`_dispatchInsertCancel`): ESC 취소 직후의 클릭이 레이아웃 선택을 해제하지 않도록 방지.
+3. **드래그 이동 완료 직후** (`LayoutEditController._onMouseUp`): `dragMoved === true`일 때 호출.
+4. **리사이즈 완료 직후** (`LayoutEditController._onResizeMouseUp`): `moved === true`일 때 호출.
+5. **Place Gun 배치 직후** (`PlaceGunController`): 배치 후 click이 선택을 해제하지 않도록 방지.
 
-### 8.3 동작 흐름 (삽입 완료/취소)
-
-```
-InsertController._finishInsert() 또는 _cancel()
-    │
-    ▼
-EditManager._dispatchInsert(detail) 또는 _dispatchInsertCancel()
-    ├── _suppressNextClick = true
-    └── 리스너 호출 (insert/insertCancel 이벤트)
-    │
-    ▼
-(브라우저가 click 이벤트 발생)
-    │
-    ▼
-LayoutSelectionController._onClick(event)
-    ├── _consumeSuppressNextClick() 호출
-    │   ├── _suppressNextClick === true?
-    │   │   ├── true → _suppressNextClick = false, return true
-    │   │   └── false → return false
-    │   └── return true → _onClick early return (선택 처리 생략)
-    └── return false → 정상 선택 처리 진행
-```
-
-### 8.4 동작 흐름 (드래그/리사이즈 완료)
+### 11.4 동작 흐름
 
 ```
-LayoutEditController._onMouseUp() 또는 _onResizeMouseUp()
+편집 액션 완료 (삽입/취소/드래그/리사이즈/Place Gun)
     │
-    ├── dragMoved === true (또는 moved === true)?
-    │   ├── true → EditManager._suppressLayoutClick() 호출
-    │   │   ├── window capture phase에 일회성 click 리스너 등록
-    │   │   └── 200ms 타임아웃 설정 (자동 제거용)
-    │   └── false → 억제하지 않음
+    ▼
+EditManager._suppressLayoutClick() 호출
+    ├── 기존 click 소비 리스너가 있으면 제거 (_removeClickConsumeHandler)
+    ├── window capture phase에 일회성 click 리스너 등록
+    └── 200ms 타임아웃 설정 (자동 제거용)
     │
     ▼
 (브라우저가 click 이벤트 발생)
@@ -988,34 +981,24 @@ LayoutSelectionController._onClick는 호출되지 않음 (stopPropagation으로
 200ms 타임아웃 → _removeClickConsumeHandler() → 리스너 제거
 ```
 
-### 8.5 API
+### 11.5 API
 
 ```typescript
 /**
- * 드래그/리사이즈 완료 직후 발생하는 클릭 이벤트를 억제한다.
- * window capture phase에 일회성 click 리스너를 등록하여
- * LayoutSelectionController._onClick보다 먼저 click을 소비한다.
+ * 편집 액션(삽입/취소/드래그/리사이즈/Place Gun) 완료 직후 발생하는
+ * 클릭 이벤트를 억제한다. window capture phase에 일회성 click 리스너를
+ * 등록하여 LayoutSelectionController._onClick보다 먼저 click을 소비한다.
  * click이 발생하지 않으면 200ms 타임아웃으로 자동 제거된다.
  * @internal
  */
 _suppressLayoutClick(): void
-
-/**
- * 삽입 완료/취소 직후 발생하는 클릭 이벤트를 무시하기 위한 플래그를 소비한다.
- * _dispatchInsert, _dispatchInsertCancel에서 true로 설정되며,
- * LayoutSelectionController._onClick에서 한 번만 소비된다.
- * 드래그/리사이즈 완료 후 클릭 억제는 _suppressLayoutClick()이
- * 별도의 window capture 리스너로 처리하므로 이 플래그를 사용하지 않는다.
- * @internal
- */
-_consumeSuppressNextClick(): boolean
 ```
 
-이 메서드들은 `@internal`이므로 외부에서 직접 호출하지 않는다. `LayoutEditController`와 `LayoutSelectionController`가 내부적으로 사용한다.
+이 메서드는 `@internal`이므로 외부에서 직접 호출하지 않는다. `EditManager`의 `_dispatchInsert`/`_dispatchInsertCancel`, `LayoutEditController`, `PlaceGunController`가 내부적으로 사용한다.
 
-### 8.6 일회성 소비
+### 11.6 일회성 소비
 
-`_suppressNextClick`은 한 번 소비되면 `false`로 재설정된다. 이후의 클릭 이벤트는 정상적으로 처리된다. `_suppressLayoutClick()`의 window capture 리스너도 click 소비 후 즉시 제거되며, click이 발생하지 않으면 200ms 후 자동 제거된다.
+`_suppressLayoutClick()`의 window capture 리스너는 click 소비 후 즉시 제거되며, click이 발생하지 않으면 200ms 후 자동 제거된다. 이후의 클릭 이벤트는 정상적으로 처리된다.
 
 ---
 
@@ -1148,7 +1131,7 @@ InsertController._onMouseUp
         ├── _createElement(...)
         ├── _cleanup()
         └── EditManager._dispatchInsert(detail)
-            ├── _suppressNextClick = true
+            ├── _suppressLayoutClick() 호출 (window capture click 리스너 등록)
             ├── _dispatching = true
             ├── insert 리스너 호출
             │   └── 외부 UI: 새 요소 정보 표시, undo 스택
@@ -1157,8 +1140,8 @@ InsertController._onMouseUp
 (이후 브라우저가 click 이벤트 발생)
     │
     ▼
-LayoutSelectionController._onClick
-    └── _consumeSuppressNextClick() → true → early return (선택 해제 방지)
+window capture 리스너가 click 소비 (stopPropagation + preventDefault)
+    └── LayoutSelectionController._onClick는 호출되지 않음 (선택 해제 방지)
 ```
 
 ---
@@ -1170,8 +1153,8 @@ LayoutSelectionController._onClick
 | `focusChange` | 텍스트 | `paragraph`, `controller`, `previousParagraph?`, `previousController?` | 단락 포커스 이동 |
 | `textChange` | 텍스트 | `paragraph`, `controller` | 텍스트 내용 변경 |
 | `styleChange` | 텍스트 | `paragraph`, `controller` | 유효 스타일 변경 |
-| `selectionStart` | 텍스트 | `paragraph`, `controller` | 텍스트 드래그 선택 시작 |
-| `selectionEnd` | 텍스트 | `paragraph`, `controller` | 텍스트 드래그 선택 종료 |
+| `selectionStart` | 텍스트 | `paragraph`, `controller` | 텍스트 선택 생성 (드래그 시작, 더블클릭, Ctrl+A, triple-click) |
+| `selectionEnd` | 텍스트 | `paragraph`, `controller` | 텍스트 선택 확정/제거 (드래그 종료, 더블클릭, Ctrl+A, triple-click, ESC 해제) |
 | `cursorMove` | 텍스트 | `paragraph`, `controller` | 커서 위치 변경 (쓰로틀링) |
 | `layoutSelectionChange` | 레이아웃 | `selectedLayouts`, `previousLayouts` | box 선택 변경 |
 | `layoutMove` | 레이아웃 | `layoutElement`, `previousLeft/Top`, `left/top`, `canceled`, `newContainer?`, `previousContainer?` | 드래그 이동 완료/취소 (reparent 모드 시 부모 정보 포함) |
@@ -1194,10 +1177,10 @@ LayoutSelectionController._onClick
 
 | 파일 | 역할 |
 |------|------|
-| `src/edit/edit-manager.ts` | `EditManager`: 이벤트 시스템, `addEventListener`/`removeEventListener`, `_dispatch*` 디스패처, `_dispatching` 재진입 보호, `_suppressNextClick` 삽입 후 클릭 억제, `_suppressLayoutClick` 드래그/리사이즈 후 window capture 클릭 소비, `_clickConsumeHandler`/`_clickConsumeTimer`, `modeChange` 이벤트 발생 (`_dispatchModeChange` 호출), `_modeChangeSuppressed` 중간 상태 이벤트 억제 |
+| `src/edit/edit-manager.ts` | `EditManager`: 이벤트 시스템, `addEventListener`/`removeEventListener`, `_dispatch*` 디스패처, `_dispatching` 재진입 보호, `_suppressLayoutClick` 편집 액션(삽입/취소/드래그/리사이즈/Place Gun) 후 window capture 클릭 소비, `_clickConsumeHandler`/`_clickConsumeTimer`, `modeChange` 이벤트 발생 (`_dispatchModeChange` 호출), `_modeChangeSuppressed` 중간 상태 이벤트 억제 |
 | `src/edit/text-edit-controller.ts` | `TextEditController`: 텍스트 편집 이벤트 발생 (`_notifyTextChange`, `_notifyStyleChange`, `_notifySelectionStart`, `_notifySelectionEnd`, `_notifyCursorMove`, `_requestFocus`, `_releaseFocus`), `getOffsetFromPoint` 좌표→오프셋 변환 |
-| `src/edit/layout-edit-controller.ts` | `LayoutEditController`: `layoutMove`, `layoutResize` 이벤트 발생 (`_dispatchLayoutMove`, `_dispatchLayoutResize` 호출), `layoutAdd`/`layoutRemove` 이벤트 발생 (reparent 시 `_dispatchLayoutAdd`/`_dispatchLayoutRemove` 호출), `_suppressLayoutClick` 호출 (드래그/리사이즈 완료 후 클릭 억제) |
-| `src/edit/layout-selection-controller.ts` | `LayoutSelectionController`: `_consumeSuppressNextClick` 소비 (삽입 후 클릭 억제), `layoutSelectionChange` 간접 발생 (`selectLayout` 호출). 드래그/리사이즈 후 클릭은 `_suppressLayoutClick`의 window capture 리스너가 먼저 소비하여 `_onClick`이 호출되지 않음. 더블클릭 시 텍스트 편집 모드 전환 + 포커스 부여 (`_onDblClick`) |
+| `src/edit/layout-edit-controller.ts` | `LayoutEditController`: `layoutMove`, `layoutResize` 이벤트 발생 (`_dispatchLayoutMove`, `_dispatchLayoutResize` 호출), `layoutAdd`/`layoutRemove` 이벤트 발생 (reparent 시 `_dispatchLayoutAdd`/`_dispatchLayoutRemove` 호출, Alt+드래그 복제 시 `_dispatchLayoutAdd({ source: 'insert' })` 호출), `_suppressLayoutClick` 호출 (드래그/리사이즈 완료 후 클릭 억제) |
+| `src/edit/layout-selection-controller.ts` | `LayoutSelectionController`: `layoutSelectionChange` 간접 발생 (`selectLayout`/`selectLayoutExclusive` 호출). 컨텍스트 메뉴 우클릭 시 `selectLayoutExclusive`로 원자적 단일 선택. 편집 액션(삽입/취소/드래그/리사이즈/Place Gun) 후 click은 `_suppressLayoutClick`의 window capture 리스너가 먼저 소비하여 `_onClick`이 호출되지 않음. 더블클릭 시 텍스트 편집 모드 전환 + 포커스 부여 (`_onDblClick`) |
 | `src/edit/insert-controller.ts` | `InsertController`: `insert`, `insertCancel` 이벤트 발생 (`_dispatchInsert`, `_dispatchInsertCancel` 호출), `layoutAdd` 이벤트 발생 (`_dispatchLayoutAdd` 호출) |
 | `src/edit/place-gun-controller.ts` | `PlaceGunController`: Place Gun 클릭 배치 처리, `_consumePlaceGunItem` 호출로 항목 소비 → `placeGunChange` 간접 발생. 새 요소를 생성하지 않고 기존 paragraph/image에 데이터 주입하므로 `layoutAdd` 이벤트는 발생하지 않음 |
 | `src/types/edit/insert.type.ts` | `InsertEventDetail` 타입 정의 (`insert` 이벤트 payload) |
@@ -1214,12 +1197,12 @@ LayoutSelectionController._onClick
 
 - **재진입 금지**: 리스너 내에서 `EditManager` 상태를 변경하여 동일한 이벤트를 다시 발생시키려 하면 무시된다 (`_dispatching` 가드). 다른 타입의 이벤트도 동일 플래그를 공유하므로, 리스너 내에서 다른 이벤트를 발생시키는 것도 차단된다.
 - **예외 격리**: 리스너에서 예외가 발생해도 `console.error`로만 출력되고 다른 리스너나 `EditManager` 상태에는 영향을 주지 않는다.
-- **`paragraph`/`controller`의 `null` 처리**: 레이아웃/삽입 이벤트에서 `paragraph`와 `controller`는 `null as unknown as LayoutParagraphElement`로 설정된다. 외부 UI는 `event.type`을 먼저 확인하여 필드 접근 여부를 결정해야 한다.
+- **`paragraph`/`controller`의 `null` 처리**: 레이아웃/삽입 이벤트에서 `paragraph`와 `controller`는 `null`이다. `focusChange`의 blur/unregister 경로에서도 `controller`는 `null`이다. 외부 UI는 `event.type`과 `event.controller === null`을 확인하여 필드 접근 여부를 결정해야 한다.
 - **`selectedLayouts`는 복사본**: `layoutSelectionChange`의 `selectedLayouts`는 `[...this._selectedLayouts]`로 새 배열이므로, 리스너에서 직접 수정해도 내부 상태에 영향을 주지 않는다.
-- **`cursorMove` 쓰로틀링**: 키보드 연속 입력 중에는 최초 KeyDown과 마지막 KeyUp에만 `cursorMove`가 발생한다. 매 입력마다 발생하지 않으므로, 실시간 커서 위치가 필요하면 `controller.cursorOffset`을 직접 조회한다.
+- **`cursorMove` 쓰로틀링**: 키보드 연속 입력 중에는 최초 KeyDown에만 `cursorMove`가 발생한다. 매 입력마다 발생하지 않으므로, 실시간 커서 위치가 필요하면 `controller.cursorOffset`을 직접 조회한다.
 - **`layoutMove`/`layoutResize` 발생 조건**: 3px 이하의 이동(클릭으로 간주)에서는 발생하지 않는다. `BoxDragState.dragMoved`/`BoxResizeState.moved`가 `true`일 때만 발생한다.
 - **`insert` 발생 조건**: 드래그 거리 3px 이상, width/height 1 이상일 때만 발생한다. 임계값 미만이면 `_cleanup()` 후 return하여 이벤트가 발생하지 않는다.
-- **`_suppressNextClick` 일회성**: 삽입/취소 직후의 첫 번째 클릭만 억제된다. 이후 클릭은 정상적으로 처리된다. 드래그/리사이즈 완료 후 클릭 억제는 `_suppressLayoutClick()`의 window capture 리스너로 처리되며, click 소비 후 즉시 제거되거나 200ms 타임아웃으로 자동 제거된다.
+- **`_suppressLayoutClick` 일회성**: 편집 액션(삽입/취소/드래그/리사이즈/Place Gun) 직후의 첫 번째 클릭만 억제된다. window capture 리스너가 click 소비 후 즉시 제거되며, click이 발생하지 않으면 200ms 타임아웃으로 자동 제거된다. 이후 클릭은 정상적으로 처리된다.
 - **리스너 등록 순서**: 동일 `type`에 여러 리스너를 등록하면 등록 순서대로 호출된다 (`Set`의 삽입 순서 보장).
 - **리스너 제거 시점**: 리스너를 제거하면 현재 디스패치 중인 `Set`에서도 즉시 제외되지만, 이미 실행 중인 리스너는 완료된다.
 - **`modeChange` 중간 상태 억제**: 모드 setter가 내부적으로 다른 모드 setter를 호출할 때 `_modeChangeSuppressed` 플래그로 중간 상태의 이벤트가 억제된다. 최종적으로 모드가 확정된 후 한 번만 `modeChange` 이벤트가 발생한다. 예: `textEditMode = true` 호출 시 내부적으로 `layoutEditMode = false`와 `insertMode = null`이 호출되지만, `modeChange` 이벤트는 최종적으로 `textEditMode = true`가 확정된 후 한 번만 발생한다.

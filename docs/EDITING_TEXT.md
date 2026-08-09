@@ -475,9 +475,9 @@ InheritStyle (부모에서 상속)
 | `focusChange` | 포커스가 다른 단락으로 이동할 때 | `paragraph`, `controller`, `previousParagraph`, `previousController` |
 | `textChange` | 텍스트 내용이 변경될 때 (입력, 삭제, 붙여넣기, 줄바꿈) | `paragraph`, `controller` |
 | `styleChange` | 커서 위치가 변경되어 유효 스타일이 달라질 때 | `paragraph`, `controller` |
-| `cursorMove` | 커서 위치가 변경될 때. 키보드 연속 입력 시 최초 KeyDown과 마지막 KeyUp에만 발생 | `paragraph`, `controller` |
-| `selectionStart` | 마우스 드래그로 선택이 시작될 때 | `paragraph`, `controller` |
-| `selectionEnd` | 마우스 드래그가 끝나고 선택이 확정될 때 | `paragraph`, `controller` |
+| `cursorMove` | 커서 위치가 변경될 때. 키보드 연속 입력 시 최초 KeyDown에만 발생 | `paragraph`, `controller` |
+| `selectionStart` | 텍스트 선택이 생성될 때 (드래그 시작, 더블클릭, Ctrl+A, triple-click) | `paragraph`, `controller` |
+| `selectionEnd` | 텍스트 선택이 확정/제거될 때 (드래그 종료, 더블클릭, Ctrl+A, triple-click, ESC 해제) | `paragraph`, `controller` |
 
 ```ts
 type EditManagerEventType =
@@ -869,7 +869,7 @@ flowchart TD
 | `Backspace` | 없음 | 커서 앞 문자를 삭제. 선택 영역이 있으면 선택 영역을 삭제 |
 | `Delete` | 없음 | 커서 뒤 문자를 삭제. 선택 영역이 있으면 선택 영역을 삭제 |
 | `Enter` | 없음 | 줄바꿈(`\n`) 삽입. 선택 영역이 있으면 선택 영역을 대체 |
-| `Escape` | 없음 | 활성 선택 영역이 있으면 선택 영역을 해제. 선택 영역이 없으면 텍스트 편집 모드를 종료하고 일반 모드로 전환 (`EditManager.textEditMode = false`) |
+| `Escape` | 없음 | 활성 선택 영역이 있으면 `_clearSelection()`으로 선택 영역을 해제하고 `selectionEnd` 이벤트 발생. 선택 영역이 없으면 텍스트 편집 모드를 종료하고 일반 모드로 전환 (`EditManager.textEditMode = false`) |
 | `a` | `Ctrl` 또는 `Cmd` | 전체 선택 |
 | `c` | `Ctrl` 또는 `Cmd` | 선택 영역을 클립보드에 복사 |
 | `x` | `Ctrl` 또는 `Cmd` | 선택 영역을 잘라내기(클립보드 복사 + 삭제) |
@@ -1038,6 +1038,7 @@ flowchart TD
 2. `SelectionRange.fromOffsets(0, content.length)`로 전체 선택 영역을 만든다.
 3. `_cursorModel.offset`을 `content.length`로 설정하고, `textarea.setSelectionRange(0, content.length)`로 textarea 선택 영역을 동기화한다.
 4. `_updateCursorPosition()`, `_updateSelection()` 호출.
+5. `_notifySelectionStart` + `_notifySelectionEnd` 이벤트 발생 (이산 선택 액션이므로 시작과 끝을 함께 발생).
 
 #### `Ctrl+C` / `Ctrl+X`
 
@@ -1132,7 +1133,7 @@ flowchart TD
 
 ### 5.5 트리플클릭
 
-`_onClick`에서 클릭 카운트가 3에 도달하면 `_onTripleClick(event)`를 호출한다. `_onTripleClick`은 `event.preventDefault()` 후 `_selectAll()`을 호출해 단락 전체를 선택한다.
+`_onClick`에서 클릭 카운트가 3에 도달하면 `_onTripleClick(event)`를 호출한다. `_onTripleClick`은 `event.preventDefault()` 후 `_selectAll()`을 호출해 단락 전체를 선택한다. `_selectAll()` 내부에서 `selectionStart` + `selectionEnd` 이벤트가 발생한다.
 
 ### 5.6 `_onMouseDown`의 두 경로
 
@@ -1250,6 +1251,8 @@ sequenceDiagram
 7. `_debounceTimer`가 있으면 취소.
 8. `paragraph.render()` 호출.
 9. `_updateCursorPosition()` 호출.
+10. `_manager._notifyTextChange(this)` 호출 (조합 전 텍스트로 복원됨을 외부 UI에 통지).
+11. `_manager._notifyCursorMove(this)` 호출 (커서가 조합 시작 위치로 이동됨을 외부 UI에 통지).
 
 ### 6.5 blur/visibilitychange 중 조합 처리
 

@@ -1571,6 +1571,7 @@ class EditManager {
 
   // 레이아웃 선택
   selectLayout(target): boolean;
+  selectLayoutExclusive(target: LayoutElement | string): boolean;
   clearLayoutSelection(preserveFocusedBox?: boolean): void;
   get selectedLayouts: LayoutElement[];
   get selectedLayoutIds: string[];
@@ -1650,7 +1651,7 @@ type EditManagerEventType =
 interface EditManagerEvent {
   type: EditManagerEventType;
   paragraph: LayoutParagraphElement;
-  controller: TextEditController;
+  controller: TextEditController | null;
   previousParagraph?: LayoutParagraphElement | null;
   previousController?: TextEditController | null;
   selectedLayouts?: LayoutElement[];
@@ -1847,6 +1848,18 @@ isBoxEditable(box: LayoutBoxElement): boolean;
  * @returns 선택 성공 여부
  */
 selectLayout(target: LayoutElement | string | (LayoutElement | string)[]): boolean;
+```
+
+```ts
+/**
+ * 단일 요소를 명시적으로 단일 선택한다. `multiSelect` 상태와 무관하게
+ * 기존 선택을 모두 제거하고 대상만 선택하여 `layoutSelectionChange`를 1회 발생시킨다.
+ * 컨텍스트 메뉴 우클릭 등 clear+select를 원자적으로 수행해야 하는 경우 사용한다.
+ *
+ * @param target - 선택할 단일 요소 또는 ID
+ * @returns 선택 성공 여부. 대상이 검증을 통과하지 못하면 `false`
+ */
+selectLayoutExclusive(target: LayoutElement | string): boolean;
 ```
 
 ```ts

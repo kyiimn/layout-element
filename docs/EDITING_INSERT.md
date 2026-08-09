@@ -74,9 +74,10 @@ const mode = manager.insertMode; // InsertMode | null
 
 | 동작 | 설명 |
 |------|------|
-| non-null 설정 | 삽입 모드 활성화, 기존 레이아웃 선택 해제, 편집 가능 box의 커서를 `crosshair`로 변경. 빈 문서(편집 가능 box가 없음)에서도 활성화되어 document에 직접 삽입 가능 |
+| non-null 설정 | 삽입 모드 활성화, 기존 레이아웃 선택 해제, 편집 가능 box의 커서를 `crosshair`로 변경. 빈 문서(편집 가능 box가 없음)에서도 활성화되어 document에 직접 삽입 가능. `layoutEditMode`와 `textEditMode`를 `false`로 비활성화한다 |
 | `null` 설정 | 삽입 모드 비활성화, 커서 복원 |
 | 반복 설정 | 동일한 모드로 다시 설정하면 무시된다 |
+| 드래그 중 non-null 설정 | `InsertController.isDragging === true` 중에 다른 타입으로 전환하면(예: static → absolute), 진행 중인 드래그를 중단하지 않고 `_mode`만 갱신하여 드래그를 이어간다. 단, 다른 편집 모드(`layoutEditMode`/`textEditMode`) 비활성화는 드래그 중에도 항상 실행된다. 커서 변경과 `clearLayoutSelection`은 드래그 중에는 생략된다(드래그 방해 방지) |
 
 `x-layout-document` 요소가 DOM에 없으면 `Error`가 throw된다. 편집 가능 `<x-layout-box>`가 없어도 삽입 모드는 활성화되며, 이 경우 document가 삽입 컨테이너가 된다.
 
@@ -772,9 +773,9 @@ ESC 키 이외의 입력은 무시한다.
 
 삽입 모드 활성화 시 `EditManager.isBoxEditable()`이 true이거나 `editableLayout` DOM 속성이 있는 모든 `<x-layout-box>`의 커서가 `crosshair`로 변경된다. 비활성화 시 `grab`으로 복원된다.
 
-### 11.5 삽입 직후 클릭 무시: `_suppressNextClick`
+### 11.5 삽입 직후 클릭 억제: `_suppressLayoutClick`
 
-`_dispatchInsert`와 `_dispatchInsertCancel`은 `_suppressNextClick = true`를 설정한다. 이 플래그는 `LayoutSelectionController._onClick`에서 `_consumeSuppressNextClick()`으로 한 번만 소비되어, 삽입 완료/취소 직후 발생하는 클릭 이벤트가 레이아웃 선택을 해제하지 않도록 방지한다.
+`_dispatchInsert`와 `_dispatchInsertCancel`은 `_suppressLayoutClick()`을 호출한다. 이 메서드는 window capture phase에 일회성 click 리스너를 등록하여, 삽입 완료/취소 직후 발생하는 클릭 이벤트를 `stopPropagation()` + `preventDefault()`로 소비한다. `LayoutSelectionController._onClick`에 도달하지 않으므로 레이아웃 선택이 해제되지 않는다. click이 발생하지 않으면 200ms 타임아웃으로 리스너가 자동 제거된다. 자세한 내용은 `EDITING_EVENTS.md` [11. 클릭 억제](#11-클릭-억제-_suppresslayoutclick)를 참조한다.
 
 ---
 
@@ -789,7 +790,7 @@ ESC 키 이외의 입력은 무시한다.
 | 파일 | 역할 |
 |------|------|
 | `src/edit/insert-controller.ts` | `InsertController`: 삽입 모드의 드래그, 좌표 변환, 요소 생성, 미리보기 관리, 컨테이너 하이라이트(`_updateInsertHighlight(previewRect)`/`_clearInsertHighlight`/`_resolveInsertContainer`), 대상 컨테이너 찾기(`_findTargetContainer` — static 모드: 문서 내 모든 box-only 박스 순회 + `staticGridContains` 그리드 containment 검증, 가장 깊이 중첩된 박스 선택; absolute 모드: 4꼭짓점 containment + 유효 box 후보 폴백), 미리보기 스냅(`_snapPreviewToGrid` — root 요소 기준, `columnCoords`로 갭 반영, 마지막 라인 `lineHeight` 제외) |
-| `src/edit/edit-manager.ts` | `insertMode` getter/setter, `activateInsert`, `deactivateInsert`, `handleInsertMouseDown`, `_dispatchInsert`, `_dispatchInsertCancel`, `insert`/`insertCancel` 이벤트 발송, `_suppressNextClick` 플래그 |
+| `src/edit/edit-manager.ts` | `insertMode` getter/setter, `activateInsert`, `deactivateInsert`, `handleInsertMouseDown`, `_dispatchInsert`, `_dispatchInsertCancel`, `insert`/`insertCancel` 이벤트 발송, `_suppressLayoutClick` 호출 (삽입/취소 후 클릭 억제) |
 | `src/types/edit/insert.type.ts` | `InsertType`, `InsertPosition`, `InsertMode`, `InsertEventDetail` 타입 정의 |
 
 ---
