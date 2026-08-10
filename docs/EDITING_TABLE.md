@@ -656,13 +656,15 @@ TD에 요소를 삽입/배치/재부모할 때의 룰:
 | ----------------------- | ------------------- | ------------------------------------------------------- |
 | **요소 생성 (드래그 삽입)** | 제한 없음 (기존 룰) | 비어있는 TD만, 드래그 box ≤ TD 크기, 위반 시 거부       |
 | **요소 패턴 (PlaceGun)**    | 제한 없음           | 비어있는 TD만, 크기 무관, `left=0,top=0,width=1,height=1` |
-| **Reparent**                | 제한 없음           | 비어있는 TD만, 크기 무관, `left=0,top=0,width=1,height=1` |
+| **Reparent**                | 제한 없음           | static 자식이 없는 TD만, 크기 무관, `left=0,top=0,width=1,height=1` |
 | **Preview (드래그 중)**     | 기존 룰             | TD 위에서 TD bounding rect에 스냅 (grid line 무시)      |
 
 - **비어있는 TD**: `td.items.length === 0` (자식 box가 없는 TD)
+- **static 자식이 없는 TD**: `td.items.every(item => item.position !== 'static')` (빈 TD이거나 absolute box만 가진 TD). Reparent 타겟으로 지정 가능한 TD는 static position 자식 box가 없어야 한다 — static box는 TD content 영역에 100%로 자동 맞춤되므로 두 개 이상共存할 수 없기 때문이다.
 - **static box auto-fill**: TD에 static box를 삽입하면 `left=0, top=0, width=1, height=1`로 설정되어 TD content 영역에 자동 맞춤됨
 - **요소 생성 시 크기 검증**: 드래그한 box의 mm 크기가 TD의 `model.editableWidth`/`model.contentHeight`를 초과하면 거부 (cleanup, no insertion)
 - **Preview 스냅**: static 모드에서 드래그 중 TD 위에 있으면, preview rect를 TD의 bounding rect에 클램핑 (grid line 스냅 무시)
+- **Reparent 모드에서 TD 내부 box 드래그**: reparent 모드(`layoutEditType === 'reparent'`)에서 TD 내부 box를 드래그하면 셀 블록 drag 대신 box reparent drag가 실행된다. `LayoutSelectionController._onMouseDown`은 reparent 모드에서 cell drag 시작을 건너뛰고 `LayoutEditController._onMouseDown`이 box drag를 처리하도록 이벤트 전파를 막지 않는다. `LayoutEditController._onMouseDown`도 reparent 모드에서는 셀 블록 갱신 처리를 건너뛴다.
 
 ---
 

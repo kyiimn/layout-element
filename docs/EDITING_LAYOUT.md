@@ -1426,11 +1426,11 @@ _tryReparent(box, clientX, clientY, state)
     ├── 1. _findReparentContainer(box, clientX, clientY) → newContainer
     │   ├── elementsFromPoint로 후보 수집
     │   ├── box 자신/자손, lock, 비-box 자식이 있는 box 제외
-    │   ├── `<x-layout-td>` 셀도 후보: static position box는 빈 TD만, absolute box는 모든 TD 허용
+    │   ├── `<x-layout-td>` 셀도 후보: static position 자식 box가 없는 TD만 허용 (빈 TD이거나 absolute box만 가진 TD)
     │   ├── editableRootId 설정 시 root box 내부의 컨테이너만 후보 (root 밖 reparent 금지)
     │   ├── 기하학적 rect containment 폴백 (elementsFromPoint가 컨테이너를 찾지 못한 경우)
     │   │   ├── 드래그 중인 box의 rect를 완전히 포함하는 가장 안쪽의 TD, 그다음 box를 querySelectorAll로 순회
-    │   │   ├── static box가 아닌 비-box 자식이 있는 TD는 제외; static box는 자식이 있는 TD 제외
+    │   │   ├── static position 자식이 있는 TD는 제외; 비-box 자식이 있는 box는 제외
     │   │   ├── editableRootId 설정 시 root box 내부의 컨테이너만 후보
     │   │   ├── 1px 허용 오차로 서브픽셀 경계 문제 흡수
     │   │   └── 가장 작은 면적(가장 안쪽) 컨테이너를 선택
@@ -1517,9 +1517,33 @@ manager.addEventListener('layoutMove', (event) => {
 - **자기 자신/자손 안으로 넣을 수 없음**: `elementsFromPoint` 결과에서 box 자신과 box의 자손을 제외한다.
 - **lock된 box 안으로 넣을 수 없음**: lock된 컨테이너는 후보에서 제외된다.
 - **비-box 자식이 있는 box 안으로 넣을 수 없음**: 단락이나 이미지가 이미 들어 있는 박스는 컨테이너로 부적합 (삽입 모드와 동일한 규칙).
+- **static 자식이 있는 TD는 reparent 타겟 불가**: `<x-layout-td>` 셀 중 `position: 'static'`인 자식 box를 가진 셀은 reparent 타겟에서 제외된다. static box는 TD content 영역에 100%로 자동 맞춤되므로 두 개 이상 공존할 수 없기 때문이다. 빈 TD이거나 absolute box만 가진 TD만 reparent 타겟이 될 수 있다.
 - **다중 선택 reparent**: 다중 선택 상태에서 reparent 모드 드래그 시 각 box가 mouseup 위치의 컨테이너로 독립적으로 reparenting된다.
 - **ESC 취소 시 원래 부모로 복원**: ESC는 `box.style.transform = ''`로 초기화하고 position/좌표를 원래 상태로 복원한다. reparenting 자체는 mouseup 시에만 발생하므로 ESC 시점에는 부모가 변경되지 않은 상태이다.
 - **새 box 참조**: reparent 성공 시 기존 box는 제거되고 새 box가 생성되므로, 외부에서 기존 box 참조를 보유하고 있으면 무효화된다. `layoutMove` 이벤트의 `layoutElement`는 새 box를 가리킨다.
+
+#### 4.5.8 TD 내부 box의 reparent drag
+
+reparent 모드에서 TD 내부 box를 드래그하면 셀 블록 drag 대신 box reparent drag가 실행된다. 두 컨트롤러의 mousedown 핸들러가 reparent 모드에서 cell drag/cell block 처리를 건너뛰도록 협동한다:
+
+```
+TD 내부 box mousedown (reparent 모드)
+    │
+    ├── LayoutSelectionController._onMouseDown (capture, 먼저 실행)
+    │   ├── table 내부 클릭 → TD 추출
+    │   ├── manager.layoutEditType === 'reparent'? → cell drag 시작 건너뜀
+    │   │   ├── TD 내부 box를 selectLayout으로 선택
+    │   │   └── return (stopImmediatePropagation 호출 안 함 → 이벤트 전파 허용)
+    │   └── (reparent 모드가 아니면 기존대로 cell drag 시작)
+    │
+    └── LayoutEditController._onMouseDown (capture, 나중 실행)
+        ├── table 내부 클릭, kc.selection 활성?
+        │   └── manager.layoutEditType === 'reparent'? → 셀 블록 갱신 건너뜀
+        ├── _findEditableBoxFromEvent → TD 내부 box 반환
+        └── _startDrag(event, box) → reparent drag 시작
+```
+
+이 협동 없이는 `LayoutSelectionController._onMouseDown`이 `stopImmediatePropagation()`으로 이벤트를 소비하여 `LayoutEditController`의 box drag가 실행되지 않는다. reparent 모드에서만 이 협동 분기가 활성화되며, 일반 move 모드와 읽기 모드에서는 기존대로 cell drag가 동작한다.
 
 ---
 
