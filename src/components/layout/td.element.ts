@@ -451,6 +451,7 @@ export class LayoutTableCellElement extends HTMLElement {
 
       styleEl.sheet.insertRule(":host {}", 0);
       styleEl.sheet.insertRule("@media print { .diagonal { display: none !important; } }", 1);
+      styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { outline: #ff9800 solid 2px !important; outline-offset: -2px !important; } }", 2);
 
       this._shadowRoot.appendChild(document.createElement('slot'));
     }
