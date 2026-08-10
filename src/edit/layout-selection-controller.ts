@@ -155,6 +155,14 @@ export class LayoutSelectionController {
               });
             }
           }
+          // reparent 모드에서는 cell drag를 시작하지 않는다.
+          // LayoutEditController._onMouseDown이 TD 내부 box의 reparent drag를
+          // 처리하도록 이벤트 전파를 막지 않고 return한다.
+          if (manager.layoutEditType === 'reparent') {
+            const box = tdElForDrag.items[0];
+            if (box) manager.selectLayout(box);
+            return;
+          }
           const box = tdElForDrag.items[0];
           if (box) manager.selectLayout(box);
           this._cellDrag = { tableEl, anchor: { ...coord }, moved: false, startX: event.clientX, startY: event.clientY };

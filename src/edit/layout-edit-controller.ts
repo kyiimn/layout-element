@@ -430,7 +430,8 @@ export class LayoutEditController {
     const tableEl = path.find((el) => el instanceof LayoutTableElement) as LayoutTableElement | undefined;
     if (tableEl) {
       const kc = tableEl.keyboardController;
-      if (kc?.selection) {
+      // reparent 모드에서는 셀 블록 처리를 건너뛰고 TD 내부 box의 reparent drag로 진행한다.
+      if (kc?.selection && this._manager.layoutEditType !== 'reparent') {
         const tdEl = path.find((el) => el instanceof LayoutTableCellElement) as LayoutTableCellElement | undefined;
         if (!tdEl) {
           kc.selection = null;
@@ -2180,7 +2181,7 @@ export class LayoutEditController {
       if (el === box) continue;
       if (box.contains(el)) continue;
       if (el instanceof LayoutTableCellElement) {
-        if (box.position === 'static' && el.items.length > 0) continue;
+        if (el.items.some(item => item.position === 'static')) continue;
         if (rootBox && !rootBox.contains(el)) continue;
         newContainer = el;
         break;
@@ -2213,7 +2214,7 @@ export class LayoutEditController {
         let bestTd: LayoutTableCellElement | null = null;
         let bestTdArea = Infinity;
         for (const td of allTds) {
-          if (box.position === 'static' && td.items.length > 0) continue;
+          if (td.items.some(item => item.position === 'static')) continue;
           if (rootBox && !rootBox.contains(td)) continue;
           if (box.contains(td)) continue;
 
