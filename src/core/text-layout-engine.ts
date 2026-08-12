@@ -105,8 +105,8 @@ export class TextLayoutEngine {
    * `data` 세터와 `inheritStyle` 세터에서 호출된다.
    */
   private _initLayoutMetrics() {
-    const fontSize = this.textStyle?.fontSize || this.inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-    const lineGap = this.paragraphStyle?.lineGap || this.inheritStyle?.lineGap || DEFAULT_LINE_GAP;
+    const fontSize = this.textStyle?.fontSize ?? this.inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
+    const lineGap = this.paragraphStyle?.lineGap ?? this.inheritStyle?.lineGap ?? DEFAULT_LINE_GAP;
 
     this._columnContents = [];
     this._overflow = 0;
@@ -198,7 +198,7 @@ export class TextLayoutEngine {
    * // 장평 0.8, 글자 폭 3mm → 3 × 0.8 = 2.4mm
    */
   private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle): number {
-    const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+    const fontSize = textBlockStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
     const minWidthMm = this.spaceRatio * fontSize;
 
     if (char === ' ') {
@@ -422,7 +422,7 @@ export class TextLayoutEngine {
 
     const freeRegions = this._computeFreeRegions(lineWidthMm, overlapPartsMm);
 
-    const fontSize = textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+    const fontSize = textBlockStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
     const indentMm = isFirstOfBlock ? fontSize * this.indent : 0;
     const adjustedFreeRegions = indentMm > 0
       ? freeRegions.map((r, i) => i === 0 ? { start: r.start + indentMm, end: r.end } : r)
@@ -432,7 +432,7 @@ export class TextLayoutEngine {
     // 이 필터링이 없으면 무한 루프 가드가 좁은 틈에 글자를 강제 배치하여
     // 파트 폭을 넘어 렌더링되는 현상이 발생한다.
     // 기준: 가장 넓은 글자 폭 상한(widthRatio × fontSize) + letterSpacing.
-    const letterSpacingEm = this._textStyle?.letterSpacing || this._inheritStyle?.letterSpacing || DEFAULT_LETTER_SPACING;
+    const letterSpacingEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
     const minCharWidthMm = this.widthRatio * fontSize + letterSpacingEm * fontSize;
     const usableRegions = adjustedFreeRegions.filter(r => (r.end - r.start) >= minCharWidthMm);
 
@@ -644,8 +644,8 @@ export class TextLayoutEngine {
           }
         }
 
-        const letterSpacingEm = this._textStyle?.letterSpacing || this._inheritStyle?.letterSpacing || DEFAULT_LETTER_SPACING;
-        const letterSpacingFontSize = block.textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+        const letterSpacingEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
+        const letterSpacingFontSize = block.textBlockStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
         const letterSpacingMm = letterSpacingEm * letterSpacingFontSize;
 
         for (; idxContentOfBlock < block.content.length; idxContentOfBlock++) {
@@ -909,7 +909,7 @@ export class TextLayoutEngine {
    * - `textBlockStyle` → 폰트, 색상, 높이 오버라이드
    */
   public genLineStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> {
-    const lineGap = this.paragraphStyle?.lineGap || this.inheritStyle?.lineGap || DEFAULT_LINE_GAP;
+    const lineGap = this.paragraphStyle?.lineGap ?? this.inheritStyle?.lineGap ?? DEFAULT_LINE_GAP;
 
     const blockStyle: Partial<CSSStyleDeclaration> = {};
     if (textBlockStyle) {
@@ -993,7 +993,7 @@ export class TextLayoutEngine {
     const cached = this._charOuterStyleCache.get(cacheKey);
     if (cached) return cached;
 
-    const fontSize = this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+    const fontSize = this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
     const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
     const lsMm = lsEm * fontSize;
     let widthMm: number;
@@ -1054,7 +1054,7 @@ export class TextLayoutEngine {
    */
   public getCharWidths = (char: string): { owidth: number; swidth: number } => {
     const wr = this.widthRatio;
-    const fontSize = this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+    const fontSize = this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
     const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
     const lsMm = lsEm * fontSize;
     let owidth: number;
@@ -1158,7 +1158,7 @@ export class TextLayoutEngine {
 
   /** 장평 비율 */
   public get widthRatio() {
-    return this.textStyle?.widthRatio || this.inheritStyle?.widthRatio || DEFAULT_WIDTH_RATIO;
+    return this.textStyle?.widthRatio ?? this.inheritStyle?.widthRatio ?? DEFAULT_WIDTH_RATIO;
   }
 
   /** 공백 너비 비율 (em 단위) */

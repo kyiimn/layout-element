@@ -1,6 +1,7 @@
 import { TextLayoutEngine } from "@/core";
 import { TextEditController } from "@/edit/text-edit-controller";
 import { EditManager } from "@/edit/edit-manager";
+import { DEFAULT_LINE_GAP } from "@/constants";
 import { ColorRegistry, FontLoader } from "@/resource";
 import { InheritStyle, ParagraphData, ParagraphStyle, PrintPostData, PrintPostDataChar, RenderCompleteEventDetail, TextBlockData, TextStyle } from "@/types";
 import { checkOverlap, genUUID, valueEqual, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay } from "@/utils";
@@ -141,7 +142,7 @@ export class LayoutParagraphElement extends HTMLElement {
     const fontFamily = this.textStyle.fontFamily || this._inheritStyle.fontFamily;
     const fontWeight = this.textStyle.fontWeight || this._inheritStyle.fontWeight;
     const fontStyle = this.textStyle.fontStyle || this._inheritStyle.fontStyle;
-    const fontSize = this.textStyle.fontSize || this._inheritStyle.fontSize;
+    const fontSize = this.textStyle.fontSize ?? this._inheritStyle.fontSize;
     const paddingTop = this._inheritStyle.paddingTop || 0;
 
     const colorRegistry = ColorRegistry.getInstance();
@@ -347,7 +348,7 @@ export class LayoutParagraphElement extends HTMLElement {
     const columnContents = model.columnContents;
     const columnCount = columnContents.length;
     const parentHeight = this.absHeight;
-    const lineGap = this._paragraphStyle?.lineGap || this._inheritStyle?.lineGap || 1;
+    const lineGap = this._paragraphStyle?.lineGap ?? this._inheritStyle?.lineGap ?? DEFAULT_LINE_GAP;
     const defaultLineHeight = model.lineHeight;
     const lastColumnIdx = columnCount - 1;
 

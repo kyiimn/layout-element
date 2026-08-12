@@ -237,10 +237,10 @@ export class GridCalculator {
   }
 
   get fontSize() {
-    return this.textStyle.fontSize || DEFAULT_FONT_SIZE;
+    return this.textStyle.fontSize ?? DEFAULT_FONT_SIZE;
   }
 
   get lineGap() {
-    return this.paragraphStyle.lineGap || DEFAULT_LINE_GAP;
+    return this.paragraphStyle.lineGap ?? DEFAULT_LINE_GAP;
   }
 }
