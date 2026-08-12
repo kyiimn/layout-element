@@ -50,6 +50,7 @@
    - [Edit](#edit-types)
 7. [Constants](#constants)
 8. [Utilities](#utilities)
+   - [`flipLayoutData`](#fliplayoutdata)
 9. [Examples](#examples)
 10. [이벤트 레퍼런스](#이벤트-레퍼런스)
 
@@ -144,6 +145,7 @@ class LayoutDocumentElement extends HTMLElement
 | `layout()` | `(): this \| null` | DOM 트리/스타일/가이드 컬럼을 재구성. `connectedCallback`에서 자동 호출. |
 | `render()` | `(): Promise<this \| null>` | 자식 박스를 z-index 역순으로 비동기 렌더링. `layout()` 완료 후 호출. |
 | `appendChild<T>(node)` | `(node: T): T` | 박스/단락/이미지 자식에 `InheritStyle` 자동 전파. |
+| `flipLayout(options)` | `(options: FlipLayoutOptions): void` | 문서 또는 지정된 박스의 **하위 요소** 배치를 좌우/상하/상하좌우 반전. `targetId` 지정 시 해당 박스가 root, 생략 시 문서가 root. root 자체(위치/보더/패딩)는 유지되고 하위만 반전. 반전 전 편집 상태(포커스, 선택)를 해제한 후 `data` setter 적용. |
 
 #### 데이터 프로퍼티 (setter / getter)
 
@@ -207,6 +209,12 @@ doc.appendChild(box);
 
 // 4. 인쇄 모드 후처리 데이터 수집
 const postData = doc.printPostData;
+
+// 5. 배치 반전
+doc.flipLayout({ axis: 'horizontal' });                           // 문서의 하위 박스들을 좌우 반전
+doc.flipLayout({ axis: 'vertical' });                             // 문서의 하위 박스들을 상하 반전
+doc.flipLayout({ axis: 'both' });                                 // 180도 회전
+doc.flipLayout({ axis: 'horizontal', targetId: 'box-42' });       // box-42의 하위 요소들만 좌우 반전
 ```
 
 ---
@@ -2942,6 +2950,84 @@ const genUUID: () => string;
 ```ts
 /** `Math.random()` 기반 헬퍼. 패키지 진입점에서 export되지 않음. */
 const genRandom: (min?: number, max?: number) => number;
+```
+
+### `flipLayoutData(data, options, metricsById)`
+
+```ts
+/**
+ * 문서 레이아웃 데이터의 배치를 좌우/상하/상하좌우 반전한다.
+ * 순수 함수: 입력 데이터 트리를 변환하여 새 트리를 반환한다. 원본은 변경하지 않는다.
+ *
+ * targetId 지정 시 해당 id를 가진 박스가 root가 되며, root 박스의 하위 요소들만 반전한다.
+ * root 박스 자체(위치/보더/패딩)는 유지된다.
+ * targetId 생략 시 문서가 root이며, 문서의 하위 박스들만 반전한다.
+ *
+ * 반전 범위 (root의 하위 요소):
+ * - Box 위치/크기 (position static/absolute 분기)
+ *   - absolute + document 부모: left = containerWidth - left - width (padding 포함)
+ *   - absolute + box 부모: left = innerWidth - left - width (padding 제외)
+ * - Paragraph 단 설정 (column/gap 배열 역순, 좌우 반전 시)
+ * - Box 보더/패딩 방향 교환 (T↔B, L↔R)
+ * - 하위 Box 트리 재귀 반전
+ *
+ * 반전 제외 (leaf 컨텐츠):
+ * - Image 내부 설정 (x/y/width/height/크롭/objectFit)
+ * - Table 셀 배치/순서/병합/보더 방향
+ * - Text content (LTR 유지, 거울 모드 아님)
+ *
+ * metricsById: static 박스의 width/height는 컬럼 span 수 / 라인 수이지 mm가 아니다.
+ * 따라서 absolute 자식 반전 시 부모 박스의 mm 내부 영역을 알기 위해
+ * 각 박스 id별 실제 mm 크기를 외부에서 주입해야 한다.
+ * LayoutDocumentElement.flipLayout()이 DOM에서 수집하여 전달한다.
+ *
+ * @param data - 원본 문서 데이터
+ * @param options - 반전 옵션
+ * @param options.axis - 반전 축 ('horizontal' | 'vertical' | 'both')
+ * @param options.targetId - 반전 root 박스 id. 생략 시 문서가 root.
+ * @param metricsById - 각 박스 id별 mm 크기 map. static 박스의 absolute 자식 반전에 필요.
+ * @returns 반전된 새 문서 데이터
+ * @throws {Error} targetId가 지정되었으나 해당 id를 가진 박스를 찾지 못한 경우
+ *
+ * @example
+ * // 문서의 하위 박스들을 좌우 반전
+ * const flipped = flipLayoutData(doc, { axis: 'horizontal' }, metricsById);
+ * documentEl.data = flipped;
+ *
+ * // 특정 박스의 하위 요소들만 상하 반전
+ * const flipped = flipLayoutData(doc, { axis: 'vertical', targetId: 'box-42' }, metricsById);
+ * documentEl.data = flipped;
+ *
+ * // 180도 회전 (상하+좌우)
+ * const flipped = flipLayoutData(doc, { axis: 'both' }, metricsById);
+ * documentEl.data = flipped;
+ */
+function flipLayoutData(
+  data: DocumentData,
+  options: FlipLayoutOptions,
+  metricsById: BoxMetricsById,
+): DocumentData;
+```
+
+#### `FlipAxis`
+
+```ts
+type FlipAxis = 'horizontal' | 'vertical' | 'both';
+```
+
+#### `FlipLayoutOptions`
+
+```ts
+type FlipLayoutOptions = {
+  axis: FlipAxis;
+  targetId?: string;
+};
+```
+
+#### `BoxMetricsById`
+
+```ts
+type BoxMetricsById = Map<string, { absWidth: number; absHeight: number }>;
 ```
 
 ### AI Processing Overlay 헬퍼

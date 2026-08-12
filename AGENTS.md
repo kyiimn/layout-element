@@ -247,6 +247,7 @@ src/
 image-fit.ts               # computeObjectFit (objectFit 프리셋 → mm 좌표/크기 변환)
 value-equal.ts             # valueEqual (number | number[] 깊은 동등성 비교)
 static-grid-containment.ts # staticGridContains (static 좌표계 컬럼/라인 그리드 containment 검증, 마지막 줄 lineHeight 제외 + 1)
+flip-layout.ts             # flipLayoutData (배치 반전 — 좌우/상하/상하좌우, 재귀 트리 순회 + 좌표 변환)
 random.ts                  # genRandom() helper (not exported by utils/index.ts)
     index.ts
   examples/                  # exampleData (demo content for dev)
