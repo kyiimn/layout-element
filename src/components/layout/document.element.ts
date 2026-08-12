@@ -4,7 +4,7 @@ import { DocumentData, ParagraphStyle, PrintPostData, TextStyle, BoxData } from 
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
-import { genUUID } from "@/utils";
+import { genUUID, flipLayoutData, FlipLayoutOptions, BoxMetricsById } from "@/utils";
 import { EditManager } from "@/edit/edit-manager";
 
 /**
@@ -515,6 +515,67 @@ export class LayoutDocumentElement extends HTMLElement {
 
   get items() {
     return Array.from(this.querySelectorAll<LayoutBoxElement>(":scope > x-layout-box"));
+  }
+
+  /**
+   * 문서 또는 지정된 박스의 하위 요소 배치를 좌우/상하/상하좌우 반전한다.
+   *
+   * `targetId`를 지정하면 해당 박스가 root가 되며 **root 박스의 하위 요소들만** 반전한다.
+   * root 박스 자체(위치/보더/패딩)는 유지된다.
+   * 생략 시 문서가 root이며, 문서의 하위 박스들만 반전한다.
+   *
+   * 반전 전 편집 상태(포커스, 선택)를 해제한 후 `data` setter를 통해 반전된 데이터를
+   * 적용한다. `data` setter가 `layout()` + `render()`를 자동 처리한다.
+   *
+   * @param options - 반전 옵션
+   * @param options.axis - 반전 축 (`'horizontal'` | `'vertical'` | `'both'`)
+   * @param options.targetId - 반전 root 박스 id. 생략 시 문서가 root.
+   * @throws {Error} `targetId`가 지정되었으나 해당 id를 가진 박스를 찾지 못한 경우
+   *
+   * @example
+   * ```ts
+   * // 문서의 하위 박스들을 좌우 반전
+   * documentEl.flipLayout({ axis: 'horizontal' });
+   *
+   * // 특정 박스의 하위 요소들만 상하 반전
+   * documentEl.flipLayout({ axis: 'vertical', targetId: 'box-42' });
+   *
+   * // 180도 회전
+   * documentEl.flipLayout({ axis: 'both' });
+   * ```
+   */
+  flipLayout(options: FlipLayoutOptions): void {
+    this.editManager.blurParagraph();
+    this.editManager.clearLayoutSelection(false);
+
+    const metricsById = this._collectBoxMetrics();
+    const flipped = flipLayoutData(this.data, options, metricsById);
+    this.data = flipped;
+  }
+
+  /**
+   * 문서 내 모든 박스의 실제 mm 크기(absWidth/absHeight)를 수집한다.
+   *
+   * static 박스의 `width`/`height`는 컬럼 span 수 / 라인 수이지 mm가 아니므로,
+   * `flipLayoutData`가 absolute 자식 반전 시 부모 박스의 mm 내부 영역을 알기 위해
+   * DOM에서 계산된 `absWidth`/`absHeight`를 수집하여 전달한다.
+   *
+   * @returns 박스 id → { absWidth, absHeight } map
+   *
+   * @internal
+   */
+  private _collectBoxMetrics(): BoxMetricsById {
+    const metrics: BoxMetricsById = new Map();
+    const boxes = this.querySelectorAll<LayoutBoxElement>('x-layout-box');
+    for (const box of boxes) {
+      if (box.id) {
+        metrics.set(box.id, {
+          absWidth: box.absWidth,
+          absHeight: box.absHeight,
+        });
+      }
+    }
+    return metrics;
   }
 
   /**
