@@ -330,12 +330,25 @@ export class TextEditController {
       }
 
       if (!reattached) {
-        const firstColumn = this._paragraph.querySelector("x-layout-column");
-        if (firstColumn && firstColumn.shadowRoot) {
-          const firstContainer = firstColumn.shadowRoot.firstElementChild;
-          if (firstContainer instanceof HTMLElement) {
-            firstContainer.appendChild(this._compositionSpan);
-            reattached = true;
+        const lineInfo = this._mapper.getLineInfoBySourceOffset(this._compositionStartOffset);
+        if (lineInfo) {
+          const columns = this._paragraph.querySelectorAll('x-layout-column');
+          const column = columns[lineInfo.columnIndex];
+          const columnShadow = column?.shadowRoot;
+          if (columnShadow) {
+            const lineDivs = Array.from(columnShadow.children).filter(
+              (child): child is HTMLDivElement => child.tagName === 'DIV',
+            );
+            const lineDiv = lineDivs[lineInfo.lineIndex];
+            if (lineDiv) {
+              const partDiv = lineDiv.querySelector('div');
+              if (partDiv instanceof HTMLElement) {
+                partDiv.appendChild(this._compositionSpan);
+              } else {
+                lineDiv.appendChild(this._compositionSpan);
+              }
+              reattached = true;
+            }
           }
         }
       }
@@ -1506,7 +1519,6 @@ export class TextEditController {
 
     const model = this._paragraph.model;
 
-    const hadSelection = this._cursorModel.selection !== null;
     if (this._cursorModel.selection) {
       const normalized = this._cursorModel.selection.normalized();
       this._compositionStartOffset = normalized.start.textOffset;
@@ -1533,9 +1545,14 @@ export class TextEditController {
     this._cursorModel.selection = null;
     this._updateSelection();
 
-    if (hadSelection) {
-      this._paragraph.render();
+    // 이전 입력의 debounced render가 아직 실행되지 않았을 수 있으므로
+    // 취소하고 즉시 render를 실행하여 mapper를 최신 상태로 만든다.
+    if (this._debounceTimer !== null) {
+      cancelAnimationFrame(this._debounceTimer);
+      this._debounceTimer = null;
     }
+    this._wasFocused = false;
+    this._paragraph.render();
 
     // 조합 span을 커서 위치에 생성하여 조합 중인 글자를 시각적으로 표시
     this._compositionSpan = this._createOptimisticSpan("", this._compositionStartOffset);
@@ -1558,12 +1575,25 @@ export class TextEditController {
     }
 
     if (!spanInserted) {
-      const firstColumn = this._paragraph.querySelector("x-layout-column");
-      if (firstColumn && firstColumn.shadowRoot) {
-        const firstContainer = firstColumn.shadowRoot.firstElementChild;
-        if (firstContainer instanceof HTMLElement) {
-          firstContainer.appendChild(this._compositionSpan);
-          spanInserted = true;
+      const lineInfo = this._mapper.getLineInfoBySourceOffset(this._compositionStartOffset);
+      if (lineInfo) {
+        const columns = this._paragraph.querySelectorAll('x-layout-column');
+        const column = columns[lineInfo.columnIndex];
+        const columnShadow = column?.shadowRoot;
+        if (columnShadow) {
+          const lineDivs = Array.from(columnShadow.children).filter(
+            (child): child is HTMLDivElement => child.tagName === 'DIV',
+          );
+          const lineDiv = lineDivs[lineInfo.lineIndex];
+          if (lineDiv) {
+            const partDiv = lineDiv.querySelector('div');
+            if (partDiv instanceof HTMLElement) {
+              partDiv.appendChild(this._compositionSpan);
+            } else {
+              lineDiv.appendChild(this._compositionSpan);
+            }
+            spanInserted = true;
+          }
         }
       }
     }
@@ -1806,12 +1836,15 @@ export class TextEditController {
     const column = columns[lineInfo.columnIndex];
     if (!column || !column.shadowRoot) return;
 
-    const columnShadow = column.shadowRoot;
-    const lineDivs = columnShadow.children;
+    const lineDivs = Array.from(column.shadowRoot.children).filter(
+      (child): child is HTMLDivElement => child.tagName === 'DIV',
+    );
     const lineDiv = lineDivs[lineInfo.lineIndex];
-    if (lineDiv instanceof HTMLElement) {
+    if (lineDiv) {
+      const partDiv = lineDiv.querySelector('div');
+      const container = partDiv instanceof HTMLElement ? partDiv : lineDiv;
       const newSpan = this._createOptimisticSpan(char, sourceOffset);
-      lineDiv.insertBefore(newSpan, lineDiv.firstChild);
+      container.insertBefore(newSpan, container.firstChild);
       this._optimisticSpan = newSpan;
     }
   }
