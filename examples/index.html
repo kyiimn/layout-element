@@ -224,6 +224,22 @@
       <button id="btn-tbl-delete-col">📋 열 삭제</button>
       <button id="btn-tbl-check">🔍 스타일 규칙 검사</button>
     </div>
+    <div style="
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          justify-content: center;
+          width: 100%;
+          margin-top: 8px;
+        ">
+      <button id="btn-flip-h">🔄 좌우 반전</button>
+      <button id="btn-flip-v">🔄 상하 반전</button>
+      <button id="btn-flip-both">🔄 상하좌우 반전</button>
+      <span style="display:flex;align-items:center;font-size:12px;color:#888;">대상:</span>
+      <select id="flip-target">
+        <option value="">문서 전체</option>
+      </select>
+    </div>
   </div>
 
   <div id="hint"></div>
@@ -1426,6 +1442,46 @@
         }
         hint.textContent = info.join(" | ");
       });
+
+      // 배치 반전 버튼
+      const btnFlipH = document.getElementById("btn-flip-h");
+      const btnFlipV = document.getElementById("btn-flip-v");
+      const btnFlipBoth = document.getElementById("btn-flip-both");
+      const flipTarget = document.getElementById("flip-target");
+
+      function refreshFlipTargetOptions() {
+        const boxes = doc.querySelectorAll("x-layout-box");
+        const currentVal = flipTarget.value;
+        flipTarget.innerHTML = '<option value="">문서 전체</option>';
+        boxes.forEach((box) => {
+          if (box.id) {
+            const opt = document.createElement("option");
+            opt.value = box.id;
+            opt.textContent = box.id;
+            flipTarget.appendChild(opt);
+          }
+        });
+        if (currentVal && Array.from(flipTarget.options).some((o) => o.value === currentVal)) {
+          flipTarget.value = currentVal;
+        }
+      }
+
+      function doFlip(axis) {
+        const targetId = flipTarget.value || undefined;
+        try {
+          doc.flipLayout({ axis, targetId });
+          hint.textContent = `반전 완료: ${axis}${targetId ? ` (대상: ${targetId})` : " (문서 전체)"}`;
+          refreshFlipTargetOptions();
+        } catch (e) {
+          hint.textContent = `반전 실패: ${e.message}`;
+        }
+      }
+
+      btnFlipH.addEventListener("click", () => doFlip("horizontal"));
+      btnFlipV.addEventListener("click", () => doFlip("vertical"));
+      btnFlipBoth.addEventListener("click", () => doFlip("both"));
+
+      refreshFlipTargetOptions();
 
       updateInfoPanel();
     })();
