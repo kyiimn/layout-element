@@ -228,16 +228,20 @@ function boxMetrics(box: BoxData, metricsById: BoxMetricsById): ContainerMetrics
  *   - 상하 반전: `top = totalLines - top - height`
  * - `'absolute'`: `left`/`top`/`width`/`height` 모두 mm 단위.
  *   - document 부모: `left = containerWidth - left - width` (padding 포함 전체)
- *   - box 부모: `left = containerInnerWidth - left - width` (padding 제외)
+ *   - box 부모: `left = innerWidth - left - width` (padding 제외)
  *
  * 보더/패딩 방향도 함께 교환한다.
  * 자식도 재귀적으로 반전한다.
+ *
+ * `box.lock === true`이면 해당 박스와 그 **하위 요소 전체**를 반전에서 제외하고
+ * 원본 그대로 반환한다. 조상 box 중 하나라도 lock이면 하위 전부에 적용되므로,
+ * 이 함수는 lock 박스를 만나는 즉시 원본을 반환한다.
  *
  * @param box - 반전할 박스 데이터
  * @param axis - 반전 축
  * @param container - 부모 컨테이너 메트릭
  * @param metricsById - 각 박스 id별 mm 크기 map
- * @returns 반전된 새 박스 데이터
+ * @returns 반전된 새 박스 데이터 (lock 박스는 원본 그대로)
  *
  * @internal
  */
@@ -247,6 +251,8 @@ function flipBox(
   container: ContainerMetrics,
   metricsById: BoxMetricsById,
 ): BoxData {
+  if (box.lock) return box;
+
   let result = { ...box };
 
   if (result.position === 'absolute') {
@@ -329,12 +335,16 @@ function flipParagraph(para: ParagraphData, axis: FlipAxis): ParagraphData {
 /**
  * 트리에서 `targetId`를 가진 박스를 찾아 **그 박스의 하위 요소들만** 반전한다.
  *
+ * `box.lock === true`이면 해당 박스와 하위 전체를 반전에서 제외하고
+ * 원본 그대로 반환한다. lock 박스가 `targetId`와 일치하더라도
+ * 하위 요소는 반전되지 않는다.
+ *
  * @param box - 순회 중인 박스
  * @param targetId - 반전 root 박스 id
  * @param axis - 반전 축
  * @param container - 현재 컨테이너 메트릭
  * @param metricsById - 각 박스 id별 mm 크기 map
- * @returns root 박스의 하위 요소들만 반전된 새 박스
+ * @returns root 박스의 하위 요소들만 반전된 새 박스 (lock 박스는 원본 그대로)
  *
  * @internal
  */
@@ -342,9 +352,11 @@ function flipBoxIfTarget(
   box: BoxData,
   targetId: string,
   axis: FlipAxis,
-  container: ContainerMetrics,
+  _container: ContainerMetrics,
   metricsById: BoxMetricsById,
 ): BoxData {
+  if (box.lock) return box;
+
   if (box.id === targetId) {
     const result = { ...box };
     const childContainer = boxMetrics(result, metricsById);
@@ -405,6 +417,12 @@ function flipChildrenIfTarget(
  * - **Box 보더/패딩 방향**: 상하/좌우 교환
  * - **Paragraph 단 설정**: `column`/`gap` 배열 역순 (좌우 반전 시)
  * - **하위 Box 트리**: 재귀적으로 전체 추적
+ *
+ * ## 반전 제외 (lock 박스)
+ *
+ * - **Box `lock`**: `box.lock === true`인 박스와 그 **하위 요소 전체**는 반전에서 제외된다.
+ *   조상 박스 중 하나라도 lock이면 하위 전부가 제외된다.
+ *   lock 박스의 위치/크기/보더/패딩/자식 모두 원본 그대로 유지된다.
  *
  * ## 반전 제외 (leaf 컨텐츠)
  *
