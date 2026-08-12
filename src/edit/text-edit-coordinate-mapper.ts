@@ -2,7 +2,20 @@ import type { LayoutColumnElement } from "@/components/layout/column.element";
 import type { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import type { CursorPosition } from "@/types/edit/cursor.type";
 import { DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN } from "@/constants";
+import { GridCalculator } from "@/core";
 import { EditManager } from "./edit-manager";
+
+/**
+ * 커서 배치 정보: 특정 source offset에 커서를 표시할 위치를 나타낸다.
+ */
+export interface CursorPlacement {
+  /** 커서가 참조할 렌더링된 문자 span의 렌더링 오프셋 */
+  renderedOffset: number;
+  /** true면 커서를 문자의 우측 끝에 배치 (이전 문자 다음), false면 좌측에 배치 */
+  atEndOfChar: boolean;
+  /** trailing space 등 매핑에서 제외된 문자의 폭을 합산한 픽셀 오프셋 */
+  spaceOffsetPx: number;
+}
 
 /**
  * `<x-layout-paragraph>` 내부의 텍스트 오프셋과 픽셀 좌표를 매핑한다.
@@ -27,6 +40,13 @@ export class TextEditCoordinateMapper {
   private _renderedToSource: Map<number, number> = new Map();
   /** 소스 오프셋 → 렌더링 오프셋 */
   private _sourceToRendered: Map<number, number> = new Map();
+  /**
+   * 소스 오프셋 → 커서 배치 정보.
+   * 매핑에서 제외된 위치(\n, trailing space, leading space, 텍스트 끝)도
+   * 인접한 가시 문자를 참조하여 커서를 배치할 수 있도록 모든 source offset에
+   * 대해 엔트리를 채운다.
+   */
+  private _sourceToCursorPlacement: Map<number, CursorPlacement> = new Map();
 
   private _spanCache: Map<number, HTMLSpanElement> = new Map();
   private _columnSpansCache: Map<LayoutColumnElement, HTMLSpanElement[]> = new Map();
@@ -67,6 +87,7 @@ export class TextEditCoordinateMapper {
   rebuild(): void {
     this._renderedToSource.clear();
     this._sourceToRendered.clear();
+    this._sourceToCursorPlacement.clear();
     this._spanCache.clear();
     this._columnSpansCache.clear();
     this._columnRanges = [];
@@ -85,6 +106,8 @@ export class TextEditCoordinateMapper {
     const columnContents = model.columnContents;
     let renderedOffset = 0;
     let sourceOffset = 0;
+    const textContent = model.textContent;
+    const spaceWidthPx = this._computeSpaceWidthPx(model);
 
     for (let columnIndex = 0; columnIndex < columnContents.length; columnIndex++) {
       const lines = columnContents[columnIndex];
@@ -96,6 +119,8 @@ export class TextEditCoordinateMapper {
       for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const line = lines[lineIndex];
         lineStartOffsets.push(sourceOffset);
+        let lastVisibleRenderedOffset: number | null = null;
+        let lastVisibleSourceOffset: number | null = null;
 
         for (let p = 0; p < line.parts.length; p++) {
           const part = line.parts[p];
@@ -106,6 +131,8 @@ export class TextEditCoordinateMapper {
           let leadingSpaces = 0;
           if (isFirst) {
             for (let k = 0; k < original.length && original[k] === ' '; k++) leadingSpaces++;
+            // leading space: 다음 가시 문자 앞에 커서 배치 (atEndOfChar=false)
+            // _sourceToCursorPlacement은 가시 문자 처리 시 앞선 leading space들을 채움
             sourceOffset += leadingSpaces;
           }
 
@@ -114,6 +141,13 @@ export class TextEditCoordinateMapper {
           for (let i = 0; i < content.length; i++) {
             this._renderedToSource.set(renderedOffset, sourceOffset);
             this._sourceToRendered.set(sourceOffset, renderedOffset);
+            this._sourceToCursorPlacement.set(sourceOffset, {
+              renderedOffset,
+              atEndOfChar: false,
+              spaceOffsetPx: 0,
+            });
+            lastVisibleRenderedOffset = renderedOffset;
+            lastVisibleSourceOffset = sourceOffset;
             renderedOffset++;
             sourceOffset++;
           }
@@ -122,12 +156,40 @@ export class TextEditCoordinateMapper {
             const afterLeading = isFirst ? original.slice(leadingSpaces) : original;
             let trailingSpaces = 0;
             for (let k = afterLeading.length - 1; k >= 0 && afterLeading[k] === ' '; k++) trailingSpaces++;
-            sourceOffset += trailingSpaces;
+            // trailing space: 이전 가시 문자의 우측 끝에 커서 배치 (atEndOfChar=true)
+            // 스페이스 폭을 누적하여 커서를 우측으로 이동
+            for (let s = 0; s < trailingSpaces; s++) {
+              if (lastVisibleRenderedOffset !== null) {
+                this._sourceToCursorPlacement.set(sourceOffset, {
+                  renderedOffset: lastVisibleRenderedOffset,
+                  atEndOfChar: true,
+                  spaceOffsetPx: (s + 1) * spaceWidthPx,
+                });
+              }
+              sourceOffset++;
+            }
           }
         }
 
         if (line.endOfBlock) {
-          sourceOffset++;
+          // endOfBlock: 라인이 블록의 끝임을 나타낸다.
+          // textContent에 실제 \n이 있으면 placement 추가 + sourceOffset++.
+          // \n이 없는 마지막 블록은 placement만 추가 (텍스트 끝 위치).
+          const hasNewline = sourceOffset < textContent.length && textContent[sourceOffset] === '\n';
+          const prevPlacement = this._sourceToCursorPlacement.get(sourceOffset - 1);
+          const prevSpacePx = prevPlacement?.spaceOffsetPx ?? 0;
+          if (lastVisibleRenderedOffset !== null && lastVisibleSourceOffset !== null) {
+            if (!this._sourceToCursorPlacement.has(sourceOffset)) {
+              this._sourceToCursorPlacement.set(sourceOffset, {
+                renderedOffset: lastVisibleRenderedOffset,
+                atEndOfChar: true,
+                spaceOffsetPx: prevSpacePx,
+              });
+            }
+          }
+          if (hasNewline) {
+            sourceOffset++;
+          }
         }
       }
 
@@ -135,6 +197,40 @@ export class TextEditCoordinateMapper {
       this._totalLineCount += lines.length;
       this._columnRanges.push({ start: columnStart, end: renderedOffset });
     }
+
+    // 매핑 구멍 채우기: _sourceToCursorPlacement에 없는 source offset에 대해
+    // 역방향으로 가장 가까운 placement를 복사.
+    // 단, \n 바로 다음 위치(새 라인 시작)는 건너뛴다 — line rect 폴백이 처리해야 함.
+    for (let i = 0; i <= textContent.length; i++) {
+      if (this._sourceToCursorPlacement.has(i)) continue;
+      if (i > 0 && textContent[i - 1] === '\n') continue;
+      for (let back = i - 1; back >= 0; back--) {
+        const existing = this._sourceToCursorPlacement.get(back);
+        if (existing) {
+          this._sourceToCursorPlacement.set(i, {
+            renderedOffset: existing.renderedOffset,
+            atEndOfChar: true,
+            spaceOffsetPx: existing.atEndOfChar ? existing.spaceOffsetPx : 0,
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  /**
+   * 스페이스 문자 1개의 픽셀 폭을 계산한다.
+   * @param model - TextLayoutEngine 모델
+   * @returns 스페이스 폭(px)
+   */
+  private _computeSpaceWidthPx(model: { genCharStyle: (char: string) => Partial<CSSStyleDeclaration> | undefined }): number {
+    const style = model.genCharStyle(' ');
+    const widthStr = style?.width;
+    if (typeof widthStr !== 'string') return 0;
+    const mmMatch = widthStr.match(/^([\d.]+)mm$/);
+    if (!mmMatch) return 0;
+    const mm = parseFloat(mmMatch[1]);
+    return mm * GridCalculator.ppm;
   }
 
   private _stripSpaces(content: string[], isFirst: boolean, isLast: boolean): string[] {
@@ -162,6 +258,20 @@ export class TextEditCoordinateMapper {
    */
   renderedOffset(sourceOffset: number): number | null {
     return this._sourceToRendered.get(sourceOffset) ?? null;
+  }
+
+  /**
+   * 주어진 source 오프셋에 커서를 배치하기 위한 정보를 반환한다.
+   *
+   * `\n` 위치, trailing space, leading space, 텍스트 끝 등 매핑에서
+   * 제외된 위치도 인접한 가시 문자를 참조하여 배치 정보를 반환한다.
+   * 빈 줄 시작 등 가시 문자가 없는 위치에서는 null을 반환한다.
+   *
+   * @param sourceOffset - 소스 텍스트 오프셋
+   * @returns 커서 배치 정보. 배치 불가능한 경우 null.
+   */
+  getCursorPlacement(sourceOffset: number): CursorPlacement | null {
+    return this._sourceToCursorPlacement.get(sourceOffset) ?? null;
   }
 
   /**
@@ -758,8 +868,14 @@ export class TextEditCoordinateMapper {
   findVisualLineBounds(sourceOffset: number): { start: number; end: number } | null {
     let renderedOffset = this.renderedOffset(sourceOffset);
     if (renderedOffset === null) {
-      if (sourceOffset > 0) {
-        renderedOffset = this.renderedOffset(sourceOffset - 1);
+      const placement = this.getCursorPlacement(sourceOffset);
+      if (placement) {
+        renderedOffset = placement.renderedOffset;
+      } else if (sourceOffset > 0) {
+        const prevPlacement = this.getCursorPlacement(sourceOffset - 1);
+        if (prevPlacement) {
+          renderedOffset = prevPlacement.renderedOffset;
+        }
       }
       if (renderedOffset === null && sourceOffset === 0) {
         return { start: 0, end: 0 };

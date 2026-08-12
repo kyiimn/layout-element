@@ -57,7 +57,7 @@ export class LayoutColumnElement extends HTMLElement {
           renderedOffset += content.length;
           sourceOffset += content.length;
         }
-        if (line.endOfBlock) sourceOffset++;
+        if (line.endOfBlock && sourceOffset < (model.textContent?.length ?? 0) && model.textContent?.[sourceOffset] === '\n') sourceOffset++;
       }
     }
     return { renderedOffset, sourceOffset };
@@ -235,7 +235,7 @@ export class LayoutColumnElement extends HTMLElement {
 
       if (line.parts.length === 0) {
         while (lineEl.firstChild) lineEl.firstChild.remove();
-        if (endOfBlock) curSourceOffset++;
+        if (endOfBlock && curSourceOffset < (this.model?.textContent?.length ?? 0) && this.model?.textContent?.[curSourceOffset] === '\n') curSourceOffset++;
         continue;
       }
 
@@ -325,7 +325,7 @@ export class LayoutColumnElement extends HTMLElement {
         existingPartEls[p].remove();
       }
 
-      if (endOfBlock) curSourceOffset++;
+      if (endOfBlock && curSourceOffset < (this.model?.textContent?.length ?? 0) && this.model?.textContent?.[curSourceOffset] === '\n') curSourceOffset++;
     }
 
     for (let i = lines.length; i < existingLineEls.length; i++) {

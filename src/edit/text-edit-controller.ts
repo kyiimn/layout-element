@@ -149,7 +149,6 @@ export class TextEditController {
             model.textContent = after;
             const composedLength = after.length - this._compositionBeforeContent.length;
             this._cursorModel.offset = this._compositionStartOffset + composedLength;
-            this._updateCursorPosition();
             if (this._debounceTimer !== null) {
               cancelAnimationFrame(this._debounceTimer);
               this._debounceTimer = null;
@@ -317,30 +316,26 @@ export class TextEditController {
     if (this._isComposing && this._compositionSpan) {
       this._compositionSpan.remove();
       let reattached = false;
-      const renderedOffset = this._mapper.renderedOffset(this._compositionStartOffset);
-      if (renderedOffset !== null) {
-        const span = this._mapper.getSpanByOffset(renderedOffset);
+      const placement = this._mapper.getCursorPlacement(this._compositionStartOffset);
+      if (placement) {
+        const span = this._mapper.getSpanByOffset(placement.renderedOffset);
         if (span) {
-          span.before(this._compositionSpan);
-          reattached = true;
-        }
-      } else if (this._compositionStartOffset > 0) {
-        const prevRendered = this._mapper.renderedOffset(this._compositionStartOffset - 1);
-        if (prevRendered !== null) {
-          const prevSpan = this._mapper.getSpanByOffset(prevRendered);
-          if (prevSpan) {
-            prevSpan.after(this._compositionSpan);
-            reattached = true;
+          if (placement.atEndOfChar) {
+            span.after(this._compositionSpan);
+          } else {
+            span.before(this._compositionSpan);
           }
+          reattached = true;
         }
       }
 
-      if (!reattached && this._compositionStartOffset === 0) {
+      if (!reattached) {
         const firstColumn = this._paragraph.querySelector("x-layout-column");
         if (firstColumn && firstColumn.shadowRoot) {
           const firstContainer = firstColumn.shadowRoot.firstElementChild;
           if (firstContainer instanceof HTMLElement) {
             firstContainer.appendChild(this._compositionSpan);
+            reattached = true;
           }
         }
       }
@@ -713,7 +708,6 @@ export class TextEditController {
         model.textContent = after;
         const composedLength = after.length - this._compositionBeforeContent.length;
         this._cursorModel.offset = this._compositionStartOffset + composedLength;
-        this._updateCursorPosition();
         if (this._debounceTimer !== null) {
           cancelAnimationFrame(this._debounceTimer);
           this._debounceTimer = null;
@@ -1221,12 +1215,12 @@ export class TextEditController {
       return targetLineStart;
     }
     if (isAtLineEnd) {
-      const currentLineStart = this._mapper.getLineStartSourceOffset(currentLineInfo.columnIndex, currentLineInfo.lineIndex) ?? 0;
+      const currentLineStart = this._mapper.getLineStartSourceOffset(currentLineInfo.columnIndex, currentLineInfo.lineIndex) ?? offset;
       const offsetInLine = offset - currentLineStart;
       return Math.min(targetLineStart + offsetInLine, targetVisualEnd);
     }
 
-    const currentLineStart = this._mapper.getLineStartSourceOffset(currentLineInfo.columnIndex, currentLineInfo.lineIndex) ?? 0;
+    const currentLineStart = this._mapper.getLineStartSourceOffset(currentLineInfo.columnIndex, currentLineInfo.lineIndex) ?? offset;
     const offsetInLine = offset - currentLineStart;
     return Math.min(targetLineStart + offsetInLine, targetVisualEnd);
   }
@@ -1272,16 +1266,16 @@ export class TextEditController {
     const content = model.textContent;
     if (typeof content !== "string") return 0;
 
-    const lineStart = this._mapper.getLineStartSourceOffset(columnIndex, lineIndex) ?? 0;
+    const lineStart = this._mapper.getLineStartSourceOffset(columnIndex, lineIndex);
     const columnContents = model.columnContents;
     const nextStart = this._findNextLineStart(columnContents, columnIndex, lineIndex);
 
     if (nextStart === null) {
-      // 마지막 라인: 텍스트 끝
       return content.length;
     }
-    // 일반/빈 라인: 다음 라인 시작 - 1 (\n 위치 = 이 라인의 마지막 커서 위치)
-    // 빈 줄의 경우 nextStart - 1 = lineStart (라인 시작 = 끝)
+    if (lineStart === null) {
+      return Math.max(0, nextStart - 1);
+    }
     return Math.max(lineStart, nextStart - 1);
   }
 
@@ -1322,8 +1316,8 @@ export class TextEditController {
    */
   private _getLogicalLineStart(offset: number): number {
     const info = this._mapper.getLineInfoBySourceOffset(offset);
-    if (!info) return 0;
-    return this._mapper.getLineStartSourceOffset(info.columnIndex, info.lineIndex) ?? 0;
+    if (!info) return offset;
+    return this._mapper.getLineStartSourceOffset(info.columnIndex, info.lineIndex) ?? offset;
   }
 
   /**
@@ -1332,7 +1326,7 @@ export class TextEditController {
    */
   private _getLogicalLineEnd(offset: number): number {
     const info = this._mapper.getLineInfoBySourceOffset(offset);
-    if (!info) return 0;
+    if (!info) return offset;
     return this._getLineEndSourceOffset(info.columnIndex, info.lineIndex);
   }
 
@@ -1550,30 +1544,26 @@ export class TextEditController {
     this._compositionSpan.style.textUnderlineOffset = "2px";
 
     let spanInserted = false;
-    const renderedOffset = this._mapper.renderedOffset(this._compositionStartOffset);
-    if (renderedOffset !== null) {
-      const span = this._mapper.getSpanByOffset(renderedOffset);
+    const placement = this._mapper.getCursorPlacement(this._compositionStartOffset);
+    if (placement) {
+      const span = this._mapper.getSpanByOffset(placement.renderedOffset);
       if (span) {
-        span.before(this._compositionSpan);
-        spanInserted = true;
-      }
-    } else if (this._compositionStartOffset > 0) {
-      const prevRendered = this._mapper.renderedOffset(this._compositionStartOffset - 1);
-      if (prevRendered !== null) {
-        const prevSpan = this._mapper.getSpanByOffset(prevRendered);
-        if (prevSpan) {
-          prevSpan.after(this._compositionSpan);
-          spanInserted = true;
+        if (placement.atEndOfChar) {
+          span.after(this._compositionSpan);
+        } else {
+          span.before(this._compositionSpan);
         }
+        spanInserted = true;
       }
     }
 
-    if (!spanInserted && this._compositionStartOffset === 0) {
+    if (!spanInserted) {
       const firstColumn = this._paragraph.querySelector("x-layout-column");
       if (firstColumn && firstColumn.shadowRoot) {
         const firstContainer = firstColumn.shadowRoot.firstElementChild;
         if (firstContainer instanceof HTMLElement) {
           firstContainer.appendChild(this._compositionSpan);
+          spanInserted = true;
         }
       }
     }
@@ -1738,41 +1728,37 @@ export class TextEditController {
   }
 
   private _optimisticSpanUpdate(sourceOffset: number, char: string): void {
-    // Clear any previous optimistic span before creating a new one
     if (this._optimisticSpan && this._optimisticSpan.parentNode) {
       this._optimisticSpan.remove();
     }
     this._optimisticSpan = null;
 
-    // Insert a new span BEFORE the character at sourceOffset, instead of
-    // replacing the existing span's text. This prevents the visual "replace then
-    // restore" flicker — the existing character stays visible and the new
-    // character appears to its left, matching the insert semantics.
     if (!this._paragraph.model) return;
 
-    let renderedOffset = this._mapper.renderedOffset(sourceOffset);
-    if (renderedOffset === null) {
-      // sourceOffset is at a \n position — insert after the previous rendered char
-      if (sourceOffset > 0) {
-        renderedOffset = this._mapper.renderedOffset(sourceOffset - 1);
-      }
-      if (renderedOffset === null) return;
+    const textContent = this._paragraph.model.textContent;
+    if (typeof textContent !== "string") return;
 
-      const prevSpan = this._mapper.getSpanByOffset(renderedOffset);
-      if (prevSpan) {
-        const newSpan = this._createOptimisticSpan(char, sourceOffset);
-        prevSpan.after(newSpan);
-        this._optimisticSpan = newSpan;
+    const placement = this._mapper.getCursorPlacement(sourceOffset);
+
+    // placement가 null: \n 바로 다음(새 라인 시작)이거나 빈 줄 시작.
+    // 새 라인 시작인 경우 line div 첫 자식으로 삽입.
+    if (!placement) {
+      if (sourceOffset > 0 && textContent[sourceOffset - 1] === '\n') {
+        this._insertOptimisticSpanAtLineStart(char, sourceOffset);
       }
       return;
     }
 
-    const span = this._mapper.getSpanByOffset(renderedOffset);
-    if (span) {
-      const newSpan = this._createOptimisticSpan(char, sourceOffset);
+    const span = this._mapper.getSpanByOffset(placement.renderedOffset);
+    if (!span) return;
+
+    const newSpan = this._createOptimisticSpan(char, sourceOffset);
+    if (placement.atEndOfChar) {
+      span.after(newSpan);
+    } else {
       span.before(newSpan);
-      this._optimisticSpan = newSpan;
     }
+    this._optimisticSpan = newSpan;
   }
 
   private _createOptimisticSpan(char: string, sourceOffset: number): HTMLSpanElement {
@@ -1795,6 +1781,41 @@ export class TextEditController {
     return span;
   }
 
+  /**
+   * \n 바로 다음 위치(새 라인 시작)에 optimistic span을 삽입한다.
+   *
+   * sourceOffset이 속한 라인의 line div를 찾아, 그 div의 첫 자식으로
+   * optimistic span을 삽입한다. 빈 라인인 경우 line div 자체를 생성하여
+   * 컬럼에 추가한 뒤 span을 삽입한다.
+   *
+   * @param char - 삽입할 문자
+   * @param sourceOffset - 새 문자의 소스 오프셋 (\n 바로 다음)
+   * @throws - model이 없으면 아무 동작도 하지 않음
+   * @returns - 없음 (void)
+   *
+   * @example
+   * // 텍스트가 "가나\n" 이고 커서가 \n 다음(sourceOffset=3)에 있을 때
+   * // '다' 입력 → _insertOptimisticSpanAtLineStart('다', 3)
+   * // → 새 라인의 line div 첫 자식으로 '다' span 삽입
+   */
+  private _insertOptimisticSpanAtLineStart(char: string, sourceOffset: number): void {
+    const lineInfo = this._mapper.getLineInfoBySourceOffset(sourceOffset);
+    if (!lineInfo) return;
+
+    const columns = this._paragraph.querySelectorAll('x-layout-column');
+    const column = columns[lineInfo.columnIndex];
+    if (!column || !column.shadowRoot) return;
+
+    const columnShadow = column.shadowRoot;
+    const lineDivs = columnShadow.children;
+    const lineDiv = lineDivs[lineInfo.lineIndex];
+    if (lineDiv instanceof HTMLElement) {
+      const newSpan = this._createOptimisticSpan(char, sourceOffset);
+      lineDiv.insertBefore(newSpan, lineDiv.firstChild);
+      this._optimisticSpan = newSpan;
+    }
+  }
+
   private _debouncedRender(): void {
     if (this._debounceTimer !== null) {
       cancelAnimationFrame(this._debounceTimer);
@@ -1807,7 +1828,6 @@ export class TextEditController {
   }
 
   private _updateCursorPosition(): void {
-    const content = this._paragraph.model?.textContent as string | undefined;
     const offset = this._cursorModel.offset;
 
     // overflow 시 textarea가 컨테이너 밖에 배치되어 브라우저가
@@ -1820,10 +1840,13 @@ export class TextEditController {
       return Math.max(0, Math.min(top, visibleHeightPx - 1));
     };
 
+    const hasVisibleSelection = this._cursorModel.selection !== null &&
+      this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
+    const cursorVisible = this._isFocused && !hasVisibleSelection;
+
     if (this._optimisticSpan && this._optimisticSpan.parentNode) {
       const spanRect = this._optimisticSpan.getBoundingClientRect();
       const paragraphRect = this._paragraph.getBoundingClientRect();
-      const scale = this._manager.scale;
       const localLeft = (spanRect.left - paragraphRect.left) / scale;
       const visualWidth = spanRect.width / scale;
       const widthRatio = this._paragraph.model?.widthRatio ?? 1;
@@ -1832,123 +1855,77 @@ export class TextEditController {
       this._cursorEl.top = (spanRect.top - paragraphRect.top) / scale;
       this._cursorEl.left = layoutRight;
       this._cursorEl.height = spanRect.height / scale;
-      const hasVisibleSelection = this._cursorModel.selection !== null &&
-        this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
-      this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
+      this._cursorEl.visible = cursorVisible;
       this._textarea.style.top = `${clampTop((spanRect.top - paragraphRect.top) / scale)}px`;
       this._textarea.style.left = `${localLeft}px`;
       return;
     }
 
-    let renderedOffset = this._mapper.renderedOffset(offset);
-    let atEndOfChar = false;
-
+    // cross state가 커서 배치를 오버라이드하는 경우
+    let placement = this._mapper.getCursorPlacement(offset);
     if (this._crossRightState === 'sticking' && offset > 0) {
-      const prevRendered = this._mapper.renderedOffset(offset - 1);
-      if (prevRendered !== null) {
-        renderedOffset = prevRendered;
-        atEndOfChar = true;
-      }
-    }
-
-    if (this._crossRightState === 'crossed') {
-      const rendered = this._mapper.renderedOffset(offset);
-      if (rendered !== null) {
-        renderedOffset = rendered;
-        atEndOfChar = false;
+      const prevPlacement = this._mapper.getCursorPlacement(offset - 1);
+      if (prevPlacement) placement = prevPlacement;
+    } else if (this._crossRightState === 'crossed') {
+      const curPlacement = this._mapper.getCursorPlacement(offset);
+      if (curPlacement) {
+        placement = { ...curPlacement, atEndOfChar: false };
       } else {
-        const nextRendered = this._mapper.renderedOffset(offset + 1);
-        if (nextRendered !== null) {
-          renderedOffset = nextRendered;
-          atEndOfChar = false;
-        }
+        const nextPlacement = this._mapper.getCursorPlacement(offset + 1);
+        if (nextPlacement) placement = { ...nextPlacement, atEndOfChar: false };
       }
+    } else if (this._crossLeftState === 'crossed' && offset > 0) {
+      const prevPlacement = this._mapper.getCursorPlacement(offset - 1);
+      if (prevPlacement) placement = prevPlacement;
+    } else if (this._crossLeftState === 'sticking') {
+      const curPlacement = this._mapper.getCursorPlacement(offset);
+      if (curPlacement) placement = { ...curPlacement, atEndOfChar: false };
     }
 
-    if (this._crossLeftState === 'crossed' && offset > 0) {
-      const prevRendered = this._mapper.renderedOffset(offset - 1);
-      if (prevRendered !== null) {
-        renderedOffset = prevRendered;
-        atEndOfChar = true;
-      }
-    }
-
-    if (this._crossLeftState === 'sticking') {
-      const rendered = this._mapper.renderedOffset(offset);
-      if (rendered !== null) {
-        renderedOffset = rendered;
-        atEndOfChar = false;
-      }
-    }
-
-    if (renderedOffset === null && content !== undefined) {
-      // \n 위치: 먼저 인접 문자로 폴백하여 이전 라인 끝 또는 다음 라인 시작에 표시.
-      // offset이 \n 위치이면 이전 문자의 오른쪽(atEndOfChar=true)이 이전 라인 끝에 해당.
-      if (offset > 0) {
-        const prevRendered = this._mapper.renderedOffset(offset - 1);
-        if (prevRendered !== null) {
-          renderedOffset = prevRendered;
-          atEndOfChar = true;
-        }
-      }
-      if (renderedOffset === null && offset < content.length) {
-        const nextRendered = this._mapper.renderedOffset(offset + 1);
-        if (nextRendered !== null) {
-          renderedOffset = nextRendered;
-          atEndOfChar = false;
-        }
-      }
-      // 인접 문자도 없는 경우(빈 줄 시작): line rect 사용
-      if (renderedOffset === null) {
-        const lineInfo = this._mapper.getLineInfoBySourceOffset(offset);
-        if (lineInfo !== null) {
-          const lineRect = this._mapper.getLineRect(lineInfo.columnIndex, lineInfo.lineIndex);
-          if (lineRect) {
-            const textAlign = this._paragraph.paragraphStyle?.textAlign || DEFAULT_TEXT_ALIGN;
-            let left: number;
-            if (textAlign === 'center') {
-              left = lineRect.left + lineRect.width / 2;
-            } else if (textAlign === 'right') {
-              left = lineRect.left + lineRect.width;
-            } else {
-              left = lineRect.left;
-            }
-            const fontSize = this._mapper.getFirstColumnRect()?.fontSize ?? lineRect.height;
-            this._cursorEl.top = lineRect.top + (lineRect.height - fontSize) / 2;
-            this._cursorEl.left = left;
-            this._cursorEl.height = fontSize;
-            const hasVisibleSelection = this._cursorModel.selection !== null &&
-              this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
-            this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
-            this._textarea.style.top = `${clampTop(lineRect.top)}px`;
-            this._textarea.style.left = `${left}px`;
-            return;
+    // placement가 없는 경우(빈 줄 시작, offset=0 등): line rect 또는 first column rect 사용
+    if (!placement) {
+      const lineInfo = this._mapper.getLineInfoBySourceOffset(offset);
+      if (lineInfo !== null) {
+        const lineRect = this._mapper.getLineRect(lineInfo.columnIndex, lineInfo.lineIndex);
+        if (lineRect) {
+          const textAlign = this._paragraph.paragraphStyle?.textAlign || DEFAULT_TEXT_ALIGN;
+          let left: number;
+          if (textAlign === 'center') {
+            left = lineRect.left + lineRect.width / 2;
+          } else if (textAlign === 'right') {
+            left = lineRect.left + lineRect.width;
+          } else {
+            left = lineRect.left;
           }
+          const fontSize = this._mapper.getFirstColumnRect()?.fontSize ?? lineRect.height;
+          this._cursorEl.top = lineRect.top + (lineRect.height - fontSize) / 2;
+          this._cursorEl.left = left;
+          this._cursorEl.height = fontSize;
+          this._cursorEl.visible = cursorVisible;
+          this._textarea.style.top = `${clampTop(lineRect.top)}px`;
+          this._textarea.style.left = `${left}px`;
+          return;
         }
       }
-    }
 
-    if (renderedOffset === null && offset === 0) {
-      const firstCol = this._mapper.getFirstColumnRect();
-      if (firstCol) {
-        this._cursorEl.top = firstCol.top;
-        this._cursorEl.left = firstCol.left;
-        this._cursorEl.height = firstCol.fontSize;
-        const hasVisibleSelection = this._cursorModel.selection !== null &&
-          this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
-        this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
-        this._textarea.style.top = `${clampTop(firstCol.top)}px`;
-        this._textarea.style.left = `${firstCol.left}px`;
-        return;
+      if (offset === 0) {
+        const firstCol = this._mapper.getFirstColumnRect();
+        if (firstCol) {
+          this._cursorEl.top = firstCol.top;
+          this._cursorEl.left = firstCol.left;
+          this._cursorEl.height = firstCol.fontSize;
+          this._cursorEl.visible = cursorVisible;
+          this._textarea.style.top = `${clampTop(firstCol.top)}px`;
+          this._textarea.style.left = `${firstCol.left}px`;
+          return;
+        }
       }
-    }
 
-    if (renderedOffset === null) {
       this._cursorEl.visible = false;
       return;
     }
 
-    const rect = this._mapper.getCharRect(renderedOffset);
+    const rect = this._mapper.getCharRect(placement.renderedOffset);
     if (!rect) {
       this._cursorEl.visible = false;
       return;
@@ -1956,13 +1933,11 @@ export class TextEditController {
 
     const useFallback = rect.height <= 1;
     const cursorHeight = useFallback ? (this._mapper.getFirstColumnRect()?.fontSize ?? rect.height) : rect.height;
-    const cursorTop = useFallback ? this._resolveFallbackTop(renderedOffset, cursorHeight) : rect.top;
+    const cursorTop = useFallback ? this._resolveFallbackTop(placement.renderedOffset, cursorHeight) : rect.top;
     this._cursorEl.top = cursorTop;
-    this._cursorEl.left = atEndOfChar ? rect.left + rect.width : rect.left;
+    this._cursorEl.left = (placement.atEndOfChar ? rect.left + rect.width : rect.left) + placement.spaceOffsetPx;
     this._cursorEl.height = cursorHeight;
-    const hasVisibleSelection = this._cursorModel.selection !== null &&
-      this._cursorModel.selection.anchor.textOffset !== this._cursorModel.selection.focus.textOffset;
-    this._cursorEl.visible = this._isFocused && !hasVisibleSelection;
+    this._cursorEl.visible = cursorVisible;
 
     this._textarea.style.top = `${clampTop(rect.top)}px`;
     this._textarea.style.left = `${rect.left}px`;
@@ -1982,7 +1957,11 @@ export class TextEditController {
       }
     }
     const rect = this._mapper.getCharRect(renderedOffset);
-    return rect ? rect.top - cursorHeight : 0;
+    if (rect) {
+      return Math.max(0, rect.top - cursorHeight);
+    }
+    const firstCol = this._mapper.getFirstColumnRect();
+    return firstCol?.top ?? 0;
   }
 
   private _updateSelection(): void {
@@ -2024,10 +2003,18 @@ export class TextEditController {
 
   /**
    * 외부에서 커서 위치를 설정할 때 사용한다.
-   * T10 이후 입력 핸들러에서 사용될 예정.
+   * @param position - 커서 위치. textOffset은 0 이상 model.textContent.length 이하로 클램핑된다.
+   * @throws - model이 없으면 아무 동작도 하지 않음
+   * @returns - 없음 (void)
+   *
+   * @example
+   * controller.setCursor({ textOffset: 5 });
+   * controller.focus();
    */
   setCursor(position: CursorPosition): void {
-    this._cursorModel.offset = position.textOffset;
+    const textContent = this._paragraph.model?.textContent;
+    const maxOffset = typeof textContent === 'string' ? textContent.length : 0;
+    this._cursorModel.offset = Math.max(0, Math.min(position.textOffset, maxOffset));
     this._syncTextareaSelection();
     this._updateCursorPosition();
     this._emitStyleChange();

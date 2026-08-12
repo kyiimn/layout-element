@@ -301,9 +301,9 @@ flowchart LR
 2. `this._optimisticSpan = null` — 낙관적 span 참조 제거. 실제 렌더링된 span으로 대체된다.
 3. 조합 중이 아닌 경우 `textarea.value`를 `model.textContent`로 동기화.
 4. `_syncTextareaSelection()` — textarea의 선택 영역을 `_cursorModel` 상태에 맞춘다.
-5. `_updateCursorPosition()` — 커서를 새 DOM 위치에 재배치.
+5. `_updateCursorPosition()` — 커서를 새 DOM 위치에 재배치. `getCursorPlacement(offset)`를 통해 커서 배치 정보(`renderedOffset`, `atEndOfChar`, `spaceOffsetPx`)를 얻는다. `_sourceToCursorPlacement` 맵은 `_rebuildMappings()`에서 모든 source offset에 대해 채워진다 — 가시 문자는 `atEndOfChar: false`, trailing space는 `atEndOfChar: true` + 누적 스페이스 폭, `\n` 위치는 `atEndOfChar: true`, 매핑 구멍(빈 줄 등)은 역방향으로 가장 가까운 placement로 채워진다. 단, `\n` 바로 다음 위치(새 라인 시작)는 line rect 폴백으로 처리된다. `endOfBlock`에서 `textContent`에 실제 `\n`이 있을 때만 `sourceOffset++`를 수행하여 phantom offset을 방지한다. `getCursorPlacement()`가 null을 반환하는 경우(빈 줄 시작, offset=0 등) line rect 또는 first column rect로 폴백한다.
 6. `_updateSelection()` — 선택 영역을 새 DOM 위치에 재배치.
-7. 조합 중이면 `_compositionSpan`을 새 DOM에 재부착. `renderedOffset(_compositionStartOffset)`으로 위치를 찾고, 실패하면 이전/다음 문자 또는 첫 컬럼 첫 요소에 폴백한다.
+7. 조합 중이면 `_compositionSpan`을 새 DOM에 재부착. `getCursorPlacement(_compositionStartOffset)`로 위치를 찾고, 실패하면 첫 컬럼 첫 요소에 폴백한다.
 8. `_wasFocused`가 true면 `textarea.focus({ preventScroll: true })`로 포커스 복원. `preventScroll: true`로 스크롤 컨테이너의 좌상단 점프를 방지한다.
 
 #### `setCursor()`
@@ -1490,10 +1490,19 @@ flowchart LR
 ### 8.1 `_optimisticSpanUpdate()` 내부 로직
 
 1. 이전 낙관적 span이 있으면 DOM에서 제거하고 `_optimisticSpan = null`로 초기화.
-2. `renderedOffset(sourceOffset)`로 삽입 위치를 찾는다.
-3. `renderedOffset`이 null이면 source offset이 `\n` 위치이므로, 이전 문자의 `renderedOffset`으로 폴백.
-   - 이전 span의 `nextSibling`이 span이면 그 앞에 새 span 삽입.
-4. `renderedOffset`이 유효하면 해당 span 앞에 새 span 삽입(`span.before(newSpan)`).
+2. `getCursorPlacement(sourceOffset)`로 커서 배치 정보를 얻는다.
+3. placement가 null인 경우(`\n` 바로 다음 위치 = 새 라인 시작): `_insertOptimisticSpanAtLineStart()`를 호출하여 새 라인의 line div 첫 자식으로 span 삽입.
+4. placement가 유효한 경우: `placement.atEndOfChar`가 true면 해당 span 뒤에, false면 앞에 새 span 삽입.
+5. `_optimisticSpan = newSpan`으로 참조 저장.
+
+#### `_insertOptimisticSpanAtLineStart()` 내부 로직
+
+\n 바로 다음 위치(새 라인 시작)에 입력된 문자의 optimistic span을 삽입한다.
+
+1. `getLineInfoBySourceOffset(sourceOffset)`로 컬럼/라인 인덱스 획득.
+2. `paragraph.querySelectorAll('x-layout-column')`로 컬럼 요소 찾기 (light DOM).
+3. 컬럼의 shadowRoot에서 `lineIndex`번째 자식(line div)을 찾기.
+4. line div의 첫 자식 앞에 optimistic span 삽입 (`lineDiv.insertBefore(newSpan, lineDiv.firstChild)`).
 5. `_optimisticSpan = newSpan`으로 참조 저장.
 
 ### 8.2 `_createOptimisticSpan()` 내부 로직
