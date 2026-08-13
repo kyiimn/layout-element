@@ -370,10 +370,20 @@ F5/F7/F8은 `_getCurrentCellCoord()`로 현재 셀을 결정한 후 처리한다
 
 | 키       | 조건                                       | 동작                                   |
 | -------- | ------------------------------------------ | -------------------------------------- |
-| Tab      | textEditMode + focusedParagraph이 표 내부  | 다음 셀 단락으로 포커스 이동 (순환)    |
-| Shift+Tab | textEditMode + focusedParagraph이 표 내부  | 이전 셀 단락으로 포커스 이동 (순환)    |
+| Tab      | textEditMode + focusedParagraph이 표 내부  | 다음 셀 단락으로 포커스 이동 (마지막 셀 이후 표 밖으로) |
+| Shift+Tab | textEditMode + focusedParagraph이 표 내부  | 이전 셀 단락으로 포커스 이동 (첫 셀 이전 표 밖으로) |
 
-Tab/Shift+Tab은 `handleTab(shiftKey)`로 처리한다. `gridResolution.placements`를 `(gridRow, gridCol)` 오름차순 정렬하고 현재 셀의 placement 인덱스를 찾아 ±1로 이동한다. 머지된 셀은 하나의 placement로 취급되어 자연스럽게 건너뛴다. 마지막 셀에서 Tab → 첫 셀, 첫 셀에서 Shift+Tab → 마지막 셀로 순환한다. 포커스는 `editManager.focusParagraph(target)`로 이동한다.
+Tab/Shift+Tab은 `EditManager.navigateByTab(shiftKey)`가 먼저 처리한다. `document.element.ts`의 window capture `_onWindowKeyDown`에서 Tab 키를 선점하며, 이벤트 전파를 `stopPropagation()`으로 차단한다. 따라서 실제로 `table.element.ts`의 document capture `_onTableKeyDown`이나 `TableKeyboardController.handleTab(shiftKey)`에는 도달하지 않는다.
+
+표 내부 이동 규칙은 기존과 동일하게 동작한다. `gridResolution.placements`를 `(gridRow, gridCol)` 오름차순 정렬하고 현재 셀의 placement 인덱스를 찾아 ±1로 이동한다. 머지된 셀은 하나의 placement로 취급되어 자연스럽게 건너뛴다. 포커스는 `editManager.focusParagraph(target)`로 이동한다.
+
+경계 동작은 `navigateByTab`에 추가되었다.
+
+- **Tab**: 마지막 셀에서 Tab을 누르면 더 이상 첫 셀로 순환하지 않고, 표 밖으로 포커스를 빠져나간다.
+- **Shift+Tab**: 첫 셀에서 Shift+Tab을 누르면 표 이전 영역(표 밖)으로 포커스를 이동한다.
+- 표 밖으로 빠져나갈 때는 브라우저 기본 포커스 이동 흐름을 따른다.
+
+`TableKeyboardController.handleTab(shiftKey)` 메서드는 호환성을 위해 그대로 유지되어 있다. 단, 현재 키 이벤트 흐름상 window capture에서 Tab이 차단되므로 실제 호출되지 않는다. 외부에서 직접 `handleTab`을 호출하면 이전처럼 동작할 수 있지만, 표 밖으로 빠져나가는 경계 동작은 `navigateByTab`에서 처리한다.
 
 ### 6.2 셀 블록 활성 시 동작 (모든 모드)
 

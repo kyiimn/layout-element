@@ -890,7 +890,59 @@ flowchart TD
 
 `Ctrl`/`Cmd` 단축키는 `event.ctrlKey || event.metaKey` 조건으로 감지한다.
 
-### 4.1 각 키의 내부 처리 과정
+### 4.1 Tab / Shift+Tab: 단락 간 포커스 이동
+
+텍스트 편집 모드에서 `Tab`과 `Shift+Tab`은 문서 내 모든 편집 가능한 단락 사이를 순환하며 포커스를 이동한다. 이 단축키는 `LayoutDocumentElement._onWindowKeyDown`이 `window`의 capture 단계에서 먼저 가로채며, `EditManager.navigateByTab(shiftKey)`를 호출한다. 호스트 프로그램은 동일한 공개 API를 프로그래밍 방식으로 호출할 수 있다.
+
+| 동작 | 키 | 결과 |
+|------|-----|------|
+| 다음 단락으로 포커스 이동 | `Tab` | 편집 가능한 단락 목록에서 현재 단락의 다음 항목에 포커스. 마지막 단락이면 첫 단락으로 순환. |
+| 이전 단락으로 포커스 이동 | `Shift+Tab` | 편집 가능한 단락 목록에서 현재 단락의 이전 항목에 포커스. 첫 단락이면 마지막 단락으로 순환. |
+| 포커스 없을 때 첫 단락 포커스 | `Tab` | `candidates` 목록의 첫 번째 단락에 포커스. |
+| 포커스 없을 때 마지막 단락 포커스 | `Shift+Tab` | `candidates` 목록의 마지막 단락에 포커스. |
+
+#### 4.1.1 순회 순서
+
+편집 가능한 단락 목록은 다음 규칙으로 평탄화된다.
+
+1. 문서 루트에서 시작해 자식 요소를 **pre-order DFS**로 순회한다.
+2. 같은 깊이의 형제 요소는 **zIndex 오름차순**으로 정렬한다. zIndex가 같으면 DOM 자식 순서를 유지한다.
+3. `<x-layout-box>` 내부에 또 다른 `<x-layout-box>`가 있으면 재귀적으로 먼저 탐색한다.
+4. `<x-layout-table>` 내부의 단락은 표 셀 좌표(`gridRow` 오름차순, 같은 행 내에서는 `gridCol` 오름차순) 순서로 삽입된다.
+5. 셀 안에는 각 셀에 포함된 첫 번째 단락(`box.items`에서 `LayoutParagraphElement`)을 먼저 추가한 뒤, 셀 안의 자식 box를 재귀로 탐색한다.
+
+따라서 순서는 "좌상단 → 우상단 → 좌하단 → 우하단"의 문서 흐름이며, 표 내부에서는 셀 좌표 순서대로 단락을 방문한다.
+
+#### 4.1.2 표와의 경계
+
+- 표 **마지막 셀**에서 `Tab`을 누르면, 다음 평탄화 후보가 표 외부에 있다면 그 단락으로 포커스를 이동한다. 표 내부에서는 순환하지 않는다.
+- 표 **내부**에서 `Tab`/`Shift+Tab` 처리는 `TableKeyboardController.handleTab`을 통해 셀 좌표 순서로 동작한다. 이는 `EditManager.navigateByTab`의 전체 문서 평탄화와 일관성을 유지한다.
+
+#### 4.1.3 제약 조건
+
+- **삽입 모드**(`insertMode !== null`): `navigateByTab`은 아무 동작도 하지 않고 `false`를 반환한다.
+- **인쇄 모드**(`_isPrint === true`): 편집 기능 전체가 차단되므로 Tab 이동도 동작하지 않는다.
+- **레이아웃 편집 모드**(`textEditMode === false`, `layoutEditMode === true`): 단락이 아닌 선택 가능한 box 목록을 순환한다. 이 문서에서는 텍스트 편집 모드의 동작을 다룬다.
+
+#### 4.1.4 프로그래밍 방식 호출
+
+```ts
+const manager = layoutDocEl.editManager;
+
+// Tab과 동일
+const handled = manager.navigateByTab(false);
+
+// Shift+Tab과 동일
+const handledReverse = manager.navigateByTab(true);
+```
+
+`navigateByTab(shiftKey: boolean): boolean`
+
+- `shiftKey: false` — 순방향(Tab).
+- `shiftKey: true` — 역방향(Shift+Tab).
+- 반환값: 포커스 이동이 실제로 처리되면 `true`, 가드 조건(삽입 모드, 인쇄 모드, 후보 없음)으로 중단되면 `false`.
+
+### 4.2 각 키의 내부 처리 과정
 
 #### `ArrowLeft` / `ArrowRight`
 

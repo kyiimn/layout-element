@@ -303,6 +303,47 @@ element.editableLayout = false;
 | **클릭** (이벤트 전파) | `stopPropagation()`으로 부모 요소의 클릭 이벤트 차단. 중첩된 box를 클릭해도 상위 box가 함께 선택되지 않음 |
 | **하위 요소 클릭** | 이벤트가 하위 레이아웃 요소(box)에서 발생한 경우, 상위 요소의 `LayoutEditController._onClick`/`LayoutEditController._onMouseDown`은 `_isEventFromDescendantLayout()` 검사로 해당 이벤트를 무시한다. 이를 통해 상위 요소가 선택된 상태에서도 하위 요소를 클릭하여 선택할 수 있다 |
 
+#### Tab / Shift+Tab으로 selection 이동
+
+`Tab` 키와 `Shift+Tab` 키로 선택 가능한 box 사이를 키보드로 순환 이동할 수 있다. 이 동작은 일반 모드와 레이아웃 편집 모드 모두에서 동작하며, `<x-layout-document>`의 `_onWindowKeyDown`이 `window` capture phase에서 `Tab` 이벤트를 가로채 `EditManager.navigateByTab(shiftKey)`를 호출한다. 이벤트가 처리되면 `preventDefault()`와 `stopPropagation()`이 적용되어 브라우저 기본 Tab 포커스 이동이나 문서 내 다른 핸들러(`_onTableKeyDown` 포함)로 전파되지 않는다.
+
+| 입력 | 동작 |
+|------|------|
+| **Tab** | 다음 선택 가능한 box로 단일 선택 이동. 마지막 box이면 첫 box로 순환 |
+| **Shift+Tab** | 이전 선택 가능한 box로 단일 선택 이동. 첫 box이면 마지막 box로 순환 |
+| **선택 없을 때 Tab** | 첫 번째 선택 가능한 box를 단일 선택 |
+| **선택 없을 때 Shift+Tab** | 마지막 선택 가능한 box를 단일 선택 |
+| **Tab** (insertMode) | 동작 안 함. 삽입 모드에서는 Tab 키가 레이아웃 선택 이동을 수행하지 않는다 |
+| **Tab** (printMode) | 동작 안 함. 인쇄 모드에서는 모든 편집 기능이 차단된다 |
+
+**이동 순서**:
+
+1. 선택 가능한 box를 문서 전체에서 평탄화한 목록을 만든다.
+2. 동일 깊이의 형제 box는 `zIndex` 오름차순으로 정렬한다. `zIndex`가 같으면 DOM의 children 순서를 따른다.
+3. 중첩된 box는 부모보다 먼저 수집되지 않는다. 형제 목록을 전부 순회한 뒤 자식 box로 재귀 들어가므로, 결과적으로 **pre-order DFS** 순서가 된다.
+4. 표(`<x-layout-table>`) 내부의 box는 셀 배치(grid row → grid col) 순서대로 수집되며, 각 셀 안의 box는 셀 내부에서 다시 pre-order DFS로 수집된다.
+5. lock된 box나 조상이 lock된 box, 그리고 선택 필터(`selectableRoles`/`selectableBoxIds`/`selectableRootId`)를 통과하지 못하는 box는 목록에서 제외된다.
+
+**선택 방식**:
+
+- Tab 이동은 항상 **단일 선택**이다. `_setMultiSelect(true)`를 호출하지 않으므로 기존 다중 선택이 있어도 단일 선택으로 전환된다.
+- 이동 대상 box는 `EditManager.selectLayout(box)`를 통해 선택되며, `layoutSelectionChange` 이벤트가 발생한다.
+- 텍스트 편집 모드에서는 Tab/Shift+Tab이 단락(paragraph) 간 포커스를 이동시킨다. 자세한 내용은 **`EDITING_TEXT.md`**를 참조한다.
+
+**공개 API**:
+
+```typescript
+const manager = layoutDocEl.editManager;
+
+// 프로그래밍 방식으로 Tab 이동 시뮬레이션
+manager.navigateByTab(false);  // Tab: 다음 요소
+manager.navigateByTab(true);     // Shift+Tab: 이전 요소
+```
+
+| 메서드 | 시그니처 | 설명 |
+|--------|---------|------|
+| `EditManager.navigateByTab(shiftKey)` | `(shiftKey: boolean) => boolean` | `false`면 다음 요소로, `true`면 이전 요소로 단일 선택 이동. 이동에 성공하면 `true`, 이동할 후보가 없거나 insertMode/printMode면 `false` |
+
 #### 드래그 이동 동작
 
 | 입력 | 동작 |
