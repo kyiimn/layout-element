@@ -2,6 +2,7 @@ import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
+import { LayoutTableElement } from "@/components/layout/table.element";
 import { GridCalculator } from "@/core";
 import type { TextEditController, CurrentStyle } from "./text-edit-controller";
 import { InsertController } from "./insert-controller";
@@ -2665,5 +2666,252 @@ export class EditManager {
     } finally {
       this._dispatching = false;
     }
+  }
+
+  /**
+   * Tab/Shift+Tab 키로 편집 가능한 요소 사이를 순환 이동한다.
+   *
+   * 현재 편집 모드에 따라 동작 대상이 결정된다:
+   * - **텍스트 편집 모드** (`textEditMode === true`): 문서 내 편집 가능한
+   *   모든 `LayoutParagraphElement`를 zIndex 오름차순으로 평탄화한 뒤,
+   *   현재 포커스된 단락의 다음/이전 단락으로 포커스를 이동한다.
+   *   `focusParagraph()`를 호출해 `editableText` 활성화, 부모 box 자동 선택,
+   *   `focusChange` 이벤트 발생을 한 번에 수행한다.
+   * - **레이아웃 편집 모드** (그 외): 문서 내 선택 가능한 모든 `LayoutBoxElement`를
+   *   zIndex 오름차순으로 평탄화한 뒤, 현재 선택된 마지막 box의 다음/이전 box로
+   *   단일 선택을 이동한다. `selectLayout()`을 호출해 기존 선택을 모두 해제하고
+   *   대상만 선택하며 `layoutSelectionChange` 이벤트를 발생시킨다.
+   *   Tab은 항상 단일 선택이므로 `_setMultiSelect(true)`를 호출하지 않는다.
+   *
+   * 인쇄 모드 또는 삽입 모드에서는 동작하지 않고 `false`를 반환한다.
+   * 후보가 하나도 없으면 `false`를 반환한다.
+   *
+   * @param shiftKey - `true`면 Shift+Tab (역방향), `false`면 Tab (순방향)
+   * @returns 이동 성공 여부. 가드 조건 미충족 또는 후보 없음 시 `false`
+   */
+  navigateByTab(shiftKey: boolean): boolean {
+    // 인쇄 모드에서는 편집 기능 전체가 차단된다.
+    if (this._isPrint) return false;
+    // 삽입 모드에서는 Tab 동작을 수행하지 않는다.
+    if (this._insertMode !== null) return false;
+
+    const isTextMode = this._textEditMode;
+
+    if (isTextMode) {
+      // 텍스트 편집 모드: 편집 가능한 paragraph 평탄화.
+      // _flattenParagraphs는 LayoutElement(Box|TD)를 받지만 document도 items getter를
+      // 가지므로 구조적으로 호환됨 — 헬퍼 내부에서는 instanceof 분기만 사용한다.
+      const candidates: LayoutParagraphElement[] = [];
+      this._flattenParagraphs(this._docEl as unknown as LayoutElement, candidates);
+      if (candidates.length === 0) return false;
+
+      const current = this.focusedParagraph;
+      const currentIdx = current ? candidates.indexOf(current) : -1;
+
+      const nextIdx = shiftKey
+        ? (currentIdx <= 0 ? candidates.length - 1 : currentIdx - 1)
+        : (currentIdx < 0 ? 0 : (currentIdx + 1) % candidates.length);
+
+      this.focusParagraph(candidates[nextIdx]);
+      return true;
+    } else {
+      // 레이아웃 편집 모드: 선택 가능한 box 평탄화 (위와 동일한 캐스트 사유).
+      const candidates: LayoutBoxElement[] = [];
+      this._flattenBoxes(this._docEl as unknown as LayoutElement, candidates);
+      if (candidates.length === 0) return false;
+
+      const current = this._selectedLayouts.length > 0
+        ? this._selectedLayouts[this._selectedLayouts.length - 1]
+        : null;
+      const currentIdx = current ? candidates.indexOf(current as LayoutBoxElement) : -1;
+
+      const nextIdx = shiftKey
+        ? (currentIdx <= 0 ? candidates.length - 1 : currentIdx - 1)
+        : (currentIdx < 0 ? 0 : (currentIdx + 1) % candidates.length);
+
+      // Tab은 항상 단일 선택 — _setMultiSelect(true) 호출 없이 selectLayout만 호출.
+      this.selectLayout(candidates[nextIdx]);
+      return true;
+    }
+  }
+
+  /**
+   * 형제 요소들을 zIndex 오름차순으로 안정 정렬한다.
+   *
+   * `box.zIndex` getter를 사용하여 role override(ad=91000, header=91001)가
+   * 정렬 순서에 반영되도록 한다. 동일한 zIndex를 가진 요소는 원래 순서를 유지한다.
+   * (ECMAScript 2019 이후 `Array.prototype.sort`는 안정 정렬을 보장한다.)
+   *
+   * @param items - 정렬할 형제 요소 배열 (box/paragraph/image/table 혼합 가능)
+   * @returns zIndex 오름차순으로 정렬된 새 배열 (원본 불변)
+   */
+  private _sortSiblings<T extends { zIndex: number }>(items: T[]): T[] {
+    return [...items].sort((a, b) => a.zIndex - b.zIndex);
+  }
+
+  /**
+   * 컨테이너 하위의 모든 선택 가능한 box를 평탄화하여 수집한다.
+   *
+   * Pre-order DFS로 순회하며, 각 컨테이너의 자식을 `_sortSiblings`로 zIndex 정렬한다.
+   * - `LayoutBoxElement`이고 `isBoxSelectable` 통과 시 result에 추가.
+   *   단, 부모 box가 lock 상태가 아니면 자식으로 재귀 (lock은 조상 lock을 통해
+   *   `isBoxSelectable`/`isBoxEditable`이 자동으로 차단하므로, lock된 box의
+   *   자식도 `isBoxSelectable`에서 걸러짐).
+   * - `LayoutTableElement` → `_flattenTableBoxes`로 위임.
+   * - `LayoutParagraphElement`, `LayoutImageElement` → 건너뜀.
+   *
+   * @param container - 순회할 컨테이너 (document 또는 box)
+   * @param result - 수집 결과를 누적할 배열
+   */
+  private _flattenBoxes(container: LayoutElement, result: LayoutBoxElement[]): void {
+    const sorted = this._sortSiblings(container.items);
+    for (const child of sorted) {
+      if (child instanceof LayoutBoxElement) {
+        if (this.isBoxSelectable(child)) {
+          result.push(child);
+        }
+        // lock 여부와 무관하게 자식으로 재귀 — 자식이 선택 가능하면 수집해야 함.
+        // 단, lock된 box의 자식은 isBoxSelectable이 조상 lock을 검사하므로 자동 제외됨.
+        this._flattenBoxes(child, result);
+      } else if (child instanceof LayoutTableElement) {
+        this._flattenTableBoxes(child, result);
+      }
+    }
+  }
+
+  /**
+   * 컨테이너 하위의 모든 편집 가능한 paragraph를 평탄화하여 수집한다.
+   *
+   * Pre-order DFS로 순회하며, 각 컨테이너의 자식을 `_sortSiblings`로 zIndex 정렬한다.
+   * - `LayoutParagraphElement`이고 `isParagraphEditable` 통과 시 result에 추가.
+   * - `LayoutBoxElement` → 자식으로 재귀 (하위에 paragraph가 있을 수 있음).
+   * - `LayoutTableElement` → `_flattenTableParagraphs`로 위임.
+   * - `LayoutImageElement` → 건너뜀.
+   *
+   * @param container - 순회할 컨테이너 (document 또는 box)
+   * @param result - 수집 결과를 누적할 배열
+   */
+  private _flattenParagraphs(container: LayoutElement, result: LayoutParagraphElement[]): void {
+    const sorted = this._sortSiblings(container.items);
+    for (const child of sorted) {
+      if (child instanceof LayoutParagraphElement) {
+        if (this.isParagraphEditable(child)) {
+          result.push(child);
+        }
+      } else if (child instanceof LayoutBoxElement) {
+        this._flattenParagraphs(child, result);
+      } else if (child instanceof LayoutTableElement) {
+        this._flattenTableParagraphs(child, result);
+      }
+    }
+  }
+
+  /**
+   * 표 내부의 모든 선택 가능한 box를 평탄화하여 수집한다.
+   *
+   * `table.gridResolution`의 placements를 (gridRow, gridCol) 오름차순으로 정렬한 뒤,
+   * 각 placement에 해당하는 TD를 찾아 첫 번째 box를 후보로 검사한다.
+   * - box가 존재하고 `isBoxSelectable` 통과 시 result에 추가.
+   * - `_flattenBoxes(box, result)` 호출로 box 하위의 모든 box를 수집한다.
+   *   (중첩 box 및 중첩 table은 `_flattenBoxes`가 내부적으로 처리한다.)
+   *
+   * @param table - 순회할 표 요소
+   * @param result - 수집 결과를 누적할 배열
+   */
+  private _flattenTableBoxes(table: LayoutTableElement, result: LayoutBoxElement[]): void {
+    const grid = table.gridResolution;
+    if (!grid || grid.placements.length === 0) return;
+
+    const sortedPlacements = [...grid.placements].sort(
+      (a, b) => a.gridRow - b.gridRow || a.gridCol - b.gridCol,
+    );
+
+    for (const placement of sortedPlacements) {
+      const td = this._findTdAt(table, placement.gridRow, placement.gridCol);
+      if (!td) continue;
+      const box = td.items[0];
+      if (!box) continue;
+
+      if (this.isBoxSelectable(box)) {
+        result.push(box);
+      }
+      // _flattenBoxes already handles nested boxes AND nested tables (LayoutTableElement
+      // children are dispatched to _flattenTableBoxes). No explicit nested-table loop needed.
+      this._flattenBoxes(box, result);
+    }
+  }
+
+  /**
+   * 표 내부의 모든 편집 가능한 paragraph를 평탄화하여 수집한다.
+   *
+   * `table.gridResolution`의 placements를 (gridRow, gridCol) 오름차순으로 정렬한 뒤,
+   * 각 placement에 해당하는 TD를 찾아 첫 번째 box의 하위 paragraph를 검사한다.
+   * - `_flattenParagraphs(box, result)` 호출로 box 하위의 모든 paragraph를 수집한다.
+   *   (중첩 box 및 중첩 table은 `_flattenParagraphs`가 내부적으로 처리한다.)
+   *
+   * @param table - 순회할 표 요소
+   * @param result - 수집 결과를 누적할 배열
+   */
+  private _flattenTableParagraphs(table: LayoutTableElement, result: LayoutParagraphElement[]): void {
+    const grid = table.gridResolution;
+    if (!grid || grid.placements.length === 0) return;
+
+    const sortedPlacements = [...grid.placements].sort(
+      (a, b) => a.gridRow - b.gridRow || a.gridCol - b.gridCol,
+    );
+
+    for (const placement of sortedPlacements) {
+      const td = this._findTdAt(table, placement.gridRow, placement.gridCol);
+      if (!td) continue;
+      const box = td.items[0];
+      if (!box) continue;
+
+      // _flattenParagraphs already collects paragraphs from box.items AND handles
+      // nested boxes/tables. No explicit paragraph or nested-table loop needed.
+      this._flattenParagraphs(box, result);
+    }
+  }
+
+  /**
+   * 표에서 지정된 (gridRow, gridCol) 좌표에 해당하는 TD를 찾는다.
+   *
+   * `table.items`는 TR 배열이며, 각 TR의 `items`는 TD 배열이다.
+   * placement의 gridRow로 TR을 찾고, 해당 TR의 TD 중 cellLabels가
+   * placement 좌표를 포함하는 TD를 반환한다.
+   *
+   * @param table - 검색할 표 요소
+   * @param gridRow - placement의 시작 행 인덱스
+   * @param gridCol - placement의 시작 열 인덱스
+   * @returns 해당 좌표의 TD 요소, 찾지 못하면 null
+   */
+  private _findTdAt(table: LayoutTableElement, gridRow: number, gridCol: number): LayoutTableCellElement | null {
+    const tr = table.items[gridRow];
+    if (!tr) return null;
+    const targetLabel = this._coordToLabel(gridRow, gridCol);
+    for (const td of tr.items) {
+      if (td.cellLabels.includes(targetLabel)) return td;
+    }
+    for (const td of tr.items) {
+      if (td.cellLabel === targetLabel) return td;
+    }
+    // fallback: 첫 번째 TD (gridResolution과 DOM이 불일치하는 극단적 케이스)
+    return tr.items[0] ?? null;
+  }
+
+  /**
+   * (row, col) 좌표를 셀 라벨(A1, B2, ...)로 변환한다.
+   *
+   * @param row - 행 인덱스 (0부터)
+   * @param col - 열 인덱스 (0부터)
+   * @returns 셀 라벨 문자열
+   */
+  private _coordToLabel(row: number, col: number): string {
+    let label = '';
+    let n = row;
+    do {
+      label = String.fromCharCode(65 + (n % 26)) + label;
+      n = Math.floor(n / 26) - 1;
+    } while (n >= 0);
+    return `${label}${col + 1}`;
   }
 }

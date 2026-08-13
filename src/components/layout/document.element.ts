@@ -117,6 +117,13 @@ export class LayoutDocumentElement extends HTMLElement {
         }
       }
     }
+    if (event.key === 'Tab') {
+      const handled = this._editManager.navigateByTab(event.shiftKey);
+      if (handled) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }
   };
 
   /**
