@@ -800,9 +800,11 @@ class LayoutTableCellElement extends HTMLElement
 
 #### Placeholder border
 
-보더가 선언되지 않은 면에 빨간 점선 placeholder border를 렌더링한다.
+보더가 선언되지 않은 면에 회색(`#aaaaaa`) 점선 placeholder border를 렌더링한다.
 `EditManager.showPlaceholderBorders`가 `false`면 렌더링하지 않는다.
 인쇄 모드에서도 렌더링하지 않는다. 자세한 내용은 `EDITING_TABLE.md` 참조.
+
+> **우선순위**: `selected` > `hovered` > `reparent-target` > placeholder. box는 CSS attribute selector로 해당 상태일 때 placeholder 규칙이 제외되며, td는 `_renderPlaceholderBorder()`가 해당 속성을 감지해 div를 제거한다. 즉, 선택/호버/리페런트 타겟 상태에서는 placeholder border가 표시되지 않고 실제 상태 표시(outline)만 보인다. selected와 hovered가 동시에 있으면 selected(빨간 실선)가 우선한다.
 
 ---
 
@@ -1630,7 +1632,7 @@ get showPlaceholderBorders(): boolean;
 set showPlaceholderBorders(value: boolean): void;
 ```
 
-보더가 없는 box/td의 빨간 점선 placeholder border 및 document 가이드 컬럼 표시 여부를 토글한다. **휘발성** — `BoxData`/`TableData`에 저장되지 않으며 편집 세션 중에만 적용된다. 기본값 `true`.
+보더가 없는 box/td의 회색(`#aaaaaa`) 점선 placeholder border 및 document 가이드 컬럼 표시 여부를 토글한다. **휘발성** — `BoxData`/`TableData`에 저장되지 않으며 편집 세션 중에만 적용된다. 기본값 `true`. `selected` > `hovered` > `reparent-target` > placeholder 순으로 우선하며, 해당 상태에서는 placeholder border가 표시되지 않는다.
 
 - `true`: 보더 없는 box/td에 placeholder border 표시, 가이드 컬럼 표시
 - `false`: placeholder border 숨김, 가이드 컬럼 숨김

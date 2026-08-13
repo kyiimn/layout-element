@@ -87,7 +87,7 @@ export class LayoutTableCellElement extends HTMLElement {
   }
 
   static get observedAttributes(): readonly string[] {
-    return ['colspan', 'rowspan'];
+    return ['colspan', 'rowspan', 'selected', 'hovered', 'reparent-target'];
   }
 
   attributeChangedCallback(
@@ -95,6 +95,10 @@ export class LayoutTableCellElement extends HTMLElement {
     _oldVal: string | null,
     newVal: string | null,
   ): void {
+    if (name === 'selected' || name === 'hovered' || name === 'reparent-target') {
+      if (this.isConnected) this._renderPlaceholderBorder();
+      return;
+    }
     if (newVal === null) return;
     const parsed = parseInt(newVal, 10);
     if (Number.isNaN(parsed) || parsed < 1) return;
@@ -542,6 +546,9 @@ export class LayoutTableCellElement extends HTMLElement {
     if (this._isPrint) return;
     if (!this.isConnected) return;
     if (!this.editManager?.showPlaceholderBorders) return;
+    if (this.hasAttribute('selected')) return;
+    if (this.hasAttribute('hovered')) return;
+    if (this.hasAttribute('reparent-target')) return;
 
     const parentTable = this._getParentTableElement();
     if (!parentTable) return;
@@ -558,7 +565,7 @@ export class LayoutTableCellElement extends HTMLElement {
     const heightPx = this._height * ppm;
     const borderWidth = '1px';
     const borderStyle = 'dashed';
-    const borderColor = 'red';
+    const borderColor = '#aaaaaa';
 
     const sides: Array<{ side: 'top' | 'bottom' | 'left' | 'right' }> = [];
     if (!this._borderTopWidth || !this._borderTopColor) sides.push({ side: 'top' });

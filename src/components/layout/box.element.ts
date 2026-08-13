@@ -235,7 +235,7 @@ export class LayoutBoxElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
-      styleEl.sheet.insertRule("@media screen { :host([show-placeholder-borders]:not([border]):not([td-static]):not([hovered]):not([reparent-target])) { outline: red dashed 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 1);
+      styleEl.sheet.insertRule("@media screen { :host([show-placeholder-borders]:not([border]):not([td-static]):not([hovered]):not([reparent-target]):not([selected])) { outline: #aaaaaa dashed 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 1);
       styleEl.sheet.insertRule("@media screen { :host([hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 2);
       styleEl.sheet.insertRule("@media screen { :host([selected]) { outline: red solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 3);
       styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { outline: #ff9800 solid 2px !important; outline-offset: -2px !important; box-shadow: none !important; } }", 4);
@@ -243,8 +243,8 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule('@media screen { .resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: ' + Z_INDEX_RESIZE_HANDLE + '; pointer-events: auto; display: none; } }', 6);
       styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .resize-handle { display: block; } }', 7);
       styleEl.sheet.insertRule('@media screen { :host([td-static]) .resize-handle { display: none !important; } }', 8);
-      styleEl.sheet.insertRule('@media screen { :host([td-static][selected]) { outline: red solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 9);
-      styleEl.sheet.insertRule('@media screen { :host([td-static][hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 10);
+      styleEl.sheet.insertRule('@media screen { :host([td-static][hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 9);
+      styleEl.sheet.insertRule('@media screen { :host([td-static][selected]) { outline: red solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 10);
       styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 11);
       styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 12);
       styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 13);
