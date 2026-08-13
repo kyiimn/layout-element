@@ -45,6 +45,12 @@ export class TextEditCoordinateMapper {
   private _columnSpansCache: Map<LayoutColumnElement, HTMLSpanElement[]> = new Map();
 
   /**
+   * 각 컬럼의 source offset 범위. binary search용.
+   * `_columnRanges[columnIndex] = { start, end }` — start는 첫 가시 문자의 source offset, end는 마지막 가시 문자의 source offset + 1.
+   */
+  private _columnRanges: { start: number; end: number }[] = [];
+
+  /**
    * 모든 라인의 시작 source offset을 컬럼순·라인순으로 평탄화한 배열.
    * `_lineSourceOffsets[columnIndex][lineIndex]` = 해당 라인의 시작 source offset.
    */
@@ -81,6 +87,7 @@ export class TextEditCoordinateMapper {
     this._sourceToPlacement.clear();
     this._spanCache.clear();
     this._columnSpansCache.clear();
+    this._columnRanges = [];
     this._lineSourceOffsets = [];
     this._totalLineCount = 0;
     this._rebuildMappings();
@@ -106,6 +113,7 @@ export class TextEditCoordinateMapper {
     for (let columnIndex = 0; columnIndex < columnContents.length; columnIndex++) {
       const lines = columnContents[columnIndex];
       const lineStartOffsets: number[] = [];
+      const columnStartSourceOffset = sourceOffset;
 
       for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const line = lines[lineIndex];
@@ -172,23 +180,25 @@ export class TextEditCoordinateMapper {
 
       this._lineSourceOffsets.push(lineStartOffsets);
       this._totalLineCount += lines.length;
+      this._columnRanges.push({ start: columnStartSourceOffset, end: sourceOffset });
     }
 
     // 매핑 구멍 채우기: _sourceToPlacement에 없는 source offset에 대해
-    // 역방향으로 가장 가까운 placement를 복사.
+    // 순방향 스캔으로 마지막 placement를 추적하여 O(n)으로 채운다.
     // 생략된 공백과 \n 다음 위치는 건너뛴다 — line rect 폴백이 처리한다.
+    let lastPlacement: CursorPlacement | null = null;
     for (let i = 0; i <= textContent.length; i++) {
-      if (this._sourceToPlacement.has(i)) continue;
+      const existing = this._sourceToPlacement.get(i);
+      if (existing) {
+        lastPlacement = existing;
+        continue;
+      }
       if (i > 0 && (textContent[i - 1] === '\n' || textContent[i - 1] === ' ')) continue;
-      for (let back = i - 1; back >= 0; back--) {
-        const existing = this._sourceToPlacement.get(back);
-        if (existing) {
-          this._sourceToPlacement.set(i, {
-            sourceOffset: existing.sourceOffset,
-            atEndOfChar: true,
-          });
-          break;
-        }
+      if (lastPlacement) {
+        this._sourceToPlacement.set(i, {
+          sourceOffset: lastPlacement.sourceOffset,
+          atEndOfChar: true,
+        });
       }
     }
   }
@@ -636,7 +646,7 @@ export class TextEditCoordinateMapper {
 
   /**
    * 주어진 source 오프셋에 해당하는 문자 `span` 요소를 반환한다.
-   * 임시 span은 제외한다.
+   * 임시 span은 제외한다. `_columnRanges`로 binary search로 컬럼을 찾아 해당 컬럼만 검색한다.
    * @param sourceOffset - 소스 오프셋
    * @returns span 요소 또는 null
    */
@@ -645,15 +655,41 @@ export class TextEditCoordinateMapper {
       return this._spanCache.get(sourceOffset)!;
     }
 
+    const columnIndex = this._findColumnIndexByOffset(sourceOffset);
+    if (columnIndex === null) return null;
+
     const columns = this._getAllColumns();
-    for (const column of columns) {
-      if (!column.shadowRoot) continue;
-      const span = column.shadowRoot.querySelector<HTMLSpanElement>(
-        `[data-source-offset="${sourceOffset}"]:not([data-temporary])`,
-      );
-      if (span) {
-        this._spanCache.set(sourceOffset, span);
-        return span;
+    const column = columns[columnIndex];
+    if (!column || !column.shadowRoot) return null;
+
+    const span = column.shadowRoot.querySelector<HTMLSpanElement>(
+      `[data-source-offset="${sourceOffset}"]:not([data-temporary])`,
+    );
+    if (!span) return null;
+
+    this._spanCache.set(sourceOffset, span);
+    return span;
+  }
+
+  /**
+   * `_columnRanges`에서 source offset이 속한 컬럼 인덱스를 binary search로 찾는다.
+   * @param sourceOffset - 찾을 source offset
+   * @returns 컬럼 인덱스 또는 null
+   */
+  private _findColumnIndexByOffset(sourceOffset: number): number | null {
+    let low = 0;
+    let high = this._columnRanges.length - 1;
+
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const range = this._columnRanges[mid];
+
+      if (sourceOffset < range.start) {
+        high = mid - 1;
+      } else if (sourceOffset >= range.end) {
+        low = mid + 1;
+      } else {
+        return mid;
       }
     }
     return null;

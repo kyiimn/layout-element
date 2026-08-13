@@ -1806,7 +1806,7 @@ export class TextEditController {
     if (charStyle) {
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(span.style, charStyle);
     }
-    span.dataset.offset = String(sourceOffset); // temporary offset; will be corrected on re-render
+    span.dataset.sourceOffset = String(sourceOffset);
     span.dataset.temporary = "true";
     const inner = document.createElement('span');
     inner.dataset.charInner = 'true';
