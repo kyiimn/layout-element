@@ -1465,6 +1465,12 @@ export class EditManager {
   /**
    * 현재 편집 가능 상태에 따라 문서 내 모든 box의 `editableLayout` 속성을 갱신한다.
    * `isBoxEditable()` 결과를 box별로 적용한다.
+   *
+   * 동시에, 필터 변경으로 인해 더 이상 `isBoxSelectable()`을 통과하지 못하게 된
+   * 선택된 box의 선택을 해제한다. 일반 모드에서 `editableRoles=null`로 모든 box가
+   * 선택 가능했던 상태에서 레이아웃 편집 모드 진입 시 `editableRoles`가 좁혀지면,
+   * 새 필터 기준에서 선택 불가능해진 box들은 자동으로 선택 해제된다.
+   * 포커스된 paragraph의 부모 box는 텍스트 편집 포커스 유지를 위해 보존된다.
    */
   private _applyEditableLayoutToAllBoxes(): void {
     const boxes = this._docEl.querySelectorAll<LayoutBoxElement>('x-layout-box');
@@ -1474,6 +1480,38 @@ export class EditManager {
         box.editableLayout = editable;
       }
     });
+
+    this._pruneUnselectableSelections();
+  }
+
+  /**
+   * 현재 선택된 레이아웃 요소 중 `isBoxSelectable()`을 통과하지 못하는 요소를
+   * 선택에서 제거한다. 포커스된 paragraph의 부모 box는 보존한다.
+   *
+   * `setEditableRoles` / `setEditableBoxIds` / `setEditableRootId` / `layoutEditMode`
+   * 변경 시 `_applyEditableLayoutToAllBoxes`를 통해 호출되어, 필터 좁힘으로 인해
+   * 선택 불가능해진 box의 선택이 남지 않도록 한다.
+   */
+  private _pruneUnselectableSelections(): void {
+    if (this._selectedLayouts.length === 0) return;
+    const previousLayouts = [...this._selectedLayouts];
+    const focusedParentBox = this._getFocusedParentBox();
+
+    const removed: LayoutElement[] = [];
+    const kept: LayoutElement[] = [];
+    for (const el of this._selectedLayouts) {
+      if (!this.isBoxSelectable(el) && el !== focusedParentBox) {
+        el.removeAttribute('selected');
+        el.removeAttribute('text-focused');
+        removed.push(el);
+      } else {
+        kept.push(el);
+      }
+    }
+
+    if (removed.length === 0) return;
+    this._selectedLayouts = kept;
+    this._dispatchLayoutSelection(previousLayouts);
   }
 
   /**

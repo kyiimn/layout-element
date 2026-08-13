@@ -101,9 +101,27 @@ manager.layoutEditMode = false;
 console.log(manager.layoutEditType); // 'move' | 'reparent'
 ```
 
-`layoutEditMode`가 `true`(또는 `{ type: ... }`)가 되면 `EditManager`는 문서 안의 모든 `<x-layout-box>`를 순회하며, `isBoxEditable(box)` 결과에 따라 각 box의 `editableLayout` 속성을 갱신한다. `false`로 설정되면 모든 box의 `editableLayout` 속성이 `false`가 된다. **선택은 레이아웃 편집 모드와 무관하게 항상 유지된다.**
+`layoutEditMode`가 `true`(또는 `{ type: ... }`)가 되면 `EditManager`는 문서 안의 모든 `<x-layout-box>`를 순회하며, `isBoxEditable(box)` 결과에 따라 각 box의 `editableLayout` 속성을 갱신한다. `false`로 설정되면 모든 box의 `editableLayout` 속성이 `false`가 된다. **선택 컨트롤러(`LayoutSelectionController`)는 레이아웃 편집 모드와 무관하게 항상 부착되어 있으며**, 인쇄 모드와 삽입 모드를 제외하면 항상 동작한다. 단, **선택 가능 여부(`isBoxSelectable`)는 `selectableRoles`/`selectableBoxIds`가 `null`일 때 `editableRoles`/`editableBoxIds`를 fallback으로 사용**하므로, 편집 필터를 설정하면 선택 필터도 같이 좁아진다. 자세한 내용은 [선택 필터](#선택-필터-setselectableroles-roles--setselectableboxids-ids--setselectablerootidid) 섹션을 참조.
+
+**필터 좁힘 시 선택 자동 해제**: `layoutEditMode` setter, `setEditableRoles()`, `setEditableBoxIds()`, `addEditableBox()`, `removeEditableBox()`, `setEditableRootId()` 호출 시, 필터 변경으로 인해 더 이상 `isBoxSelectable()`을 통과하지 못하게 된 선택된 box는 자동으로 선택 해제된다. `layoutSelectionChange` 이벤트가 발생한다. 포커스된 paragraph의 부모 box는 텍스트 편집 포커스 유지를 위해 보존된다.
 
 **기본적으로 모든 box가 허용된다.** `layoutEditMode`만 켜고 `editableRoles`와 `editableBoxIds`를 모두 `null`로 두면 Root 제한(`setEditableRootId`)과 lock을 제외한 모든 box가 편집·선택 가능하다. 편집을 막으려면 `layoutEditMode`를 `false`로 설정하거나, `editableRoles`/`editableBoxIds`를 지정해 허용 범위를 좁혀야 한다. box의 `lock` 속성이 `true`이거나 조상 box 중 하나라도 lock이면 해당 box와 하위 요소는 항상 편집·선택 모두 불가이다.
+
+> **⚠️ 주의: `setEditableRoles`는 선택에도 영향을 준다**
+>
+> `selectableRoles`가 `null`인 상태에서 `setEditableRoles(['none'])`을 호출하면, `isBoxSelectable()`이 `editableRoles`를 fallback으로 사용하여 `role='none'`인 box만 선택 가능해진다. 즉, `role='title'`, `role='body'`, `role='group-article'` 등 명시적 역할이 부여된 box는 편집뿐 아니라 **선택도 불가능**해진다.
+>
+> **편집은 제한하되 선택은 모든 box에 허용하려면**, 선택 전용 필터를 명시적으로 설정해야 한다:
+>
+> ```typescript
+> manager.setEditableRoles(['none']);           // 편집: role='none'만
+> manager.setSelectableRoles(null);             // 선택: 편집 필터 fallback → 같이 제한됨
+>
+> // 대안: 선택은 모든 역할 허용 (편집 필터를 덮어씀)
+> manager.setSelectableRoles(['none', 'title', 'body', 'group-article', 'image', 'caption', 'header', 'ad', 'byline']);
+> ```
+>
+> 또는 편집과 선택 모두 모든 box에 허용하려면 `setEditableRoles(null)`을 사용한다.
 
 **하위 호환**: `true`는 `{ type: 'move' }`와 동일하다. 기존 `boolean` API를 그대로 사용할 수 있다.
 
@@ -122,6 +140,8 @@ manager.setEditableRoles(null);
 | `roles` | `BoxRole[] \| null` | 편집을 허용할 역할 목록. `null`이면 역할 기반 제한 없음 |
 
 `BoxRole`에 `'none'`이 추가되었다. `box.role`이 설정되지 않았을 때는 `'none'`을 반환한다. 역할 미지정 box도 편집하려면 `'none'`을 목록에 포함해야 한다.
+
+> **⚠️ 선택에 미치는 부작용**: `setEditableRoles()`로 편집 역할을 제한하면, `selectableRoles`가 `null`일 때 `isBoxSelectable()`이 `editableRoles`를 fallback으로 사용하므로 **선택도 같은 역할로 제한**된다. 편집은 제한하되 선택은 모든 box에 허용하려면 `setSelectableRoles()`로 선택 전용 필터를 별도로 설정해야 한다. 자세한 내용은 [선택 필터](#선택-필터-setselectableroles-roles--setselectableboxids-ids--setselectablerootidid) 섹션을 참조.
 
 #### ID 기반 필터: `setEditableBoxIds(ids)` / `editableBoxIds` / `addEditableBox(id)` / `removeEditableBox(id)`
 
@@ -169,12 +189,13 @@ const editable = manager.isBoxEditable(box); // boolean
 
 #### 선택 (항상 활성)
 
-레이아웃 선택은 기본적으로 항상 활성이다. `LayoutSelectionController`는 처음부터 부착되어 있으며, 인쇄 모드와 삽입 모드를 제외하면 항상 동작한다. 선택은 `layoutEditMode`와 독립적으로 동작한다.
+레이아웃 선택은 기본적으로 항상 활성이다. `LayoutSelectionController`는 처음부터 부착되어 있으며, 인쇄 모드와 삽입 모드를 제외하면 항상 동작한다. 선택 컨트롤러의 부착 여부는 `layoutEditMode`와 독립적이지만, **개별 box의 선택 가능 여부(`isBoxSelectable`)는 편집 필터의 영향을 받는다** — `selectableRoles`/`selectableBoxIds`가 `null`이면 `editableRoles`/`editableBoxIds`를 fallback으로 사용하므로, 편집 필터를 좁히면 선택도 같이 좁아진다.
 
 ```typescript
 const manager = layoutDocEl.editManager;
 
 // 항상 클릭 선택 가능 (인쇄/삽입 모드 제외)
+// 단, isBoxSelectable 통과 필요 — selectableRoles가 null이면 editableRoles를 fallback 사용
 manager.selectLayout(box);
 
 // 레이아웃 편집 모드도 켜면 선택 + 이동/리사이즈 모두 가능
@@ -185,10 +206,14 @@ manager.layoutEditMode = true;
 |---|---|---|
 | 인쇄 모드 | ✗ | ✗ |
 | 삽입 모드 | ✗ | ✗ |
-| 기본 상태 | ✓ | ✗ |
-| `layoutEditMode = true` | ✓ (편집 필터) | ✓ |
+| 기본 상태 (필터 `null`) | ✓ | ✗ |
+| 기본 상태 (`editableRoles` 설정) | `isBoxSelectable` 통과 시만 | ✗ |
+| `layoutEditMode = true` (필터 `null`) | ✓ | ✓ |
+| `layoutEditMode = true` (`editableRoles` 설정) | `isBoxSelectable` 통과 시만 | `isBoxEditable` 통과 시만 |
 
 `LayoutSelectionController`가 항상 부착되어 있으므로 선택을 위해 별도의 모드를 켤 필요가 없다. 편집 모드가 꺼진 상태에서는 드래그/리사이즈는 시작되지 않고 클릭 선택만 처리된다. 문서의 빈 영역(box가 아닌 곳)을 클릭하면 포커스된 box를 제외한 선택이 해제된다.
+
+**필터 좁힘 시 기존 선택 자동 해제**: 일반 모드에서 `editableRoles=null`로 모든 box가 선택 가능했던 상태에서 `setEditableRoles(['none'])`을 호출하거나 `layoutEditMode = true`로 전환하면, 새 필터에서 선택 불가능해진 box는 자동으로 선택 해제된다. 포커스된 paragraph의 부모 box는 보존된다. `layoutSelectionChange` 이벤트가 발생한다.
 
 #### 모드 스위칭
 
@@ -207,7 +232,7 @@ manager.layoutEditMode = true;
 
 #### 선택 필터: `setSelectableRoles(roles)` / `setSelectableBoxIds(ids)` / `setSelectableRootId(id)`
 
-선택 전용 필터는 편집 필터와 독립적으로 동작한다. 선택 전용 필터가 설정되지 않으면(`null`) 편집 필터를 대신 사용한다.
+선택 전용 필터는 편집 필터와 독립적으로 동작한다. **선택 전용 필터가 `null`이면 편집 필터를 fallback으로 사용**한다. 즉, `setEditableRoles(['none'])`만 호출하고 `setSelectableRoles`를 호출하지 않으면, 선택도 `editableRoles` 기준으로 필터링되어 `role='none'`인 box만 선택 가능해진다. 편집은 제한하되 선택은 모든 box에 허용하려면, `setSelectableRoles()`에 모든 허용 역할을 명시적으로 나열하거나, `setEditableRoles(null)`을 사용해 편집 필터 자체를 해제해야 한다.
 
 ```typescript
 // 선택 전용 role 필터 설정
@@ -244,9 +269,9 @@ const selectable = manager.isBoxSelectable(box); // boolean
 
 1. box 자체 또는 조상 box 중 lock이 설정된 것이 있으면 `false`를 반환한다.
 2. 선택 전용 루트(`selectableRootId`)가 지정된 경우, box가 해당 루트 내부의 자손이어야 한다. `null`이면 편집 루트(`editableRootId`)를 따른다.
-3. 선택 전용 role 필터(`selectableRoles`)가 설정되어 있으면 box의 `role`이 그 안에 포함되어야 한다. `null`이면 편집 필터(`editableRoles`)를 따른다.
-4. 선택 전용 ID 필터(`selectableBoxIds`)가 설정되어 있으면 box의 `id`가 그 안에 포함되어야 한다. `null`이면 편집 필터(`editableBoxIds`)를 따른다.
-5. 모든 필터가 `null`이면 lock/루트 제한을 제외한 모든 box가 선택 가능하다.
+3. 선택 전용 role 필터(`selectableRoles`)가 설정되어 있으면 box의 `role`이 그 안에 포함되어야 한다. **`null`이면 편집 필터(`editableRoles`)를 따른다 — 이때 `editableRoles`도 `null`이어야 모든 역할이 허용된다.** `editableRoles`가 `['none']`이면 `selectableRoles`가 `null`이어도 `role='none'`인 box만 선택 가능하다.
+4. 선택 전용 ID 필터(`selectableBoxIds`)가 설정되어 있으면 box의 `id`가 그 안에 포함되어야 한다. **`null`이면 편집 필터(`editableBoxIds`)를 따른다** — `editableBoxIds`도 `null`이어야 모든 ID가 허용된다.
+5. 모든 필터가 `null`이면 lock/루트 제한을 제외한 모든 box가 선택 가능하다. **`selectableRoles`와 `editableRoles`가 모두 `null`이어야 이 조건이 충족된다.**
 
 | lock/ancestor lock | Root 범위 | `selectableRoles` | `selectableBoxIds` | box.role | box.id | 결과 |
 |--------------------|-----------|-------------------|--------------------|----------|--------|------|
@@ -260,7 +285,7 @@ const selectable = manager.isBoxSelectable(box); // boolean
 | unlocked | inside Root | `['body']` | `['b1']` | `'body'` | `'b1'` | `true` |
 | unlocked | inside Root | `['body']` | `['b1']` | `'body'` | `'b2'` | `false` |
 
-> **참고**: `selectableRoles`/`selectableBoxIds`가 `null`이면 각각 `editableRoles`/`editableBoxIds`를 대신 사용한다(Row 2~3 참조). `selectableRootId`가 `null`이면 `editableRootId`를 대신 사용한다.
+> **참고**: `selectableRoles`/`selectableBoxIds`가 `null`이면 각각 `editableRoles`/`editableBoxIds`를 대신 사용한다(Row 2~3 참조). `selectableRootId`가 `null`이면 `editableRootId`를 대신 사용한다. **즉, `editableRoles`를 설정하는 것만으로 선택 범위도 같이 좁혀지는 부작용이 있다.** 편집과 선택을 독립적으로 제어하려면 `setSelectableRoles()` / `setSelectableBoxIds()`로 선택 전용 필터를 명시적으로 설정해야 한다.
 
 #### `editableLayout` 속성 (하위 호환)
 

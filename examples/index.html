@@ -1039,7 +1039,7 @@
         clearInsertMode();
         currentMode = "layout";
         clearAllEditMode();
-        em.setEditableRoles(["none"]);
+        em.setEditableRoles(null);
         em.layoutEditMode = true; // { type: 'move' }와 동일
         btnRead.classList.remove("active");
         btnEdit.classList.remove("active");
@@ -1053,7 +1053,7 @@
         clearInsertMode();
         currentMode = "layout-reparent";
         clearAllEditMode();
-        em.setEditableRoles(["none"]);
+        em.setEditableRoles(null);
         em.layoutEditMode = { type: "reparent" };
         btnRead.classList.remove("active");
         btnEdit.classList.remove("active");
@@ -1071,7 +1071,7 @@
           clearInsertMode();
           currentMode = "insert";
           clearAllEditMode();
-          em.setEditableRoles(["none"]);
+          em.setEditableRoles(null);
           em.layoutEditMode = true;
           btnRead.classList.remove("active");
           btnEdit.classList.remove("active");
@@ -1277,7 +1277,7 @@
 
         // 레이아웃 편집 모드로 전환 (기존 편집 상태 해제 후 활성화)
         clearAllEditMode();
-        em.setEditableRoles(["none"]);
+        em.setEditableRoles(null);
         em.layoutEditMode = true;
         btnRead.classList.remove("active");
         btnEdit.classList.remove("active");
