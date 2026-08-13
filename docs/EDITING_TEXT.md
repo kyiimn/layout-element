@@ -301,7 +301,7 @@ flowchart LR
 2. `this._optimisticSpan = null` — 낙관적 span 참조 제거. 실제 렌더링된 span으로 대체된다.
 3. 조합 중이 아닌 경우 `textarea.value`를 `model.textContent`로 동기화.
 4. `_syncTextareaSelection()` — textarea의 선택 영역을 `_cursorModel` 상태에 맞춘다.
-5. `_updateCursorPosition()` — 커서를 새 DOM 위치에 재배치. `getCursorPlacement(offset)`를 통해 커서 배치 정보(`renderedOffset`, `atEndOfChar`, `spaceOffsetPx`)를 얻는다. `_sourceToCursorPlacement` 맵은 `_rebuildMappings()`에서 모든 source offset에 대해 채워진다 — 가시 문자는 `atEndOfChar: false`, trailing space는 `atEndOfChar: true` + 누적 스페이스 폭, `\n` 위치는 `atEndOfChar: true`, 매핑 구멍(빈 줄 등)은 역방향으로 가장 가까운 placement로 채워진다. 단, `\n` 바로 다음 위치(새 라인 시작)는 line rect 폴백으로 처리된다. `endOfBlock`에서 `textContent`에 실제 `\n`이 있을 때만 `sourceOffset++`를 수행하여 phantom offset을 방지한다. `getCursorPlacement()`가 null을 반환하는 경우(빈 줄 시작, offset=0 등) line rect 또는 first column rect로 폴백한다.
+5. `_updateCursorPosition()` — 커서를 새 DOM 위치에 재배치. `getCursorPlacement(offset)`를 통해 커서 배치 정보(`sourceOffset`, `atEndOfChar`)를 얻는다. `_sourceToPlacement` 맵은 `_rebuildMappings()`에서 모든 source offset에 대해 채워진다 — 가시 문자는 `atEndOfChar: false`, trailing space는 `atEndOfChar: true` + 누적 스페이스 폭, `\n` 위치는 `atEndOfChar: true`, 매핑 구멍(빈 줄 등)은 역방향으로 가장 가까운 placement로 채워진다. 단, `\n` 바로 다음 위치(새 라인 시작)는 line rect 폴백으로 처리된다. `endOfBlock`에서 `textContent`에 실제 `\n`이 있을 때만 `sourceOffset++`를 수행하여 phantom offset을 방지한다. `getCursorPlacement()`가 null을 반환하는 경우(빈 줄 시작, offset=0 등) line rect 또는 first column rect로 폴백한다.
 6. `_updateSelection()` — 선택 영역을 새 DOM 위치에 재배치.
 7. 조합 중이면 `_compositionSpan`을 새 DOM에 재부착. `getCursorPlacement(_compositionStartOffset)`로 위치를 찾고, 실패하면 첫 컬럼 첫 요소에 폴백한다.
 8. `_wasFocused`가 true면 `textarea.focus({ preventScroll: true })`로 포커스 복원. `preventScroll: true`로 스크롤 컨테이너의 좌상단 점프를 방지한다.
@@ -347,29 +347,40 @@ const { textStyle, paragraphStyle } = controller.currentStyle;
 
 ### 3.4 `TextEditCoordinateMapper`
 
-`TextEditController` 내부에서 사용하는 좌표 매핑 객체이지만, 내부 상태를 직접 참조해야 하는 호스트 프로그램을 위해 다음 메서드를 문서화한다.
+`TextEditController` 내부에서 사용하는 좌표 매핑 객체이다.
+
+소스 오프셋은 `textContent` 기반 0-indexed 위치이며 `\n`과 공백을 포함한다. 렌더링에서 생략된 leading/trailing space와 `\n`은 span이 생성되지 않지만 `data-source-offset`이 연속된 가시 문자에 부여되므로 소스 오프셋 기반으로 span을 직접 찾을 수 있다.
+
+**좌표계 메모**: paragraph의 shadow root 자식 요소(cursor/selection)의 `top`/`left`는 paragraph local coordinate(transform: scale 적용 전 픽셀)를 기대하지만 `getBoundingClientRect()`는 transform 적용 후 viewport 픽셀을 반환한다. `getCharRect`/`getTextRange`/`getFirstColumnRect`가 반환하는 top/left/width/height는 모두 `EditManager.scale`로 나누어 local coordinate로 변환한다.
 
 | API | 타입 | 설명 |
 |-----|------|------|
 | `rebuild()` | `void` | 렌더링된 DOM을 기준으로 오프셋 매핑을 다시 구축한다. `postRender()`가 호출한다. |
-| `sourceOffset(renderedOffset: number)` | `number \| null` | 렌더링 오프셋을 소스 텍스트 오프셋으로 변환한다. |
-| `renderedOffset(sourceOffset: number)` | `number \| null` | 소스 텍스트 오프셋을 렌더링 오프셋으로 변환한다. |
-| `getCharOffsetFromPoint(x, y)` | `CursorPosition \| null` | 뷰포트 좌표(x, y) 위치의 문자에 해당하는 소스 오프셋을 반환한다. 컬럼 범위 기준 binary search를 사용한다. |
-| `getNearestOffsetFromPoint(x, y)` | `CursorPosition \| null` | 뷰포트 좌표(x, y)에서 가장 가까운 텍스트 위치를 반환한다. 행간, 선행/후행 공백 클릭, 빈 줄(span 없는 행) 클릭을 처리한다. |
-| `getCharRect(offset: number)` | `DOMRect \| null` | 렌더링 오프셋에 해당하는 문자 span의 위치를 단락 로컬 좌표로 반환한다. |
-| `getFirstColumnRect()` | `{ top, left, fontSize } \| null` | 첫 번째 컬럼의 단락 로컬 좌표와 폰트 크기를 반환한다. 빈 단락에서 커서를 배치할 때 사용한다. |
+| `getCursorPlacement(sourceOffset)` | `CursorPlacement \| null` | 주어진 소스 오프셋에 커서를 표시할 위치를 반환한다. 가시 문자는 `{ sourceOffset, atEndOfChar: false }`, trailing space/endOfBlock은 이전 가시 문자를 `atEndOfChar: true`로 참조한다. 생략된 leading space와 `\n` 다음 위치는 null을 반환하여 line rect 폴백으로 처리된다. |
+| `getCharOffsetFromPoint(x, y)` | `CursorPosition \| null` | 뷰포트 좌표(x, y) 위치의 문자에 해당하는 소스 오프셋을 반환한다. y 범위에 있는 컬럼들 중 x에 가장 가까운 컬럼을 찾고, 해당 컬럼에서 y에 가장 가까운 라인 div를 찾은 후, 그 라인의 span들 중 x에 가장 가까운 span을 선택한다. 빈 라인(span이 없는 경우)이면 라인 시작 오프셋을 반환한다. |
+| `getNearestOffsetFromPoint(x, y)` | `CursorPosition \| null` | `getCharOffsetFromPoint`와 동일하다. |
+| `getCharRect(sourceOffset)` | `DOMRect \| null` | 주어진 소스 오프셋에 해당하는 문자 span의 위치를 단락 로컬 좌표로 반환한다. |
+| `getFirstColumnRect()` | `{ top, left, fontSize } \| null` | 첫 번째 컬럼의 첫 번째 라인 div의 단락 로컬 rect와 폰트 크기를 반환한다. 빈 단락에서 커서를 배치할 때 사용한다. |
 | `getLineInfoBySourceOffset(sourceOffset)` | `{ columnIndex, lineIndex } \| null` | 소스 오프셋이 속한 라인의 컬럼 인덱스와 라인 인덱스를 반환한다. 빈 줄(\\n 위치)도 해당 라인으로 반환한다. |
 | `getLineStartSourceOffset(columnIndex, lineIndex)` | `number \| null` | 주어진 컬럼/라인 인덱스의 시작 source 오프셋을 반환한다. |
 | `getLineRect(columnIndex, lineIndex)` | `{ top, left, width, height } \| null` | 주어진 컬럼/라인 인덱스에 해당하는 line div의 단락 로컬 rect를 반환한다. 빈 줄도 line div가 존재하므로 rect를 반환한다. |
 | `totalLineCount` | `number` | 전체 라인 수(모든 컬럼 합)를 반환한다. |
 | `getTextRange(start, end)` | `Rect[]` | `start`부터 `end`까지(끝 제외)의 선택 사각형 배열을 단락 로컬 좌표로 반환한다. 같은 행의 연속된 span은 병합한다. |
 | `getTextContent(start, end)` | `string` | `start`부터 `end`까지(끝 제외)의 소스 텍스트를 반환한다. span의 `innerText`를 읽고 블록 사이의 `\n`을 복원한다. |
-| `findVisualLineBounds(offset)` | `{ start, end } \| null` | 소스 오프셋이 속한 시각적 라인의 시작/끝 오프셋을 반환한다. `Home`/`End` 키 처리에 사용한다. |
-| `getSpanByOffset(offset)` | `HTMLSpanElement \| null` | 렌더링 오프셋에 해당하는 문자 `span` 요소를 반환한다. 임시 span은 제외한다. |
+| `findVisualLineBounds(sourceOffset)` | `{ start, end } \| null` | 소스 오프셋이 속한 시각적 라인의 시작/끝 오프셋을 반환한다. `Home`/`End` 키 처리에 사용한다. |
+| `getSpanByOffset(sourceOffset)` | `HTMLSpanElement \| null` | 주어진 소스 오프셋에 해당하는 문자 `span` 요소를 반환한다. `[data-source-offset]` 속성으로 검색하며 임시 span은 제외한다. |
 
 ### 3.5 타입
 
 ```ts
+/** 커서 배치 정보: 특정 source offset에 커서를 표시할 위치를 나타낸다. */
+interface CursorPlacement {
+  /** 커서가 참조할 가시 문자의 source offset */
+  sourceOffset: number;
+  /** true면 커서를 문자의 우측 끝에 배치, false면 좌측에 배치 */
+  atEndOfChar: boolean;
+}
+
 type CursorPosition = {
   textOffset: number;  // 0-based offset in source text (including \n)
 };
