@@ -170,24 +170,24 @@ export class LayoutBoxElement extends HTMLElement {
         const tdContentWidth = tdModel.editableWidth;
         const tdContentHeight = tdModel.contentHeight;
 
-      this._model ??= GridCalculator.create({
-        element: this,
-        width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}
-      });
-      this._model.data = {
-        element: this,
-        paddingTop: this.paddingTop,
-        paddingRight: this.paddingRight,
-        paddingBottom: this.paddingBottom,
-        paddingLeft: this.paddingLeft,
-        columns: [tdContentWidth],
-        gap: [],
-        paragraphStyle: this.paragraphStyle,
-        textStyle: this.textStyle,
-        height: tdContentHeight,
-        width: tdContentWidth,
-      };
-      return;
+        this._model ??= GridCalculator.create({
+          element: this,
+          width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}
+        });
+        this._model.data = {
+          element: this,
+          paddingTop: this.paddingTop,
+          paddingRight: this.paddingRight,
+          paddingBottom: this.paddingBottom,
+          paddingLeft: this.paddingLeft,
+          columns: [tdContentWidth],
+          gap: [],
+          paragraphStyle: this.paragraphStyle,
+          textStyle: this.textStyle,
+          height: tdContentHeight,
+          width: tdContentWidth,
+        };
+        return;
       }
     }
 
@@ -238,30 +238,32 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule("@media screen { :host([show-placeholder-borders]:not([border]):not([td-static]):not([hovered]):not([reparent-target]):not([selected])) { outline: #aaaaaa dashed 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 1);
       styleEl.sheet.insertRule("@media screen { :host([hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 2);
       styleEl.sheet.insertRule("@media screen { :host([selected]) { outline: red solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 3);
-      styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { outline: #ff9800 solid 2px !important; outline-offset: -2px !important; box-shadow: none !important; } }", 4);
-      styleEl.sheet.insertRule(`@media print { [border] { display: none !important; } }`, 5);
-      styleEl.sheet.insertRule('@media screen { .resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: ' + Z_INDEX_RESIZE_HANDLE + '; pointer-events: auto; display: none; } }', 6);
-      styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .resize-handle { display: block; } }', 7);
-      styleEl.sheet.insertRule('@media screen { :host([td-static]) .resize-handle { display: none !important; } }', 8);
-      styleEl.sheet.insertRule('@media screen { :host([td-static][hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 9);
-      styleEl.sheet.insertRule('@media screen { :host([td-static][selected]) { outline: red solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 10);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 11);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 12);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 13);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="right"] { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 14);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="nw"] { top: -4px; left: -4px; cursor: nwse-resize; } }', 15);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="ne"] { top: -4px; right: -4px; cursor: nesw-resize; } }', 16);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="sw"] { bottom: -4px; left: -4px; cursor: nesw-resize; } }', 17);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="se"] { bottom: -4px; right: -4px; cursor: nwse-resize; } }', 18);
-      styleEl.sheet.insertRule('@media screen { .type-label { position: absolute; top: 0; left: 0; padding: 0px 0px 0px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: auto; user-select: none; cursor: grab; z-index: ' + Z_INDEX_TYPE_LABEL + '; display: none; white-space: nowrap; } }', 19);
-      styleEl.sheet.insertRule('@media screen { :host([selected]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 0, 0, 0.85); cursor: grab; } }', 20);
-      styleEl.sheet.insertRule('@media screen { :host([hovered]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); cursor: grab; } }', 21);
-      styleEl.sheet.insertRule('@media screen { :host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); cursor: grab; } }', 22);
-      styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .type-label:active, :host([editable-layout][hovered]) .type-label:active { cursor: grabbing; } }', 23);
-      styleEl.sheet.insertRule('@media screen { :host([text-focused]) .type-label { display: none; } }', 24);
-      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }', 25);
-      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn:hover { opacity: 1; } }', 26);
-      styleEl.sheet.insertRule('@media print { .type-label { display: none !important; } }', 27);
+      styleEl.sheet.insertRule("@media screen { :host([content-type-null][selected]) { outline: red solid 3px !important; outline-offset: -2px !important; box-shadow: none !important; } }", 4);
+      styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { outline: #ff9800 solid 2px !important; outline-offset: -2px !important; box-shadow: none !important; } }", 5);
+      styleEl.sheet.insertRule(`@media print { [border] { display: none !important; } }`, 6);
+      styleEl.sheet.insertRule('@media screen { .resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: ' + Z_INDEX_RESIZE_HANDLE + '; pointer-events: auto; display: none; } }', 7);
+      styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .resize-handle { display: block; } }', 8);
+      styleEl.sheet.insertRule('@media screen { :host([td-static]) .resize-handle { display: none !important; } }', 9);
+      styleEl.sheet.insertRule('@media screen { :host([td-static][hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 10);
+      styleEl.sheet.insertRule('@media screen { :host([td-static][selected]) { outline: red solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 11);
+      styleEl.sheet.insertRule('@media screen { :host([td-static][content-type-null][selected]) { outline: red solid 3px !important; outline-offset: -2px !important; box-shadow: none !important; } }', 12);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 13);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 14);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 15);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="right"] { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 16);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="nw"] { top: -4px; left: -4px; cursor: nwse-resize; } }', 17);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="ne"] { top: -4px; right: -4px; cursor: nesw-resize; } }', 18);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="sw"] { bottom: -4px; left: -4px; cursor: nesw-resize; } }', 19);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="se"] { bottom: -4px; right: -4px; cursor: nwse-resize; } }', 20);
+      styleEl.sheet.insertRule('@media screen { .type-label { position: absolute; top: 0; left: 0; padding: 0px 0px 0px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: auto; user-select: none; cursor: grab; z-index: ' + Z_INDEX_TYPE_LABEL + '; display: none; white-space: nowrap; } }', 21);
+      styleEl.sheet.insertRule('@media screen { :host([selected]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 0, 0, 0.85); cursor: grab; } }', 22);
+      styleEl.sheet.insertRule('@media screen { :host([hovered]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); cursor: grab; } }', 23);
+      styleEl.sheet.insertRule('@media screen { :host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); cursor: grab; } }', 24);
+      styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .type-label:active, :host([editable-layout][hovered]) .type-label:active { cursor: grabbing; } }', 25);
+      styleEl.sheet.insertRule('@media screen { :host([text-focused]) .type-label { display: none; } }', 26);
+      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }', 27);
+      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn:hover { opacity: 1; } }', 28);
+      styleEl.sheet.insertRule('@media print { .type-label { display: none !important; } }', 29);
 
       this._shadowRoot.appendChild(document.createElement('slot'));
 
@@ -313,7 +315,7 @@ export class LayoutBoxElement extends HTMLElement {
         zIndex: `${this.zIndex + 100}`,
         backgroundColor: this._backgroundColor
           ? colorRegistry.getCSSColor(this._backgroundColor) +
-            colorRegistry.getOpacityHex(this._backgroundOpacity ?? 1)
+          colorRegistry.getOpacityHex(this._backgroundOpacity ?? 1)
           : 'transparent',
       }
     );
@@ -1256,6 +1258,12 @@ export class LayoutBoxElement extends HTMLElement {
     const span = this._labelEl.firstElementChild as HTMLSpanElement | null;
     if (span && span.textContent !== text) {
       span.textContent = text;
+    }
+
+    if (contentType === null) {
+      this.setAttribute('content-type-null', '');
+    } else {
+      this.removeAttribute('content-type-null');
     }
   }
 

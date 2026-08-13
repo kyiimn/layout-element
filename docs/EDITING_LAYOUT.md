@@ -421,7 +421,14 @@ manager.navigateByTab(true);     // Shift+Tab: 이전 요소
 
 ```css
 :host([selected]) {
-  box-shadow: red 0px 0px 0px 1px inset, red 0px 0px 0px 1px;
+  outline: red solid 1px;
+  outline-offset: -1px;
+}
+
+/* contentType이 null인 box (자식이 없거나 다중 자식/중첩 박스)는 3px 두께 */
+:host([content-type-null][selected]) {
+  outline: red solid 3px;
+  outline-offset: -2px;
 }
 ```
 
@@ -468,13 +475,15 @@ manager.navigateByTab(true);     // Shift+Tab: 이전 요소
 - `role`이 `'none'`이 아닌 경우 `[role=XXX]` 접미사가 붙는다. 예: `텍스트[role=body]`, `박스[role=group-article]`, `이미지[role=image]`.
 - 라벨은 `layout()` 호출 시, `role` 속성 변경 시(`attributeChangedCallback`), `appendChildData`/`data` 세터로 자식이 변경될 때(=`_childObserver` → `layout()` 흐름) 자동 갱신된다.
 - 인쇄 모드에서는 `selected`/`hovered`/`reparent-target` 어느 것도 설정되지 않으므로 라벨도 표시되지 않는다.
+- **`content-type-null` 속성**: `_updateLabelText()`는 `contentType === null`인 경우 `content-type-null` DOM 속성을 설정하고, 아닌 경우 제거한다. 이 속성은 `:host([content-type-null][selected])` CSS 규칙과 함께 `contentType`이 `null`인 box가 선택되었을 때 3px 두께의 빨간색 테두리를 적용하기 위해 사용된다. `td-static` 박스에도 동일한 3px 규칙이 적용된다(`:host([td-static][content-type-null][selected])`).
 
 **지면 라벨** — `<x-layout-document>`에도 동일한 `.type-label` 요소가 shadow DOM(루트 div 내부)에 존재하며, `reparent-target` 속성이 설정된 경우에만 `지면`이라는 텍스트로 표시된다. reparent/insert 드래그 중 후보 컨테이너가 document일 때 주황색 라벨이 노출된다.
 
 | 상태 | 색상 | 적용 대상 | 라벨 텍스트 |
 |------|------|----------|-----------|
-| `selected` | 빨간색 (`rgba(255,0,0,0.85)`) | box | `박스`/`텍스트`/`이미지` (+`[role=XXX]`) |
-| `hovered` | 파란색 (`rgba(74,144,217,0.85)`) | box | 동일 |
+| `selected` | 빨간색 (`red`) | box | `박스`/`텍스트`/`이미지` (+`[role=XXX]`) |
+| `selected` + `content-type-null` | 빨간색 (`red`) **3px** | box | `박스` (+`[role=XXX]`) |
+| `hovered` | 파란색 (`#4a90d9`) | box | 동일 |
 | `reparent-target` | 주황색 (`rgba(255,152,0,0.85)`) | box, document | box는 동일 / document는 `지면` |
 
 **호버 표시** (`hovered`) — `<x-layout-box>`만 해당:
@@ -487,8 +496,9 @@ manager.navigateByTab(true);     // Shift+Tab: 이전 요소
 
 | 속성 | 색상 | 적용 대상 | 조건 |
 |------|------|----------|------|
-| `selected` | 빨간색 (`red`) | box | 레이아웃 편집 모드에서 클릭으로 선택됨, **또는** 텍스트 편집 모드에서 내부 paragraph가 포커스됨 |
-| `hovered` | 파란색 (`#4a90d9`) | box만 | 마우스 hover, 선택되지 않은 요소만 |
+| `selected` | 빨간색 (`red`) 1px | box | 레이아웃 편집 모드에서 클릭으로 선택됨, **또는** 텍스트 편집 모드에서 내부 paragraph가 포커스됨 |
+| `selected` + `content-type-null` | 빨간색 (`red`) 3px | box | `contentType === null` (자식 없음, 다중 자식, 또는 중첩 박스)인 box가 선택됨 |
+| `hovered` | 파란색 (`#4a90d9`) 1px | box만 | 마우스 hover, 선택되지 않은 요소만 |
 
 - **inset shadow**: 요소 내부에 1px 테두리
 - **outset shadow**: 요소 외부에 1px 테두리
