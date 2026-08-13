@@ -1,28 +1,25 @@
 import type { LayoutColumnElement } from "@/components/layout/column.element";
 import type { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import type { CursorPosition } from "@/types/edit/cursor.type";
-import { DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN } from "@/constants";
-import { GridCalculator } from "@/core";
 import { EditManager } from "./edit-manager";
 
 /**
  * 커서 배치 정보: 특정 source offset에 커서를 표시할 위치를 나타낸다.
  */
 export interface CursorPlacement {
-  /** 커서가 참조할 렌더링된 문자 span의 렌더링 오프셋 */
-  renderedOffset: number;
-  /** true면 커서를 문자의 우측 끝에 배치 (이전 문자 다음), false면 좌측에 배치 */
+  /** 커서가 참조할 가시 문자의 source offset */
+  sourceOffset: number;
+  /** true면 커서를 문자의 우측 끝에 배치, false면 좌측에 배치 */
   atEndOfChar: boolean;
-  /** trailing space 등 매핑에서 제외된 문자의 폭을 합산한 픽셀 오프셋 */
-  spaceOffsetPx: number;
 }
 
 /**
  * `<x-layout-paragraph>` 내부의 텍스트 오프셋과 픽셀 좌표를 매핑한다.
  *
- * `data-offset`은 렌더링된 문자 위치(0, 1, 2, ...)를 나타내며,
- * 소스 문자열에 포함된 `\n` 문자나 줄 앞뒤로 제거된 공백을 반영하지 않는다.
- * 이 클래스는 렌더링 오프셋과 소스 오프셋 간의 양방향 변환을 관리한다.
+ * source offset은 `textContent` 기반 0-indexed 위치이며 `\n`과 공백을 포함한다.
+ * 렌더링에서 생략된 leading/trailing space와 `\n`은 span이 생성되지 않지만
+ * `data-source-offset`이 연속된 가시 문자에 부여되므로 source offset 기반으로
+ * span을 직접 찾을 수 있다.
  *
  * **좌표계 메모**: paragraph의 shadow root 자식 요소(cursor/selection)의
  * `top`/`left`는 paragraph local coordinate(transform: scale 적용 전 픽셀)를
@@ -36,27 +33,20 @@ export class TextEditCoordinateMapper {
   private _paragraph: LayoutParagraphElement;
   private _manager: EditManager;
 
-  /** 렌더링 오프셋 → 소스 오프셋 */
-  private _renderedToSource: Map<number, number> = new Map();
-  /** 소스 오프셋 → 렌더링 오프셋 */
-  private _sourceToRendered: Map<number, number> = new Map();
   /**
-   * 소스 오프셋 → 커서 배치 정보.
-   * 매핑에서 제외된 위치(\n, trailing space, leading space, 텍스트 끝)도
-   * 인접한 가시 문자를 참조하여 커서를 배치할 수 있도록 모든 source offset에
-   * 대해 엔트리를 채운다.
+   * source offset → 커서 배치 정보.
+   * 가시 문자는 `{ sourceOffset, atEndOfChar: false }`로 설정된다.
+   * trailing space, endOfBlock 위치는 이전 가시 문자를 `{ atEndOfChar: true }`로 참조한다.
+   * 생략된 leading space와 `\n` 다음 위치는 설정되지 않아 line rect 폴백으로 처리된다.
    */
-  private _sourceToCursorPlacement: Map<number, CursorPlacement> = new Map();
+  private _sourceToPlacement: Map<number, CursorPlacement> = new Map();
 
   private _spanCache: Map<number, HTMLSpanElement> = new Map();
   private _columnSpansCache: Map<LayoutColumnElement, HTMLSpanElement[]> = new Map();
-  private _columnRanges: { start: number; end: number }[] = [];
-  private _columnStartOffsets: number[] = [];
 
   /**
    * 모든 라인의 시작 source offset을 컬럼순·라인순으로 평탄화한 배열.
    * `_lineSourceOffsets[columnIndex][lineIndex]` = 해당 라인의 시작 source offset.
-   * 빈 줄(endOfBlock 직전 \n 위치)도 포함된다.
    */
   private _lineSourceOffsets: number[][] = [];
 
@@ -75,7 +65,10 @@ export class TextEditCoordinateMapper {
     this.rebuild();
   }
 
-  /** 이 mapper가 바인딩된 paragraph 요소. */
+  /**
+   * 이 mapper가 바인딩된 paragraph 요소를 반환한다.
+   * @returns paragraph 요소
+   */
   get paragraph(): LayoutParagraphElement {
     return this._paragraph;
   }
@@ -85,41 +78,38 @@ export class TextEditCoordinateMapper {
    * `paragraph.render()` 이후 컬럼이 다시 생성되면 호출해야 한다.
    */
   rebuild(): void {
-    this._renderedToSource.clear();
-    this._sourceToRendered.clear();
-    this._sourceToCursorPlacement.clear();
+    this._sourceToPlacement.clear();
     this._spanCache.clear();
     this._columnSpansCache.clear();
-    this._columnRanges = [];
-    this._columnStartOffsets = [];
     this._lineSourceOffsets = [];
     this._totalLineCount = 0;
-
     this._rebuildMappings();
   }
 
-
+  /**
+   * `columnContents`를 순회하며 source offset별 커서 배치 맵을 구축한다.
+   *
+   * 각 라인의 parts를 순회하며:
+   * 1. leading space: `sourceOffset` 증가, placement 미설정 (line rect 폴백)
+   * 2. 가시 문자: `{ sourceOffset, atEndOfChar: false }` 설정
+   * 3. trailing space: 이전 가시 문자를 `{ atEndOfChar: true }`로 참조
+   * 4. endOfBlock: 이전 가시 문자를 `{ atEndOfChar: true }`로 참조
+   */
   private _rebuildMappings(): void {
     const model = this._paragraph.model;
     if (!model) return;
 
     const columnContents = model.columnContents;
-    let renderedOffset = 0;
     let sourceOffset = 0;
     const textContent = model.textContent;
-    const spaceWidthPx = this._computeSpaceWidthPx(model);
 
     for (let columnIndex = 0; columnIndex < columnContents.length; columnIndex++) {
       const lines = columnContents[columnIndex];
-      const columnStart = renderedOffset;
-      this._columnStartOffsets.push(columnStart);
-
       const lineStartOffsets: number[] = [];
 
       for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const line = lines[lineIndex];
         lineStartOffsets.push(sourceOffset);
-        let lastVisibleRenderedOffset: number | null = null;
         let lastVisibleSourceOffset: number | null = null;
 
         for (let p = 0; p < line.parts.length; p++) {
@@ -128,42 +118,34 @@ export class TextEditCoordinateMapper {
           const isFirst = p === 0;
           const isLast = p === line.parts.length - 1;
 
+          // leading space: sourceOffset 증가만, placement 미설정
           let leadingSpaces = 0;
           if (isFirst) {
             for (let k = 0; k < original.length && original[k] === ' '; k++) leadingSpaces++;
-            // leading space: 다음 가시 문자 앞에 커서 배치 (atEndOfChar=false)
-            // _sourceToCursorPlacement은 가시 문자 처리 시 앞선 leading space들을 채움
             sourceOffset += leadingSpaces;
           }
 
           const content = this._stripSpaces(original, isFirst, isLast);
 
           for (let i = 0; i < content.length; i++) {
-            this._renderedToSource.set(renderedOffset, sourceOffset);
-            this._sourceToRendered.set(sourceOffset, renderedOffset);
-            this._sourceToCursorPlacement.set(sourceOffset, {
-              renderedOffset,
+            this._sourceToPlacement.set(sourceOffset, {
+              sourceOffset,
               atEndOfChar: false,
-              spaceOffsetPx: 0,
             });
-            lastVisibleRenderedOffset = renderedOffset;
             lastVisibleSourceOffset = sourceOffset;
-            renderedOffset++;
             sourceOffset++;
           }
 
+          // trailing space: 이전 가시 문자를 atEndOfChar: true로 참조
           if (isLast) {
             const afterLeading = isFirst ? original.slice(leadingSpaces) : original;
             let trailingSpaces = 0;
-            for (let k = afterLeading.length - 1; k >= 0 && afterLeading[k] === ' '; k++) trailingSpaces++;
-            // trailing space: 이전 가시 문자의 우측 끝에 커서 배치 (atEndOfChar=true)
-            // 스페이스 폭을 누적하여 커서를 우측으로 이동
+            for (let k = afterLeading.length - 1; k >= 0 && afterLeading[k] === ' '; k--) trailingSpaces++;
             for (let s = 0; s < trailingSpaces; s++) {
-              if (lastVisibleRenderedOffset !== null) {
-                this._sourceToCursorPlacement.set(sourceOffset, {
-                  renderedOffset: lastVisibleRenderedOffset,
+              if (lastVisibleSourceOffset !== null) {
+                this._sourceToPlacement.set(sourceOffset, {
+                  sourceOffset: lastVisibleSourceOffset,
                   atEndOfChar: true,
-                  spaceOffsetPx: (s + 1) * spaceWidthPx,
                 });
               }
               sourceOffset++;
@@ -171,23 +153,18 @@ export class TextEditCoordinateMapper {
           }
         }
 
+        // endOfBlock: 라인이 블록의 끝. 이전 가시 문자를 atEndOfChar: true로 참조.
         if (line.endOfBlock) {
-          // endOfBlock: 라인이 블록의 끝임을 나타낸다.
-          // textContent에 실제 \n이 있으면 placement 추가 + sourceOffset++.
-          // \n이 없는 마지막 블록은 placement만 추가 (텍스트 끝 위치).
-          const hasNewline = sourceOffset < textContent.length && textContent[sourceOffset] === '\n';
-          const prevPlacement = this._sourceToCursorPlacement.get(sourceOffset - 1);
-          const prevSpacePx = prevPlacement?.spaceOffsetPx ?? 0;
-          if (lastVisibleRenderedOffset !== null && lastVisibleSourceOffset !== null) {
-            if (!this._sourceToCursorPlacement.has(sourceOffset)) {
-              this._sourceToCursorPlacement.set(sourceOffset, {
-                renderedOffset: lastVisibleRenderedOffset,
+          if (lastVisibleSourceOffset !== null) {
+            if (!this._sourceToPlacement.has(sourceOffset)) {
+              this._sourceToPlacement.set(sourceOffset, {
+                sourceOffset: lastVisibleSourceOffset,
                 atEndOfChar: true,
-                spaceOffsetPx: prevSpacePx,
               });
             }
           }
-          if (hasNewline) {
+          // textContent에 실제 \n이 있으면 sourceOffset++
+          if (sourceOffset < textContent.length && textContent[sourceOffset] === '\n') {
             sourceOffset++;
           }
         }
@@ -195,22 +172,20 @@ export class TextEditCoordinateMapper {
 
       this._lineSourceOffsets.push(lineStartOffsets);
       this._totalLineCount += lines.length;
-      this._columnRanges.push({ start: columnStart, end: renderedOffset });
     }
 
-    // 매핑 구멍 채우기: _sourceToCursorPlacement에 없는 source offset에 대해
+    // 매핑 구멍 채우기: _sourceToPlacement에 없는 source offset에 대해
     // 역방향으로 가장 가까운 placement를 복사.
-    // 단, \n 바로 다음 위치(새 라인 시작)는 건너뛴다 — line rect 폴백이 처리해야 함.
+    // 생략된 공백과 \n 다음 위치는 건너뛴다 — line rect 폴백이 처리한다.
     for (let i = 0; i <= textContent.length; i++) {
-      if (this._sourceToCursorPlacement.has(i)) continue;
-      if (i > 0 && textContent[i - 1] === '\n') continue;
+      if (this._sourceToPlacement.has(i)) continue;
+      if (i > 0 && (textContent[i - 1] === '\n' || textContent[i - 1] === ' ')) continue;
       for (let back = i - 1; back >= 0; back--) {
-        const existing = this._sourceToCursorPlacement.get(back);
+        const existing = this._sourceToPlacement.get(back);
         if (existing) {
-          this._sourceToCursorPlacement.set(i, {
-            renderedOffset: existing.renderedOffset,
+          this._sourceToPlacement.set(i, {
+            sourceOffset: existing.sourceOffset,
             atEndOfChar: true,
-            spaceOffsetPx: existing.atEndOfChar ? existing.spaceOffsetPx : 0,
           });
           break;
         }
@@ -219,130 +194,10 @@ export class TextEditCoordinateMapper {
   }
 
   /**
-   * 스페이스 문자 1개의 픽셀 폭을 계산한다.
-   * @param model - TextLayoutEngine 모델
-   * @returns 스페이스 폭(px)
-   */
-  private _computeSpaceWidthPx(model: { genCharStyle: (char: string) => Partial<CSSStyleDeclaration> | undefined }): number {
-    const style = model.genCharStyle(' ');
-    const widthStr = style?.width;
-    if (typeof widthStr !== 'string') return 0;
-    const mmMatch = widthStr.match(/^([\d.]+)mm$/);
-    if (!mmMatch) return 0;
-    const mm = parseFloat(mmMatch[1]);
-    return mm * GridCalculator.ppm;
-  }
-
-  private _stripSpaces(content: string[], isFirst: boolean, isLast: boolean): string[] {
-    let result = content;
-    if (isFirst) {
-      while (result.length > 0 && result[0] === ' ') { result = result.slice(1); }
-    }
-    if (isLast) {
-      while (result.length > 0 && result[result.length - 1] === ' ') { result = result.slice(0, result.length - 1); }
-    }
-    return result;
-  }
-
-  /**
-   * 렌더링 오프셋을 소스 문자열 오프셋으로 변환한다.
-   * `\n` 문자와 제거된 공백을 고려한다.
-   */
-  sourceOffset(renderedOffset: number): number | null {
-    return this._renderedToSource.get(renderedOffset) ?? null;
-  }
-
-  /**
-   * 소스 문자열 오프셋을 렌더링 오프셋으로 변환한다.
-   * `\n` 문자와 제거된 공백을 고려한다.
-   */
-  renderedOffset(sourceOffset: number): number | null {
-    return this._sourceToRendered.get(sourceOffset) ?? null;
-  }
-
-  /**
-   * 주어진 source 오프셋에 커서를 배치하기 위한 정보를 반환한다.
-   *
-   * `\n` 위치, trailing space, leading space, 텍스트 끝 등 매핑에서
-   * 제외된 위치도 인접한 가시 문자를 참조하여 배치 정보를 반환한다.
-   * 빈 줄 시작 등 가시 문자가 없는 위치에서는 null을 반환한다.
-   *
-   * @param sourceOffset - 소스 텍스트 오프셋
-   * @returns 커서 배치 정보. 배치 불가능한 경우 null.
-   */
-  getCursorPlacement(sourceOffset: number): CursorPlacement | null {
-    return this._sourceToCursorPlacement.get(sourceOffset) ?? null;
-  }
-
-  /**
-   * 주어진 source 오프셋이 속한 라인의 컬럼 인덱스와 라인 인덱스를 반환한다.
-   *
-   * `columnContents`의 각 라인 시작 source offset과 비교하여 source 오프셋이
-   * 어느 라인에 속하는지 이진 탐색으로 찾는다. \n 위치(빈 줄)도 해당 라인으로
-   * 반환된다.
-   *
-   * @param sourceOffset 소스 텍스트 오프셋
-   * @returns `{ columnIndex, lineIndex }` 또는 `null`(모델이 없거나 범위 밖)
-   * @example
-   *   // "hello\n\nworld"에서 sourceOffset 6(빈 줄) → { columnIndex: 0, lineIndex: 1 }
-   */
-  getLineInfoBySourceOffset(sourceOffset: number): { columnIndex: number; lineIndex: number } | null {
-    for (let columnIndex = 0; columnIndex < this._lineSourceOffsets.length; columnIndex++) {
-      const lineStarts = this._lineSourceOffsets[columnIndex];
-      if (lineStarts.length === 0) continue;
-
-      // 이 컬럼의 마지막 라인의 끝 source offset 계산
-      const columnEnd = columnIndex < this._lineSourceOffsets.length - 1
-        ? this._lineSourceOffsets[columnIndex + 1][0]  // 다음 컬럼 시작
-        : sourceOffset + 1;  // 마지막 컬럼은 범위를 넓게
-
-      if (sourceOffset < lineStarts[0] || sourceOffset >= columnEnd) continue;
-
-      // 이진 탐색: sourceOffset이 속한 라인 찾기
-      let low = 0;
-      let high = lineStarts.length - 1;
-      while (low < high) {
-        const mid = Math.floor((low + high + 1) / 2);
-        if (lineStarts[mid] <= sourceOffset) {
-          low = mid;
-        } else {
-          high = mid - 1;
-        }
-      }
-      return { columnIndex, lineIndex: low };
-    }
-    return null;
-  }
-
-  /**
-   * 주어진 컬럼/라인 인덱스의 시작 source 오프셋을 반환한다.
-   *
-   * @param columnIndex 컬럼 인덱스
-   * @param lineIndex 라인 인덱스
-   * @returns 시작 source 오프셋 또는 `null`(범위 밖)
-   */
-  getLineStartSourceOffset(columnIndex: number, lineIndex: number): number | null {
-    const lineStarts = this._lineSourceOffsets[columnIndex];
-    if (!lineStarts || lineIndex < 0 || lineIndex >= lineStarts.length) return null;
-    return lineStarts[lineIndex];
-  }
-
-  /**
-   * 전체 라인 수(모든 컬럼 합)를 반환한다.
-   *
-   * @returns 라인 수
-   */
-  get totalLineCount(): number {
-    return this._totalLineCount;
-  }
-
-  /**
-   * 주어진 컬럼/라인 인덱스에 해당하는 line div의 paragraph-local rect를 반환한다.
-   * 빈 줄도 line div가 존재하므로 rect를 반환한다.
-   *
-   * @param columnIndex 컬럼 인덱스
-   * @param lineIndex 라인 인덱스
-   * @returns `{ top, left, width, height }` 또는 `null`(line div가 없거나 범위 밖)
+   * 주어진 컬럼/라인 인덱스의 line div rect를 반환한다.
+   * @param columnIndex - 컬럼 인덱스
+   * @param lineIndex - 라인 인덱스
+   * @returns `{ top, left, width, height }` 또는 null
    */
   getLineRect(columnIndex: number, lineIndex: number): { top: number; left: number; width: number; height: number } | null {
     const columns = this._getAllColumns();
@@ -367,12 +222,80 @@ export class TextEditCoordinateMapper {
     };
   }
 
+  /** 줄의 양 끝 공백을 제거하여 렌더링된 문자열을 정리한다. */
+  private _stripSpaces(content: string[], isFirst: boolean, isLast: boolean): string[] {
+    let result = content;
+    if (isFirst) {
+      while (result.length > 0 && result[0] === ' ') { result = result.slice(1); }
+    }
+    if (isLast) {
+      while (result.length > 0 && result[result.length - 1] === ' ') { result = result.slice(0, result.length - 1); }
+    }
+    return result;
+  }
+
   /**
-   * 주어진 렌더링 오프셋에 해당하는 문자 span의 위치를 반환한다.
-   * 좌표는 paragraph 로컬 좌표계(픽셀)로 변환된다.
+   * 주어진 source 오프셋에 커서를 배치하기 위한 정보를 반환한다.
+   *
+   * 생략된 leading space, `\n` 다음 위치 등 매핑이 없는 위치에서는
+   * null을 반환하여 line rect 폴백으로 처리한다.
+   *
+   * @param sourceOffset - 소스 텍스트 오프셋
+   * @returns 커서 배치 정보. 배치 불가능한 경우 null.
    */
-  getCharRect(offset: number): DOMRect | null {
-    const span = this.getSpanByOffset(offset);
+  getCursorPlacement(sourceOffset: number): CursorPlacement | null {
+    return this._sourceToPlacement.get(sourceOffset) ?? null;
+  }
+
+  /**
+   * 주어진 source 오프셋이 속한 라인의 컬럼 인덱스와 라인 인덱스를 반환한다.
+   *
+   * @param sourceOffset - 찾을 source 오프셋
+   * @returns `{ columnIndex, lineIndex }` 또는 null
+   */
+  getLineInfoBySourceOffset(sourceOffset: number): { columnIndex: number; lineIndex: number } | null {
+    for (let columnIndex = this._lineSourceOffsets.length - 1; columnIndex >= 0; columnIndex--) {
+      const lineStarts = this._lineSourceOffsets[columnIndex];
+      if (lineStarts.length === 0) continue;
+      if (sourceOffset < lineStarts[0]) continue;
+
+      for (let lineIndex = lineStarts.length - 1; lineIndex >= 0; lineIndex--) {
+        if (sourceOffset >= lineStarts[lineIndex]) {
+          return { columnIndex, lineIndex };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 주어진 컬럼/라인 인덱스의 시작 source 오프셋을 반환한다.
+   * @param columnIndex - 컬럼 인덱스
+   * @param lineIndex - 라인 인덱스
+   * @returns 시작 source 오프셋. 없으면 null.
+   */
+  getLineStartSourceOffset(columnIndex: number, lineIndex: number): number | null {
+    const lineStarts = this._lineSourceOffsets[columnIndex];
+    if (!lineStarts || lineIndex < 0 || lineIndex >= lineStarts.length) return null;
+    return lineStarts[lineIndex];
+  }
+
+  /**
+   * 전체 라인 수를 반환한다.
+   * @returns 라인 수
+   */
+  get totalLineCount(): number {
+    return this._totalLineCount;
+  }
+
+  /**
+   * 주어진 source 오프셋에 해당하는 문자 span의 위치를 반환한다.
+   * 좌표는 paragraph 로컬 좌표계(픽셀)로 변환된다.
+   * @param sourceOffset - 소스 오프셋
+   * @returns DOMRect 또는 null
+   */
+  getCharRect(sourceOffset: number): DOMRect | null {
+    const span = this.getSpanByOffset(sourceOffset);
     if (!span) return null;
 
     const spanRect = span.getBoundingClientRect();
@@ -388,395 +311,204 @@ export class TextEditCoordinateMapper {
   }
 
   /**
-   * 뷰포트 좌표(x, y)가 포함된 문자 span의 소스 오프셋을 반환한다.
-   * 컬럼 범위를 기준으로 binary search로 빠르게 탐색한다.
+   * 뷰포트 좌표(x, y) 위치의 문자에 해당하는 소스 오프셋을 반환한다.
+   *
+   * 1. (x, y)가 속한 컬럼을 찾는다.
+   * 2. 해당 컬럼에서 y에 가장 가까운 라인 div를 찾는다.
+   * 3. 그 라인 div 내의 span들 중 x에 가장 가까운 span을 찾는다.
+   * 4. span의 중심점 기준으로 좌측/우측을 결정하여 offset을 반환한다.
+   * 5. 빈 라인(span이 없는 경우)이면 라인 시작 offset을 반환한다.
+   *
+   * @param x - 뷰포트 x 좌표
+   * @param y - 뷰포트 y 좌표
+   * @returns CursorPosition 또는 null
    */
-  getCharOffsetFromPoint(x: number, y: number): CursorPosition | null {
+   getCharOffsetFromPoint(x: number, y: number): CursorPosition | null {
     const columns = this._getAllColumns();
-    if (columns.length === 0) return null;
 
-    let low = 0;
-    let high = columns.length - 1;
+    // y 범위에 있는 컬럼들 중 x에 가장 가까운 컬럼 찾기
+    let bestColumn: LayoutColumnElement | null = null;
+    let bestColumnDist = Infinity;
+    for (const column of columns) {
+      if (!column.shadowRoot) continue;
+      const columnRect = column.getBoundingClientRect();
+      if (y < columnRect.top || y > columnRect.bottom) continue;
 
-    while (low <= high) {
-      const mid = Math.floor((low + high) / 2);
-      const column = columns[mid];
-      const rect = column.getBoundingClientRect();
-
-      if (x < rect.left) {
-        high = mid - 1;
-      } else if (x >= rect.right) {
-        low = mid + 1;
+      let dist: number;
+      if (x < columnRect.left) {
+        dist = columnRect.left - x;
+      } else if (x > columnRect.right) {
+        dist = x - columnRect.right;
       } else {
-        const spans = this._getColumnSpans(column);
-        if (spans.length === 0) return null;
+        dist = 0;
+      }
+      if (dist < bestColumnDist) {
+        bestColumnDist = dist;
+        bestColumn = column;
+      }
+    }
+    if (!bestColumn || !bestColumn.shadowRoot) return null;
 
-        let spanLow = 0;
-        let spanHigh = spans.length - 1;
+    const columnShadow = bestColumn.shadowRoot;
+    const lineEls = Array.from(columnShadow.children).filter(
+      (child): child is HTMLDivElement => child.tagName === 'DIV',
+    );
 
-        while (spanLow <= spanHigh) {
-          const spanMid = Math.floor((spanLow + spanHigh) / 2);
-          const span = spans[spanMid];
-          const spanRect = span.getBoundingClientRect();
+    // y에 가장 가까운 라인 div 찾기
+    let closestLineEl: HTMLDivElement | null = null;
+    let closestLineIndex = -1;
+    let closestLineDist = Infinity;
+    for (let i = 0; i < lineEls.length; i++) {
+      const lineRect = lineEls[i].getBoundingClientRect();
+      const lineCenterY = lineRect.top + lineRect.height / 2;
+      const dist = Math.abs(y - lineCenterY);
+      if (dist < closestLineDist) {
+        closestLineDist = dist;
+        closestLineEl = lineEls[i];
+        closestLineIndex = i;
+      }
+    }
+    if (!closestLineEl) return null;
 
-          if (y < spanRect.top) {
-            spanHigh = spanMid - 1;
-          } else if (y >= spanRect.bottom) {
-            spanLow = spanMid + 1;
-          } else if (x >= spanRect.left && x < spanRect.right) {
-            const renderedOffset = parseInt(span.dataset.offset ?? '', 10);
-            if (Number.isNaN(renderedOffset)) return null;
+    const lineRect = closestLineEl.getBoundingClientRect();
+    const lineTop = Math.round(lineRect.top);
 
-            const sourceOffset = this.sourceOffset(renderedOffset);
-            if (sourceOffset === null) return null;
-
-            return { textOffset: sourceOffset };
-          } else {
-            // x is on the correct row but not within any span's bounds.
-            // Return null so getNearestOffsetFromPoint() handles trailing/leading whitespace.
-            return null;
-          }
-        }
-
-        return null;
+    // 해당 라인의 span들 수집
+    const allSpans = this._getColumnSpans(bestColumn);
+    const lineSpans: HTMLSpanElement[] = [];
+    for (const span of allSpans) {
+      const spanRect = span.getBoundingClientRect();
+      if (spanRect.height <= 1) continue;
+      if (Math.round(spanRect.top) === lineTop) {
+        lineSpans.push(span);
       }
     }
 
-    return null;
+    // 빈 라인: 라인 시작 offset 반환
+    if (lineSpans.length === 0) {
+      const lineStarts = this._lineSourceOffsets[this._getAllColumns().indexOf(bestColumn)];
+      if (lineStarts && closestLineIndex >= 0 && closestLineIndex < lineStarts.length) {
+        return { textOffset: lineStarts[closestLineIndex] };
+      }
+      return null;
+    }
+
+    // x에 가장 가까운 span 찾기
+    let bestSpan = lineSpans[0];
+    let bestDist = Infinity;
+    for (const span of lineSpans) {
+      const spanRect = span.getBoundingClientRect();
+      const spanCenterX = spanRect.left + spanRect.width / 2;
+      const dist = Math.abs(x - spanCenterX);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestSpan = span;
+      }
+    }
+
+    const bestSpanRect = bestSpan.getBoundingClientRect();
+    const srcOff = parseInt(bestSpan.dataset.sourceOffset ?? '', 10);
+    if (Number.isNaN(srcOff)) return null;
+
+    // span 중심 기준 좌/우 결정
+    const isRightSide = x > bestSpanRect.left + bestSpanRect.width / 2;
+    return { textOffset: isRightSide ? srcOff + 1 : srcOff };
   }
 
   /**
    * 뷰포트 좌표(x, y)에서 가장 가까운 텍스트 위치를 반환한다.
-   * 행간 클릭 → 가장 가까운 행, 행의 빈 공간 클릭 → 가장 가까운 글자 위치.
-   * getCharOffsetFromPoint와 달리 정확히 span 위가 아니어도 동작한다.
+   *
+   * `getCharOffsetFromPoint`와 동일한 로직을 사용한다.
+   * 빈 공간, 라인 간 간격, 빈 라인 등 모든 경우를 처리한다.
+   *
+   * @param x - 뷰포트 x 좌표
+   * @param y - 뷰포트 y 좌표
+   * @returns CursorPosition 또는 null
    */
   getNearestOffsetFromPoint(x: number, y: number): CursorPosition | null {
-    // 먼저 정확한 span 위를 클릭했으면 그 결과를 그대로 반환
-    const exact = this.getCharOffsetFromPoint(x, y);
-    if (exact !== null) return exact;
-
-    const columns = this._getAllColumns();
-    if (columns.length === 0) return null;
-
-    // 1. 클릭한 x 좌표가 포함된 컬럼 찾기, 또는 가장 가까운 컬럼
-    let nearestColumn: LayoutColumnElement | null = null;
-    let nearestColumnDist = Infinity;
-    for (const col of columns) {
-      const rect = col.getBoundingClientRect();
-      if (x >= rect.left && x <= rect.right) {
-        nearestColumn = col;
-        break;
-      }
-      const dist = x < rect.left ? rect.left - x : x - rect.right;
-      if (dist < nearestColumnDist) {
-        nearestColumnDist = dist;
-        nearestColumn = col;
-      }
-    }
-    if (!nearestColumn) return null;
-
-    // line div 기반 라인 감지: 빈 줄(span 없는 줄)을 포함하여 클릭한 y가
-    // 어느 라인에 속하는지 찾는다. 컬럼 내 line div들을 순회하며 y가 라인 범위
-    // 내에 있으면 해당 라인의 시작 source offset을 반환한다.
-    const columnIndex = this._getAllColumns().indexOf(nearestColumn);
-    if (columnIndex >= 0) {
-      const lineInfo = this._getLineAtPoint(nearestColumn, columnIndex, y);
-      if (lineInfo !== null) {
-        return { textOffset: lineInfo };
-      }
-    }
-
-    let spans = this._getColumnSpans(nearestColumn);
-    // 클릭한 컬럼에 span이 없으면(빈 컬럼) 가장 가까운 텍스트가 있는 컬럼으로 폴백
-    if (spans.length === 0) {
-      let bestCol: LayoutColumnElement | null = null;
-      let bestColDist = Infinity;
-      for (const col of columns) {
-        const colSpans = this._getColumnSpans(col);
-        if (colSpans.length === 0) continue;
-        const colRect = col.getBoundingClientRect();
-        const dist = x < colRect.left ? colRect.left - x : (x > colRect.right ? x - colRect.right : 0);
-        if (dist < bestColDist) {
-          bestColDist = dist;
-          bestCol = col;
-        }
-      }
-      if (bestCol) {
-        nearestColumn = bestCol;
-        spans = this._getColumnSpans(bestCol);
-      }
-    }
-    if (spans.length === 0) return null;
-
-    const spanRects = new Map<HTMLSpanElement, DOMRect>();
-    for (const s of spans) {
-      spanRects.set(s, s.getBoundingClientRect());
-    }
-
-    // 2. 클릭한 y 좌표가 속한 행(row) 찾기
-    // 각 행의 top과 bottom을 모두 고려하여 y가 행 범위 내에 있으면 그 행을 선택.
-    // 어느 행에도 속하지 않으면(행간 클릭) 행 중심에 가장 가까운 행을 선택.
-    let nearestRowY = Infinity;
-    const rowBounds = new Map<number, { top: number; bottom: number }>();
-    for (const s of spans) {
-      const r = spanRects.get(s)!;
-      const rowTop = Math.round(r.top);
-      const existing = rowBounds.get(rowTop);
-      if (!existing || r.bottom > existing.bottom) {
-        rowBounds.set(rowTop, { top: rowTop, bottom: r.bottom });
-      }
-    }
-
-    // y가 행 범위 내에 있으면 그 행 선택
-    for (const [rowTop, bounds] of rowBounds) {
-      if (y >= bounds.top && y <= bounds.bottom) {
-        nearestRowY = rowTop;
-        break;
-      }
-    }
-
-    // 어느 행에도 속하지 않으면 행 중심에 가장 가까운 행 선택
-    if (nearestRowY === Infinity) {
-      let bestRowDist = Infinity;
-      for (const [rowTop, bounds] of rowBounds) {
-        const centerY = (bounds.top + bounds.bottom) / 2;
-        const dist = Math.abs(y - centerY);
-        if (dist < bestRowDist) {
-          bestRowDist = dist;
-          nearestRowY = rowTop;
-        }
-      }
-    }
-
-    // 3. 해당 행의 span들 중에서 x 좌표와 가장 가까운 span 찾기
-    let bestSpan: HTMLSpanElement | null = null;
-    let bestDist = Infinity;
-    for (const s of spans) {
-      const r = spanRects.get(s)!;
-      if (Math.round(r.top) !== nearestRowY) continue;
-
-      let dist: number;
-      if (x >= r.left && x <= r.right) {
-        dist = 0;
-      } else if (x < r.left) {
-        dist = r.left - x;
-      } else {
-        dist = x - r.right;
-      }
-
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestSpan = s;
-      }
-    }
-
-    if (!bestSpan) return null;
-
-    const renderedOffset = parseInt(bestSpan.dataset.offset ?? '', 10);
-    if (Number.isNaN(renderedOffset)) return null;
-
-    const sourceOffset = this.sourceOffset(renderedOffset);
-    if (sourceOffset === null) return null;
-
-    let rightmostSpan: HTMLSpanElement | null = null;
-    let rightmostRight = -Infinity;
-    let leftmostSpan: HTMLSpanElement | null = null;
-    let leftmostLeft = Infinity;
-
-    for (const s of spans) {
-      const r = spanRects.get(s)!;
-      if (Math.round(r.top) !== nearestRowY) continue;
-      if (r.right > rightmostRight) {
-        rightmostRight = r.right;
-        rightmostSpan = s;
-      }
-      if (r.left < leftmostLeft) {
-        leftmostLeft = r.left;
-        leftmostSpan = s;
-      }
-    }
-
-    if (rightmostSpan && x >= rightmostRight) {
-      const rightmostOffset = parseInt(rightmostSpan.dataset.offset ?? '', 10);
-      const rightmostSource = this.sourceOffset(rightmostOffset);
-      if (rightmostSource !== null) {
-        const content = this._paragraph.model?.textContent;
-        if (content !== undefined && rightmostSource < content.length) {
-          return { textOffset: rightmostSource + 1 };
-        }
-        return { textOffset: rightmostSource };
-      }
-    }
-
-    if (leftmostSpan && x <= leftmostLeft) {
-      const leftmostOffset = parseInt(leftmostSpan.dataset.offset ?? '', 10);
-      const leftmostSource = this.sourceOffset(leftmostOffset);
-      if (leftmostSource !== null) {
-        return { textOffset: leftmostSource };
-      }
-    }
-
-    const spanRect = spanRects.get(bestSpan)!;
-    const midpoint = spanRect.left + spanRect.width / 2;
-    if (x >= midpoint) {
-      const content = this._paragraph.model?.textContent;
-      if (content !== undefined && sourceOffset < content.length) {
-        return { textOffset: sourceOffset + 1 };
-      }
-    }
-
-    return { textOffset: sourceOffset };
+    return this.getCharOffsetFromPoint(x, y);
   }
 
   /**
-   * 컬럼 내에서 클릭한 y 좌표가 속한 빈 줄(span 없는 라인)의 시작 source offset을 반환한다.
-   * 일반 라인(문자가 있는 라인)은 null을 반환하여 span 기반 로직이 가장 가까운
-   * 글자 위치를 찾도록 위임한다.
-   *
-   * @param column 컬럼 요소
-   * @param columnIndex 컬럼 인덱스
-   * @param y 뷰포트 y 좌표
-   * @returns 빈 줄의 시작 source offset 또는 `null`(일반 라인이거나 라인 div가 없음)
-   */
-  private _getLineAtPoint(
-    column: LayoutColumnElement,
-    columnIndex: number,
-    y: number,
-  ): number | null {
-    if (!column.shadowRoot) return null;
-    const model = this._paragraph.model;
-    if (!model) return null;
-    const lines = model.columnContents[columnIndex] || [];
-    if (lines.length === 0) return null;
-
-    const lineEls = Array.from(column.shadowRoot.children).filter(
-      (child): child is HTMLDivElement => child.tagName === 'DIV',
-    );
-    if (lineEls.length === 0) return null;
-
-    // 클릭한 y가 속한 라인 찾기
-    let hitLine = -1;
-    for (let i = 0; i < lineEls.length; i++) {
-      const rect = lineEls[i].getBoundingClientRect();
-      const isLast = i === lineEls.length - 1;
-      const inRange = isLast
-        ? (y >= rect.top && y <= rect.bottom)
-        : (y >= rect.top && y < rect.bottom);
-      if (inRange) {
-        hitLine = i;
-        break;
-      }
-    }
-    // y가 라인들 사이 빈 공간이면 가장 가까운 라인 선택
-    if (hitLine === -1) {
-      let bestDist = Infinity;
-      for (let i = 0; i < lineEls.length; i++) {
-        const rect = lineEls[i].getBoundingClientRect();
-        const centerY = (rect.top + rect.bottom) / 2;
-        const dist = Math.abs(y - centerY);
-        if (dist < bestDist) {
-          bestDist = dist;
-          hitLine = i;
-        }
-      }
-    }
-    if (hitLine < 0) return null;
-
-    // 빈 줄(문자가 없는 라인)인 경우에만 line start offset 반환.
-    const line = lines[hitLine];
-    const lineCharCount = line.parts.reduce((sum, p) => sum + p.content.length, 0);
-    if (lineCharCount === 0) {
-      return this.getLineStartSourceOffset(columnIndex, hitLine);
-    }
-    // 일반 라인은 span 기반 로직에 위임
-    return null;
-  }
-
-  /**
-   * paragraph 로컬 좌표(픽셀)의 사각형 배열로 반환한다.
-   * 같은 줄에 연속된 span은 하나의 사각형으로 합친다.
+   * start부터 end까지(끝 제외)의 선택 사각형 배열을 반환한다.
+   * @param startOffset - 시작 source 오프셋
+   * @param endOffset - 끝 source 오프셋
+   * @returns Rect 배열
    */
   getTextRange(startOffset: number, endOffset: number): { top: number; left: number; width: number; height: number }[] {
-    const result: { top: number; left: number; width: number; height: number }[] = [];
-    if (startOffset >= endOffset) return result;
+    if (startOffset >= endOffset) return [];
 
-    const paragraphRect = this._paragraph.getBoundingClientRect();
-    const scale = this._manager.scale;
     const columns = this._getAllColumns();
+    const paraRect = this._paragraph.getBoundingClientRect();
+    const scale = this._manager.scale;
+    const ranges: { top: number; left: number; width: number; height: number }[] = [];
 
     for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
-      const columnStartOffset = this._columnStartOffsets[columnIndex] ?? 0;
-      const columnEndOffset = this._columnRanges[columnIndex]?.end ?? Infinity;
-
-      if (startOffset >= columnEndOffset) continue;
-      if (endOffset <= columnStartOffset) break;
-
       const column = columns[columnIndex];
+      if (!column.shadowRoot) continue;
+
       const spans = this._getColumnSpans(column);
-      const rects: DOMRect[] = [];
+
+      let currentRow: { top: number; left: number; right: number; height: number } | null = null;
 
       for (const span of spans) {
-        const renderedOffset = parseInt(span.dataset.offset ?? '', 10);
-        if (Number.isNaN(renderedOffset)) continue;
+        const srcOff = parseInt(span.dataset.sourceOffset ?? '', 10);
+        if (Number.isNaN(srcOff)) continue;
 
-        const sourceOffset = this.sourceOffset(renderedOffset);
-        if (sourceOffset === null) continue;
-
-        if (sourceOffset >= startOffset && sourceOffset < endOffset) {
-          const spanRect = span.getBoundingClientRect();
-          rects.push(new DOMRect(
-            (spanRect.left - paragraphRect.left) / scale,
-            (spanRect.top - paragraphRect.top) / scale,
-            spanRect.width / scale,
-            spanRect.height / scale,
-          ));
+        if (srcOff < startOffset || srcOff >= endOffset) {
+          if (currentRow) {
+            ranges.push({
+              top: currentRow.top,
+              left: currentRow.left,
+              width: currentRow.right - currentRow.left,
+              height: currentRow.height,
+            });
+            currentRow = null;
+          }
+          continue;
         }
-      }
 
-      if (rects.length === 0) continue;
+        const spanRect = span.getBoundingClientRect();
+        if (spanRect.height <= 1) continue;
 
-      rects.sort((a, b) => a.top - b.top || a.left - b.left);
+        const localTop = (spanRect.top - paraRect.top) / scale;
+        const localLeft = (spanRect.left - paraRect.left) / scale;
+        const localRight = (spanRect.right - paraRect.left) / scale;
+        const localHeight = spanRect.height / scale;
 
-      // 같은 행의 연속된 사각형을 간격에 관계없이 병합하여
-      // 글자 사이 빈 공간까지 선택 영역으로 덮도록 한다.
-      let current = rects[0];
-      for (let i = 1; i < rects.length; i++) {
-        const rect = rects[i];
-        if (Math.abs(rect.top - current.top) < 0.001) {
-          // 같은 행: 간격에 관계없이 병합 (오른쪽 끝까지 확장)
-          const newLeft = Math.min(current.left, rect.left);
-          const newRight = Math.max(current.left + current.width, rect.left + rect.width);
-          current = new DOMRect(
-            newLeft,
-            current.top,
-            newRight - newLeft,
-            Math.max(current.height, rect.height),
-          );
+        if (currentRow && Math.round(currentRow.top) === Math.round(localTop)) {
+          currentRow.right = localRight;
         } else {
-          result.push({
-            top: current.top,
-            left: current.left,
-            width: current.width,
-            height: current.height,
-          });
-          current = rect;
+          if (currentRow) {
+            ranges.push({
+              top: currentRow.top,
+              left: currentRow.left,
+              width: currentRow.right - currentRow.left,
+              height: currentRow.height,
+            });
+          }
+          currentRow = { top: localTop, left: localLeft, right: localRight, height: localHeight };
         }
       }
 
-      result.push({
-        top: current.top,
-        left: current.left,
-        width: current.width,
-        height: current.height,
-      });
+      if (currentRow) {
+        ranges.push({
+          top: currentRow.top,
+          left: currentRow.left,
+          width: currentRow.right - currentRow.left,
+          height: currentRow.height,
+        });
+      }
     }
 
-    return result;
+    return ranges;
   }
 
   /**
-   * startOffset부터 endOffset까지(시작 포함, 끝 제외)의 소스 텍스트를 반환한다.
-   * span의 innerText를 읽어 블록 사이의 `\n`을 복원한다.
+   * start부터 end까지(끝 제외)의 소스 텍스트를 반환한다.
+   * @param startOffset - 시작 source 오프셋
+   * @param endOffset - 끝 source 오프셋
+   * @returns 텍스트
    */
   getTextContent(startOffset: number, endOffset: number): string {
     if (startOffset >= endOffset) return '';
@@ -784,138 +516,87 @@ export class TextEditCoordinateMapper {
     const model = this._paragraph.model;
     if (!model) return '';
 
-    const spans = this._getAllSortedSpans();
+    const columns = this._getAllColumns();
     let result = '';
-    let lastSourceOffset: number | null = null;
+    let lastSourceOffset = startOffset - 1;
 
-    for (const span of spans) {
-      const renderedOffset = parseInt(span.dataset.offset ?? '', 10);
-      if (Number.isNaN(renderedOffset)) continue;
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+      const column = columns[columnIndex];
+      if (!column.shadowRoot) continue;
 
-      const sourceOffset = this.sourceOffset(renderedOffset);
-      if (sourceOffset === null) continue;
+      const spans = this._getColumnSpans(column);
 
-      if (sourceOffset < startOffset || sourceOffset >= endOffset) continue;
+      for (const span of spans) {
+        const srcOff = parseInt(span.dataset.sourceOffset ?? '', 10);
+        if (Number.isNaN(srcOff)) continue;
 
-      if (lastSourceOffset !== null && sourceOffset > lastSourceOffset + 1) {
-        // Fill the gap from the source string. Gaps contain either \n
-        // characters (from block splits) or stripped spaces.
-        const model = this._paragraph.model;
-        if (model && typeof model.textContent === 'string') {
-          const content = model.textContent;
-          for (let i = lastSourceOffset + 1; i < sourceOffset; i++) {
-            if (i < content.length) {
-              result += content[i];
+        if (srcOff < startOffset || srcOff >= endOffset) continue;
+
+        if (srcOff > lastSourceOffset + 1 && typeof model.textContent === 'string') {
+          for (let gap = lastSourceOffset + 1; gap < srcOff; gap++) {
+            if (gap >= startOffset && gap < endOffset) {
+              result += model.textContent[gap] ?? '\n';
             }
           }
-        } else {
-          result += '\n';
         }
-      }
 
-      result += span.innerText;
-      lastSourceOffset = sourceOffset;
+        result += span.innerText;
+        lastSourceOffset = srcOff;
+      }
+    }
+
+    if (lastSourceOffset < endOffset - 1 && typeof model.textContent === 'string') {
+      for (let gap = lastSourceOffset + 1; gap < endOffset; gap++) {
+        result += model.textContent[gap] ?? '\n';
+      }
     }
 
     return result;
   }
 
   /**
-   * 첫 번째 컬럼의 paragraph-로컬 좌표와 폰트 크기를 반환한다.
-   * 빈 단락에서 커서를 위치시킬 때 사용한다.
+   * 첫 번째 컬럼의 rect와 폰트 크기를 반환한다.
+   * @returns `{ top, left, fontSize }` 또는 null
    */
   getFirstColumnRect(): { top: number; left: number; fontSize: number } | null {
     const columns = this._getAllColumns();
-    if (columns.length === 0) return null;
     const firstColumn = columns[0];
-    const colRect = firstColumn.getBoundingClientRect();
+    if (!firstColumn || !firstColumn.shadowRoot) return null;
+
+    const firstLineDiv = Array.from(firstColumn.shadowRoot.children).find(
+      (child): child is HTMLDivElement => child.tagName === 'DIV',
+    );
+    if (!firstLineDiv) return null;
+
+    const rect = firstLineDiv.getBoundingClientRect();
     const paraRect = this._paragraph.getBoundingClientRect();
-    // fontSize는 getComputedStyle에서 오므로 paragraph local coordinate와 동일 (transform 영향 없음).
-    const fontSize = parseFloat(getComputedStyle(firstColumn).fontSize) || 16;
     const scale = this._manager.scale;
 
-    const textAlign = this._paragraph.paragraphStyle?.textAlign || DEFAULT_TEXT_ALIGN;
-    let left: number;
-    if (textAlign === 'center') {
-      left = (colRect.left - paraRect.left + colRect.width / 2) / scale;
-    } else if (textAlign === 'right') {
-      left = (colRect.right - paraRect.left) / scale;
-    } else {
-      left = (colRect.left - paraRect.left) / scale;
-    }
-
-    const verticalAlign = this._paragraph.paragraphStyle?.verticalAlign || this._paragraph.inheritStyle?.verticalAlign || DEFAULT_VERTICAL_ALIGN;
-    let top: number;
-    if (verticalAlign === 'center') {
-      top = (colRect.top - paraRect.top + colRect.height / 2 - fontSize / 2) / scale;
-    } else if (verticalAlign === 'bottom') {
-      top = (colRect.bottom - paraRect.top - fontSize) / scale;
-    } else {
-      top = (colRect.top - paraRect.top) / scale;
-    }
+    const computedStyle = window.getComputedStyle(firstLineDiv);
+    const fontSize = parseFloat(computedStyle.fontSize) || 0;
 
     return {
-      top,
-      left,
+      top: (rect.top - paraRect.top) / scale,
+      left: (rect.left - paraRect.left) / scale,
       fontSize,
     };
   }
 
   /**
-   * 주어진 source 오프셋이 속한 시각적 라인의 시작과 끝 source 오프셋을 반환한다.
-   * Home/End 키에서 사용 — \n 기준이 아닌 렌더링된 줄 기준.
+   * 주어진 source 오프셋이 속한 시각적 라인의 시작/끝 오프셋을 반환한다.
+   * @param sourceOffset - source 오프셋
+   * @returns `{ start, end }` 또는 null
    */
   findVisualLineBounds(sourceOffset: number): { start: number; end: number } | null {
-    let renderedOffset = this.renderedOffset(sourceOffset);
-    if (renderedOffset === null) {
-      const placement = this.getCursorPlacement(sourceOffset);
-      if (placement) {
-        renderedOffset = placement.renderedOffset;
-      } else if (sourceOffset > 0) {
-        const prevPlacement = this.getCursorPlacement(sourceOffset - 1);
-        if (prevPlacement) {
-          renderedOffset = prevPlacement.renderedOffset;
-        }
-      }
-      if (renderedOffset === null && sourceOffset === 0) {
-        return { start: 0, end: 0 };
-      }
-      if (renderedOffset === null) return null;
-    }
+    const span = this.getSpanByOffset(sourceOffset);
+    if (!span) return null;
 
-    const anchorSpan = this.getSpanByOffset(renderedOffset);
-    if (!anchorSpan) return null;
-
-    // anchorSpan이 속한 컬럼만 검색 (다중 컬럼에서 같은 Y좌표가 다른 단인 것을 방지)
-    const anchorColumn = this._findColumnBySpan(anchorSpan);
+    const anchorColumn = this._findColumnBySpan(span);
     if (anchorColumn === null) return null;
 
-    const anchorRect = anchorSpan.getBoundingClientRect();
-    let anchorTop = Math.round(anchorRect.top);
+    const anchorRect = span.getBoundingClientRect();
+    const anchorTop = Math.round(anchorRect.top);
 
-    // 공백 문자의 span은 height가 0이고 top이 실제 텍스트 행과 달라
-    // 시각적 행 탐지가 틀어지므로, 가장 가까운 가시 span의 Y로 보정한다.
-    if (anchorRect.height <= 1) {
-      const columnSpansForY = this._getColumnSpans(anchorColumn);
-      let bestSpan: HTMLSpanElement | null = null;
-      let bestOffset = Infinity;
-      for (const s of columnSpansForY) {
-        const r = s.getBoundingClientRect();
-        if (r.height <= 1) continue;
-        const sOffset = parseInt(s.dataset.offset ?? '', 10);
-        const distance = Math.abs(sOffset - renderedOffset);
-        if (distance < bestOffset) {
-          bestOffset = distance;
-          bestSpan = s;
-        }
-      }
-      if (bestSpan) {
-        anchorTop = Math.round(bestSpan.getBoundingClientRect().top);
-      }
-    }
-
-    // 같은 컬럼 내에서 같은 시각적 행(같은 top 좌표)의 가시 span 수집
-    // 공백 등 height≤1 span은 가시 문자가 아니므로 제외
     const columnSpans = this._getColumnSpans(anchorColumn);
     const lineSpans: HTMLSpanElement[] = [];
     for (const s of columnSpans) {
@@ -931,79 +612,50 @@ export class TextEditCoordinateMapper {
     const firstSpan = lineSpans[0];
     const lastSpan = lineSpans[lineSpans.length - 1];
 
-    const startRendered = parseInt(firstSpan.dataset.offset ?? '', 10);
-    const endRendered = parseInt(lastSpan.dataset.offset ?? '', 10);
-    if (Number.isNaN(startRendered) || Number.isNaN(endRendered)) return null;
+    const startSource = parseInt(firstSpan.dataset.sourceOffset ?? '', 10);
+    const endSource = parseInt(lastSpan.dataset.sourceOffset ?? '', 10);
+    if (Number.isNaN(startSource) || Number.isNaN(endSource)) return null;
 
-    const startSource = this.sourceOffset(startRendered);
-    const endSource = this.sourceOffset(endRendered);
-    if (startSource === null || endSource === null) return null;
-
-    // end는 마지막 글자 "다음" 위치이므로 +1
     return { start: startSource, end: endSource + 1 };
   }
 
-  /** span이 속한 컬럼 요소를 반환한다. */
   private _findColumnBySpan(span: HTMLSpanElement): LayoutColumnElement | null {
-    let node: Node | null = span;
-    while (node) {
-      if (node instanceof HTMLElement && node.tagName.toLowerCase() === 'x-layout-column') {
-        return node as LayoutColumnElement;
+    const columns = this._getAllColumns();
+    for (const column of columns) {
+      if (!column.shadowRoot) continue;
+      if (column.shadowRoot.contains(span)) {
+        return column;
       }
-      // Shadow DOM 경계를 넘어야 함 — span은 column의 shadow root 안에 있음
-      if (node instanceof ShadowRoot) {
-        node = node.host;
-        continue;
-      }
-      node = node.parentNode;
     }
     return null;
   }
 
-  /** paragraph의 모든 컬럼 요소를 렌더링 순서대로 반환한다. */
   private _getAllColumns(): LayoutColumnElement[] {
     return Array.from(this._paragraph.querySelectorAll('x-layout-column'));
   }
 
-  getSpanByOffset(offset: number): HTMLSpanElement | null {
-    if (this._spanCache.has(offset)) {
-      return this._spanCache.get(offset)!;
+  /**
+   * 주어진 source 오프셋에 해당하는 문자 `span` 요소를 반환한다.
+   * 임시 span은 제외한다.
+   * @param sourceOffset - 소스 오프셋
+   * @returns span 요소 또는 null
+   */
+  getSpanByOffset(sourceOffset: number): HTMLSpanElement | null {
+    if (this._spanCache.has(sourceOffset)) {
+      return this._spanCache.get(sourceOffset)!;
     }
-
-    const columnIndex = this._findColumnIndexByOffset(offset);
-    if (columnIndex === null) return null;
 
     const columns = this._getAllColumns();
-    const column = columns[columnIndex];
-    if (!column || !column.shadowRoot) return null;
-
-    const span = column.shadowRoot.querySelector<HTMLSpanElement>(
-      `[data-offset="${offset}"]:not([data-temporary])`,
-    );
-    if (!span) return null;
-
-    this._spanCache.set(offset, span);
-    return span;
-  }
-
-  /** 컬럼 범위를 이용해 렌더링 오프셋이 속한 컬럼 인덱스를 반환한다. */
-  private _findColumnIndexByOffset(offset: number): number | null {
-    let low = 0;
-    let high = this._columnRanges.length - 1;
-
-    while (low <= high) {
-      const mid = Math.floor((low + high) / 2);
-      const range = this._columnRanges[mid];
-
-      if (offset < range.start) {
-        high = mid - 1;
-      } else if (offset >= range.end) {
-        low = mid + 1;
-      } else {
-        return mid;
+    for (const column of columns) {
+      if (!column.shadowRoot) continue;
+      const span = column.shadowRoot.querySelector<HTMLSpanElement>(
+        `[data-source-offset="${sourceOffset}"]:not([data-temporary])`,
+      );
+      if (span) {
+        this._spanCache.set(sourceOffset, span);
+        return span;
       }
     }
-
     return null;
   }
 
@@ -1011,19 +663,14 @@ export class TextEditCoordinateMapper {
     const cached = this._columnSpansCache.get(column);
     if (cached) return cached;
 
-    if (!column.shadowRoot) return [];
-    const spans = Array.from(
-      column.shadowRoot.querySelectorAll<HTMLSpanElement>('[data-offset]:not([data-temporary])'),
-    );
-    this._columnSpansCache.set(column, spans);
-    return spans;
-  }
-
-  private _getAllSortedSpans(): HTMLSpanElement[] {
     const spans: HTMLSpanElement[] = [];
-    for (const column of this._getAllColumns()) {
-      spans.push(...this._getColumnSpans(column));
+    if (column.shadowRoot) {
+      column.shadowRoot.querySelectorAll<HTMLSpanElement>(
+        'span[data-source-offset]:not([data-temporary])',
+      ).forEach(span => spans.push(span));
     }
+
+    this._columnSpansCache.set(column, spans);
     return spans;
   }
 }

@@ -318,7 +318,7 @@ export class TextEditController {
       let reattached = false;
       const placement = this._mapper.getCursorPlacement(this._compositionStartOffset);
       if (placement) {
-        const span = this._mapper.getSpanByOffset(placement.renderedOffset);
+        const span = this._mapper.getSpanByOffset(placement.sourceOffset);
         if (span) {
           if (placement.atEndOfChar) {
             span.after(this._compositionSpan);
@@ -522,11 +522,8 @@ export class TextEditController {
 
     if (targetSpan.innerText === ' ') return null;
 
-    const renderedOffset = parseInt(targetSpan.dataset.offset ?? "", 10);
-    if (Number.isNaN(renderedOffset)) return null;
-
-    const sourceOffset = this._mapper.sourceOffset(renderedOffset);
-    if (sourceOffset === null) return null;
+    const sourceOffset = parseInt(targetSpan.dataset.sourceOffset ?? '', 10);
+    if (Number.isNaN(sourceOffset)) return null;
 
     const spanRect = targetSpan.getBoundingClientRect();
     const midpoint = spanRect.left + spanRect.width / 2;
@@ -1195,14 +1192,14 @@ export class TextEditController {
     const atVisualLineEnd = visualBoundsPrev !== null && offset === visualBoundsPrev.end;
     const atVisualLineStart = visualBounds !== null && offset === visualBounds.start;
 
-    // \n 위치나 trailing space처럼 renderedOffset이 null인 offset은 커서가 직접
+    // \n 위치나 trailing space처럼 매핑이 없는 offset은 커서가 직접
     // 위치할 수 없으므로, 마지막 visible 문자(offset === visualBounds.end - 1)를
     // 라인 끝으로 취급한다.
     const isAtLineStart = atVisualLineStart;
     const isAtLineEnd = atVisualLineEnd
       || (visualBounds !== null
         && offset === visualBounds.end - 1
-        && this._mapper.renderedOffset(offset + 1) === null);
+        && this._mapper.getCursorPlacement(offset + 1) === null);
 
     let currentLineInfo = this._mapper.getLineInfoBySourceOffset(offset);
     if (currentLineInfo === null) return null;
@@ -1350,8 +1347,19 @@ export class TextEditController {
    */
   private _getEndKeyOffset(offset: number): number {
     const lineEnd = this._getLogicalLineEnd(offset);
-    if (this._mapper.renderedOffset(lineEnd) !== null) {
+    // lineEnd가 \n 위치이면 그대로 반환 (\n 앞에서 멈춤)
+    if (this._paragraph.model?.textContent?.[lineEnd] === "\n") {
+      return lineEnd;
+    }
+    if (this._mapper.getCursorPlacement(lineEnd) !== null) {
       return lineEnd + 1;
+    }
+    // lineEnd가 매핑되지 않은 위치(\n, 생략된 공백)면
+    // 역방향으로 가장 가까운 매핑된 위치 + 1을 반환
+    for (let back = lineEnd - 1; back >= 0; back--) {
+      if (this._mapper.getCursorPlacement(back) !== null) {
+        return back + 1;
+      }
     }
     return lineEnd;
   }
@@ -1563,7 +1571,7 @@ export class TextEditController {
     let spanInserted = false;
     const placement = this._mapper.getCursorPlacement(this._compositionStartOffset);
     if (placement) {
-      const span = this._mapper.getSpanByOffset(placement.renderedOffset);
+      const span = this._mapper.getSpanByOffset(placement.sourceOffset);
       if (span) {
         if (placement.atEndOfChar) {
           span.after(this._compositionSpan);
@@ -1779,7 +1787,7 @@ export class TextEditController {
       return;
     }
 
-    const span = this._mapper.getSpanByOffset(placement.renderedOffset);
+    const span = this._mapper.getSpanByOffset(placement.sourceOffset);
     if (!span) return;
 
     const newSpan = this._createOptimisticSpan(char, sourceOffset);
@@ -1958,7 +1966,7 @@ export class TextEditController {
       return;
     }
 
-    const rect = this._mapper.getCharRect(placement.renderedOffset);
+    const rect = this._mapper.getCharRect(placement.sourceOffset);
     if (!rect) {
       this._cursorEl.visible = false;
       return;
@@ -1966,9 +1974,9 @@ export class TextEditController {
 
     const useFallback = rect.height <= 1;
     const cursorHeight = useFallback ? (this._mapper.getFirstColumnRect()?.fontSize ?? rect.height) : rect.height;
-    const cursorTop = useFallback ? this._resolveFallbackTop(placement.renderedOffset, cursorHeight) : rect.top;
+    const cursorTop = useFallback ? this._resolveFallbackTop(placement.sourceOffset, cursorHeight) : rect.top;
     this._cursorEl.top = cursorTop;
-    this._cursorEl.left = (placement.atEndOfChar ? rect.left + rect.width : rect.left) + placement.spaceOffsetPx;
+    this._cursorEl.left = placement.atEndOfChar ? rect.left + rect.width : rect.left;
     this._cursorEl.height = cursorHeight;
     this._cursorEl.visible = cursorVisible;
 
@@ -1980,8 +1988,8 @@ export class TextEditController {
    * 공백 등 height≈0인 span에서 커서 top을 결정한다.
    * 인접한 일반 문자의 top을 우선 사용하고, 실패하면 rect.top에서 cursorHeight를 뺀다.
    */
-  private _resolveFallbackTop(renderedOffset: number, cursorHeight: number): number {
-    const offsets = [renderedOffset - 1, renderedOffset + 1];
+  private _resolveFallbackTop(sourceOffset: number, cursorHeight: number): number {
+    const offsets = [sourceOffset - 1, sourceOffset + 1];
     for (const off of offsets) {
       if (off < 0) continue;
       const neighborRect = this._mapper.getCharRect(off);
@@ -1989,7 +1997,7 @@ export class TextEditController {
         return neighborRect.top;
       }
     }
-    const rect = this._mapper.getCharRect(renderedOffset);
+    const rect = this._mapper.getCharRect(sourceOffset);
     if (rect) {
       return Math.max(0, rect.top - cursorHeight);
     }
