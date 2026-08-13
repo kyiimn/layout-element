@@ -1886,6 +1886,45 @@ get selectedLayouts: LayoutElement[];
 get selectedLayoutIds: string[];
 ```
 
+#### Tab 탐색
+
+```ts
+/**
+ * Tab/Shift+Tab 키로 문서 내 요소를 순회한다.
+ *
+ * - `textEditMode === true`: 편집 가능한 paragraph 사이에서 포커스를 이동.
+ * - `textEditMode === false`: 선택 가능한 box 사이에서 단일 선택을 이동.
+ * - 후보가 없거나 인쇄 모드/삽입 모드면 `false`를 반환하고 아무 동작도 하지 않는다.
+ *
+ * @param shiftKey - true면 역방향(Shift+Tab), false면 순방향(Tab)
+ * @returns 이동 성공 여부
+ */
+navigateByTab(shiftKey: boolean): boolean;
+```
+
+탐색 순서:
+
+1. 문서 전체를 전위 순회(pre-order DFS)로 평면화한다.
+2. 같은 깊이의 형제는 `zIndex` 오름차순으로 정렬한다.
+3. 표 내부 셀은 `gridRow` → `gridCol` 순서로 탐색한다.
+4. 마지막 후보에서 Tab을 누르면 처음으로 돌아가고, 첫 번째 후보에서 Shift+Tab을 누르면 마지막으로 이동한다.
+
+```ts
+// 키 이벤트 핸들러에서 직접 호출
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const moved = layoutDocEl.editManager.navigateByTab(e.shiftKey);
+    if (!moved) {
+      console.log('이동할 후보가 없거나 현재 모드에서 Tab이 차단됨');
+    }
+  }
+});
+```
+
+> **참고**: `<x-layout-document>`는 `window` capture phase에서 Tab 키를 가로채서
+> `navigateByTab`을 자동 호출하므로, 일반적으로 외부에서 별도 핸들러를 달 필요는 없다.
+
 #### 삽입 모드
 
 ```ts
