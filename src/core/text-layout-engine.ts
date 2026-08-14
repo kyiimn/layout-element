@@ -374,7 +374,8 @@ export class TextLayoutEngine {
    * @param textBlockStyle - 이 라인에 적용할 블록 스타일
    * @param ppm - 픽셀/mm 변환 비율
    * @param columnIndex - 현재 컬럼 인덱스 (`_columnWidths` 조회용)
-   * @param isFirstInColumn - 첫 번째 라인 여부 (firstOfText/firstOfBlock 플래그 설정용)
+   * @param isFirstInColumn - 첫 번째 라인 여부 (firstOfText 플래그 설정용)
+   * @param isFirstOfBlock - 블록의 첫 라인 여부 (firstOfBlock 플래그 설정용)
    * @returns cover=true면 라인 전체가 덮임, overflow=true면 컬럼 높이 초과.
    *          `partWidths`는 mm 단위.
    */
@@ -401,7 +402,7 @@ export class TextLayoutEngine {
     if (cover) {
       const lineData: TextLineData = {
         firstOfText: isFirstInColumn,
-        firstOfBlock: isFirstInColumn,
+        firstOfBlock: isFirstOfBlock,
         parts: [],
         textBlockStyle,
       };
@@ -442,7 +443,7 @@ export class TextLayoutEngine {
     if (usableRegions.length === 0) {
       const lineData: TextLineData = {
         firstOfText: isFirstInColumn,
-        firstOfBlock: isFirstInColumn,
+        firstOfBlock: isFirstOfBlock,
         parts: [],
         textBlockStyle,
       };
@@ -469,7 +470,7 @@ export class TextLayoutEngine {
 
     const lineData: TextLineData = {
       firstOfText: isFirstInColumn,
-      firstOfBlock: isFirstInColumn,
+      firstOfBlock: isFirstOfBlock,
       parts,
       textBlockStyle,
     };
