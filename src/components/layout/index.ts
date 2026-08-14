@@ -7,4 +7,3 @@ export * from "./paragraph.element";
 export * from "./table.element";
 export * from "./td.element";
 export * from "./tr.element";
-export * from "./v-column.element";

@@ -5,7 +5,7 @@ import { TextBlockStyle } from "../../style";
  *
  * **내부 전용 타입**: 외부에서 직접 생성하지 않는다.
  * `TextLayoutEngine`이 텍스트 래핑 과정에서 자동 생성하며,
- * `LayoutColumnElement`와 `LayoutVirtualColumnElement`가 이 데이터를 소비하여 각 줄을 렌더링한다.
+ * `LayoutColumnElement`가 이 데이터를 소비하여 각 줄을 렌더링한다.
  *
  * 플래그 조합 예시:
  * | firstOfBlock | endOfBlock | firstOfText | endOfText | 의미 |

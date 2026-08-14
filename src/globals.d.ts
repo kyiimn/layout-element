@@ -9,7 +9,6 @@ import {
   LayoutTableElement,
   LayoutTableRowElement,
   LayoutTableCellElement,
-  LayoutVirtualColumnElement,
 } from "./components";
 import type { DocumentData, BoxData, ParagraphData, ImageData, GuideColumnData, TableData, TableRowData, TableCellData, BoxRole } from "./types";
 
@@ -24,7 +23,6 @@ declare global {
     'x-layout-table': LayoutTableElement;
     'x-layout-tr': LayoutTableRowElement;
     'x-layout-td': LayoutTableCellElement;
-    'x-layout-vcolumn': LayoutVirtualColumnElement;
   };
 }
 
@@ -47,7 +45,6 @@ declare module 'react' {
       'x-layout-table': DetailedHTMLProps<HTMLAttributes<LayoutTableElement> & { data?: TableData; }, LayoutTableElement>;
       'x-layout-tr': DetailedHTMLProps<HTMLAttributes<LayoutTableRowElement> & { data?: TableRowData; height?: number; }, LayoutTableRowElement>;
       'x-layout-td': DetailedHTMLProps<HTMLAttributes<LayoutTableCellElement> & { data?: TableCellData; colspan?: number; rowspan?: number; }, LayoutTableCellElement>;
-      'x-layout-vcolumn': DetailedHTMLProps<HTMLAttributes<LayoutVirtualColumnElement>, LayoutVirtualColumnElement>;
     }
   }
 }
