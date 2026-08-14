@@ -1,6 +1,5 @@
 import { DEFAULT_FONT_SIZE, DEFAULT_INDENT, DEFAULT_LETTER_SPACING, DEFAULT_LINE_GAP, DEFAULT_SPACE_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, DEFAULT_WIDTH_RATIO, isLineEndForbidden, isLineStartForbidden } from "@/constants";
 import type { LayoutBoxElement, LayoutParagraphElement } from "@/components";
-import type { LayoutVirtualColumnElement } from "@/components/layout/v-column.element";
 import {
   InheritStyle,
   TextBlockData,
@@ -11,9 +10,10 @@ import {
   TextLineData,
   OverlapParts
 } from "@/types";
-import { getOverlapSizePX, mergeOverlapParts, normalizeRect, type NormalizedRect } from "@/utils";
+import { getOverlapSizeMm, mergeOverlapParts, type MmRect } from "@/utils";
 import { FontLoader } from "@/resource/font-loader";
 import { ColorRegistry } from "@/resource/color-registry";
+
 
 type TextLayoutEngineOptions = {
   content: string | (string | TextBlockData)[];
@@ -70,11 +70,8 @@ export class TextLayoutEngine {
 
   private _lineHeight: number = 0;
 
-  private _columnPpm: number[] = [];
-
   /**
-   * 화면 배율(scale). `getBoundingClientRect()`로 측정한 viewport 픽셀을
-   * scale=1 기준 픽셀로 정규화하는 데 사용한다. 0 이하이면 1로 취급한다.
+   * 화면 배율(scale). 0 이하이면 1로 취급한다.
    * `layoutStructure()`/`layoutText()` 호출 전에 paragraph 측에서 설정한다.
    */
   private _scale: number = 1;
@@ -82,8 +79,8 @@ export class TextLayoutEngine {
   private _paragraphElement: LayoutParagraphElement;
   private _rootNode: Node;
 
-  /** 성능 캐시: 오버랩 요소의 정규화된 rect 캐시. 렌더링 사이클당 한 번 측정 후 재사용하여 강제 리플로우를 최소화한다. */
-  private _overlayRects: Map<LayoutBoxElement, NormalizedRect> | null = null;
+  /** 성능 캐시: 오버랩 요소의 mm rect 캐시. 렌더링 사이클당 한 번 구성 후 재사용하여 강제 리플로우를 최소화한다. */
+  private _overlayRectsMm: Map<LayoutBoxElement, MmRect> | null = null;
 
   /**
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
@@ -113,38 +110,6 @@ export class TextLayoutEngine {
 
     this._lineHeight = 0;
     this._lineHeight = fontSize * lineGap;
-  }
-
-  /** 줄 요소 생성 (Flexbox 컨테이너). `genLineStyle()`으로 스타일을 적용한다. */
-  private _createLineElement(textBlockStyle?: TextBlockStyle) {
-    const lineEl = document.createElement('div');
-    const lineStyle = this.genLineStyle(textBlockStyle);
-    Object.assign(lineEl.style, {
-      ...lineStyle,
-      flexWrap: 'nowrap',
-    });
-    return lineEl;
-  }
-
-  /**
-   * 파트 요소 생성 (줄 내부 수평 세그먼트). `marginLeft`로 파트 간 간격을 설정한다.
-   *
-   * @param widthMm - 파트 너비 (mm)
-   * @param marginLeftMm - 좌측 여백 (mm)
-   * @returns 파트 div 요소
-   */
-  private _createPartElement(widthMm: number, marginLeftMm: number) {
-    const partEl = document.createElement('div');
-    Object.assign(partEl.style, {
-      display: 'inline-flex',
-      flexDirection: 'row',
-      flexWrap: 'nowrap',
-      overflow: 'hidden',
-      width: `${widthMm}mm`,
-      marginLeft: `${marginLeftMm}mm`,
-      alignItems: 'baseline',
-    });
-    return partEl;
   }
 
   /**
@@ -314,90 +279,94 @@ export class TextLayoutEngine {
 
   /**
    * 오버랩 요소(이미지 등)와의 겹침 계산.
-   * 성능 최적화: `_overlayRects` 캐시를 사용하여 렌더링 사이클당
-   * `getBoundingClientRect()` 호출을 한 번으로 제한한다.
+   * 성능 최적화: `_overlayRectsMm` 캐시를 사용하여 렌더링 사이클당
+   * 오버랩 요소의 mm rect를 한 번 구성 후 재사용한다.
    * COVER면 라인 전체가 덮인 것이고, PART면 일부만 덮인 것이다.
-   *
-   * 모든 `getBoundingClientRect()` 결과는 `this._scale`로 나누어 scale=1 기준으로
-   * 정규화한다. lineRect와 overlayRect 모두 같은 scale로 정규화하므로 상대적
-   * 겹침 판정은 동일하지만, 서브픽셀 정밀도가 scale에 관계없이 일관되어
-   * scale 변경 시 텍스트 배치 어긋남을 원천 방지한다.
    */
-  private _detectOverlapWithCache(lineEl: HTMLElement): { cover: boolean; overlapParts: OverlapParts[] } {
+  private _detectOverlapWithCache(lineRectMm: MmRect): { cover: boolean; overlapParts: OverlapParts[] } {
     const overlapEls = this._paragraphElement.overlayElements;
     let cover = false;
     let parts: OverlapParts[] = [];
 
-    if (this._overlayRects === null) {
-      this._overlayRects = new Map();
+    if (this._overlayRectsMm === null) {
+      this._overlayRectsMm = new Map();
       for (const el of overlapEls) {
-        // 정규화된 rect를 캐싱하여 이후 반복 측정을 피한다
-        this._overlayRects.set(el, normalizeRect(el.getBoundingClientRect(), this._scale));
+        this._overlayRectsMm.set(el, {
+          left: el.absLeft,
+          right: el.absLeft + el.absWidth,
+          top: el.absTop,
+          bottom: el.absTop + el.absHeight,
+          width: el.absWidth,
+          height: el.absHeight,
+        });
       }
     }
 
-    // lineRect도 동일한 scale 기준으로 정규화하여 캐시된 overlayRect와 비교한다
-    const lineRect = normalizeRect(lineEl.getBoundingClientRect(), this._scale);
-
     for (const el of overlapEls) {
-      const elRect = this._overlayRects.get(el);
+      const elRect = this._overlayRectsMm.get(el);
       if (!elRect) continue;
 
-      if (lineRect.bottom <= elRect.top || lineRect.top >= elRect.bottom) {
+      if (lineRectMm.bottom <= elRect.top || lineRectMm.top >= elRect.bottom) {
         continue;
       }
 
-      // getOverlapSizePX는 내부에서 다시 getBoundingClientRect를 호출하므로 scale 전달이 필수
-      const type = getOverlapSizePX(lineEl, el, this._scale);
+      const type = getOverlapSizeMm(lineRectMm, el);
       if (type.direction === 'COVERS') cover = true;
       if (type.direction === 'PART') parts = parts.concat(type.parts);
     }
-
-    if (cover) lineEl.style.width = '0';
-    lineEl.style.maxWidth = lineEl.style.width;
 
     return { cover, overlapParts: mergeOverlapParts(parts) };
   }
 
   /**
-   * 라인 요소를 생성하고 오버랩을 감지하여 파트를 구성한다.
+   * 라인의 mm 좌표를 계산하고 오버랩을 감지하여 파트를 구성한다.
    * `_detectOverlapWithCache()`로 겹침을 감지하고, `_computeFreeRegions()`로
-   * 자유 영역을 계산한 뒤, 각 자유 영역에 대한 파트 요소와 TextPartData를 생성한다.
+   * 자유 영역을 계산한 뒤, 각 자유 영역에 대한 TextPartData를 생성한다.
    *
-   * 모든 측정값과 산술은 **mm 단위**로 수행된다. 라인 너비는 DOM 측정
-   * (`getBoundingClientRect().width / ppm`) 대신 `_columnWidths[columnIndex]`를
-   * 직접 사용하여 브라우저 렌더링 정밀도 오차를 원천 제거한다.
-   * `getOverlapSizePX()`가 반환하는 px 단위 OverlapParts는 ppm으로 나누어 mm로 변환한다.
-   * 이로 인해 scale에 완전히 무관한 줄바꿈 결과를 보장한다.
+   * DOM은 생성하지 않는다. 모든 측정값과 산술은 **mm 단위**로 수행되며,
+   * 라인 너비는 `_columnWidths[columnIndex]`를 직접 사용하여 브라우저 렌더링
+   * 정밀도 오차를 원천 제거한다.
    *
-   * @param vColumnEl - 가상 컬럼 요소 (DOM에 삽입되어 있어야 함)
    * @param textBlockStyle - 이 라인에 적용할 블록 스타일
-   * @param ppm - 픽셀/mm 변환 비율
    * @param columnIndex - 현재 컬럼 인덱스 (`_columnWidths` 조회용)
+   * @param lineIndexInColumn - 컬럼 내에서 이 라인의 0-based 인덱스
    * @param isFirstInColumn - 첫 번째 라인 여부 (firstOfText 플래그 설정용)
    * @param isFirstOfBlock - 블록의 첫 라인 여부 (firstOfBlock 플래그 설정용)
    * @returns cover=true면 라인 전체가 덮임, overflow=true면 컬럼 높이 초과.
    *          `partWidths`는 mm 단위.
    */
   private _createLineWithParts(
-    vColumnEl: HTMLElement,
     textBlockStyle: TextBlockStyle | undefined,
-    ppm: number,
     columnIndex: number,
+    lineIndexInColumn: number,
     isFirstInColumn: boolean,
     isFirstOfBlock: boolean,
   ): {
     cover: boolean;
     overflow: boolean;
-    lineEl: HTMLDivElement | null;
-    partEls: HTMLDivElement[];
     partWidths: number[];
     lineData: TextLineData;
   } {
-    const lineEl = this._createLineElement(textBlockStyle);
-    vColumnEl.appendChild(lineEl);
+    const columnLeftMm = this._columnWidths.slice(0, columnIndex).reduce((a, b) => a + b, 0)
+      + this._gaps.slice(0, columnIndex).reduce((a, b) => a + b, 0);
+    const lineLeftMm = this._paragraphElement.absLeft + columnLeftMm;
+    const lineTopMm = this._paragraphElement.absTop + lineIndexInColumn * this._lineHeight;
+    const lineWidthMm = this._columnWidths[columnIndex];
+    const lineHeightMm = this._lineHeight;
 
-    const { cover, overlapParts } = this._detectOverlapWithCache(lineEl);
+    const lineRectMm: MmRect = {
+      left: lineLeftMm,
+      right: lineLeftMm + lineWidthMm,
+      top: lineTopMm,
+      bottom: lineTopMm + lineHeightMm,
+      width: lineWidthMm,
+      height: lineHeightMm,
+    };
+
+    const { cover, overlapParts } = this._detectOverlapWithCache(lineRectMm);
+
+    const parentHeight = this._inheritStyle?.parentHeight ?? 0;
+    const isOverflow = (lineIndexInColumn + 1) * this._lineHeight > parentHeight + 1e-6;
 
     if (cover) {
       const lineData: TextLineData = {
@@ -406,22 +375,10 @@ export class TextLayoutEngine {
         parts: [],
         textBlockStyle,
       };
-      return { cover: true, overflow: (vColumnEl as LayoutVirtualColumnElement).isOverflow, lineEl: null, partEls: [], partWidths: [], lineData };
+      return { cover: true, overflow: isOverflow, partWidths: [], lineData };
     }
 
-    // 오버플로우 시에도 lineEl을 DOM에 유지하고 freeRegions를 계산하여
-    // 문자 배치를 시도한다. 원래 코드에서도 오버플로우 시 lineEl을 제거하지 않았다.
-    // 오버플로우 플래그는 최종 반환값에 반영한다.
-    const isOverflow = (vColumnEl as LayoutVirtualColumnElement).isOverflow;
-
-    const lineWidthMm = this._columnWidths[columnIndex];
-
-    const overlapPartsMm: OverlapParts[] = overlapParts.map(p => ({
-      x1: p.x1 / ppm,
-      x2: p.x2 / ppm,
-    }));
-
-    const freeRegions = this._computeFreeRegions(lineWidthMm, overlapPartsMm);
+    const freeRegions = this._computeFreeRegions(lineWidthMm, overlapParts);
 
     const fontSize = textBlockStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
     const indentMm = isFirstOfBlock ? fontSize * this.indent : 0;
@@ -447,7 +404,7 @@ export class TextLayoutEngine {
         parts: [],
         textBlockStyle,
       };
-      return { cover: true, overflow: (vColumnEl as LayoutVirtualColumnElement).isOverflow, lineEl: null, partEls: [], partWidths: [], lineData };
+      return { cover: true, overflow: isOverflow, partWidths: [], lineData };
     }
 
     const parts: TextPartData[] = usableRegions.map((region, i) => ({
@@ -458,16 +415,6 @@ export class TextLayoutEngine {
 
     const partWidths = usableRegions.map(r => r.end - r.start);
 
-    const partEls = usableRegions.map(region => this._createPartElement(
-      region.end - region.start,
-      0,
-    ));
-    partEls.forEach((partEl, i) => {
-      const gapMm = i === 0 ? usableRegions[0].start : usableRegions[i].start - usableRegions[i - 1].end;
-      if (gapMm > 0) partEl.style.marginLeft = `${gapMm}mm`;
-      lineEl.appendChild(partEl);
-    });
-
     const lineData: TextLineData = {
       firstOfText: isFirstInColumn,
       firstOfBlock: isFirstOfBlock,
@@ -475,14 +422,13 @@ export class TextLayoutEngine {
       textBlockStyle,
     };
 
-    return { cover: false, overflow: isOverflow, lineEl, partEls, partWidths, lineData };
+    return { cover: false, overflow: isOverflow, partWidths, lineData };
   }
 
   /**
-   * 구조 측정 및 컬럼 ppm 측정.
-   * 컬럼 폭/간격/lineHeight를 계산하고, 가상 컬럼을 생성해
-   * 픽셀/mm 비율(`_columnPpm`)을 측정한 뒤 제거한다.
-   * `_overlayRects`를 null로 리셋하고 `_textContent`를 파싱한다.
+   * 구조 측정 및 컬럼 콘텐츠 파싱.
+   * 컬럼 폭/간격/lineHeight를 계산하고, `_overlayRectsMm`을 null로 리셋하며
+   * `_textContent`를 파싱한다.
    * 내부 전용. `layoutStructure()`에서만 호출된다.
    */
   private _initStructureAndMeasureColumns() {
@@ -490,7 +436,7 @@ export class TextLayoutEngine {
 
     this._columnContents = [];
     this._overflow = 0;
-    this._overlayRects = null;
+    this._overlayRectsMm = null;
 
     const rawContents = !Array.isArray(this._textContent) ? [{
       content: this._textContent
@@ -504,29 +450,6 @@ export class TextLayoutEngine {
     });
 
     if (this.columnCount < 1) return;
-
-    this._columnPpm = [];
-    const vColumnEls: LayoutVirtualColumnElement[] = [];
-    for (let curColumn = 0; curColumn < this.columnCount; curColumn++) {
-      const vColumnEl = document.createElement('x-layout-vcolumn');
-      vColumnEl.index = curColumn;
-      vColumnEl.model = this;
-      vColumnEl.parentElement = this._paragraphElement;
-      this._rootNode.appendChild(vColumnEl);
-      vColumnEls.push(vColumnEl);
-    }
-
-    for (let i = 0; i < vColumnEls.length; i++) {
-      // viewport px를 scale로 나누어 scale=1 기준 픽셀 폭으로 정규화한다.
-      // 정규화된 px / columnWidths[i](mm) = scale 무관한 ppm을 보장한다.
-      const widthPx = vColumnEls[i].getBoundingClientRect().width / this._scale;
-      const ppm = widthPx / this._columnWidths[i];
-      this._columnPpm.push(ppm);
-    }
-
-    for (const vColumnEl of vColumnEls) {
-      vColumnEl.remove();
-    }
   }
 
   /**
@@ -550,7 +473,7 @@ export class TextLayoutEngine {
 
   /**
    * 문자 단위 줄바꿈 루프. `initStructureAndMeasureColumns()`가 먼저 실행되어
-   * `_columnWidths`, `_gaps`, `_lineHeight`, `_columnPpm`이 준비되어 있어야 한다.
+   * `_columnWidths`, `_gaps`, `_lineHeight`가 준비되어 있어야 한다.
    * `textContent` 변경을 반영하기 위해 `_contents`를 다시 파싱한다.
    * 결과는 `_columnContents`와 `_overflow`에 저장된다.
    *
@@ -568,39 +491,32 @@ export class TextLayoutEngine {
 
     this._columnContents = [];
     this._overflow = 0;
-    this._overlayRects = null;
+    this._overlayRectsMm = null;
 
     let beforeIdxBlock = 0;
     let beforeIdxContentOfBlock = 0;
 
     for (let curColumn = 0; curColumn < this.columnCount; curColumn++) {
       let columnContent: TextLineData[] = [];
-      let lineEl: HTMLDivElement | null = null;
-      let partEls: HTMLDivElement[] = [];
+      let hasLine = false;
       let partWidths: number[] = [];
       let currentPartIdx = 0;
       let cumulativeWidths: number[] = [];
+      let isColumnOverflow = false;
 
       let idxBlock = beforeIdxBlock;
       let idxContentOfBlock = beforeIdxContentOfBlock;
-
-      const vColumnEl = document.createElement('x-layout-vcolumn');
-      vColumnEl.index = curColumn;
-      vColumnEl.model = this;
-      vColumnEl.parentElement = this._paragraphElement;
-      this._rootNode.appendChild(vColumnEl);
-
-      const ppm = this._columnPpm[curColumn];
 
       for (; idxBlock < this.contents.length; idxBlock++) {
         const block = this.contents[idxBlock];
         if (idxBlock !== beforeIdxBlock) idxContentOfBlock = 0;
 
-        if (!lineEl || idxContentOfBlock === 0) {
+        if (!hasLine || idxContentOfBlock === 0) {
           let isFirstLineInLoop = true;
           while (true) {
             const isFirstInColumn = curColumn === 0 && columnContent.length < 1 && isFirstLineInLoop;
-            const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, curColumn, isFirstInColumn, idxContentOfBlock === 0);
+            const result = this._createLineWithParts(block.textBlockStyle, curColumn, columnContent.length, isFirstInColumn, idxContentOfBlock === 0);
+            isColumnOverflow = result.overflow;
 
             // M2: COVER 라인은 실제 텍스트가 없으므로 이전 라인에 endOfBlock을 설정하지 않음
             if (columnContent.length > 0 && !result.cover) {
@@ -609,8 +525,8 @@ export class TextLayoutEngine {
 
             if (result.cover) {
               columnContent.push(result.lineData);
-              partEls = [];
-              lineEl = null;
+              partWidths = [];
+              hasLine = false;
               isFirstLineInLoop = false;
               if (result.overflow) {
                 break;
@@ -620,14 +536,13 @@ export class TextLayoutEngine {
 
             if (result.overflow) {
               columnContent.push(result.lineData);
-              lineEl = null;
-              partEls = [];
+              hasLine = false;
+              partWidths = [];
               break;
             }
 
             columnContent.push(result.lineData);
-            lineEl = result.lineEl;
-            partEls = result.partEls;
+            hasLine = true;
             partWidths = result.partWidths;
             currentPartIdx = 0;
             cumulativeWidths = new Array(partWidths.length).fill(0);
@@ -635,12 +550,12 @@ export class TextLayoutEngine {
             break;
           }
 
-          if (!lineEl) {
-            if (vColumnEl.isOverflow && curColumn < this._columnWidths.length - 1) break;
+          if (!hasLine) {
+            if (isColumnOverflow && curColumn < this._columnWidths.length - 1) break;
           }
 
-          if (!lineEl || partEls.length === 0) {
-            if (vColumnEl.isOverflow) continue;
+          if (!hasLine || partWidths.length === 0) {
+            if (isColumnOverflow) continue;
             break;
           }
         }
@@ -669,7 +584,7 @@ export class TextLayoutEngine {
               columnContent[columnContent.length - 1].endOfBlock = true;
             }
 
-            if (vColumnEl.isOverflow) {
+            if (isColumnOverflow) {
               if (curColumn < this._columnWidths.length - 1) {
                 if (idxContentOfBlock < block.content.length - 1) {
                   columnContent = this._removeTrailingEmptyLine(columnContent);
@@ -699,7 +614,7 @@ export class TextLayoutEngine {
               columnContent[columnContent.length - 1].endOfBlock = true;
             }
 
-            if (vColumnEl.isOverflow) {
+            if (isColumnOverflow) {
               if (curColumn < this._columnWidths.length - 1) {
                 if (idxContentOfBlock < block.content.length - 1) {
                   columnContent = this._removeTrailingEmptyLine(columnContent);
@@ -713,13 +628,13 @@ export class TextLayoutEngine {
           }
 
           while (true) {
-            const result = this._createLineWithParts(vColumnEl, block.textBlockStyle, ppm, curColumn, false, false);
+            const result = this._createLineWithParts(block.textBlockStyle, curColumn, columnContent.length, false, false);
+            isColumnOverflow = result.overflow;
 
             if (result.cover) {
               columnContent.push(result.lineData);
-              partEls = [];
               partWidths = [];
-              lineEl = null;
+              hasLine = false;
               if (result.overflow) {
                 if (curColumn < this._columnWidths.length - 1) {
                   if (idxContentOfBlock < block.content.length - 1) {
@@ -738,8 +653,7 @@ export class TextLayoutEngine {
                 if (idxContentOfBlock < block.content.length - 1) {
                   columnContent = this._removeTrailingEmptyLine(columnContent);
                 }
-                lineEl = null;
-                partEls = [];
+                hasLine = false;
                 partWidths = [];
                 break;
               } else {
@@ -748,8 +662,7 @@ export class TextLayoutEngine {
             }
 
             columnContent.push(result.lineData);
-            lineEl = result.lineEl;
-            partEls = result.partEls;
+            hasLine = true;
             partWidths = result.partWidths;
             currentPartIdx = 0;
             cumulativeWidths = new Array(partWidths.length).fill(0);
@@ -786,7 +699,7 @@ export class TextLayoutEngine {
             break;
           }
 
-          if (vColumnEl.isOverflow && curColumn < this._columnWidths.length - 1) {
+          if (isColumnOverflow && curColumn < this._columnWidths.length - 1) {
             break;
           }
 
@@ -794,7 +707,7 @@ export class TextLayoutEngine {
             columnContent[columnContent.length - 1].endOfBlock = true;
           }
 
-          if (vColumnEl.isOverflow) {
+          if (isColumnOverflow) {
             if (curColumn < this._columnWidths.length - 1) {
               if (idxContentOfBlock < block.content.length - 1) {
                 columnContent = this._removeTrailingEmptyLine(columnContent);
@@ -806,7 +719,7 @@ export class TextLayoutEngine {
           }
         }
 
-        if (vColumnEl.isOverflow) {
+        if (isColumnOverflow) {
           if (curColumn < this._columnWidths.length - 1) break;
         }
       }
@@ -815,15 +728,12 @@ export class TextLayoutEngine {
       if (columnContent.length > 0) {
         const isEndOfText = idxBlock === this.contents.length &&
           idxContentOfBlock >= this.contents[this.contents.length - 1].content.length;
-        const isOverflow = vColumnEl.isOverflow;
-        if (isEndOfText || isOverflow) {
+        if (isEndOfText || isColumnOverflow) {
           columnContent[columnContent.length - 1].endOfText = true;
         }
       }
       beforeIdxContentOfBlock = idxContentOfBlock;
       beforeIdxBlock = idxBlock;
-
-      vColumnEl.remove();
 
       this._columnContents.push(columnContent);
     }
@@ -835,9 +745,9 @@ export class TextLayoutEngine {
   }
 
   /**
-   * 구조적 레이아웃만 계산하고 캐싱한다. 컬럼 폭, 간격, ppm 등 DOM 측정에
-   * 의존하는 값들을 `_columnPpm`과 기타 private 필드에 저장한다.
-   * 내부적으로 `initStructureAndMeasureColumns()`를 호출한다.
+   * 구조적 레이아웃만 계산하고 캐싱한다. 컬럼 폭, 간격, lineHeight 등을
+   * private 필드에 저장한다.
+   * 내부적으로 `_initStructureAndMeasureColumns()`를 호출한다.
    */
   public layoutStructure() {
     this._initStructureAndMeasureColumns();
@@ -852,17 +762,10 @@ export class TextLayoutEngine {
     this._layoutTextIntoColumns();
   }
 
-  /**
-   * 현재 화면 배율을 반환한다. `getBoundingClientRect()` 결과를 정규화하는 데 사용된다.
-   */
   get scale(): number {
     return this._scale;
   }
 
-  /**
-   * 화면 배율을 설정한다. `layoutStructure()`/`layoutText()` 호출 전에 설정해야
-   * 오버랩 판정과 ppm 측정이 scale 무관하게 동작한다. 0 이하이면 1로 취급한다.
-   */
   set scale(value: number) {
     this._scale = value > 0 ? value : 1;
   }
