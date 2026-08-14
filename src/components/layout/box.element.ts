@@ -11,6 +11,13 @@ import { LayoutTableElement } from "./table.element";
 import { LayoutTableCellElement } from "./td.element";
 
 /**
+ * 드래그/리사이즈 중 한 번이라도 오버랩된 단락 집합.
+ * 매 rAF 프레임마다 누적되어 드래그 종료 시까지 모든 단락이 갱신된다.
+ * null이면 드래그/리사이즈 중이 아님.
+ */
+type DragAffectedSet = Set<LayoutParagraphElement> | null;
+
+/**
  * 위치 지정 가능한 컨테이너 요소. `<x-layout-box>` 커스텀 엘리먼트.
  *
  * `BoxData`를 받아 DOM 트리를 구축하고 자식 요소들을 렌더링한다.
@@ -56,6 +63,12 @@ export class LayoutBoxElement extends HTMLElement {
   private _savedGap: number | number[] = 0;
 
   private _resizeHandles: HTMLDivElement[] = [];
+
+  /** 드래그/리사이즈 중 한 번이라도 오버랩된 단락 집합. null이면 비활성. */
+  private _dragAffectedParagraphs: DragAffectedSet = null;
+
+  /** 드래그/리사이즈 중 보류된 rAF ID. */
+  private _dragRafId: number | null = null;
 
   /** 테두리 바깥 요소(방향별). `top`/`bottom`/`left`/`right` 키로 관리한다. */
   private _borderEls: Record<string, HTMLDivElement | null> = {
@@ -737,28 +750,32 @@ export class LayoutBoxElement extends HTMLElement {
     if (this._left === value) return;
     this._left = value;
     this.layout();
-    this.scheduleRerenderAffectedParagraphs();
+    if (this._dragAffectedParagraphs !== null) this._scheduleDragRerender();
+    else this.scheduleRerenderAffectedParagraphs();
   }
 
   set top(value: number) {
     if (this._top === value) return;
     this._top = value;
     this.layout();
-    this.scheduleRerenderAffectedParagraphs();
+    if (this._dragAffectedParagraphs !== null) this._scheduleDragRerender();
+    else this.scheduleRerenderAffectedParagraphs();
   }
 
   set width(value: number) {
     if (this._width === value) return;
     this._width = value;
     this.layout();
-    this.scheduleRerenderAffectedParagraphs();
+    if (this._dragAffectedParagraphs !== null) this._scheduleDragRerender();
+    else this.scheduleRerenderAffectedParagraphs();
   }
 
   set height(value: number) {
     if (this._height === value) return;
     this._height = value;
     this.layout();
-    this.scheduleRerenderAffectedParagraphs();
+    if (this._dragAffectedParagraphs !== null) this._scheduleDragRerender();
+    else this.scheduleRerenderAffectedParagraphs();
   }
 
   set position(value: BoxPosition) {
@@ -835,28 +852,32 @@ export class LayoutBoxElement extends HTMLElement {
     if (this._paddingTop === value) return;
     this._paddingTop = value;
     this.layout();
-    this.scheduleRerenderAffectedParagraphs();
+    if (this._dragAffectedParagraphs !== null) this._scheduleDragRerender();
+    else this.scheduleRerenderAffectedParagraphs();
   }
 
   set paddingRight(value: number) {
     if (this._paddingRight === value) return;
     this._paddingRight = value;
     this.layout();
-    this.scheduleRerenderAffectedParagraphs();
+    if (this._dragAffectedParagraphs !== null) this._scheduleDragRerender();
+    else this.scheduleRerenderAffectedParagraphs();
   }
 
   set paddingBottom(value: number) {
     if (this._paddingBottom === value) return;
     this._paddingBottom = value;
     this.layout();
-    this.scheduleRerenderAffectedParagraphs();
+    if (this._dragAffectedParagraphs !== null) this._scheduleDragRerender();
+    else this.scheduleRerenderAffectedParagraphs();
   }
 
   set paddingLeft(value: number) {
     if (this._paddingLeft === value) return;
     this._paddingLeft = value;
     this.layout();
-    this.scheduleRerenderAffectedParagraphs();
+    if (this._dragAffectedParagraphs !== null) this._scheduleDragRerender();
+    else this.scheduleRerenderAffectedParagraphs();
   }
 
   set inheritStyle(style: InheritStyle | undefined) {
@@ -1526,11 +1547,53 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   /**
-   * 영향받는 단락 요소를 즉시 다시 렌더링한다.
+   * 영향받는 단락 요소를 즉시 다시 렌더링한다. (외부 API용)
    */
   private scheduleRerenderAffectedParagraphs(): void {
     const affected = this._collectAffectedParagraphs();
     this._renderAffectedParagraphs(affected);
+  }
+
+  /**
+   * 드래그/리사이즈 시작. 추적 Set 초기화.
+   * `LayoutEditController`가 드래그/리사이즈 시작 시 호출한다.
+   */
+  startDragTracking(): void {
+    this._dragAffectedParagraphs = new Set();
+  }
+
+  /**
+   * 드래그/리사이즈 종료. 보류된 rAF 취소 후 모든 누적 단락 즉시 갱신.
+   * `LayoutEditController`가 드래그/리사이즈 종료 시 호출한다.
+   */
+  flushDragRerender(): void {
+    if (this._dragRafId !== null) {
+      cancelAnimationFrame(this._dragRafId);
+      this._dragRafId = null;
+    }
+    this.layout();
+    if (this._dragAffectedParagraphs) {
+      this._renderAffectedParagraphs(this._dragAffectedParagraphs);
+    }
+    this._dragAffectedParagraphs = null;
+  }
+
+  /**
+   * 드래그/리사이즈 중 영향받는 단락을 rAF로 배치하여 갱신한다.
+   * 동일 rAF 프레임 내 여러 setter 호출을 1회 갱신으로 배치한다.
+   */
+  private _scheduleDragRerender(): void {
+    if (this._dragRafId === null) {
+      this._dragRafId = requestAnimationFrame(() => {
+        this._dragRafId = null;
+        this.layout();
+        const current = this._collectAffectedParagraphs();
+        if (this._dragAffectedParagraphs) {
+          for (const p of current) this._dragAffectedParagraphs.add(p);
+          this._renderAffectedParagraphs(this._dragAffectedParagraphs);
+        }
+      });
+    }
   }
 
   /**

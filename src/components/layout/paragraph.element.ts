@@ -637,7 +637,12 @@ export class LayoutParagraphElement extends HTMLElement {
   }
 
   get overlayElements() {
-    const list: LayoutBoxElement[] = this.parentElement.overlayElements;
+    // 부모의 overlayElements는 부모 box 기준으로 교차를 판정하므로,
+    // paragraph 자체와 교차하지 않는 box가 포함될 수 있다.
+    // paragraph 기준으로 다시 한 번 필터링한다.
+    const list: LayoutBoxElement[] = this.parentElement.overlayElements
+      .filter(el => checkOverlap(el, this));
+
     const self: any = this;
 
     let overlay = this.parentElement.items.filter(i => i.type === 'box' && i !== self && i.zIndex > this.zIndex) as LayoutBoxElement[];

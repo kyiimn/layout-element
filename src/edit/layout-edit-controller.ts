@@ -667,7 +667,9 @@ export class LayoutEditController {
       targetState.originalWidth = target.width;
       targetState.originalHeight = target.height;
       targetState.originalPosition = target.position;
+      target.startDragTracking();
     }
+    box.startDragTracking();
 
     this._activeDragBox = box;
     document.addEventListener('mousemove', this._onMouseMove);
@@ -924,6 +926,10 @@ export class LayoutEditController {
       }
     }
 
+    for (const target of dragTargets) {
+      target.flushDragRerender();
+    }
+
     manager._endLayoutDrag();
   }
 
@@ -1042,6 +1048,7 @@ export class LayoutEditController {
     state.lastClientY = event.clientY;
 
     manager._startLayoutResize();
+    box.startDragTracking();
     // 시작 시점의 box 부모 좌표계 AABB를 캡처한다. 리사이즈도 move 모드와 동일하게
     // AABB union으로 형제 box 필터링이 가능하다 (resize는 box의 width/height 변경).
     const startRect = this._getRectInParent(box);
@@ -1132,6 +1139,7 @@ export class LayoutEditController {
 
     // 리사이즈 중 보류된 단락 재렌더링을 즉시 실행
     this._flushRerenderAffectedParagraphs(box, state);
+    box.flushDragRerender();
     this._manager._endLayoutResize();
 
     // 리사이즈 이동이 없었으면 (임계값 미충족 = 단순 클릭)
@@ -1204,6 +1212,7 @@ export class LayoutEditController {
     if (box.top !== state.startTop) box.top = state.startTop;
     if (box.width !== state.startWidth) box.width = state.startWidth;
     if (box.height !== state.startHeight) box.height = state.startHeight;
+    box.flushDragRerender();
 
     this._manager._dispatchLayoutResize(
       box,

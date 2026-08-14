@@ -227,19 +227,39 @@ export class LayoutDocumentElement extends HTMLElement {
   private _renderGuideColumns() {
     if (!this._model) return;
 
-    Array.from(this._root?.children || []).forEach(e => {
-      if (e.nodeName !== "X-LAYOUT-GUIDE-COLUMN") return;
-      e.remove();
-    });
+    const existing = Array.from(this._root?.children || []).filter(
+      (e): e is HTMLElement & {
+        rect: unknown; fontSize: number; lineHeight: number; visible: boolean;
+        left: number; top: number; width: number; height: number;
+      } => e.nodeName === "X-LAYOUT-GUIDE-COLUMN",
+    );
+
+    if (existing.length === this._model.columnCoords.length) {
+      for (let i = 0; i < this._model.columnCoords.length; i++) {
+        const coord = this._model.columnCoords[i];
+        const el = existing[i];
+        const nl = coord.x1, nt = coord.y1, nw = coord.x2 - coord.x1, nh = coord.y2 - coord.y1;
+        if (el.left !== nl || el.top !== nt || el.width !== nw || el.height !== nh) {
+          (el as unknown as { rect: unknown }).rect = coord;
+        }
+        if (el.fontSize !== this._model.fontSize) el.fontSize = this._model.fontSize;
+        if (el.lineHeight !== this._model.lineHeight) el.lineHeight = this._model.lineHeight;
+        if (el.visible !== this._visibleGuide) el.visible = this._visibleGuide;
+      }
+      return;
+    }
+
+    existing.forEach(e => e.remove());
 
     for (let i = 0; i < this._model.columnCoords.length; i++) {
       const coord = this._model.columnCoords[i];
-      const colEl = document.createElement('x-layout-guide-column');
+      const colEl = document.createElement('x-layout-guide-column') as HTMLElement & {
+        rect: unknown; fontSize: number; lineHeight: number; visible: boolean;
+      };
       colEl.rect = coord;
       colEl.fontSize = this._model.fontSize;
       colEl.lineHeight = this._model.lineHeight;
       colEl.visible = this._visibleGuide;
-
       this._root?.appendChild(colEl);
     }
   }
