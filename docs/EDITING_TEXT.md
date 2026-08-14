@@ -1758,19 +1758,19 @@ flowchart TD
 2. 각 컬럼(column)의 각 라인(line)을 순회:
    a. 라인 시작 source offset을 `_lineSourceOffsets[columnIndex][lineIndex]`에 기록. 빈 줄도 포함.
    b. 각 파트(part)를 순회:
-      - **선행 공백 처리** (`p === 0`, 첫 파트): `original[k] === ' '`인 동안 `leadingSpaces++`, 매핑 루프 **전**에 `sourceOffset += leadingSpaces`. 공백은 렌더링되지 않으므로 `renderedOffset`은 증가하지 않는다.
+       - **선행 공백 처리** (`p === 0`, 첫 파트): `original[k] === ' '`인 동안 `leadingSpaces++`, 매핑 루프 **전**에 `sourceOffset += leadingSpaces`. 공백은 렌더링되지 않으므로 `renderedOffset`은 증가하지 않는다. 단, `firstOfBlock`가 true이면(텍스트 블록 맨 앞) 선행 공백을 유지하므로 이 처리를 건너뛰고 공백도 매핑 루프에서 일반 문자로 처리된다.
       - **매핑**: `_stripSpaces(original, isFirst, isLast)`로 양끝 공백을 제거한 content를 문자 단위로 순회. 각 문자에 대해 `_renderedToSource.set(renderedOffset, sourceOffset)`, `_sourceToRendered.set(sourceOffset, renderedOffset)`. 양쪽 모두 `++`.
-      - **후행 공백 처리** (`p === line.parts.length - 1`, 마지막 파트): 매핑 루프 **후**에 `sourceOffset += trailingSpaces`. 공백은 렌더링되지 않으므로 `renderedOffset`은 증가하지 않는다.
+       - **후행 공백 처리** (`p === line.parts.length - 1`, 마지막 파트): 매핑 루프 **후**에 `sourceOffset += trailingSpaces`. 공백은 렌더링되지 않으므로 `renderedOffset`은 증가하지 않는다. 단, `endOfBlock`가 true이면(텍스트 블록 맨 끝) 후행 공백을 유지하므로 이 처리를 건너뛰고 공백도 매핑 루프에서 일반 문자로 처리된다.
    c. `line.endOfBlock`이면 `sourceOffset++` (`\n` 문자 반영). `renderedOffset`은 증가하지 않는다.
 3. 컬럼 범위(`_columnRanges`)와 컬럼 시작 오프셋(`_columnStartOffsets`) 기록.
 
-**`_stripSpaces(content, isFirst, isLast)`**: `renderText()`의 `_stripSpaces()`와 동일한 로직.
-- `isFirst`이면 content 앞쪽 공백 제거.
-- `isLast`이면 content 뒤쪽 공백 제거.
+**`_stripSpaces(content, isFirst, isLast, firstOfBlock, endOfBlock)`**: `renderText()`의 `_stripSpaces()`와 동일한 로직.
+- `isFirst`이면 content 앞쪽 공백 제거. 단, `firstOfBlock`가 true이면(텍스트 블록 맨 앞) 선행 공백을 유지.
+- `isLast`이면 content 뒤쪽 공백 제거. 단, `endOfBlock`가 true이면(텍스트 블록 맨 끝) 후행 공백을 유지.
 
 **선행/후행 공백 처리 순서가 중요한 이유**: 선행 공백은 매핑 루프 **전**에 `sourceOffset`에 반영하고, 후행 공백은 매핑 루프 **후**에 반영한다. 이 순서가 뒤바뀌면 source offset과 rendered offset이 어긋나서(`off-by-one`) 커서 이동이 깨진다.
 
-**`renderText()`와의 일치성**: `column.element.ts`의 `renderText()`는 동일한 `_stripSpaces()` 로직으로 공백을 제거하고, 선행 공백은 매핑 전에 `curSourceOffset += leadingSpaces`, 후행 공백은 매핑 후에 `curSourceOffset += trailingSpaces`로 처리한다. `_rebuildMappings()`는 이와 정확히 동일한 순서를 따른다.
+**`renderText()`와의 일치성**: `column.element.ts`의 `renderText()`는 동일한 `_stripSpaces()` 로직으로 공백을 제거하고, 선행 공백은 매핑 전에 `curSourceOffset += leadingSpaces`, 후행 공백은 매핑 후에 `curSourceOffset += trailingSpaces`로 처리한다. `_rebuildMappings()`는 이와 정확히 동일한 순서를 따른다. `firstOfBlock`/`endOfBlock`인 경우 양쪽 모두 공백 제거 및 offset 건너뛰기를 하지 않고 일반 문자로 처리한다.
 
 ### 10.2 매핑 예시
 
@@ -1823,7 +1823,7 @@ flowchart LR
 매핑 규칙:
 
 - `\n` 문자는 렌더링되지 않으므로 소스 오프셋에만 존재한다.
-- 줄의 첫 파트 선행 공백과 마지막 파트 후행 공백은 렌더링에서 제거되어 매핑에 포함되지 않는다. `renderText()`의 `_stripSpaces()`와 동일한 처리다.
+- 줄의 첫 파트 선행 공백과 마지막 파트 후행 공백은 렌더링에서 제거되어 매핑에 포함되지 않는다. `renderText()`의 `_stripSpaces()`와 동일한 처리다. 단, 텍스트 블록의 맨 앞(`firstOfBlock`)이나 맨 끝(`endOfBlock`)의 공백은 사용자 의도일 수 있으므로 제거하지 않고 일반 문자로 렌더링 및 매핑한다.
 - 블록 경계(`endOfBlock`)마다 소스 오프셋이 1 증가하여 `\n`을 반영한다.
 
 ---

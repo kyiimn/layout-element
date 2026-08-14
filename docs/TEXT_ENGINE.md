@@ -1038,7 +1038,7 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 - `renderText()`에서 `model.columnContents[index]`로 줄 데이터 획득
 - `genColumnStyle()`, `genLineStyle()`, `genPartStyle()`, `genCharStyle()` 사용
 - 마지막 파트 + `endOfBlock`이면 `justify-content: flex-start`로 조정
-- 양 끝 공백 제거
+- 양 끝 공백 제거 (단, 텍스트 블록(`\n`으로 분리된 각 블록)의 맨 앞/맨 끝 공백은 유지 — `firstOfBlock`/`endOfBlock` 플래그로 제어)
 - **오버플로우 라인 `display: none` 처리**:
   - `renderText()`에서 각 라인의 누적 높이(mm)를 계산하여 컬럼 높이(`model.inheritStyle.parentHeight`, mm)를 초과하는 라인을 감지한다
   - 라인 높이는 `_getLineHeightMm()` 헬퍼로 `lineEl.style.height`에서 추출 (폴백: `model.lineHeight`)
@@ -1421,7 +1421,7 @@ for (const unusedSpan of existingSpans.values()) {
 
 **헬퍼 메서드:**
 - `computePerfSourceOffsets()`: 컬럼 시작 위치의 rendered/source offset 계산.
-- `_stripSpaces()`: 첫/마지막 파트의 선행/후행 공백 제거.
+- `_stripSpaces()`: 첫/마지막 파트의 선행/후행 공백 제거. 단, `firstOfBlock`이 true이면 선행 공백을 유지하고, `endOfBlock`이 true이면 후행 공백을 유지한다 (텍스트 블록의 맨 앞/맨 끝 공백은 사용자 의도일 수 있으므로 제거하지 않음).
 - `_createLineElement()` / `_applyLineStyle()`: 라인 div 생성/스타일 갱신.
 - `_createPartElement()` / `_applyPartStyle()`: 파트 div 생성/스타일 갱신.
 - `_createSpanElement()` / `_applySpanStyle()`: span 생성/스타일 갱신.
