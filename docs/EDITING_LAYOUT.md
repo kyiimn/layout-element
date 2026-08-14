@@ -1680,16 +1680,15 @@ _structureDirty === true?
     │   │   │       └── 차단 범위(BlockingRange) 리스트 반환
     │   │   │           └── 각 컬럼별: { top, bottom } (픽셀 단위)
     │   │   │
-    │   │   └── _overlayRects 캐시에 저장
+    │   │   └── _overlayRectsMm 캐시에 저장
     │   │
     │   └── layoutText() 호출
     │       └── _layoutTextIntoColumns()
     │           ├── _parseContents() — 텍스트 파싱
     │           ├── 각 컬럼마다:
-    │           │   ├── 가상 컬럼(v-column) 생성
-    │           │   ├── _createLineWithParts() — 라인 생성
+    │           │   ├── _createLineWithParts() — 라인 생성 (mm 좌표 직접 계산)
     │           │   │   ├── 오버랩 영역 확인
-    │           │   │   │   └── _overlayRects에서 해당 컬럼의 차단 범위 조회
+    │           │   │   │   └── _overlayRectsMm에서 해당 컬럼의 차단 범위 조회
     │           │   │   ├── 차단 영역이 있으면:
     │           │   │   │   └── COVER 라인 생성 (빈 라인, 텍스트 없음)
     │           │   │   └── 차단 영역이 없으면:

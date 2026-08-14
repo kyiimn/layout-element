@@ -81,7 +81,6 @@ When you make **any** of the following changes, you **must** update the correspo
       <x-layout-tr>          ← Table row. height(mm)
         <x-layout-td>        ← Table cell. colspan/rowspan, box-equivalent container
           <x-layout-box>     ← Cell content (paragraph/image/nested-table wrapped in box)
-  <x-layout-vcolumn>         ← Virtual column (temporary, used only during layoutText)
 
 Edit mode elements (in shadow DOM of <x-layout-paragraph>):
   <x-edit-cursor>            ← 1px width cursor element (in src/components/edit/)
@@ -119,7 +118,6 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 
 - **No `new` on models**: `GridCalculator.create()` and `TextLayoutEngine.create()` are the only way to instantiate. Constructors are `private`.
 - **Shadow DOM**: Every element uses `attachShadow({ mode: "open" })`. Styles are injected programmatically via `styleEl.sheet.insertRule()`, not in HTML templates.
-- **Virtual columns are temporary**: `<x-layout-vcolumn>` is created during `layoutText()` for measurement and removed immediately after. Never persist these.
 - **Canvas `measureText()` for char width**: `_charWidthPx()` uses Canvas `measureText().width` (advance width) clamped to `maxWidthPx = widthRatio * fontSizePx` for layout calculations. `genCharStyle()` uses both `maxWidth: ${widthRatio}em` (layout box) and `scale: ${widthRatio} 1` (glyph shape) to implement 장평.
 - **Infinite loop guard**: `_layoutTextIntoColumns()` force-places characters wider than any available part width into the first part, preventing infinite loops.
 - **Cursor position in whitespace**: `getNearestOffsetFromPoint()` detects trailing whitespace (past row's rightmost span) and leading whitespace (before row's leftmost span) clicks to place cursor after last char or before first char respectively, bypassing midpoint logic.
@@ -177,7 +175,6 @@ src/
       table.element.ts          # <x-layout-table> (table container, border layer, resize handles)
       tr.element.ts             # <x-layout-tr> (table row)
       td.element.ts             # <x-layout-td> (table cell, box-equivalent)
-      v-column.element.ts
       index.ts
     index.ts
   core/

@@ -61,11 +61,10 @@ flowchart TD
 
 ### 2.2 Phase 2: 구조 측정 (`layoutStructure` / `_initStructureAndMeasureColumns`)
 
-`_initStructureAndMeasureColumns()`에서 컬럼 폭, 간격, 줄 높이를 계산하고, 가상 컬럼을 생성해 컬럼별 `ppm`을 측정한 뒤 제거한다.
+`_initStructureAndMeasureColumns()`에서 컬럼 폭, 간격, 줄 높이를 계산하고, `GridCalculator.ppm`을 직접 사용한다.
 
 - `_columnWidths`, `_gaps`, `_lineHeight` 초기화
-- 각 컬럼마다 `x-layout-vcolumn`을 임시로 생성해 `ppm` 측정
-- 측정 후 가상 컬럼 제거
+- `GridCalculator.ppm`으로 mm→px 변환 비율 확보 (DOM 측정 불필요)
 
 ### 2.3 Phase 3: 텍스트 배치 (`layoutText` / `_layoutTextIntoColumns`)
 
@@ -91,8 +90,7 @@ flowchart TD
     Parse --> Count{columnCount >= 1?}
     Count -->|No| End1[return]
     Count -->|Yes| Loop{각 컬럼}
-    Loop --> CreateVC[가상 컬럼 생성<br/>x-layout-vcolumn]
-    CreateVC --> InitState[partWidths, cumulativeWidths<br/>currentPartIdx 초기화]
+    Loop --> InitState[partWidths, cumulativeWidths<br/>currentPartIdx 초기화]
     InitState --> BlockLoop{각 TextBlockData}
     BlockLoop --> NeedLine{새 라인 필요?}
     NeedLine -->|Yes| CreateLine[_createLineWithParts]
@@ -132,14 +130,9 @@ flowchart TD
 
 각 컬럼 처리 상세:
 
-1. `x-layout-vcolumn` 생성
-2. `index`, `model`, `parentElement` 설정
-3. `rootNode`에 삽입
-4. `ppm = _columnPpm[curColumn]` (구조 측정 단계에서 미리 측정)
-5. `_layoutTextIntoColumns()`가 라인 생성, 오버랩 감지, 글자 배치를 수행
-6. `endOfText` 조건이면 마지막 라인에 `endOfText = true` 설정
-7. 가상 컬럼 제거
-8. `_columnContents.push(columnContent)`
+1. `_layoutTextIntoColumns()`가 라인 생성, 오버랩 감지, 글자 배치를 수행
+2. `endOfText` 조건이면 마지막 라인에 `endOfText = true` 설정
+3. `_columnContents.push(columnContent)`
 
 ---
 
@@ -587,12 +580,6 @@ type FreeRegion = { start: number; end: number };
               ├── #shadow-root
               │     ├── <style>
               │     ├── <slot>
-              │     ├── <x-layout-vcolumn>    (임시, 측정 중에만 존재)
-              │     │     ├── #shadow-root
-              │     │     │     └── <style>
-              │     │     └── <div>           (line)
-              │     │           └── <div>     (part)
-              │     │                 └── <span>  (char)
               │     └── <x-layout-column>
               │           ├── #shadow-root
               │           │     └── <style>
@@ -610,19 +597,6 @@ type FreeRegion = { start: number; end: number };
 │  ┌─────────────────────────────────┐    │
 │  │  #shadow-root                   │    │
 │  │                                 │    │
-│  │  ┌─────────────────────────┐    │    │
-│  │  │ <x-layout-vcolumn>      │    │    │
-│  │  │  (측정용, 임시)          │    │    │
-│  │  │  ┌─────┐ ┌─────┐ ┌────┐ │    │    │
-│  │  │  │line │ │line │ │line│ │    │    │
-│  │  │  │ ┌─┐ │ │ ┌─┐ │ │ ┌┐ │ │    │    │
-│  │  │  │ │p│ │ │ │p│ │ │ │p│ │ │    │    │
-│  │  │  │ │┌┐│ │ │ │┌┐│ │ │ └┘ │ │    │    │
-│  │  │  │ ││c││ │ │ ││c││ │ │    │ │    │    │
-│  │  │  │ │└┘│ │ │ │└┘│ │ │    │ │    │    │
-│  │  │  └─────┘ └─────┘ └────┘ │    │    │
-│  │  └─────────────────────────┘    │    │
-│  │            ↓ 측정 완료 후 제거    │    │
 │  │  ┌─────────────────────────┐    │    │
 │  │  │ <x-layout-column>       │    │    │
 │  │  │  (실제 렌더링)           │    │    │
@@ -1060,18 +1034,16 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
     `_createSpanElement()`, `_applySpanStyle()`
   - `innerHTML = ''`는 더 이상 발생하지 않음
 
-### 18.3 `LayoutVirtualColumnElement`
+### 18.3 `LayoutColumnElement`
 
-- `_initStructureAndMeasureColumns()`와 `_layoutTextIntoColumns()`에서 임시로 생성
-- `isOverflow`로 컬럼 높이 초과 여부 감지. **mm 기반 판정**: children 수 × `model.lineHeight`(mm)와 `model.inheritStyle.parentHeight`(mm)를 직접 비교하여 scale에 무관한 오버플로우 판정을 보장한다. **부동소수점 오차 tolerance**: 비교 시 `containerHeightMm + 1e-6` 기준을 사용하여, `editableTextHeight` 계산에서 발생하는 부동소수점 오차(예: `15 × 4.8 = 72` vs `parentHeight = 71.99999999999999`)로 인해 15줄이 꽉 찬 컬럼이 overflow로 잘못 판정되는 현상을 방지한다. 이 기준은 `LayoutParagraphElement._computeRenderStats()`의 `accumulatedHeightMm + lineHeightMm > parentHeight + 1e-6`과 동일하다.
-- 측정 완료 후 제거됨
+> `LayoutVirtualColumnElement`는 mm 좌표계 마이그레이션으로 제거됨. 텍스트 래핑은 `_layoutTextIntoColumns()`에서 mm 좌표로 직접 수행하며, `isOverflow` 판정은 `(lineIndexInColumn + 1) * lineHeight > parentHeight + 1e-6`로 계산한다.
 
 ---
 
 ## 19. 주의사항 및 제약
 
 - `TextLayoutEngine`은 `create()`로만 인스턴스화해야 한다.
-- `layoutText()`는 `layoutStructure()`가 먼저 호출되어 `_columnWidths`, `_gaps`, `_columnPpm`, `_lineHeight`가 준비된 상태에서 실행해야 한다.
+- `layoutText()`는 `layoutStructure()`가 먼저 호출되어 `_columnWidths`, `_gaps`, `_lineHeight`가 준비된 상태에서 실행해야 한다.
 - 이미지 오버랩 탐지는 `LayoutImageElement.canvas`가 존재할 때만 픽셀 수준으로 수행한다.
 - `overlapPadding`이 설정된 이미지는 타원 기반 감지를 사용한다. 캔버스가 없으면 기하학적 확장 사각형으로 폴백하며, 이 경우 투명 영역 구분이 불가능하다.
 - 텍스트 오버플로우는 마지막 컬럼에서 `_overflow`로 집계되며 `render-error` 이벤트로 통지된다. 오버플로우된 라인은 `renderText()`에서 `display: none` 처리되어 시각적으로 숨겨진다. `_createLineWithParts()`가 overflow를 반환한 경우에도 라인 데이터를 `columnContent`에 포함시켜, `_computeRenderStats()`가 라인 기반 오버플로우를 감지할 수 있도록 한다. 이는 텍스트 끝의 `\n`으로 인해 발생하는 빈 라인 오버플로우도 감지하기 위함이다.
@@ -1311,45 +1283,24 @@ if (this._overlayRects === null) {
 
 > **참고:** 상세한 내용은 섹션 8을 참조.
 
-### 21.3 배치 vcolumn ppm 측정
+### 21.3 mm 좌표계 직접 계산 (vcolumn DOM 제거)
 
-**대상:** `_initStructureAndMeasureColumns()` (`src/core/text-layout-engine.ts:344`)
+**대상:** `_initStructureAndMeasureColumns()` 및 `_layoutTextIntoColumns()` (`src/core/text-layout-engine.ts`)
 
-**문제:** 컬럼마다 개별적으로 가상 컬럼(`<x-layout-vcolumn>`)을 생성/측정/제거하면 컬럼 수만큼의 강제 리플로우가 발생한다.
+**문제:** 컬럼마다 가상 컬럼(`<x-layout-vcolumn>`)을 생성/측정/제거하면 강제 리플로우가 발생하고, `getBoundingClientRect()`에 의존하여 브라우저 렌더링/DPI/서브픽셀 라운딩 영향을 받는다.
 
-**해결:** 모든 컬럼의 가상 컬럼을 한 번에 생성하고, 한 번의 루프에서 ppm을 측정한 뒤 한 번에 제거한다.
+**해결:** 모든 좌표 계산을 mm 단위로 직접 수행한다.
 
-```ts
-private _initStructureAndMeasureColumns() {
-  // ...
-  this._columnPpm = [];
-  const vColumnEls: LayoutVirtualColumnElement[] = [];
-  for (let curColumn = 0; curColumn < this.columnCount; curColumn++) {
-    const vColumnEl = document.createElement('x-layout-vcolumn');
-    vColumnEl.index = curColumn;
-    vColumnEl.model = this;
-    vColumnEl.parentElement = this._paragraphElement;
-    this._rootNode.appendChild(vColumnEl);
-    vColumnEls.push(vColumnEl);
-  }
-
-  for (let i = 0; i < vColumnEls.length; i++) {
-    const ppm = vColumnEls[i].getBoundingClientRect().width / this._columnWidths[i];
-    this._columnPpm.push(ppm);
-  }
-
-  for (const vColumnEl of vColumnEls) {
-    vColumnEl.remove();
-  }
-}
-```
+- `_initStructureAndMeasureColumns()`: `GridCalculator.ppm`을 직접 사용 (vcolumn DOM 생성/측정/제거 제거)
+- `_layoutTextIntoColumns()`: vcolumn DOM 없이 mm 좌표로 라인 배치 (line rect = paragraph absLeft/absTop + column widths/gaps + lineIndex × lineHeight)
+- `_detectOverlapWithCache()`: `getOverlapSizeMm()` 사용, overlay rect는 `absLeft/absTop/absWidth/absHeight`로 구성
+- `isOverflow`: `(lineIndexInColumn + 1) * lineHeight > parentHeight + 1e-6`로 직접 계산
 
 **핵심 포인트:**
-- 모든 가상 컬럼을 DOM에 추가한 후 한 번에 측정 — 브라우저가 배치를 한 번에 처리.
-- 측정 완료 후 한 번에 제거.
-- 이전 방식(컬럼마다 생성/측정/제거)은 O(columns)번의 강제 리플로우를 유발했음.
+- 모든 mm 좌표는 이미 알려진 값(box.absLeft/absTop, _columnWidths, _gaps, _lineHeight)이므로 DOM 측정이 불필요.
+- `getBoundingClientRect()` 호출 0회, vcolumn DOM 조작 0회.
 
-**효과:** O(columns)번의 강제 리플로우를 1번으로 통합.
+**효과:** 강제 리플로우 0회, 브라우저 렌더링 의존성 제거, PDF 변환 신뢰도 향상.
 
 ### 21.4 key 기반 증분 span 렌더링
 
@@ -1478,8 +1429,8 @@ for (const s of spans) {
 | 전략 | 대상 | 문제 | 해결 | 효과 |
 |------|------|------|------|------|
 | 폰트 메트릭 측정 | `_charWidthMm()` | DOM 기반 측정의 O(n) 리플로우 | `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 단위 직접 계산 | DOM 조작 없이 순수 계산, 환경 무관 |
-| 오버랩 rect 캐시 | `_detectOverlapWithCache()` | 라인×오버랩 요소 수의 리플로우 | `Map`에 오버랩 요소 rect 캐싱 | 리플로우를 사이클당 1번으로 통합 |
-| 배치 vcolumn 측정 | `_initStructureAndMeasureColumns()` | 컬럼마다 개별 측정 | 모든 컬럼을 한 번에 생성/측정/제거 | O(columns)번 리플로우를 1번으로 통합 |
+| 오버랩 rect 캐시 | `_detectOverlapWithCache()` | 라인×오버랩 요소 수의 리플로우 | `Map`에 오버랩 요소 mm rect 캐싱 | 리플로우 0회 (mm 직접 계산) |
+| mm 좌표계 직접 계산 | `_initStructureAndMeasureColumns()` / `_layoutTextIntoColumns()` | vcolumn DOM 생성/측정/제거 리플로우 + `getBoundingClientRect()` 의존 | mm 좌표로 직접 계산, `GridCalculator.ppm` 사용 | 강제 리플로우 0회, 브라우저 렌더링 의존성 제거 |
 | key 기반 증분 렌더링 | `renderText()` | 전체 DOM 재구축 (`innerHTML = ''`) | `data-source-offset` key로 span 재사용 | 변경된 span만 갱신, DOM 조작 최소화 |
 | Mapper 캐싱 | `EditCoordinateMapper` | 반복 `querySelectorAll` / `getBoundingClientRect` | `_columnSpansCache` + 로컬 `spanRects` Map | 드래그 시 프레임당 리플로우 감소 |
 
@@ -1488,14 +1439,11 @@ for (const s of spans) {
 ```mermaid
 flowchart TD
     subgraph TextLayoutEngine["TextLayoutEngine 캐시"]
-        T1["_initStructureAndMeasureColumns()"] -->|"_overlayRects = null"| T2["_layoutTextIntoColumns()"]
-        T2 -->|"_overlayRects = null"| T3["_detectOverlapWithCache() 첫 호출"]
-        T3 -->|"Map 생성 + 일괄 측정"| T4["이후 _detectOverlapWithCache() 호출"]
+        T1["_initStructureAndMeasureColumns()"] -->|"_overlayRectsMm = null"| T2["_layoutTextIntoColumns()"]
+        T2 -->|"_overlayRectsMm = null"| T3["_detectOverlapWithCache() 첫 호출"]
+        T3 -->|"Map 생성 + mm rect 구성"| T4["이후 _detectOverlapWithCache() 호출"]
         T4 -->|"Map.get(el) 재사용"| T5["다음 렌더링 사이클"]
         T5 --> T1
-
-        T1 -->|"vcolumn 일괄 생성"| T6["ppm 일괄 측정"]
-        T6 -->|"vcolumn 일괄 제거"| T7["_columnPpm[] 확정"]
     end
 
     subgraph StyleCache["스타일 캐시"]

@@ -1494,18 +1494,19 @@ private _debouncedRender(): void {
 - 폰트 문자열 단일 항목 캐시(`_lastFontKey`/`_lastFontString`)로 `ctx.font` 설정 비용 절감.
 - 효과: 텍스트 래핑 계산 시 DOM 조작 없이 순수 계산으로 처리.
 
-#### 7.4.5 오버랩 rect 캐시 (`_overlayRects`)
+#### 7.4.5 오버랩 rect 캐시 (`_overlayRectsMm`)
 
 - `_layoutTextIntoColumns()` 시작 시 `null`로 리셋.
-- 첫 `_applyOverlap()` 호출 시 모든 오버랩 요소를 한 번에 측정해 `Map`에 저장.
+- 첫 `_detectOverlapWithCache()` 호출 시 모든 오버랩 요소의 mm rect를 구성해 `Map`에 저장.
 - 이후 동일 렌더링 사이클 내에서는 `Map.get(el)`로 재사용.
-- 효과: 라인마다 `getBoundingClientRect()`를 호출하는 강제 리플로우를 한 번으로 통합.
+- 효과: `getBoundingClientRect()` 호출 0회, mm 좌표로 직접 판정.
 
-#### 7.4.6 배치 vcolumn 측정
+#### 7.4.6 mm 좌표계 직접 계산 (vcolumn DOM 제거)
 
-- `layoutStructure()`에서 모든 컬럼의 ppm을 한 번에 측정.
-- 이전에는 컬럼마다 가상 컬럼을 생성/제거하며 개별 측정.
-- 효과: O(columns)번의 강제 리플로우를 1번으로 통합.
+- `_initStructureAndMeasureColumns()`와 `_layoutTextIntoColumns()`에서 모든 좌표 계산을 mm 단위로 직접 수행.
+- 기존에는 가상 컬럼(`<x-layout-vcolumn>`)을 생성/측정/제거하며 `getBoundingClientRect()`로 ppm을 측정.
+- 이제는 `GridCalculator.ppm`을 직접 사용하고, line rect를 mm 좌표로 직접 구성.
+- 효과: 강제 리플로우 0회, vcolumn DOM 조작 0회, 브라우저 렌더링 의존성 제거.
 
 ### 7.5 렌더링 비용 분석
 

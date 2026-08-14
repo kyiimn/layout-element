@@ -22,9 +22,8 @@
    - [`<x-layout-table>`](#x-layout-table)
    - [`<x-layout-tr>`](#x-layout-tr)
    - [`<x-layout-td>`](#x-layout-td)
-   - [`<x-layout-column>`](#x-layout-column)
-   - [`<x-layout-vcolumn>`](#x-layout-vcolumn)
-   - [`<x-layout-guide-column>`](#x-layout-guide-column)
+    - [`<x-layout-column>`](#x-layout-column)
+    - [`<x-layout-guide-column>`](#x-layout-guide-column)
    - [`<x-layout-cursor>`](#x-layout-cursor)
    - [`<x-layout-selection>`](#x-layout-selection)
 3. [Core](#core)
@@ -845,35 +844,6 @@ class LayoutColumnElement extends HTMLElement
 
 > **Note**: `<x-layout-column>`은 `LayoutParagraphElement`가 관리하며, 직접 생성하지
 > 마세요. `paragraph.data`를 변경하면 `render()`가 자동으로 컬럼 DOM을 갱신합니다.
-
----
-
-### `<x-layout-vcolumn>`
-
-**가상 컬럼**. `TextLayoutEngine._layoutTextIntoColumns()` 내부에서 오버플로우 측정용으로
-**임시** 생성됩니다. 측정이 끝나면 즉시 제거됩니다.
-
-#### Class: `LayoutVirtualColumnElement`
-
-```ts
-class LayoutVirtualColumnElement extends HTMLElement
-```
-
-#### Attributes
-
-| 속성 | 타입 | 설명 |
-|---|---|---|
-| `index` | `number` | 컬럼 인덱스. |
-
-#### 게터
-
-| 이름 | 타입 | 설명 |
-|---|---|---|
-| `isOverflow` | `boolean` | 누적 `scrollHeight`가 `clientHeight` 초과 여부. |
-| `left` / `top` (mm) | `number` | 부모 단락 내 상대 위치. |
-| `type` | `'column'` | 타입 리터럴. |
-
-> **절대 직접 만들거나 영구 저장하지 마세요.** `TextLayoutEngine` 내부 전용입니다.
 
 ---
 

@@ -801,7 +801,7 @@ function EditableParagraph({ data }: { data: ParagraphData }) {
 export type {
   LayoutDocumentElement, LayoutBoxElement, LayoutParagraphElement,
   LayoutImageElement, LayoutGuideColumnElement, LayoutColumnElement,
-  LayoutVirtualColumnElement, LayoutCursorElement, LayoutSelectionElement,
+  LayoutCursorElement, LayoutSelectionElement,
 };
 
 // Core
