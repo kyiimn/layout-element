@@ -64,12 +64,12 @@ export class LayoutColumnElement extends HTMLElement {
   }
 
   /** 줄의 양 끝 공백을 제거하여 렌더링된 문자열을 정리한다. */
-  private _stripSpaces(content: string[], isFirst: boolean, isLast: boolean): string[] {
+  private _stripSpaces(content: string[], isFirst: boolean, isLast: boolean, firstOfBlock: boolean = false, endOfBlock: boolean = false): string[] {
     let result = content;
-    if (isFirst) {
+    if (isFirst && !firstOfBlock) {
       while (result.length > 0 && result[0] === ' ') { result = result.slice(1); }
     }
-    if (isLast) {
+    if (isLast && !endOfBlock) {
       while (result.length > 0 && result[result.length - 1] === ' ') { result = result.slice(0, result.length - 1); }
     }
     return result;
@@ -250,12 +250,12 @@ export class LayoutColumnElement extends HTMLElement {
         const isLast = p === line.parts.length - 1;
 
         let leadingSpaces = 0;
-        if (isFirst) {
+        if (isFirst && line.firstOfBlock !== true) {
           for (let k = 0; k < original.length && original[k] === ' '; k++) leadingSpaces++;
           curSourceOffset += leadingSpaces;
         }
 
-        const content = this._stripSpaces(part.content, isFirst, isLast);
+        const content = this._stripSpaces(part.content, isFirst, isLast, line.firstOfBlock === true, line.endOfBlock === true);
 
         let partJustify = curPartStyle.justifyContent;
         if (isLast && endOfBlock && partJustify === 'space-between') {
@@ -313,7 +313,7 @@ export class LayoutColumnElement extends HTMLElement {
           unusedSpan.remove();
         }
 
-        if (isLast) {
+        if (isLast && line.endOfBlock !== true) {
           const afterLeading: string[] = isFirst ? original.slice(leadingSpaces) : original;
           let trailingSpaces = 0;
           for (let k = afterLeading.length - 1; k >= 0 && afterLeading[k] === ' '; k--) trailingSpaces++;

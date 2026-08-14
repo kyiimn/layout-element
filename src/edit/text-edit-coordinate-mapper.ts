@@ -127,13 +127,14 @@ export class TextEditCoordinateMapper {
           const isLast = p === line.parts.length - 1;
 
           // leading space: sourceOffset 증가만, placement 미설정
+          // 단, firstOfBlock인 경우(블록 맨 앞)는 공백을 유지하므로 placement 설정
           let leadingSpaces = 0;
-          if (isFirst) {
+          if (isFirst && line.firstOfBlock !== true) {
             for (let k = 0; k < original.length && original[k] === ' '; k++) leadingSpaces++;
             sourceOffset += leadingSpaces;
           }
 
-          const content = this._stripSpaces(original, isFirst, isLast);
+          const content = this._stripSpaces(original, isFirst, isLast, line.firstOfBlock === true, line.endOfBlock === true);
 
           for (let i = 0; i < content.length; i++) {
             this._sourceToPlacement.set(sourceOffset, {
@@ -145,7 +146,8 @@ export class TextEditCoordinateMapper {
           }
 
           // trailing space: 이전 가시 문자를 atEndOfChar: true로 참조
-          if (isLast) {
+          // 단, endOfBlock인 경우(블록 맨 끝)는 공백을 유지하므로 placement 설정
+          if (isLast && line.endOfBlock !== true) {
             const afterLeading = isFirst ? original.slice(leadingSpaces) : original;
             let trailingSpaces = 0;
             for (let k = afterLeading.length - 1; k >= 0 && afterLeading[k] === ' '; k--) trailingSpaces++;
@@ -233,12 +235,12 @@ export class TextEditCoordinateMapper {
   }
 
   /** 줄의 양 끝 공백을 제거하여 렌더링된 문자열을 정리한다. */
-  private _stripSpaces(content: string[], isFirst: boolean, isLast: boolean): string[] {
+  private _stripSpaces(content: string[], isFirst: boolean, isLast: boolean, firstOfBlock: boolean = false, endOfBlock: boolean = false): string[] {
     let result = content;
-    if (isFirst) {
+    if (isFirst && !firstOfBlock) {
       while (result.length > 0 && result[0] === ' ') { result = result.slice(1); }
     }
-    if (isLast) {
+    if (isLast && !endOfBlock) {
       while (result.length > 0 && result[result.length - 1] === ' ') { result = result.slice(0, result.length - 1); }
     }
     return result;
