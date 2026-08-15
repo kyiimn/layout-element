@@ -1174,8 +1174,8 @@ export class LayoutBoxElement extends HTMLElement {
     }
 
     let overlay = this.parentElement.items.filter(i => i.type === 'box' && i !== this && i.zIndex > this.zIndex) as LayoutBoxElement[];
-    overlay = overlay.filter(i => checkOverlap(i, this));
-    // overlapMode === 'none'인 이미지 박스는 오버랩 요소에서 제외
+    // overlapMode === 'none'인 이미지 박스는 checkOverlap() 이전에 제외하여
+    // getBoundingClientRect() 강제 리플로우 비용을 피한다.
     overlay = overlay.filter(i => {
       if (i.contentType === 'image') {
         const imgEl = i.contentElement as LayoutImageElement | null;
@@ -1183,6 +1183,7 @@ export class LayoutBoxElement extends HTMLElement {
       }
       return true;
     });
+    overlay = overlay.filter(i => checkOverlap(i, this));
 
     list.push(...overlay);
 

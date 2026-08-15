@@ -55,13 +55,12 @@
   - [5.2 Image canvas willReadFrequently](#52-image-canvas-willreadfrequently)
 - [6. 기하/알고리즘 최적화](#6-기하알고리즘-최적화)
   - [6.1 mergeOverlapParts O(n) 병합](#61-mergeoverlapparts-on-병합)
-  - [6.2 normalizeRect scale 정규화](#62-normalizerect-scale-정규화)
-  - [6.3 타원 기반 픽셀 컬링](#63-타원-기반-픽셀-컬링)
-  - [6.4 GridCalculator editableHeight 정수 절사](#64-gridcalculator-editableheight-정수-절사)
-  - [6.5 staticGridContainment 조기 거부](#65-staticgridcontainment-조기-거부)
-  - [6.6 flip-layout metricsById Map](#66-flip-layout-metricsbyid-map)
-  - [6.7 테이블 seen Set 중복 셀 제거](#67-테이블-seen-set-중복-셀-제거)
-  - [6.8 테이블 removeSet 배치 제거](#68-테이블-removeset-배치-제거)
+  - [6.2 타원 기반 픽셀 컬링](#62-타원-기반-픽셀-컬링)
+  - [6.3 GridCalculator editableHeight 정수 절사](#63-gridcalculator-editableheight-정수-절사)
+  - [6.4 staticGridContainment 조기 거부](#64-staticgridcontainment-조기-거부)
+  - [6.5 flip-layout metricsById Map](#65-flip-layout-metricsbyid-map)
+  - [6.6 테이블 seen Set 중복 셀 제거](#66-테이블-seen-set-중복-셀-제거)
+  - [6.7 테이블 removeSet 배치 제거](#67-테이블-removeset-배치-제거)
 - [7. 렌더링 핫 경로 전체 흐름](#7-렌더링-핫-경로-전체-흐름)
 - [8. 캐시 용량 튜닝 가이드](#8-캐시-용량-튜닝-가이드)
 - [9. 최적화되지 않은 영역](#9-최적화되지-않은-영역)
@@ -387,6 +386,7 @@
 | `fontSize` | 폰트 크기 |
 | `_inheritStyle.parentHeight` | 단락 높이 (오버플로우 판정) |
 | 오버랩 요소 `absLeft/absTop/absWidth/absHeight` | 오버랩 위치/크기 |
+| 오버랩 요소 `overlapMode` | 오버랩 처리 모드 (`'path'`/`'box'`). 모드 변경 시 캐시 무효화 |
 | `paragraph.absLeft` / `paragraph.absTop` | 단락 절대 위치 (라인 mm 좌표 계산 기준) |
 
 #### 캐시 무효화
@@ -600,15 +600,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 오버랩 파트를 `x1` 기준 정렬 후 O(n) 순회로 겹치는/접하는 구간을 병합. 텍스트 래퍼가 처리해야 할 구간 수를 감소.
 
-### 6.2 normalizeRect scale 정규화
-
-| 항목 | 값 |
-|---|---|
-| 위치 | `check-overlap.ts:84-94` |
-
-`getBoundingClientRect()` 값을 `EditManager.scale`로 나누어 정규화. 오버랩 탐지를 줌 레벨에 무관하게 만들어 동일한 텍스트 레이아웃을 보장.
-
-### 6.3 타원 기반 픽셀 컬링
+### 6.2 타원 기반 픽셀 컬링
 
 | 항목 | 값 |
 |---|---|
@@ -616,7 +608,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 `overlapPadding`이 설정된 경우 `opaqueColumns: Set<number>`로 불투명 픽셀의 열을 기록. 정규화된 타원 거리(`ndx² + ndy² ≤ 1`) 조건으로만 차단 여부를 판정. 투명 픽셀은 제외. 기하 fallback은 캔버스를 사용할 수 없는 경우에만 사용.
 
-### 6.4 GridCalculator editableHeight 정수 절사
+### 6.3 GridCalculator editableHeight 정수 절사
 
 | 항목 | 값 |
 |---|---|
@@ -624,7 +616,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 `Math.floor((height - padding) / lineHeight) * lineHeight`로 편집 가능 높이를 항상 lineHeight의 정수 배로 보장. 소수 라인으로 인한 분할 레이아웃을 방지.
 
-### 6.5 staticGridContainment 조기 거부
+### 6.4 staticGridContainment 조기 거부
 
 | 항목 | 값 |
 |---|---|
@@ -632,7 +624,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 음수 left/top, 무효 width/height, 컬럼/라인 초과 등 부적절한 static 삽입 위치를 즉시 `false` 반환. 전체 검증을 수행하기 전에 빠르게 거부.
 
-### 6.6 flip-layout metricsById Map
+### 6.5 flip-layout metricsById Map
 
 | 항목 | 값 |
 |---|---|
@@ -640,7 +632,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 박스 mm 메트릭을 `metricsById` Map으로 미리 주입하여 레이아웃 플립 중 재계산을 방지. `box.lock === true`인 서브트리는 변경 없이 원본 반환.
 
-### 6.7 테이블 seen Set 중복 셀 제거
+### 6.6 테이블 seen Set 중복 셀 제거
 
 | 항목 | 값 |
 |---|---|
@@ -648,7 +640,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 셀 블록 선택 영역 확장 시 `Set<string>`(키 `row-col`)으로 동일 물리 셀의 중복 추가를 방지. 병합된 셀을 스팬할 때 중복을 방지.
 
-### 6.8 테이블 removeSet 배치 제거
+### 6.7 테이블 removeSet 배치 제거
 
 | 항목 | 값 |
 |---|---|
@@ -738,7 +730,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | `findVisualLineBounds()` | `EditCoordinateMapper` | Home/End 키 처리 시 span마다 `getBoundingClientRect()` 수행 |
 | 라인 rect 측정 | `_detectOverlapWithCache()` | `_overlayRectsMm`는 오버랩 요소만 캐싱, 라인 자체의 rect는 라인마다 측정 |
 | `getImageData` 캐싱 | `getOverlapSizeMm()` | 동일 이미지에 대해 라인마다 `getImageData()` 재호출 |
-| `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산 |
+| `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산. 단, `overlapMode === 'none'` 이미지는 `checkOverlap()` 이전에 제외하여 `getBoundingClientRect()` 강제 리플로우 비용을 피함 |
 
 ---
 

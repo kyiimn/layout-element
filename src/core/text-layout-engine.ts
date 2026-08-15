@@ -1,5 +1,5 @@
 import { DEFAULT_FONT_SIZE, DEFAULT_INDENT, DEFAULT_LETTER_SPACING, DEFAULT_LINE_GAP, DEFAULT_SPACE_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, DEFAULT_WIDTH_RATIO, isLineEndForbidden, isLineStartForbidden } from "@/constants";
-import type { LayoutBoxElement, LayoutParagraphElement } from "@/components";
+import type { LayoutBoxElement, LayoutImageElement, LayoutParagraphElement } from "@/components";
 import {
   InheritStyle,
   TextBlockData,
@@ -781,8 +781,15 @@ export class TextLayoutEngine {
 
     const overlapEls = this._paragraphElement.overlayElements;
     for (const el of overlapEls) {
+      // overlapMode를 해시에 포함하여 모드 변경 시 캐시 무효화 보장.
+      // 'none' 이미지는 overlayElements에서 제외되므로 여기에 등장하지 않는다.
+      let mode = 'path';
+      if (el.contentType === 'image') {
+        const imgEl = el.contentElement as LayoutImageElement | null;
+        if (imgEl) mode = imgEl.overlapMode;
+      }
       parts.push(
-        'o:' + el.absLeft + ',' + el.absTop + ',' + el.absWidth + ',' + el.absHeight,
+        'o:' + el.absLeft + ',' + el.absTop + ',' + el.absWidth + ',' + el.absHeight + ',' + mode,
       );
     }
 
