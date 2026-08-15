@@ -737,6 +737,8 @@ document capture (LayoutEditController._onMouseDown) — layoutEditMode 시 활�
 
 ### 11.5 _collectParagraphs (텍스트 리플로우)
 
+> **일반 렌더링 및 오버랩 회피 최적화 전략은 `docs/PERFORMANCE.md`를 참조.** 이 절은 테이블 특화 리플로우 수집을 다룬다.
+
 `LayoutEditController._collectParagraphs`는 box drag/resize 시 영향받는 paragraph를 수집하여 재렌더링한다. table 내부 paragraph도 포함되도록 `'table'` 타입 재귀 처리가 추가되어 있다:
 
 ```typescript

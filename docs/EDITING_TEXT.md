@@ -1442,71 +1442,25 @@ paragraph.render();
 
 ### 7.4 렌더링 성능 향상 전략
 
-텍스트 편집 모드는 빠른 입력 응답성이 중요하다. 다음 전략을 사용해 렌더링 비용을 줄인다.
+> **전체 성능 최적화 전략은 `docs/PERFORMANCE.md`를 참조.** 이 절에서는 텍스트 편집 모드 특화 전략만 다룬다.
 
-#### 7.4.1 디바운스 렌더링 (`_debouncedRender()`)
+텍스트 편집 모드는 빠른 입력 응답성이 중요하다. 다음 전략을 사용해 렌더링 비용을 준인다.
 
-- `requestAnimationFrame` 기반으로 연속 입력을 하나의 렌더링으로 묶는다.
-- 타이머가 이미 있으면 `cancelAnimationFrame`으로 취소하고 새로 설정.
-- `_wasFocused = this._isFocused` 플래그로 렌더링 후 포커스 복원.
-- 효과: 빠른 타이핑 시 프레임당 최대 1회 렌더링.
-- **커서 위치 갱신 시점**: 텍스트 변경(Backspace, Delete, Enter, 붙여넣기, 문자 입력) 후에는 `_updateCursorPosition()`을 즉시 호출하지 않고 `_debouncedRender()`만 예약한다. 커서 위치는 `paragraph.render()` → `postRender()` → `_updateCursorPosition()` 흐름에서 **최신 DOM 기준**으로 갱신된다. 이는 이전 DOM 기준으로 커서를 잘못된 위치에 그리는 문제를 방지한다.
-  - 예외: `_onInput`에서 `_optimisticSpan`이 생성된 경우(단일 문자 입력)에는 즉시 `_updateCursorPosition()`을 호출하여 사용자에게 즉각적인 피드백을 제공한다.
+#### 7.4.1 요약
 
-```ts
-private _debouncedRender(): void {
-  if (this._debounceTimer !== null) {
-    cancelAnimationFrame(this._debounceTimer);
-  }
-  this._wasFocused = this._isFocused;
-  this._debounceTimer = requestAnimationFrame(() => {
-    this._debounceTimer = null;
-    this._paragraph.render();
-  });
-}
-```
+| 전략 | 대상 | 효과 |
+|------|------|------|
+| 디바운스 렌더링 | `_debouncedRender()` | `requestAnimationFrame` → `scheduleRender()` (`queueMicrotask`) 기반으로 연속 입력을 단일 렌더링으로 통합. Enter/compositionend는 `flushRender()`로 즉시 실행 |
+| 낙관적 span | `_optimisticSpanUpdate()` | 단일 문자 입력 시 전체 렌더링 대기 없이 즉시 시각적 피드백 제공 |
+| key 기반 증분 span 렌더링 | `renderText()` | `data-source-offset` key로 span 재사용 + `_skipSpanStyleIfUnchanged()`로 변경 없는 span 스킵 |
+| 스타일 시트 증분 갱신 | `renderText()` `:host` rule | `_cachedColStyleKey` 비교 후 변경 시에만 재구축 |
+| opentype.js 폰트 메트릭 + LRU 캐시 | `_charWidthMm()` | DOM 조작 없이 mm 직접 계산 + `_charWidthCache`(LRU 5000)로 캐싱 |
+| 오버랩 rect 캐시 | `_overlayRectsMm` | 렌더링 사이클당 `getBoundingClientRect()` 1회로 통합 |
+| mm 좌표계 직접 계산 | `_layoutTextIntoColumns()` | vcolumn DOM 제거, 강제 리플로우 0회 |
 
-#### 7.4.2 낙관적 span 업데이트 (`_optimisticSpanUpdate()`)
+#### 7.4.2 디바운스 렌더링 커서 갱신 시점
 
-- 단일 문자 삽입 시 전체 렌더링을 기다리지 않고 즉시 span을 생성.
-- 기존 span 앞에 새 span을 삽입해 "교체 후 복원" 깜빡임을 방지.
-- `data-temporary="true"` 속성으로 임시 span 표시.
-- `postRender()`에서 `_optimisticSpan = null`로 참조 제거, 실제 렌더링된 span으로 대체.
-- 효과: 키 입력과 화면 갱신 사이 지연 감소.
-
-#### 7.4.3 key 기반 증분 span 렌더링 (`renderText()` 내부)
-
-- `column.element.ts`의 `renderText()`는 `data-source-offset`을 key로 사용한 diff 렌더링으로 동작한다.
-- 기존 span들을 `data-source-offset` 기준으로 Map에 저장한다.
-- `data-temporary` span(낙관적 span)은 diff 시작 전 모두 제거한다.
-- 새 content의 각 문자에 대해 source offset을 계산한다.
-- 기존 span이 있으면: `innerText`, 스타일, `data-offset`을 갱신하고 DOM 순서를 `insertBefore`로 조정한다.
-- 기존 span이 없으면: 새 span을 생성한다.
-- 사용되지 않은 기존 span은 제거한다.
-- `<style>` 요소는 재사용하고 CSS 룰만 갱신한다 (재생성하지 않음).
-- COVER 라인(`parts: []`)은 라인 div의 모든 자식을 제거하고 빈 div만 유지한다.
-- 효과: 한 글자 입력 시 변경된 라인의 span만 갱신되고 나머지는 재사용된다. `innerHTML = ''`가 발생하지 않는다.
-
-#### 7.4.4 Canvas `measureText()` 기반 측정
-
-- `TextLayoutEngine._charWidthPx()`가 Canvas 2D `measureText().width`를 사용해 문자 폭 측정.
-- DOM 기반 `scrollWidth > clientWidth` 측정을 대체하여 강제 리플로우 제거.
-- 폰트 문자열 단일 항목 캐시(`_lastFontKey`/`_lastFontString`)로 `ctx.font` 설정 비용 절감.
-- 효과: 텍스트 래핑 계산 시 DOM 조작 없이 순수 계산으로 처리.
-
-#### 7.4.5 오버랩 rect 캐시 (`_overlayRectsMm`)
-
-- `_layoutTextIntoColumns()` 시작 시 `null`로 리셋.
-- 첫 `_detectOverlapWithCache()` 호출 시 모든 오버랩 요소의 mm rect를 구성해 `Map`에 저장.
-- 이후 동일 렌더링 사이클 내에서는 `Map.get(el)`로 재사용.
-- 효과: `getBoundingClientRect()` 호출 0회, mm 좌표로 직접 판정.
-
-#### 7.4.6 mm 좌표계 직접 계산 (vcolumn DOM 제거)
-
-- `_initStructureAndMeasureColumns()`와 `_layoutTextIntoColumns()`에서 모든 좌표 계산을 mm 단위로 직접 수행.
-- 기존에는 가상 컬럼(`<x-layout-vcolumn>`)을 생성/측정/제거하며 `getBoundingClientRect()`로 ppm을 측정.
-- 이제는 `GridCalculator.ppm`을 직접 사용하고, line rect를 mm 좌표로 직접 구성.
-- 효과: 강제 리플로우 0회, vcolumn DOM 조작 0회, 브라우저 렌더링 의존성 제거.
+텍스트 변경(Backspace, Delete, 붙여넣기, 문자 입력) 후에는 `_updateCursorPosition()`을 즉시 호출하지 않고 `_debouncedRender()`만 예약한다. `_debouncedRender()`는 rAF 콜백 내에서 `paragraph.scheduleRender()`를 호출하여 `queueMicrotask` 배치에 참여한다. 커서 위치는 `paragraph.render()` → `postRender()` → `_updateCursorPosition()` 흐름에서 **최신 DOM 기준**으로 갱신된다. 예외: (1) `_onInput`에서 `_optimisticSpan`이 생성된 경우(단일 문자 입력)에는 즉시 `_updateCursorPosition()`을 호출하여 즉각적인 피드백을 제공한다. (2) Enter/compositionend 핸들러는 `paragraph.flushRender()`를 사용하여 대기 중인 `scheduleRender()` 배치를 취소하고 즉시 `render()`를 실행한 후 동기적으로 `_updateCursorPosition()`을 호출한다.
 
 ### 7.5 렌더링 비용 분석
 

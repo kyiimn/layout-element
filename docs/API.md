@@ -570,6 +570,8 @@ box.width = N  (또는 height/top/left/paddingTop/...)
 
 #### 이미지 로딩 캐싱 및 깜빡임 방지
 
+> **일반 단락/컬럼 렌더링 최적화는 `docs/PERFORMANCE.md`를 참조.** 이 절은 이미지 특화 로딩/깜빡임 방지 캐싱을 다룬다.
+
 `render()`가 호출될 때마다 `new Image()`를 만들고 `onload`를 기다리면 상위 box
 크기 변경 등 빈번한 재렌더링에서 비효율적이며, 캔버스를 비운 뒤 이미지를 다시
 그리는 동안 빈 프레임이 노출되어 깜빡임이 발생한다. `LayoutImageElement`는

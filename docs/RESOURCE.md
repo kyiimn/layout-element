@@ -199,6 +199,8 @@ FontLoader.resetLoader();
 
 ### 2.9 폰트 메트릭 파싱 (opentype.js 연동)
 
+> **파싱된 메트릭이 텍스트 레이아웃 중 어떻게 캐싱/재사용되는지는 `docs/PERFORMANCE.md`를 참조.**
+
 `FontLoader`는 opentype.js를 필수 의존성으로 사용한다. `TextLayoutEngine._charWidthMm`이 폰트 메트릭 테이블에서 직접 advance width를 읽어 환경에 무관한 측정 결과를 보장한다.
 
 - **정적 import**: `opentype.js`는 번들에 포함되어 항상 사용 가능하다. IIFE 빌드에 포함되며, React ESM 빌드에도 포함된다.

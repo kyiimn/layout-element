@@ -2202,6 +2202,8 @@ mouseup
 
 ### 10.6 성능: 중첩된 하위 요소를 가진 박스의 드래그/리사이즈
 
+> **공유 단락/컬럼 렌더링 최적화(LRU 캐시, span 스킵, 배치 렌더링)는 `docs/PERFORMANCE.md`를 참조.** 이 절은 레이아웃 편집 특화 드래그/리사이즈 성능을 다룬다.
+
 드래그나 리사이즈 중 **박스가 움직이거나 크기가 바뀔 때마다** 영향받는 단락들을 다시 렌더링한다. `LayoutEditController`는 `_startDrag()`/`_startResize()`에서 `_collectAffectedParagraphs(box, startRect)`로 영향받는 단락 집합을 수집하고, drag/resize 종료 시 `_flushRerenderAffectedParagraphs()`로 한 번에 다시 렌더링한다. 이 메서드는 다음 작업을 수행한다:
 
 1. 자식 단락 수집: `box.items`를 재귀적으로 순회
