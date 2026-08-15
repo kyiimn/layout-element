@@ -185,13 +185,13 @@ private _detectOverlapWithCache(lineEl: HTMLElement): { cover: boolean; overlapP
 
 동작:
 
-1. `_overlayRects`가 null이면 모든 오버랩 요소를 한 번만 `getBoundingClientRect()`로 측정해 `Map`에 저장
-2. 각 오버랩 요소에 대해 `getOverlapSizePX(lineEl, el)` 호출
+1. `_overlayRectsMm`가 null이면 모든 오버랩 요소의 mm rect(`absLeft`/`absTop`/`absWidth`/`absHeight`)를 `Map`에 저장
+2. 각 오버랩 요소에 대해 `getOverlapSizeMm(lineRectMm, el)` 호출
 3. `COVERS`가 하나라도 있으면 `cover = true`
 4. `PART`면 `overlapParts`에 병합
 5. `cover`인 경우 `lineEl.style.width = '0'` 설정, `maxWidth`도 동일하게 설정
 
-이미지 픽셀 탐색이 먼저 수행된다. `getOverlapSizePX`가 `COVERS`를 반환해야 기하학적 COVER 판정으로 이어진다. 투명 영역만 겹치면 COVER로 처리되지 않는다.
+이미지 픽셀 탐색이 먼저 수행된다. `getOverlapSizeMm`가 `COVERS`를 반환해야 기하학적 COVER 판정으로 이어진다. 투명 영역만 겹치면 COVER로 처리되지 않는다.
 
 ### 5.2.1 오버랩 요소 변경 시 단락 재렌더링 트리거
 
@@ -475,18 +475,18 @@ private _removeTrailingEmptyLine(columnContent: TextLineData[]): TextLineData[] 
 
 ---
 
-## 8. 오버랩 rect 캐시 (`_overlayRects`)
+## 8. 오버랩 rect 캐시 (`_overlayRectsMm`)
 
 ### 8.1 목적
 
-한 번의 렌더링 사이클 내에서 동일한 오버랩 요소에 대해 `getBoundingClientRect()`를 반복 호출하지 않도록 캐싱한다.
+한 번의 렌더링 사이클 내에서 동일한 오버랩 요소의 mm rect를 반복 계산하지 않도록 캐싱한다. `getBoundingClientRect()`를 사용하지 않고 모델 기반 mm 좌표(`absLeft`/`absTop`/`absWidth`/`absHeight`)를 사용한다.
 
 ### 8.2 생명 주기
 
 ```mermaid
 flowchart LR
-    A[_initStructureAndMeasureColumns] -->|_overlayRects = null| B[_layoutTextIntoColumns]
-    B -->|_overlayRects = null| C[_detectOverlapWithCache 첫 호출]
+    A[_initStructureAndMeasureColumns] -->|_overlayRectsMm = null| B[_layoutTextIntoColumns]
+    B -->|_overlayRectsMm = null| C[_detectOverlapWithCache 첫 호출]
     C -->|Map 생성| D[이후 _detectOverlapWithCache 호출]
     D -->|Map.get(el)| E[재사용]
     E -->|다음 렌더링 사이클| A
@@ -495,19 +495,26 @@ flowchart LR
 ### 8.3 동작
 
 ```ts
-private _overlayRects: Map<LayoutBoxElement, DOMRect> | null = null;
+private _overlayRectsMm: Map<LayoutBoxElement, MmRect> | null = null;
 ```
 
 ```ts
-if (this._overlayRects === null) {
-  this._overlayRects = new Map();
+if (this._overlayRectsMm === null) {
+  this._overlayRectsMm = new Map();
   for (const el of overlapEls) {
-    this._overlayRects.set(el, el.getBoundingClientRect());
+    this._overlayRectsMm.set(el, {
+      left: el.absLeft,
+      right: el.absLeft + el.absWidth,
+      top: el.absTop,
+      bottom: el.absTop + el.absHeight,
+      width: el.absWidth,
+      height: el.absHeight,
+    });
   }
 }
 ```
 
-`_detectOverlapWithCache()`가 처음 호출될 때 모든 오버랩 요소를 한 번 측정해 `Map`에 저장한다. 이후 호출에서는 `this._overlayRects.get(el)`로 재사용한다.
+`_detectOverlapWithCache()`가 처음 호출될 때 모든 오버랩 요소의 mm rect를 계산해 `Map`에 저장한다. 이후 호출에서는 `this._overlayRectsMm.get(el)`로 재사용한다.
 
 ---
 
@@ -743,7 +750,7 @@ const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColu
 
 - `TextPartData.left`, `TextPartData.width`: **mm**
 - `FreeRegion.start`, `FreeRegion.end`: **mm**
-- `OverlapParts.x1`, `OverlapParts.x2`: **px** (`getOverlapSizePX()` 반환값. `_createLineWithParts()`에서 mm로 변환하여 사용)
+- `OverlapParts.x1`, `OverlapParts.x2`: **mm** (`getOverlapSizeMm()` 반환값. 라인 좌측 기준 상대 좌표)
 - DOM 파트 요소의 `width`, `marginLeft`: **mm** (CSS `Nmm` 형식)
 - `_charWidthMm()` 반환값: **mm**
 - `_layoutTextIntoColumns()` 내 `partWidths`, `cumulativeWidths`, `charWidth`, `letterSpacingMm`: **mm**
@@ -756,11 +763,10 @@ const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColu
 
 CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는 scale이 곱해진 viewport 픽셀을 반환한다. 서브픽셀 렌더링 정밀도는 scale에 비례하므로(예: scale=0.5면 반픽셀 단위, scale=2면 2배 정밀도), scale마다 측정값이 미세하게 달라져 텍스트 배치가 어긋나는 원인이 된다.
 
-이를 방지하기 위해 모든 `getBoundingClientRect()` 결과는 `EditManager.scale`로 나누어 **scale=1 기준 픽셀 좌표**로 정규화한 뒤 사용한다. 정규화는 다음 세 경로에 적용된다:
+이를 방지하기 위해 모든 `getBoundingClientRect()` 결과는 `EditManager.scale`로 나누어 **scale=1 기준 픽셀 좌표**로 정규화한 뒤 사용한다. 정규화는 다음 경로에 적용된다:
 
 1. **ppm 측정** (`_initStructureAndMeasureColumns`): 가상 컬럼의 렌더링 폭을 scale로 나누어 ppm을 계산한다. 폰트 메트릭 기반 `_charWidthMm()`은 ppm에 무관하게 동일한 mm 값을 반환하므로, 오버랩이 없는 라인의 글자 배치도 일관된다.
-2. **오버랩 rect 캐시** (`_detectOverlapWithCache`): 오버랩 요소의 rect를 scale로 나누어 캐싱한다. 라인 rect도 동일한 scale로 나누어 비교하므로, 모든 scale에서 동일한 겹침 판정 결과를 보장한다.
-3. **`getOverlapSizePX()`**: 내부에서 `getBoundingClientRect()`를 다시 호출하므로, scale 파라미터를 받아 r1/r2를 정규화한다. canvas 픽셀 매핑(`canvas.width / r2.width`)도 정규화된 r2.width 기준으로 수행되어 scale 무관하다.
+2. **오버랩 rect 캐시** (`_detectOverlapWithCache`): 오버랩 요소의 mm rect(`absLeft`/`absTop`/`absWidth`/`absHeight`)를 사용한다. 이 값들은 모델 기반 mm 좌표이므로 `getBoundingClientRect()`를 호출하지 않으며, scale에 무관하게 동일한 겹침 판정 결과를 보장한다. `getOverlapSizeMm()`도 mm 좌표계에서 직접 동작하므로 canvas 픽셀 매핑만 `GridCalculator.ppm`을 통해 수행된다.
 
 `TextLayoutEngine.scale` 프로퍼티를 통해 scale 값을 받으며, `LayoutParagraphElement.render()`가 `layoutDocEl.editManager.scale`을 읽어 `model.scale`에 설정한 후 `layoutStructure()`/`layoutText()`를 호출한다. `EditManager.setScale()`은 모든 paragraph의 `markStructureChangedAndRender()`를 호출하므로, scale 변경 시 자동으로 재렌더링되어 새 scale이 반영된다.
 
@@ -929,12 +935,12 @@ line 3: PART  → parts = [{left:0, width:x1}, {left:x2, width:colWidth-x2}]
 line 4: FREE  → parts = [{ left:0, width:colWidth }]
 ```
 
-### 17.2 픽셀 단위 겹침 탐지 (`getOverlapSizePX`)
+### 17.2 mm 단위 겹침 탐지 (`getOverlapSizeMm`)
 
-이미지 요소인 경우 캔버스 픽셀 데이터를 사용하여 불투명 픽셀이 있는 열을 탐지한다.
+이미지 요소인 경우 캔버스 픽셀 데이터를 사용하여 불투명 픽셀이 있는 열을 탐지한다. 모든 좌표는 mm 단위로 처리된다.
 
 ```text
-baseElement (line)        targetElement (image box)
+lineRectMm (라인, mm)       overlayElement (이미지 박스, mm)
 ┌─────────────────┐       ┌─────────────────────┐
 │                 │       │                     │
 │    ┌────────────┼───────┼────┐                │
@@ -945,7 +951,7 @@ baseElement (line)        targetElement (image box)
 │                 │       │                     │
 └─────────────────┘       └─────────────────────┘
         ↑
-   intersectionStart, intersectionEnd
+   intersectionStart, intersectionEnd (mm)
         ↑
    relStart = intersectionStart - r1.left
    relEnd   = intersectionEnd - r1.left
@@ -955,7 +961,7 @@ baseElement (line)        targetElement (image box)
 
 ### 17.3 overlapPadding: 타원 기반 패딩 감지
 
-`ImageData.overlapPadding`이 설정된 경우, `getOverlapSizePX()`는 단순 사각형 교차 대신 **타원 기반 패딩 감지**를 사용한다.
+`ImageData.overlapPadding`이 설정된 경우, `getOverlapSizeMm()`는 단순 사각형 교차 대신 **타원 기반 패딩 감지**를 사용한다.
 
 #### 타입
 
@@ -1011,8 +1017,8 @@ overlapMode?: OverlapMode; // 기본값 'path'
 
 #### 구현
 
-- **`'path'`**: `getOverlapSizeMm()` / `getOverlapSizePX()`에서 캔버스 픽셀 단위 검사 수행 (기존 동작과 동일).
-- **`'box'`**: 캔버스 픽셀 검사를 skip하고 기하학적 rect + `overlapPadding`만 적용. `getOverlapSizeMm()` / `getOverlapSizePX()`의 이미지 픽셀 검사 블록이 `overlapMode === 'path'`일 때만 진입하도록 분기.
+- **`'path'`**: `getOverlapSizeMm()`에서 캔버스 픽셀 단위 검사 수행 (기존 동작과 동일).
+- **`'box'`**: 캔버스 픽셀 검사를 skip하고 기하학적 rect + `overlapPadding`만 적용. `getOverlapSizeMm()`의 이미지 픽셀 검사 블록이 `overlapMode === 'path'`일 때만 진입하도록 분기.
 - **`'none'`**: `overlayElements` 게터에서 `overlapMode === 'none'`인 이미지 박스를 제외. `TextLayoutEngine`이 이 이미지를 오버랩 요소로 취급하지 않으므로 텍스트가 이미지 아래에 그대로 배치되고 이미지가 시각적으로 덮음.
 
 #### `overlayElements` 필터링
@@ -1357,7 +1363,7 @@ flowchart TD
 | `getTextRange()` | `EditCoordinateMapper` | 선택 영역 계산 시 span마다 `getBoundingClientRect()` 수행 |
 | `findVisualLineBounds()` | `EditCoordinateMapper` | Home/End 키 처리 시 span마다 `getBoundingClientRect()` 수행 |
 | 라인 rect 측정 | `_detectOverlapWithCache()` | `_overlayRectsMm`는 오버랩 요소만 캐싱, 라인 자체의 rect는 라인마다 측정 |
-| `getImageData` 캐싱 | `getOverlapSizePX()` | 동일 이미지에 대해 라인마다 `getImageData()` 재호출 |
+| `getImageData` 캐싱 | `getOverlapSizeMm()` | 동일 이미지에 대해 라인마다 `getImageData()` 재호출 |
 | `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산 |
 
 ---

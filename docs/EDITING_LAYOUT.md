@@ -1674,7 +1674,7 @@ _structureDirty === true?
     │   │
     │   ├── TextLayoutEngine.create()
     │   │   ├── overlapRects 수집
-    │   │   │   └── getOverlapSizePX(): 이미지/박스의 오버랩 영역 계산
+    │   │   │   └── getOverlapSizeMm(): 이미지/박스의 오버랩 영역 계산 (mm 좌표계)
     │   │   │       ├── 캔버스 픽셀 스캔 (불투명 픽셀 감지)
     │   │   │       ├── overlapPadding 적용 (타원형 패딩 존)
     │   │   │       └── 차단 범위(BlockingRange) 리스트 반환
@@ -1709,13 +1709,13 @@ _structureDirty === true?
 
 텍스트가 이미지나 박스 주변을 흘러가는 메커니즘:
 
-#### 5.4.1 오버랩 영역 계산: `getOverlapSizePX()`
+#### 5.4.1 오버랩 영역 계산: `getOverlapSizeMm()`
 
 ```
 이미지/박스 위치 변경
     │
     ▼
-getOverlapSizePX(columnIndex, textTopMM, textBottomMM)
+getOverlapSizeMm(lineRectMm, overlayElement)
     │
     ├── 캔버스 사용 가능?
     │   ├── YES → 픽셀 단위 정밀 스캔
@@ -1984,7 +1984,7 @@ private _onKeyDown = (event: KeyboardEvent): void => {
              │    │                │  │                     │
              │    │ ppm 측정       │  │ overlapRects 수집    │
              │    │ 컬럼 폭 계산   │  │ ┌─────────────────┐ │
-             │    │ 라인 높이 계산 │  │ │ getOverlapSizePX│ │
+             │    │ 라인 높이 계산 │  │ │getOverlapSizeMm │ │
              │    └────────┬────────┘  │ │                 │ │
              │             │           │ │ 캔버스 픽셀 스캔 │ │
              │             │           │ │ overlapPadding   │ │
@@ -2079,7 +2079,7 @@ private _onKeyDown = (event: KeyboardEvent): void => {
 | `src/core/text-layout-engine.ts` | `_layoutTextIntoColumns`, 오버랩 회피, COVER 라인, PART 분할 |
 | `src/components/layout/paragraph.element.ts` | `render()`, `_structureDirty`, TextLayoutEngine 생성 |
 | `src/components/layout/column.element.ts` | `renderText()`, span 기반 diff 렌더링 |
-| `src/utils/check-overlap.ts` | `checkOverlap()`, `mergeOverlapParts()`, `getOverlapSizePX()` |
+| `src/utils/check-overlap.ts` | `checkOverlap()`, `mergeOverlapParts()`, `getOverlapSizeMm()` |
 
 ### 10.2 드래그/리사이즈 관련 상태
 
@@ -2288,7 +2288,7 @@ mouseup
 - **`LayoutEditController._onClick`과 `_onMouseDown`의 관계**: `_onMouseDown`은 편집 가능한 box에서 드래그/리사이즈를 시작한다. `_onClick`은 `BoxDragState.dragMoved`나 `BoxResizeState.moved`가 `true`이면 무시한다. 두 핸들러는 문서 수준에서 캡처 단계로 동작한다.
 - **`_onClick`의 `stopPropagation()`**: 클릭이 부모 박스나 문서로 전파되는 것을 막는다. 이로 인해 중첩된 박스를 클릭해도 부모가 함께 선택되지 않는다.
 - **`_structureDirty`**: `paragraph.render()`에서 이 플래그가 `true`이면 `layout()`과 `TextLayoutEngine.create()`를 재실행한다. `false`이면 기존 모델을 재사용하여 `layoutText()`만 재실행한다. 드래그 중에는 박스 위치가 변하므로 항상 `true`로 설정해야 한다.
-- **`_overlayRects`**: `TextLayoutEngine`이 `_layoutTextIntoColumns()` 시작 시 `null`로 초기화한다. `paragraph.render()`에서 `TextLayoutEngine.create()` 호출 시 `getOverlapSizePX()`를 통해 새로 계산된다.
+- **`_overlayRectsMm`**: `TextLayoutEngine`이 `_layoutTextIntoColumns()` 시작 시 `null`로 초기화한다. `paragraph.render()`에서 `TextLayoutEngine.create()` 호출 시 `getOverlapSizeMm()`를 통해 새로 계산된다.
 - **`layoutMove` 이벤트**: 드래그 완료(mouseup) 또는 취소(ESC) 시 `EditManager._dispatchLayoutMove()`를 통해 발생한다. 단순 클릭(이동 임계값 3px 미만)에서는 발생하지 않는다. `canceled` 필드로 완료와 취소를 구분할 수 있다.
 - **호버 표시 (`hovered`)**: `<x-layout-box>`에만 적용되며, `<x-layout-document>`는 호버 표시를 지원하지 않는다. `mouseenter` 시 조상 요소의 `hovered`를 모두 제거하여 가장 안쪽 요소만 호버 표시가 보이도록 한다. `mouseleave` 시 `elementFromPoint`로 마우스 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다. 이 동작은 중첩된 박스에서 자식→부모로 마우스가 돌아갈 때 부모의 호버가 복원되도록 보장한다.
 - **호버와 선택의 우선순위**: `selected`가 있는 요소는 `hovered`를 표시하지 않는다. `LayoutBoxElement._onLayoutMouseEnter`에서 `hasAttribute('selected')`를 먼저 검사하여, 이미 선택된 요소 위에 마우스가 있을 때 파란색 호버 테두리가 빨간색 선택 테두리와 겹치지 않도록 한다. 조상의 `hovered` 제거는 `selected` 체크 전에 수행되어, 선택된 요소 위에서 마우스가 움직일 때 조상 요소의 호버 표시도 제거된다. **lock이 `true`인 box도 호버가 억제된다** — `_onLayoutMouseEnter`에서 `this._lock`이 `true`이면 조상 `hovered` 제거 없이 즉시 early return하여 호버 표시가 나타나지 않는다.

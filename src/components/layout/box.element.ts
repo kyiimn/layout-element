@@ -1246,7 +1246,7 @@ export class LayoutBoxElement extends HTMLElement {
    * `contentType`과 동일한 재귀 경로를 따라 가장 깊은 비-box 자식 요소를 반환한다.
    *
    * `contentType === 'image'`인 경우, 실제 `LayoutImageElement`는 중첩 box 안에
-   * 있을 수 있다. `getOverlapSizePX` 등에서 `items[0]`을 직접 image로
+   * 있을 수 있다. `getOverlapSizeMm` 등에서 `items[0]`을 직접 image로
    * 캐스트하면 중첩 box인 경우 잘못된 요소를 참조하게 되므로 이 getter로
    * 실제 image/paragraph 요소를 안전하게 얻는다.
    *

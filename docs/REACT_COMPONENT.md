@@ -855,7 +855,7 @@ export {
 
 // Utils (`@/utils`를 `export *`로 재노출)
 export {
-  checkOverlap, getOverlapSizePX, mergeOverlapParts, genUUID,
+  checkOverlap, getOverlapSizeMm, mergeOverlapParts, genUUID,
   createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay,
 };
 ```

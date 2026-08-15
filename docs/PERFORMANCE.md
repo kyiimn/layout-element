@@ -737,7 +737,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | `getTextRange()` | `EditCoordinateMapper` | 선택 영역 계산 시 span마다 `getBoundingClientRect()` 수행 |
 | `findVisualLineBounds()` | `EditCoordinateMapper` | Home/End 키 처리 시 span마다 `getBoundingClientRect()` 수행 |
 | 라인 rect 측정 | `_detectOverlapWithCache()` | `_overlayRectsMm`는 오버랩 요소만 캐싱, 라인 자체의 rect는 라인마다 측정 |
-| `getImageData` 캐싱 | `getOverlapSizePX()` | 동일 이미지에 대해 라인마다 `getImageData()` 재호출 |
+| `getImageData` 캐싱 | `getOverlapSizeMm()` | 동일 이미지에 대해 라인마다 `getImageData()` 재호출 |
 | `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산 |
 
 ---

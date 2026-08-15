@@ -2947,19 +2947,19 @@ const checkOverlap: (base: HTMLElement, target: HTMLElement) => boolean;
 const mergeOverlapParts: (parts: OverlapParts[]) => OverlapParts[];
 ```
 
-### `getOverlapSizePX(base, target)`
+### `getOverlapSizeMm(lineRectMm, overlayElement)`
 
 ```ts
 /**
- * 오버랩 크기 계산. 이미지 overlapPadding 적용 시 타원형 감지.
+ * 오버랩 크기 계산 (mm 좌표계). 이미지 overlapPadding 적용 시 타원형 감지.
  *
- * @param baseElement - 기준 (보통 텍스트 라인)
- * @param targetElement - LayoutBoxElement (보통 이미지 박스)
+ * @param lineRectMm - 라인 영역 (mm)
+ * @param overlayElement - LayoutBoxElement (보통 이미지 박스)
  * @returns { direction: 'NONE' | 'COVERS' | 'PART', parts: OverlapParts[] }
  */
-const getOverlapSizePX: (
-  base: HTMLElement,
-  target: LayoutBoxElement,
+const getOverlapSizeMm: (
+  lineRectMm: MmRect,
+  overlayElement: LayoutBoxElement,
 ) => { direction: 'NONE' | 'COVERS' | 'PART', parts: OverlapParts[] };
 ```
 

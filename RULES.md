@@ -60,9 +60,9 @@
 - 이 캐시를 제거하면 라인마다 `getBoundingClientRect()`가 호출되어
   강제 리플로우가 발생한다.
 
-### 1.6.1 `getOverlapSizePX` — 중첩 box의 이미지 참조 시 `contentElement` 사용
+### 1.6.1 `getOverlapSizeMm` — 중첩 box의 이미지 참조 시 `contentElement` 사용
 
-- **`getOverlapSizePX()`의 `targetElement`는 항상 `LayoutBoxElement`이다.**
+- **`getOverlapSizeMm()`의 `overlayElement`는 항상 `LayoutBoxElement`이다.**
   `overlayElements`가 `LayoutBoxElement[]`를 반환하기 때문이다.
 - **`contentType === 'image'`가 `true`여도 `items[0]`이 `LayoutImageElement`가 아닐 수 있다.**
   `contentType`은 단일 자식 box를 재귀적으로 파고들어 판정하므로,
@@ -219,7 +219,7 @@
 
 ### 4.2 `getImageData` 캐싱 없음
 
-- `getOverlapSizePX()`에서 이미지 픽셀 데이터를 라인마다 재읽기한다.
+- `getOverlapSizeMm()`에서 이미지 픽셀 데이터를 라인마다 재읽기한다.
 - `overlapPadding`이 설정된 경우 전체 이미지(`sx=0, sw=canvas.width`)를 읽어 열별 불투명 픽셀을 검사하므로, 패딩 없는 경우보다 더 많은 픽셀 데이터를 처리한다.
 - 동일 이미지에 대한 `getImageData()` 결과를 캐싱하면 성능 향상 가능.
 - 단, 캔버스 크기가 큰 경우 메모리 사용량 주의.
