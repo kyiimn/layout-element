@@ -6,6 +6,7 @@ import { ColorRegistry, FontLoader } from "@/resource";
 import { InheritStyle, ParagraphData, ParagraphStyle, PrintPostData, PrintPostDataChar, RenderCompleteEventDetail, TextBlockData, TextStyle } from "@/types";
 import { checkOverlap, genUUID, valueEqual, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay } from "@/utils";
 import { LayoutBoxElement } from "./box.element";
+import { LayoutImageElement } from "./image.element";
 import { LayoutColumnElement } from "./column.element";
 
 /**
@@ -646,6 +647,14 @@ export class LayoutParagraphElement extends HTMLElement {
 
     let overlay = this.parentElement.items.filter(i => i.type === 'box' && i !== self && i.zIndex > this.zIndex) as LayoutBoxElement[];
     overlay = overlay.filter(i => checkOverlap(i, this));
+    // overlapMode === 'none'인 이미지 박스는 오버랩 요소에서 제외
+    overlay = overlay.filter(i => {
+      if (i.contentType === 'image') {
+        const imgEl = i.contentElement as LayoutImageElement | null;
+        if (imgEl && imgEl.overlapMode === 'none') return false;
+      }
+      return true;
+    });
 
     list.push(...overlay);
 

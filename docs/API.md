@@ -514,6 +514,7 @@ class LayoutImageElement extends HTMLElement
 | `url` | `string \| undefined` | — | 이미지 URL. `urlLoader`가 설정되면 로더를 거쳐 변환. |
 | `zIndex` | `number` | — | 렌더링 순서. |
 | `overlapPadding` | `number \| { top?, right?, bottom?, left? }` | mm | 텍스트 회피 패딩. |
+| `overlapMode` | `OverlapMode` | — | 오버랩 처리 모드 (`'path'` \| `'box'` \| `'none'`). 기본값 `'path'`. `'path'`=불투명 픽셀 윤곽 따라 흐름, `'box'`=박스 rect 기준 회피(투명 영역도 차단), `'none'`=오버랩 회피 없음(텍스트가 이미지 아래에 쓰여짐). | |
 | `objectFit` | `ImageObjectFit` | — | 편집 UI 메타데이터 ONLY (`'cover'` \| `'fill'` \| `'contain'` \| `'none'`). `LayoutImageElement` 렌더링 미사용. 편집 UI가 이 값으로 `x`/`y`/`width`/`height`를 계산. 기본값 `'cover'`. |
 | `originalWidth` | `number \| undefined` | mm | 원본 이미지 너비 (mm). Place Gun에서 `px / dpi × 25.4`로 변환하여 주입. |
 | `originalHeight` | `number \| undefined` | mm | 원본 이미지 높이 (mm). Place Gun에서 `px / dpi × 25.4`로 변환하여 주입. |
@@ -539,6 +540,13 @@ class LayoutImageElement extends HTMLElement
 - `overlapPadding` 또는 `zIndex` 변경 시 형제 단락을 재렌더링하여
   텍스트가 새 영역을 회피하도록 함.
 
+#### `overlapMode` 사용
+
+- `'path'` (기본값): 캔버스 불투명 픽셀 윤곽을 따라 텍스트가 흐른다. 투명 영역은 통과.
+- `'box'`: 이미지를 박스처럼 취급하여 박스 rect 기준으로 텍스트가 회피한다. `overlapPadding` 적용. 투명 영역도 차단.
+- `'none'`: 오버랩 회피를 하지 않는다. 텍스트가 이미지 아래에 그대로 쓰여지고 이미지가 그 위를 덮는다. `overlayElements`에서 제외되어 `TextLayoutEngine`이 오버랩 요소로 취급하지 않음.
+- `overlapMode` 변경 시 `layout()` + `render()` + 부모 `requestRerenderAffectedParagraphs()` 호출.
+
 #### 이미지 재렌더링 트리거
 
 이미지 캔버스(`absWidth` × `absHeight`)와 크롭 영역(`x`, `y`, `width`, `height`,
@@ -550,7 +558,7 @@ class LayoutImageElement extends HTMLElement
 | `data` setter | `layout()` + `render()` | `objectFit`, `x`/`y`/`width`/`height`, `url`, `originalWidth`/`originalHeight` 등 일괄 갱신 |
 | `x`, `y`, `width`, `height`, `dpi`, `url`, `originalWidth`, `originalHeight` setter | `render()` | 단일 필드 변경 (기존 값과 같으면 no-op) |
 | `objectFit` setter | (없음) | 메타데이터만 갱신. 렌더링 미영향. 편집 UI가 별도로 `x`/`y`/`width`/`height`를 갱신. |
-| `zIndex`, `overlapPadding` setter | `layout()` + `render()` + 부모 `requestRerenderAffectedParagraphs()` | 형제 단락 텍스트 회피 재계산 |
+| `zIndex`, `overlapPadding`, `overlapMode` setter | `layout()` + `render()` + 부모 `requestRerenderAffectedParagraphs()` | 형제 단락 텍스트 회피 재계산 |
 | `inheritStyle` setter | `layout()` + `render()` | 상위 box의 크기/여백 변경 시. `absWidth`/`absHeight`가 `inheritStyle.parentWidth`/`parentHeight`에 의존하므로 캔버스 픽셀을 다시 그려야 함 |
 
 **상위 box 크기/여백 변경 경로**:
@@ -2547,6 +2555,8 @@ type TextLineData = {
 ```ts
 type ImageObjectFit = 'cover' | 'fill' | 'contain' | 'none';
 
+type OverlapMode = 'path' | 'box' | 'none';
+
 type ImageData = {
   type: 'image';
   id?: string;
@@ -2568,6 +2578,11 @@ type ImageData = {
   overlapPadding?: number | {
     top?: number; right?: number; bottom?: number; left?: number;
   };
+  /**
+   * 오버랩 처리 모드. 'path'=불투명 픽셀 윤곽 따라 흐름(기본값),
+   * 'box'=박스 rect 기준 회피, 'none'=오버랩 회피 없음.
+   */
+  overlapMode?: OverlapMode;
   /** 원본 이미지 너비 (mm). Place Gun에서 px/dpi×25.4로 변환하여 주입. */
   originalWidth?: number;
   /** 원본 이미지 높이 (mm). Place Gun에서 px/dpi×25.4로 변환하여 주입. */

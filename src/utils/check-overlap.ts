@@ -1,6 +1,6 @@
 import { LayoutBoxElement, LayoutImageElement } from "@/components";
 import { GridCalculator } from "@/core/grid-calculator";
-import { OverlapParts } from "@/types";
+import { OverlapMode, OverlapParts } from "@/types";
 
 export const checkOverlap = (baseElement: HTMLElement, targetElement: HTMLElement) => {
   const r1 = baseElement.getBoundingClientRect();
@@ -121,9 +121,11 @@ export const getOverlapSizeMm = (lineRectMm: MmRect, overlayElement: LayoutBoxEl
   let padTop = 0, padRight = 0, padBottom = 0, padLeft = 0;
   let hasOverlapPadding = false;
   let imageEl: LayoutImageElement | null = null;
+  let overlapMode: OverlapMode = 'path';
   if (overlayElement.contentType === 'image') {
     imageEl = overlayElement.contentElement as LayoutImageElement | null;
     if (imageEl) {
+      overlapMode = imageEl.overlapMode;
       const padding = imageEl.overlapPadding;
       if (padding !== undefined) {
         // overlapPadding은 이미 mm 단위이므로 변환 없이 사용한다.
@@ -155,7 +157,8 @@ export const getOverlapSizeMm = (lineRectMm: MmRect, overlayElement: LayoutBoxEl
   const relEnd = intersectionEnd - r1.left;
 
   // 이미지 픽셀 단위 겹침 탐지 — COVERS 판정 전에 수행
-  if (overlayElement.contentType === 'image' && imageEl) {
+  // 'box' 모드에서는 캔버스 픽셀 검사를 skip하고 기하학적 rect 기준으로 판정한다.
+  if (overlapMode === 'path' && overlayElement.contentType === 'image' && imageEl) {
     // 이미지 요소의 mm rect를 사용하여 캔버스 픽셀과 매핑한다.
     // overlayElement(박스)의 rect는 중첩 box의 경우 실제 이미지보다 클 수 있다.
     const imgRectMm: MmRect = {
@@ -421,9 +424,11 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
   let padTop = 0, padRight = 0, padBottom = 0, padLeft = 0;
   let hasOverlapPadding = false;
   let imageEl: LayoutImageElement | null = null;
+  let overlapMode: OverlapMode = 'path';
   if (targetElement.contentType === 'image') {
     imageEl = targetElement.contentElement as LayoutImageElement | null;
     if (imageEl) {
+      overlapMode = imageEl.overlapMode;
       const padding = imageEl.overlapPadding;
       if (padding !== undefined) {
         const ppm = GridCalculator.ppm;
@@ -455,7 +460,8 @@ export const getOverlapSizePX = (baseElement: HTMLElement, targetElement: Layout
   const relEnd = intersectionEnd - r1.left;
 
   // 이미지 픽셀 단위 겹침 탐지 — COVERS 판정 전에 수행
-  if (targetElement.contentType === 'image' && imageEl) {
+  // 'box' 모드에서는 캔버스 픽셀 검사를 skip하고 기하학적 rect 기준으로 판정한다.
+  if (overlapMode === 'path' && targetElement.contentType === 'image' && imageEl) {
 
     // 이미지 요소의 rect를 사용하여 캔버스 픽셀과 정확히 매핑한다.
     // targetElement(박스)의 rect는 중첩 box의 경우 실제 이미지보다 클 수 있다.

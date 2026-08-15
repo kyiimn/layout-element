@@ -15,6 +15,26 @@
 export type ImageObjectFit = 'cover' | 'fill' | 'contain' | 'none';
 
 /**
+ * 이미지 오버랩 처리 모드.
+ *
+ * 단락보다 앞쪽에 떠 있는(z-index가 큰) 이미지가 텍스트와 겹칠 때,
+ * 텍스트가 이미지를 어떻게 회피할지 결정한다.
+ *
+ * - **`'path'`** (기본값): 이미지 캔버스의 불투명 픽셀 윤곽을 따라 텍스트가 흐른다.
+ *   투명 영역은 통과하며, `overlapPadding`이 설정되면 타원 기반 패딩이 적용된다.
+ *   현재 동작과 동일하다.
+ * - **`'box'`**: 이미지를 일반 박스처럼 취급한다. 캔버스 픽셀 검사를 수행하지 않고
+ *   박스 기하학적 rect 기준으로 오버랩을 판정한다. `overlapPadding`은 적용된다.
+ *   투명 영역도 텍스트를 차단한다.
+ * - **`'none'`**: 오버랩 회피를完全不히 하지 않는다. 텍스트가 이미지 아래에
+ *   그대로 쓰여지고 이미지가 그 위를 덮는다. `overlayElements`에서 제외되어
+ *   `TextLayoutEngine`이 이 이미지를 오버랩 요소로 취급하지 않는다.
+ *
+ * @readonly
+ */
+export type OverlapMode = 'path' | 'box' | 'none';
+
+/**
  * 이미지 표시 영역과 소스를 정의하는 데이터.
  *
  * `<canvas>`를 사용해 이미지를 렌더링한다. 원본 이미지를 `width`×`height`(mm)
@@ -103,6 +123,20 @@ export type ImageData = {
 
   /** 오버랩 감지 시 이미지 불투명 픽셀 주변의 패딩 (mm). 숫자면 상하좌우 동일. */
   overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number };
+
+  /**
+   * 오버랩 처리 모드.
+   *
+   * 단락보다 앞쪽에 떠 있는(z-index가 큰) 이미지가 텍스트와 겹칠 때,
+   * 텍스트가 이미지를 어떻게 회피할지 결정한다.
+   *
+   * - `'path'` (기본값): 불투명 픽셀 윤곽을 따라 흐름. 투명 영역 통과.
+   * - `'box'`: 박스 rect 기준으로 오버랩. 투명 영역도 차단. `overlapPadding` 적용.
+   * - `'none'`: 오버랩 회피 없음. 텍스트가 이미지 아래에 쓰여지고 이미지가 덮음.
+   *
+   * 생략 시 `'path'`.
+   */
+  overlapMode?: OverlapMode;
 
   /**
    * 원본 이미지 너비 (mm).

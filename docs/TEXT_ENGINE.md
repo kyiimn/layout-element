@@ -206,6 +206,7 @@ private _detectOverlapWithCache(lineEl: HTMLElement): { cover: boolean; overlapP
 | 박스 `data` setter (자식 일괄 구축) | `LayoutBoxElement.data` setter | `render()` 후 |
 | 이미지 zIndex 변경 | `LayoutImageElement.zIndex` setter | `render()` 후 |
 | 이미지 overlapPadding 변경 | `LayoutImageElement.overlapPadding` setter | `render()` 후 |
+| 이미지 overlapMode 변경 | `LayoutImageElement.overlapMode` setter | `render()` 후 |
 
 `requestRerenderAffectedParagraphs()` → `scheduleRerenderAffectedParagraphs()` → `_collectAffectedParagraphs()` → `_renderAffectedParagraphs()` 흐름으로 동작한다:
 
@@ -989,6 +990,49 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 | `padLeft` | 이미지 왼쪽에서 오른쪽으로 뻗어나가는 패딩 (오른쪽 텍스트 줄을 차단) |
 | `padRight` | 이미지 오른쪽에서 왼쪽으로 뻗어나가는 패딩 (왼쪽 텍스트 줄을 차단) |
 
+### 17.4 overlapMode: 오버랩 처리 모드
+
+`ImageData.overlapMode`는 단락보다 앞쪽에 떠 있는(z-index가 큰) 이미지가 텍스트와 겹칠 때, 텍스트가 이미지를 어떻게 회피할지 결정한다.
+
+#### 타입
+
+```ts
+type OverlapMode = 'path' | 'box' | 'none';
+overlapMode?: OverlapMode; // 기본값 'path'
+```
+
+#### 모드별 동작
+
+| 모드 | 동작 | `overlapPadding` 적용 | 투명 영역 |
+|------|------|----------------------|-----------|
+| `'path'` (기본값) | 캔버스 불투명 픽셀 윤곽을 따라 텍스트가 흐름 | 타원 기반 패딩 적용 | 통과 (텍스트가 흐름) |
+| `'box'` | 박스 rect 기준으로 텍스트가 회피 | 기하학적 rect에 padding 적용 | 차단 (텍스트가 흐르지 않음) |
+| `'none'` | 오버랩 회피 없음 | 미적용 | 텍스트가 이미지 아래에 그대로 쓰여지고 이미지가 덮음 |
+
+#### 구현
+
+- **`'path'`**: `getOverlapSizeMm()` / `getOverlapSizePX()`에서 캔버스 픽셀 단위 검사 수행 (기존 동작과 동일).
+- **`'box'`**: 캔버스 픽셀 검사를 skip하고 기하학적 rect + `overlapPadding`만 적용. `getOverlapSizeMm()` / `getOverlapSizePX()`의 이미지 픽셀 검사 블록이 `overlapMode === 'path'`일 때만 진입하도록 분기.
+- **`'none'`**: `overlayElements` 게터에서 `overlapMode === 'none'`인 이미지 박스를 제외. `TextLayoutEngine`이 이 이미지를 오버랩 요소로 취급하지 않으므로 텍스트가 이미지 아래에 그대로 배치되고 이미지가 시각적으로 덮음.
+
+#### `overlayElements` 필터링
+
+`LayoutBoxElement.overlayElements`와 `LayoutParagraphElement.overlayElements` 게터는 `overlapMode === 'none'`인 이미지 박스를 제외한다:
+
+```ts
+overlay = overlay.filter(i => {
+  if (i.contentType === 'image') {
+    const imgEl = i.contentElement as LayoutImageElement | null;
+    if (imgEl && imgEl.overlapMode === 'none') return false;
+  }
+  return true;
+});
+```
+
+#### 변경 시 재렌더링
+
+`LayoutImageElement.overlapMode` setter는 `requestRerenderAffectedParagraphs()`를 호출하여 영향받는 단락을 재렌더링한다. `'none'` ↔ `'path'`/`'box'` 전환 시 `overlayElements`에서 추가/제외되므로 단락의 텍스트 배치가 즉시 갱신된다.
+
 ---
 
 ## 18. 연관 컴포넌트와의 관계
@@ -1055,6 +1099,7 @@ overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?
 - `layoutText()`는 `layoutStructure()`가 먼저 호출되어 `_columnWidths`, `_gaps`, `_lineHeight`가 준비된 상태에서 실행해야 한다.
 - 이미지 오버랩 탐지는 `LayoutImageElement.canvas`가 존재할 때만 픽셀 수준으로 수행한다.
 - `overlapPadding`이 설정된 이미지는 타원 기반 감지를 사용한다. 캔버스가 없으면 기하학적 확장 사각형으로 폴백하며, 이 경우 투명 영역 구분이 불가능하다.
+- `overlapMode`가 `'box'`인 이미지는 캔버스 픽셀 검사를 수행하지 않고 기하학적 rect 기준으로 오버랩을 판정한다. `overlapPadding`은 적용되지만 투명 영역도 텍스트를 차단한다. `'none'`인 이미지는 `overlayElements`에서 제외되어 오버랩 회피가 전혀 수행되지 않는다.
 - 텍스트 오버플로우는 마지막 컬럼에서 `_overflow`로 집계되며 `render-error` 이벤트로 통지된다. 오버플로우된 라인은 `renderText()`에서 `display: none` 처리되어 시각적으로 숨겨진다. `_createLineWithParts()`가 overflow를 반환한 경우에도 라인 데이터를 `columnContent`에 포함시켜, `_computeRenderStats()`가 라인 기반 오버플로우를 감지할 수 있도록 한다. 이는 텍스트 끝의 `\n`으로 인해 발생하는 빈 라인 오버플로우도 감지하기 위함이다.
 - 오버플로우 발생 시 `LayoutParagraphElement`의 `:host`에 하단 8px 빨간 inset shadow(`inset 0 -8px 0 0 #ff0000`)가 자동 적용되어 사용자에게 오버플로우를 시각적으로 알린다. 인쇄 모드에서는 적용되지 않는다. 오버플로우가 해제되면 shadow도 자동 제거된다.
 - 폰트 메트릭 테이블에서 직접 읽은 advance width를 사용하므로 브라우저 렌더링 파이프라인 차이에서 오는 불일치가 발생하지 않는다. 폰트 파싱에 실패하면 `minWidthMm` 바닥값으로 폴백한다.

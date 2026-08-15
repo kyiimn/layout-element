@@ -419,6 +419,7 @@ import type { LayoutImageProps } from 'layout-element/react';
 | `url` | `string` | — | 선택 | 이미지 URL. |
 | `zIndex` | `number` | — | 선택 | z-index. |
 | `overlapPadding` | `number \| { top?, right?, bottom?, left? }` | mm | 선택 | 텍스트 회피 패딩. |
+| `overlapMode` | `OverlapMode` | — | 선택 | 오버랩 처리 모드 (`'path'` \| `'box'` \| `'none'`). 기본값 `'path'`. | |
 | `aiProcessing` | `boolean` | — | 선택 | AI 처리 중 오버레이 토글. `true` 시 반투명 오버레이 + shimmer/spinner 애니메이션. `pointer-events: auto`로 마우스 이벤트 차단. `data`에 포함되지 않는 휘발성 속성. |
 
 #### Ref

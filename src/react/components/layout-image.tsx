@@ -1,6 +1,6 @@
 import { forwardRef, useEffect } from 'react';
 import { LayoutImageElement } from '@/components';
-import type { ImageData } from '@/types';
+import type { ImageData, OverlapMode } from '@/types';
 import { useLayoutElement } from '@/react/hooks';
 
 export interface LayoutImageProps {
@@ -13,11 +13,12 @@ export interface LayoutImageProps {
   url?: string;
   zIndex?: number;
   overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number };
+  overlapMode?: OverlapMode;
   aiProcessing?: boolean;
 }
 
 export const LayoutImage = forwardRef<LayoutImageElement, LayoutImageProps>(
-  function LayoutImage({ data, x, y, width, height, dpi, url, zIndex, overlapPadding, aiProcessing }, ref) {
+  function LayoutImage({ data, x, y, width, height, dpi, url, zIndex, overlapPadding, overlapMode, aiProcessing }, ref) {
     const { ref: innerRef, define } = useLayoutElement<LayoutImageElement>();
 
     useEffect(() => {
@@ -77,6 +78,12 @@ export const LayoutImage = forwardRef<LayoutImageElement, LayoutImageProps>(
       if (!element || overlapPadding === undefined) return;
       element.overlapPadding = overlapPadding;
     }, [innerRef, overlapPadding]);
+
+    useEffect(() => {
+      const element = innerRef.current;
+      if (!element || overlapMode === undefined) return;
+      element.overlapMode = overlapMode;
+    }, [innerRef, overlapMode]);
 
     useEffect(() => {
       const element = innerRef.current;

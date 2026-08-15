@@ -1,4 +1,4 @@
-import { InheritStyle, ImageData, ImageObjectFit, PrintPostData } from "@/types";
+import { InheritStyle, ImageData, ImageObjectFit, OverlapMode, PrintPostData } from "@/types";
 import { LayoutBoxElement } from "./box.element";
 import { genUUID, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay, computeObjectFit } from "@/utils";
 import { DEFAULT_IMAGE_DPI } from "@/constants";
@@ -71,6 +71,7 @@ export class LayoutImageElement extends HTMLElement {
   private _url?: string;
   private _zIndex: number = 0;
   private _overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number };
+  private _overlapMode: OverlapMode = 'path';
   private _objectUrl?: string;
   private _originalWidth?: number;
   private _originalHeight?: number;
@@ -418,6 +419,7 @@ export class LayoutImageElement extends HTMLElement {
     if (data.id !== undefined) this.id = data.id;
     if (data.zIndex !== undefined) this._zIndex = data.zIndex;
     if (data.overlapPadding !== undefined) this._overlapPadding = data.overlapPadding;
+    this._overlapMode = data.overlapMode ?? 'path';
 
     const urlChanged = this._url !== data.url;
     this._x = data.x;
@@ -499,6 +501,28 @@ export class LayoutImageElement extends HTMLElement {
     return this._overlapPadding;
   }
 
+  /**
+   * 오버랩 처리 모드를 설정한다.
+   *
+   * `'path'` = 불투명 픽셀 윤곽 따라 흐름(기본값), `'box'` = 박스 rect 기준 오버랩,
+   * `'none'` = 오버랩 회피 없음(텍스트가 이미지 아래에 쓰여짐).
+   *
+   * 변경 시 영향받는 단락을 재렌더링한다.
+   *
+   * @param value - 오버랩 모드
+   */
+  set overlapMode(value: OverlapMode) {
+    if (this._overlapMode === value) return;
+    this._overlapMode = value;
+    this.layout();
+    this.render();
+    this.parentElement?.requestRerenderAffectedParagraphs();
+  }
+
+  get overlapMode(): OverlapMode {
+    return this._overlapMode;
+  }
+
   set originalWidth(value: number | undefined) {
     this._originalWidth = value;
     this._applyObjectFit();
@@ -576,6 +600,7 @@ export class LayoutImageElement extends HTMLElement {
       id: this.id,
       zIndex: this._zIndex,
       overlapPadding: this._overlapPadding,
+      overlapMode: this._overlapMode,
       x: this._x,
       y: this._y,
       width: this._width,
