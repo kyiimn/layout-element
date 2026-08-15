@@ -11,6 +11,7 @@ import type { TextBlockStyle } from "@/types/style/text-block-style.type";
 export class LayoutColumnElement extends HTMLElement {
   private _index?: number;
   private _shadowRoot: ShadowRoot;
+  private _cachedColStyleKey: string = '';
 
   constructor() {
     super();
@@ -157,6 +158,36 @@ export class LayoutColumnElement extends HTMLElement {
   }
 
   /**
+   * 재사용 span에서 글자/오프셋이 모두 동일하면 스타일 재적용을 스킵한다.
+   * `genCharStyle()`는 이미 LRU 캐시되어 있어 객체 생성 비용은 낮지만,
+   * `Object.assign(style, ...)` + `cssText = ''` + inner span 처리는 매 span마다
+   * DOM 쓰기를 발생시키므로 변경이 없으면 전체 스킵한다.
+   *
+   * @param charEl - 재사용 대상 span
+   * @param char - 현재 글자
+   * @param renderedOffset - 현재 렌더링 오프셋
+   * @param sourceOffset - 현재 소스 오프셋
+   * @returns 스킵했으면 `true`, 스타일을 적용했으면 `false`
+   */
+  private _skipSpanStyleIfUnchanged(
+    charEl: HTMLSpanElement,
+    char: string,
+    renderedOffset: number,
+    sourceOffset: number,
+  ): boolean {
+    if (
+      charEl.dataset.offset === String(renderedOffset) &&
+      charEl.dataset.sourceOffset === String(sourceOffset)
+    ) {
+      const inner = charEl.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
+      if (inner && inner.textContent === char) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Diff 기반 텍스트 렌더링: 기존 span 요소를 `data-source-offset` 키로 재사용하며
    * 변경된 부분만 업데이트한다. COVER 라인(`parts: []`)은 라인 div의 자식을 모두 제거한다.
    */
@@ -185,8 +216,10 @@ export class LayoutColumnElement extends HTMLElement {
     if (!existingStyleEl) {
       this._shadowRoot.appendChild(styleEl);
     }
-    // Update style rules
-    if (styleEl.sheet) {
+    // Update style rules only when colStyle actually changed
+    const colStyleKey = JSON.stringify(colStyle);
+    if (colStyleKey !== this._cachedColStyleKey && styleEl.sheet) {
+      this._cachedColStyleKey = colStyleKey;
       while (styleEl.sheet.cssRules.length > 0) {
         styleEl.sheet.deleteRule(0);
       }
@@ -293,7 +326,9 @@ export class LayoutColumnElement extends HTMLElement {
           let charEl: HTMLSpanElement;
           if (existingSpan) {
             charEl = existingSpan;
-            this._applySpanStyle(charEl, char, curRenderedOffset, curSourceOffset);
+            if (!this._skipSpanStyleIfUnchanged(charEl, char, curRenderedOffset, curSourceOffset)) {
+              this._applySpanStyle(charEl, char, curRenderedOffset, curSourceOffset);
+            }
             existingSpans.delete(thisCharSourceOffset);
           } else {
             charEl = this._createSpanElement(char, curRenderedOffset, curSourceOffset);
