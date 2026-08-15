@@ -1097,10 +1097,19 @@ export class LayoutEditController {
       const dx = state.lastClientX - state.startMouseX;
       const dy = state.lastClientY - state.startMouseY;
       const { left, top, width, height } = this._computeNewSize(box, state, dx, dy);
+      const prevLeft = box.left;
+      const prevTop = box.top;
+      const prevWidth = box.width;
+      const prevHeight = box.height;
       if (left !== box.left) box.left = left;
       if (top !== box.top) box.top = top;
       if (width !== box.width) box.width = width;
       if (height !== box.height) box.height = height;
+      const deltaLeft = box.left - prevLeft;
+      const deltaTop = box.top - prevTop;
+      const deltaWidth = box.width - prevWidth;
+      const deltaHeight = box.height - prevHeight;
+      this._applyMultiResize(box, deltaLeft, deltaTop, deltaWidth, deltaHeight);
     });
   }
 
@@ -1157,10 +1166,19 @@ export class LayoutEditController {
     const deltaY = event.clientY - state.startMouseY;
     const { left, top, width, height } = this._computeNewSize(box, state, deltaX, deltaY);
     state.handle = null;
+    const prevLeft = box.left;
+    const prevTop = box.top;
+    const prevWidth = box.width;
+    const prevHeight = box.height;
     if (left !== box.left) box.left = left;
     if (top !== box.top) box.top = top;
     if (width !== box.width) box.width = width;
     if (height !== box.height) box.height = height;
+    const deltaLeft = box.left - prevLeft;
+    const deltaTop = box.top - prevTop;
+    const deltaWidth = box.width - prevWidth;
+    const deltaHeight = box.height - prevHeight;
+    this._applyMultiResize(box, deltaLeft, deltaTop, deltaWidth, deltaHeight);
 
     this._manager._dispatchLayoutResize(
       box,
@@ -1618,6 +1636,17 @@ export class LayoutEditController {
 
     if (!handle) return { left: sLeft, top: sTop, width: sWidth, height: sHeight };
 
+    // 하위 요소들의 mm 기준 최대 right/bottom을 계산하여 줄이기 시 차단 기준으로 사용
+    const childMinRightMm = this._computeChildMinRightMm(box);
+    const childMinBottomMm = this._computeChildMinBottomMm(box);
+
+    // 최소 크기: static 1단/1라인, absolute 5mm/5mm. 하위 요소 차단값과 비교해 더 큰 값을 사용.
+    const isAbs = box.position === 'absolute';
+    const minSizeW = isAbs ? 5 : 1;
+    const minSizeH = isAbs ? 5 : 1;
+    const effectiveMinW = Math.max(minSizeW, childMinRightMm);
+    const effectiveMinH = Math.max(minSizeH, childMinBottomMm);
+
     if (box.position === 'absolute') {
       const manager = this._manager;
       const deltaMmX = manager.screenDeltaToMm(deltaPxX);
@@ -1638,30 +1667,38 @@ export class LayoutEditController {
       switch (handle) {
         case 'right': {
           const maxWidth = parentW - sLeft;
-          const width = Math.max(1, Math.min(maxWidth, sWidth + deltaMmX));
+          const rawWidth = sWidth + deltaMmX;
+          const minWidth = effectiveMinW;
+          const width = Math.max(minWidth, Math.min(maxWidth, rawWidth));
           const result = { left: sLeft, top: sTop, width, height: sHeight };
           if (!snapEnabled) return result;
           return this._snapAbsoluteResize('right', result.left, result.top, result.width, result.height, parentModel, thresholdMm);
         }
         case 'left': {
           const maxWidth = sLeft + sWidth;
-          const width = Math.max(1, Math.min(maxWidth, sWidth - deltaMmX));
-          const left = Math.max(0, Math.min(sLeft + sWidth - 1, sLeft + deltaMmX));
+          const rawWidth = sWidth - deltaMmX;
+          const minWidth = effectiveMinW;
+          const width = Math.max(minWidth, Math.min(maxWidth, rawWidth));
+          const left = Math.max(0, Math.min(sLeft + sWidth - width, sLeft + deltaMmX));
           const result = { left, top: sTop, width, height: sHeight };
           if (!snapEnabled) return result;
           return this._snapAbsoluteResize('left', result.left, result.top, result.width, result.height, parentModel, thresholdMm);
         }
         case 'bottom': {
           const maxHeight = parentH - sTop;
-          const height = Math.max(1, Math.min(maxHeight, sHeight + deltaMmY));
+          const rawHeight = sHeight + deltaMmY;
+          const minHeight = effectiveMinH;
+          const height = Math.max(minHeight, Math.min(maxHeight, rawHeight));
           const result = { left: sLeft, top: sTop, width: sWidth, height };
           if (!snapEnabled) return result;
           return this._snapAbsoluteResize('bottom', result.left, result.top, result.width, result.height, parentModel, thresholdMm);
         }
         case 'top': {
           const maxHeight = sTop + sHeight;
-          const height = Math.max(1, Math.min(maxHeight, sHeight - deltaMmY));
-          const top = Math.max(0, Math.min(sTop + sHeight - 1, sTop + deltaMmY));
+          const rawHeight = sHeight - deltaMmY;
+          const minHeight = effectiveMinH;
+          const height = Math.max(minHeight, Math.min(maxHeight, rawHeight));
+          const top = Math.max(0, Math.min(sTop + sHeight - height, sTop + deltaMmY));
           const result = { left: sLeft, top, width: sWidth, height };
           if (!snapEnabled) return result;
           return this._snapAbsoluteResize('top', result.left, result.top, result.width, result.height, parentModel, thresholdMm);
@@ -1678,23 +1715,25 @@ export class LayoutEditController {
           const fixedRight = sLeft + sWidth;
           const fixedBottom = sTop + sHeight;
           // 가로축 새 값
+          const minChildW = effectiveMinW;
+          const minChildH = effectiveMinH;
           let newWidth: number;
           let newLeft = sLeft;
           if (isLeftHandle) {
-            newWidth = Math.max(1, Math.min(fixedRight, sWidth - deltaMmX));
-            newLeft = Math.max(0, Math.min(fixedRight - 1, sLeft + deltaMmX));
+            newWidth = Math.max(minChildW, Math.min(fixedRight, sWidth - deltaMmX));
+            newLeft = Math.max(0, Math.min(fixedRight - newWidth, sLeft + deltaMmX));
           } else {
             const maxWidth = parentW - sLeft;
-            newWidth = Math.max(1, Math.min(maxWidth, sWidth + deltaMmX));
+            newWidth = Math.max(minChildW, Math.min(maxWidth, sWidth + deltaMmX));
           }
           let newHeight: number;
           let newTop = sTop;
           if (isTopHandle) {
-            newHeight = Math.max(1, Math.min(fixedBottom, sHeight - deltaMmY));
-            newTop = Math.max(0, Math.min(fixedBottom - 1, sTop + deltaMmY));
+            newHeight = Math.max(minChildH, Math.min(fixedBottom, sHeight - deltaMmY));
+            newTop = Math.max(0, Math.min(fixedBottom - newHeight, sTop + deltaMmY));
           } else {
             const maxHeight = parentH - sTop;
-            newHeight = Math.max(1, Math.min(maxHeight, sHeight + deltaMmY));
+            newHeight = Math.max(minChildH, Math.min(maxHeight, sHeight + deltaMmY));
           }
           // Shift 비례 제한 (absolute 전용)
           if (state.shiftKey && sWidth > 0 && sHeight > 0) {
@@ -1720,16 +1759,16 @@ export class LayoutEditController {
             }
             // 클램핑 재적용
             if (isLeftHandle) {
-              newLeft = Math.max(0, Math.min(fixedRight - 1, newLeft));
-              newWidth = Math.max(1, Math.min(fixedRight - newLeft, newWidth));
+              newLeft = Math.max(0, Math.min(fixedRight - minChildW, newLeft));
+              newWidth = Math.max(minChildW, Math.min(fixedRight - newLeft, newWidth));
             } else {
-              newWidth = Math.max(1, Math.min(parentW - sLeft, newWidth));
+              newWidth = Math.max(minChildW, Math.min(parentW - sLeft, newWidth));
             }
             if (isTopHandle) {
-              newTop = Math.max(0, Math.min(fixedBottom - 1, newTop));
-              newHeight = Math.max(1, Math.min(fixedBottom - newTop, newHeight));
+              newTop = Math.max(0, Math.min(fixedBottom - minChildH, newTop));
+              newHeight = Math.max(minChildH, Math.min(fixedBottom - newTop, newHeight));
             } else {
-              newHeight = Math.max(1, Math.min(parentH - sTop, newHeight));
+              newHeight = Math.max(minChildH, Math.min(parentH - sTop, newHeight));
             }
           }
           return { left: newLeft, top: newTop, width: newWidth, height: newHeight };
@@ -1753,27 +1792,31 @@ export class LayoutEditController {
     const deltaLines = Math.round(deltaMmY / lineHeight);
     const maxLines = Math.floor(editableTextHeight / lineHeight);
 
+    // static: mm 기준 하위 요소 최대 right/bottom을 컬럼/라인 수로 역변환
+    const effectiveMinCols = Math.max(1, Math.ceil(childMinRightMm / avgColWidth));
+    const effectiveMinLines = Math.max(1, Math.ceil(childMinBottomMm / lineHeight));
+
     switch (handle) {
       case 'right': {
         const maxWidth = columnCount - sLeft;
-        const width = Math.max(1, Math.min(maxWidth, sWidth + deltaCols));
+        const width = Math.max(effectiveMinCols, Math.min(maxWidth, sWidth + deltaCols));
         return { left: sLeft, top: sTop, width, height: sHeight };
       }
       case 'left': {
         const maxWidth = sLeft + sWidth;
-        const width = Math.max(1, Math.min(maxWidth, sWidth - deltaCols));
-        const left = Math.max(0, Math.min(sLeft + sWidth - 1, sLeft + deltaCols));
+        const width = Math.max(effectiveMinCols, Math.min(maxWidth, sWidth - deltaCols));
+        const left = Math.max(0, Math.min(sLeft + sWidth - width, sLeft + deltaCols));
         return { left, top: sTop, width, height: sHeight };
       }
       case 'bottom': {
         const maxHeightForBox = maxLines - sTop;
-        const height = Math.max(1, Math.min(maxHeightForBox, sHeight + deltaLines));
+        const height = Math.max(effectiveMinLines, Math.min(maxHeightForBox, sHeight + deltaLines));
         return { left: sLeft, top: sTop, width: sWidth, height };
       }
       case 'top': {
         const maxHeight = sTop + sHeight;
-        const height = Math.max(1, Math.min(maxHeight, sHeight - deltaLines));
-        const top = Math.max(0, Math.min(sTop + sHeight - 1, sTop + deltaLines));
+        const height = Math.max(effectiveMinLines, Math.min(maxHeight, sHeight - deltaLines));
+        const top = Math.max(0, Math.min(sTop + sHeight - height, sTop + deltaLines));
         return { left: sLeft, top, width: sWidth, height };
       }
       case 'nw':
@@ -1790,25 +1833,100 @@ export class LayoutEditController {
         let newHeight = sHeight;
         if (isLeftHandle) {
           const maxWidth = sLeft + sWidth;
-          newWidth = Math.max(1, Math.min(maxWidth, sWidth - deltaCols));
-          newLeft = Math.max(0, Math.min(sLeft + sWidth - 1, sLeft + deltaCols));
+          newWidth = Math.max(effectiveMinCols, Math.min(maxWidth, sWidth - deltaCols));
+          newLeft = Math.max(0, Math.min(sLeft + sWidth - newWidth, sLeft + deltaCols));
         } else {
           const maxWidth = columnCount - sLeft;
-          newWidth = Math.max(1, Math.min(maxWidth, sWidth + deltaCols));
+          newWidth = Math.max(effectiveMinCols, Math.min(maxWidth, sWidth + deltaCols));
         }
         if (isTopHandle) {
           const maxHeight = sTop + sHeight;
-          newHeight = Math.max(1, Math.min(maxHeight, sHeight - deltaLines));
-          newTop = Math.max(0, Math.min(sTop + sHeight - 1, sTop + deltaLines));
+          newHeight = Math.max(effectiveMinLines, Math.min(maxHeight, sHeight - deltaLines));
+          newTop = Math.max(0, Math.min(sTop + sHeight - newHeight, sTop + deltaLines));
         } else {
           const maxHeightForBox = maxLines - sTop;
-          newHeight = Math.max(1, Math.min(maxHeightForBox, sHeight + deltaLines));
+          newHeight = Math.max(effectiveMinLines, Math.min(maxHeightForBox, sHeight + deltaLines));
         }
         return { left: newLeft, top: newTop, width: newWidth, height: newHeight };
       }
     }
 
     return { left: sLeft, top: sTop, width: sWidth, height: sHeight };
+  }
+
+  /**
+   * box 내부 하위 요소들의 mm 기준 최대 (left+width)를 계산한다.
+   * 줄이기 시 박스 width가 이 값보다 작아지는 것을 차단하기 위해 사용.
+   * @param box - 리사이즈 대상 박스
+   * @returns 부모 기준 mm 단위 최대 right (하위 요소가 없으면 0)
+   */
+  private _computeChildMinRightMm(box: LayoutBoxElement): number {
+    let maxRightMm = 0;
+    const boxAbsLeft = box.absLeft;
+    for (const child of box.items) {
+      if (child instanceof LayoutBoxElement) {
+        const childRightMm = (child.absLeft - boxAbsLeft) + child.absWidth;
+        if (childRightMm > maxRightMm) maxRightMm = childRightMm;
+      }
+    }
+    return maxRightMm;
+  }
+
+  /**
+   * box 내부 하위 요소들의 mm 기준 최대 (top+height)를 계산한다.
+   * 줄이기 시 박스 height가 이 값보다 작아지는 것을 차단하기 위해 사용.
+   * @param box - 리사이즈 대상 박스
+   * @returns 부모 기준 mm 단위 최대 bottom (하위 요소가 없으면 0)
+   */
+  private _computeChildMinBottomMm(box: LayoutBoxElement): number {
+    let maxBottomMm = 0;
+    const boxAbsTop = box.absTop;
+    for (const child of box.items) {
+      if (child instanceof LayoutBoxElement) {
+        const childBottomMm = (child.absTop - boxAbsTop) + child.absHeight;
+        if (childBottomMm > maxBottomMm) maxBottomMm = childBottomMm;
+      }
+    }
+    return maxBottomMm;
+  }
+
+  /**
+   * 멀티 선택된 다른 box들에게 메인 box와 동일한 delta를 적용한다.
+   * absolute는 absolute끼리, static은 static끼리 적용. 메인 box는 제외.
+   *
+   * @param mainBox - 리사이즈를 잡고 있는 기준 box
+   * @param deltaLeft - 메인 box의 left 변화량
+   * @param deltaTop - 메인 box의 top 변화량
+   * @param deltaWidth - 메인 box의 width 변화량
+   * @param deltaHeight - 메인 box의 height 변화량
+   */
+  private _applyMultiResize(
+    mainBox: LayoutBoxElement,
+    deltaLeft: number, deltaTop: number,
+    deltaWidth: number, deltaHeight: number,
+  ): void {
+    if (deltaLeft === 0 && deltaTop === 0 && deltaWidth === 0 && deltaHeight === 0) return;
+
+    const selected = this._manager.selectedLayouts;
+    const isAbs = mainBox.position === 'absolute';
+    const minSize = isAbs ? 5 : 1;
+
+    for (const el of selected) {
+      if (!(el instanceof LayoutBoxElement)) continue;
+      if (el === mainBox) continue;
+      if (el.position !== mainBox.position) continue;
+      if (!el.isConnected) continue;
+
+      const newLeft = el.left + deltaLeft;
+      const newTop = el.top + deltaTop;
+      const newWidth = Math.max(minSize, el.width + deltaWidth);
+      const newHeight = Math.max(minSize, el.height + deltaHeight);
+
+      if (newLeft !== el.left) el.left = newLeft;
+      if (newTop !== el.top) el.top = newTop;
+      if (newWidth !== el.width) el.width = newWidth;
+      if (newHeight !== el.height) el.height = newHeight;
+    }
   }
 
   /**
