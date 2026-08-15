@@ -154,7 +154,7 @@ export class TextEditController {
               this._debounceTimer = null;
               this._wasFocused = false;
             }
-            this._paragraph.render();
+            this._paragraph.scheduleRender();
           }
         }
       }
@@ -722,7 +722,7 @@ export class TextEditController {
           cancelAnimationFrame(this._debounceTimer);
           this._debounceTimer = null;
         }
-        this._paragraph.render();
+        this._paragraph.scheduleRender();
         this._pendingTextChangeOnBlur = true;
       }
     }
@@ -1520,7 +1520,7 @@ export class TextEditController {
     if (this._debounceTimer !== null) {
       cancelAnimationFrame(this._debounceTimer);
       this._debounceTimer = null;
-      this._paragraph.render();
+      this._paragraph.scheduleRender();
     }
 
     this._removeCompositionSpan();
@@ -1560,7 +1560,7 @@ export class TextEditController {
       this._debounceTimer = null;
     }
     this._wasFocused = false;
-    this._paragraph.render();
+    this._paragraph.scheduleRender();
 
     // 조합 span을 커서 위치에 생성하여 조합 중인 글자를 시각적으로 표시
     this._compositionSpan = this._createOptimisticSpan("", this._compositionStartOffset);
@@ -1679,7 +1679,7 @@ export class TextEditController {
         this._debounceTimer = null;
         this._wasFocused = false;
       }
-      this._paragraph.render();
+      this._paragraph.flushRender();
       this._updateCursorPosition();
       this._manager._notifyTextChange(this);
       this._manager._notifyCursorMove(this);
@@ -1709,7 +1709,7 @@ export class TextEditController {
     const composedLength = after.length - beforeContent.length;
     this._cursorModel.offset = startOffset + composedLength;
 
-    this._paragraph.render();
+    this._paragraph.flushRender();
     this._updateCursorPosition();
     this._updateSelection();
     this._emitStyleChange();
@@ -1864,7 +1864,7 @@ export class TextEditController {
     this._wasFocused = this._isFocused;
     this._debounceTimer = requestAnimationFrame(() => {
       this._debounceTimer = null;
-      this._paragraph.render();
+      this._paragraph.scheduleRender();
     });
   }
 

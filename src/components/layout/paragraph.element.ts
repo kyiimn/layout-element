@@ -756,6 +756,16 @@ export class LayoutParagraphElement extends HTMLElement {
   }
 
   /**
+   * 구조 변경 플래그를 설정하고 즉시 `render()`를 실행한다.
+   * rAF 콜백 내에서 드래그/리사이즈 중 영향받는 단락을 갱신할 때 사용 —
+   * `scheduleRender()`의 microtask 지연 없이 rAF 콜백 내에서 렌더링을 완료한다.
+   */
+  markStructureChangedAndFlushRender(): void {
+    this._perfStructureChanged = true;
+    this.flushRender();
+  }
+
+  /**
    * `render()`를 마이크로태스크 배치로 예약한다.
    * 한 이벤트 루프 틱 내의 다중 `scheduleRender()` 호출을 하나의 `render()`로 통합하여
    * 불필요한 중복 렌더링을 방지한다.
@@ -767,6 +777,16 @@ export class LayoutParagraphElement extends HTMLElement {
       this._renderScheduled = false;
       this.render();
     });
+  }
+
+  /**
+   * 대기 중인 `scheduleRender()` 배치를 취소하고 즉시 `render()`를 실행한다.
+   * `render()` 직후에 동기적으로 커서/선택을 갱신해야 하는 호출자
+   * (예: `TextEditController`의 Enter/compositionend 핸들러)가 사용한다.
+   */
+  flushRender(): void {
+    this._renderScheduled = false;
+    this.render();
   }
 
   get editableText(): boolean {

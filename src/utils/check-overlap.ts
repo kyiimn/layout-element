@@ -172,7 +172,6 @@ export const getOverlapSizeMm = (lineRectMm: MmRect, overlayElement: LayoutBoxEl
         const canvas = imageEl.canvas;
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
         if (ctx) {
-          // 캔버스 픽셀 ↔ mm 매핑. canvas.width는 이미지의 mm 폭에 대응한다.
           const scaleX = canvas.width / imgRectMm.width;
           const scaleY = canvas.height / imgRectMm.height;
 

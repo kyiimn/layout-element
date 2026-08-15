@@ -267,6 +267,19 @@ export class LayoutImageElement extends HTMLElement {
     const img = await this._loadImage(resolvedUrl);
     if (!img) return;
     this._drawImage(ctx, img);
+
+    this._notifyOverlapParagraphs();
+  }
+
+  /**
+   * 이미지 로드 완료 후 오버랩되는 단락에게 재렌더링을 요청한다.
+   * 최초 로딩 시 이미지 canvas가 비어 있는 상태에서 단락이 먼저 렌더링되어
+   * 오버랩 판정이 누락되는 문제를 해결한다.
+   */
+  private _notifyOverlapParagraphs(): void {
+    const parent = this.parentElement;
+    if (!parent) return;
+    parent.requestRerenderAffectedParagraphs();
   }
 
   /**

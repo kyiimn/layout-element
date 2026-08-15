@@ -78,6 +78,9 @@ export class TextLayoutEngine {
   /** 성능 캐시: 오버랩 요소의 mm rect 캐시. 렌더링 사이클당 한 번 구성 후 재사용하여 강제 리플로우를 최소화한다. */
   private _overlayRectsMm: Map<LayoutBoxElement, MmRect> | null = null;
 
+  /** Skeleton 캐시: 입력 매개변수 해시가 동일하면 _layoutTextIntoColumns() 결과를 재사용. (현재 비활성화) */
+  private _layoutCache: { hash: string; columnContents: TextLineData[][]; overflow: number } | null = null;
+
   /**
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
    */
@@ -474,6 +477,14 @@ export class TextLayoutEngine {
   private _layoutTextIntoColumns() {
     if (!this._rootNode || this.columnCount < 1) return;
 
+    const inputHash = this._computeLayoutInputHash();
+    if (this._layoutCache && this._layoutCache.hash === inputHash) {
+      this._columnContents = this._layoutCache.columnContents;
+      this._overflow = this._layoutCache.overflow;
+      this._overlayRectsMm = null;
+      return;
+    }
+
     this._columnContents = [];
     this._overflow = 0;
     this._overlayRectsMm = null;
@@ -728,6 +739,54 @@ export class TextLayoutEngine {
 
     this._previousLineCount = this._columnContents.reduce((sum, col) => sum + col.length, 0);
     this._previousOverflow = this._overflow;
+
+    this._layoutCache = {
+      hash: inputHash,
+      columnContents: this._columnContents,
+      overflow: this._overflow,
+    };
+  }
+
+  /**
+   * 레이아웃 입력 매개변수 해시를 계산한다.
+   * 해시가 동일하면 레이아웃 결과가 동일하므로 `_layoutTextIntoColumns()`를 생략할 수 있다.
+   */
+  private _computeLayoutInputHash(): string {
+    const parts: string[] = [];
+
+    if (typeof this._textContent === 'string') {
+      parts.push(this._textContent);
+    } else {
+      for (const block of this._textContent) {
+        if (typeof block === 'string') {
+          parts.push(block);
+        } else {
+          parts.push(block.content);
+        }
+      }
+    }
+
+    parts.push(
+      'cw:' + this._columnWidths.join(','),
+      'g:' + this._gaps.join(','),
+      'lh:' + this._lineHeight,
+      'wr:' + this.widthRatio,
+      'ls:' + (this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING),
+      'sr:' + this.spaceRatio,
+      'fs:' + (this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE),
+      'ph:' + (this._inheritStyle?.parentHeight ?? 0),
+      'pl:' + this._paragraphElement.absLeft,
+      'pt:' + this._paragraphElement.absTop,
+    );
+
+    const overlapEls = this._paragraphElement.overlayElements;
+    for (const el of overlapEls) {
+      parts.push(
+        'o:' + el.absLeft + ',' + el.absTop + ',' + el.absWidth + ',' + el.absHeight,
+      );
+    }
+
+    return parts.join('|');
   }
 
   /**
@@ -755,6 +814,7 @@ export class TextLayoutEngine {
   public resetIncrementalState() {
     this._previousLineCount = -1;
     this._previousOverflow = -1;
+    this._layoutCache = null;
   }
 
   /** 컬럼 스타일 생성 (Flexbox 컨테이너) */
@@ -871,12 +931,13 @@ export class TextLayoutEngine {
    */
   public genCharStyle = (char: string): Partial<CSSStyleDeclaration> => {
     const wr = this.widthRatio;
-    const cacheKey = `${char}|${wr}`;
+    const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
+    const sr = this.spaceRatio;
+    const cacheKey = `${char}|${wr}|${lsEm}|${sr}`;
     const cached = this._charOuterStyleCache.get(cacheKey);
     if (cached) return cached;
 
     const fontSize = this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
-    const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
     const lsMm = lsEm * fontSize;
     let widthMm: number;
     if (char === ' ') {

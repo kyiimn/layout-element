@@ -70,6 +70,9 @@ export class LayoutBoxElement extends HTMLElement {
   /** 드래그/리사이즈 중 보류된 rAF ID. */
   private _dragRafId: number | null = null;
 
+  /** 비드래그 시 영향받는 단락 재렌더링 배치 플래그. */
+  private _rerenderScheduled: boolean = false;
+
   /** 테두리 바깥 요소(방향별). `top`/`bottom`/`left`/`right` 키로 관리한다. */
   private _borderEls: Record<string, HTMLDivElement | null> = {
     top: null, bottom: null, left: null, right: null,
@@ -1550,8 +1553,13 @@ export class LayoutBoxElement extends HTMLElement {
    * 영향받는 단락 요소를 즉시 다시 렌더링한다. (외부 API용)
    */
   private scheduleRerenderAffectedParagraphs(): void {
-    const affected = this._collectAffectedParagraphs();
-    this._renderAffectedParagraphs(affected);
+    if (this._rerenderScheduled) return;
+    this._rerenderScheduled = true;
+    queueMicrotask(() => {
+      this._rerenderScheduled = false;
+      const affected = this._collectAffectedParagraphs();
+      this._renderAffectedParagraphs(affected);
+    });
   }
 
   /**
@@ -1697,7 +1705,7 @@ export class LayoutBoxElement extends HTMLElement {
   private _renderAffectedParagraphs(affected: Set<LayoutParagraphElement>): void {
     for (const p of affected) {
       if (p.isConnected) {
-        p.markStructureChangedAndRender();
+        p.markStructureChangedAndFlushRender();
       }
     }
   }
