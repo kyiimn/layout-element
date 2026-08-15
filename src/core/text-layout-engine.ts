@@ -70,12 +70,6 @@ export class TextLayoutEngine {
 
   private _lineHeight: number = 0;
 
-  /**
-   * 화면 배율(scale). 0 이하이면 1로 취급한다.
-   * `layoutStructure()`/`layoutText()` 호출 전에 paragraph 측에서 설정한다.
-   */
-  private _scale: number = 1;
-
   private _paragraphElement: LayoutParagraphElement;
   private _rootNode: Node;
 
@@ -426,29 +420,12 @@ export class TextLayoutEngine {
   }
 
   /**
-   * 구조 측정 및 컬럼 콘텐츠 파싱.
-   * 컬럼 폭/간격/lineHeight를 계산하고, `_overlayRectsMm`을 null로 리셋하며
-   * `_textContent`를 파싱한다.
+   * 구조 측정. `_columnWidths`, `_gaps`, `_lineHeight`는 `data` 세터에서
+   * 이미 초기화되어 있으므로 여기서는 컬럼 수 검사만 수행한다.
    * 내부 전용. `layoutStructure()`에서만 호출된다.
    */
   private _initStructureAndMeasureColumns() {
     if (!this._rootNode) return;
-
-    this._columnContents = [];
-    this._overflow = 0;
-    this._overlayRectsMm = null;
-
-    const rawContents = !Array.isArray(this._textContent) ? [{
-      content: this._textContent
-    }] : this._textContent;
-
-    this._contents = [];
-    rawContents.forEach(c => {
-      const rawBlock = (typeof c === 'string') ? { content: c } : c;
-      const lines = rawBlock.content.split("\n");
-      this._contents.push(...(lines.map(l => ({ ...rawBlock, content: l }))));
-    });
-
     if (this.columnCount < 1) return;
   }
 
@@ -487,11 +464,10 @@ export class TextLayoutEngine {
   private _layoutTextIntoColumns() {
     if (!this._rootNode || this.columnCount < 1) return;
 
-    this._parseContents();
-
     this._columnContents = [];
     this._overflow = 0;
     this._overlayRectsMm = null;
+    this._parseContents();
 
     let beforeIdxBlock = 0;
     let beforeIdxContentOfBlock = 0;
@@ -760,14 +736,6 @@ export class TextLayoutEngine {
    */
   public layoutText() {
     this._layoutTextIntoColumns();
-  }
-
-  get scale(): number {
-    return this._scale;
-  }
-
-  set scale(value: number) {
-    this._scale = value > 0 ? value : 1;
   }
 
   /**

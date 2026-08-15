@@ -229,10 +229,6 @@ export class LayoutParagraphElement extends HTMLElement {
     const lineCountBefore = this._model.previousLineCount;
     const overflowBefore = this._model.previousOverflow;
 
-    // EditManager.scale을 모델에 전달하여 getBoundingClientRect() 결과를
-    // scale=1 기준으로 정규화하도록 한다. scale 무관한 래핑 결과를 보장한다.
-    this._model.scale = this.editManager?.scale ?? 1;
-
     if (this._perfStructureChanged) {
       this._model.resetIncrementalState();
       this._model.layoutStructure();
