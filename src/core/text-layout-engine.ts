@@ -10,7 +10,7 @@ import {
   TextLineData,
   OverlapParts
 } from "@/types";
-import { getOverlapSizeMm, mergeOverlapParts, type MmRect } from "@/utils";
+import { getOverlapSizeMm, mergeOverlapParts, type MmRect, LRU } from "@/utils";
 import { FontLoader } from "@/resource/font-loader";
 import { ColorRegistry } from "@/resource/color-registry";
 
@@ -62,11 +62,13 @@ export class TextLayoutEngine {
   private _previousLineCount: number = -1;
   private _previousOverflow: number = -1;
 
-  /** 성능 캐시: 문자별 외부 span 스타일. 키 `${char}|${widthRatio}`. */
-  private _charOuterStyleCache: Map<string, Partial<CSSStyleDeclaration>> = new Map();
+  /** 성능 캐시: 문자별 외부 span 스타일. 키 `${char}|${widthRatio}`. LRU (5000). */
+  private _charOuterStyleCache: LRU<string, Partial<CSSStyleDeclaration>> = new LRU(5000);
   /** 성능 캐시: 내부 span 스타일. 장평 변경 시 갱신. */
   private _charInnerStyle: Partial<CSSStyleDeclaration> = {};
   private _charInnerStyleKey: string = '';
+  /** 성능 캐시: 문자 폭(mm). 키 `${char}|${fontName}|${fontSize}`. LRU (5000). */
+  private _charWidthCache: LRU<string, number> = new LRU(5000);
 
   private _lineHeight: number = 0;
 
@@ -164,8 +166,16 @@ export class TextLayoutEngine {
       return minWidthMm;
     }
 
+    const fontName = textBlockStyle?.fontFamily ?? '';
+    const cacheKey = `${char}|${fontName}|${fontSize}`;
+    const cached = this._charWidthCache.get(cacheKey);
+    if (cached !== undefined) {
+      return Math.max(cached, minWidthMm);
+    }
+
     const fontWidth = this._charWidthMmFromFont(char, textBlockStyle, fontSize);
     if (fontWidth !== null) {
+      this._charWidthCache.set(cacheKey, fontWidth);
       return Math.max(fontWidth, minWidthMm);
     }
 
@@ -885,9 +895,6 @@ export class TextLayoutEngine {
       textAlign: 'center',
     };
 
-    if (this._charOuterStyleCache.size > 5000) {
-      this._charOuterStyleCache.clear();
-    }
     this._charOuterStyleCache.set(cacheKey, style);
     return style;
   }
