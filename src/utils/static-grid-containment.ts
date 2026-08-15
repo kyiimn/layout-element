@@ -62,3 +62,92 @@ export function staticGridContains(
 
   return true;
 }
+
+/**
+ * static 좌표계에서 요소의 left/top/width/height를 컨테이너 그리드 내에 맞춘다.
+ *
+ * - `left`는 `0 ~ columnCount - width` 범위로 clamp.
+ * - `width`는 `1 ~ columnCount` 범위로 clamp.
+ * - `top`는 `0 ~ containerLineCount - height` 범위로 clamp.
+ * - `height`는 `1 ~ containerLineCount` 범위로 clamp.
+ *
+ * @param container - 삽입 대상 컨테이너
+ * @param left - 요소의 static left (컬럼 인덱스)
+ * @param top - 요소의 static top (라인 인덱스)
+ * @param width - 요소의 static width (컬럼 스팬 수)
+ * @param height - 요소의 static height (라인 수)
+ * @returns 컨테이너 그리드 내에 맞춰진 `{ left, top, width, height }`
+ *
+ * @example
+ * ```ts
+ * // 3컬럼 box에 left=2, width=2 → left=2+2=4 > 3 → left=1, width=2
+ * clampStaticToContainer(box, 2, 0, 2, 5); // { left: 1, top: 0, width: 2, height: 5 }
+ * // 3컬럼 box에 width=5 → width=3
+ * clampStaticToContainer(box, 0, 0, 5, 5); // { left: 0, top: 0, width: 3, height: 5 }
+ * ```
+ */
+export function clampStaticToContainer(
+  container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+): { left: number; top: number; width: number; height: number } {
+  const model = container.model;
+  if (!model) return { left: 0, top: 0, width: 1, height: 1 };
+
+  const { columnCount, lineHeight, editableHeight } = model;
+  const containerLineCount = lineHeight > 0
+    ? Math.floor(Math.round((editableHeight / lineHeight) * 1e6) / 1e6) + 1
+    : 1;
+
+  const clampedWidth = Math.max(1, Math.min(width, columnCount));
+  const clampedHeight = Math.max(1, Math.min(height, containerLineCount));
+  const clampedLeft = Math.max(0, Math.min(left, columnCount - clampedWidth));
+  const clampedTop = Math.max(0, Math.min(top, Math.max(0, containerLineCount - clampedHeight)));
+
+  return { left: clampedLeft, top: clampedTop, width: clampedWidth, height: clampedHeight };
+}
+
+/**
+ * absolute 좌표계에서 요소의 left/top/width/height를 컨테이너 편집 영역 내에 맞춘다.
+ *
+ * - `left`는 `0 ~ editableWidth - width` 범위로 clamp.
+ * - `width`는 `1 ~ editableWidth` 범위로 clamp.
+ * - `top`는 `0 ~ editableHeight - height` 범위로 clamp.
+ * - `height`는 `1 ~ editableHeight` 범위로 clamp.
+ *
+ * @param container - 삽입 대상 컨테이너
+ * @param leftMm - 요소의 absolute left (mm)
+ * @param topMm - 요소의 absolute top (mm)
+ * @param widthMm - 요소의 absolute width (mm)
+ * @param heightMm - 요소의 absolute height (mm)
+ * @returns 컨테이너 편집 영역 내에 맞춰진 `{ left, top, width, height }` (mm)
+ *
+ * @example
+ * ```ts
+ * // editableWidth=200mm에 left=150, width=100 → 150+100=250 > 200 → left=100, width=100
+ * clampAbsoluteToContainer(box, 150, 0, 100, 50); // { left: 100, top: 0, width: 100, height: 50 }
+ * // editableWidth=200mm에 width=300 → width=200
+ * clampAbsoluteToContainer(box, 0, 0, 300, 50); // { left: 0, top: 0, width: 200, height: 50 }
+ * ```
+ */
+export function clampAbsoluteToContainer(
+  container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement,
+  leftMm: number,
+  topMm: number,
+  widthMm: number,
+  heightMm: number,
+): { left: number; top: number; width: number; height: number } {
+  const model = container.model;
+  if (!model) return { left: 0, top: 0, width: 1, height: 1 };
+
+  const { editableWidth, editableHeight } = model;
+
+  const clampedWidth = Math.max(1, Math.min(widthMm, editableWidth));
+  const clampedHeight = Math.max(1, Math.min(heightMm, editableHeight));
+  const clampedLeft = Math.max(0, Math.min(leftMm, Math.max(0, editableWidth - clampedWidth)));
+  const clampedTop = Math.max(0, Math.min(topMm, Math.max(0, editableHeight - clampedHeight)));
+
+  return { left: clampedLeft, top: clampedTop, width: clampedWidth, height: clampedHeight };
+}

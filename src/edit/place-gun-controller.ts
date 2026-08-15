@@ -5,7 +5,7 @@ import { LayoutImageElement } from "@/components/layout/image.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { GridCalculator } from "@/core";
-import { staticGridContains } from "@/utils";
+import { staticGridContains, clampStaticToContainer, clampAbsoluteToContainer } from "@/utils";
 import { DEFAULT_IMAGE_DPI, Z_INDEX_INSERT_PREVIEW, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER, Z_INDEX_MAX_LAYOUT } from "@/constants";
 import type { PlaceGunItem, ArticleContent, ImageContent, ElementPatternContent, StylePatternContent } from "@/types/edit";
 import type { BoxData } from "@/types/layout/box.type";
@@ -645,8 +645,11 @@ export class PlaceGunController {
     let width = boxData.width;
     let height = boxData.height;
     if (position === 'absolute') {
-      left = Math.max(0, Math.round(leftMm * 100) / 100);
-      top = Math.max(0, Math.round(topMm * 100) / 100);
+      const clamped = clampAbsoluteToContainer(container, leftMm, topMm, width, height);
+      left = clamped.left;
+      top = clamped.top;
+      width = clamped.width;
+      height = clamped.height;
     } else if (container instanceof LayoutTableCellElement) {
       left = 0;
       top = 0;
@@ -654,8 +657,11 @@ export class PlaceGunController {
       height = 1;
     } else {
       const result = this._mmToStatic(leftMm, topMm, container);
-      left = result.left;
-      top = result.top;
+      const clamped = clampStaticToContainer(container, result.left, result.top, width, height);
+      left = clamped.left;
+      top = clamped.top;
+      width = clamped.width;
+      height = clamped.height;
     }
 
     const zIndex = this._getNextZIndex(container);

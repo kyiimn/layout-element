@@ -6,7 +6,7 @@ import { LayoutImageElement } from "@/components/layout/image.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { LayoutTableElement } from "@/components/layout/table.element";
-import { genUUID } from "@/utils";
+import { genUUID, clampStaticToContainer, clampAbsoluteToContainer } from "@/utils";
 import { EditManager } from "./edit-manager";
 import type { GridCalculator } from "@/core";
 import type { BoxData } from "@/types/layout/box.type";
@@ -1637,7 +1637,6 @@ export class LayoutEditController {
 
       switch (handle) {
         case 'right': {
-          // 우측 핸들: width만 변경, left/top/height 유지
           const maxWidth = parentW - sLeft;
           const width = Math.max(1, Math.min(maxWidth, sWidth + deltaMmX));
           const result = { left: sLeft, top: sTop, width, height: sHeight };
@@ -1645,7 +1644,6 @@ export class LayoutEditController {
           return this._snapAbsoluteResize('right', result.left, result.top, result.width, result.height, parentModel, thresholdMm);
         }
         case 'left': {
-          // 좌측 핸들: width와 left가 함께 변경 (우측 끝 sLeft+sWidth 고정)
           const maxWidth = sLeft + sWidth;
           const width = Math.max(1, Math.min(maxWidth, sWidth - deltaMmX));
           const left = Math.max(0, Math.min(sLeft + sWidth - 1, sLeft + deltaMmX));
@@ -1654,7 +1652,6 @@ export class LayoutEditController {
           return this._snapAbsoluteResize('left', result.left, result.top, result.width, result.height, parentModel, thresholdMm);
         }
         case 'bottom': {
-          // 하단 핸들: height만 변경, left/top/width 유지
           const maxHeight = parentH - sTop;
           const height = Math.max(1, Math.min(maxHeight, sHeight + deltaMmY));
           const result = { left: sLeft, top: sTop, width: sWidth, height };
@@ -1662,7 +1659,6 @@ export class LayoutEditController {
           return this._snapAbsoluteResize('bottom', result.left, result.top, result.width, result.height, parentModel, thresholdMm);
         }
         case 'top': {
-          // 상단 핸들: height와 top이 함께 변경 (하단 끝 sTop+sHeight 고정)
           const maxHeight = sTop + sHeight;
           const height = Math.max(1, Math.min(maxHeight, sHeight - deltaMmY));
           const top = Math.max(0, Math.min(sTop + sHeight - 1, sTop + deltaMmY));
@@ -1691,7 +1687,6 @@ export class LayoutEditController {
             const maxWidth = parentW - sLeft;
             newWidth = Math.max(1, Math.min(maxWidth, sWidth + deltaMmX));
           }
-          // 세로축 새 값
           let newHeight: number;
           let newTop = sTop;
           if (isTopHandle) {
@@ -2126,19 +2121,33 @@ export class LayoutEditController {
         const editAreaTop = columnCoords[0]?.y1 ?? 0;
 
         const nearestColumn = Math.round((leftMm - editAreaLeft) / avgColWidth);
-        const clampedColumn = Math.max(0, Math.min(columnCount - boxData.width, nearestColumn));
         const nearestLine = Math.round((topMm - editAreaTop) / lineHeight);
-        const clampedLine = Math.max(0, nearestLine);
 
-        // width/height는 원래 static 값(컬럼/라인 수) 유지
-        boxData.left = clampedColumn;
-        boxData.top = clampedLine;
+        const clamped = clampStaticToContainer(
+          newContainer as LayoutBoxElement | LayoutDocumentElement,
+          nearestColumn,
+          nearestLine,
+          boxData.width,
+          boxData.height,
+        );
+        boxData.left = clamped.left;
+        boxData.top = clamped.top;
+        boxData.width = clamped.width;
+        boxData.height = clamped.height;
       }
     } else {
-      // absolute 요소는 absolute 좌표로 변환. width/height는 원래 mm 값 유지
       boxData.position = 'absolute';
-      boxData.left = Math.round(leftMm * 100) / 100;
-      boxData.top = Math.round(topMm * 100) / 100;
+      const clamped = clampAbsoluteToContainer(
+        newContainer as LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement,
+        Math.round(leftMm * 100) / 100,
+        Math.round(topMm * 100) / 100,
+        boxData.width,
+        boxData.height,
+      );
+      boxData.left = clamped.left;
+      boxData.top = clamped.top;
+      boxData.width = clamped.width;
+      boxData.height = clamped.height;
     }
     boxData.zIndex = newZIndex;
 

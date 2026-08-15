@@ -5,7 +5,7 @@ import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { BoxData, TableData, TableRowData, TableCellData } from "@/types";
-import { staticGridContains } from "@/utils";
+import { staticGridContains, clampStaticToContainer, clampAbsoluteToContainer } from "@/utils";
 import type { InsertMode, InsertEventDetail } from "@/types/edit";
 
 /** 드래그-삽입을 통한 새 요소 생성을 관리하는 컨트롤러. */
@@ -205,23 +205,24 @@ export class InsertController {
         height = 1;
       } else {
         const staticCoords = this._mmToStatic(leftMm, topMm, widthMm, heightMm, container);
-        left = staticCoords.left;
-        top = staticCoords.top;
-        width = staticCoords.width;
-        height = staticCoords.height;
+        const clamped = clampStaticToContainer(container, staticCoords.left, staticCoords.top, staticCoords.width, staticCoords.height);
+        left = clamped.left;
+        top = clamped.top;
+        width = clamped.width;
+        height = clamped.height;
       }
     } else {
-      left = Math.round(leftMm * 100) / 100;
-      top = Math.round(topMm * 100) / 100;
-      width = Math.round(widthMm * 100) / 100;
-      height = Math.round(heightMm * 100) / 100;
-      // absolute 모드: left+width, top+height가 컨테이너 영역을 초과하지 않도록 클램핑
-      if (containerContentW > 0 && left + width > containerContentW) {
-        width = Math.max(1, Math.round((containerContentW - left) * 100) / 100);
-      }
-      if (containerContentH > 0 && top + height > containerContentH) {
-        height = Math.max(1, Math.round((containerContentH - top) * 100) / 100);
-      }
+      const clamped = clampAbsoluteToContainer(
+        container,
+        Math.round(leftMm * 100) / 100,
+        Math.round(topMm * 100) / 100,
+        Math.round(widthMm * 100) / 100,
+        Math.round(heightMm * 100) / 100,
+      );
+      left = clamped.left;
+      top = clamped.top;
+      width = clamped.width;
+      height = clamped.height;
     }
 
     if (mode.position === 'absolute') {
