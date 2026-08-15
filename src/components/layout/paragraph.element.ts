@@ -43,6 +43,9 @@ export class LayoutParagraphElement extends HTMLElement {
   /** 성능 최적화: 구조 변경 여부 플래그. true면 다음 render()에서 전체 재생성을 수행한다. */
   private _perfStructureChanged: boolean = true;
 
+  /** 성능 최적화: render() 배치 플래그. 한 마이크로태스크 내의 다중 render() 호출을 하나로 통합한다. */
+  private _renderScheduled: boolean = false;
+
   /**
    * 오버플로우 시각 표시기 활성화 여부. `render()`에서 텍스트 오버플로우가
    * 감지되면 `true`로 설정되어 하단 8px 빨간 inset shadow가 표시된다.
@@ -514,7 +517,7 @@ export class LayoutParagraphElement extends HTMLElement {
     this._textStyle = value;
     this.layout();
     this._perfStructureChanged = true;
-    this.render();
+    this.scheduleRender();
   }
 
   get textStyle(): TextStyle {
@@ -532,7 +535,7 @@ export class LayoutParagraphElement extends HTMLElement {
     this._paragraphStyle = value;
     this.layout();
     this._perfStructureChanged = true;
-    this.render();
+    this.scheduleRender();
   }
 
   get paragraphStyle(): ParagraphStyle {
@@ -559,7 +562,7 @@ export class LayoutParagraphElement extends HTMLElement {
     this._column = value;
     this.layout();
     this._perfStructureChanged = true;
-    this.render();
+    this.scheduleRender();
   }
 
   /**
@@ -592,7 +595,7 @@ export class LayoutParagraphElement extends HTMLElement {
     this._gap = value;
     this.layout();
     this._perfStructureChanged = true;
-    this.render();
+    this.scheduleRender();
   }
 
   /**
@@ -744,12 +747,26 @@ export class LayoutParagraphElement extends HTMLElement {
   get zIndex() { return this._zIndex; }
 
   /**
-   * 구조 변경 플래그를 설정하고 `render()`를 호출한다.
+   * 구조 변경 플래그를 설정하고 `scheduleRender()`를 호출한다.
    * 외부 컨트롤러가 단락의 재렌더링을 트리거할 때 사용한다.
    */
   markStructureChangedAndRender(): void {
     this._perfStructureChanged = true;
-    this.render();
+    this.scheduleRender();
+  }
+
+  /**
+   * `render()`를 마이크로태스크 배치로 예약한다.
+   * 한 이벤트 루프 틱 내의 다중 `scheduleRender()` 호출을 하나의 `render()`로 통합하여
+   * 불필요한 중복 렌더링을 방지한다.
+   */
+  scheduleRender(): void {
+    if (this._renderScheduled) return;
+    this._renderScheduled = true;
+    queueMicrotask(() => {
+      this._renderScheduled = false;
+      this.render();
+    });
   }
 
   get editableText(): boolean {
