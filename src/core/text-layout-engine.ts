@@ -933,15 +933,15 @@ export class TextLayoutEngine {
     const wr = this.widthRatio;
     const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
     const sr = this.spaceRatio;
-    const cacheKey = `${char}|${wr}|${lsEm}|${sr}`;
+    const fs = this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
+    const cacheKey = `${char}|${wr}|${lsEm}|${sr}|${fs}`;
     const cached = this._charOuterStyleCache.get(cacheKey);
     if (cached) return cached;
 
-    const fontSize = this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
-    const lsMm = lsEm * fontSize;
+    const lsMm = lsEm * fs;
     let widthMm: number;
     if (char === ' ') {
-      widthMm = this.spaceRatio * fontSize * wr + lsMm;
+      widthMm = this.spaceRatio * fs * wr + lsMm;
     } else {
       const rawWidthMm = this._charWidthMm(char);
       widthMm = rawWidthMm * wr + lsMm;
@@ -951,7 +951,7 @@ export class TextLayoutEngine {
     const style: Partial<CSSStyleDeclaration> = {
       display: 'inline-block',
       width: widthCss,
-      minWidth: `${this.spaceRatio * fontSize}mm`,
+      minWidth: `${this.spaceRatio * fs}mm`,
       maxWidth: widthCss,
       textAlign: 'center',
     };
