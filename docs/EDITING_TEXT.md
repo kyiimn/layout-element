@@ -926,6 +926,7 @@ flowchart TD
 - **삽입 모드**(`insertMode !== null`): `navigateByTab`은 아무 동작도 하지 않고 `false`를 반환한다.
 - **인쇄 모드**(`_isPrint === true`): 편집 기능 전체가 차단되므로 Tab 이동도 동작하지 않는다.
 - **레이아웃 편집 모드**(`textEditMode === false`, `layoutEditMode === true`): 단락이 아닌 선택 가능한 box 목록을 순환한다. 이 문서에서는 텍스트 편집 모드의 동작을 다룬다.
+- **외부 input/textarea/button/select 포커스**: `document.activeElement`가 `HTMLInputElement`, `HTMLTextAreaElement`, `HTMLButtonElement`, 또는 `HTMLSelectElement`인 경우(예: 호스트 프로그램의 툴바 입력창, 검색어 입력 필드, 버튼, 드롭다운), `_onWindowKeyDown`은 `navigateByTab`을 호출하지 않고 즉시 반환하여 외부 입력 요소의 기본 Tab 동작을 보존한다.
 
 #### 4.1.4 프로그래밍 방식 호출
 

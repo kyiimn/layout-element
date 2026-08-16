@@ -118,6 +118,10 @@ export class LayoutDocumentElement extends HTMLElement {
       }
     }
     if (event.key === 'Tab') {
+      const active = document.activeElement;
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLButtonElement || active instanceof HTMLSelectElement) {
+        return;
+      }
       const handled = this._editManager.navigateByTab(event.shiftKey);
       if (handled) {
         event.preventDefault();
