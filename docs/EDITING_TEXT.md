@@ -1131,7 +1131,7 @@ const handledReverse = manager.navigateByTab(true);
 | 트리플 클릭 | 단락 전체 텍스트 선택 |
 | 마우스 드래그 | `mousedown` 위치를 anchor로, 마우스 위치를 focus로 하는 선택 영역 생성 |
 | 드래그 중 마우스 이동 | `requestAnimationFrame`과 저장된 최신 좌표를 사용해 빠른 이동에도 선택 영역이 정확히 따라간다. `_onMouseMove`는 `clientX`/`clientY`를 즉시 저장하고, 실제 계산은 `requestAnimationFrame` 콜백에서 수행한다. |
-| `MouseUp` | 드래그 상태를 종료하고 문서 전체의 `mousemove` 리스너를 제거한다. |
+| `MouseUp` | 드래그 상태를 종료하고 문서 전체의 `mousemove` 리스너를 제거한다. `_wasDragged === true`이면 `EditManager._suppressLayoutClick()`로 후속 `click` 이벤트를 소비하여 `LayoutSelectionController._onClick`이 텍스트 선택을 가로채지 못하도록 한다. |
 
 ### 5.1 클릭 이벤트 흐름
 
@@ -1185,6 +1185,7 @@ const handledReverse = manager.navigateByTab(true);
    - `_isMouseDown = false`, `_selectionAnchor = null`.
    - 예약된 rAF를 취소.
    - document에서 `mousemove` 리스너 제거.
+   - `_wasDragged === true`이면 `EditManager._suppressLayoutClick()` 호출. 이 호출은 window capture phase에 일회성 `click` 리스너를 등록하여, 드래그 종료 직후에 발생하는 `click` 이벤트가 `LayoutSelectionController._onClick`에 도달하지 못하도록 소비한다. 마우스가 paragraph를 벗어나거나 오버랩된 다른 요소 위에서 `mouseup`이 발생해도, `mousedown`으로 시작된 드래그 시퀀스가 `mouseup`까지 마우스 이벤트의 소유권을 유지하여 텍스트 선택이 다른 요소 선택으로 가로채이지 않는다. `click`이 발생하지 않으면 200ms 타임아웃 후 자동 제거된다.
 
 ### 5.4 더블클릭
 

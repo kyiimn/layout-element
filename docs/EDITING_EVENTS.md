@@ -935,7 +935,7 @@ interface EditModeState {
 
 ### 11.1 개요
 
-브라우저는 `mouseup` 이후 자동으로 `click` 이벤트를 발생시킨다. 편집 액션(삽입 완료/취소, 드래그/리사이즈 완료, Place Gun 배치) 직후 이 click이 `LayoutSelectionController._onClick`에 의해 레이아웃 선택을 해제하는 것을 방지하기 위해, `EditManager`는 `_suppressLayoutClick()` 메서드를 사용한다.
+브라우저는 `mouseup` 이후 자동으로 `click` 이벤트를 발생시킨다. 편집 액션(삽입 완료/취소, 레이아웃 드래그/리사이즈 완료, Place Gun 배치, 텍스트 드래그 선택 완료) 직후 이 click이 `LayoutSelectionController._onClick`에 의해 레이아웃 선택을 해제하거나 다른 box를 선택하는 것을 방지하기 위해, `EditManager`는 `_suppressLayoutClick()` 메서드를 사용한다.
 
 ### 11.2 메커니즘
 
@@ -952,6 +952,7 @@ interface EditModeState {
 3. **드래그 이동 완료 직후** (`LayoutEditController._onMouseUp`): `dragMoved === true`일 때 호출.
 4. **리사이즈 완료 직후** (`LayoutEditController._onResizeMouseUp`): `moved === true`일 때 호출.
 5. **Place Gun 배치 직후** (`PlaceGunController`): 배치 후 click이 선택을 해제하지 않도록 방지.
+6. **텍스트 드래그 선택 완료 직후** (`TextEditController._onMouseUp`): `_wasDragged === true`일 때 호출. 마우스가 paragraph를 벗어나거나 오버랩된 다른 요소 위에서 `mouseup`이 발생해도, 후속 click이 `LayoutSelectionController._onClick`에 도달하여 텍스트 선택을 가로채고 다른 box를 선택하는 것을 방지한다.
 
 ### 11.4 동작 흐름
 

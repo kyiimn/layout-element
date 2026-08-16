@@ -644,6 +644,16 @@ export class TextEditController {
       this._mousemoveRafId = null;
     }
     document.removeEventListener("mousemove", this._handleMouseMove);
+
+    // 텍스트 드래그 선택이 있었으면 후속 click 이벤트가 LayoutSelectionController
+    // _onClick에 도달해 선택을 가로채는 것을 방지한다.
+    // 드래그 중 마우스가 paragraph를 벗어나거나 오버랩된 다른 요소 위에서
+    // mouseup이 발생해도, mousedown으로 시작된 드래그 시퀀스가 mouseup까지
+    // 마우스 이벤트의 소유권을 가져가야 한다.
+    if (this._wasDragged) {
+      this._manager._suppressLayoutClick();
+    }
+
     if (this._cursorModel.selection) {
       this._manager._notifySelectionEnd(this);
       this._manager._notifyCursorMove(this);
