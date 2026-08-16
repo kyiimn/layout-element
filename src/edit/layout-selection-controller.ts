@@ -681,6 +681,16 @@ export class LayoutSelectionController {
 
     if (box.hasAttribute('text-focused')) return;
 
+    // stopPropagation()이 textarea blur 전파를 차단하므로, _focusedController가
+    // 갱신되지 않는다. 클릭한 box가 포커스된 paragraph의 부모가 아니면 명시적으로 blur.
+    const focusedParagraph = manager.focusedParagraph;
+    if (focusedParagraph) {
+      const focusedParentBox = focusedParagraph.parentElement;
+      if (focusedParentBox instanceof LayoutBoxElement && focusedParentBox !== box) {
+        manager.blurParagraph();
+      }
+    }
+
     event.stopPropagation();
     if (this._isEventFromDescendantLayout(event, box)) return;
 
