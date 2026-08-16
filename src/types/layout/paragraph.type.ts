@@ -27,6 +27,19 @@ import { TextBlockData } from "./text/text-block.type";
  *   ]
  * }
  */
+
+/**
+ * paragraph가 다른 요소의 overlay(텍스트 회피) 대상이 될지 제어한다.
+ *
+ * `ImageData.overlapMode`와 대칭 구조이지만, paragraph는 텍스트 영역이므로
+ * 이미지의 `'path'` 모드(투명 픽셀 경로 추종)는 적용하지 않는다.
+ *
+ * - `'box'`: (기본값) paragraph를 감싼 박스가 다른 paragraph의 텍스트 회피 대상이 된다.
+ * - `'none'`: paragraph를 감싼 박스가 다른 paragraph의 텍스트 회피 대상에서 제외된다.
+ *   byline처럼 본문과 시각적으로 겹치되 텍스트가 회피하지 않아야 하는 영역에 사용한다.
+ */
+export type ParagraphOverlapMode = 'box' | 'none';
+
 export type ParagraphData = {
   /** 타입 식별자 (리터럴) */
   type: 'paragraph';
@@ -61,4 +74,17 @@ export type ParagraphData = {
 
   /** 렌더링 순서 (z-index) */
   zIndex?: number;
+
+  /**
+   * 다른 paragraph가 이 paragraph를 감싼 박스를 텍스트 회피 대상으로 취급할지 제어.
+   * 생략 시 `'box'`(회피 대상)가 적용된다.
+   *
+   * `'none'`으로 설정하면 다른 paragraph가 이 박스와 겹쳐도 텍스트를 회피하지 않는다.
+   * byline처럼 본문과 시각적으로 겹치되 텍스트 회피가 필요 없는 영역에 사용한다.
+   *
+   * @example
+   * // byline paragraph — 다른 paragraph가 이 영역을 회피하지 않음
+   * { type: 'paragraph', content: "기자 이름", overlapMode: 'none' }
+   */
+  overlapMode?: ParagraphOverlapMode;
 }

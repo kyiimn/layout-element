@@ -3,7 +3,7 @@ import { TextEditController } from "@/edit/text-edit-controller";
 import { EditManager } from "@/edit/edit-manager";
 import { DEFAULT_LINE_GAP } from "@/constants";
 import { ColorRegistry, FontLoader } from "@/resource";
-import { InheritStyle, ParagraphData, ParagraphStyle, PrintPostData, PrintPostDataChar, RenderCompleteEventDetail, TextBlockData, TextStyle } from "@/types";
+import { InheritStyle, ParagraphData, ParagraphOverlapMode, ParagraphStyle, PrintPostData, PrintPostDataChar, RenderCompleteEventDetail, TextBlockData, TextStyle } from "@/types";
 import { checkOverlap, genUUID, valueEqual, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay } from "@/utils";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutImageElement } from "./image.element";
@@ -35,6 +35,8 @@ export class LayoutParagraphElement extends HTMLElement {
   private _textStyle: TextStyle;
 
   private _zIndex: number;
+
+  private _overlapMode: ParagraphOverlapMode = 'box';
 
   private _editableText: boolean = false;
   private _editController: TextEditController | null = null;
@@ -406,6 +408,7 @@ export class LayoutParagraphElement extends HTMLElement {
     if (data.textStyle !== undefined) this._textStyle = data.textStyle;
     if (data.paragraphStyle !== undefined) this._paragraphStyle = data.paragraphStyle;
     if (data.zIndex !== undefined) this._zIndex = data.zIndex;
+    if (data.overlapMode !== undefined) this._overlapMode = data.overlapMode;
 
     this._sourceContent = data.content;
     if (this._model && typeof data.content === 'string') this._model.textContent = data.content;
@@ -432,6 +435,7 @@ export class LayoutParagraphElement extends HTMLElement {
       paragraphStyle: this._paragraphStyle,
       textStyle: this._textStyle,
       zIndex: this._zIndex,
+      overlapMode: this._overlapMode,
       type: this.type,
     };
   }
@@ -642,11 +646,15 @@ export class LayoutParagraphElement extends HTMLElement {
     // paragraph 기준으로 다시 한 번 필터링한다.
     const list: LayoutBoxElement[] = this.parentElement.overlayElements
       .filter(el => {
-        // overlapMode === 'none'인 이미지 박스는 checkOverlap() 이전에 제외하여
+        // overlapMode === 'none'인 이미지/paragraph 박스는 checkOverlap() 이전에 제외하여
         // getBoundingClientRect() 강제 리플로우 비용을 피한다.
         if (el.contentType === 'image') {
           const imgEl = el.contentElement as LayoutImageElement | null;
           if (imgEl && imgEl.overlapMode === 'none') return false;
+        }
+        if (el.contentType === 'paragraph') {
+          const paraEl = el.contentElement as LayoutParagraphElement | null;
+          if (paraEl && paraEl.overlapMode === 'none') return false;
         }
         return checkOverlap(el, this);
       });
@@ -654,11 +662,15 @@ export class LayoutParagraphElement extends HTMLElement {
     const self: any = this;
 
     let overlay = this.parentElement.items.filter(i => i.type === 'box' && i !== self && i.zIndex > this.zIndex) as LayoutBoxElement[];
-    // overlapMode === 'none'인 이미지 박스는 checkOverlap() 이전에 제외
+    // overlapMode === 'none'인 이미지/paragraph 박스는 checkOverlap() 이전에 제외
     overlay = overlay.filter(i => {
       if (i.contentType === 'image') {
         const imgEl = i.contentElement as LayoutImageElement | null;
         if (imgEl && imgEl.overlapMode === 'none') return false;
+      }
+      if (i.contentType === 'paragraph') {
+        const paraEl = i.contentElement as LayoutParagraphElement | null;
+        if (paraEl && paraEl.overlapMode === 'none') return false;
       }
       return true;
     });
@@ -762,6 +774,24 @@ export class LayoutParagraphElement extends HTMLElement {
   get type() { return 'paragraph' as const; }
 
   get zIndex() { return this._zIndex; }
+
+  /**
+   * 다른 paragraph가 이 paragraph를 감싼 박스를 텍스트 회피 대상으로 취급할지 제어한다.
+   *
+   * `'none'`으로 변경하면 다른 paragraph가 이 박스와 겹쳐도 텍스트를 회피하지 않는다.
+   * 변경 시 영향받는 형제 paragraph들을 재렌더링하도록 부모 box에 요청한다.
+   *
+   * @param value - 오버랩 모드 (`'box'` | `'none'`)
+   */
+  set overlapMode(value: ParagraphOverlapMode) {
+    if (this._overlapMode === value) return;
+    this._overlapMode = value;
+    this.parentElement?.requestRerenderAffectedParagraphs();
+  }
+
+  get overlapMode(): ParagraphOverlapMode {
+    return this._overlapMode;
+  }
 
   /**
    * 구조 변경 플래그를 설정하고 `scheduleRender()`를 호출한다.
