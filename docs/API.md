@@ -1090,7 +1090,7 @@ class TextLayoutEngine {
   get previousLineCount: number;
   get previousOverflow: number;
   get widthRatio: number;        // 장평 (기본 0.8)
-  get spaceRatio: number;        // 공백 너비 (em, 기본 0.25)
+  get spaceRatio: number;        // 공백 너비 (em, 기본 0.5)
   get indent: number;             // 문단 첫 줄 들여쓰기 비율 (fontSize 대비, 기본 0)
   get columnWidths: number[];
 
@@ -1183,7 +1183,7 @@ public genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaratio
  *
  * - `widthRatio` → CSS `scale` 적용 (장평)
  * - 반각 문자 → `min-width: 0.35em`
- * - 전각 문자 → `min-width: 0.15em`
+ * - 전각 문자 → `min-width: 0.5em`
  * - 공백 → `min-width: ${spaceRatio}em`
  *
  * @param char - 단일 글자
@@ -2721,7 +2721,7 @@ type TextStyle = {
   fontSize?: number;       // mm, 기본 4
   letterSpacing?: number;  // em
   widthRatio?: number;     // 장평, 기본 0.8
-  spaceRatio?: number;     // 공백 최소 너비 (em), 기본 0.25
+  spaceRatio?: number;     // 공백 최소 너비 (em), 기본 0.5
   indent?: number;         // 문단 첫 줄 들여쓰기 (fontSize 대비 비율, 0.0~1.0), 기본 0
 };
 ```
@@ -2926,7 +2926,7 @@ type PlaceGunChangeEventDetail = {
 | `DEFAULT_LINE_GAP` | `1.25` | — | `lineHeight = fontSize × lineGap`. |
 | `DEFAULT_PPM` | `96 / 25.4` | px/mm | 화면 DPI 기준 픽셀/mm 비율. |
 | `DEFAULT_IMAGE_DPI` | `72` | DPI | 이미지 기본 해상도. |
-| `DEFAULT_SPACE_RATIO` | `0.25` | em | 공백 최소 너비. |
+| `DEFAULT_SPACE_RATIO` | `0.5` | em | 공백 최소 너비. |
 | `DEFAULT_LETTER_SPACING` | `-0.1` | em | 자간. |
 | `DEFAULT_WIDTH_RATIO` | `0.8` | — | 장평 (글자 가로폭 비율). |
 | `DEFAULT_TEXT_ALIGN` | `'justify'` | — | 양쪽 정렬. |

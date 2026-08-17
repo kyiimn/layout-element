@@ -21,7 +21,7 @@
  *
  * `spaceRatio`는 공백 문자의 최소 너비 비율(em 단위)을 설정한다.
  * 공백 문자의 렌더링 너비는 `spaceRatio × fontSizePx`로 제한되며,
- * 기본값은 0.15로 반각 문자보다 좁은 공백을 표현한다.
+ * 기본값은 0.5로 전각 문자의 절반 너비 공백을 표현한다.
  *
  * @example
  * // 올바른 사용 — ColorRegistry에 등록된 색상 이름, FontLoader에 등록된 폰트 family

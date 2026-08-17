@@ -962,7 +962,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `lineHeight` | `number` | 줄 높이(mm) |
 | `overflow` | `number` | 오버플로우된 문자 수 |
 | `widthRatio` | `number` | 장평 비율 |
-| `spaceRatio` | `number` | 공백 너비 비율 (em 단위). 기본값: 0.15 |
+| `spaceRatio` | `number` | 공백 너비 비율 (em 단위). 기본값: 0.5 |
 | `indent` | `number` | 첫 줄 들여쓰기 비율 (fontSize 대비, 0.0~1.0). 기본값: 0 |
 | `columnWidths` | `number[]` | 컬럼별 너비(mm) 배열 |
 | `textContent` | `string \| (string \| TextBlockData)[]` | 현재 입력 콘텐츠 |
@@ -1004,7 +1004,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `DEFAULT_FONT_WEIGHT` | `400` | 기본 폰트 굵기 |
 | `DEFAULT_PPM` | `96 / 25.4` | 기본 pixels-per-mm |
 | `DEFAULT_IMAGE_DPI` | `72` | 기본 이미지 DPI |
-| `DEFAULT_SPACE_RATIO` | `0.15` | 기본 공백 너비 비율 (em) |
+| `DEFAULT_SPACE_RATIO` | `0.5` | 기본 공백 너비 비율 (em) |
 
 `_lineHeight` 계산:
 
