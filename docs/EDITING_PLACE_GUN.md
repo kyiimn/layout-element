@@ -383,7 +383,9 @@ Place Gun이 활성 상태이고 다음으로 쏠 항목의 `contentType === 'el
 
 ## 5. 커서 변경
 
-Place Gun이 활성 상태면 `<x-layout-document>`의 `style.cursor`가 `'copy'`로 설정된다. 비활성(비었거나 일시정지)이면 빈 문자열로 복원된다.
+Place Gun이 활성 상태면 이 컨트롤러가 속한 `EditManager`가 관리하는 `<x-layout-document>` 요소의 `style.cursor`가 `'copy'`로 설정된다. 비활성(비었거나 일시정지)이면 빈 문자열로 복원된다.
+
+`PlaceGunController`는 per-document `EditManager`에 귀속되므로, 다른 문서 요소의 커서는 변경하지 않는다 — 다른 문서는 자신의 `EditManager`/`PlaceGunController` 인스턴스가 독립적으로 커서를 관리한다.
 
 ---
 

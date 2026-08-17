@@ -248,7 +248,7 @@ focus:  { row: currentCell.row, col: maxCol }
 
 **모든 모드에서 동작** (레이아웃 편집 모드, 읽기 모드, 텍스트 편집 모드 포함; 삽입 모드, Place Gun, spacePressed 제외). 셀을 단순 클릭(드래그 없음)하면:
 - `LayoutSelectionController._onMouseDown`에서 클릭된 TD의 `cellLabel`을 좌표로 변환
-- 모든 테이블의 기존 셀 블록을 해제(`kc.selection = null` + overlay 클리어)
+- 같은 문서(`EditManager.docEl` 하위) 내 모든 테이블의 기존 셀 블록을 해제(`kc.selection = null` + overlay 클리어). EditManager는 per-document 인스턴스이므로 다른 문서의 테이블은 간섭하지 않는다.
 - 클릭된 TD의 첫 번째 box를 `selectLayout(box)`로 선택
 - `event.preventDefault()` + `event.stopImmediatePropagation()`으로 다른 핸들러 실행 차단
 - **셀 블록은 설정하지 않음** — 단일 클릭으로는 셀 블록이 활성화되지 않는다
@@ -260,7 +260,7 @@ focus:  { row: currentCell.row, col: maxCol }
 ### 4.8 셀 드래그 — range 모드 셀 블록 선택
 
 **모든 모드에서 동작** (레이아웃 편집 모드, 읽기 모드, 텍스트 편집 모드 포함; 삽입 모드, Place Gun, spacePressed 제외). table 내부 TD에서 마우스 드래그를 시작하면:
-- 모든 테이블의 기존 셀 블록을 해제(자신 포함)
+- 같은 문서(`EditManager.docEl` 하위) 내 모든 테이블의 기존 셀 블록을 해제(자신 포함). EditManager는 per-document 인스턴스이므로 다른 문서의 테이블은 간섭하지 않는다.
 - 클릭된 TD의 첫 번째 box를 `selectLayout(box)`로 선택
 - `_cellDrag` 상태 시작 (tableEl, anchor, startX/Y, moved=false)
 - **mousedown에서는 셀 블록을 설정하지 않음** — 깜빡임 방지
@@ -277,7 +277,7 @@ focus:  { row: currentCell.row, col: maxCol }
 
 `LayoutSelectionController._onMouseDown`에서:
 - `composedPath()`에 `LayoutTableElement`가 있고, `kc.selection`이 활성이지만 TD를 찾지 못한 경우 → `kc.selection = null` + overlay 클리어
-- `composedPath()`에 `LayoutTableElement`가 없고, 다른 table에 `kc.selection`이 있는 경우 → 모든 table의 `kc.selection` 클리어
+- `composedPath()`에 `LayoutTableElement`가 없고, 같은 문서(`EditManager.docEl` 하위) 내 다른 table에 `kc.selection`이 있는 경우 → 같은 문서 내 모든 table의 `kc.selection` 클리어. EditManager는 per-document 인스턴스이므로 다른 문서의 테이블은 간섭하지 않는다.
 - table 영역 클릭이지만 selectable box를 찾지 못한 경우 → marquee 시작 안 함
 
 ### 4.10 range 모드와 EditManager selection 동기화
@@ -903,7 +903,8 @@ class TableKeyboardController {
   /**
    * TD 요소를 전달하여 셀 블록 단일 선택을 설정한다.
    * TD의 cellLabel에서 좌표를 추출하여 selection을 설정하고 overlay를 갱신한다.
-   * 다른 테이블의 기존 selection은 해제한다.
+   * 같은 문서(EditManager.docEl 하위) 내 다른 테이블의 기존 selection은 해제한다.
+   * — EditManager는 per-document 인스턴스이므로 다른 문서의 테이블은 간섭하지 않는다.
    */
   selectCell(td: LayoutTableCellElement): void;
 

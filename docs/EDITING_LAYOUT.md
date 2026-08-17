@@ -579,20 +579,24 @@ this._layoutEditController.attach();
 
 ### 2.3 `LayoutSelectionController` 클릭 선택 처리
 
-`LayoutSelectionController`는 처음부터 문서(document) 수준에서 `click` 이벤트를 캡처 단계로 처리한다. 편집 모드(`layoutEditMode`)와 무관하게 동작하며, **선택만** 처리한다. 드래그/리사이즈는 `LayoutEditController`가 담당한다.
+`LayoutSelectionController`는 per-document `EditManager`가 생성자에서 자신이 관리하는 `<x-layout-document>` 요소(`docEl`)에 부착한다. 문서(document) 요소 수준에서 `click`/`mousedown`/`dblclick`/`contextmenu` 이벤트를 캡처 단계로 처리하며, 편집 모드(`layoutEditMode`)와 무관하게 동작하고 **선택만** 처리한다. 드래그/리사이즈는 `LayoutEditController`가 담당한다. EditManager가 per-document 인스턴스이므로, 셀 블록 해제 순회 등은 모두 `docEl` 하위 트리로 한정되며 다른 문서 요소와 간섭하지 않는다.
+
 ```typescript
-// LayoutSelectionController는 항상 부착됨
-this._selectionController = new LayoutSelectionController(document.documentElement);
+// EditManager 생성자에서 항상 부착됨 (edit-manager.ts)
+this._selectionController = new LayoutSelectionController(this._docEl, this);
 this._selectionController.attach();
 ```
 
-`attach()`는 다음 리스너를 등록한다:
+`attach()`는 다음 리스너를 `docEl`에 등록한다:
 
 | 이벤트 | 단계 | 콜백 | 목적 |
 |--------|------|------|------|
+| `mousedown` | capture | `_onMouseDown` | 셀 드래그 시작 / 빈 영역 마키 시작 / 셀 블록 해제 |
 | `click` | capture | `_onClick` | 단일/다중 선택 |
+| `dblclick` | capture | `_onDblClick` | 텍스트 편집 모드 진입 |
+| `contextmenu` | capture | `_onContextMenu` | 컨텍스트 메뉴 디스패치 |
 
-`detach()`는 위 리스너를 제거한다.
+`detach()`는 위 리스너를 모두 제거한다.
 
 #### `_onClick` 처리 흐름
 
