@@ -132,6 +132,7 @@ export class TextEditCoordinateMapper {
         const line = lines[lineIndex];
         lineStartOffsets.push(sourceOffset);
         let lastVisibleSourceOffset: number | null = null;
+        let lineTrailingSpaces = 0;
 
         for (let p = 0; p < line.parts.length; p++) {
           const part = line.parts[p];
@@ -164,6 +165,7 @@ export class TextEditCoordinateMapper {
             const afterLeading = isFirst ? original.slice(leadingSpaces) : original;
             let trailingSpaces = 0;
             for (let k = afterLeading.length - 1; k >= 0 && afterLeading[k] === ' '; k--) trailingSpaces++;
+            lineTrailingSpaces += trailingSpaces;
             for (let s = 0; s < trailingSpaces; s++) {
               if (lastVisibleSourceOffset !== null) {
                 this._sourceToPlacement.set(sourceOffset, {
@@ -179,8 +181,11 @@ export class TextEditCoordinateMapper {
         // phantom end placement: trailing space 없이 끝나는 라인의 마지막 가시 문자 다음 offset.
         // 이 offset은 다음 라인 첫 글자의 offset과 동일하므로 _sourceToPlacement와 충돌한다.
         // 따라서 별도 맵(_lineEndPlacements)에 저장하여 라인 끝 커서 배치에 사용한다.
+        // trailing space가 있는 라인은 _sourceToPlacement에 이미 atEndOfChar: true로 설정되어 있으므로
+        // phantom end가 불필요하며, 설정하면 다음 라인 첫 글자 offset에 잘못 배치되어
+        // ArrowRight crossed → none 전환 시 커서가 이전 라인으로 돌아가는 버그가 발생한다.
         // endOfBlock 라인은 별도 처리(아래)에서 _sourceToPlacement에 설정하므로 제외.
-        if (!line.endOfBlock && lastVisibleSourceOffset !== null) {
+        if (!line.endOfBlock && lineTrailingSpaces === 0 && lastVisibleSourceOffset !== null) {
           this._lineEndPlacements.set(sourceOffset, {
             sourceOffset: lastVisibleSourceOffset,
             atEndOfChar: true,
