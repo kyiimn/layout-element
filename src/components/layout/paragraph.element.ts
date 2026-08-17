@@ -890,6 +890,7 @@ export class LayoutParagraphElement extends HTMLElement {
       this._editController = null;
     }
     this._editableText = value;
+    this.markStructureChangedAndRender();
   }
 
   /**

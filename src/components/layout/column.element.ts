@@ -116,33 +116,68 @@ export class LayoutColumnElement extends HTMLElement {
     return partEl;
   }
 
-  /** 파트 요소에 스타일, 너비, `marginLeft`, `justifyContent`를 적용한다. */
+  /**
+   * 파트 요소에 스타일, 너비, `marginLeft`, `justifyContent`를 적용한다.
+   *
+   * `part.charOffsets`가 정의되어 있으면 flexbox 정렬을 우회하고
+   * `justify-content: flex-start` + `position: relative` + `height: 100%`로 설정하여
+   * 각 span이 `position: absolute; left: ${charOffset}mm; top: 0`으로 정확히 배치되도록 한다.
+   * `height: 100%`는 absolute 자식이 플로우에서 벗어나 part div가 높이를 잃지 않도록 보장한다.
+   * `charOffsets`가 없으면 기존 flexbox `justify-content` 정렬 경로를 유지한다.
+   */
   private _applyPartStyle(partEl: HTMLDivElement, part: TextPartData, _lineData: TextLineData, curPartStyle: Record<string, string>, partJustify: string | undefined): void {
     partEl.style.cssText = '';
+    const useCharOffsets = part.charOffsets !== undefined;
+    const effectiveJustify = useCharOffsets ? 'flex-start' : (partJustify || curPartStyle.justifyContent);
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(partEl.style, {
       ...curPartStyle,
       width: `${part.width}mm`,
       marginLeft: `${part.left}mm`,
-      justifyContent: partJustify || curPartStyle.justifyContent,
+      justifyContent: effectiveJustify,
+      ...(useCharOffsets && { position: 'relative', height: '100%' }),
     });
   }
 
   /** 글자(span) DOM 요소를 생성하고 `genCharStyle()` 결과와 오프셋 속성을 적용한다. */
-  private _createSpanElement(char: string, renderedOffset: number, sourceOffset: number): HTMLSpanElement {
+  private _createSpanElement(char: string, renderedOffset: number, sourceOffset: number, charOffsetMm: number | undefined, textBlockStyle: TextBlockStyle | undefined): HTMLSpanElement {
     const charEl = document.createElement('span');
-    this._applySpanStyle(charEl, char, renderedOffset, sourceOffset);
+    this._applySpanStyle(charEl, char, renderedOffset, sourceOffset, charOffsetMm, textBlockStyle);
     return charEl;
   }
 
-  /** 글자 요소에 `genCharStyle()` 스타일, `data-offset`, `data-source-offset`, `innerText`를 적용한다. */
-  private _applySpanStyle(charEl: HTMLSpanElement, char: string, renderedOffset: number, sourceOffset: number): void {
-    const charStyle = this.model!.genCharStyle(char);
+  /**
+   * 글자 요소에 `genCharStyle()` 스타일, `data-offset`, `data-source-offset`, `innerText`를 적용한다.
+   *
+   * `textBlockStyle`이 제공되면 `genCharStyle`/`getCharWidths`에 전달하여 블록별
+   * `fontSize`/`fontFamily` 오버라이드가 span 폭에 반영되도록 한다. 이는
+   * `_layoutTextIntoColumns`의 줄바꿈 계산(`_charWidthMm(char, textBlockStyle)`)과
+   * 동일한 폭을 사용하도록 보장한다.
+   *
+   * `charOffsetMm`가 제공되면(정렬 계산 경로) span에 `position: absolute; left: ${charOffsetMm}mm; top: 0`를
+   * 적용하여 부모 파트 기준 절대 좌표로 직접 배치한다. flexbox 자연 위치 연산을 거치지 않으므로
+   * 브라우저 렌더링 결과가 계산된 `charOffsets[j]`와 정확히 일치한다.
+   * `top: 0`은 수직 정렬을 부모 part div(`alignItems: baseline`이 무시되므로 부모 top 기준)에 맡긴다 —
+   * 폰트 메트릭 기반 렌더링에서 span 높이는 `lineHeight`와 일치하므로 top=0이면 시각적으로 올바르다.
+   * `charOffsetMm === undefined`이면 레거시 flexbox 정렬 경로를 유지한다.
+   */
+  private _applySpanStyle(charEl: HTMLSpanElement, char: string, renderedOffset: number, sourceOffset: number, charOffsetMm: number | undefined, textBlockStyle: TextBlockStyle | undefined): void {
+    const charStyle = this.model!.genCharStyle(char, textBlockStyle);
     charEl.style.cssText = '';
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, charStyle);
+    if (charOffsetMm !== undefined) {
+      charEl.style.position = 'absolute';
+      charEl.style.left = `${charOffsetMm}mm`;
+      charEl.style.top = '0';
+    }
     charEl.dataset.offset = String(renderedOffset);
     charEl.dataset.sourceOffset = String(sourceOffset);
+    if (charOffsetMm !== undefined) {
+      charEl.dataset.charOffset = String(charOffsetMm);
+    } else {
+      delete charEl.dataset.charOffset;
+    }
 
-    const { owidth, swidth } = this.model!.getCharWidths(char);
+    const { owidth, swidth } = this.model!.getCharWidths(char, textBlockStyle);
     charEl.dataset.owidth = String(owidth);
     charEl.dataset.swidth = String(swidth);
     let inner = charEl.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
@@ -163,10 +198,13 @@ export class LayoutColumnElement extends HTMLElement {
    * `Object.assign(style, ...)` + `cssText = ''` + inner span 처리는 매 span마다
    * DOM 쓰기를 발생시키므로 변경이 없으면 전체 스킵한다.
    *
+   * `charOffsetMm`가 변경되면 스킵하지 않는다 (정렬 변경 시 재적용 필요).
+   *
    * @param charEl - 재사용 대상 span
    * @param char - 현재 글자
    * @param renderedOffset - 현재 렌더링 오프셋
    * @param sourceOffset - 현재 소스 오프셋
+   * @param charOffsetMm - 절대 정렬 오프셋 (undefined = 레거시 경로)
    * @returns 스킵했으면 `true`, 스타일을 적용했으면 `false`
    */
   private _skipSpanStyleIfUnchanged(
@@ -174,6 +212,7 @@ export class LayoutColumnElement extends HTMLElement {
     char: string,
     renderedOffset: number,
     sourceOffset: number,
+    charOffsetMm?: number,
   ): boolean {
     if (
       charEl.dataset.offset === String(renderedOffset) &&
@@ -181,7 +220,11 @@ export class LayoutColumnElement extends HTMLElement {
     ) {
       const inner = charEl.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
       if (inner && inner.textContent === char) {
-        return true;
+        const existingCharOffset = charEl.dataset.charOffset;
+        const newCharOffsetStr = charOffsetMm !== undefined ? String(charOffsetMm) : undefined;
+        if (existingCharOffset === newCharOffsetStr) {
+          return true;
+        }
       }
     }
     return false;
@@ -318,20 +361,26 @@ export class LayoutColumnElement extends HTMLElement {
 
         let nextRef: Node | null = partEl.firstChild;
 
+        const charOffsets = part.charOffsets;
+
         for (let j = 0; j < content.length; j++) {
           const char = content[j];
           const thisCharSourceOffset = String(curSourceOffset);
           const existingSpan = existingSpans.get(thisCharSourceOffset);
 
+          const offsetMm = charOffsets !== undefined && j < charOffsets.length
+            ? charOffsets[j]
+            : undefined;
+
           let charEl: HTMLSpanElement;
           if (existingSpan) {
             charEl = existingSpan;
-            if (!this._skipSpanStyleIfUnchanged(charEl, char, curRenderedOffset, curSourceOffset)) {
-              this._applySpanStyle(charEl, char, curRenderedOffset, curSourceOffset);
+            if (!this._skipSpanStyleIfUnchanged(charEl, char, curRenderedOffset, curSourceOffset, offsetMm)) {
+              this._applySpanStyle(charEl, char, curRenderedOffset, curSourceOffset, offsetMm, textBlockStyle);
             }
             existingSpans.delete(thisCharSourceOffset);
           } else {
-            charEl = this._createSpanElement(char, curRenderedOffset, curSourceOffset);
+            charEl = this._createSpanElement(char, curRenderedOffset, curSourceOffset, offsetMm, textBlockStyle);
           }
 
           if (nextRef === charEl) {

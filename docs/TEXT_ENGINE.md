@@ -402,6 +402,10 @@ private _charWidthMmFromFont(char: string, textBlockStyle: TextBlockStyle | unde
 5. 컬럼이 꽉 차면 다음 컬럼으로 이동. 마지막 컬럼이면 `_overflow` 증가
 6. 마지막 컬럼 처리 후 `endOfText` 플래그 설정
 7. **`_applyLineBreakRules()` 후처리** — 한글 조판 금칙문자 규칙 적용 (§22 참조)
+8. **`_computeCharOffsets()` 후처리** — 각 파트의 글자별 x 오프셋을 `textAlign`에 따라 산출.
+   `_applyLineBreakRules()`가 글자를 이동시킨 후 최종 배치를 기준으로 정렬 위치를 계산한다.
+   결과는 `TextPartData.charOffsets`에 저장되며, flexbox `justify-content`에 의존하지 않고
+   렌더링 시 글자 위치를 결정론적으로 결정한다 (§9.3, §11.5 참조).
 
 ### 7.2 블록 경계 처리
 
@@ -562,11 +566,40 @@ export type TextLineData = {
 
 ```ts
 export type TextPartData = {
-  content: string[]; // 글자 배열
-  left: number;      // mm 단위 좌측 여백
-  width: number;     // mm 단위 폭
+  content: string[];     // 글자 배열
+  left: number;          // mm 단위 좌측 여백
+  width: number;         // mm 단위 폭
+  charOffsets?: number[]; // 각 글자의 파트 내 x 오프셋 (mm, 정렬 반영)
 };
 ```
+
+`charOffsets`는 `_layoutTextIntoColumns()` 이후 `_computeCharOffsets()` 후처리 패스가 산출한다.
+`content[i]`의 좌측 끝 x 좌표(파트 기준)가 `charOffsets[i]`에 저장된다.
+이 값은 `textAlign`(`left`/`right`/`center`/`justify`)에 따른 정렬 후 위치로,
+flexbox `justify-content`에 의존하지 않고 렌더링 시 글자 위치를 결정론적으로 결정한다.
+
+공식 (여기서 `Σ charWidth[0..i-1]`는 `_stripSpaces`로 선행/후행 공백이 제거된
+스트리핑된 글자들의 누적 폭):
+
+- `left`:    `offset[i] = Σ charWidth[0..i-1]`
+- `right`:   `offset[i] = (partWidth - Σ charWidth) + Σ charWidth[0..i-1]`
+- `center`:  `offset[i] = (partWidth - Σ charWidth) / 2 + Σ charWidth[0..i-1]`
+- `justify`: 첫 글자는 0, 마지막 글자는 `partWidth - lastCharWidth`,
+  중간 간격 `(partWidth - Σ charWidth) / (n - 1)` 균등 분배.
+  마지막 줄(`endOfBlock`) 또는 글자 1개 → `left`와 동일.
+
+글자 폭은 `getCharWidths(char).swidth`를 사용하며, 여기에는 장평(`widthRatio`)과
+`letterSpacing`이 이미 포함되어 있다. 따라서 `charOffsets` 산출 시 이들을
+별도로 더하지 않는다.
+
+`undefined`인 경우 레거시 호환 — `LayoutColumnElement.renderText()`는
+기존 flexbox `justify-content` 경로로 폴백한다.
+
+**스트리핑 동기화**: `LayoutColumnElement.renderText()`가 `_stripSpaces()`로
+렌더링하지 않는 선행/후행 공백을 제거한다. `charOffsets`는 이 스트리핑과
+동일한 범위만 산출한다(스트리핑된 공백은 offset 배열에서 제외).
+그렇지 않으면 `right`/`center`/`justify`의 `partWidth - totalWidth` 계산이
+브라우저 flexbox(스트리핑된 flex item만 배치)와 불일치한다.
 
 ### 9.4 `OverlapParts`
 
@@ -683,6 +716,12 @@ public genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaratio
   - `'justify'` → `space-between`
 - `textBlockStyle`이 있으면 폰트, 크기, 색상, 정렬 오버라이드
 
+> **`charOffsets` 오버라이드**: `LayoutColumnElement._applyPartStyle()`는
+> `part.charOffsets`가 정의되어 있으면 이 매핑을 무시하고 `justify-content: flex-start` +
+> `position: relative; height: 100%`로 설정한다. 각 span은 `position: absolute; left`로
+> 절대 좌표에 직접 배치된다 (§11.5 참조). `genPartStyle()` 자체는 레거시 호환을 위해
+> 기존 매핑을 그대로 반환한다.
+
 ### 11.4 `genCharStyle(char)`
 
 글자(char) 요소의 외부 span 스타일을 생성한다. 이중 span 구조에서 외부 span을 담당한다.
@@ -707,12 +746,84 @@ public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
 - `overflow: 'hidden'` (glyph 넘침 방지)
 - `textAlign`: `'center'`
 
+> **`charOffsets` 경로 추가 속성**: `LayoutColumnElement._applySpanStyle()`가
+> `charOffsetMm` 인자로 호출되면 외부 span에 `position: absolute; left: ${charOffsetMm}mm; top: 0`를
+> 적용하여 부모 파트 기준 절대 좌표로 직접 배치한다 (§11.5 참조).
+> `charOffsetMm === undefined`이면 레거시 flexbox 경로를 유지한다.
+
 **내부 span** (`genCharInnerStyle` 반환):
 - `display: 'inline-block'`
 - `scale`: `${widthRatio * 0.88} 1` (glyph 모양 수평 축소 — 장평)
 - `transformOrigin`: `'0 center'`
 
 > **보정 계수 `0.88`**: opentype.js의 `advanceWidth`(레이아웃 폭, side bearing 포함)와 브라우저 실제 렌더링 glyph 너비(hinting/subpixel 등으로 약간 좁음) 간의 미세한 차이를 보정하는 경험적 값. 이 보정이 없으면 외부 span의 `width`보다 내부 glyph가 약간 넓게 렌더링되어 글자가 오버플로우하거나 인접 글자와 살짝 겹치는 현상이 발생한다. **절대 변경하거나 제거해서는 안 된다.** 제거 시 시각적 정렬이 깨진다.
+
+### 11.5 `charOffsets` 기반 명시적 위치 지정 (`_computeCharOffsets`)
+
+`_computeCharOffsets()`는 `_layoutTextIntoColumns()`와 `_applyLineBreakRules()` 이후에
+실행되는 후처리 패스로, 각 파트의 글자별 x 오프셋(mm)을 `textAlign`에 따라 산출하여
+`TextPartData.charOffsets`에 저장한다. 이를 통해 flexbox `justify-content`에 의존하지
+않고 렌더링 시 글자 위치를 결정론적으로 결정한다.
+
+#### 산출 공식
+
+`_stripSpaces()`로 선행/후행 공백이 제거된 스트리핑된 글자들에 대해
+`getCharWidths(char).swidth`를 사용하여 각 글자의 폭을 구한다
+(장평 `widthRatio`와 `letterSpacing`이 이미 포함된 값).
+
+여기서 `totalWidth = Σ charWidth[i]`, `remaining = max(0, partWidth - totalWidth)`일 때:
+
+| 정렬 | 첫 글자 offset | i번째 글자 offset | 비고 |
+|------|----------------|-------------------|------|
+| `left`    | 0                          | `Σ charWidth[0..i-1]`                        | 기본 |
+| `right`   | `remaining`                | `remaining + Σ charWidth[0..i-1]`            | 우측 정렬 |
+| `center`  | `remaining / 2`            | `remaining / 2 + Σ charWidth[0..i-1]`        | 중앙 정렬 |
+| `justify` | 0                          | `Σ charWidth[0..i-1] + gap * i`              | `gap = remaining / (n - 1)`, 양끝 정렬 |
+
+`justify`의 경우 마지막 줄(`endOfBlock`)이거나 글자가 1개이면 `left`와 동일하게 처리한다
+(CSS `space-between`의 마지막 줄 동작과 일치).
+
+`textBlockStyle.textAlign`이 있으면 우선한다(블록별 오버라이드).
+
+#### 렌더링 적용 (`LayoutColumnElement.renderText`)
+
+`renderText()`는 각 span에 대해 계산된 절대 오프셋 `charOffsets[j]`를
+`_applySpanStyle()`에 직접 전달한다. flexbox 자연 위치 연산을 거치지 않고
+브라우저가 span을 지정 좌표에 직접 배치한다.
+
+```
+charOffsetMm = charOffsets[j]  // 절대 좌표 (delta 아님)
+```
+
+`_applySpanStyle()`은 `charOffsetMm !== undefined`이면 외부 span에 다음 스타일을 적용한다:
+
+```css
+position: absolute;
+left: ${charOffsetMm}mm;
+top: 0;
+```
+
+부모 part div는 `position: relative; height: 100%`로 설정되어 absolute 자식의
+기준점이 되고, absolute 자식이 플로우에서 벗어나 part div가 높이를 잃지 않도록 보장한다.
+`top: 0`은 수직 정렬을 부모 top 기준으로 고정한다 — 폰트 메트릭 기반 렌더링에서
+span 높이는 `lineHeight`와 일치하므로 top=0이면 시각적으로 올바르다.
+
+`data-char-offset` 데이터 속성에 절대 offset 값을 저장하여 diff 렌더링 시 변경 감지에 사용한다.
+
+#### 레거시 호환
+
+`charOffsets === undefined`이면(예: 외부에서 임의로 `TextPartData`를 생성한 경우)
+`renderText()`는 기존 flexbox `justify-content` 경로로 폴백한다.
+`genPartStyle()`/`genCharStyle()` 자체는 기존 동작을 그대로 반환하므로,
+`charOffsets` 경로를 사용하지 않는 기존 코드는 영향을 받지 않는다.
+
+#### headless 렌더링과의 일치성
+
+이 경로의 핵심 가치는 **편집 화면 렌더링과 PDF 생성 시 계산이 동일하다는 보장**이다.
+`charOffsets`가 산출한 mm 단위 오프셋은 ppm을 곱해 픽셀로 변환하면
+브라우저 DOM 측정값(`getBoundingClientRect()`)과 정확히 일치한다 —
+`position: absolute; left`를 사용하므로 flexbox float 연산 오차가 원천 제거된다.
+따라서 pdf-gen이 Playwright 없이 동일한 `PrintPostDataChar.rect`를 산출할 수 있다.
 
 `width`와 `scale`은 분리되어 작동한다:
 - 외부 span의 `width`는 `_charWidthMm(char)`으로 측정한 원본 폭에 장평을 곱해 정확히 고정한다. 측정값과 DOM 렌더링이 결정론적으로 일치하며, 마지막 글자가 틀을 넘어가는 현상을 방지한다.
@@ -837,7 +948,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `_initLayoutMetrics()` | 레이아웃 상태 초기화. `_lineHeight` 계산, `_columnContents`/`_overflow` 리셋 |
 | `_initStructureAndMeasureColumns()` | 컬럼 폭/간격/lineHeight 계산, 가상 컬럼 생성 후 ppm 측정 및 제거 |
 | `_parseContents()` | 입력 콘텐츠를 `\n` 단위로 분리하여 `_contents` 생성 |
-| `_layoutTextIntoColumns()` | 메인 래핑 메서드. 라인 생성, 오버랩 적용, 글자 배치를 한 번에 수행. 종료 시 `_applyLineBreakRules()` 호출 |
+| `_layoutTextIntoColumns()` | 메인 래핑 메서드. 라인 생성, 오버랩 적용, 글자 배치를 한 번에 수행. 종료 시 `_applyLineBreakRules()` → `_computeCharOffsets()` 순서로 후처리 호출 |
 | `_createLineWithParts(...)` | 라인 DOM 생성 + 오버랩 감지 + 파트/데이터 생성 |
 | `_createLineElement(textBlockStyle?)` | 줄 DOM 요소 생성 |
 | `_computeFreeRegions(lineWidth, overlapParts)` | 오버랩 영역의 여집합으로 자유 영역 계산 |
@@ -847,6 +958,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `_createPartElement(widthMm, marginLeftMm)` | 파트 DOM 요소 생성. mm 단위 CSS 적용 |
 | `_removeTrailingEmptyLine(columnContent)` | 빈 파트만 있는 마지막 줄 제거 |
 | `_applyLineBreakRules()` | 한글 조판 금칙문자(행두/행말 금지) 후처리. 인접 줄 경계의 금칙 위반 교정 (§22 참조) |
+| `_computeCharOffsets()` | 각 파트의 글자별 x 오프셋(mm)을 `textAlign`에 따라 산출. `_applyLineBreakRules()` 이후에 호출되어 `TextPartData.charOffsets`를 채움. flexbox `justify-content`에 의존하지 않고 렌더링 시 글자 위치를 결정론적으로 결정 (§9.3 참조) |
 
 ---
 

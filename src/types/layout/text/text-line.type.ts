@@ -28,6 +28,29 @@ export type TextPartData = {
 
   /** 파트의 가로 폭 (mm) - 텍스트가 배치될 수 있는 공간 */
   width: number;
+
+  /**
+   * 각 글자의 파트 내 x 오프셋 (mm, 정렬 반영).
+   *
+   * `TextLayoutEngine._computeCharOffsets()` 후처리 패스가 산출한다.
+   * `content[i]`의 좌측 끝 x 좌표(파트 기준)가 `charOffsets[i]`에 저장된다.
+   * 글자의 렌더링 폭(`genCharStyle()`의 `width`)과 무관하게,
+   * `textAlign`(`left`/`right`/`center`/`justify`)에 따른 정렬 후 위치이다.
+   *
+   * - `left`: `charOffsets[i] = Σ charWidth[0..i-1]`
+   * - `right`: `charOffsets[i] = (partWidth - Σ charWidth) + Σ charWidth[0..i-1]`
+   * - `center`: `charOffsets[i] = (partWidth - Σ charWidth) / 2 + Σ charWidth[0..i-1]`
+   * - `justify`: 첫 글자는 0, 마지막 글자는 `partWidth - lastCharWidth`,
+   *   중간 간격은 `(partWidth - Σ charWidth) / (charCount - 1)`로 균등 분배.
+   *   단, 마지막 줄(`endOfBlock`)이거나 글자가 1개이면 `left`와 동일.
+   *
+   * `undefined`인 경우 레거시 호환 — `LayoutColumnElement.renderText()`는
+   * 기존 flexbox `justify-content` 경로로 폴백한다.
+   *
+   * 글자 폭에는 `letterSpacingMm`이 포함되어 있으므로(see `_charWidthMm` 호출부),
+   * `charOffsets` 산출 시 letter-spacing을 별도로 더하지 않는다.
+   */
+  charOffsets?: number[];
 };
 
 export type TextLineData = {

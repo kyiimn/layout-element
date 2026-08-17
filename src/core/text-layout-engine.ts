@@ -285,6 +285,134 @@ export class TextLayoutEngine {
   }
 
   /**
+   * 각 파트의 글자별 x 오프셋(mm)을 `textAlign`에 따라 산출한다.
+   *
+   * `_layoutTextIntoColumns()`와 `_applyLineBreakRules()` 이후에 호출되어
+   * `TextPartData.charOffsets`를 채운다. flexbox `justify-content`에 의존하지
+   * 않고 렌더링 시 글자 위치를 결정론적으로 결정한다.
+   *
+   * 정렬 기준(브라우저 flexbox와 동일):
+   * - `left`      → 첫 글자 좌측 정렬, `offset[i] = Σ charWidth[0..i-1]`
+   * - `right`     → 우측 정렬, `offset[i] = (partWidth - Σ charWidth) + Σ charWidth[0..i-1]`
+   * - `center`    → 중앙 정렬, `offset[i] = (partWidth - Σ charWidth) / 2 + Σ charWidth[0..i-1]`
+   * - `justify`   → 양끝 정렬, 첫 글자는 0, 마지막 글자는 `partWidth - lastCharWidth`,
+   *                 중간 간격 `(partWidth - Σ charWidth) / (n - 1)` 균등 분배.
+   *                 마지막 줄(`endOfBlock`) 또는 글자 1개 → `left`와 동일.
+   *
+   * `textBlockStyle.textAlign`이 있으면 우선한다(블록별 오버라이드).
+   * COVER 라인(`parts: []`)은 건너뛴다.
+   *
+   * **스트리핑 동기화**: `LayoutColumnElement.renderText()`가 `_stripSpaces()`로
+   * 렌더링하지 않는 선행/후행 공백을 제거한다. `charOffsets`는 이 스트리핑과
+   * 동일한 범위만 산출한다(스트리핑된 공백은 offset 배열에서 제외).
+   * 그렇지 않으면 `right`/`center`/`justify`의 `partWidth - totalWidth` 계산이
+   * 브라우저 flexbox(스트리핑된 flex item만 배치)와 불일치한다.
+   *
+   * @example
+   * // justify, partWidth=100, 글자 3개, 폭 20/30/20 → total=70
+   * // gap = (100 - 70) / 2 = 15
+   * // offsets = [0, 20+15, 20+15+30+15] = [0, 35, 80]
+   */
+  private _computeCharOffsets(): void {
+    if (this._paragraphElement.editableText) {
+      return;
+    }
+    const defaultTextAlign = this.paragraphStyle?.textAlign
+      ?? this.inheritStyle?.textAlign
+      ?? DEFAULT_TEXT_ALIGN;
+
+    for (let c = 0; c < this._columnContents.length; c++) {
+      const columnContent = this._columnContents[c];
+      if (!columnContent) continue;
+
+      for (let li = 0; li < columnContent.length; li++) {
+        const line = columnContent[li];
+        if (!line || line.parts.length === 0) continue;
+
+        const textAlign = line.textBlockStyle?.textAlign ?? defaultTextAlign;
+        const isLastLineOfBlock = line.endOfBlock === true;
+        const firstOfBlock = line.firstOfBlock === true;
+        const endOfBlock = line.endOfBlock === true;
+        const partCount = line.parts.length;
+
+        for (let p = 0; p < partCount; p++) {
+          const part = line.parts[p];
+          if (!part) continue;
+          const content = part.content;
+          if (content.length === 0) {
+            part.charOffsets = [];
+            continue;
+          }
+
+          const isFirst = p === 0;
+          const isLast = p === partCount - 1;
+          let stripStart = 0;
+          let stripEnd = content.length;
+          if (isFirst && !firstOfBlock) {
+            while (stripStart < stripEnd && content[stripStart] === ' ') stripStart++;
+          }
+          if (isLast && !endOfBlock) {
+            while (stripEnd > stripStart && content[stripEnd - 1] === ' ') stripEnd--;
+          }
+          const strippedCount = stripEnd - stripStart;
+          if (strippedCount === 0) {
+            part.charOffsets = [];
+            continue;
+          }
+
+          const partWidth = part.width;
+
+          const charWidths: number[] = new Array(strippedCount);
+          let totalWidth = 0;
+          for (let i = 0; i < strippedCount; i++) {
+            const ch = content[stripStart + i]!;
+            const { swidth } = this.getCharWidths(ch, line.textBlockStyle);
+            charWidths[i] = swidth;
+            totalWidth += swidth;
+          }
+
+          const offsets = new Array<number>(strippedCount);
+          const remaining = Math.max(0, partWidth - totalWidth);
+
+          let align: 'left' | 'right' | 'center' | 'justify';
+          if (textAlign === 'center') align = 'center';
+          else if (textAlign === 'right') align = 'right';
+          else if (textAlign === 'justify') align = (isLastLineOfBlock || strippedCount === 1) ? 'left' : 'justify';
+          else align = 'left';
+
+          let cursor = 0;
+          if (align === 'left') {
+            for (let i = 0; i < strippedCount; i++) {
+              offsets[i] = cursor;
+              cursor += charWidths[i]!;
+            }
+          } else if (align === 'right') {
+            cursor = remaining;
+            for (let i = 0; i < strippedCount; i++) {
+              offsets[i] = cursor;
+              cursor += charWidths[i]!;
+            }
+          } else if (align === 'center') {
+            cursor = remaining / 2;
+            for (let i = 0; i < strippedCount; i++) {
+              offsets[i] = cursor;
+              cursor += charWidths[i]!;
+            }
+          } else {
+            const gap = strippedCount > 1 ? remaining / (strippedCount - 1) : 0;
+            for (let i = 0; i < strippedCount; i++) {
+              offsets[i] = cursor;
+              cursor += charWidths[i]! + gap;
+            }
+          }
+
+          part.charOffsets = offsets;
+        }
+      }
+    }
+  }
+
+  /**
    * 오버랩 요소(이미지 등)와의 겹침 계산.
    * 성능 최적화: `_overlayRectsMm` 캐시를 사용하여 렌더링 사이클당
    * 오버랩 요소의 mm rect를 한 번 구성 후 재사용한다.
@@ -736,6 +864,7 @@ export class TextLayoutEngine {
     }
 
     this._applyLineBreakRules();
+    this._computeCharOffsets();
 
     this._previousLineCount = this._columnContents.reduce((sum, col) => sum + col.length, 0);
     this._previousOverflow = this._overflow;
@@ -933,14 +1062,19 @@ export class TextLayoutEngine {
    * 내부 span(`genCharInnerStyle`)이 `scale`로 glyph 축소를 담당한다.
    * 공백은 `fontSize × spaceRatio`로 고정한다.
    *
+   * `textBlockStyle`이 제공되면 그 `fontSize`/`fontFamily`를 우선 사용하여
+   * `getCharWidths(char, textBlockStyle)` 및 `_charWidthMm(char, textBlockStyle)`과
+   * 동일한 폭을 반환한다. 미제공 시 paragraph `textStyle`/`inheritStyle`을 사용한다.
+   *
    * @param char - 대상 문자
+   * @param textBlockStyle - 블록 레벨 스타일 오버라이드 (선택)
    * @returns 외부 span CSS 스타일 객체
    */
-  public genCharStyle = (char: string): Partial<CSSStyleDeclaration> => {
+  public genCharStyle = (char: string, textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> => {
     const wr = this.widthRatio;
     const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
     const sr = this.spaceRatio;
-    const fs = this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
+    const fs = textBlockStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
     const cacheKey = `${char}|${wr}|${lsEm}|${sr}|${fs}`;
     const cached = this._charOuterStyleCache.get(cacheKey);
     if (cached) return cached;
@@ -950,7 +1084,7 @@ export class TextLayoutEngine {
     if (char === ' ') {
       widthMm = this.spaceRatio * fs * wr + lsMm;
     } else {
-      const rawWidthMm = this._charWidthMm(char);
+      const rawWidthMm = this._charWidthMm(char, textBlockStyle);
       widthMm = rawWidthMm * wr + lsMm;
     }
 
@@ -995,20 +1129,25 @@ export class TextLayoutEngine {
 
   /**
    * 문자의 원본 폭(mm, 장평 미적용)과 장평 적용 폭(mm)을 반환한다.
-   * 디버깅용 data 속성 저장에 사용된다.
+   *
+   * `textBlockStyle`이 제공되면 그 fontSize/letterSpacing을 우선 사용하여
+   * `_layoutTextIntoColumns`의 줄바꿈 계산(`_charWidthMm(char, textBlockStyle)`)과
+   * 동일한 폭을 반환한다. 미제공 시 paragraph `textStyle`/`inheritStyle`을 사용한다.
+   *
    * @param char - 대상 문자
+   * @param textBlockStyle - 블록 레벨 스타일 오버라이드 (선택)
    * @returns `{ owidth: 원본 폭 mm, swidth: 장평 적용 폭 mm }`
    */
-  public getCharWidths = (char: string): { owidth: number; swidth: number } => {
+  public getCharWidths = (char: string, textBlockStyle?: TextBlockStyle): { owidth: number; swidth: number } => {
     const wr = this.widthRatio;
-    const fontSize = this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
+    const fontSize = textBlockStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
     const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
     const lsMm = lsEm * fontSize;
     let owidth: number;
     if (char === ' ') {
       owidth = this.spaceRatio * fontSize;
     } else {
-      owidth = this._charWidthMm(char);
+      owidth = this._charWidthMm(char, textBlockStyle);
     }
     const swidth = owidth * wr + lsMm;
     return { owidth, swidth };
