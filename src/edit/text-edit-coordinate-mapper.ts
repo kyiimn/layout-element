@@ -41,6 +41,18 @@ export class TextEditCoordinateMapper {
    */
   private _sourceToPlacement: Map<number, CursorPlacement> = new Map();
 
+  /**
+   * 라인 끝 phantom end placement 맵.
+   *
+   * trailing space 없이 끝나는 라인의 마지막 가시 문자 다음 offset(= 다음 라인 첫 글자의 offset)에 대해,
+   * 이전 라인 마지막 가시 문자를 `atEndOfChar: true`로 참조하는 placement를 저장한다.
+   *
+   * 이 offset은 `_sourceToPlacement`에서 다음 라인 첫 글자의 placement(`atEndOfChar: false`)와 충돌하므로
+   * 별도 맵으로 관리한다. `getCursorPlacement(offset, preferLineEnd)`에서 `preferLineEnd=true`면
+   * 이 맵을 우선 조회하여 라인 끝 커서 배치에 사용한다.
+   */
+  private _lineEndPlacements: Map<number, CursorPlacement> = new Map();
+
   private _spanCache: Map<number, HTMLSpanElement> = new Map();
   private _columnSpansCache: Map<LayoutColumnElement, HTMLSpanElement[]> = new Map();
 
@@ -85,6 +97,7 @@ export class TextEditCoordinateMapper {
    */
   rebuild(): void {
     this._sourceToPlacement.clear();
+    this._lineEndPlacements.clear();
     this._spanCache.clear();
     this._columnSpansCache.clear();
     this._columnRanges = [];
@@ -161,6 +174,17 @@ export class TextEditCoordinateMapper {
               sourceOffset++;
             }
           }
+        }
+
+        // phantom end placement: trailing space 없이 끝나는 라인의 마지막 가시 문자 다음 offset.
+        // 이 offset은 다음 라인 첫 글자의 offset과 동일하므로 _sourceToPlacement와 충돌한다.
+        // 따라서 별도 맵(_lineEndPlacements)에 저장하여 라인 끝 커서 배치에 사용한다.
+        // endOfBlock 라인은 별도 처리(아래)에서 _sourceToPlacement에 설정하므로 제외.
+        if (!line.endOfBlock && lastVisibleSourceOffset !== null) {
+          this._lineEndPlacements.set(sourceOffset, {
+            sourceOffset: lastVisibleSourceOffset,
+            atEndOfChar: true,
+          });
         }
 
         // endOfBlock: 라인이 블록의 끝. 이전 가시 문자를 atEndOfChar: true로 참조.
@@ -253,9 +277,22 @@ export class TextEditCoordinateMapper {
    * null을 반환하여 line rect 폴백으로 처리한다.
    *
    * @param sourceOffset - 소스 텍스트 오프셋
+   * @param preferLineEnd - true면 라인 끝 배치를 우선한다. trailing space 없이 끝나는 라인의
+   *   마지막 가시 문자 다음 offset(= 다음 라인 첫 글자 offset)에서, `_sourceToPlacement`는
+   *   다음 라인 첫 글자의 `atEndOfChar: false`를 반환하지만, `preferLineEnd=true`면
+   *   `_lineEndPlacements`의 phantom end placement(이전 라인 마지막 가시 문자의 `atEndOfChar: true`)를
+   *   우선 반환하여 커서가 라인 끝 문자의 오른쪽에 배치되도록 한다.
    * @returns 커서 배치 정보. 배치 불가능한 경우 null.
+   * @example
+   * // offset 31이 라인 끝(일)과 다음 라인 시작(()의 경계일 때:
+   * mapper.getCursorPlacement(31);            // → { sourceOffset: 31, atEndOfChar: false } (()의 왼쪽)
+   * mapper.getCursorPlacement(31, true);      // → { sourceOffset: 30, atEndOfChar: true } (일의 오른쪽)
    */
-  getCursorPlacement(sourceOffset: number): CursorPlacement | null {
+  getCursorPlacement(sourceOffset: number, preferLineEnd = false): CursorPlacement | null {
+    if (preferLineEnd) {
+      const lineEnd = this._lineEndPlacements.get(sourceOffset);
+      if (lineEnd) return lineEnd;
+    }
     return this._sourceToPlacement.get(sourceOffset) ?? null;
   }
 

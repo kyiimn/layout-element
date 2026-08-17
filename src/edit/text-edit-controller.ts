@@ -68,9 +68,13 @@ export class TextEditController {
   private _compositionSpan: HTMLSpanElement | null = null;
   private _compositionSession: number = 0;
   private _compositionBeforeContent: string = "";
+  // 조합 span의 현재 폭(mm) — 후속 span 밀어내기/되돌림에 사용
+  private _compositionSpanWidthMm: number = 0;
   private _debounceTimer: number | null = null;
   private _wasFocused: boolean = false;
   private _optimisticSpan: HTMLSpanElement | null = null;
+  // optimistic span의 현재 폭(mm) — 후속 span 밀어내기/되돌림에 사용
+  private _optimisticSpanWidthMm: number = 0;
   private _lastStyleJson: string | null = null;
 
   private _selectionAnchor: number | null = null;
@@ -279,9 +283,11 @@ export class TextEditController {
     this._isFocused = false;
     this._resetCompositionState();
     if (this._optimisticSpan && this._optimisticSpan.parentNode) {
+      this._shiftFollowingSpans(this._optimisticSpan, -this._optimisticSpanWidthMm);
       this._optimisticSpan.remove();
     }
     this._optimisticSpan = null;
+    this._optimisticSpanWidthMm = 0;
 
     if (this._textarea.parentNode) {
       this._textarea.parentNode.removeChild(this._textarea);
@@ -314,17 +320,28 @@ export class TextEditController {
     this._updateSelection();
 
     if (this._isComposing && this._compositionSpan) {
+      // 밀어냄 되돌림 (postRender에서 재삽입 시 이전 밀어내기가 남아있을 수 있음)
+      this._shiftFollowingSpans(this._compositionSpan, -this._compositionSpanWidthMm);
       this._compositionSpan.remove();
       let reattached = false;
       const placement = this._mapper.getCursorPlacement(this._compositionStartOffset);
       if (placement) {
         const span = this._mapper.getSpanByOffset(placement.sourceOffset);
         if (span) {
+          // charOffsets 경로: 임시 span의 left 재계산
+          const leftMm = this._computeTempSpanLeft(span, placement.atEndOfChar);
+          if (leftMm !== undefined) {
+            this._compositionSpan.style.position = 'absolute';
+            this._compositionSpan.style.left = `${leftMm}mm`;
+            this._compositionSpan.style.top = '0';
+          }
           if (placement.atEndOfChar) {
             span.after(this._compositionSpan);
           } else {
             span.before(this._compositionSpan);
           }
+          // 밀어내기 재적용
+          this._shiftFollowingSpans(this._compositionSpan, this._compositionSpanWidthMm);
           reattached = true;
         }
       }
@@ -343,9 +360,22 @@ export class TextEditController {
             if (lineDiv) {
               const partDiv = lineDiv.querySelector('div');
               if (partDiv instanceof HTMLElement) {
+                // 파트 끝 위치 계산
+                const lastSpan = this._findLastSpanInPart(partDiv);
+                const leftMm = this._computeTempSpanLeft(lastSpan, true);
+                if (leftMm !== undefined) {
+                  this._compositionSpan.style.position = 'absolute';
+                  this._compositionSpan.style.left = `${leftMm}mm`;
+                  this._compositionSpan.style.top = '0';
+                }
                 partDiv.appendChild(this._compositionSpan);
+                this._shiftFollowingSpans(this._compositionSpan, this._compositionSpanWidthMm);
               } else {
+                this._compositionSpan.style.position = 'absolute';
+                this._compositionSpan.style.left = '0mm';
+                this._compositionSpan.style.top = '0';
                 lineDiv.appendChild(this._compositionSpan);
+                this._shiftFollowingSpans(this._compositionSpan, this._compositionSpanWidthMm);
               }
               reattached = true;
             }
@@ -817,6 +847,10 @@ export class TextEditController {
         } else if (this._crossLeftState === 'crossed') {
           targetLeft = offset > 0 ? offset - 1 : offset;
           this._crossLeftState = 'none';
+        } else if (atLineStart) {
+          // 라인 시작에서 ArrowLeft: 이전 라인 끝(phantom end)으로 배치
+          targetLeft = offset;
+          this._crossLeftState = 'crossed';
         } else if (atSecondChar) {
           targetLeft = offset - 1;
           this._crossLeftState = 'sticking';
@@ -1583,6 +1617,12 @@ export class TextEditController {
     if (placement) {
       const span = this._mapper.getSpanByOffset(placement.sourceOffset);
       if (span) {
+        const leftMm = this._computeTempSpanLeft(span, placement.atEndOfChar);
+        if (leftMm !== undefined) {
+          this._compositionSpan.style.position = 'absolute';
+          this._compositionSpan.style.left = `${leftMm}mm`;
+          this._compositionSpan.style.top = '0';
+        }
         if (placement.atEndOfChar) {
           span.after(this._compositionSpan);
         } else {
@@ -1606,8 +1646,18 @@ export class TextEditController {
           if (lineDiv) {
             const partDiv = lineDiv.querySelector('div');
             if (partDiv instanceof HTMLElement) {
+              const lastSpan = this._findLastSpanInPart(partDiv);
+              const leftMm = this._computeTempSpanLeft(lastSpan, true);
+              // leftMm이 undefined여도 absolute 배치 — 기본 0
+              const finalLeft = leftMm ?? 0;
+              this._compositionSpan.style.position = 'absolute';
+              this._compositionSpan.style.left = `${finalLeft}mm`;
+              this._compositionSpan.style.top = '0';
               partDiv.appendChild(this._compositionSpan);
             } else {
+              this._compositionSpan.style.position = 'absolute';
+              this._compositionSpan.style.left = '0mm';
+              this._compositionSpan.style.top = '0';
               lineDiv.appendChild(this._compositionSpan);
             }
             spanInserted = true;
@@ -1627,26 +1677,25 @@ export class TextEditController {
     if (event.data && this._compositionSpan) {
       const model = this._paragraph.model;
       if (model) {
-        const charStyle = model.genCharStyle(event.data);
-        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(this._compositionSpan.style, charStyle);
+        // 이전 폭 되돌림 → 새 폭으로 밀어내기
+        const newWidthMm = this._computeTempSpanWidthMm(event.data);
+        this._shiftFollowingSpans(this._compositionSpan, -this._compositionSpanWidthMm);
+        this._compositionSpanWidthMm = newWidthMm;
+        this._shiftFollowingSpans(this._compositionSpan, newWidthMm);
+
+        const flatStyle = model.genCharStyleFlat(event.data[0] ?? ' ');
+        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(this._compositionSpan.style, flatStyle);
         this._compositionSpan.style.textDecoration = "underline";
         this._compositionSpan.style.textUnderlineOffset = "2px";
-
-        let inner = this._compositionSpan.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
-        if (!inner) {
-          inner = document.createElement('span');
-          inner.dataset.charInner = 'true';
-          const innerStyle = model.genCharInnerStyle();
-          Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(inner.style, innerStyle);
-          this._compositionSpan.appendChild(inner);
-        }
-        inner.textContent = event.data;
+        this._compositionSpan.textContent = event.data;
       }
 
       this._cursorModel.offset = this._compositionStartOffset + event.data.length;
     } else if (this._compositionSpan) {
-      const inner = this._compositionSpan.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
-      if (inner) inner.textContent = "";
+      // 조합 텍스트가 빈 경우 — 밀어냄 되돌림
+      this._shiftFollowingSpans(this._compositionSpan, -this._compositionSpanWidthMm);
+      this._compositionSpanWidthMm = 0;
+      this._compositionSpan.textContent = "";
       this._cursorModel.offset = this._compositionStartOffset;
     }
     if (!this._positionCursorFromCompositionSpan()) {
@@ -1729,9 +1778,12 @@ export class TextEditController {
 
   private _removeCompositionSpan(): void {
     if (this._compositionSpan && this._compositionSpan.parentNode) {
+      // 밀어낸 후속 span들을 원래 위치로 되돌림
+      this._shiftFollowingSpans(this._compositionSpan, -this._compositionSpanWidthMm);
       this._compositionSpan.remove();
     }
     this._compositionSpan = null;
+    this._compositionSpanWidthMm = 0;
   }
 
   private _resetCompositionState(): void {
@@ -1777,9 +1829,11 @@ export class TextEditController {
 
   private _optimisticSpanUpdate(sourceOffset: number, char: string): void {
     if (this._optimisticSpan && this._optimisticSpan.parentNode) {
+      this._shiftFollowingSpans(this._optimisticSpan, -this._optimisticSpanWidthMm);
       this._optimisticSpan.remove();
     }
     this._optimisticSpan = null;
+    this._optimisticSpanWidthMm = 0;
 
     if (!this._paragraph.model) return;
 
@@ -1801,31 +1855,120 @@ export class TextEditController {
     if (!span) return;
 
     const newSpan = this._createOptimisticSpan(char, sourceOffset);
+    const leftMm = this._computeTempSpanLeft(span, placement.atEndOfChar);
+    if (leftMm !== undefined) {
+      newSpan.style.position = 'absolute';
+      newSpan.style.left = `${leftMm}mm`;
+      newSpan.style.top = '0';
+    }
     if (placement.atEndOfChar) {
       span.after(newSpan);
     } else {
       span.before(newSpan);
     }
+    // 후속 span들을 임시 span 폭만큼 밀어냄
+    const widthMm = this._computeTempSpanWidthMm(char);
+    this._shiftFollowingSpans(newSpan, widthMm);
+    this._optimisticSpanWidthMm = widthMm;
     this._optimisticSpan = newSpan;
+  }
+
+  /**
+   * 임시 span(optimistic/composition)에 부여할 `left` 오프셋(mm)을 계산한다.
+   *
+   * charOffsets 경로(absolute 배치)에서는 임시 span이 기존 span을 밀어낼 수 없으므로,
+   * 삽입 위치 기준 span의 `data-char-offset`과 `data-swidth`로부터 새 span의 x 좌표를 산출한다.
+   *
+   * 삽입 케이스:
+   *  - `atEndOfChar === true`: 기존 span 이후 → `offset + swidth`
+   *  - `atEndOfChar === false`: 기존 span 이전 → `offset` (기존 span의 위치를 임시 span이 차지)
+   *  - 기준 span 없음(빈 파트/라인 시작): `0`
+   *
+   * @param anchorSpan - 삽입 기준 span (placement.sourceOffset의 span)
+   * @param atEndOfChar - 기존 span의 끝에 삽입 여부
+   * @returns `left` 오프셋(mm). charOffsets 경로가 아니면 `undefined`.
+   */
+  private _computeTempSpanLeft(anchorSpan: HTMLSpanElement | null, atEndOfChar: boolean): number | undefined {
+    if (!anchorSpan) return 0;
+    const offsetStr = anchorSpan.dataset.charOffset;
+    if (offsetStr === undefined) return undefined;
+    const offset = parseFloat(offsetStr);
+    if (Number.isNaN(offset)) return undefined;
+    if (!atEndOfChar) return offset;
+    const swidthStr = anchorSpan.dataset.swidth;
+    if (swidthStr === undefined) return offset;
+    const swidth = parseFloat(swidthStr);
+    if (Number.isNaN(swidth)) return offset;
+    return offset + swidth;
+  }
+
+  /**
+   * charOffsets 경로에서 임시 span 삽입/갱신 후 같은 파트 내 후속 span들의 `left`를 밀어낸다.
+   *
+   * absolute 배치에서는 in-flow 밀어내기가 불가능하므로, 임시 span의 폭 변화량만큼
+   * 후속 span들의 `left`와 `data-char-offset`을 수동으로 이동시켜야 한다.
+   * 그렇지 않으면 임시 span이 기존 글자 위에 겹쳐 보인다.
+   *
+   * @param tempSpan - 삽입된 임시 span
+   * @param deltaMm - 이동량(mm). 양수=밀어내기, 음수=되돌리기, 0=불필요.
+   */
+  private _shiftFollowingSpans(tempSpan: HTMLSpanElement, deltaMm: number): void {
+    if (deltaMm === 0) return;
+    const partDiv = tempSpan.parentElement;
+    if (!partDiv) return;
+
+    let sibling = tempSpan.nextElementSibling as HTMLSpanElement | null;
+    while (sibling) {
+      if (sibling.dataset.charOffset !== undefined) {
+        const curOffset = parseFloat(sibling.dataset.charOffset);
+        if (!Number.isNaN(curOffset)) {
+          const newOffset = curOffset + deltaMm;
+          sibling.dataset.charOffset = String(newOffset);
+          sibling.style.left = `${newOffset}mm`;
+        }
+      }
+      sibling = sibling.nextElementSibling as HTMLSpanElement | null;
+    }
+  }
+
+  /**
+   * 파트 내 마지막 비-임시 span을 반환한다.
+   * 폴백 경로에서 임시 span의 `left`를 파트 끝으로 설정할 때 사용.
+   */
+  private _findLastSpanInPart(partDiv: HTMLElement): HTMLSpanElement | null {
+    const spans = partDiv.querySelectorAll<HTMLSpanElement>(':scope > span[data-char-offset]:not([data-temporary])');
+    return spans.length > 0 ? spans[spans.length - 1] : null;
+  }
+
+  /**
+   * 임시 span의 폭(mm)을 계산한다.
+   * 조합 중인 텍스트의 각 글자에 대해 `getCharWidths().swidth`를 합산.
+   *
+   * @param text - 임시 span에 표시되는 텍스트 (조합 중인 문자열)
+   * @returns 폭(mm). 빈 문자열이면 0.
+   */
+  private _computeTempSpanWidthMm(text: string): number {
+    if (!text) return 0;
+    const model = this._paragraph.model;
+    if (!model) return 0;
+    let total = 0;
+    for (const ch of text) {
+      const { swidth } = model.getCharWidths(ch);
+      total += swidth;
+    }
+    return total;
   }
 
   private _createOptimisticSpan(char: string, sourceOffset: number): HTMLSpanElement {
     const model = this._paragraph.model;
     const span = document.createElement('span');
-    const charStyle = model?.genCharStyle(char);
+    span.dataset.sourceOffset = String(sourceOffset);
+    span.dataset.temporary = "true";
+    const charStyle = model?.genCharStyleFlat(char);
     if (charStyle) {
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(span.style, charStyle);
     }
-    span.dataset.sourceOffset = String(sourceOffset);
-    span.dataset.temporary = "true";
-    const inner = document.createElement('span');
-    inner.dataset.charInner = 'true';
-    const innerStyle = model?.genCharInnerStyle();
-    if (innerStyle) {
-      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(inner.style, innerStyle);
-    }
-    inner.textContent = char;
-    span.appendChild(inner);
+    span.textContent = char;
     return span;
   }
 
@@ -1862,7 +2005,15 @@ export class TextEditController {
       const partDiv = lineDiv.querySelector('div');
       const container = partDiv instanceof HTMLElement ? partDiv : lineDiv;
       const newSpan = this._createOptimisticSpan(char, sourceOffset);
+      // 라인 시작 삽입 — 파트 첫 자식이므로 offset 0
+      newSpan.style.position = 'absolute';
+      newSpan.style.left = '0mm';
+      newSpan.style.top = '0';
       container.insertBefore(newSpan, container.firstChild);
+      // 후속 span들을 임시 span 폭만큼 밀어냄
+      const widthMm = this._computeTempSpanWidthMm(char);
+      this._shiftFollowingSpans(newSpan, widthMm);
+      this._optimisticSpanWidthMm = widthMm;
       this._optimisticSpan = newSpan;
     }
   }
@@ -1913,23 +2064,41 @@ export class TextEditController {
     }
 
     // cross state가 커서 배치를 오버라이드하는 경우
-    let placement = this._mapper.getCursorPlacement(offset);
-    if (this._crossRightState === 'sticking' && offset > 0) {
-      const prevPlacement = this._mapper.getCursorPlacement(offset - 1);
-      if (prevPlacement) placement = prevPlacement;
+    // 기본 조회에서 preferLineEnd=true: 라인 끝 문자 다음 offset에서 phantom end placement를 우선하여
+    // 커서가 라인 끝 문자의 오른쪽에 배치되도록 한다.
+    let placement = this._mapper.getCursorPlacement(offset, true);
+    if (this._crossRightState === 'sticking') {
+      // sticking: 라인 끝에 머무는 상태. 기본 placement(phantom end)를 그대로 사용한다.
+      // phantom end placement가 없는 경우(trailing space 있음)는 기본 placement가 이미 atEndOfChar: true.
     } else if (this._crossRightState === 'crossed') {
-      const curPlacement = this._mapper.getCursorPlacement(offset);
-      if (curPlacement) {
+      // crossed: 다음 라인 첫 글자의 왼쪽에 배치해야 하므로 preferLineEnd=false
+      const curPlacement = this._mapper.getCursorPlacement(offset, false);
+      if (curPlacement && curPlacement.sourceOffset === offset) {
+        // 현재 offset이 가시 문자(또는 phantom end) 자체인 경우
         placement = { ...curPlacement, atEndOfChar: false };
       } else {
+        // 현재 offset이 trailing space 등 다른 문자를 참조하는 경우:
+        // 다음 라인 첫 글자를 찾아 배치한다.
         const nextPlacement = this._mapper.getCursorPlacement(offset + 1);
-        if (nextPlacement) placement = { ...nextPlacement, atEndOfChar: false };
+        if (nextPlacement) {
+          placement = { ...nextPlacement, atEndOfChar: false };
+        } else if (curPlacement) {
+          placement = { ...curPlacement, atEndOfChar: false };
+        }
       }
     } else if (this._crossLeftState === 'crossed' && offset > 0) {
-      const prevPlacement = this._mapper.getCursorPlacement(offset - 1);
-      if (prevPlacement) placement = prevPlacement;
+      // crossed: 이전 라인 끝 글자 뒤에 배치.
+      // offset은 라인 시작이고 phantom end placement가 offset에 설정되어 있으므로
+      // getCursorPlacement(offset, true)로 조회하여 이전 라인 끝 글자 뒤에 배치한다.
+      const curPlacement = this._mapper.getCursorPlacement(offset, true);
+      if (curPlacement && curPlacement.atEndOfChar === true) {
+        placement = curPlacement;
+      } else {
+        const prevPlacement = this._mapper.getCursorPlacement(offset - 1);
+        if (prevPlacement) placement = prevPlacement;
+      }
     } else if (this._crossLeftState === 'sticking') {
-      const curPlacement = this._mapper.getCursorPlacement(offset);
+      const curPlacement = this._mapper.getCursorPlacement(offset, false);
       if (curPlacement) placement = { ...curPlacement, atEndOfChar: false };
     }
 
@@ -1986,6 +2155,7 @@ export class TextEditController {
     const cursorHeight = useFallback ? (this._mapper.getFirstColumnRect()?.fontSize ?? rect.height) : rect.height;
     const cursorTop = useFallback ? this._resolveFallbackTop(placement.sourceOffset, cursorHeight) : rect.top;
     this._cursorEl.top = cursorTop;
+
     this._cursorEl.left = placement.atEndOfChar ? rect.left + rect.width : rect.left;
     this._cursorEl.height = cursorHeight;
     this._cursorEl.visible = cursorVisible;
@@ -1996,9 +2166,24 @@ export class TextEditController {
 
   /**
    * 공백 등 height≈0인 span에서 커서 top을 결정한다.
-   * 인접한 일반 문자의 top을 우선 사용하고, 실패하면 rect.top에서 cursorHeight를 뺀다.
+   *
+   * 우선순위:
+   * 1. 인접한 일반 문자(sourceOffset ± 1)의 `rect.top` — 같은 라인에 가시 문자가 있으면 가장 정확
+   * 2. sourceOffset이 속한 라인 div의 `getLineRect().top` — 라인 div는 height≈0 span과 무관하게
+   *    `lineHeight` 높이를 가지므로 올바른 top을 반환
+   * 3. `getCharRect(sourceOffset).top` — height≈0 span이라도 top은 라인 상단과 거의 일치
+   * 4. `getFirstColumnRect().top` — 빈 단락 등의 최종 폴백
+   *
+   * @param sourceOffset - 커서가 참조하는 source offset (placement.sourceOffset)
+   * @param cursorHeight - 폴백 없을 때 사용할 커서 높이 (현재 사용하지 않음, 시그니처 호환 유지)
+   * @returns 커서 top (paragraph local coordinate, 픽셀)
+   * @example
+   * // offset 1715가 height=0인 스페이스 span이고, 같은 라인에 '다'(1713)가 있으면
+   * // '다'의 rect.top(368)을 반환한다.
+   * const top = this._resolveFallbackTop(1715, 15);
    */
-  private _resolveFallbackTop(sourceOffset: number, cursorHeight: number): number {
+  private _resolveFallbackTop(sourceOffset: number, _cursorHeight: number): number {
+    // 1. 인접한 일반 문자의 top 사용
     const offsets = [sourceOffset - 1, sourceOffset + 1];
     for (const off of offsets) {
       if (off < 0) continue;
@@ -2007,10 +2192,26 @@ export class TextEditController {
         return neighborRect.top;
       }
     }
-    const rect = this._mapper.getCharRect(sourceOffset);
-    if (rect) {
-      return Math.max(0, rect.top - cursorHeight);
+
+    // 2. sourceOffset이 속한 라인 div의 top 사용
+    // height≈0 span은 같은 라인의 가시 문자와 동일한 라인 div에 속하므로
+    // 라인 div의 top이 정확한 커서 top이다.
+    const lineInfo = this._mapper.getLineInfoBySourceOffset(sourceOffset);
+    if (lineInfo) {
+      const lineRect = this._mapper.getLineRect(lineInfo.columnIndex, lineInfo.lineIndex);
+      if (lineRect && lineRect.height > 0) {
+        return lineRect.top;
+      }
     }
+
+    // 3. height≈0 span 자체의 rect.top 사용
+    // 라인 div를 찾지 못한 경우, span 자체의 top은 라인 상단과 거의 일치한다.
+    const rect = this._mapper.getCharRect(sourceOffset);
+    if (rect && rect.top >= 0) {
+      return rect.top;
+    }
+
+    // 4. 빈 단락 등의 최종 폴백
     const firstCol = this._mapper.getFirstColumnRect();
     return firstCol?.top ?? 0;
   }
