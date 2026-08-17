@@ -489,6 +489,44 @@ export class LayoutParagraphElement extends HTMLElement {
     return Array.from(this.querySelectorAll('x-layout-column'));
   }
 
+  /**
+   * 단락의 모든 단(column)을 순회하며, 텍스트가 실제로 끝나는 단 인덱스와
+   * 그 단의 보이는 라인 수를 반환한다.
+   *
+   * 각 단의 `visibleLineCount`는 `TextLayoutEngine`이 이 단락 자체의
+   * `textStyle.fontSize`와 `paragraphStyle.lineGap`을 곱해 계산한
+   * `lineHeight`(mm)로 렌더링한 line div 중 `display: none`이 아닌 것의 수이다.
+   * 따라서 document 기본 스타일이 아닌 단락 자체 스타일 기반의 가시 라인 수이다.
+   *
+   * 이 메서드는 단락의 컬럼 요소(`LayoutColumnElement.visibleLineCount`)를
+   * 통해서만 가시 라인 수를 가져오므로, 외부 코드가 컬럼의 shadow DOM 내부
+   * 구조(line div, span 등)를 직접 순회할 필요를 제거한다.
+   *
+   * @returns `{ columnIndex, visibleLineCount }` — 보이는 라인이 있는 가장 마지막
+   *   단의 0-base 인덱스와 그 단의 보이는 라인 수. 단이 없거나 보이는 라인이
+   *   하나도 없으면 `null`.
+   * @example
+   * const last = paragraph.getVisibleLineCount();
+   * if (last) {
+   *   console.log(`텍스트 끝: ${last.columnIndex + 1}번 단, ${last.visibleLineCount}줄`);
+   * }
+   */
+  getVisibleLineCount(): { columnIndex: number; visibleLineCount: number } | null {
+    const columns = this.columnEl;
+    if (columns.length === 0) return null;
+
+    let result: { columnIndex: number; visibleLineCount: number } | null = null;
+    for (let c = 0; c < columns.length; c++) {
+      const column = columns[c];
+      if (!column) continue;
+      const visible = column.visibleLineCount;
+      if (visible > 0) {
+        result = { columnIndex: c, visibleLineCount: visible };
+      }
+    }
+    return result;
+  }
+
   get parentElement() {
     return super.parentElement as LayoutBoxElement;
   }

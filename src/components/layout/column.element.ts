@@ -398,6 +398,36 @@ export class LayoutColumnElement extends HTMLElement {
     return this.parentElement.model;
   }
 
+  /**
+   * 이 컬럼의 shadow DOM 내에서 `display: none`이 아닌 line div의 수를 반환한다.
+   *
+   * `renderText()`가 오버플로우된 줄을 `display: none`으로 숨기므로,
+   * 이 게터는 실제로 화면에 보이는 줄 수만 센다. `TextLayoutEngine`이 paragraph
+   * 자체 `textStyle.fontSize`와 `paragraphStyle.lineGap`을 곱해 계산한
+   * `lineHeight`(mm)를 기준으로 렌더링된 결과이므로, document 기본 스타일이
+   * 아닌 paragraph 자체 스타일 기반의 가시 라인 수이다.
+   *
+   * 외부 코드는 shadow DOM 내부 구조(line div 등)를 직접 순회하지 않고
+   * 이 게터를 통해 캡슐화된 가시 라인 수만 가져올 수 있다.
+   *
+   * @returns 보이는 라인 수. 컬럼이 연결되지 않았거나 line div가 없으면 0.
+   * @example
+   * const column = paragraph.columnEl[0];
+   * if (column) {
+   *   const visible = column.visibleLineCount;
+   *   console.log(`첫 번째 단의 보이는 라인 수: ${visible}`);
+   * }
+   */
+  get visibleLineCount(): number {
+    let count = 0;
+    for (const child of this._shadowRoot.children) {
+      if (child.tagName === 'DIV' && (child as HTMLDivElement).style.display !== 'none') {
+        count++;
+      }
+    }
+    return count;
+  }
+
   set index(index: number | undefined) {
     this._index = index;
     this.renderText();
