@@ -52,7 +52,8 @@ export class TableKeyboardController {
     const coord = this._labelToCoord(td.cellLabel);
     if (!coord) return;
 
-    for (const t of document.querySelectorAll('x-layout-table')) {
+    // EditManager는 per-document 인스턴스이므로 docEl 하위 트리만 순회한다.
+    for (const t of this._editManager.docEl.querySelectorAll('x-layout-table')) {
       const otherKc = (t as LayoutTableElement).keyboardController;
       if (otherKc && otherKc !== this && otherKc.selection) {
         otherKc.selection = null;
