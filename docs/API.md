@@ -420,6 +420,12 @@ class LayoutParagraphElement extends HTMLElement
 | `zIndex` | `number` | 렌더링 순서. |
 | `printPostData` | `PrintPostData<ParagraphData>[]` | 인쇄 후처리 데이터. paragraph rect + `chars` 배열 (글자별 rect/폰트/장평/색상). |
 
+#### 메서드
+
+| 메서드 | 시그니처 | 설명 |
+|---|---|---|
+| `getVisibleLineCount()` | `(): { columnIndex: number; visibleLineCount: number } \| null` | 단락의 모든 단(column)을 순회하며 텍스트가 실제로 끝나는 단 인덱스(0-base)와 그 단의 보이는 라인 수를 반환. 각 단의 `visibleLineCount`는 paragraph 자체 `textStyle.fontSize` × `paragraphStyle.lineGap`으로 계산된 `lineHeight`(mm)로 렌더링된 line div 중 `display: none`이 아닌 것의 수. 보이는 라인이 있는 가장 마지막 단을 반환하며, 단이 없거나 보이는 라인이 하나도 없으면 `null`. 외부 코드가 컬럼의 shadow DOM 내부 구조를 직접 순회할 필요를 제거하는 캡슐화 API. |
+
 #### `render-error` 이벤트
 
 ```ts
@@ -846,6 +852,7 @@ class LayoutColumnElement extends HTMLElement
 | `parentElement` | `LayoutParagraphElement` | 부모 단락. |
 | `zIndex` | `0` | 항상 0. |
 | `type` | `'column'` | 타입 리터럴. |
+| `visibleLineCount` | `number` | shadow DOM 내 `display: none`이 아닌 line div의 수. `renderText()`가 오버플로우된 줄을 `display: none`으로 숨기므로 실제로 화면에 보이는 줄 수만 센다. paragraph 자체 `textStyle.fontSize`와 `paragraphStyle.lineGap` 기반의 `lineHeight`로 렌더링된 결과이므로 document 기본 스타일이 아닌 paragraph 자체 스타일 기반이다. 외부 코드는 이 게터를 통해 캡슐화된 가시 라인 수만 가져올 수 있어 shadow DOM 내부 구조를 직접 순회할 필요가 없다. |
 
 #### 메서드
 
