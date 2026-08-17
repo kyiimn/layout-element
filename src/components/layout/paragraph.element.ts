@@ -1,4 +1,4 @@
-import { TextLayoutEngine } from "@/core";
+import { TextLayoutEngine, GridCalculator } from "@/core";
 import { TextEditController } from "@/edit/text-edit-controller";
 import { EditManager } from "@/edit/edit-manager";
 import { DEFAULT_LINE_GAP } from "@/constants";
@@ -730,71 +730,119 @@ export class LayoutParagraphElement extends HTMLElement {
   }
 
   get printPostData(): PrintPostData[] {
-    const rect = this.getBoundingClientRect();
+    const ppm = GridCalculator.ppm;
     const chars: PrintPostDataChar[] = [];
     const registry = ColorRegistry.getInstance();
+    const fontLoader = FontLoader.getInstance();
     const model = this._model;
 
+    if (model === undefined) {
+      return [{
+        data: this.data,
+        rect: {
+          x: this.absLeft * ppm,
+          y: this.absTop * ppm,
+          width: (this._inheritStyle?.parentWidth ?? 0) * ppm,
+          height: (this._inheritStyle?.parentHeight ?? 0) * ppm,
+        },
+        chars,
+      }];
+    }
+
+    const lineHeightMm = model.lineHeight;
+
     for (const col of this.columnEl) {
-      const root = col.shadowRoot;
-      if (root === null) continue;
-      const lineDivs = Array.from(root.children).filter(
-        (c): c is HTMLDivElement => c.tagName === 'DIV',
-      );
-
       const columnIndex = col.index;
-      const lines = model !== undefined && columnIndex !== undefined
-        ? model.columnContents[columnIndex] ?? []
-        : [];
+      if (columnIndex === undefined) continue;
+      const lines = model.columnContents[columnIndex] ?? [];
+      const colAbsLeftMm = col.absLeft;
+      const colAbsTopMm = col.absTop;
 
-      for (let li = 0; li < lineDivs.length; li++) {
-        const lineDiv = lineDivs[li]!;
-        if (lineDiv.style.display === 'none') continue;
+      let visibleLineIndex = 0;
+      for (let li = 0; li < lines.length; li++) {
         const lineData = lines[li];
         if (lineData === undefined) continue;
-        // genPartStyle()의 CSS 상속과 동일한 우선순위: textBlockStyle → textStyle → inheritStyle.
-        // 상속 색상을 무시하면 검은 배경 박스의 흰 글자가 default(검은색)로 폴백되어 보이지 않는다.
-        const colorName = lineData?.textBlockStyle?.color
+
+        // 오버플로우된 라인 건너뛰기 — column.element.renderText()의
+        // accumulatedHeightMm 기준과 동일하게, 누적 높이가 컬럼 높이를 초과하면 제외.
+        const columnHeightMm = model.inheritStyle?.parentHeight ?? 0;
+        if (columnHeightMm > 0 && visibleLineIndex * lineHeightMm >= columnHeightMm) break;
+
+        const { textBlockStyle } = lineData;
+        const colorName = textBlockStyle?.color
           ?? this._textStyle?.color
           ?? this._inheritStyle?.color;
         const cmyk = colorName !== undefined
           ? registry.get(colorName)
           : registry.get('default');
 
-        const partDivs = Array.from(lineDiv.children).filter(
-          (c): c is HTMLDivElement => c.tagName === 'DIV',
-        );
-        for (const partDiv of partDivs) {
-          const spans = partDiv.querySelectorAll<HTMLSpanElement>(':scope > span[data-source-offset]');
-          for (const span of spans) {
-            const inner = span.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
-            const char = inner ? inner.textContent : span.textContent;
+        // textBlockStyle이 lineHeight를 오버라이드하는 경우 (genLineStyle 참조)
+        const lineGap = this._paragraphStyle?.lineGap ?? this._inheritStyle?.lineGap ?? DEFAULT_LINE_GAP;
+        const fontSizeMm = textBlockStyle?.fontSize
+          ?? this._textStyle?.fontSize
+          ?? this._inheritStyle?.fontSize
+          ?? 4;
+        let effectiveLineHeightMm = lineHeightMm;
+        if (textBlockStyle?.fontSize && lineHeightMm < fontSizeMm * lineGap) {
+          effectiveLineHeightMm = Math.ceil((fontSizeMm * lineGap) / lineHeightMm) * lineHeightMm;
+        }
+
+        const lineTopMm = colAbsTopMm + visibleLineIndex * lineHeightMm;
+
+        for (let pi = 0; pi < lineData.parts.length; pi++) {
+          const part = lineData.parts[pi]!;
+          const { content, charOffsets, left: partLeftMm } = part;
+          if (content.length === 0) continue;
+
+          // _stripSpaces와 동일한 leading/trailing space 제거
+          const isFirst = pi === 0;
+          const isLast = pi === lineData.parts.length - 1;
+          const firstOfBlock = lineData.firstOfBlock === true;
+          const endOfBlock = lineData.endOfBlock === true;
+
+          let stripStart = 0;
+          let stripEnd = content.length;
+          if (isFirst && !firstOfBlock) {
+            while (stripStart < stripEnd && content[stripStart] === ' ') stripStart++;
+          }
+          if (isLast && !endOfBlock) {
+            while (stripEnd > stripStart && content[stripEnd - 1] === ' ') stripEnd--;
+          }
+
+          for (let j = stripStart; j < stripEnd; j++) {
+            const char = content[j]!;
             if (char.length === 0) continue;
 
-            const spanRect = span.getBoundingClientRect();
-            const style = window.getComputedStyle(span);
+            // charOffset이 있으면 사용, 없으면 0
+            const charOffsetMm = charOffsets !== undefined && j < charOffsets.length
+              ? charOffsets[j]!
+              : 0;
+            const charXMm = colAbsLeftMm + partLeftMm + charOffsetMm;
 
-            const scaleValue = (inner ? window.getComputedStyle(inner).scale : style.scale) || '1 1';
-            const widthRatio = parseFloat(scaleValue.split(' ')[0] || '1');
-            if (Number.isNaN(widthRatio)) continue;
+            const { swidth } = model.getCharWidths(char, textBlockStyle);
+            const charWidthPx = swidth * ppm;
+            const charHeightPx = effectiveLineHeightMm * ppm;
 
-            const charFontFamily = lineData?.textBlockStyle?.fontFamily
-              ? FontLoader.getInstance().getFontFamily(lineData.textBlockStyle.fontFamily)
-              : style.fontFamily;
-            const charFontSize = lineData?.textBlockStyle?.fontSize !== undefined
-              ? `${lineData.textBlockStyle.fontSize}mm`
-              : style.fontSize;
-            const charFontWeight = lineData?.textBlockStyle?.fontWeight !== undefined
-              ? String(lineData.textBlockStyle.fontWeight)
-              : style.fontWeight;
+            const widthRatio = model.widthRatio;
+
+            const charFontFamily = textBlockStyle?.fontFamily
+              ? fontLoader.getFontFamily(textBlockStyle.fontFamily)
+              : fontLoader.getFontFamily();
+            const charFontSize = `${fontSizeMm}mm`;
+            const charFontWeight = String(
+              textBlockStyle?.fontWeight
+              ?? this._textStyle?.fontWeight
+              ?? this._inheritStyle?.fontWeight
+              ?? 400
+            );
 
             chars.push({
               char,
               rect: {
-                x: spanRect.x + window.scrollX,
-                y: spanRect.y + window.scrollY,
-                width: spanRect.width,
-                height: spanRect.height,
+                x: charXMm * ppm,
+                y: lineTopMm * ppm,
+                width: charWidthPx,
+                height: charHeightPx,
               },
               fontFamily: charFontFamily,
               fontSize: charFontSize,
@@ -804,16 +852,18 @@ export class LayoutParagraphElement extends HTMLElement {
             });
           }
         }
+
+        visibleLineIndex++;
       }
     }
 
     return [{
       data: this.data,
       rect: {
-        x: rect.x + window.scrollX,
-        y: rect.y + window.scrollY,
-        width: rect.width,
-        height: rect.height,
+        x: this.absLeft * ppm,
+        y: this.absTop * ppm,
+        width: (this._inheritStyle?.parentWidth ?? 0) * ppm,
+        height: (this._inheritStyle?.parentHeight ?? 0) * ppm,
       },
       chars,
     }];
