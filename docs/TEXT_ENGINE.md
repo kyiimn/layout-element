@@ -747,9 +747,12 @@ public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
 - `textAlign`: `'center'`
 
 > **`charOffsets` 경로 추가 속성**: `LayoutColumnElement._applySpanStyle()`가
-> `charOffsetMm` 인자로 호출되면 외부 span에 `position: absolute; left: ${charOffsetMm}mm; top: 0`를
-> 적용하여 부모 파트 기준 절대 좌표로 직접 배치한다 (§11.5 참조).
-> `charOffsetMm === undefined`이면 레거시 flexbox 경로를 유지한다.
+> `charOffsetMm` 인자로 호출되면 **단일 span**에 `position: absolute; left: ${charOffsetMm}mm; top: 0`와
+> `scale`/`transformOrigin`을 직접 적용하여 부모 파트 기준 절대 좌표로 배치한다 (§11.5 참조).
+> outer/inner 중첩 span 대신 단일 span을 사용하여 DOM 노드 수를 절반으로 감소.
+> 편집 모드에서도 charOffsets가 활성화되며, 임시 span(optimistic/IME 조합)은
+> `_computeTempSpanLeft()`로 `left`를 동적 계산하여 absolute 배치한다.
+> `charOffsetMm === undefined`이면 레거시 flexbox 경로(outer/inner 중첩 span)를 유지한다.
 
 **내부 span** (`genCharInnerStyle` 반환):
 - `display: 'inline-block'`
@@ -795,13 +798,22 @@ public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
 charOffsetMm = charOffsets[j]  // 절대 좌표 (delta 아님)
 ```
 
-`_applySpanStyle()`은 `charOffsetMm !== undefined`이면 외부 span에 다음 스타일을 적용한다:
+`_applySpanStyle()`은 `charOffsetMm !== undefined`이면 **단일 span**에 다음 스타일을 적용한다:
 
 ```css
+display: inline-block;
+scale: ${widthRatio * 0.88} 1;
+transform-origin: 0 center;
 position: absolute;
 left: ${charOffsetMm}mm;
 top: 0;
 ```
+
+> **단일 span 구조**: charOffsets 경로에서는 outer/inner 중첩 span 대신 단일 span을
+> 사용한다. absolute 배치이므로 outer의 `width`/`textAlign`이 의미 없고, 정렬은
+> charOffsets가 직접 산출한다. inner의 `scale`/`transformOrigin`을 단일 span에 직접
+> 적용(`genCharStyleFlat()`)하여 DOM 노드 수를 절반으로 감소시키고 querySelector/inner
+> span 갱신 비용을 제거한다.
 
 부모 part div는 `position: relative; height: 100%`로 설정되어 absolute 자식의
 기준점이 되고, absolute 자식이 플로우에서 벗어나 part div가 높이를 잃지 않도록 보장한다.
@@ -814,8 +826,26 @@ span 높이는 `lineHeight`와 일치하므로 top=0이면 시각적으로 올�
 
 `charOffsets === undefined`이면(예: 외부에서 임의로 `TextPartData`를 생성한 경우)
 `renderText()`는 기존 flexbox `justify-content` 경로로 폴백한다.
+이 경로에서는 outer/inner 중첩 span 구조를 유지한다 — outer의 `width`/`textAlign`이
+flexbox 정렬에 사용되고 inner의 `scale`이 glyph 축소를 담당한다.
 `genPartStyle()`/`genCharStyle()` 자체는 기존 동작을 그대로 반환하므로,
 `charOffsets` 경로를 사용하지 않는 기존 코드는 영향을 받지 않는다.
+
+#### 편집 모드에서의 charOffsets
+
+편집 모드(`editableText=true`)에서도 charOffsets가 활성화되어 단일 span + absolute 배치를 사용한다.
+임시 span(optimistic, IME 조합)은 `columnContents`에 포함되지 않으므로, 삽입 시 기준 span의
+`data-char-offset`과 `data-swidth`로부터 임시 span의 `left`를 동적 계산한다(`_computeTempSpanLeft()`).
+
+| 삽입 케이스 | `left` 계산 |
+|---|---|
+| 기존 span 이전 (`atEndOfChar=false`) | 기존 span의 `data-char-offset` |
+| 기존 span 이후 (`atEndOfChar=true`) | 기존 span의 `data-char-offset` + `data-swidth` |
+| 파트 끝 (placement 없음) | 파트의 마지막 span `data-char-offset` + `data-swidth`, 또는 `0` |
+| 라인 시작 (`\n` 다음) | `0` |
+
+임시 span은 `data-temporary="true"` 속성으로 표시되며, 다음 `renderText()` 시작 시 모두 제거된 후
+실제 `columnContents` 기반 span으로 교체된다.
 
 #### headless 렌더링과의 일치성
 

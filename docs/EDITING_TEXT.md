@@ -301,7 +301,7 @@ flowchart LR
 2. `this._optimisticSpan = null` — 낙관적 span 참조 제거. 실제 렌더링된 span으로 대체된다.
 3. 조합 중이 아닌 경우 `textarea.value`를 `model.textContent`로 동기화.
 4. `_syncTextareaSelection()` — textarea의 선택 영역을 `_cursorModel` 상태에 맞춘다.
-5. `_updateCursorPosition()` — 커서를 새 DOM 위치에 재배치. `getCursorPlacement(offset)`를 통해 커서 배치 정보(`sourceOffset`, `atEndOfChar`)를 얻는다. `_sourceToPlacement` 맵은 `_rebuildMappings()`에서 모든 source offset에 대해 채워진다 — 가시 문자는 `atEndOfChar: false`, trailing space는 `atEndOfChar: true` + 누적 스페이스 폭, `\n` 위치는 `atEndOfChar: true`, 매핑 구멍(빈 줄 등)은 역방향으로 가장 가까운 placement로 채워진다. 단, `\n` 바로 다음 위치(새 라인 시작)는 line rect 폴백으로 처리된다. `endOfBlock`에서 `textContent`에 실제 `\n`이 있을 때만 `sourceOffset++`를 수행하여 phantom offset을 방지한다. `getCursorPlacement()`가 null을 반환하는 경우(빈 줄 시작, offset=0 등) line rect 또는 first column rect로 폴백한다.
+5. `_updateCursorPosition()` — 커서를 새 DOM 위치에 재배치. `getCursorPlacement(offset, preferLineEnd=true)`를 통해 커서 배치 정보(`sourceOffset`, `atEndOfChar`)를 얻는다. `_sourceToPlacement` 맵은 `_rebuildMappings()`에서 모든 source offset에 대해 채워진다 — 가시 문자는 `atEndOfChar: false`, trailing space는 `atEndOfChar: true` + 누적 스페이스 폭, `\n` 위치는 `atEndOfChar: true`, 매핑 구멍(빈 줄 등)은 역방향으로 가장 가까운 placement로 채워진다. 단, `\n` 바로 다음 위치(새 라인 시작)는 line rect 폴백으로 처리된다. `endOfBlock`에서 `textContent`에 실제 `\n`이 있을 때만 `sourceOffset++`를 수행하여 phantom offset을 방지한다. **phantom end placement**: trailing space 없이 끝나는 라인의 마지막 가시 문자 다음 offset(= 다음 라인 첫 글자 offset)은 `_lineEndPlacements`에 별도 저장되며, `preferLineEnd=true`로 조회 시 우선 반환되어 커서가 라인 끝 문자의 오른쪽에 배치된다. `crossRightState === 'crossed'`일 때는 `preferLineEnd=false`로 다음 라인 첫 글자의 왼쪽에 배치한다. `getCursorPlacement()`가 null을 반환하는 경우(빈 줄 시작, offset=0 등) line rect 또는 first column rect로 폴백한다. **height≈0 span(공백 문자) 처리**: `getCharRect(placement.sourceOffset)`의 `rect.height <= 1`이면 `useFallback=true`로 전환하여 `_resolveFallbackTop()`으로 커서 top을 결정한다. `_resolveFallbackTop`은 (1) 인접 가시 문자의 `rect.top`, (2) `getLineRect()`의 라인 div top, (3) span 자체 `rect.top`, (4) `getFirstColumnRect().top` 순서로 폴백한다. `rect.top - cursorHeight`를 사용하지 않는다 — 라인 끝 스페이스에서 위 라인으로 커서가 올라가는 버그를 방지.
 6. `_updateSelection()` — 선택 영역을 새 DOM 위치에 재배치.
 7. 조합 중이면 `_compositionSpan`을 새 DOM에 재부착. `getCursorPlacement(_compositionStartOffset)`로 위치를 찾고, 실패하면 첫 컬럼 첫 요소에 폴백한다.
 8. `_wasFocused`가 true면 `textarea.focus({ preventScroll: true })`로 포커스 복원. `preventScroll: true`로 스크롤 컨테이너의 좌상단 점프를 방지한다.
@@ -356,7 +356,7 @@ const { textStyle, paragraphStyle } = controller.currentStyle;
 | API | 타입 | 설명 |
 |-----|------|------|
 | `rebuild()` | `void` | 렌더링된 DOM을 기준으로 오프셋 매핑을 다시 구축한다. `postRender()`가 호출한다. |
-| `getCursorPlacement(sourceOffset)` | `CursorPlacement \| null` | 주어진 소스 오프셋에 커서를 표시할 위치를 반환한다. 가시 문자는 `{ sourceOffset, atEndOfChar: false }`, trailing space/endOfBlock은 이전 가시 문자를 `atEndOfChar: true`로 참조한다. 생략된 leading space와 `\n` 다음 위치는 null을 반환하여 line rect 폴백으로 처리된다. |
+| `getCursorPlacement(sourceOffset, preferLineEnd?)` | `CursorPlacement \| null` | 주어진 소스 오프셋에 커서를 표시할 위치를 반환한다. 가시 문자와 중간 스페이스(단어 사이)는 `{ sourceOffset, atEndOfChar: false }`로 설정되어 커서가 문자/스페이스 앞(왼쪽)에 배치된다. 라인 마지막 trailing space와 endOfBlock은 이전 가시 문자를 `atEndOfChar: true`로 참조하여 커서가 스페이스 뒤(이전 가시 문자의 오른쪽)에 배치된다. 생략된 leading space와 `\n` 다음 위치는 null을 반환하여 line rect 폴백으로 처리된다. `preferLineEnd=true`면 `_lineEndPlacements`를 우선 조회하여 라인 끝 문자의 오른쪽에 배치한다 (trailing space 없이 끝나는 라인에서 다음 라인 첫 글자 offset과 충돌할 때 사용). |
 | `getCharOffsetFromPoint(x, y)` | `CursorPosition \| null` | 뷰포트 좌표(x, y) 위치의 문자에 해당하는 소스 오프셋을 반환한다. y 범위에 있는 컬럼들 중 x에 가장 가까운 컬럼을 찾고, 해당 컬럼에서 y에 가장 가까운 라인 div를 찾은 후, 그 라인의 span들 중 x에 가장 가까운 span을 선택한다. 빈 라인(span이 없는 경우)이면 라인 시작 오프셋을 반환한다. |
 | `getNearestOffsetFromPoint(x, y)` | `CursorPosition \| null` | `getCharOffsetFromPoint`와 동일하다. |
 | `getCharRect(sourceOffset)` | `DOMRect \| null` | 주어진 소스 오프셋에 해당하는 문자 span의 위치를 단락 로컬 좌표로 반환한다. |
@@ -1515,7 +1515,7 @@ flowchart LR
 1. 이전 낙관적 span이 있으면 DOM에서 제거하고 `_optimisticSpan = null`로 초기화.
 2. `getCursorPlacement(sourceOffset)`로 커서 배치 정보를 얻는다.
 3. placement가 null인 경우(`\n` 바로 다음 위치 = 새 라인 시작): `_insertOptimisticSpanAtLineStart()`를 호출하여 새 라인의 line div 첫 자식으로 span 삽입.
-4. placement가 유효한 경우: `placement.atEndOfChar`가 true면 해당 span 뒤에, false면 앞에 새 span 삽입.
+4. placement가 유효한 경우: `_computeTempSpanLeft()`로 기준 span의 `data-char-offset`/`data-swidth`로부터 임시 span의 `left`(mm)를 동적 계산하여 absolute 배치. `placement.atEndOfChar`가 true면 해당 span 뒤에, false면 앞에 새 span 삽입.
 5. `_optimisticSpan = newSpan`으로 참조 저장.
 
 #### `_insertOptimisticSpanAtLineStart()` 내부 로직
@@ -1525,16 +1525,18 @@ flowchart LR
 1. `getLineInfoBySourceOffset(sourceOffset)`로 컬럼/라인 인덱스 획득.
 2. `paragraph.querySelectorAll('x-layout-column')`로 컬럼 요소 찾기 (light DOM).
 3. 컬럼의 shadowRoot에서 `lineIndex`번째 자식(line div)을 찾기.
-4. line div의 첫 자식 앞에 optimistic span 삽입 (`lineDiv.insertBefore(newSpan, lineDiv.firstChild)`).
-5. `_optimisticSpan = newSpan`으로 참조 저장.
+4. 임시 span에 `position: absolute; left: 0mm; top: 0` 적용 (라인 시작이므로 offset 0).
+5. line div의 첫 자식 앞에 optimistic span 삽입 (`lineDiv.insertBefore(newSpan, lineDiv.firstChild)`).
+6. `_optimisticSpan = newSpan`으로 참조 저장.
 
 ### 8.2 `_createOptimisticSpan()` 내부 로직
 
-1. `model.genCharStyle(char)`로 스타일 객체를 얻는다.
+1. `model.genCharStyleFlat()`로 단일 span용 통합 스타일(`scale`/`transformOrigin`/`display`)을 얻는다.
 2. `Object.assign`로 span의 style에 적용.
-3. `dataset.offset = String(sourceOffset)`: 임시 오프셋. 재렌더링 시 실제 오프셋으로 교정된다.
+3. `dataset.sourceOffset = String(sourceOffset)`: 소스 오프셋.
 4. `dataset.temporary = "true"`: 임시 span 표시. `TextEditCoordinateMapper`는 이 속성이 있는 span을 매핑 대상에서 제외.
-5. `innerText = char`.
+5. `textContent = char`: 단일 span에 직접 글자 설정 (outer/inner 중첩 없음).
+6. 호출자가 `_computeTempSpanLeft()`로 계산한 `left`值으로 `position: absolute; left: ${mm}mm; top: 0`를 추가 적용.
 
 ### 8.3 낙관적 span이 있는 경우의 커서 위치 처리
 

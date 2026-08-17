@@ -1074,6 +1074,7 @@ class TextLayoutEngine {
   genLineStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration>;
   genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration>;
   genCharStyle(char: string): Partial<CSSStyleDeclaration>;
+  genCharStyleFlat(): Partial<CSSStyleDeclaration>;
 
   // 게터
   get textContent: string | (string | TextBlockData)[];
@@ -1189,6 +1190,20 @@ public genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaratio
  * @returns 글자(span) CSS 스타일
  */
 public genCharStyle: (char: string) => Partial<CSSStyleDeclaration>;
+```
+
+#### `genCharStyleFlat()`
+
+```ts
+/**
+ * charOffsets(절대 좌표) 경로에서 단일 span에 적용할 통합 스타일 생성.
+ * flexbox 경로(`genCharStyle` + `genCharInnerStyle` 중첩 span)와 달리
+ * outer의 `width`/`textAlign`을 제거하고 inner의 `scale`/`transformOrigin`을 통합.
+ * absolute 배치이므로 레이아웃 슬롯 폭이 의미 없고 정렬은 charOffsets가 직접 산출.
+ *
+ * @returns 단일 span용 CSS 스타일 (`scale`/`transformOrigin`/`display`)
+ */
+public genCharStyleFlat: () => Partial<CSSStyleDeclaration>;
 ```
 
 #### `columnContents`
