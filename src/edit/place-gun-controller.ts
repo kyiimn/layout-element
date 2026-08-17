@@ -933,15 +933,14 @@ export class PlaceGunController {
   }
 
   /**
-   * Place Gun 활성 상태에 따라 문서 커서를 `copy`로 변경하거나 복원한다.
+   * Place Gun 활성 상태에 따라 이 컨트롤러가 관리하는 문서의 커서를 `copy`로 변경하거나 복원한다.
    *
    * @param active - 활성 여부
    */
   private _applyCursor(active: boolean): void {
     if (active === this._cursorApplied) return;
-    document.querySelectorAll('x-layout-document').forEach((el) => {
-      el.style.cursor = active ? 'copy' : '';
-    });
+    // EditManager는 per-document 인스턴스이므로 자신이 관리하는 문서 요소만 변경한다.
+    this._manager.docEl.style.cursor = active ? 'copy' : '';
     this._cursorApplied = active;
   }
 }

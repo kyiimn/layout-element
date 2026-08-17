@@ -143,7 +143,8 @@ export class LayoutSelectionController {
         const kcInternal = kc as unknown as { _labelToCoord: (label: string) => CellCoord | null };
         const coord = kcInternal._labelToCoord ? kcInternal._labelToCoord(tdElForDrag.cellLabel) : null;
         if (coord) {
-          for (const t of document.querySelectorAll('x-layout-table')) {
+          // EditManager는 per-document 인스턴스이므로 docEl 하위 트리만 순회한다.
+          for (const t of this._document.querySelectorAll('x-layout-table')) {
             const otherKc = (t as LayoutTableElement).keyboardController;
             if (otherKc && otherKc.selection) {
               otherKc.selection = null;
@@ -177,7 +178,8 @@ export class LayoutSelectionController {
     }
 
     let clearedTable = false;
-    for (const t of document.querySelectorAll('x-layout-table')) {
+    // EditManager는 per-document 인스턴스이므로 docEl 하위 트리만 순회한다.
+    for (const t of this._document.querySelectorAll('x-layout-table')) {
       const kc = (t as LayoutTableElement).keyboardController;
       if (kc?.selection) {
         kc.selection = null;
