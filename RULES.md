@@ -123,8 +123,48 @@
 - 공백 문자 span은 `getBoundingClientRect().height === 0`이다.
   커서 높이를 `rect.height`에서 가져오면 공백 앞에서 커서가 보이지 않는다.
 - `rect.height <= 1`이면 `getFirstColumnRect().fontSize`를 폴백으로 사용한다.
-- 커서 `top` 위치는 `rect.top - cursorHeight`가 아닌
-  인접 일반 문자의 `rect.top`을 사용한다 (`_resolveFallbackTop()`).
+- 커서 `top` 위치는 `_resolveFallbackTop()`으로 결정하며, 폴백 우선순위는:
+  1. 인접 일반 문자(`sourceOffset ± 1`)의 `rect.top` — 같은 라인에 가시 문자가 있으면 사용
+  2. `getLineInfoBySourceOffset` + `getLineRect`로 구한 라인 div의 `top` — 라인 div는
+     height≈0 span과 무관하게 `lineHeight` 높이를 가지므로 올바른 top을 반환
+  3. `getCharRect(sourceOffset).top` — height≈0 span이라도 top은 라인 상단과 일치
+  4. `getFirstColumnRect().top` — 빈 단락 등의 최종 폴백
+- **주의**: `rect.top - cursorHeight`를 사용하면 안 된다. 라인 끝의 스페이스처럼
+  인접 가시 문자가 모두 height≈0이면 `rect.top - cursorHeight`가 위 라인 쪽으로
+  커서를 올려버리는 버그가 발생한다 (엔터 → 가나다 → 스페이스 두 번 시나리오).
+
+### 2.3.1 라인 끝 커서 배치 — phantom end placement
+
+- trailing space 없이 끝나는 라인의 마지막 가시 문자 다음 offset은
+  다음 라인 첫 글자의 offset과 **동일**하다 (예: `...21일(현지...`에서
+  `일` = offset 30, `(` = offset 31). 
+- `_sourceToPlacement`는 이 offset에 대해 다음 라인 첫 글자의
+  `atEndOfChar: false` placement를 설정한다.
+- 라인 끝에서 커서가 마지막 가시 문자의 **오른쪽**에 배치되려면
+  이전 라인 마지막 가시 문자를 `atEndOfChar: true`로 참조해야 하지만,
+  같은 offset에 두 가지 placement가 충돌하므로 별도 맵
+  `_lineEndPlacements`에 phantom end placement를 저장한다.
+- `getCursorPlacement(offset, preferLineEnd=true)`로 조회하면
+  `_lineEndPlacements`를 우선하여 라인 끝 배치를 반환한다.
+- `_updateCursorPosition`은 기본 조회에서 `preferLineEnd=true`를 사용하고,
+  `crossRightState === 'crossed'`일 때만 `preferLineEnd=false`로
+  다음 라인 첫 글자의 왼쪽에 배치한다.
+
+### 2.3.2 스페이스 문자 커서 배치
+
+- **중간 스페이스**(단어 사이): 커서가 스페이스 **앞**(왼쪽)에 배치된다.
+  `_rebuildMappings`에서 가시 문자와 동일하게 `atEndOfChar: false`로 설정된다.
+- **라인 마지막 스페이스**(trailing space): 커서가 스페이스 **뒤**(이전 가시 문자의 오른쪽)에 배치된다.
+  `_rebuildMappings`에서 trailing space 처리 시 `atEndOfChar: true`로 설정된다.
+- **endOfBlock의 trailing space**: 라인 마지막 스페이스와 동일하게 `atEndOfChar: true`로 설정된다.
+- **금지**: `placement.atEndOfChar === false`일 때 span 텍스트가 `' '`인지 검사하여
+  강제로 `atEndOfChar: true`로 바꾸면 안 된다. 이는 모든 중간 스페이스를 뒤로 밀어버려
+  ArrowRight로 스페이스 → 다음 글자 이동 시 커서가 뒤로(왼쪽으로) 가는 버그를 발생시킨다.
+- **crossed 상태에서 trailing space 처리**: ArrowRight cross 메커니즘의 crossed 상태에서
+  현재 offset이 trailing space인 경우(`getCursorPlacement(offset, false).sourceOffset !== offset`),
+  `atEndOfChar: false`로 강제하면 이전 가시 문자의 **앞**에 커서가 배치되어
+  "한 글자 앞으로 돌아옴" 버그가 발생한다. 이 경우 다음 offset의 placement를 참조하여
+  다음 라인 첫 글자의 왼쪽에 배치해야 한다.
 
 ### 2.4 커서 너비
 
@@ -164,7 +204,11 @@
   `lineSpans` 수집 시 `height <= 1`인 span을 제외해야 한다.
 - **`_updateCursorPosition`**: `rect.height <= 1`이면
   `getFirstColumnRect().fontSize`를 커서 높이 폴백으로 사용하고
-  `_resolveFallbackTop()`으로 인접 문자의 `top`을 사용해야 한다.
+  `_resolveFallbackTop()`으로 커서 top을 결정해야 한다.
+  `_resolveFallbackTop`은 인접 가시 문자 → 라인 div top → span rect.top →
+  첫 컬럼 top 순서로 폴백한다 (§2.3 참조).
+  **`rect.top - cursorHeight`를 폴백으로 사용하면 안 된다** — 라인 끝 스페이스처럼
+  인접 가시 문자가 모두 height≈0일 때 위 라인 쪽으로 커서가 올라가는 버그가 발생한다.
 
 ### 2.8 편집 기능 회귀 방지 — 기능 추가/수정 시 필수 검증
 

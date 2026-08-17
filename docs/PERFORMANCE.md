@@ -32,6 +32,7 @@
   - [3.10 임시 span 제거](#310-임시-span-제거)
   - [3.11 AI 처리 오버레이 CSS 토글](#311-ai-처리-오버레이-css-토글)
   - [3.12 Skeleton 레이아웃 캐시](#312-skeleton-레이아웃-캐시-_layoutcache)
+  - [3.13 charOffsets 단일 span 구조](#313-charoffsets-단일-span-구조)
 - [4. 이벤트/입력 최적화](#4-이벤트입력-최적화)
   - [4.1 TextEditController 디바운스 렌더링](#41-texteditcontroller-디바운스-렌더링-_debouncedrender)
   - [4.2 낙관적 span](#42-낙관적-span-optimistic-span)
@@ -325,9 +326,11 @@
 | 항목 | 값 |
 |---|---|
 | 위치 | `LayoutParagraphElement._perfShouldFullRecreate()` (`paragraph.element.ts:310`) |
-| 조건 | `wasStructureDirty \|\| lineCountBefore === -1 \|\| lineCountBefore !== lineCountAfter \|\| overflowBefore !== overflowAfter` |
+| 조건 | `lineCountBefore === -1 \|\| lineCountBefore !== lineCountAfter \|\| overflowBefore !== overflowAfter` |
 
-구조 변경, 줄 수 변경, 오버플로우 변경 시에만 `replaceChildren()` + 전체 컬럼 재생성. 변경이 없으면 기존 컬럼의 `renderText()`만 호출.
+`lineCountBefore === -1`(초기 렌더, `resetIncrementalState()` 직후)이거나 라인 수/오버플로우가 변경된 경우에만 `replaceChildren()` + 전체 컬럼 재생성. 변경이 없으면 기존 컬럼의 `renderText()`만 호출.
+
+> **`wasStructureDirty` 제거**: 이전에는 `_perfStructureChanged === true`이면 무조건 전체 재생성이 트리거되었다. 그러나 박스 이동 시 Skeleton 캐시가 히트하면 `columnContents`가 동일 → 라인 수/오버플로우 불변이므로 diff 렌더링으로 충분하다. `wasStructureDirty` 조건을 제거하여 diff 경로로 진입하도록 완화. 단, `resetIncrementalState()`가 `_previousLineCount = -1`로 설정하므로 구조 변경 후 첫 렌더는 여전히 `lineCountBefore === -1` 경로로 전체 재생성된다.
 
 ### 3.7 단락 오버플로우 shadow change-gating
 
@@ -385,9 +388,14 @@
 | `spaceRatio` | 공백 비율 |
 | `fontSize` | 폰트 크기 |
 | `_inheritStyle.parentHeight` | 단락 높이 (오버플로우 판정) |
-| 오버랩 요소 `absLeft/absTop/absWidth/absHeight` | 오버랩 위치/크기 |
+| 오버랩 요소 **상대 좌표** (`el.absLeft - paragraph.absLeft`, `el.absTop - paragraph.absTop`) | 단락 기준 상대 위치. 오버랩 요소가 없으면 해시에 포함되지 않음 |
+| 오버랩 요소 `absWidth/absHeight` | 오버랩 크기 |
 | 오버랩 요소 `overlapMode` | 오버랩 처리 모드 (`'path'`/`'box'`). 모드 변경 시 캐시 무효화 |
-| `paragraph.absLeft` / `paragraph.absTop` | 단락 절대 위치 (라인 mm 좌표 계산 기준) |
+
+> **단락 절대 위치(`paragraph.absLeft`/`absTop`)는 해시에서 제외됨**. 오버랩 판정은 단락 rect와 오버랩 요소 rect의 **상대 기하학**에만 의존하므로, 절대 좌표 대신 오버랩 요소의 단락 기준 상대 좌표를 사용한다. 이로써:
+> - **오버랩 없는 박스 이동**: 해시 불변 → 캐시 히트 → 재배치 스킵
+> - **부모 박스 통째 이동**: 단락과 오버랩 요소가 동시에 이동 → 상대 좌표 불변 → 캐시 히트
+> - **오버랩 요소만 독립 이동**: 상대 좌표 변화 → 캐시 미스 → 재배치 (정확성 유지)
 
 #### 캐시 무효화
 
@@ -400,9 +408,11 @@
 | 시나리오 | 현재 (캐시 없음) | Skeleton 캐시 적용 후 |
 |---|---|---|
 | 박스 이동 (오버랩 없음, 컬럼 폭 변경 없음) | `_layoutTextIntoColumns()` 2~8ms | 해시 계산 ~0.1ms → **캐시 히트 → 0ms** |
+| 부모 박스 통째 이동 (오버랩 요소 포함) | `_layoutTextIntoColumns()` 2~8ms | 상대 좌표 불변 → **캐시 히트 → 0ms** |
 | `scheduleRender` 배치 후 동일 입력 재렌더 | `_layoutTextIntoColumns()` 재실행 | **해시 히트 → 0ms** |
 | 단락 끝 1글자 타이핑 | 전체 재배치 | 해시 미스 → 전체 재배치 (정확함) |
 | 장평/자간 변경 | 전체 재배치 | 해시 미스 → 전체 재배치 (정확함) |
+| 오버랩 이미지만 독립 이동 | 전체 재배치 | 상대 좌표 변화 → 해시 미스 → 전체 재배치 (정확함) |
 | 이미지 첫 로드 완료 | 오버랩 누락 (canvas 비어있음) | `_notifyOverlapParagraphs()` → 캐시 무효화 → **재배치로 오버랩 정상 적용** |
 
 #### 테이블 `refreshBorder` 증분 갱신
@@ -412,6 +422,40 @@
 #### 테이블 리사이즈 중 write-back 스킵
 
 `table.element.ts:289-297` — 리사이즈 핸들 드래그 중 `_resizeState`가 존재할 때 `data` write-back을 스킵하여 레이아웃 스래싱 방지.
+
+### 3.13 charOffsets 단일 span 구조
+
+| 항목 | 값 |
+|---|---|
+| 위치 | `LayoutColumnElement._applySpanStyle()` (`column.element.ts:163`) |
+| 스타일 | `TextLayoutEngine.genCharStyleFlat()` (`text-layout-engine.ts:1140`) |
+| 적용 조건 | `charOffsetMm !== undefined` (charOffsets 절대 좌표 경로) |
+
+charOffsets 경로에서는 outer/inner 중첩 span 대신 **단일 span**을 사용한다. absolute 배치이므로 outer의 `width`/`textAlign`이 의미 없고, 정렬은 charOffsets가 직접 산출한다. inner의 `scale`/`transformOrigin`을 단일 span에 직접 적용(`genCharStyleFlat()`).
+
+편집 모드(`editableText=true`)에서도 charOffsets가 활성화되어 단일 span + absolute 배치를 사용한다.
+임시 span(optimistic, IME 조합)은 `columnContents`에 포함되지 않으므로, 삽입 시 기준 span의
+`data-char-offset`과 `data-swidth`로부터 임시 span의 `left`를 동적 계산한다
+(`TextEditController._computeTempSpanLeft()`).
+
+flexbox 폴백 경로(`charOffsets === undefined`, 외부에서 임의로 `TextPartData`를 생성한 경우)에서만
+기존 outer/inner 중첩 span 구조를 유지한다.
+
+| 항목 | 중첩 span (flexbox) | 단일 span (charOffsets) |
+|---|---|---|
+| DOM 노드 수 | 글자 수 × 2 | 글자 수 × 1 (**50% 감소**) |
+| `_applySpanStyle` DOM 작업 | `querySelector` + inner 생성/갱신 | `textContent` 직접 설정 |
+| `_skipSpanStyleIfUnchanged` | `querySelector` + inner textContent 비교 | `textContent` 직접 비교 |
+| 스타일 속성 | outer `width`/`textAlign` + inner `scale` | `scale`/`transformOrigin`/`position`/`left` 통합 |
+| 편집 모드 | 미사용 (charOffsets 활성화) | 임시 span 동적 offset 계산 |
+
+#### `printPostData` 호환성
+
+`paragraph.element.ts:770-778` — `printPostData`는 inner span 존재 여부로 분기:
+- inner 있으면(중첩 span): `inner.textContent`에서 글자, `inner.style.scale`에서 widthRatio 추출
+- inner 없으면(단일 span): `span.textContent`에서 글자, `span.style.scale`에서 widthRatio 추출
+
+두 경로 모두 자연스럽게 처리되므로 `printPostData`는 변경 없이 호환됨.
 
 ---
 
@@ -511,6 +555,15 @@ Enter/compositionend 핸들러와 같이 `render()` 직후 동기적 커서/선�
 #### Box 드래그/리사이즈 rAF 배치
 
 `box.element.ts:1585-1597` — `_scheduleDragRerender`로 단일 `requestAnimationFrame`을 스케줄하고 동일 rAF 프레임 내 여러 setter 호출을 1회 갱신으로 배치.
+
+#### 드래그 중 diff 렌더링 경로 (`renderForDrag`)
+
+`box.element.ts:_renderAffectedParagraphs(affected, isDrag=true)` — 드래그/리사이즈 중에는 `markStructureChangedAndFlushRender()` 대신 `paragraph.renderForDrag()`를 호출. `renderForDrag()`는 `_perfStructureChanged`를 `true`로 설정하지 않고 `flushRender()`만 실행.
+
+- **비드래그 경로**(`markStructureChangedAndFlushRender`): `_perfStructureChanged = true` → `render()`에서 `resetIncrementalState()` + `layoutStructure()` + 전체 재생성. 드래그 종료(`flushDragRerender`) 및 비드래그 setter에서 사용.
+- **드래그 경로**(`renderForDrag`): `_perfStructureChanged = false` 유지 → `render()`에서 `layoutText()`만 호출 (Skeleton 캐시 히트 시 즉시 반환) → `_perfShouldFullRecreate()`가 `false` → diff 기반 `renderText()` → `_skipSpanStyleIfUnchanged`가 모든 span 스킵.
+
+이로써 드래그 중 매 프레임 `replaceChildren()` + 전체 span 재생성이 발생하던 성능 저하를 해결. 텍스트 내용이 아닌 박스 위치만 변경된 경우 Skeleton 캐시가 히트하면 0ms에 가까운 렌더링.
 
 ### 4.11 LayoutEditController lockAxis 메모이제이션
 
