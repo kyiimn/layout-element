@@ -314,9 +314,6 @@ export class TextLayoutEngine {
    * // offsets = [0, 20+15, 20+15+30+15] = [0, 35, 80]
    */
   private _computeCharOffsets(): void {
-    if (this._paragraphElement.editableText) {
-      return;
-    }
     const defaultTextAlign = this.paragraphStyle?.textAlign
       ?? this.inheritStyle?.textAlign
       ?? DEFAULT_TEXT_ALIGN;
@@ -895,6 +892,32 @@ export class TextLayoutEngine {
       }
     }
 
+    // 해시 키 전략: 오버랩 판정(`_createLineWithParts`의 lineRectMm)은 단락 절대
+    // 위치와 오버랩 요소 절대 위치를 모두 사용하지만, 결과에 영향을 주는 것은
+    // 단락-오버랩 **상대 기하학**뿐이다. 따라서:
+    //  - 오버랩 요소가 있으면: 오버랩 요소의 단락 기준 상대 좌표를 키에 사용.
+    //    부모 박스 통째 이동 시 두 요소가 동시에 이동 → 상대 좌표 불변 → 캐시 히트.
+    //  - 오버랩 요소가 없으면: 단락 절대 위치(pl/pt)를 키에서 제외.
+    //    오버랩이 없으면 lineRectMm가 결과에 영향을 주지 않으므로 박스 이동 시 히트.
+    // 'none' 모드 이미지/paragraph는 overlayElements에서 제외되어 여기에 등장하지 않는다.
+    const pAbsLeft = this._paragraphElement.absLeft;
+    const pAbsTop = this._paragraphElement.absTop;
+
+    const overlapEls = this._paragraphElement.overlayElements;
+    for (const el of overlapEls) {
+      // overlapMode를 해시에 포함하여 모드 변경 시 캐시 무효화 보장.
+      let mode = 'path';
+      if (el.contentType === 'image') {
+        const imgEl = el.contentElement as LayoutImageElement | null;
+        if (imgEl) mode = imgEl.overlapMode;
+      }
+      const relLeft = el.absLeft - pAbsLeft;
+      const relTop = el.absTop - pAbsTop;
+      parts.push(
+        'o:' + relLeft + ',' + relTop + ',' + el.absWidth + ',' + el.absHeight + ',' + mode,
+      );
+    }
+
     parts.push(
       'cw:' + this._columnWidths.join(','),
       'g:' + this._gaps.join(','),
@@ -904,23 +927,7 @@ export class TextLayoutEngine {
       'sr:' + this.spaceRatio,
       'fs:' + (this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE),
       'ph:' + (this._inheritStyle?.parentHeight ?? 0),
-      'pl:' + this._paragraphElement.absLeft,
-      'pt:' + this._paragraphElement.absTop,
     );
-
-    const overlapEls = this._paragraphElement.overlayElements;
-    for (const el of overlapEls) {
-      // overlapMode를 해시에 포함하여 모드 변경 시 캐시 무효화 보장.
-      // 'none' 이미지는 overlayElements에서 제외되므로 여기에 등장하지 않는다.
-      let mode = 'path';
-      if (el.contentType === 'image') {
-        const imgEl = el.contentElement as LayoutImageElement | null;
-        if (imgEl) mode = imgEl.overlapMode;
-      }
-      parts.push(
-        'o:' + el.absLeft + ',' + el.absTop + ',' + el.absWidth + ',' + el.absHeight + ',' + mode,
-      );
-    }
 
     return parts.join('|');
   }
@@ -1125,6 +1132,47 @@ export class TextLayoutEngine {
       transformOrigin: '0 center',
     };
     return this._charInnerStyle;
+  }
+
+  /**
+   * charOffsets(절대 좌표) 경로에서 단일 span에 적용할 통합 스타일을 반환한다.
+   *
+   * flexbox 경로(`genCharStyle` + `genCharInnerStyle` 중첩 span)와 달리:
+   *  - outer의 `textAlign`을 제거 — absolute 배치이므로 정렬은 charOffsets가 직접 산출.
+   *  - inner의 `scale`/`transformOrigin`을 통합 — 중첩 span 없이 단일 span에서
+   *    glyph 시각 축소를 담당.
+   *  - `width`/`minWidth`는 유지 — `getBoundingClientRect().width`가 올바른 값을
+   *    반환하도록 보장. 커서 배치(`getCharRect`)와 printPostData가 폭을 기반으로 동작.
+   *
+   * 보정 계수 `0.88`은 `genCharInnerStyle`과 동일 값(opentype.js advanceWidth와
+   * 브라우저 렌더링 간 격차 보정). 절대 변경/제거 금지.
+   *
+   * @param char - 대상 문자 (공백 여부에 따라 width 계산이 다름)
+   * @param textBlockStyle - 블록 레벨 스타일 오버라이드 (선택)
+   * @returns 단일 span용 CSS 스타일 객체.
+   */
+  public genCharStyleFlat = (char: string, textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> => {
+    const wr = this.widthRatio;
+    const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
+    const sr = this.spaceRatio;
+    const fs = textBlockStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
+    const lsMm = lsEm * fs;
+    let widthMm: number;
+    if (char === ' ') {
+      widthMm = sr * fs * wr + lsMm;
+    } else {
+      const rawWidthMm = this._charWidthMm(char, textBlockStyle);
+      widthMm = rawWidthMm * wr + lsMm;
+    }
+    const widthCss = `${widthMm}mm`;
+    return {
+      display: 'inline-block',
+      width: widthCss,
+      minWidth: `${sr * fs}mm`,
+      maxWidth: widthCss,
+      scale: `${wr * 0.88} 1`,
+      transformOrigin: '0 center',
+    };
   }
 
   /**

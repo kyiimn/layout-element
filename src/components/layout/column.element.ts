@@ -158,17 +158,45 @@ export class LayoutColumnElement extends HTMLElement {
    * 브라우저 렌더링 결과가 계산된 `charOffsets[j]`와 정확히 일치한다.
    * `top: 0`은 수직 정렬을 부모 part div(`alignItems: baseline`이 무시되므로 부모 top 기준)에 맡긴다 —
    * 폰트 메트릭 기반 렌더링에서 span 높이는 `lineHeight`와 일치하므로 top=0이면 시각적으로 올바르다.
-   * `charOffsetMm === undefined`이면 레거시 flexbox 정렬 경로를 유지한다.
+   *
+   * charOffsets 경로에서는 **단일 span** 구조를 사용한다 — outer/inner 중첩 없이
+   * `scale`/`transformOrigin`을 이 span에 직접 적용(`genCharStyleFlat`). absolute 배치이므로
+   * outer의 `width`/`textAlign`이 의미 없고, 정렬은 charOffsets가 직접 산출한다.
+   * DOM 노드 수 절반, querySelector/inner span 갱신 비용 제거.
+   *
+   * `charOffsetMm === undefined`이면 레거시 flexbox 정렬 경로를 유지한다 (outer/inner 중첩).
    */
   private _applySpanStyle(charEl: HTMLSpanElement, char: string, renderedOffset: number, sourceOffset: number, charOffsetMm: number | undefined, textBlockStyle: TextBlockStyle | undefined): void {
-    const charStyle = this.model!.genCharStyle(char, textBlockStyle);
     charEl.style.cssText = '';
-    Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, charStyle);
+
     if (charOffsetMm !== undefined) {
+      // 단일 span 경로: scale/transformOrigin을 직접 적용, inner span 없음
+      const flatStyle = this.model!.genCharStyleFlat(char, textBlockStyle);
+      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, flatStyle);
       charEl.style.position = 'absolute';
       charEl.style.left = `${charOffsetMm}mm`;
       charEl.style.top = '0';
+      charEl.textContent = char;
+
+      // flexbox→charOffsets 전환 시 기존 inner span 제거
+      const existingInner = charEl.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
+      if (existingInner) existingInner.remove();
+    } else {
+      // 중첩 span 경로: outer width/textAlign + inner scale
+      const charStyle = this.model!.genCharStyle(char, textBlockStyle);
+      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, charStyle);
+      let inner = charEl.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
+      if (!inner) {
+        inner = document.createElement('span');
+        inner.dataset.charInner = 'true';
+        charEl.appendChild(inner);
+      }
+      const innerStyle = this.model!.genCharInnerStyle();
+      inner.style.cssText = '';
+      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(inner.style, innerStyle);
+      inner.textContent = char;
     }
+
     charEl.dataset.offset = String(renderedOffset);
     charEl.dataset.sourceOffset = String(sourceOffset);
     if (charOffsetMm !== undefined) {
@@ -180,16 +208,6 @@ export class LayoutColumnElement extends HTMLElement {
     const { owidth, swidth } = this.model!.getCharWidths(char, textBlockStyle);
     charEl.dataset.owidth = String(owidth);
     charEl.dataset.swidth = String(swidth);
-    let inner = charEl.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
-    if (!inner) {
-      inner = document.createElement('span');
-      inner.dataset.charInner = 'true';
-      charEl.appendChild(inner);
-    }
-    const innerStyle = this.model!.genCharInnerStyle();
-    inner.style.cssText = '';
-    Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(inner.style, innerStyle);
-    inner.textContent = char;
   }
 
   /**
@@ -199,6 +217,9 @@ export class LayoutColumnElement extends HTMLElement {
    * DOM 쓰기를 발생시키므로 변경이 없으면 전체 스킵한다.
    *
    * `charOffsetMm`가 변경되면 스킵하지 않는다 (정렬 변경 시 재적용 필요).
+   *
+   * charOffsets 경로(단일 span)에서는 `textContent`를 직접 비교하고,
+   * flexbox 경로(중첩 span)에서는 inner span의 `textContent`를 비교한다.
    *
    * @param charEl - 재사용 대상 span
    * @param char - 현재 글자
@@ -218,13 +239,16 @@ export class LayoutColumnElement extends HTMLElement {
       charEl.dataset.offset === String(renderedOffset) &&
       charEl.dataset.sourceOffset === String(sourceOffset)
     ) {
-      const inner = charEl.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
-      if (inner && inner.textContent === char) {
-        const existingCharOffset = charEl.dataset.charOffset;
-        const newCharOffsetStr = charOffsetMm !== undefined ? String(charOffsetMm) : undefined;
-        if (existingCharOffset === newCharOffsetStr) {
-          return true;
+      const existingCharOffset = charEl.dataset.charOffset;
+      const newCharOffsetStr = charOffsetMm !== undefined ? String(charOffsetMm) : undefined;
+      if (existingCharOffset === newCharOffsetStr) {
+        // charOffsets 경로(단일 span): textContent 직접 비교
+        if (charOffsetMm !== undefined) {
+          return charEl.textContent === char;
         }
+        // flexbox 경로(중첩 span): inner span textContent 비교
+        const inner = charEl.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
+        return inner !== null && inner.textContent === char;
       }
     }
     return false;

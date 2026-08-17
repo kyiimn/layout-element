@@ -1611,7 +1611,8 @@ export class LayoutBoxElement extends HTMLElement {
         const current = this._collectAffectedParagraphs();
         if (this._dragAffectedParagraphs) {
           for (const p of current) this._dragAffectedParagraphs.add(p);
-          this._renderAffectedParagraphs(this._dragAffectedParagraphs);
+          // 드래그 중: diff 렌더링 경로로 전체 재생성 회피
+          this._renderAffectedParagraphs(this._dragAffectedParagraphs, true);
         }
       });
     }
@@ -1714,11 +1715,20 @@ export class LayoutBoxElement extends HTMLElement {
 
   /**
    * 수집된 단락 요소들을 다시 렌더링한다.
+   *
+   * @param affected - 영향받는 단락 집합
+   * @param isDrag - `true`이면 드래그/리사이즈 중임. `_perfStructureChanged`를
+   *   설정하지 않고 `renderForDrag()`로 diff 렌더링 경로를 타서 전체 재생성을 피한다.
+   *   `false`(기본)이면 `markStructureChangedAndFlushRender()`로 전체 재생성 경로를 탄다.
    */
-  private _renderAffectedParagraphs(affected: Set<LayoutParagraphElement>): void {
+  private _renderAffectedParagraphs(affected: Set<LayoutParagraphElement>, isDrag: boolean = false): void {
     for (const p of affected) {
       if (p.isConnected) {
-        p.markStructureChangedAndFlushRender();
+        if (isDrag) {
+          p.renderForDrag();
+        } else {
+          p.markStructureChangedAndFlushRender();
+        }
       }
     }
   }

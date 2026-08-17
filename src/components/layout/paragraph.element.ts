@@ -231,7 +231,6 @@ export class LayoutParagraphElement extends HTMLElement {
   render() {
     if (!this.isConnected || !this._model) return;
 
-    const wasStructureDirty = this._perfStructureChanged;
     const lineCountBefore = this._model.previousLineCount;
     const overflowBefore = this._model.previousOverflow;
 
@@ -265,7 +264,7 @@ export class LayoutParagraphElement extends HTMLElement {
     const lineCountAfter = this._model.columnContents.reduce((sum, col) => sum + col.length, 0);
     const overflowAfter = this._model.overflow;
 
-    const needsFullRecreate = this._perfShouldFullRecreate(wasStructureDirty, lineCountBefore, overflowBefore, lineCountAfter, overflowAfter);
+    const needsFullRecreate = this._perfShouldFullRecreate(lineCountBefore, overflowBefore, lineCountAfter, overflowAfter);
 
     if (needsFullRecreate) {
       this.replaceChildren();
@@ -308,17 +307,28 @@ export class LayoutParagraphElement extends HTMLElement {
 
   /**
    * 성능 최적화: 전체 재생성이 필요한지 판별한다.
-   * 구조 변경, 줄 수 변경, 오버플로우 변경 시 전체 재생성이 필요하다.
+   *
+   * 라인 수와 오버플로우가 동일하면 diff 경로로 진입하여
+   * `_skipSpanStyleIfUnchanged`가 모든 span을 스킵하도록 한다. 박스 이동 시
+   * Skeleton 레이아웃 캐시가 히트하면 `columnContents`가 동일 → 라인 수/오버플로우
+   * 불변 → diff 렌더링으로 매 프레임 `replaceChildren()` + 전체 span 재생성을 회피.
+   *
+   * 단, `lineCountBefore === -1`(초기 렌더 또는 `resetIncrementalState()` 직후)은
+   * 항상 전체 재생성이 필요하다 — 이전 상태가 없으므로 diff 비교가 불가능하다.
+   *
+   * @param lineCountBefore - 이전 렌더의 총 라인 수. `-1`이면 초기 상태.
+   * @param overflowBefore - 이전 렌더의 오버플로우 문자 수.
+   * @param lineCountAfter - 현재 렌더의 총 라인 수.
+   * @param overflowAfter - 현재 렌더의 오버플로우 문자 수.
+   * @returns `true`이면 전체 재생성(`replaceChildren()`), `false`이면 diff 렌더링.
    */
   private _perfShouldFullRecreate(
-    wasStructureDirty: boolean,
     lineCountBefore: number,
     overflowBefore: number,
     lineCountAfter: number,
     overflowAfter: number,
   ): boolean {
-    return wasStructureDirty
-      || lineCountBefore === -1
+    return lineCountBefore === -1
       || lineCountBefore !== lineCountAfter
       || overflowBefore !== overflowAfter;
   }
@@ -847,6 +857,18 @@ export class LayoutParagraphElement extends HTMLElement {
    */
   markStructureChangedAndFlushRender(): void {
     this._perfStructureChanged = true;
+    this.flushRender();
+  }
+
+  /**
+   * 드래그/리사이즈 중 영향받는 단락을 즉시 `render()`로 갱신한다.
+   * `markStructureChangedAndFlushRender()`와 달리 `_perfStructureChanged`를
+   * `true`로 설정하지 않는다 — 텍스트 내용이 아닌 박스 위치만 변경된 경우,
+   * Skeleton 레이아웃 캐시가 히트하면 `columnContents`가 동일하므로 diff 기반
+   * `renderText()` 경로로 진입하여 `_skipSpanStyleIfUnchanged`가 모든 span을
+   * 스킵하도록 한다. 전체 재생성(`replaceChildren()`)을 피한다.
+   */
+  renderForDrag(): void {
     this.flushRender();
   }
 
