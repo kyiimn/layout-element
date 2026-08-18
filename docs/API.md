@@ -2954,13 +2954,16 @@ type PlaceGunChangeEventDetail = {
 
 ```ts
 /**
- * 두 요소의 화면 사각형이 교차하는지 검사.
+ * 두 요소의 mm 기반 사각형이 교차하는지 검사.
  *
- * @param baseElement - 기준 요소
- * @param targetElement - 대상 요소
- * @returns 화면상 교차 여부
+ * `getBoundingClientRect()`를 호출하지 않으며, `absLeft`/`absTop`/
+ * `absWidth`/`absHeight`를 통해 mm 좌표계에서 직접 판정한다.
+ *
+ * @param baseElement - 기준 요소 (LayoutBoxElement | LayoutParagraphElement)
+ * @param targetElement - 대상 요소 (LayoutBoxElement | LayoutParagraphElement)
+ * @returns mm 영역 교차 여부
  */
-const checkOverlap: (base: HTMLElement, target: HTMLElement) => boolean;
+const checkOverlap: (base: MmMeasurable, target: MmMeasurable) => boolean;
 ```
 
 ### `mergeOverlapParts(parts)`
