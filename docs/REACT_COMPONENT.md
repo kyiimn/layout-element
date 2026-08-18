@@ -795,7 +795,7 @@ function EditableParagraph({ data }: { data: ParagraphData }) {
 
 ## 타입 재노출
 
-`layout-element/react`는 바닐라 API의 모든 타입을 다시 export합니다:
+`layout-element/react`는 바닐라 API의 모든 타입을 다시 export합니다. 엔진 클래스(`DocumentEngine`, `BoxEngine`, `ParagraphEngine`, `ImageEngine`, `TableEngine`, `GridCalculatorEngine`, `FontLoaderEngineImpl`, `ColorRegistryEngineImpl`)도 `layout-element/react`에서 재노출되어 바닐라 진입점과 동일하게 import할 수 있습니다.
 
 ```ts
 // Components
@@ -806,7 +806,7 @@ export type {
 };
 
 // Core
-export type { GridCalculator, TextLayoutEngine, Rect };
+export type { GridCalculatorEngine, ParagraphEngine, Rect };
 
 // Resource
 export type { ColorRegistry, FontLoader, ColorLoaderFn, FontLoaderFn };
@@ -855,7 +855,7 @@ export {
 
 // Utils (`@/utils`를 `export *`로 재노출)
 export {
-  checkOverlap, getOverlapSizeMm, mergeOverlapParts, genUUID,
+  checkOverlap, computeOverlapSizeMm, mergeOverlapParts, genUUID,
   createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay,
 };
 ```
