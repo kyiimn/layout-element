@@ -1,5 +1,5 @@
 export * from '@/types';
-export * from '@/core';
+export * from '@/engine';
 export * from '@/resource';
 export * from '@/constants';
 export * from '@/utils';

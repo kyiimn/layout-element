@@ -3,7 +3,7 @@ import type { TableCellSelection, CellCoord } from "@/types";
 import type { TableData, TableRowData, TableCellData, BoxData } from "@/types";
 import type { EditManager } from "./edit-manager";
 import { MIN_TABLE_COL_WIDTH, MIN_TABLE_ROW_HEIGHT } from "@/constants";
-import { normalizeWidths } from "@/core";
+import { normalizeWidths } from "@/engine";
 
 export class TableStructureEditor {
   private _tableEl: LayoutTableElement;
