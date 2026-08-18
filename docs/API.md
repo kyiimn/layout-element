@@ -2,7 +2,9 @@
 
 이 문서는 `layout-element` 패키지의 **바닐라 JavaScript API**(Custom Element 기반)에 대한
 전체 레퍼런스입니다. 모든 측정은 **mm(밀리미터)** 단위이며, 픽셀 변환 비율(`ppm`)은 런타임에
-`GridCalculator.ppm`을 통해 측정됩니다.
+`LayoutDocumentElement.ppm`(100mm div 측정)을 통해 주입되어 `DocumentEngine.ppm`으로 전파됩니다.
+엔진 계층의 모든 연산은 mm 단위로만 동작하므로 ppm은 브라우저 화면 렌더링용도이며 Node.js에서는 불필요합니다.
+엔진 계층에 대한 상세 문서는 [`ENGINE.md`](./ENGINE.md)를 참고하세요.
 
 - **두 가지 빌드 출력**을 사용합니다:
   - **IIFE 번들**(`dist/layout-element.iife.js`): `LayoutElement` 전역 네임스페이스로 노출
@@ -26,10 +28,17 @@
     - [`<x-layout-guide-column>`](#x-layout-guide-column)
    - [`<x-layout-cursor>`](#x-layout-cursor)
    - [`<x-layout-selection>`](#x-layout-selection)
-3. [Core](#core)
-   - [`GridCalculator`](#gridcalculator)
-   - [`TextLayoutEngine`](#textlayoutengine)
-   - [`Rect`](#rect)
+3. [Core / Engine](#core--engine)
+   - [`GridCalculatorEngine`](#gridcalculatorengine)
+   - [`ParagraphEngine`](#paragraphengine)
+   - [`BoxEngine`](#boxengine)
+   - [`DocumentEngine`](#documentengine)
+   - [`ImageEngine`](#imageengine)
+   - [`TableEngine`](#tableengine)
+   - [`FontLoaderEngineImpl`](#fontloaderengineimpl)
+   - [`ColorRegistryEngineImpl`](#colorregistryengineimpl)
+   - [순수 오버랩 함수](#순수-오버랩-함수)
+   - [`GridRect`](#gridrect)
 4. [Resource Managers](#resource-managers)
    - [`ColorRegistry`](#colorregistry)
    - [`FontLoader`](#fontloader)
@@ -121,7 +130,7 @@
  * `DocumentData`를 받아 전체 렌더링 파이프라인을 조율한다.
  *
  * 렌더링 파이프라인:
- * 1. `layout()` (동기) — DOM 트리 구축, 자식 박스 생성, `GridCalculator` 생성
+ * 1. `layout()` (동기) — DOM 트리 구축, 자식 박스 생성, `DocumentEngine` 생성 (`GridCalculatorEngine` 포함)
  * 2. `render()` (비동기) — 이미지 로딩 후 자식 박스 렌더링
  *
  * @example
@@ -170,7 +179,8 @@ class LayoutDocumentElement extends HTMLElement
 | 이름 | 타입 | 설명 |
 |---|---|---|
 | `items` | `LayoutBoxElement[]` | 직속 자식 박스 (`<x-layout-box>`) 배열. |
-| `model` | `GridCalculator \| undefined` | 컬럼 그리드 계산기. |
+| `model` | `GridCalculatorEngine \| undefined` | 컬럼 그리드 계산기. |
+| `engine` | `DocumentEngine \| undefined` | 문서 루트 엔진 (ppm, 리소스, 트리 관리). |
 | `visibleGuide` | `boolean` | 가이드 컬럼 표시 여부. |
 | `type` | `'document'` | 타입 리터럴. |
 | `zIndex` | `number` | 항상 0. |
@@ -295,7 +305,8 @@ class LayoutBoxElement extends HTMLElement
 | `absTop` | `number` | mm | 루트 기준 절대 상단. |
 | `absWidth` | `number` | mm | 절대 너비 (그리드 모드는 컬럼 폭 합). |
 | `absHeight` | `number` | mm | 절대 높이 (그리드 모드는 lineHeight × 줄 수). |
-| `parentModel` | `GridCalculator \| undefined` | — | 부모 계산기. |
+| `parentModel` | `GridCalculatorEngine \| undefined` | — | 부모 계산기. |
+| `engine` | `BoxEngine \| undefined` | — | 박스 엔진 (절대 좌표, 오버레이, contentType). |
 | `items` | `(Box \| Paragraph \| Image)[]` | — | 직속 자식 요소 배열. |
 | `overlayElements` | `LayoutBoxElement[]` | — | 오버랩된 형제 박스들. |
 | `contentType` | `'image' \| 'paragraph' \| null` | — | 자식이 1개일 때 그 타입. |
@@ -359,7 +370,7 @@ console.log(box.left, box.top, box.width, box.height); // mm 값
 
 ### `<x-layout-paragraph>`
 
-**다중 컬럼 텍스트 영역**. `TextLayoutEngine`이 텍스트를 래핑하고, 각 컬럼을
+**다중 컬럼 텍스트 영역**. `ParagraphEngine`이 텍스트를 래핑하고, 각 컬럼을
 `<x-layout-column>`으로 렌더링합니다. 오버플로우 발생 시 `render-error` 커스텀 이벤트를
 디스패치합니다.
 
@@ -408,7 +419,8 @@ class LayoutParagraphElement extends HTMLElement
 
 | 이름 | 타입 | 설명 |
 |---|---|---|
-| `model` | `TextLayoutEngine \| undefined` | 텍스트 래핑 엔진. |
+| `model` | `ParagraphEngine \| undefined` | 텍스트 래핑 엔진. |
+| `engine` | `ParagraphEngine \| undefined` | `model`과 동일 (엔진 게터). |
 | `columnEl` | `LayoutColumnElement[]` | 렌더링된 컬럼 요소들. |
 | `textStyle` | `TextStyle` | 단락의 글자 스타일. |
 | `paragraphStyle` | `ParagraphStyle` | 단락의 문단 스타일. |
@@ -513,6 +525,7 @@ class LayoutImageElement extends HTMLElement
 | 이름 | 타입 | 단위 | 설명 |
 |---|---|---|---|
 | `data` | `ImageData` | — | 한 번에 갱신. |
+| `engine` | `ImageEngine \| undefined` | — | 이미지 오버랩 엔진 (RGBA 데이터 주입, overlapMode, overlapPadding). |
 | `x` | `number \| undefined` | mm | 박스 내 이미지 표시 시작 X. 음수면 박스 왼쪽으로 치워져 원본 오른쪽이 크롭. `undefined` 시 0. |
 | `y` | `number \| undefined` | mm | 박스 내 이미지 표시 시작 Y. 음수면 박스 위쪽으로 치워져 원본 아래쪽이 크롭. `undefined` 시 0. |
 | `width` | `number \| undefined` | mm | 이미지 표시 너비. 원본을 이 크기로 리사이즈. `undefined` 시 `absWidth`. |
@@ -551,7 +564,7 @@ class LayoutImageElement extends HTMLElement
 
 - `'path'` (기본값): 캔버스 불투명 픽셀 윤곽을 따라 텍스트가 흐른다. 투명 영역은 통과.
 - `'box'`: 이미지를 박스처럼 취급하여 박스 rect 기준으로 텍스트가 회피한다. `overlapPadding` 적용. 투명 영역도 차단.
-- `'none'`: 오버랩 회피를 하지 않는다. 텍스트가 이미지 아래에 그대로 쓰여지고 이미지가 그 위를 덮는다. `overlayElements`에서 제외되어 `TextLayoutEngine`이 오버랩 요소로 취급하지 않음.
+- `'none'`: 오버랩 회피를 하지 않는다. 텍스트가 이미지 아래에 그대로 쓰여지고 이미지가 그 위를 덮는다. `overlayElements`에서 제외되어 `ParagraphEngine`이 오버랩 요소로 취급하지 않음.
 - `overlapMode` 변경 시 `layout()` + `render()` + 부모 `requestRerenderAffectedParagraphs()` 호출.
 
 #### 이미지 재렌더링 트리거
@@ -672,6 +685,7 @@ class LayoutTableElement extends HTMLElement
 | 프로퍼티 | 타입 | 설명 |
 |---|---|---|
 | `data` | `TableData` | 표 데이터. setter에서 `id`·`colWidths`·`rows`를 설정하고 `layout()` + `render()`를 트리거. ID 기반 diff 재구성. |
+| `engine` | `TableEngine \| undefined` | 테이블 그리드 엔진 (rowEngines, cellEngines, gridResolution). |
 
 #### 게터 (계산 프로퍼티)
 
@@ -757,7 +771,7 @@ class LayoutTableRowElement extends HTMLElement
 
 ### `<x-layout-td>`
 
-**표 셀**. `<x-layout-tr>`의 자식으로, box 배치 컨텍스트(`GridCalculator` `columns=1`)를
+**표 셀**. `<x-layout-tr>`의 자식으로, box 배치 컨텍스트(`GridCalculatorEngine` `columns=1`)를
 가지며 paragraph/image/nested-table을 box로 감싸서 자식으로 둔다.
 
 #### Class: `LayoutTableCellElement`
@@ -795,7 +809,8 @@ class LayoutTableCellElement extends HTMLElement
 | `paddingTop/Right/Bottom/Left` | `number` | 셀 내부 여백(mm). |
 | `cellLabel` | `string` | 셀 라벨 (예: "A1"). |
 | `cellLabels` | `string[]` | 병합된 전체 셀 라벨 배열. |
-| `model` | `GridCalculator \| undefined` | 셀 내부 그리드 계산기. |
+| `model` | `GridCalculatorEngine \| undefined` | 셀 내부 그리드 계산기. |
+| `engine` | `TableCellEngine \| undefined` | 테이블 셀 엔진 (BoxEngineParent 구현). |
 | `contentType` | `'box' \| 'paragraph' \| 'image' \| 'table' \| undefined` | 첫 번째 자식 box의 콘텐츠 타입. |
 | `contentElement` | `LayoutBoxElement \| LayoutParagraphElement \| LayoutImageElement \| null` | 가장 깊은 콘텐츠 요소. |
 | `items` | `LayoutBoxElement[]` | 직계 자식 box 요소 배열. |
@@ -826,7 +841,7 @@ class LayoutTableCellElement extends HTMLElement
 
 ### `<x-layout-column>`
 
-**단락 내부의 실제 텍스트 컬럼**. `LayoutParagraphElement`가 `TextLayoutEngine`의
+**단락 내부의 실제 텍스트 컬럼**. `LayoutParagraphElement`가 `ParagraphEngine`의
 `columnContents[i]`를 소비하여 생성합니다. 외부에서 직접 만들지 않습니다.
 
 #### Class: `LayoutColumnElement`
@@ -848,7 +863,7 @@ class LayoutColumnElement extends HTMLElement
 | `index` | `number \| undefined` | 컬럼 인덱스. |
 | `left` / `top` (mm) | `number` | 부모 단락 내 상대 위치. |
 | `absLeft` / `absTop` (mm) | `number` | 루트 기준 절대 위치. |
-| `model` | `TextLayoutEngine \| undefined` | 부모 단락의 모델. |
+| `model` | `ParagraphEngine \| undefined` | 부모 단락의 모델. |
 | `parentElement` | `LayoutParagraphElement` | 부모 단락. |
 | `zIndex` | `0` | 항상 0. |
 | `type` | `'column'` | 타입 리터럴. |
@@ -967,244 +982,189 @@ class LayoutSelectionElement extends HTMLElement
 
 ---
 
-## Core
+## Core / Engine
 
-### `GridCalculator`
+> **마이그레이션**: 기존 `GridCalculator`와 `TextLayoutEngine`은 제거되었습니다.
+> `GridCalculatorEngine`과 `ParagraphEngine`이 동일한 역할을 수행하며, DOM/Canvas/FontFace 의존성 없이
+> Node.js에서도 동작합니다. 상세 API는 [`ENGINE.md`](./ENGINE.md)를 참고하세요.
 
-문서/박스 단위의 컬럼 그리드와 픽셀-mm 변환 비율을 계산하는 모델.
+### `GridCalculatorEngine`
+
+문서/박스 단위의 컬럼 그리드 좌표를 계산하는 순수 엔진. 기존 `GridCalculator`를 대체.
 
 ```ts
-class GridCalculator {
-  static create(data: GridCalculatorOptions): GridCalculator;
-  static get ppm: number;       // 픽셀/mm 변환 비율 (캐싱됨)
-  static resetPpm(): void;       // 캐시 무효화 (zoom/transform 후 호출)
+class GridCalculatorEngine {
+  static create(data: GridCalculatorEngineOptions, ppm?: number): GridCalculatorEngine;
 
+  get ppm: number;
   get textStyle: TextStyle;
   get paragraphStyle: ParagraphStyle;
   get columnCount: number;
-  get columnCoords: Rect[];      // 각 컬럼의 (x1, y1, x2, y2)
-  get columnWidth: number[];     // 각 컬럼의 폭
-  get gaps: number[];           // 컬럼 간 간격
-  get lineHeight: number;        // fontSize × lineGap
-  get editableWidth: number;     // mm
-  get editableHeight: number;    // mm
-  get editableTextHeight: number; // editableHeight + (lineHeight - fontSize)
-  get fontSize: number;         // 상속 또는 기본값 (4)
-  get lineGap: number;          // 상속 또는 기본값 (1.25)
+  get columnCoords: GridRect[];      // 각 컬럼의 (x1, y1, x2, y2)
+  get columnWidth: number[];          // 각 컬럼의 폭
+  get gaps: number[];                 // 컬럼 간 간격
+  get lineHeight: number;             // fontSize × lineGap
+  get editableWidth: number;          // mm
+  get editableHeight: number;         // mm (lineHeight의 정수 배로 내림)
+  get editableTextHeight: number;     // editableHeight + (lineHeight - fontSize)
+  get contentHeight: number;          // mm
+  get fontSize: number;               // 상속 또는 기본값 (4)
+  get lineGap: number;                // 상속 또는 기본값 (1.25)
 
-  set data(data: GridCalculatorOptions): void;
+  set data(data: GridCalculatorEngineOptions): void;
+  set ppm(v: number): void;
 }
 ```
 
-#### 정적 메서드
+#### 팩토리
 
 ```ts
 /**
- * GridCalculator 인스턴스를 생성한다. `new` 직접 사용 금지.
+ * GridCalculatorEngine 인스턴스를 생성한다. `new` 직접 사용 금지.
  *
- * @param data - width, height, padding, columns, gap, paragraphStyle, textStyle
- * @returns 새 GridCalculator 인스턴스
- */
-static create(data: GridCalculatorOptions): GridCalculator;
-```
-
-```ts
-/**
- * 픽셀/mm 변환 비율. 100mm div를 만들어 측정한 후 캐싱.
- *
- * @returns 픽셀/mm (예: 보통 3.78)
- * @throws 픽셀이 0 이하일 때 (DOM 측정 실패)
+ * @param data - width, height, padding, columns, gap, paragraphStyle, textStyle, isBox
+ * @param ppm - pixels-per-mm (옵셔널, 브라우저 화면 렌더링용)
+ * @returns 새 GridCalculatorEngine 인스턴스
  *
  * @example
- * const px = mm * GridCalculator.ppm;
+ * const grid = GridCalculatorEngine.create({
+ *   width: 210, height: 297,
+ *   paddingTop: 10, paddingLeft: 10, paddingRight: 10, paddingBottom: 10,
+ *   columns: 6, gap: 3,
+ *   paragraphStyle: { lineGap: 1.2 },
+ *   textStyle: { fontSize: 4 },
+ *   isBox: false,
+ * }, 3.78);
  */
-static get ppm: number;
+static create(data: GridCalculatorEngineOptions, ppm?: number): GridCalculatorEngine;
 ```
 
-```ts
-/**
- * ppm 캐시 무효화. zoom 변경, CSS transform, 인쇄 전환 시 호출.
- */
-static resetPpm(): void;
-```
+> **ppm은 옵셔널** — 엔진 연산은 mm 단위로만 동작하므로 Node.js에서는 생략 가능.
 
-#### `data` setter
+#### `GridCalculatorEngineOptions`
 
 ```ts
-/**
- * 입력 데이터를 갱신하고 컬럼 그리드 좌표를 재계산.
- *
- * @param data - element, width, height, padding, columns, gap, paragraphStyle, textStyle
- */
-set data(data: GridCalculatorOptions): void;
+interface GridCalculatorEngineOptions {
+  width: number;
+  height: number;
+  columns: number | number[];      // 컬럼 수 또는 명시적 너비 배열
+  gap: number | number[];          // 컬럼 간격 또는 명시적 간격 배열
+  paddingTop?: number;
+  paddingRight?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+  paragraphStyle: ParagraphStyle;
+  textStyle: TextStyle;
+  isBox?: boolean;                 // 박스 레벨 여부 (기본 false)
+}
 ```
 
 #### 사용 예제
 
 ```ts
-const calc = GridCalculator.create({
-  element: docEl,
+const grid = GridCalculatorEngine.create({
   width: 210, height: 297,
   paddingTop: 10, paddingLeft: 10, paddingRight: 10, paddingBottom: 10,
   columns: 6, gap: 3,
   paragraphStyle: { lineGap: 1.2 },
   textStyle: { fontSize: 4 },
+  isBox: false,
 });
 
-console.log(calc.columnCoords);    // Rect[6]
-console.log(calc.editableWidth);   // 190 - 3*5 = 175 (mm)
-console.log(calc.lineHeight);      // 4 × 1.2 = 4.8 (mm)
+console.log(grid.columnCoords);    // GridRect[6]
+console.log(grid.editableWidth);   // 190 - 3*5 = 175 (mm)
+console.log(grid.lineHeight);      // 4 × 1.2 = 4.8 (mm)
 ```
 
-### `TextLayoutEngine`
+---
 
-다중 컬럼 텍스트 래핑, 오버랩 회피, 스타일 생성을 담당하는 모델.
+### `ParagraphEngine`
+
+다중 컬럼 텍스트 래핑, 오버랩 회피, 스타일 생성, 커서/오프셋 쿼리를 담당하는 순수 엔진.
+기존 `TextLayoutEngine`을 대체.
 
 ```ts
-class TextLayoutEngine {
-  static create(options: TextLayoutEngineOptions): TextLayoutEngine;
+class ParagraphEngine {
+  static create(data: ParagraphEngineData): ParagraphEngine;
 
   // 렌더링 파이프라인
-  layoutStructure(): void;     // 컬럼 폭/ppm 측정
-  layoutText(): void;          // 문자 단위 줄바꿈
-  resetIncrementalState(): void; // _previousLineCount = -1, _previousOverflow = -1
+  layoutStructure(): void;
+  layoutText(): void;
+  resetIncrementalState(): void;
 
   // 스타일 생성
   genColumnStyle(idx: number): Partial<CSSStyleDeclaration>;
   genLineStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration>;
   genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration>;
-  genCharStyle(char: string): Partial<CSSStyleDeclaration>;
-  genCharStyleFlat(): Partial<CSSStyleDeclaration>;
+  genCharStyle: (char: string, textBlockStyle?: TextBlockStyle) => Partial<CSSStyleDeclaration>;
+  genCharInnerStyle: () => Partial<CSSStyleDeclaration>;
+  genCharStyleFlat: (char: string, textBlockStyle?: TextBlockStyle) => Partial<CSSStyleDeclaration>;
+
+  // 문자 폭
+  getCharWidths: (char: string, textBlockStyle?: TextBlockStyle) => { rawWidth, swidth, widthRatio };
+
+  // 엔진 쿼리 API (mm 단위)
+  getCharRect(sourceOffset: number): MmRect | null;
+  getOffsetFromPoint(xMm: number, yMm: number): CursorPosition | null;
+  getCursorPlacement(sourceOffset: number, preferLineEnd?: boolean): CursorPlacement | null;
 
   // 게터
-  get textContent: string | (string | TextBlockData)[];
-  get contents: TextBlockData[];
+  get data: ParagraphEngineData;
   get inheritStyle: InheritStyle;
+  get textContent: string;
+  get contents: TextBlockData[];
   get textStyle: TextStyle;
   get paragraphStyle: ParagraphStyle;
   get columnCount: number;
-  get columnContents: TextLineData[][];  // 컬럼별 줄 데이터
+  get columnContents: TextLineData[][];
   get gaps: number[];
   get lineHeight: number;
-  get overflow: number;          // 컨테이너 밖으로 밀려난 문자 수
+  get overflow: number;
   get previousLineCount: number;
   get previousOverflow: number;
-  get widthRatio: number;        // 장평 (기본 0.8)
-  get spaceRatio: number;        // 공백 너비 (em, 기본 0.5)
-  get indent: number;             // 문단 첫 줄 들여쓰기 비율 (fontSize 대비, 기본 0)
+  get widthRatio: number;
+  get spaceRatio: number;
+  get indent: number;
   get columnWidths: number[];
+  get scale: number;
+  get overlapMode: ParagraphOverlapMode;
+  get printPostData: PrintPostData[];
 
   // 세터
+  set data(options: ParagraphEngineData): void;
   set inheritStyle(value: InheritStyle): void;
-  set data(options: TextLayoutEngineOptions): void;
-  set textContent(value: string | (string | TextBlockData)[]): void;
+  set textContent(value: string): void;
+  set overlapMode(v: ParagraphOverlapMode): void;
+  set scale(v: number): void;
 }
 ```
 
-#### `layoutStructure()`
+#### `ParagraphEngineData`
 
 ```ts
-/**
- * 구조적 레이아웃만 계산하고 캐싱. DOM 측정에 의존.
- * 내부적으로 `initStructureAndMeasureColumns()` 호출.
- */
-public layoutStructure(): void;
+interface ParagraphEngineData {
+  content: string;
+  column: number | number[];
+  gap: number | number[];
+  paragraphStyle: ParagraphStyle;
+  textStyle: TextStyle;
+  inheritStyle: InheritStyle;
+  overlayEngines: BoxEngine[];
+  parentAbsRect: AbsRect;
+  resources: EngineResources;
+}
 ```
 
-#### `layoutText()`
+#### 엔진 쿼리 API
 
-```ts
-/**
- * 문자 단위 줄바꿈 렌더링 실행. `layoutStructure()`가 먼저 호출되어야 함.
- * 내부적으로 `_layoutTextIntoColumns()` 호출.
- */
-public layoutText(): void;
-```
+`ParagraphEngine`은 DOM 없이 mm 단위로 커서/오프셋 쿼리를 수행할 수 있다.
 
-#### `resetIncrementalState()`
+- `getCharRect(sourceOffset)`: 특정 오프셋의 문자 rect를 mm 단위로 반환
+- `getOffsetFromPoint(xMm, yMm)`: mm 좌표에서 가장 가까운 오프셋 반환
+- `getCursorPlacement(sourceOffset, preferLineEnd?)`: 커서 배치 정보 반환
 
-```ts
-/**
- * 증분 렌더링 상태 초기화. 구조 변경 후 전체 재생성을 보장.
- * `_previousLineCount`와 `_previousOverflow`를 -1로 설정.
- */
-public resetIncrementalState(): void;
-```
-
-#### `genColumnStyle(idx)`
-
-```ts
-/**
- * 컬럼 스타일 생성 (Flexbox 컨테이너).
- *
- * @param idx - 컬럼 인덱스 (0-based)
- * @returns column 위치/크기/수직 정렬을 포함한 CSS 스타일
- */
-public genColumnStyle(idx: number): Partial<CSSStyleDeclaration>;
-```
-
-#### `genLineStyle(textBlockStyle?)`
-
-```ts
-/**
- * 줄 스타일 생성.
- *
- * - `lineGap` → `height` (mm) 계산
- * - `textBlockStyle` → 폰트/색상/높이 오버라이드
- *
- * @param textBlockStyle - 블록 단위 스타일 (선택)
- * @returns 줄(line) CSS 스타일
- */
-public genLineStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration>;
-```
-
-#### `genPartStyle(textBlockStyle?)`
-
-```ts
-/**
- * 파트(part, 줄 내부 세그먼트) 스타일 생성.
- *
- * - `letterSpacing` → em 단위 적용
- * - `textAlign` → `justify-content` 매핑
- *   ('justify' → 'space-between')
- * - `textBlockStyle` → 폰트/색상/정렬 오버라이드
- *
- * @param textBlockStyle - 블록 단위 스타일 (선택)
- * @returns 파트(part) CSS 스타일
- */
-public genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration>;
-```
-
-#### `genCharStyle(char)`
-
-```ts
-/**
- * 글자(span) 스타일 생성.
- *
- * - `widthRatio` → CSS `scale` 적용 (장평)
- * - 반각 문자 → `min-width: 0.35em`
- * - 전각 문자 → `min-width: 0.5em`
- * - 공백 → `min-width: ${spaceRatio}em`
- *
- * @param char - 단일 글자
- * @returns 글자(span) CSS 스타일
- */
-public genCharStyle: (char: string) => Partial<CSSStyleDeclaration>;
-```
-
-#### `genCharStyleFlat()`
-
-```ts
-/**
- * charOffsets(절대 좌표) 경로에서 단일 span에 적용할 통합 스타일 생성.
- * flexbox 경로(`genCharStyle` + `genCharInnerStyle` 중첩 span)와 달리
- * outer의 `width`/`textAlign`을 제거하고 inner의 `scale`/`transformOrigin`을 통합.
- * absolute 배치이므로 레이아웃 슬롯 폭이 의미 없고 정렬은 charOffsets가 직접 산출.
- *
- * @returns 단일 span용 CSS 스타일 (`scale`/`transformOrigin`/`display`)
- */
-public genCharStyleFlat: () => Partial<CSSStyleDeclaration>;
-```
+이 API는 `TextEditCoordinateMapper.useEngineCoordinateQueries = true`로 활성화 시
+브라우저 텍스트 편집에서도 사용된다 (기본값 `false`, 점진적 마이그레이션).
 
 #### `columnContents`
 
@@ -1219,14 +1179,15 @@ DOM을 만듭니다. **읽기 전용**으로 취급하세요.
 #### 예제
 
 ```ts
-const engine = TextLayoutEngine.create({
+const engine = ParagraphEngine.create({
   content: 'Hello, world!',
   column: 3, gap: 3,
   paragraphStyle: { lineGap: 1.2, textAlign: 'justify' },
   textStyle: { fontSize: 4, fontFamily: 'Myoungjo', color: 'black' },
-  inheritStyle: { parentWidth: 100, parentHeight: 200 },
-  paragraphEl: paragraphEl,
-  rootNode: paragraphEl.shadowRoot!,
+  inheritStyle: { parentWidth: 100, parentHeight: 200, fontSize: 4 },
+  overlayEngines: [],
+  parentAbsRect: { absLeft: 0, absTop: 0, absWidth: 100, absHeight: 200 },
+  resources: { ppm: 3.78, fontLoader, colorRegistry },
 });
 
 engine.layoutStructure();
@@ -1234,12 +1195,220 @@ engine.layoutText();
 
 console.log(engine.columnContents); // TextLineData[][]
 console.log(engine.overflow);        // 0
+console.log(engine.getCharRect(0));  // MmRect | null
 ```
 
-### `Rect`
+---
+
+### `BoxEngine`
+
+박스 절대 좌표/오버랩 요소 계산 엔진.
 
 ```ts
-type Rect = {
+class BoxEngine {
+  static create(data: BoxData, parent: BoxEngineParent): BoxEngine;
+
+  get data: BoxData;
+  get parent: BoxEngineParent;
+  get position: 'static' | 'absolute';
+  get left: number;
+  get top: number;
+  get width: number;
+  get height: number;
+  get zIndex: number;
+  get role: BoxRole;
+  get paddingTop/Right/Bottom/Left: number;
+  get relLeft: number;
+  get relTop: number;
+  get absLeft: number;
+  get absTop: number;
+  get absWidth: number;
+  get absHeight: number;
+  get absRect: AbsRect;
+  get contentType: 'image' | 'paragraph' | 'table' | null;
+  get contentElement: ImageEngine | ParagraphEngine | TableEngine | null;
+  get overlayElements: BoxEngine[];
+  get childEngines: (BoxEngine | ImageEngine | ParagraphEngine | TableEngine)[];
+  get childBoxEngines: BoxEngine[];
+  get gridCalculator: GridCalculatorEngine | null;
+  get isDocument: false;
+  get printPostData: PrintPostData[];
+
+  set data(d: BoxData): void;
+  set parent(p: BoxEngineParent): void;
+  set childEngines(engines: (BoxEngine | ImageEngine | ParagraphEngine | TableEngine)[]): void;
+  set gridCalculator(calc: GridCalculatorEngine | null): void;
+}
+
+type BoxEngineParent = DocumentEngine | BoxEngine | TableCellEngine;
+```
+
+---
+
+### `DocumentEngine`
+
+문서 루트 엔진. ppm, 폰트, 색상 리소스를 주입받아 하위 엔진으로 전파.
+
+```ts
+class DocumentEngine {
+  static create(
+    data: DocumentData,
+    fontLoader: FontLoaderEngine,
+    colorRegistry: ColorRegistryEngine,
+    ppm?: number,
+  ): DocumentEngine;
+
+  get data: DocumentData;
+  get ppm: number;
+  get width: number;
+  get height: number;
+  get paddingTop/Right/Bottom/Left: number;
+  get gridCalculator: GridCalculatorEngine;
+  get childBoxEngines: BoxEngine[];
+  get absRect: AbsRect;
+  get isDocument: true;
+  get overlayElements: [];
+  get resources: { ppm, fontLoader, colorRegistry };
+  get printPostData: PrintPostData[];
+
+  set data(d: DocumentData): void;
+  set ppm(v: number): void;
+  set childBoxEngines(engines: BoxEngine[]): void;
+
+  layout(): void;  // DocumentData로 전체 엔진 트리 자동 구축
+}
+```
+
+> **ppm은 옵셔널** — Node.js에서 DOM 없이 연산할 때 생략 가능. `layout()` 하나로 전체 트리 구축.
+
+---
+
+### `ImageEngine`
+
+이미지 오버랩 판정 엔진. RGBA 데이터 주입 방식.
+
+```ts
+class ImageEngine {
+  static create(data: ImageEngineData): ImageEngine;
+
+  get data: ImageEngineData;
+  get rgbaData: RgbaData | null;
+  get overlapMode: OverlapMode;
+  get overlapPadding: number | { top?, right?, bottom?, left? } | undefined;
+  get dpi: number;
+
+  set data(d: ImageEngineData): void;
+  set rgbaData(input: RgbaData | null): void;
+
+  computeOverlap(lineRectMm: MmRect, imgRectMm: AbsRect): OverlapResult;
+  layout(): { cropRectMm: AbsRect; displayRectMm: AbsRect };
+  buildPrintPostData(absRect: AbsRect, imageData: ImageData): PrintPostData[];
+}
+
+interface RgbaData { data: Uint8Array; width: number; height: number }
+```
+
+---
+
+### `TableEngine`
+
+테이블 그리드 해석 엔진.
+
+```ts
+class TableEngine {
+  static create(data: TableData, parentBox: BoxEngine): TableEngine;
+
+  get data: TableData;
+  get gridResolution: GridResolution | null;
+  get rowEngines: TableRowEngine[];
+  get cellEngines: TableCellEngine[];
+  get parentBox: BoxEngine;
+
+  set data(d: TableData): void;
+
+  layout(): void;
+}
+
+class TableCellEngine implements BoxEngineParent {
+  get absRect: AbsRect;
+  get isDocument: false;
+  get gridCalculator: null;
+  get overlayElements: [];
+  get childBoxEngines: BoxEngine[];
+  get boxEngine: BoxEngine | undefined;
+  get x/y/width/height: number;
+  setCellMetrics(x, y, width, height, cellLabel, labels): void;
+}
+
+class TableRowEngine {
+  get y/height/rowIndex: number;
+  get cellEngines: TableCellEngine[];
+  setRowMetrics(y, height, _contentWidth, rowIndex): void;
+}
+```
+
+---
+
+### `FontLoaderEngineImpl`
+
+Node.js 호환 폰트 로더. `FontFace`/`fetch` 없이 동작. `opentype.js` 기반.
+
+```ts
+class FontLoaderEngineImpl implements FontLoaderEngine {
+  static create(): FontLoaderEngineImpl;
+
+  get ready: boolean;
+
+  async init(fonts: Font[]): Promise<void>;
+  getParsedFont(fontName?: string): ParsedFont | null;
+  getFontFamily(fontName?: string): string;
+}
+```
+
+---
+
+### `ColorRegistryEngineImpl`
+
+Node.js 호환 색상 레지스트리. `fetch` 없이 동작.
+
+```ts
+class ColorRegistryEngineImpl implements ColorRegistryEngine {
+  static create(): ColorRegistryEngineImpl;
+
+  get ready: boolean;
+
+  init(colorSet: CMYKColorSet): void;
+  getCSSColor(name: string): string;
+  getOpacityHex(opacity: number): string;
+  get(name: string): CMYKColor;  // { c, m, y, k }
+}
+```
+
+---
+
+### 순수 오버랩 함수
+
+`src/engine/overlap-engine.ts`에서 내보내는 순수 함수들. DOM 의존성 없음.
+
+```ts
+// AABB 교차 판정
+function checkOverlapMm(a: AbsRect, b: AbsRect): boolean;
+
+// 오버랩 크기 계산 (이미지 RGBA, overlapMode, overlapPadding 지원)
+function computeOverlapSizeMm(lineRectMm: MmRect, overlay: OverlapInput): OverlapResult;
+
+// 인접 오버랩 파트 머지
+function mergeOverlapParts(parts: OverlapParts[]): OverlapParts[];
+```
+
+> 기존 `getOverlapSizeMm()`는 제거되었습니다. `computeOverlapSizeMm()`을 사용하세요.
+
+---
+
+### `GridRect`
+
+```ts
+type GridRect = {
   /** 좌측 경계 (mm) */
   x1: number;
   /** 상단 경계 (mm) */
@@ -1251,7 +1420,7 @@ type Rect = {
 };
 ```
 
-`GridCalculator.columnCoords`의 원소 타입. 가이드 컬럼의 위치 지정에도 사용됩니다.
+`GridCalculatorEngine.columnCoords`의 원소 타입. 가이드 컬럼의 위치 지정에도 사용됩니다.
 
 ---
 
@@ -2574,7 +2743,7 @@ type TextLineData = {
 };
 ```
 
-`TextLineData`는 **내부 전용** — `TextLayoutEngine`이 자동 생성합니다.
+`TextLineData`는 **내부 전용** — `ParagraphEngine`이 자동 생성합니다.
 
 #### `ImageData`
 
@@ -2660,7 +2829,7 @@ type TableRowData = {
 #### `TableCellData`
 
 각 셀은 box들을 자식으로 가지며(paragraph/image/nested-table은 항상 box로 감싸임),
-자체 `GridCalculator`(columns=1)를 보유하여 cell 내부를 box 배치 컨텍스트로 동작시킨다.
+자체 `GridCalculatorEngine`(columns=1)를 보유하여 cell 내부를 box 배치 컨텍스트로 동작시킨다.
 
 ```ts
 type CellBorderEdge = {
@@ -2978,20 +3147,34 @@ const checkOverlap: (base: MmMeasurable, target: MmMeasurable) => boolean;
 const mergeOverlapParts: (parts: OverlapParts[]) => OverlapParts[];
 ```
 
-### `getOverlapSizeMm(lineRectMm, overlayElement)`
+### `computeOverlapSizeMm(lineRectMm, overlay)`
+
+> **마이그레이션**: 기존 `getOverlapSizeMm(lineRectMm, overlayElement)`는 제거되었습니다.
+> `computeOverlapSizeMm(lineRectMm, overlay: OverlapInput)`을 사용하세요.
+> `src/engine/overlap-engine.ts`에서 내보내집니다.
 
 ```ts
 /**
  * 오버랩 크기 계산 (mm 좌표계). 이미지 overlapPadding 적용 시 타원형 감지.
+ * DOM 요소 대신 OverlapInput 객체를 받아 Node.js에서도 동작.
  *
  * @param lineRectMm - 라인 영역 (mm)
- * @param overlayElement - LayoutBoxElement (보통 이미지 박스)
+ * @param overlay - { absRect, overlapMode, overlapPadding?, image?, contentType }
  * @returns { direction: 'NONE' | 'COVERS' | 'PART', parts: OverlapParts[] }
+ *
+ * @example
+ * const result = computeOverlapSizeMm(lineRect, {
+ *   absRect: { absLeft: 10, absTop: 5, absWidth: 40, absHeight: 30 },
+ *   overlapMode: 'path',
+ *   overlapPadding: 2,
+ *   image: imageEngine,  // ImageEngine with rgbaData
+ *   contentType: 'image',
+ * });
  */
-const getOverlapSizeMm: (
+const computeOverlapSizeMm: (
   lineRectMm: MmRect,
-  overlayElement: LayoutBoxElement,
-) => { direction: 'NONE' | 'COVERS' | 'PART', parts: OverlapParts[] };
+  overlay: OverlapInput,
+) => OverlapResult;
 ```
 
 ### `genUUID()`
