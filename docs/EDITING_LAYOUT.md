@@ -1,5 +1,7 @@
 # layout-element 레이아웃 편집 모드 상세 명세
 
+> **엔진 마이그레이션**: `GridCalculator` → `GridCalculatorEngine`, `TextLayoutEngine` → `ParagraphEngine`. ppm 접근이 `GridCalculator.ppm`(static)에서 `LayoutDocumentElement.ppm`(instance)로 변경. 상세는 [ENGINE.md](./ENGINE.md) 참고.
+
 > 작성 기준: `src/edit/edit-manager.ts`, `src/edit/layout-edit-controller.ts`, `src/edit/layout-selection-controller.ts`, `src/components/layout/box.element.ts`, `src/react/hooks/use-edit-manager.ts`
 >
 > 본 문서는 `layout-element` 라이브러리의 레이아웃 편집 모드 기능, 공개 API, 선택 동작, 드래그-이동, 스냅-그리드, 경계 클램핑, 텍스트 회피(리플로우), ESC 취소, 시각적 피드백, React 연동 방법을 상세히 기술한다.
@@ -383,7 +385,7 @@ manager.navigateByTab(true);     // Shift+Tab: 이전 요소
 
 **임계값 상수**: `SNAP_THRESHOLD_PX` (기본값 `10`, 단위: 화면 픽셀). `EditManager.screenPxToMm()`로 mm로 환산하여 비교한다. 값을 조정하려면 `src/edit/layout-edit-controller.ts` 상단의 상수만 변경하면 된다.
 
-**스냅 대상**: 부모 `GridCalculator`의 컬럼 경계(`columnCoords[i].x1` 시작선, `x2` 끝선)와 라인 경계(`baseY + lineHeight * i`). 부모 콘텐츠 영역 하단(`contentHeight` = `height - paddingTop - paddingBottom`)도 스냅 대상에 포함된다.
+**스냅 대상**: 부모 `GridCalculatorEngine`의 컬럼 경계(`columnCoords[i].x1` 시작선, `x2` 끝선)와 라인 경계(`baseY + lineHeight * i`). 부모 콘텐츠 영역 하단(`contentHeight` = `height - paddingTop - paddingBottom`)도 스냅 대상에 포함된다.
 
 **부모 하단 경계 스냅**: 부모 박스의 콘텐츠 영역 하단(`contentHeight`)이 `lineHeight`의 정수배가 아닌 경우(라인 중간에 걸쳐있는 경우), absolute box의 하단 엣지가 부모 실제 하단까지 내려갈 수 있도록 `contentHeight` 자체도 Y축 스냅 후보에 포함된다. 이는 이동 스냅(`_snapAbsolutePosition`)과 리사이즈의 `bottom` 핸들 스냅(`_snapAbsoluteResize`) 모두에 적용된다. absolute box의 클램핑 한계도 `contentHeight`를 기준으로 적용되어, 박스가 부모의 실제 하단까지 자유롭게 이동/확장될 수 있다. 단, `contentHeight`가 마지막 라인 경계와 정확히 일치하는 경우(정수배인 경우)에는 중복을 방지하기 위해 추가 후보에서 제외된다.
 
@@ -413,7 +415,7 @@ manager.navigateByTab(true);     // Shift+Tab: 이전 요소
 - `layoutEditMode = true` (move 모드)에서만 동작한다.
 - `layoutEditMode = { type: 'reparent' }` (reparent 모드)에서는 transform 기반 이동이므로 스냅이 적용되지 않는다.
 - `position: 'static'` 박스는 이미 컬럼/라인 단위 스냅이 내장되어 있으므로 별도의 자석 기능이 적용되지 않는다.
-- 부모가 `GridCalculator`(그리드 모델)를 가지지 않는 경우 스냅이 적용되지 않고 원래 위치가 그대로 반환된다.
+- 부모가 `GridCalculatorEngine`(그리드 모델)를 가지지 않는 경우 스냅이 적용되지 않고 원래 위치가 그대로 반환된다.
 
 #### 시각적 피드백
 
@@ -779,13 +781,13 @@ manager.setEditableRootId(null);
 
 #### 화면 scale 보정 (`EditManager.setScale`/`screenPxToMm`)
 
-미리보기 영역에 CSS `transform: scale(s)`이 적용된 환경에서는 `MouseEvent.clientX/clientY` 및 `Element.getBoundingClientRect()`가 변환된 픽셀 좌표를 반환한다. 이때 `GridCalculator.ppm`을 그대로 사용하면 `mm ↔ px` 환산이 어긋나 영역 그리기, 드래그 이동, 리사이즈의 좌표가 모두 어긋난다. 단 `GridCalculator.ppm` 자체를 보정하면 `text-layout-engine`의 `fontSizePx = fontSize * ppm` 계산까지 절반/두배로 줄어드는 부작용이 생긴다.
+미리보기 영역에 CSS `transform: scale(s)`이 적용된 환경에서는 `MouseEvent.clientX/clientY` 및 `Element.getBoundingClientRect()`가 변환된 픽셀 좌표를 반환한다. 이때 `LayoutDocumentElement.ppm`을 그대로 사용하면 `mm ↔ px` 환산이 어긋나 영역 그리기, 드래그 이동, 리사이즈의 좌표가 모두 어긋난다. 단 `LayoutDocumentElement.ppm` 자체를 보정하면 `text-layout-engine`의 `fontSizePx = fontSize * ppm` 계산까지 절반/두배로 줄어드는 부작용이 생긴다.
 
-해결: `EditManager`가 별도의 `_scale` 보정 계수를 보관하고, `screenPxToMm(px)` / `screenDeltaToMm(deltaPx)` 헬퍼가 `px / (GridCalculator.ppm * _scale)`로 환산한다. `GridCalculator.ppm`은 항상 `originalPpm`을 반환하므로 폰트 크기/column 폭 계산은 정상이다. `InsertController`/`LayoutEditController`의 모든 mm 환산은 이 헬퍼를 통해 정확하게 동작한다.
+해결: `EditManager`가 별도의 `_scale` 보정 계수를 보관하고, `screenPxToMm(px)` / `screenDeltaToMm(deltaPx)` 헬퍼가 `px / (manager.docEl.ppm * _scale)`로 환산한다. `manager.docEl.ppm`은 항상 `originalPpm`을 반환하므로 폰트 크기/column 폭 계산은 정상이다. `InsertController`/`LayoutEditController`의 모든 mm 환산은 이 헬퍼를 통해 정확하게 동작한다.
 
 텍스트 편집(`TextEditController`/`TextEditCoordinateMapper`)은 `getBoundingClientRect()`만으로 좌표를 비교하므로 scale 보정과 무관하게 정확하다 (입력 clientX와 비교 대상 rect 모두 같은 viewport 픽셀 좌표계).
 
-**scale 변경 시 paragraph 재렌더링**: `setScale(s)`는 보정 계수를 설정한 뒤, 문서 내 모든 `<x-layout-paragraph>`에 대해 `markStructureChangedAndRender()`를 호출한다. 이는 `TextLayoutEngine._columnPpm`(컬럼 픽셀/mm 비율)이 `layoutStructure()` 시점의 scale을 반영하여 측정되기 때문이다. scale이 변경되어도 `paragraph.render()`가 `_perfStructureChanged = false` 상태로 호출되면 `layoutText()`만 실행되어 이전 scale 기준의 `_columnPpm`이 재사용되고, `partWidths`(현재 scale의 viewport 픽셀)와 `_charWidthPx`(이전 scale ppm 기반)가 불일치하여 컬럼에 들어가는 문자 수가 잘못 계산된다. `markStructureChangedAndRender()`가 `_perfStructureChanged = true`를 설정하여 다음 `render()`에서 `layoutStructure()`가 호출되도록 보장함으로써 `_columnPpm`이 새 scale 기준으로 재측정된다.
+**scale 변경 시 paragraph 재렌더링**: `setScale(s)`는 보정 계수를 설정한 뒤, 문서 내 모든 `<x-layout-paragraph>`에 대해 `markStructureChangedAndRender()`를 호출한다. 이는 `ParagraphEngine._columnPpm`(컬럼 픽셀/mm 비율)이 `layoutStructure()` 시점의 scale을 반영하여 측정되기 때문이다. scale이 변경되어도 `paragraph.render()`가 `_perfStructureChanged = false` 상태로 호출되면 `layoutText()`만 실행되어 이전 scale 기준의 `_columnPpm`이 재사용되고, `partWidths`(현재 scale의 viewport 픽셀)와 `_charWidthPx`(이전 scale ppm 기반)가 불일치하여 컬럼에 들어가는 문자 수가 잘못 계산된다. `markStructureChangedAndRender()`가 `_perfStructureChanged = true`를 설정하여 다음 `render()`에서 `layoutStructure()`가 호출되도록 보장함으로써 `_columnPpm`이 새 scale 기준으로 재측정된다.
 
 ```typescript
 const manager = layoutDocEl.editManager;
@@ -1262,8 +1264,8 @@ LayoutEditController._onMouseUp(event)
 deltaPxX, deltaPxY (마우스 이동 픽셀)
     │
     ▼
-deltaMmX = deltaPxX / GridCalculator.ppm     ← 픽셀 → mm 변환
-deltaMmY = deltaPxY / GridCalculator.ppm
+deltaMmX = deltaPxX / LayoutDocumentElement.ppm     ← 픽셀 → mm 변환
+deltaMmY = deltaPxY / LayoutDocumentElement.ppm
     │
     ▼
 startX = columnCoords[dragStartLeft].x1         ← 시작 컬럼의 mm 좌표
@@ -1295,7 +1297,7 @@ return { left: newLeft, top: newTop }
 - **범위 제한**: 박스가 `columnCount - width` 이상의 컬럼, `maxTop` 이상의 라인으로 이동하지 못한다.
 - **문서 영역 밖 변환**: 클램핑 전의 mm 위치가 편집 영역 밖이면 absolute 위치로 자동 변환된다.
 - **`maxTop` 계산**: `editableTextHeight`와 box의 `absHeight`를 사용하여, 박스의 하단이 편집 영역 하단(`editableTextHeight`)을 넘지 않도록 제한한다.
-- `columnCoords`, `lineHeight`, `columnCount`, `editableTextHeight`는 부모의 `GridCalculator`(=`parentModel`)에서 가져온다.
+- `columnCoords`, `lineHeight`, `columnCount`, `editableTextHeight`는 부모의 `GridCalculatorEngine`(=`parentModel`)에서 가져온다.
 - `parentModel`이 없으면 (예: 박스가 DOM에 연결되지 않은 경우) 시작 위치를 그대로 반환한다.
 
 #### 4.3.2 absolute 모드 (mm 좌표)
@@ -1304,8 +1306,8 @@ return { left: newLeft, top: newTop }
 deltaPxX, deltaPxY (마우스 이동 픽셀)
     │
     ▼
-deltaMmX = deltaPxX / GridCalculator.ppm     ← 픽셀 → mm 변환
-deltaMmY = deltaPxY / GridCalculator.ppm
+deltaMmX = deltaPxX / LayoutDocumentElement.ppm     ← 픽셀 → mm 변환
+deltaMmY = deltaPxY / LayoutDocumentElement.ppm
     │
     ▼
 newLeft = dragStartLeft + deltaMmX              ← 시작 위치 + 이동량
@@ -1345,7 +1347,7 @@ set top(value: number) {
 ```
 
 setter가 호출될 때마다:
-1. **`this.layout()`**: GridCalculator를 사용하여 박스와 자식 요소의 위치·크기를 재계산하고 DOM 스타일을 업데이트한다.
+1. **`this.layout()`**: GridCalculatorEngine를 사용하여 박스와 자식 요소의 위치·크기를 재계산하고 DOM 스타일을 업데이트한다.
 2. **`this._rerenderAffectedParagraphs()`**: 영향받는 단락들의 텍스트 레이아웃을 재실행하여 이미지/박스 회피를 다시 계산한다.
 
 ### 4.4 드래그 중 position 변환 불가
@@ -1672,13 +1674,13 @@ _structureDirty === true?
     │
     ├── YES → 전체 재생성
     │   ├── layout() 호출
-    │   │   └── GridCalculator 생성/업데이트
+    │   │   └── GridCalculatorEngine 생성/업데이트
     │   │       ├── 컬럼 폭, 라인 높이, 간격 계산
     │   │       └── ppm (pixels-per-mm) 측정
     │   │
-    │   ├── TextLayoutEngine.create()
+    │   ├── ParagraphEngine.create()
     │   │   ├── overlapRects 수집
-    │   │   │   └── getOverlapSizeMm(): 이미지/박스의 오버랩 영역 계산 (mm 좌표계)
+    │   │   │   └── computeOverlapSizeMm(): 이미지/박스의 오버랩 영역 계산 (mm 좌표계)
     │   │   │       ├── 캔버스 픽셀 스캔 (불투명 픽셀 감지)
     │   │   │       ├── overlapPadding 적용 (타원형 패딩 존)
     │   │   │       └── 차단 범위(BlockingRange) 리스트 반환
@@ -1713,13 +1715,13 @@ _structureDirty === true?
 
 텍스트가 이미지나 박스 주변을 흘러가는 메커니즘:
 
-#### 5.4.1 오버랩 영역 계산: `getOverlapSizeMm()`
+#### 5.4.1 오버랩 영역 계산: `computeOverlapSizeMm()`
 
 ```
 이미지/박스 위치 변경
     │
     ▼
-getOverlapSizeMm(lineRectMm, overlayElement)
+computeOverlapSizeMm(lineRectMm, overlayElement)
     │
     ├── 캔버스 사용 가능?
     │   ├── YES → 픽셀 단위 정밀 스캔
@@ -1751,7 +1753,7 @@ overlapPadding: 5
 overlapPadding: { top: 2, right: 5, bottom: 2, left: 5 }
 ```
 
-- 값은 mm 단위이며, 내부적으로 `GridCalculator.ppm`을 사용해 픽셀로 변환된다.
+- 값은 mm 단위이며, 내부적으로 `LayoutDocumentElement.ppm`을 사용해 픽셀로 변환된다.
 - 타원형 패딩(`ndx² + ndy² ≤ 1`)을 사용하여 자연스럽게 둥근 회피 영역을 만든다.
 - 투명 픽셀은 텍스트를 차단하지 않는다.
 
@@ -1973,7 +1975,7 @@ private _onKeyDown = (event: KeyboardEvent): void => {
      ┌──────────────────┐  ┌───────────────────────────┐
      │   box.layout()   │  │ _renderAffectedParagraphs│
      │                  │  │                             │
-     │ GridCalculator   │  │ 1) 자식 단락 수집           │
+     │ GridCalculatorEngine   │  │ 1) 자식 단락 수집           │
      │ 재계산           │  │ 2) 형제 단락 수집           │
      │ DOM 스타일 업데이트│  │ 3) _structureDirty = true  │
      │                  │  │ 4) paragraph.render() 호출   │
@@ -1983,12 +1985,12 @@ private _onKeyDown = (event: KeyboardEvent): void => {
              │              │                 │
              │              ▼                 ▼
              │    ┌─────────────────┐  ┌────────────────────┐
-             │    │ layout()       │  │ TextLayoutEngine    │
+             │    │ layout()       │  │ ParagraphEngine    │
              │    │ (구조 재계산)   │  │ .create()           │
              │    │                │  │                     │
              │    │ ppm 측정       │  │ overlapRects 수집    │
              │    │ 컬럼 폭 계산   │  │ ┌─────────────────┐ │
-             │    │ 라인 높이 계산 │  │ │getOverlapSizeMm │ │
+             │    │ 라인 높이 계산 │  │ │computeOverlapSizeMm │ │
              │    └────────┬────────┘  │ │                 │ │
              │             │           │ │ 캔버스 픽셀 스캔 │ │
              │             │           │ │ overlapPadding   │ │
@@ -2063,7 +2065,7 @@ private _onKeyDown = (event: KeyboardEvent): void => {
 - **rAF 쓰로틀링**: 드래그 중 위치 업데이트는 `requestAnimationFrame`으로 60fps로 제한된다. 중복 rAF 요청은 무시된다.
 - **이동 임계값**: mousedown 후 3px 이하의 이동은 클릭으로 간주하며, 드래그로 인식되지 않는다.
 - **`BoxDragState.dragMoved` / `BoxResizeState.moved` 플래그**: 드래그/리사이즈 후 `click` 이벤트가 발생하면 빈 영역 클릭으로 처리되어 선택이 해제되는 것을 방지하기 위해, `LayoutEditController`는 실제 이동이 있었을 때(`dragMoved` 또는 `moved`가 `true`) `EditManager._suppressLayoutClick()`를 호출하여 후속 `click` 이벤트를 억제한다. 이 메서드는 window capture phase에 일회성 click 리스너를 등록하여 `LayoutSelectionController._onClick`보다 먼저 click을 소비한다. click이 발생하지 않으면 200ms 타임아웃으로 자동 제거된다.
-- **`parentModel` 필수**: `LayoutEditController._computeNewPosition`에서 `position: 'static'` 모드는 `parentModel`(부모의 `GridCalculator`)이 필요하다. 없으면 시작 위치를 그대로 반환한다.
+- **`parentModel` 필수**: `LayoutEditController._computeNewPosition`에서 `position: 'static'` 모드는 `parentModel`(부모의 `GridCalculatorEngine`)이 필요하다. 없으면 시작 위치를 그대로 반환한다.
 - **`maxTop` 계산**: static 모드에서 박스의 하단이 편집 영역 하단을 넘지 않도록 `editableTextHeight`와 `absHeight`를 사용하여 `maxTop`을 계산한다. `editableHeight`만 사용하면 마지막 줄의 leading 공간이 무시되어 박스가 하단에 딱 붙지 않는다.
 - **문서 영역 밖 드래그**: 문서 직계 자식 박스(`this.parentElement?.type === 'document'`)만 위치 변환 대상이다. 다른 박스 안에 중첩된 박스는 이 동작의 대상이 아니다.
 - **absolute → static 변환 시 크기 근사**: 절대 위치에서 static으로 복귀할 때 `width = round(absWidth / avgColWidth)`, `height = round(absHeight / lineHeight)`로 근사 변환한다. 정밀한 값이 아닐 수 있으므로 사용자가 조정해야 할 수 있다.
@@ -2081,9 +2083,9 @@ private _onKeyDown = (event: KeyboardEvent): void => {
 | `src/edit/layout-edit-controller.ts` | 문서 수준 이벤트 처리, 드래그/리사이즈 상태(`Map` 기반), `_computeNewPosition`, `_computeNewSize`, ESC 취소, `applyPositionConversion` 호출, 영향받는 단락 재렌더링 |
 | `src/react/hooks/use-edit-manager.ts` | React 훅: `selectedLayouts`, `selectLayout`, `clearLayoutSelection`, `layoutEditMode`, `setLayoutEditMode`, `setEditableRoles`, `setEditableBoxIds`, `onLayoutSelectionChange` |
 | `src/core/text-layout-engine.ts` | `_layoutTextIntoColumns`, 오버랩 회피, COVER 라인, PART 분할 |
-| `src/components/layout/paragraph.element.ts` | `render()`, `_structureDirty`, TextLayoutEngine 생성 |
+| `src/components/layout/paragraph.element.ts` | `render()`, `_structureDirty`, ParagraphEngine 생성 |
 | `src/components/layout/column.element.ts` | `renderText()`, span 기반 diff 렌더링 |
-| `src/utils/check-overlap.ts` | `checkOverlap()`, `mergeOverlapParts()`, `getOverlapSizeMm()` |
+| `src/utils/check-overlap.ts` | `checkOverlap()`, `mergeOverlapParts()`, `computeOverlapSizeMm()` |
 
 ### 10.2 드래그/리사이즈 관련 상태
 
@@ -2202,7 +2204,7 @@ mouseup
 
 ### 10.5 오버랩 회피 캐시 무효화
 
-`_rerenderAffectedParagraphs()`에서 `_structureDirty = true`를 설정하면, 다음 `paragraph.render()` 호출 시 `TextLayoutEngine.create()`가 재실행되어 `_overlayRects` 캐시가 새로 계산된다. 박스가 이동할 때마다 오버랩 영역이 변하므로 이 캐시 무효화가 필수적이다.
+`_rerenderAffectedParagraphs()`에서 `_structureDirty = true`를 설정하면, 다음 `paragraph.render()` 호출 시 `ParagraphEngine.create()`가 재실행되어 `_overlayRects` 캐시가 새로 계산된다. 박스가 이동할 때마다 오버랩 영역이 변하므로 이 캐시 무효화가 필수적이다.
 
 ### 10.6 성능: 중첩된 하위 요소를 가진 박스의 드래그/리사이즈
 
@@ -2214,7 +2216,7 @@ mouseup
 2. 형제 단락 수집: 부모의 `items` 중 **box의 이동 전/후 AABB union과 교차하는 형제**의 단락만 재귀적으로 순회 (AABB 최적화)
 3. 수집된 모든 `LayoutParagraphElement`에 대해 `_structureDirty = true`를 설정하고 `render()` 호출
 
-`render()`는 `TextLayoutEngine.layoutText()`를 실행하여 **문자 단위**로 줄바꿈과 오버랩 회피를 다시 계산한다. 따라서 단락 수가 많거나 텍스트가 길수록 비용이 커진다. 특히 중첩된 박스 하위에 많은 단락이 있으면, 상위 박스 하나를 움직여도 하위 트리 전체의 단락을 다시 렌더링하게 되어 프레임 저하가 발생할 수 있다. **AABB 최적화**는 이 비용을 줄이기 위해 형제 box의 AABB와 교차 검사하여 실제로 영향이 있는 형제만 수집한다. 단, `box.element.ts`의 setter에서 호출되는 `scheduleRerenderAffectedParagraphs`는 이전 위치 정보가 없으므로 **현재 box의 사각형과 교차하는 형제만** 수집하는 약간 다른 최적화를 적용한다.
+`render()`는 `ParagraphEngine.layoutText()`를 실행하여 **문자 단위**로 줄바꿈과 오버랩 회피를 다시 계산한다. 따라서 단락 수가 많거나 텍스트가 길수록 비용이 커진다. 특히 중첩된 박스 하위에 많은 단락이 있으면, 상위 박스 하나를 움직여도 하위 트리 전체의 단락을 다시 렌더링하게 되어 프레임 저하가 발생할 수 있다. **AABB 최적화**는 이 비용을 줄이기 위해 형제 box의 AABB와 교차 검사하여 실제로 영향이 있는 형제만 수집한다. 단, `box.element.ts`의 setter에서 호출되는 `scheduleRerenderAffectedParagraphs`는 이전 위치 정보가 없으므로 **현재 box의 사각형과 교차하는 형제만** 수집하는 약간 다른 최적화를 적용한다.
 
 #### 10.6.1 AABB 교차 최적화
 
@@ -2238,10 +2240,10 @@ mouseup
 |------|------|------|
 | `_collectAffectedParagraphs()`가 수집하는 단락 수 | O(box 사각형과 교차하는 형제의 자식 트리 크기) | 드래그/리사이즈 시작 시 한 번 + box setter 호출 시 (rAF 프레임마다) |
 | `_collectParagraphs()` 재귀 순회 | O(트리 노드 수) | rAF 프레임마다 |
-| `paragraph.layout()` | DOM 측정, GridCalculator 재생성/업데이트 | `_structureDirty` 변경 시 |
-| `TextLayoutEngine.layoutText()` | 문자 단위 줄바꿈 + 오버랩 계산 | rAF 프레임마다 |
+| `paragraph.layout()` | DOM 측정, GridCalculatorEngine 재생성/업데이트 | `_structureDirty` 변경 시 |
+| `ParagraphEngine.layoutText()` | 문자 단위 줄바꿈 + 오버랩 계산 | rAF 프레임마다 |
 | `_createLineWithParts()` | 가상 컬럼 생성 (mm 좌표계) | 매 라인마다 |
-| `_applyOverlap()` | `getOverlapSizeMm()` 호출 (mm 좌표계) | 매 라인마다, 오버랩 요소마다 |
+| `_applyOverlap()` | `computeOverlapSizeMm()` 호출 (mm 좌표계) | 매 라인마다, 오버랩 요소마다 |
 | `column.renderText()` | span 단위 diff + DOM 조작 | rAF 프레임마다 |
 
 #### 10.6.3 최적화 전략
@@ -2264,12 +2266,12 @@ mouseup
 - 또는 `requestAnimationFrame`을 사용해 화면 갱신 직전에 한 번에 처리.
 
 **5. 오버랩 캐시 갱신 최소화**
-- `_applyOverlap()`은 `getOverlapSizeMm()`를 통해 mm 좌표계에서 겹침을 판정하고, `_overlayRectsMm`는 `_layoutTextIntoColumns()` 시작 시 초기화된다.
+- `_applyOverlap()`은 `computeOverlapSizeMm()`를 통해 mm 좌표계에서 겹침을 판정하고, `_overlayRectsMm`는 `_layoutTextIntoColumns()` 시작 시 초기화된다.
 - 드래그 중 박스 위치만 변할 때는 오버랩 요소의 **rect가 이미 알고 있으므로** 매번 DOM 측정 대신 마지막 위치에서 이동량을 더하는 식으로 추정 가능.
 - 또는 `_overlayRectsMm`를 `_layoutTextIntoColumns()` 외부에서 미리 계산해두고, 텍스트 배치 중에는 캐시만 참조.
 
 **6. 증분 텍스트 레이아웃 활용**
-- `TextLayoutEngine`은 이미 `layoutText()`만 호출하면 `_columnContents`를 증분 갱신할 수 있다.
+- `ParagraphEngine`은 이미 `layoutText()`만 호출하면 `_columnContents`를 증분 갱신할 수 있다.
 - 다만 `_structureDirty = true`이면 `layoutStructure()` + `layoutText()`를 모두 재실행하여 비용이 커진다.
 - 박스 이동 시 컬럼 구조(폭, 간격)가 변하지 않으면 `_structureDirty = false`로 유지할 수 있다면 증분 갱신 가능.
 
@@ -2290,8 +2292,8 @@ mouseup
 
 - **`LayoutEditController._onClick`과 `_onMouseDown`의 관계**: `_onMouseDown`은 편집 가능한 box에서 드래그/리사이즈를 시작한다. `_onClick`은 `BoxDragState.dragMoved`나 `BoxResizeState.moved`가 `true`이면 무시한다. 두 핸들러는 문서 수준에서 캡처 단계로 동작한다.
 - **`_onClick`의 `stopPropagation()`**: 클릭이 부모 박스나 문서로 전파되는 것을 막는다. 이로 인해 중첩된 박스를 클릭해도 부모가 함께 선택되지 않는다.
-- **`_structureDirty`**: `paragraph.render()`에서 이 플래그가 `true`이면 `layout()`과 `TextLayoutEngine.create()`를 재실행한다. `false`이면 기존 모델을 재사용하여 `layoutText()`만 재실행한다. 드래그 중에는 박스 위치가 변하므로 항상 `true`로 설정해야 한다.
-- **`_overlayRectsMm`**: `TextLayoutEngine`이 `_layoutTextIntoColumns()` 시작 시 `null`로 초기화한다. `paragraph.render()`에서 `TextLayoutEngine.create()` 호출 시 `getOverlapSizeMm()`를 통해 새로 계산된다.
+- **`_structureDirty`**: `paragraph.render()`에서 이 플래그가 `true`이면 `layout()`과 `ParagraphEngine.create()`를 재실행한다. `false`이면 기존 모델을 재사용하여 `layoutText()`만 재실행한다. 드래그 중에는 박스 위치가 변하므로 항상 `true`로 설정해야 한다.
+- **`_overlayRectsMm`**: `ParagraphEngine`이 `_layoutTextIntoColumns()` 시작 시 `null`로 초기화한다. `paragraph.render()`에서 `ParagraphEngine.create()` 호출 시 `computeOverlapSizeMm()`를 통해 새로 계산된다.
 - **`layoutMove` 이벤트**: 드래그 완료(mouseup) 또는 취소(ESC) 시 `EditManager._dispatchLayoutMove()`를 통해 발생한다. 단순 클릭(이동 임계값 3px 미만)에서는 발생하지 않는다. `canceled` 필드로 완료와 취소를 구분할 수 있다.
 - **호버 표시 (`hovered`)**: `<x-layout-box>`에만 적용되며, `<x-layout-document>`는 호버 표시를 지원하지 않는다. `mouseenter` 시 조상 요소의 `hovered`를 모두 제거하여 가장 안쪽 요소만 호버 표시가 보이도록 한다. `mouseleave` 시 `elementFromPoint`로 마우스 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다. 이 동작은 중첩된 박스에서 자식→부모로 마우스가 돌아갈 때 부모의 호버가 복원되도록 보장한다.
 - **호버와 선택의 우선순위**: `selected`가 있는 요소는 `hovered`를 표시하지 않는다. `LayoutBoxElement._onLayoutMouseEnter`에서 `hasAttribute('selected')`를 먼저 검사하여, 이미 선택된 요소 위에 마우스가 있을 때 파란색 호버 테두리가 빨간색 선택 테두리와 겹치지 않도록 한다. 조상의 `hovered` 제거는 `selected` 체크 전에 수행되어, 선택된 요소 위에서 마우스가 움직일 때 조상 요소의 호버 표시도 제거된다. **lock이 `true`인 box도 호버가 억제된다** — `_onLayoutMouseEnter`에서 `this._lock`이 `true`이면 조상 `hovered` 제거 없이 즉시 early return하여 호버 표시가 나타나지 않는다.
@@ -2394,7 +2396,7 @@ mouseup
 #### 11.4.1 absolute 모드 (mm 좌표)
 
 ```
-deltaPxX, deltaPxY → deltaMmX/Y = px / GridCalculator.ppm
+deltaPxX, deltaPxY → deltaMmX/Y = px / LayoutDocumentElement.ppm
 padL/R/T/B = inheritStyle padding values
 parentWidth/Height = inheritStyle parent dimensions
 
@@ -2424,7 +2426,7 @@ top handle:
 #### 11.4.2 static 모드 (컬럼/라인 그리드)
 
 ```
-deltaPxX, deltaPxY → deltaMmX/Y = px / GridCalculator.ppm
+deltaPxX, deltaPxY → deltaMmX/Y = px / LayoutDocumentElement.ppm
 deltaCols = round(deltaMmX / avgColWidth)
 deltaLines = round(deltaMmY / lineHeight)
 avgColWidth = parentModel.editableWidth / parentModel.columnCount

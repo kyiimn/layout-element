@@ -2,7 +2,9 @@
 
 이 문서는 `layout-element`의 전체 소스에서 발견된 모든 성능 최적화 전략을 체계적으로 정리한다. 각 최적화는 소스의 특정 병목을 해결하기 위해 도입되었으며, 캐시 키, 용량, 제거 정책, 스킵 조건, 배치 동작을 포함한다.
 
-> **관련 파일**: `src/core/text-layout-engine.ts`, `src/core/grid-calculator.ts`, `src/components/layout/*.ts`, `src/components/edit/*.ts`, `src/edit/*.ts`, `src/resource/*.ts`, `src/utils/*.ts`
+> **엔진 마이그레이션**: `TextLayoutEngine` → `ParagraphEngine`, `GridCalculator` → `GridCalculatorEngine`. 캐시 구조는 동일하나 엔진 클래스명 변경. 상세는 [ENGINE.md](./ENGINE.md) 참고.
+
+> **관련 파일**: `src/engine/paragraph-engine.ts`, `src/engine/grid-calculator-engine.ts`, `src/components/layout/*.ts`, `src/components/edit/*.ts`, `src/edit/*.ts`, `src/resource/*.ts`, `src/utils/*.ts`
 
 ---
 
@@ -13,7 +15,7 @@
   - [2.1 글자 폭 캐시](#21-글자-폭-캐시-_charwidthcache)
   - [2.2 글자 외부 span 스타일 캐시](#22-글자-외부-span-스타일-캐시-_charouterstylecache)
   - [2.3 내부 span 스타일 캐시](#23-내부-span-스타일-캐시-_charinnerstyle)
-  - [2.4 GridCalculator ppm 캐시](#24-gridcalculator-ppm-캐시)
+  - [2.4 GridCalculatorEngine ppm 캐시](#24-gridcalculatorengine-ppm-캐시)
   - [2.5 이미지 3단계 캐시](#25-이미지-3단계-캐시)
   - [2.6 오버랩 rect 캐시](#26-오버랩-rect-캐시-_overlayrectsmm)
   - [2.7 폰트 파싱 캐시 + 시그니처 스킵](#27-폰트-파싱-캐시--시그니처-스킵)
@@ -57,7 +59,7 @@
 - [6. 기하/알고리즘 최적화](#6-기하알고리즘-최적화)
   - [6.1 mergeOverlapParts O(n) 병합](#61-mergeoverlapparts-on-병합)
   - [6.2 타원 기반 픽셀 컬링](#62-타원-기반-픽셀-컬링)
-  - [6.3 GridCalculator editableHeight 정수 절사](#63-gridcalculator-editableheight-정수-절사)
+  - [6.3 GridCalculatorEngine editableHeight 정수 절사](#63-gridcalculatorengine-editableheight-정수-절사)
   - [6.4 staticGridContainment 조기 거부](#64-staticgridcontainment-조기-거부)
   - [6.5 flip-layout metricsById Map](#65-flip-layout-metricsbyid-map)
   - [6.6 테이블 seen Set 중복 셀 제거](#66-테이블-seen-set-중복-셀-제거)
@@ -98,7 +100,7 @@
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `TextLayoutEngine._charWidthCache` (`text-layout-engine.ts:69`) |
+| 위치 | `ParagraphEngine._charWidthCache` (`paragraph-engine.ts:69`) |
 | 타입 | `LRU<string, number>` |
 | 용량 | 5000 |
 | 키 | `${char}\|${fontName}\|${fontSize}` |
@@ -117,13 +119,13 @@
 | 자간(`letterSpacing`) 변경 | 영향 없음 (자간은 `genCharStyle`에서 적용) |
 | `spaceRatio` 변경 | 영향 없음 (캐시된 값은 원본 폭, 하한값은 반환 시 적용) |
 | 새 폰트 로드 | 기존 `fontName` 키는 그대로; 새 `fontName` 키 생성 |
-| 단락 제거 | `TextLayoutEngine` 인스턴스 소멸 → 캐시도 GC 대상 |
+| 단락 제거 | `ParagraphEngine` 인스턴스 소멸 → 캐시도 GC 대상 |
 
 ### 2.2 글자 외부 span 스타일 캐시 (`_charOuterStyleCache`)
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `TextLayoutEngine._charOuterStyleCache` (`text-layout-engine.ts:66`) |
+| 위치 | `ParagraphEngine._charOuterStyleCache` (`paragraph-engine.ts:66`) |
 | 타입 | `LRU<string, Partial<CSSStyleDeclaration>>` |
 | 용량 | 5000 |
 | 키 | `${char}\|${widthRatio}\|${letterSpacing}\|${spaceRatio}` |
@@ -144,19 +146,19 @@
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `TextLayoutEngine._charInnerStyle` / `_charInnerStyleKey` (`text-layout-engine.ts:68-69`) |
+| 위치 | `ParagraphEngine._charInnerStyle` / `_charInnerStyleKey` (`paragraph-engine.ts:68-69`) |
 | 타입 | 단일 키 메모이제이션 (LRU 아님) |
 | 키 | `inner\|${widthRatio}` |
 
 모든 글자의 내부 span은 동일 스타일을 사용하므로(글자 무관, 장평에만 의존) 단일 키 메모이제이션으로 충분하다.
 
-### 2.4 GridCalculator ppm 캐시
+### 2.4 GridCalculatorEngine ppm 캐시
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `GridCalculator._ppm` (`grid-calculator.ts:55`) |
+| 위치 | `GridCalculatorEngine._ppm` (`grid-calculator-engine.ts:55`) |
 | 타입 | `static number \| undefined` (싱글톤) |
-| 무효화 | `GridCalculator.resetPpm()` 호출 시 |
+| 무효화 | `GridCalculatorEngine.resetPpm()` 호출 시 |
 
 최초 접근 시 100mm `<div>`를 생성하여 `getBoundingClientRect()`로 픽셀 폭을 측정하고 `px/100`을 `_ppm`에 저장. 이후 접근은 DOM 측정 없이 캐시된 값을 반환. 줌/인쇄/CSS transform 등으로 ppm이 변경될 수 있으므로 `resetPpm()`으로 수동 무효화 필요.
 
@@ -174,7 +176,7 @@
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `TextLayoutEngine._overlayRectsMm` (`text-layout-engine.ts:77`) |
+| 위치 | `ParagraphEngine._overlayRectsMm` (`paragraph-engine.ts:77`) |
 | 타입 | `Map<LayoutBoxElement, MmRect> \| null` |
 | 생명 주기 | `_initStructureAndMeasureColumns()` 시작 시 `null` 리셋, 첫 `_detectOverlapWithCache()` 호출 시 구축 |
 
@@ -370,7 +372,7 @@
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `TextLayoutEngine._layoutCache` (`text-layout-engine.ts:81`) |
+| 위치 | `ParagraphEngine._layoutCache` (`paragraph-engine.ts:81`) |
 | 타입 | `{ hash: string; columnContents: TextLineData[][]; overflow: number } \| null` |
 | 적용 대상 | `_layoutTextIntoColumns()` 진입부 |
 
@@ -428,7 +430,7 @@
 | 항목 | 값 |
 |---|---|
 | 위치 | `LayoutColumnElement._applySpanStyle()` (`column.element.ts:163`) |
-| 스타일 | `TextLayoutEngine.genCharStyleFlat()` (`text-layout-engine.ts:1140`) |
+| 스타일 | `ParagraphEngine.genCharStyleFlat()` (`paragraph-engine.ts:1140`) |
 | 적용 조건 | `charOffsetMm !== undefined` (charOffsets 절대 좌표 경로) |
 
 charOffsets 경로에서는 outer/inner 중첩 span 대신 **단일 span**을 사용한다. absolute 배치이므로 outer의 `width`/`textAlign`이 의미 없고, 정렬은 charOffsets가 직접 산출한다. inner의 `scale`/`transformOrigin`을 단일 span에 직접 적용(`genCharStyleFlat()`).
@@ -661,11 +663,11 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 `overlapPadding`이 설정된 경우 `opaqueColumns: Set<number>`로 불투명 픽셀의 열을 기록. 정규화된 타원 거리(`ndx² + ndy² ≤ 1`) 조건으로만 차단 여부를 판정. 투명 픽셀은 제외. 기하 fallback은 캔버스를 사용할 수 없는 경우에만 사용.
 
-### 6.3 GridCalculator editableHeight 정수 절사
+### 6.3 GridCalculatorEngine editableHeight 정수 절사
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `grid-calculator.ts:150` |
+| 위치 | `grid-calculator-engine.ts:150` |
 
 `Math.floor((height - padding) / lineHeight) * lineHeight`로 편집 가능 높이를 항상 lineHeight의 정수 배로 보장. 소수 라인으로 인한 분할 레이아웃을 방지.
 
@@ -782,7 +784,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | `getTextRange()` | `EditCoordinateMapper` | 선택 영역 계산 시 span마다 `getBoundingClientRect()` 수행 |
 | `findVisualLineBounds()` | `EditCoordinateMapper` | Home/End 키 처리 시 span마다 `getBoundingClientRect()` 수행 |
 | 라인 rect 측정 | `_detectOverlapWithCache()` | `_overlayRectsMm`는 오버랩 요소만 캐싱, 라인 자체의 rect는 라인마다 측정 |
-| `getImageData` 캐싱 | `getOverlapSizeMm()` | 동일 이미지에 대해 라인마다 `getImageData()` 재호출 |
+| `getImageData` 캐싱 | `computeOverlapSizeMm()` | 동일 이미지에 대해 라인마다 `getImageData()` 재호출 |
 | `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산. `overlapMode === 'none'` 이미지/paragraph는 `checkOverlap()` 이전에 제외. `checkOverlap()`은 mm 좌표(`absLeft`/`absTop`/`absWidth`/`absHeight`) 기반으로 동작하므로 `getBoundingClientRect()` 강제 리플로우 비용이 발생하지 않음 |
 
 ---
