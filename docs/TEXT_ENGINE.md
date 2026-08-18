@@ -1,30 +1,33 @@
-# TextLayoutEngine 상세 명세
+# ParagraphEngine 상세 명세
 
-> 작성 기준: `src/core/text-layout-engine.ts` 및 관련 타입, 컴포넌트, 유틸리티 소스 코드
+> **엔진 마이그레이션**: `TextLayoutEngine` → `ParagraphEngine`, `GridCalculator` → `GridCalculatorEngine`. 상세는 [ENGINE.md](./ENGINE.md) 참고.
+
+> 작성 기준: `src/engine/paragraph-engine.ts` 및 관련 타입, 컴포넌트, 유틸리티 소스 코드
 >
-> 본 문서는 `TextLayoutEngine`의 렌더링 파이프라인, 텍스트 측정, 오버랩 회피, 데이터 구조, DOM 계층, 스타일 생성, 공개 API를 상세히 기술한다.
+> 본 문서는 `ParagraphEngine`의 렌더링 파이프라인, 텍스트 측정, 오버랩 회피, 데이터 구조, DOM 계층, 스타일 생성, 공개 API를 상세히 기술한다.
 
 ---
 
 ## 1. 개요 (Overview)
 
-`TextLayoutEngine`은 신문 레이아웃 엔진의 핵심 텍스트 래핑 모델이다.
+`ParagraphEngine`은 신문 레이아웃 엔진의 핵심 텍스트 래핑 모델이다.
 입력된 텍스트를 다중 컬럼 구조에 맞게 줄바꿈하고, 이미지 등 다른 요소와의 겹침을 회피하며,
 글자 단위로 DOM에 배치할 수 있는 `TextLineData[][]`를 생성한다.
 
-인스턴스는 `TextLayoutEngine.create(options)` 팩토리 메서드로만 생성할 수 있다. 직접 `new` 사용은 금지되며,
+인스턴스는 `ParagraphEngine.create(data)` 팩토리 메서드로만 생성할 수 있다. 직접 `new` 사용은 금지되며,
 생성자가 `private`이기 때문이다.
 
 ```ts
-const model = TextLayoutEngine.create({
+const model = ParagraphEngine.create({
   content: "...",
   column: 2,
   gap: 3,
   paragraphStyle: { textAlign: 'justify', lineGap: 1.2 },
   textStyle: { widthRatio: 0.95 },
   inheritStyle: { ... },
-  paragraphEl: paragraphElement,
-  rootNode: shadowRoot,
+  overlayEngines: [...],
+  parentAbsRect: { left: 0, top: 0, width: 180, height: 260 },
+  resources: { ppm: 3.78, parsedFonts: ... },
 });
 ```
 
@@ -40,7 +43,7 @@ const model = TextLayoutEngine.create({
 
 ## 2. 3단계 렌더링 파이프라인
 
-`TextLayoutEngine`은 다음 3단계 파이프라인으로 동작한다.
+`ParagraphEngine`은 다음 3단계 파이프라인으로 동작한다.
 
 ```mermaid
 flowchart TD
@@ -61,10 +64,10 @@ flowchart TD
 
 ### 2.2 Phase 2: 구조 측정 (`layoutStructure` / `_initStructureAndMeasureColumns`)
 
-`_initStructureAndMeasureColumns()`에서 컬럼 폭, 간격, 줄 높이를 계산하고, `GridCalculator.ppm`을 직접 사용한다.
+`_initStructureAndMeasureColumns()`에서 컬럼 폭, 간격, 줄 높이를 계산하고, `DocumentEngine.ppm`을 직접 사용한다.
 
 - `_columnWidths`, `_gaps`, `_lineHeight` 초기화
-- `GridCalculator.ppm`으로 mm→px 변환 비율 확보 (DOM 측정 불필요)
+- `DocumentEngine.ppm`으로 mm→px 변환 비율 확보 (DOM 측정 불필요)
 
 ### 2.3 Phase 3: 텍스트 배치 (`layoutText` / `_layoutTextIntoColumns`)
 
@@ -138,7 +141,7 @@ flowchart TD
 
 ## 4. 증분 상태와 재생성
 
-`TextLayoutEngine`은 증분 렌더링을 지원하지 않는다. 텍스트 내용이 바뀌면 `layoutText()`를 다시 호출해 전체 래핑을 재계산한다.
+`ParagraphEngine`은 증분 렌더링을 지원하지 않는다. 텍스트 내용이 바뀌면 `layoutText()`를 다시 호출해 전체 래핑을 재계산한다.
 
 ### 4.1 상태 초기화 (`resetIncrementalState`)
 
@@ -170,7 +173,7 @@ flowchart TD
 
 ### 5.1 개념
 
-이미지 등 다른 요소가 텍스트 영역과 겹칠 때, `TextLayoutEngine`은 두 가지 상황을 구분한다.
+이미지 등 다른 요소가 텍스트 영역과 겹칠 때, `ParagraphEngine`은 두 가지 상황을 구분한다.
 
 - **COVER**: 라인 전체가 덮여 글자를 배치할 수 없음
 - **PART**: 라인 일부가 덮임
@@ -186,12 +189,12 @@ private _detectOverlapWithCache(lineEl: HTMLElement): { cover: boolean; overlapP
 동작:
 
 1. `_overlayRectsMm`가 null이면 모든 오버랩 요소의 mm rect(`absLeft`/`absTop`/`absWidth`/`absHeight`)를 `Map`에 저장
-2. 각 오버랩 요소에 대해 `getOverlapSizeMm(lineRectMm, el)` 호출
+2. 각 오버랩 요소에 대해 `computeOverlapSizeMm(lineRectMm, el)` 호출
 3. `COVERS`가 하나라도 있으면 `cover = true`
 4. `PART`면 `overlapParts`에 병합
 5. `cover`인 경우 `lineEl.style.width = '0'` 설정, `maxWidth`도 동일하게 설정
 
-이미지 픽셀 탐색이 먼저 수행된다. `getOverlapSizeMm`가 `COVERS`를 반환해야 기하학적 COVER 판정으로 이어진다. 투명 영역만 겹치면 COVER로 처리되지 않는다.
+이미지 픽셀 탐색이 먼저 수행된다. `computeOverlapSizeMm`가 `COVERS`를 반환해야 기하학적 COVER 판정으로 이어진다. 투명 영역만 겹치면 COVER로 처리되지 않는다.
 
 ### 5.2.1 오버랩 요소 변경 시 단락 재렌더링 트리거
 
@@ -211,7 +214,7 @@ private _detectOverlapWithCache(lineEl: HTMLElement): { cover: boolean; overlapP
 `requestRerenderAffectedParagraphs()` → `scheduleRerenderAffectedParagraphs()` → `_collectAffectedParagraphs()` → `_renderAffectedParagraphs()` 흐름으로 동작한다:
 
 1. **`_collectAffectedParagraphs()`**: 자식 박스를 재귀 탐색하여 모든 단락 수집 + 형제 박스의 자식 단락도 수집 (오버랩 영향 반영)
-2. **`_renderAffectedParagraphs()`**: 수집된 단락의 `markStructureChangedAndRender()` 호출 → `_perfStructureChanged = true` + `render()` → `TextLayoutEngine`이 새 `overlayElements`로 재평가
+2. **`_renderAffectedParagraphs()`**: 수집된 단락의 `markStructureChangedAndRender()` 호출 → `_perfStructureChanged = true` + `render()` → `ParagraphEngine`이 새 `overlayElements`로 재평가
 
 > **주의**: `appendChildData()`는 각 자식 추가마다 `requestRerenderAffectedParagraphs()`를 호출한다. `data` setter는 자식을 일괄 추가한 후 마지막에 한 번만 호출하여 중복 렌더링을 방지한다. `_appendChildData()` (private)는 `data` setter에서만 호출되므로 별도로 호출하지 않는다.
 
@@ -524,18 +527,19 @@ if (this._overlayRectsMm === null) {
 
 ## 9. 데이터 구조
 
-### 9.1 `TextLayoutEngineOptions`
+### 9.1 `ParagraphEngineData`
 
 ```ts
-type TextLayoutEngineOptions = {
+type ParagraphEngineData = {
   content: string | (string | TextBlockData)[];
   column: number | number[];
   gap: number | number[];
   paragraphStyle: ParagraphStyle;
   textStyle: TextStyle;
   inheritStyle: InheritStyle;
-  paragraphEl: LayoutParagraphElement;
-  rootNode: Node;
+  overlayEngines: ImageEngine[];
+  parentAbsRect: AbsRect;
+  resources: EngineResources;
 };
 ```
 
@@ -891,7 +895,7 @@ const ppm = vColumnEl.getBoundingClientRect().width / this._columnWidths[curColu
 
 - `TextPartData.left`, `TextPartData.width`: **mm**
 - `FreeRegion.start`, `FreeRegion.end`: **mm**
-- `OverlapParts.x1`, `OverlapParts.x2`: **mm** (`getOverlapSizeMm()` 반환값. 라인 좌측 기준 상대 좌표)
+- `OverlapParts.x1`, `OverlapParts.x2`: **mm** (`computeOverlapSizeMm()` 반환값. 라인 좌측 기준 상대 좌표)
 - DOM 파트 요소의 `width`, `marginLeft`: **mm** (CSS `Nmm` 형식)
 - `_charWidthMm()` 반환값: **mm**
 - `_layoutTextIntoColumns()` 내 `partWidths`, `cumulativeWidths`, `charWidth`, `letterSpacingMm`: **mm**
@@ -907,9 +911,9 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 이를 방지하기 위해 모든 `getBoundingClientRect()` 결과는 `EditManager.scale`로 나누어 **scale=1 기준 픽셀 좌표**로 정규화한 뒤 사용한다. 정규화는 다음 경로에 적용된다:
 
 1. **ppm 측정** (`_initStructureAndMeasureColumns`): 가상 컬럼의 렌더링 폭을 scale로 나누어 ppm을 계산한다. 폰트 메트릭 기반 `_charWidthMm()`은 ppm에 무관하게 동일한 mm 값을 반환하므로, 오버랩이 없는 라인의 글자 배치도 일관된다.
-2. **오버랩 rect 캐시** (`_detectOverlapWithCache`): 오버랩 요소의 mm rect(`absLeft`/`absTop`/`absWidth`/`absHeight`)를 사용한다. 이 값들은 모델 기반 mm 좌표이므로 `getBoundingClientRect()`를 호출하지 않으며, scale에 무관하게 동일한 겹침 판정 결과를 보장한다. `getOverlapSizeMm()`도 mm 좌표계에서 직접 동작하므로 canvas 픽셀 매핑만 `GridCalculator.ppm`을 통해 수행된다.
+2. **오버랩 rect 캐시** (`_detectOverlapWithCache`): 오버랩 요소의 mm rect(`absLeft`/`absTop`/`absWidth`/`absHeight`)를 사용한다. 이 값들은 모델 기반 mm 좌표이므로 `getBoundingClientRect()`를 호출하지 않으며, scale에 무관하게 동일한 겹침 판정 결과를 보장한다. `computeOverlapSizeMm()`도 mm 좌표계에서 직접 동작하므로 canvas 픽셀 매핑만 `DocumentEngine.ppm`을 통해 수행된다.
 
-`TextLayoutEngine.scale` 프로퍼티를 통해 scale 값을 받으며, `LayoutParagraphElement.render()`가 `layoutDocEl.editManager.scale`을 읽어 `model.scale`에 설정한 후 `layoutStructure()`/`layoutText()`를 호출한다. `EditManager.setScale()`은 모든 paragraph의 `markStructureChangedAndRender()`를 호출하므로, scale 변경 시 자동으로 재렌더링되어 새 scale이 반영된다.
+`ParagraphEngine.scale` 프로퍼티를 통해 scale 값을 받으며, `LayoutParagraphElement.render()`가 `layoutDocEl.editManager.scale`을 읽어 `model.scale`에 설정한 후 `layoutStructure()`/`layoutText()`를 호출한다. `EditManager.setScale()`은 모든 paragraph의 `markStructureChangedAndRender()`를 호출하므로, scale 변경 시 자동으로 재렌더링되어 새 scale이 반영된다.
 
 ---
 
@@ -919,7 +923,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 
 | 메서드 | 설명 |
 |--------|------|
-| `TextLayoutEngine.create(...)` | 팩토리 메서드. `new` 대신 사용 |
+| `ParagraphEngine.create(...)` | 팩토리 메서드. `new` 대신 사용 |
 
 ### 13.2 공개 메서드
 
@@ -937,7 +941,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 
 | 세터 | 타입 | 설명 |
 | ------ | ------ | ------ |
-| `data` | `TextLayoutEngineOptions` | 모델 전체 데이터 설정. 컬럼, 스타일, 콘텐츠 갱신. `_initLayoutMetrics()` 호출 |
+| `data` | `ParagraphEngineData` | 모델 전체 데이터 설정. 컬럼, 스타일, 콘텐츠 갱신. `_initLayoutMetrics()` 호출 |
 | `inheritStyle` | `InheritStyle` | 상속 스타일 설정. `_initLayoutMetrics()` 호출 |
 | `textContent` | `string \| (string \| TextBlockData)[]` | 텍스트 콘텐츠 갱신. 래핑은 호출자가 직접 실행 |
 
@@ -1021,7 +1025,7 @@ this._lineHeight = fontSize * lineGap;
 ### 16.1 기본 사용
 
 ```ts
-const model = TextLayoutEngine.create({
+const model = ParagraphEngine.create({
   content: "신문 본문 텍스트입니다.\n두 번째 단락입니다.",
   column: 2,
   gap: 3,
@@ -1033,8 +1037,9 @@ const model = TextLayoutEngine.create({
     fontSize: 4,
     fontFamily: 'Myoungjo',
   },
-  paragraphEl,
-  rootNode,
+  overlayEngines: [],
+  parentAbsRect: { left: 0, top: 0, width: 180, height: 260 },
+  resources: { ppm: 3.78, parsedFonts: ... },
 });
 
 model.layoutStructure();
@@ -1077,7 +1082,7 @@ line 3: PART  → parts = [{left:0, width:x1}, {left:x2, width:colWidth-x2}]
 line 4: FREE  → parts = [{ left:0, width:colWidth }]
 ```
 
-### 17.2 mm 단위 겹침 탐지 (`getOverlapSizeMm`)
+### 17.2 mm 단위 겹침 탐지 (`computeOverlapSizeMm`)
 
 이미지 요소인 경우 캔버스 픽셀 데이터를 사용하여 불투명 픽셀이 있는 열을 탐지한다. 모든 좌표는 mm 단위로 처리된다.
 
@@ -1103,7 +1108,7 @@ lineRectMm (라인, mm)       overlayElement (이미지 박스, mm)
 
 ### 17.3 overlapPadding: 타원 기반 패딩 감지
 
-`ImageData.overlapPadding`이 설정된 경우, `getOverlapSizeMm()`는 단순 사각형 교차 대신 **타원 기반 패딩 감지**를 사용한다.
+`ImageData.overlapPadding`이 설정된 경우, `computeOverlapSizeMm()`는 단순 사각형 교차 대신 **타원 기반 패딩 감지**를 사용한다.
 
 #### 타입
 
@@ -1111,7 +1116,7 @@ lineRectMm (라인, mm)       overlayElement (이미지 박스, mm)
 overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number }
 ```
 
-값은 mm 단위이며, `GridCalculator.ppm`을 통해 화면 픽셀로 변환된다. `number`이면 상하좌우 동일하게 적용된다.
+값은 mm 단위이며, `DocumentEngine.ppm`을 통해 화면 픽셀로 변환된다. `number`이면 상하좌우 동일하게 적용된다.
 
 #### 알고리즘
 
@@ -1159,9 +1164,9 @@ overlapMode?: OverlapMode; // 기본값 'path'
 
 #### 구현
 
-- **`'path'`**: `getOverlapSizeMm()`에서 캔버스 픽셀 단위 검사 수행 (기존 동작과 동일).
-- **`'box'`**: 캔버스 픽셀 검사를 skip하고 기하학적 rect + `overlapPadding`만 적용. `getOverlapSizeMm()`의 이미지 픽셀 검사 블록이 `overlapMode === 'path'`일 때만 진입하도록 분기.
-- **`'none'`**: `overlayElements` 게터에서 `overlapMode === 'none'`인 이미지 박스를 제외. `TextLayoutEngine`이 이 이미지를 오버랩 요소로 취급하지 않으므로 텍스트가 이미지 아래에 그대로 배치되고 이미지가 시각적으로 덮음.
+- **`'path'`**: `computeOverlapSizeMm()`에서 캔버스 픽셀 단위 검사 수행 (기존 동작과 동일).
+- **`'box'`**: 캔버스 픽셀 검사를 skip하고 기하학적 rect + `overlapPadding`만 적용. `computeOverlapSizeMm()`의 이미지 픽셀 검사 블록이 `overlapMode === 'path'`일 때만 진입하도록 분기.
+- **`'none'`**: `overlayElements` 게터에서 `overlapMode === 'none'`인 이미지 박스를 제외. `ParagraphEngine`이 이 이미지를 오버랩 요소로 취급하지 않으므로 텍스트가 이미지 아래에 그대로 배치되고 이미지가 시각적으로 덮음.
 
 #### `overlayElements` 필터링
 
@@ -1187,7 +1192,7 @@ overlay = overlay.filter(i => {
 
 ### 18.1 `LayoutParagraphElement`
 
-- `layout()`에서 `TextLayoutEngine.create()` 또는 `model.data = ...` 호출
+- `layout()`에서 `ParagraphEngine.create()` 또는 `model.data = ...` 호출
 - `render()`에서 `model.layoutStructure()`와 `model.layoutText()` 호출
 - `render()`에서 `columnContents` 길이만큼 `<x-layout-column>` 생성
 - `overlayElements` 게터가 `_detectOverlapWithCache()`에 사용될 오버랩 요소 제공
@@ -1243,7 +1248,7 @@ overlay = overlay.filter(i => {
 
 ## 19. 주의사항 및 제약
 
-- `TextLayoutEngine`은 `create()`로만 인스턴스화해야 한다.
+- `ParagraphEngine`은 `create()`로만 인스턴스화해야 한다.
 - `layoutText()`는 `layoutStructure()`가 먼저 호출되어 `_columnWidths`, `_gaps`, `_lineHeight`가 준비된 상태에서 실행해야 한다.
 - 이미지 오버랩 탐지는 `LayoutImageElement.canvas`가 존재할 때만 픽셀 수준으로 수행한다.
 - `overlapPadding`이 설정된 이미지는 타원 기반 감지를 사용한다. 캔버스가 없으면 기하학적 확장 사각형으로 폴백하며, 이 경우 투명 영역 구분이 불가능하다.
@@ -1269,7 +1274,7 @@ private _detectOverlapWithCache(lineEl: HTMLElement): { cover: boolean; overlapP
 private _computeFreeRegions(lineWidth: number, overlapParts: OverlapParts[]): FreeRegion[]
 ```
 
-- `_detectOverlapWithCache()`은 `getOverlapSizeMm()`을 통해 mm 좌표계에서 라인과 오버랩 요소의 겹침을 판정한다. `getBoundingClientRect()`를 호출하지 않으며, `_overlayRectsMm` 캐시를 사용한다.
+- `_detectOverlapWithCache()`은 `computeOverlapSizeMm()`을 통해 mm 좌표계에서 라인과 오버랩 요소의 겹침을 판정한다. `getBoundingClientRect()`를 호출하지 않으며, `_overlayRectsMm` 캐시를 사용한다.
 - `_computeFreeRegions()`은 겹침 구간의 여집합을 기하학적으로 계산한다.
 - 두 메서드 모두 `textAlign`, `justifyContent`와 같은 정렬 속성을 읽지 않는다.
 
@@ -1410,15 +1415,15 @@ textAlign = 'justify' (space-between)
 | 시각적 정렬 위치 | 예 | `genPartStyle()`의 `justifyContent` 매핑과 `renderText()`의 오버라이드 |
 | 마지막 줄 처리 | 예 | `justify`일 때만 `flex-start`로 강제 |
 
-결론적으로, TextLayoutEngine의 핵심 기능인 오버랩 회피와 텍스트 래핑은 어떤 `textAlign` 값이 오든 정확하게 동작한다. 정렬은 최종 렌더링 단계에서 시각적 위치만 바꾼다.
+결론적으로, ParagraphEngine의 핵심 기능인 오버랩 회피와 텍스트 래핑은 어떤 `textAlign` 값이 오든 정확하게 동작한다. 정렬은 최종 렌더링 단계에서 시각적 위치만 바꾼다.
 
 ---
 
 ## 21. 렌더링 성능 최적화 전략
 
-> **전체 성능 최적화 전략의 상세 내용은 `docs/PERFORMANCE.md`를 참조.** 이 절에서는 `TextLayoutEngine` 관련 최적화의 요약만 제공한다.
+> **전체 성능 최적화 전략의 상세 내용은 `docs/PERFORMANCE.md`를 참조.** 이 절에서는 `ParagraphEngine` 관련 최적화의 요약만 제공한다.
 
-`TextLayoutEngine`과 연관 컴포넌트들은 렌더링 성능을 향상하기 위해 다음 최적화 전략을 사용한다.
+`ParagraphEngine`과 연관 컴포넌트들은 렌더링 성능을 향상하기 위해 다음 최적화 전략을 사용한다.
 
 ### 21.1 요약
 
@@ -1427,7 +1432,7 @@ textAlign = 'justify' (space-between)
 | 폰트 메트릭 측정 + LRU 폭 캐시 | `_charWidthMm()` | `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 직접 계산 + `_charWidthCache`(LRU 5000)로 캐싱. DOM 조작 없이 순수 계산, 환경 무관, 재레이아웃 시 폰트 호출 비용 제거 |
 | LRU 스타일 캐시 | `genCharStyle()` | `_charOuterStyleCache`를 `Map`에서 `LRU`(5000)로 교체. 안정적 적중률, 성능 cliff 제거 |
 | 오버랩 rect 캐시 | `_detectOverlapWithCache()` | `Map`에 오버랩 요소 mm rect 캐싱. 리플로우 0회 (mm 직접 계산) |
-| mm 좌표계 직접 계산 | `_initStructureAndMeasureColumns()` / `_layoutTextIntoColumns()` | mm 좌표로 직접 계산, `GridCalculator.ppm` 사용. 강제 리플로우 0회 |
+| mm 좌표계 직접 계산 | `_initStructureAndMeasureColumns()` / `_layoutTextIntoColumns()` | mm 좌표로 직접 계산, `DocumentEngine.ppm` 사용. 강제 리플로우 0회 |
 | key 기반 증분 렌더링 + span 스킵 | `renderText()` | `data-source-offset` key로 span 재사용 + `_skipSpanStyleIfUnchanged()`로 변경 없는 span 스타일 적용 스킵 |
 | 스타일 시트 증분 갱신 | `renderText()` `:host` rule | `_cachedColStyleKey`로 `JSON.stringify` 비교 후 변경 시에만 재구축 |
 | queueMicrotask 배치 렌더링 | `LayoutParagraphElement.render()` | `scheduleRender()` + `queueMicrotask`로 다중 `render()` 호출 통합 |
@@ -1437,7 +1442,7 @@ textAlign = 'justify' (space-between)
 
 ```mermaid
 flowchart TD
-    subgraph TextLayoutEngine["TextLayoutEngine 캐시"]
+    subgraph ParagraphEngine["ParagraphEngine 캐시"]
         T1["_initStructureAndMeasureColumns()"] -->|"_overlayRectsMm = null"| T2["_layoutTextIntoColumns()"]
         T2 -->|"_overlayRectsMm = null"| T3["_detectOverlapWithCache() 첫 호출"]
         T3 -->|"Map 생성 + mm rect 구성"| T4["이후 _detectOverlapWithCache() 호출"]
@@ -1505,14 +1510,14 @@ flowchart TD
 | `getTextRange()` | `EditCoordinateMapper` | 선택 영역 계산 시 span마다 `getBoundingClientRect()` 수행 |
 | `findVisualLineBounds()` | `EditCoordinateMapper` | Home/End 키 처리 시 span마다 `getBoundingClientRect()` 수행 |
 | 라인 rect 측정 | `_detectOverlapWithCache()` | `_overlayRectsMm`는 오버랩 요소만 캐싱, 라인 자체의 rect는 라인마다 측정 |
-| `getImageData` 캐싱 | `getOverlapSizeMm()` | 동일 이미지에 대해 라인마다 `getImageData()` 재호출 |
+| `getImageData` 캐싱 | `computeOverlapSizeMm()` | 동일 이미지에 대해 라인마다 `getImageData()` 재호출 |
 | `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산 |
 
 ---
 
 ## 22. 한글 조판 금칙문자 줄바꿈 규칙
 
-한글과 CJK 조판에는 서양의 hyphenation 개념 대신 **금칙(禁則)** 규칙이 있다. 줄의 시작(행두)이나 끝(행말)에 특정 문자가 오는 것을 금지하는 규칙이다. `TextLayoutEngine`은 `_layoutTextIntoColumns()`가 폭 기준으로 글자를 배치한 뒤, **후처리 패스** `_applyLineBreakRules()`로 이 규칙을 적용한다.
+한글과 CJK 조판에는 서양의 hyphenation 개념 대신 **금칙(禁則)** 규칙이 있다. 줄의 시작(행두)이나 끝(행말)에 특정 문자가 오는 것을 금지하는 규칙이다. `ParagraphEngine`은 `_layoutTextIntoColumns()`가 폭 기준으로 글자를 배치한 뒤, **후처리 패스** `_applyLineBreakRules()`로 이 규칙을 적용한다.
 
 ### 22.1 금칙문자 테이블
 
