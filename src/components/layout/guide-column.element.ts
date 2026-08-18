@@ -1,5 +1,5 @@
 import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/constants";
-import { Rect } from "@/core";
+import type { GridRect } from "@/engine";
 import { GuideColumnData } from "@/types/layout";
 import { PrintPostData, PrintPostDataRect } from "@/types/print";
 
@@ -90,7 +90,7 @@ export class LayoutGuideColumnElement extends HTMLElement {
     }
   }
 
-  set rect(rect: Rect) {
+  set rect(rect: GridRect) {
     this._left = rect.x1;
     this._top = rect.y1;
     this._width = rect.x2 - rect.x1;

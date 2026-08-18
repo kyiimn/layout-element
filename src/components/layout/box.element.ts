@@ -1,5 +1,4 @@
 import { DEFAULT_BORDER_STYLE, Z_INDEX_RESIZE_HANDLE, Z_INDEX_TYPE_LABEL, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER, Z_INDEX_MAX_LAYOUT } from "@/constants";
-import { GridCalculator } from "@/core";
 import { ColorRegistry } from "@/resource";
 import { InheritStyle, BoxData, ParagraphData, TextData, ImageData, TableData, ParagraphStyle, TextStyle, PrintPostData, BoxPosition, BoxBorderStyle, BoxRole } from "@/types";
 import { checkOverlap, genUUID } from "@/utils";
@@ -9,6 +8,8 @@ import { LayoutImageElement } from "./image.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutTableElement } from "./table.element";
 import { LayoutTableCellElement } from "./td.element";
+import { BoxEngine, GridCalculatorEngine } from "@/engine";
+import type { BoxEngineParent } from "@/engine";
 
 /**
  * 드래그/리사이즈 중 한 번이라도 오버랩된 단락 집합.
@@ -29,7 +30,8 @@ type DragAffectedSet = Set<LayoutParagraphElement> | null;
  */
 export class LayoutBoxElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
-  private _model?: GridCalculator;
+  private _model?: GridCalculatorEngine;
+  private _engine?: BoxEngine;
 
   private _shadowRoot: ShadowRoot;
 
@@ -135,6 +137,16 @@ export class LayoutBoxElement extends HTMLElement {
     return null;
   }
 
+  /**
+   * 이 box에 연결된 BoxEngine 인스턴스를 반환한다.
+   *
+   * 엔진은 `_layoutStructure()`에서 생성/갱신되며,
+   * 하위 paragraph/image 요소들이 엔진 좌표에 접근할 수 있도록 한다.
+   *
+   * @returns BoxEngine 인스턴스. 연결 전이면 undefined.
+   */
+  get engine(): BoxEngine | undefined { return this._engine; }
+
   disconnectedCallback() {
     this._stopChildObserver();
     this.removeEventListener('mouseenter', this._onLayoutMouseEnter);
@@ -176,6 +188,9 @@ export class LayoutBoxElement extends HTMLElement {
   private _layoutStructure() {
     if (!this.isConnected || !this.parentModel) return;
 
+    const ppm = this._getPpm();
+    if (ppm <= 0) return;
+
     const tdParent = this.parentElement instanceof LayoutTableCellElement
       ? this.parentElement as LayoutTableCellElement
       : null;
@@ -186,12 +201,10 @@ export class LayoutBoxElement extends HTMLElement {
         const tdContentWidth = tdModel.editableWidth;
         const tdContentHeight = tdModel.contentHeight;
 
-        this._model ??= GridCalculator.create({
-          element: this,
-          width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}
-        });
+        this._model ??= GridCalculatorEngine.create({
+          width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}, isBox: true,
+        }, ppm);
         this._model.data = {
-          element: this,
           paddingTop: this.paddingTop,
           paddingRight: this.paddingRight,
           paddingBottom: this.paddingBottom,
@@ -202,33 +215,110 @@ export class LayoutBoxElement extends HTMLElement {
           textStyle: this.textStyle,
           height: tdContentHeight,
           width: tdContentWidth,
+          isBox: true,
         };
+        this._updateEngine();
         return;
       }
     }
 
     const { columnWidth, gaps } = this.parentModel;
 
-    this._model ??= GridCalculator.create({
-      element: this,
-      width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}
-    });
+    this._model ??= GridCalculatorEngine.create({
+      width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}, isBox: true,
+    }, ppm);
     this._model.data = {
-      element: this,
-
       paddingTop: this.paddingTop,
       paddingRight: this.paddingRight,
       paddingBottom: this.paddingBottom,
       paddingLeft: this.paddingLeft,
-
       columns: this.position !== 'absolute' ? columnWidth.slice(this.left, this.left + this.width) : this._savedColumns,
       gap: this.position !== 'absolute' ? gaps.slice(this.left, this.left + this.width - 1) : this._savedGap,
-
       paragraphStyle: this.paragraphStyle,
       textStyle: this.textStyle,
       height: this.absHeight,
       width: this.absWidth,
+      isBox: true,
     };
+    this._updateEngine();
+  }
+
+  /**
+   * 문서 요소에서 ppm을 가져온다.
+   */
+  private _getPpm(): number {
+    const docEl = this._findDocumentElement();
+    return docEl?.ppm ?? 3.78;
+  }
+
+  /**
+   * BoxEngine 인스턴스를 생성/갱신한다.
+   * 부모 요소(document/box/td)의 엔진 또는 GridCalculator로부터
+   * BoxEngineParent를 구성하여 전달.
+   */
+  private _updateEngine(): void {
+    const parent = this.parentElement;
+    if (!parent) return;
+
+    const docEl = this._findDocumentElement();
+    if (!docEl) return;
+
+    const parentEngineParent: BoxEngineParent | null = this._buildParentEngineParent(parent);
+    if (!parentEngineParent) return;
+
+    const boxData: BoxData = {
+      type: 'box',
+      id: this.id || undefined,
+      left: this._left,
+      top: this._top,
+      width: this._width,
+      height: this._height,
+      position: this._position,
+      zIndex: this._zIndex,
+      role: this._role,
+      paddingTop: this._paddingTop,
+      paddingRight: this._paddingRight,
+      paddingBottom: this._paddingBottom,
+      paddingLeft: this._paddingLeft,
+    };
+
+    if (!this._engine) {
+      this._engine = BoxEngine.create(boxData, parentEngineParent);
+    } else {
+      this._engine.data = boxData;
+      this._engine.parent = parentEngineParent;
+    }
+  }
+
+  /**
+   * 부모 요소로부터 BoxEngineParent 인터페이스를 구성한다.
+   */
+  private _buildParentEngineParent(parent: Element): BoxEngineParent | null {
+    if (parent instanceof LayoutDocumentElement) {
+      const docEngine = parent.engine;
+      if (!docEngine) return null;
+      return docEngine;
+    }
+    if (parent instanceof LayoutBoxElement) {
+      const boxEngine = parent.engine;
+      if (!boxEngine) return null;
+      return boxEngine;
+    }
+    if (parent instanceof LayoutTableCellElement) {
+      const tdEngine = parent.engine;
+      if (!tdEngine) return null;
+      return tdEngine;
+    }
+    return null;
+  }
+
+  private _findDocumentElement(): LayoutDocumentElement | null {
+    let el: Element | null = this.parentElement;
+    while (el) {
+      if (el instanceof LayoutDocumentElement) return el;
+      el = el.parentElement;
+    }
+    return null;
   }
 
   /**
@@ -360,7 +450,7 @@ export class LayoutBoxElement extends HTMLElement {
   private _renderBorder() {
     if (!this.isConnected || !this.parentModel) return;
 
-    const ppm = GridCalculator.ppm;
+    const ppm = this._getPpm();
     const colorRegistry = ColorRegistry.getInstance();
 
     if (this.borderColor) {
@@ -1139,7 +1229,7 @@ export class LayoutBoxElement extends HTMLElement {
       ? this.parentElement as LayoutTableCellElement
       : null;
     if (tdParent && this.position !== 'absolute') {
-      const tdModel: GridCalculator | undefined = tdParent.model;
+      const tdModel: GridCalculatorEngine | undefined = tdParent.model;
       if (tdModel) {
         return Math.max(0, tdModel.contentHeight);
       }

@@ -1,10 +1,10 @@
 import { forwardRef, useEffect } from 'react';
 import { LayoutGuideColumnElement } from '@/components';
-import type { Rect } from '@/core';
+import type { GridRect } from '@/engine';
 import { useLayoutElement } from '@/react/hooks';
 
 export interface LayoutGuideColumnProps {
-  rect?: Rect;
+  rect?: GridRect;
   visible?: boolean;
   fontSize?: number;
   lineHeight?: number;

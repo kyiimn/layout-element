@@ -1,4 +1,3 @@
-import { TextLayoutEngine, GridCalculator } from "@/core";
 import { TextEditController } from "@/edit/text-edit-controller";
 import { EditManager } from "@/edit/edit-manager";
 import { DEFAULT_LINE_GAP } from "@/constants";
@@ -8,6 +7,9 @@ import { checkOverlap, genUUID, valueEqual, createAiProcessingOverlay, setAiProc
 import { LayoutBoxElement } from "./box.element";
 import { LayoutImageElement } from "./image.element";
 import { LayoutColumnElement } from "./column.element";
+import { LayoutDocumentElement } from "./document.element";
+import { ParagraphEngine } from "@/engine";
+import type { ParagraphEngineData } from "@/engine";
 
 /**
  * 다중 컬럼 텍스트 영역 요소. `<x-layout-paragraph>` 커스텀 엘리먼트.
@@ -23,7 +25,8 @@ import { LayoutColumnElement } from "./column.element";
 export class LayoutParagraphElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
 
-  private _model?: TextLayoutEngine;
+  private _model?: ParagraphEngine;
+  private _engine?: ParagraphEngine;
 
   private _shadowRoot: ShadowRoot;
 
@@ -97,6 +100,13 @@ export class LayoutParagraphElement extends HTMLElement {
     return null;
   }
 
+  /**
+   * 이 paragraph에 연결된 ParagraphEngine 인스턴스를 반환한다.
+   *
+   * @returns ParagraphEngine 인스턴스. 연결 전이면 undefined.
+   */
+  get engine(): ParagraphEngine | undefined { return this._engine; }
+
   disconnectedCallback() {
     removeAiProcessingOverlay(this._shadowRoot);
     this._editController?.destroy();
@@ -105,36 +115,77 @@ export class LayoutParagraphElement extends HTMLElement {
   }
 
   /**
-   * 구조 계산: TextLayoutEngine 데이터 할당 및 모델 생성/갱신.
+   * 구조 계산: ParagraphEngine 데이터 할당 및 모델 생성/갱신.
    * 내부 전용. `layout()`에서만 호출된다.
    */
   private _layoutStructure() {
     if (!this.isConnected || !this.parentModel || !this._inheritStyle) return;
 
-    const paragraphData = {
+    const docEl = this._findDocumentElement();
+    const resources = docEl?.engine?.resources;
+    if (!resources) return;
+
+    const parentBox = this.parentElement;
+    if (!parentBox) return;
+
+    const overlayBoxEngines: import("@/engine").BoxEngine[] = this.overlayElements
+      .map(el => {
+        const engine = el.engine;
+        if (engine) {
+          if (engine.childEngines.length === 0) {
+            const children: (import("@/engine").BoxEngine | import("@/engine").ImageEngine | import("@/engine").ParagraphEngine | import("@/engine").TableEngine)[] = [];
+            for (const childEl of el.items) {
+              if (childEl instanceof LayoutBoxElement && childEl.engine) children.push(childEl.engine);
+              else if (childEl instanceof LayoutImageElement && childEl.engine) children.push(childEl.engine);
+              else if (childEl instanceof LayoutParagraphElement && childEl.engine) children.push(childEl.engine);
+            }
+            engine.childEngines = children;
+          }
+          return engine;
+        }
+        return null;
+      })
+      .filter((e): e is import("@/engine").BoxEngine => e !== null);
+
+    const engineData: ParagraphEngineData = {
+      content: this._model?.textContent ?? this._sourceContent,
       column: this._column !== undefined ? this._column : this.parentModel.columnWidth,
       gap: this._gap !== undefined ? this._gap : this.parentModel.gaps,
-
-      content: this._model?.textContent ?? this._sourceContent,
       paragraphStyle: this.paragraphStyle,
       textStyle: this.textStyle,
-
-      paragraphEl: this,
-      rootNode: this._shadowRoot,
       inheritStyle: {
         ...this._inheritStyle,
         parentHeight: this.absHeight,
         parentWidth: this.absWidth,
       },
+      overlayEngines: overlayBoxEngines,
+      parentAbsRect: {
+        absLeft: parentBox.absLeft,
+        absTop: parentBox.absTop,
+        absWidth: parentBox.absWidth,
+        absHeight: parentBox.absHeight,
+      },
+      resources,
     };
 
     if (!this._model) {
-      this._model = TextLayoutEngine.create(paragraphData);
+      this._model = ParagraphEngine.create(engineData);
     } else {
-      this._model.data = paragraphData;
+      this._model.data = engineData;
     }
 
+    this._engine = this._model;
+
     this._perfStructureChanged = true;
+  }
+
+  private _findDocumentElement(): LayoutDocumentElement | null {
+    let el: Element | null = this.parentElement;
+    while (el) {
+      if (el instanceof LayoutDocumentElement) return el;
+      el = el.parentElement;
+    }
+    return null;
   }
 
   /**
@@ -240,6 +291,11 @@ export class LayoutParagraphElement extends HTMLElement {
       this._model.layoutText();
       this._perfStructureChanged = false;
     } else {
+      // overlay 요소의 위치가 변경되었을 수 있으므로 overlayEngines를 갱신.
+      // _perfStructureChanged가 false여도 형제 박스의 드래그/리사이즈로
+      // 오버랩 관계가 변할 수 있다. _layoutStructure()를 호출하여
+      // 엔진의 overlayEngines/parentAbsRect를 최신화한다.
+      this._layoutStructure();
       this._model.layoutText();
     }
 
@@ -727,7 +783,8 @@ export class LayoutParagraphElement extends HTMLElement {
   }
 
   get printPostData(): PrintPostData[] {
-    const ppm = GridCalculator.ppm;
+    const docEl = this._findDocumentElement();
+    const ppm = docEl?.ppm ?? 3.78;
     const chars: PrintPostDataChar[] = [];
     const registry = ColorRegistry.getInstance();
     const fontLoader = FontLoader.getInstance();
@@ -914,8 +971,14 @@ export class LayoutParagraphElement extends HTMLElement {
    * Skeleton 레이아웃 캐시가 히트하면 `columnContents`가 동일하므로 diff 기반
    * `renderText()` 경로로 진입하여 `_skipSpanStyleIfUnchanged`가 모든 span을
    * 스킵하도록 한다. 전체 재생성(`replaceChildren()`)을 피한다.
+   *
+   * 단, 오버랩 요소의 위치가 변경되었을 수 있으므로 `_layoutStructure()`를
+   * 호출하여 `overlayEngines`를 갱신한다 — 엔진의 `data` setter가
+   * 새 `overlayEngines` / `parentAbsRect`를 받아 skeleton 캐시 해시가
+   * 변경되어 재래핑이 트리거된다.
    */
   renderForDrag(): void {
+    this._layoutStructure();
     this.flushRender();
   }
 

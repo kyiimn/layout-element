@@ -7,7 +7,6 @@ import {
   PrintPostBorderEdge,
 } from "@/types";
 import {
-  GridCalculator,
   GridResolution,
   BorderResolution,
   ResolvedBorderEdge,
@@ -23,6 +22,7 @@ import { TableStructureEditor } from "@/edit/table-structure-editor";
 import { LayoutDocumentElement } from "./document.element";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutTableRowElement } from "./tr.element";
+import { TableEngine } from "@/engine";
 
 interface TableResizeState {
   isResizing: boolean;
@@ -48,6 +48,7 @@ const HIT_WIDTH = 8;
  */
 export class LayoutTableElement extends HTMLElement {
   private _shadowRoot: ShadowRoot;
+  private _engine?: TableEngine;
 
   private _borderLayerEl: HTMLDivElement | null = null;
   private _borderEdgeMap: Map<string, HTMLDivElement> = new Map();
@@ -106,6 +107,13 @@ export class LayoutTableElement extends HTMLElement {
     this._deactivateKeyboardEditing();
     this._deactivateTableEditing();
   }
+
+  /**
+   * 이 테이블에 연결된 TableEngine 인스턴스를 반환한다.
+   *
+   * @returns TableEngine 인스턴스. 연결 전이면 undefined.
+   */
+  get engine(): TableEngine | undefined { return this._engine; }
 
   private _onModeChange = (event: { mode?: { layoutEditMode?: boolean } }): void => {
     const mode = event?.mode;
@@ -346,6 +354,45 @@ export class LayoutTableElement extends HTMLElement {
         tdEl._setCellMetrics(placement.x, placement.y - trY, placement.width, placement.height, cellLabel, labels);
       }
     }
+
+    this._updateEngine();
+  }
+
+  /**
+   * TableEngine 인스턴스를 생성/갱신한다.
+   */
+  private _updateEngine(): void {
+    const parentBox = this.parentElement;
+    if (!(parentBox instanceof LayoutBoxElement)) return;
+    const boxEngine = parentBox.engine;
+    if (!boxEngine) return;
+
+    const tableData: TableData = {
+      type: 'table',
+      id: this.id || undefined,
+      colWidths: this._colWidths,
+      children: this._rows,
+    };
+
+    if (!this._engine) {
+      this._engine = TableEngine.create(tableData, boxEngine);
+    } else {
+      this._engine.data = tableData;
+    }
+    this._engine.layout();
+  }
+
+  private _findDocumentElement(): LayoutDocumentElement | null {
+    let el: Element | null = this.parentElement;
+    while (el) {
+      if (el instanceof LayoutDocumentElement) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  private _getPpm(): number {
+    return this._findDocumentElement()?.ppm ?? 3.78;
   }
 
   private _applyStyle(): void {
@@ -392,7 +439,7 @@ export class LayoutTableElement extends HTMLElement {
   }
 
   private _renderBorderLayer(edges: ResolvedBorderEdge[]): void {
-    const ppm = GridCalculator.ppm;
+    const ppm = this._getPpm();
     const colorRegistry = ColorRegistry.getInstance();
     const layer = this._borderLayerEl!;
     const newKeys = new Set<string>();
@@ -493,7 +540,7 @@ export class LayoutTableElement extends HTMLElement {
     const editManager = this.editManager;
     if (!editManager?.layoutEditMode) return;
     const grid = this._gridResolution;
-    const ppm = GridCalculator.ppm;
+    const ppm = this._getPpm();
 
     if (!this._resizeHandleLayerEl) {
       const layer = document.createElement('div');
@@ -617,7 +664,7 @@ export class LayoutTableElement extends HTMLElement {
     this._resizeState.rafId = requestAnimationFrame(() => {
       if (!this._resizeState) return;
       this._resizeState.rafId = null;
-      const ppm = GridCalculator.ppm;
+      const ppm = this._getPpm();
       const handle = this._resizeState.handle!;
       if (handle.startsWith('v-')) {
         const col = parseInt(handle.slice(2), 10);
@@ -779,7 +826,7 @@ export class LayoutTableElement extends HTMLElement {
       this._selectionLayerEl = layer;
     }
 
-    const ppm = GridCalculator.ppm;
+    const ppm = this._getPpm();
     const coords = this._getSelectionCoords(selection as { anchor: { row: number; col: number }; focus: { row: number; col: number } });
     const focusCell = (selection as { focus: { row: number; col: number } }).focus;
 
@@ -929,7 +976,7 @@ export class LayoutTableElement extends HTMLElement {
 
   get printPostData(): PrintPostData[] {
     const data: PrintPostData[] = [];
-    const ppm = GridCalculator.ppm;
+    const ppm = this._getPpm();
     const colorRegistry = ColorRegistry.getInstance();
     const tableRect = this.getBoundingClientRect();
 

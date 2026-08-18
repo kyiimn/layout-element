@@ -1,11 +1,75 @@
-import { GridCalculator } from "@/core";
 import { Z_INDEX_TYPE_LABEL } from "@/constants";
-import { DocumentData, ParagraphStyle, PrintPostData, TextStyle, BoxData } from "@/types";
+import { DocumentData, ParagraphStyle, PrintPostData, TextStyle, BoxData, Font, CMYKColorSet } from "@/types";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
 import { genUUID, flipLayoutData, FlipLayoutOptions, BoxMetricsById } from "@/utils";
 import { EditManager } from "@/edit/edit-manager";
+import { DocumentEngine } from "@/engine";
+import type { FontLoaderEngine, ColorRegistryEngine, ParsedFont, GridCalculatorEngine } from "@/engine";
+import { FontLoader } from "@/resource/font-loader";
+import { ColorRegistry } from "@/resource/color-registry";
+
+/**
+ * `FontLoader` 싱글톤을 `FontLoaderEngine` 인터페이스로 래핑하는 어댑터.
+ *
+ * 브라우저 환경에서 `FontLoader`가 `FontFace` 등록과 opentype.js 파싱을
+ * 모두 수행하므로, 엔진 계층에 메트릭 조회만 위임한다.
+ */
+class FontLoaderSingletonAdapter implements FontLoaderEngine {
+  private _fl: FontLoader;
+
+  constructor(fl: FontLoader) {
+    this._fl = fl;
+  }
+
+  get ready(): boolean {
+    return this._fl.ready;
+  }
+
+  async init(fonts: Font[]): Promise<void> {
+    await this._fl.init(fonts);
+  }
+
+  getParsedFont(fontName?: string): ParsedFont | null {
+    return this._fl.getParsedFont(fontName) as unknown as ParsedFont | null;
+  }
+
+  getFontFamily(fontName?: string): string {
+    return this._fl.getFontFamily(fontName);
+  }
+}
+
+/**
+ * `ColorRegistry` 싱글톤을 `ColorRegistryEngine` 인터페이스로 래핑하는 어댑터.
+ */
+class ColorRegistrySingletonAdapter implements ColorRegistryEngine {
+  private _cr: ColorRegistry;
+
+  constructor(cr: ColorRegistry) {
+    this._cr = cr;
+  }
+
+  get ready(): boolean {
+    return this._cr.ready;
+  }
+
+  init(colorSet: CMYKColorSet): void {
+    void this._cr.init(colorSet);
+  }
+
+  get(name: string): { c: number; m: number; y: number; k: number } {
+    return this._cr.get(name);
+  }
+
+  getCSSColor(name: string): string {
+    return this._cr.getCSSColor(name);
+  }
+
+  getOpacityHex(opacity: number): string {
+    return this._cr.getOpacityHex(opacity);
+  }
+}
 
 /**
  * 문서 루트 요소. `<x-layout-document>` 커스텀 엘리먼트.
@@ -23,7 +87,8 @@ import { EditManager } from "@/edit/edit-manager";
  * - 컬럼 가이드(`<x-layout-guide-column>`) 렌더링
  */
 export class LayoutDocumentElement extends HTMLElement {
-  private _model?: GridCalculator;
+  private _engine?: DocumentEngine;
+  private _ppm: number = 0;
 
   private _shadowRoot: ShadowRoot;
   private _root?: HTMLDivElement;
@@ -68,6 +133,42 @@ export class LayoutDocumentElement extends HTMLElement {
    */
   get editManager(): EditManager { return this._editManager; }
 
+  /**
+   * 이 문서 요소에 연결된 DocumentEngine 인스턴스를 반환한다.
+   *
+   * 엔진은 `connectedCallback`에서 ppm 측정 후 생성되며,
+   * 하위 box/paragraph 요소들이 엔진 트리에 접근할 수 있도록 한다.
+   *
+   * @returns DocumentEngine 인스턴스. 연결 전이면 undefined.
+   */
+  get engine(): DocumentEngine | undefined { return this._engine; }
+
+  /**
+   * 이 문서의 GridCalculatorEngine을 반환한다 (엔진 기반).
+   *
+   * @returns GridCalculatorEngine. 엔진이 없으면 undefined.
+   */
+  get model(): GridCalculatorEngine | undefined { return this._engine?.gridCalculator; }
+
+  /**
+   * 측정된 pixels-per-mm 값을 반환한다.
+   *
+   * @returns ppm 값. 측정 전이면 0.
+   */
+  get ppm(): number { return this._ppm; }
+
+  /**
+   * ppm을 무효화하고 재측정한다.
+   * 줌 레벨 변경이나 CSS transform 후 호출해야 한다.
+   */
+  resetPpm(): void {
+    this._ppm = 0;
+    if (this._engine) {
+      this._measurePpm();
+      this._engine.ppm = this._ppm;
+    }
+  }
+
   constructor() {
     super();
 
@@ -80,6 +181,7 @@ export class LayoutDocumentElement extends HTMLElement {
   connectedCallback() {
     if (!this.id) this.id = genUUID();
     if (this._isPrint) return;
+    this._measurePpm();
     this._startChildObserver();
     this.addEventListener('mousedown', this._onPlaceGunMouseDown);
     window.addEventListener('keydown', this._onWindowKeyDown, true);
@@ -147,18 +249,39 @@ export class LayoutDocumentElement extends HTMLElement {
   };
 
   /**
-   * 구조 계산: GridCalculator 데이터 할당 및 모델 생성.
+   * 브라우저 DPI를 측정하여 ppm(pixels-per-mm)을 계산한다.
+   * 100mm div를 DOM에 추가하여 getBoundingClientRect로 픽셀 폭을 측정.
+   */
+  private _measurePpm(): void {
+    if (this._ppm > 0) return;
+    const div = document.createElement('div');
+    div.style.width = '100mm';
+    div.style.height = '1px';
+    div.style.position = 'absolute';
+    div.style.top = '-10000px';
+    div.style.left = '-10000px';
+    div.style.visibility = 'hidden';
+    document.body.appendChild(div);
+    const pxWidth100mm = div.getBoundingClientRect().width;
+    document.body.removeChild(div);
+    this._ppm = pxWidth100mm / 100;
+    if (this._ppm <= 0) {
+      throw new Error(`LayoutDocumentElement: ppm 측정 실패 (${this._ppm}). 브라우저 렌더링 컨텍스트를 확인하세요.`);
+    }
+  }
+
+  /**
+   * 구조 계산: DocumentEngine 데이터 할당 및 엔진 생성/갱신.
    * 내부 전용. `layout()`에서만 호출된다.
    */
   private _layoutStructure() {
     if (!this.isConnected) return null;
 
-    this._model ??= GridCalculator.create({
-      element: this,
-      width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}
-    });
-    this._model.data = {
-      element: this,
+    this._measurePpm();
+
+    const fontLoader = new FontLoaderSingletonAdapter(FontLoader.getInstance());
+    const colorRegistry = new ColorRegistrySingletonAdapter(ColorRegistry.getInstance());
+    const docData: DocumentData = {
       width: this._width,
       height: this._height,
       paddingTop: this._paddingTop,
@@ -170,6 +293,13 @@ export class LayoutDocumentElement extends HTMLElement {
       paragraphStyle: this._paragraphStyle,
       textStyle: this._textStyle,
     };
+    if (!this._engine) {
+      this._engine = DocumentEngine.create(docData, fontLoader, colorRegistry, this._ppm);
+    } else {
+      this._engine.data = docData;
+      this._engine.ppm = this._ppm;
+    }
+
     return this;
   }
 
@@ -229,7 +359,8 @@ export class LayoutDocumentElement extends HTMLElement {
    * 내부 전용. `layout()`에서만 호출된다.
    */
   private _renderGuideColumns() {
-    if (!this._model) return;
+    const grid = this._engine?.gridCalculator;
+    if (!grid) return;
 
     const existing = Array.from(this._root?.children || []).filter(
       (e): e is HTMLElement & {
@@ -238,16 +369,16 @@ export class LayoutDocumentElement extends HTMLElement {
       } => e.nodeName === "X-LAYOUT-GUIDE-COLUMN",
     );
 
-    if (existing.length === this._model.columnCoords.length) {
-      for (let i = 0; i < this._model.columnCoords.length; i++) {
-        const coord = this._model.columnCoords[i];
+    if (existing.length === grid.columnCoords.length) {
+      for (let i = 0; i < grid.columnCoords.length; i++) {
+        const coord = grid.columnCoords[i];
         const el = existing[i];
         const nl = coord.x1, nt = coord.y1, nw = coord.x2 - coord.x1, nh = coord.y2 - coord.y1;
         if (el.left !== nl || el.top !== nt || el.width !== nw || el.height !== nh) {
           (el as unknown as { rect: unknown }).rect = coord;
         }
-        if (el.fontSize !== this._model.fontSize) el.fontSize = this._model.fontSize;
-        if (el.lineHeight !== this._model.lineHeight) el.lineHeight = this._model.lineHeight;
+        if (el.fontSize !== grid.fontSize) el.fontSize = grid.fontSize;
+        if (el.lineHeight !== grid.lineHeight) el.lineHeight = grid.lineHeight;
         if (el.visible !== this._visibleGuide) el.visible = this._visibleGuide;
       }
       return;
@@ -255,14 +386,14 @@ export class LayoutDocumentElement extends HTMLElement {
 
     existing.forEach(e => e.remove());
 
-    for (let i = 0; i < this._model.columnCoords.length; i++) {
-      const coord = this._model.columnCoords[i];
+    for (let i = 0; i < grid.columnCoords.length; i++) {
+      const coord = grid.columnCoords[i];
       const colEl = document.createElement('x-layout-guide-column') as HTMLElement & {
         rect: unknown; fontSize: number; lineHeight: number; visible: boolean;
       };
       colEl.rect = coord;
-      colEl.fontSize = this._model.fontSize;
-      colEl.lineHeight = this._model.lineHeight;
+      colEl.fontSize = grid.fontSize;
+      colEl.lineHeight = grid.lineHeight;
       colEl.visible = this._visibleGuide;
       this._root?.appendChild(colEl);
     }
@@ -273,13 +404,14 @@ export class LayoutDocumentElement extends HTMLElement {
    * 내부 전용. `layout()`에서만 호출된다.
    */
   private _propagateInheritStyle() {
-    if (!this._model) return;
+    const grid = this._engine?.gridCalculator;
+    if (!grid) return;
     this.items.forEach(childEl => {
       childEl.inheritStyle = {
         ...this.textStyle,
         ...this.paragraphStyle,
-        parentHeight: this._model!.editableHeight,
-        parentWidth: this._model!.editableWidth,
+        parentHeight: grid.editableHeight,
+        parentWidth: grid.editableWidth,
       };
     });
   }
@@ -313,13 +445,14 @@ export class LayoutDocumentElement extends HTMLElement {
   }
 
   appendChild<T extends Node>(node: T) {
-    if (this._model && ['X-LAYOUT-BOX', 'X-LAYOUT-PARAGRAPH', 'X-LAYOUT-IMAGE'].includes(node.nodeName)) {
+    const grid = this._engine?.gridCalculator;
+    if (grid && ['X-LAYOUT-BOX', 'X-LAYOUT-PARAGRAPH', 'X-LAYOUT-IMAGE'].includes(node.nodeName)) {
       const childEl = node as unknown as (LayoutBoxElement | LayoutParagraphElement | LayoutImageElement);
       childEl.inheritStyle = {
         ...this.textStyle,
         ...this.paragraphStyle,
-        parentHeight: this._model!.editableHeight,
-        parentWidth: this._model!.editableWidth,
+        parentHeight: grid.editableHeight,
+        parentWidth: grid.editableWidth,
       };
     }
     return super.appendChild(node);
@@ -512,7 +645,6 @@ export class LayoutDocumentElement extends HTMLElement {
   get paragraphStyle() { return this._paragraphStyle; }
   get textStyle() { return this._textStyle; }
 
-  get model() { return this._model; }
   get visibleGuide() { return this._visibleGuide; }
   get type() { return 'document' as const; }
   get zIndex() { return 0; }

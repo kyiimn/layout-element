@@ -205,8 +205,8 @@ export class LayoutColumnElement extends HTMLElement {
       delete charEl.dataset.charOffset;
     }
 
-    const { owidth, swidth } = this.model!.getCharWidths(char, textBlockStyle);
-    charEl.dataset.owidth = String(owidth);
+    const { rawWidth, swidth } = this.model!.getCharWidths(char, textBlockStyle);
+    charEl.dataset.owidth = String(rawWidth);
     charEl.dataset.swidth = String(swidth);
   }
 

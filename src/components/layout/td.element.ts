@@ -1,4 +1,4 @@
-import { GridCalculator } from "@/core";
+import { GridCalculatorEngine, TableCellEngine } from "@/engine";
 import { ColorRegistry } from "@/resource";
 import {
   TableCellData,
@@ -27,7 +27,8 @@ import { LayoutParagraphElement } from "./paragraph.element";
 export class LayoutTableCellElement extends HTMLElement {
   private _shadowRoot: ShadowRoot;
 
-  private _model?: GridCalculator;
+  private _model?: GridCalculatorEngine;
+  private _cellEngine?: TableCellEngine;
 
   private _x: number = 0;
   private _y: number = 0;
@@ -418,14 +419,15 @@ export class LayoutTableCellElement extends HTMLElement {
   private _layoutStructure(): void {
     if (!this.isConnected) return;
 
-    this._model ??= GridCalculator.create({
-      element: this,
+    const ppm = this._getPpm();
+    if (ppm <= 0) return;
+
+    this._model ??= GridCalculatorEngine.create({
       width: 0, height: 0, columns: 1, gap: 0,
-      paragraphStyle: {}, textStyle: {},
-    });
+      paragraphStyle: {}, textStyle: {}, isBox: true,
+    }, ppm);
 
     this._model.data = {
-      element: this,
       paddingTop: this._paddingTop,
       paddingRight: this._paddingRight,
       paddingBottom: this._paddingBottom,
@@ -436,7 +438,22 @@ export class LayoutTableCellElement extends HTMLElement {
       textStyle: this._inheritStyle ?? {},
       width: this._width,
       height: this._height,
+      isBox: true,
     };
+  }
+
+  /**
+   * 문서 요소에서 ppm을 가져온다.
+   */
+  private _getPpm(): number {
+    let el: Element | null = this.parentElement;
+    while (el) {
+      if (el instanceof HTMLElement && 'ppm' in el) {
+        return (el as unknown as { ppm: number }).ppm;
+      }
+      el = el.parentElement;
+    }
+    return 3.78;
   }
 
   private _applyStyle(): void {
@@ -489,7 +506,7 @@ export class LayoutTableCellElement extends HTMLElement {
     if (!this._diagonals || this._diagonals.length === 0) return;
     if (this._isPrint) return;
 
-    const ppm = GridCalculator.ppm;
+    const ppm = this._getPpm();
     const widthPx = this._width * ppm;
     const heightPx = this._height * ppm;
 
@@ -560,7 +577,7 @@ export class LayoutTableCellElement extends HTMLElement {
     const isLastRow = maxRow >= grid.rowCount - 1;
     const isLastCol = maxCol >= grid.colCount - 1;
 
-    const ppm = GridCalculator.ppm;
+    const ppm = this._getPpm();
     const widthPx = this._width * ppm;
     const heightPx = this._height * ppm;
     const borderWidth = '1px';
@@ -665,7 +682,7 @@ export class LayoutTableCellElement extends HTMLElement {
 
   private _propagateInheritStyle(): void {
     if (!this._inheritStyle) return;
-    const ppm = GridCalculator.ppm;
+    const ppm = this._getPpm();
     const childInherit: InheritStyle = {
       ...this._inheritStyle,
       parentWidth: this._width - this._paddingLeft - this._paddingRight,
@@ -750,8 +767,12 @@ export class LayoutTableCellElement extends HTMLElement {
     return parent.overlayElements ?? [];
   }
 
-  get model(): GridCalculator | undefined {
+  get model(): GridCalculatorEngine | undefined {
     return this._model;
+  }
+
+  get engine(): TableCellEngine | undefined {
+    return this._cellEngine;
   }
 
   get contentType(): 'box' | 'paragraph' | 'image' | 'table' | undefined {
@@ -780,7 +801,7 @@ export class LayoutTableCellElement extends HTMLElement {
 
     const diagonals: PrintPostDiagonal[] = [];
     if (this._diagonals && this._diagonals.length > 0) {
-      const ppm = GridCalculator.ppm;
+      const ppm = this._getPpm();
       const color = colorRegistry.get(this._diagonalColor ?? 'black');
       const widthPx = Math.max(1, Math.ceil(this._diagonalWidth * ppm));
       const x1 = rect.x + window.scrollX;

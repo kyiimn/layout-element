@@ -2,6 +2,7 @@ import { InheritStyle, ImageData, ImageObjectFit, OverlapMode, PrintPostData } f
 import { LayoutBoxElement } from "./box.element";
 import { genUUID, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay, computeObjectFit } from "@/utils";
 import { DEFAULT_IMAGE_DPI } from "@/constants";
+import { ImageEngine } from "@/engine";
 
 /**
  * URL 로더 함수 타입.
@@ -59,6 +60,7 @@ export type URLLoader = (
  */
 export class LayoutImageElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
+  private _engine?: ImageEngine;
 
   private _canvas?: HTMLCanvasElement;
   private _shadowRoot: ShadowRoot;
@@ -134,6 +136,16 @@ export class LayoutImageElement extends HTMLElement {
     }
     this._clearImageCache();
   }
+
+  /**
+   * 이 이미지에 연결된 ImageEngine 인스턴스를 반환한다.
+   *
+   * 엔진은 `data` setter에서 생성/갱신되며,
+   * RGBA 데이터는 `render()` 후 canvas에서 추출하여 주입된다.
+   *
+   * @returns ImageEngine 인스턴스. 연결 전이면 undefined.
+   */
+  get engine(): ImageEngine | undefined { return this._engine; }
 
   /**
    * 구조 계산: 스타일 규칙 생성 및 캔버스 요소 생성.
@@ -253,6 +265,7 @@ export class LayoutImageElement extends HTMLElement {
     // 캐시 히트: 동기 drawImage (await 없음, 빈 프레임 없음)
     if (this._cachedImage && this._cachedImageSrc === resolvedUrl) {
       this._drawImage(ctx, this._cachedImage);
+      this._feedRgbaToEngine(ctx);
       return;
     }
 
@@ -268,8 +281,30 @@ export class LayoutImageElement extends HTMLElement {
     const img = await this._loadImage(resolvedUrl);
     if (!img) return;
     this._drawImage(ctx, img);
+    this._feedRgbaToEngine(ctx);
 
     this._notifyOverlapParagraphs();
+  }
+
+  /**
+   * canvas에서 RGBA 픽셀 데이터를 추출하여 ImageEngine에 주입한다.
+   * 브라우저 모드에서만 호출 — Node 환경에서는 pngjs 결과를 직접 주입.
+   */
+  private _feedRgbaToEngine(ctx: CanvasRenderingContext2D): void {
+    if (!this._engine || !this.canvas) return;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    if (w <= 0 || h <= 0) return;
+    try {
+      const imageData = ctx.getImageData(0, 0, w, h);
+      this._engine.rgbaData = {
+        data: new Uint8Array(imageData.data.buffer),
+        width: w,
+        height: h,
+      };
+    } catch {
+      // CORS taint 등 — 엔진은 rgbaData 없이 기하학적 fallback 사용
+    }
   }
 
   /**
@@ -440,8 +475,34 @@ export class LayoutImageElement extends HTMLElement {
       this._applyObjectFit();
     }
 
+    this._updateEngine();
+
     this.layout();
     this.render();
+  }
+
+  /**
+   * ImageEngine 인스턴스를 생성/갱신한다.
+   */
+  private _updateEngine(): void {
+    const engineData = {
+      url: this._url || '',
+      x: this._x,
+      y: this._y,
+      width: this._width,
+      height: this._height,
+      dpi: this._dpi,
+      overlapPadding: this._overlapPadding,
+      overlapMode: this._overlapMode,
+      objectFit: this._objectFit,
+      originalWidth: this._originalWidth,
+      originalHeight: this._originalHeight,
+    };
+    if (!this._engine) {
+      this._engine = ImageEngine.create(engineData);
+    } else {
+      this._engine.data = engineData;
+    }
   }
 
   set x(value: number | undefined) {
