@@ -1,17 +1,53 @@
 import { LayoutBoxElement, LayoutImageElement } from "@/components";
 import { OverlapMode, OverlapParts } from "@/types";
 
-export const checkOverlap = (baseElement: HTMLElement, targetElement: HTMLElement) => {
-  const r1 = baseElement.getBoundingClientRect();
-  const r2 = targetElement.getBoundingClientRect();
+/**
+ * mm 좌표계에서 오버랩 판정을 위한 최소 요소 인터페이스.
+ * `LayoutBoxElement`와 `LayoutParagraphElement` 모두 이 형태를 만족한다.
+ */
+interface MmMeasurable {
+  absLeft: number;
+  absTop: number;
+  absWidth: number;
+  absHeight: number;
+}
 
-  const isIntersecting = (
-    r1.right > r2.left &&
-    r1.left < r2.right &&
-    r1.bottom > r2.top &&
-    r1.top < r2.bottom
+/**
+ * 두 요소의 mm 기반 AABB 교차 여부를 판정한다.
+ *
+ * `getBoundingClientRect()`를 전혀 호출하지 않으며, `absLeft`/`absTop`/
+ * `absWidth`/`absHeight`를 통해 mm 좌표계에서 직접 판정한다.
+ *
+ * @param baseElement - 기준 요소
+ * @param targetElement - 비교 대상 요소
+ * @returns 두 요소의 mm 영역이 교차하면 `true`, 아니면 `false`.
+ *
+ * @example
+ * ```ts
+ * const intersects = checkOverlap(boxA, boxB);
+ * if (intersects) {
+ *   const { direction, parts } = getOverlapSizeMm(lineRectMm, boxA);
+ *   ...
+ * }
+ * ```
+ */
+export const checkOverlap = (baseElement: MmMeasurable, targetElement: MmMeasurable): boolean => {
+  const r1Left = baseElement.absLeft;
+  const r1Right = baseElement.absLeft + baseElement.absWidth;
+  const r1Top = baseElement.absTop;
+  const r1Bottom = baseElement.absTop + baseElement.absHeight;
+
+  const r2Left = targetElement.absLeft;
+  const r2Right = targetElement.absLeft + targetElement.absWidth;
+  const r2Top = targetElement.absTop;
+  const r2Bottom = targetElement.absTop + targetElement.absHeight;
+
+  return (
+    r1Right > r2Left &&
+    r1Left < r2Right &&
+    r1Bottom > r2Top &&
+    r1Top < r2Bottom
   );
-  return isIntersecting;
 }
 
 export const mergeOverlapParts = (parts: OverlapParts[]): OverlapParts[] => {
