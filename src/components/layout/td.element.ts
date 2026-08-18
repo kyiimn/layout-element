@@ -72,8 +72,6 @@ export class LayoutTableCellElement extends HTMLElement {
   private _childObserver: MutationObserver | null = null;
   private _rebuildingChildren = false;
 
-  private _isPrint: boolean = window.matchMedia("print").matches;
-
   constructor() {
     super();
     this._shadowRoot = this.attachShadow({ mode: "open" });
@@ -524,8 +522,7 @@ export class LayoutTableCellElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
-      styleEl.sheet.insertRule("@media print { .diagonal { display: none !important; } }", 1);
-      styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { outline: #ff9800 solid 2px !important; outline-offset: -2px !important; } }", 2);
+      styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { outline: #ff9800 solid 2px !important; outline-offset: -2px !important; } }", 1);
 
       this._shadowRoot.appendChild(document.createElement('slot'));
     }
@@ -557,7 +554,6 @@ export class LayoutTableCellElement extends HTMLElement {
     this._diagonalEls = [];
 
     if (!this._diagonals || this._diagonals.length === 0) return;
-    if (this._isPrint) return;
 
     const ppm = this._getPpm();
     const width = this._cellEngine?.width ?? this._width;
@@ -605,17 +601,15 @@ export class LayoutTableCellElement extends HTMLElement {
    * 셀 border가 선언되지 않은 면에 빨간 점선 placeholder border를 렌더링한다.
    *
    * - 위쪽, 왼쪽: 항상 표시 (해당 면 border 없을 때)
-   * - 오른쪽: 셀이 논리적으로 마지막 열에 닿을 때만 (해당 면 border 없을 때)
-   * - 아랫쪽: 셀이 논리적으로 마지막 행에 닿을 때만 (해당 면 border 없을 때)
-   *
-   * 인쇄 모드에서는 렌더링하지 않는다. 레이아웃에 영향을 주지 않도록
-   * shadow DOM 내부에 div 요소로 점선을 그린다.
-   */
+    * - 오른쪽: 셀이 논리적으로 마지막 열에 닿을 때만 (해당 면 border 없을 때)
+    * - 아랫쪽: 셀이 논리적으로 마지막 행에 닿을 때만 (해당 면 border 없을 때)
+    *
+    * 레이아웃에 영향을 주지 않도록 shadow DOM 내부에 div 요소로 점선을 그린다.
+    */
   private _renderPlaceholderBorder(): void {
     for (const el of this._placeholderBorderEls) el.remove();
     this._placeholderBorderEls = [];
 
-    if (this._isPrint) return;
     if (!this.isConnected) return;
     if (!this.editManager?.showPlaceholderBorders) return;
     if (this.hasAttribute('selected')) return;

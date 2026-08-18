@@ -157,7 +157,6 @@ export class EditManager {
   private _listeners: Map<EditManagerEventType, Set<EditManagerEventListener>> = new Map();
   private _dispatching = false;
   private _selectedLayouts: LayoutElement[] = [];
-  private _isPrint: boolean = window.matchMedia("print").matches;
   private _isLayoutDragging = false;
   private _isLayoutResizing = false;
   private _insertController: InsertController | null = null;
@@ -709,7 +708,6 @@ export class EditManager {
     target: LayoutParagraphElement | string,
     options?: { cursorOffset?: number; selection?: SelectionRange },
   ): boolean {
-    if (this._isPrint) return false;
     if (!this._textEditMode) return false;
     let paragraph: LayoutParagraphElement | null;
 
@@ -832,7 +830,6 @@ export class EditManager {
    */
   get textEditMode(): boolean { return this._textEditMode; }
   set textEditMode(value: boolean) {
-    if (this._isPrint) return;
     if (this._textEditMode === value) return;
     const prevMode = this._getModeState();
     if (value) {
@@ -1138,8 +1135,6 @@ export class EditManager {
    */
   get layoutEditMode(): boolean { return this._layoutEditMode; }
   set layoutEditMode(value: LayoutEditModeInput) {
-    if (this._isPrint) return;
-
     // 입력 정규화: boolean → { type: 'move' | (비활성) }
     let nextActive: boolean;
     let nextType: LayoutEditType;
@@ -1525,7 +1520,6 @@ export class EditManager {
    * @returns 선택 성공 여부. 하나도 선택하지 못하면 `false`
    */
   selectLayout(target: LayoutElement | string | (LayoutElement | string)[]): boolean {
-    if (this._isPrint) return false;
     const targets = Array.isArray(target) ? target : [target];
     const newSelections: LayoutElement[] = [];
 
@@ -1588,7 +1582,6 @@ export class EditManager {
    *   기존 선택은 유지된다.
    */
   selectLayoutExclusive(target: LayoutElement | string): boolean {
-    if (this._isPrint) return false;
     const element = this._resolveLayoutElement(target);
     if (!element) return false;
     if (this._isBoxOrAncestorLocked(element)) return false;
@@ -1690,7 +1683,6 @@ export class EditManager {
    * `null`을 설정하면 삽입 모드가 비활성화된다.
    */
   set insertMode(mode: InsertMode | null) {
-    if (this._isPrint) return;
     if (this._insertMode === mode) return;
 
     const isDragging = this._insertController?.isDragging ?? false;
@@ -1938,7 +1930,6 @@ export class EditManager {
     shiftDeltaMm: number,
     shiftKey: boolean,
   ): void {
-    if (this._isPrint) return;
     const targets = this.getTopLevelDragTargets();
     if (targets.length === 0) return;
 
@@ -2486,7 +2477,6 @@ export class EditManager {
    * ```
    */
   loadPlaceGun(items: readonly PlaceGunItem[]): void {
-    if (this._isPrint) return;
     this._placeGunItems = [...items];
     this._placeGunPaused = false;
     this._syncPlaceGunController();
@@ -2727,8 +2717,6 @@ export class EditManager {
    * @returns 이동 성공 여부. 가드 조건 미충족 또는 후보 없음 시 `false`
    */
   navigateByTab(shiftKey: boolean): boolean {
-    // 인쇄 모드에서는 편집 기능 전체가 차단된다.
-    if (this._isPrint) return false;
     // 삽입 모드에서는 Tab 동작을 수행하지 않는다.
     if (this._insertMode !== null) return false;
 

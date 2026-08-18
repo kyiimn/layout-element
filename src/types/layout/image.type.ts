@@ -65,8 +65,8 @@ export type OverlapMode = 'path' | 'box' | 'none';
  * `objectFit`을 참조하지 않고 explicit 값만 사용한다.
  *
  * `urlLoader`가 설정되면 원본 URL을 로더에 전달하여 실제 로드할 URL을 얻는다.
- * 인쇄 모드(`window.matchMedia("print")`)에서 base64 인라인 데이터를 반환하는
- * 등의 시나리오를 지원한다.
+ * CDN URL 리라이팅, 서명된 URL 발급, base64 인라인 데이터 반환 등의
+ * 시나리오를 지원한다.
  */
 export type ImageData = {
   /** 타입 식별자 (리터럴) */

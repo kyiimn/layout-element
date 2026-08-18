@@ -103,7 +103,6 @@ export class LayoutDocumentElement extends HTMLElement {
   private _childObserver: MutationObserver | null = null;
 
   private _visibleGuide: boolean;
-  private _isPrint: boolean;
 
   private _width: number = 0;
   private _height: number = 0;
@@ -174,13 +173,11 @@ export class LayoutDocumentElement extends HTMLElement {
 
     this._shadowRoot = this.attachShadow({ mode: "open" });
     this._visibleGuide = true;
-    this._isPrint = window.matchMedia("print").matches;
     this._editManager = new EditManager(this);
   }
 
   connectedCallback() {
     if (!this.id) this.id = genUUID();
-    if (this._isPrint) return;
     this._measurePpm();
     this._startChildObserver();
     this.addEventListener('mousedown', this._onPlaceGunMouseDown);
@@ -239,8 +236,7 @@ export class LayoutDocumentElement extends HTMLElement {
    * `stopPropagation`을 호출하므로 여기에 도달하지 않는다.
    * document 빈 공간 클릭 시 element 항목만 주입을 시도한다.
    */
-  private _onPlaceGunMouseDown = (event: MouseEvent): void => {
-    if (this._isPrint) return;
+   private _onPlaceGunMouseDown = (event: MouseEvent): void => {
     const manager = this._editManager;
     if (!manager.placeGunActive) return;
     const nextItem = manager.placeGunItems[0];
@@ -302,9 +298,7 @@ export class LayoutDocumentElement extends HTMLElement {
       this._engine.ppm = this._ppm;
     }
 
-    if (!this._isPrint) {
-      this._engine.layout();
-    }
+    this._engine.layout();
 
     return this;
   }
@@ -323,7 +317,6 @@ export class LayoutDocumentElement extends HTMLElement {
       styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { box-shadow: #ff9800 0px 0px 0px 2px inset; } }", 1);
       styleEl.sheet.insertRule('@media screen { .type-label { position: absolute; top: 0; left: 0; padding: 2px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: none; user-select: none; cursor: default; z-index: ' + Z_INDEX_TYPE_LABEL + '; display: none; white-space: nowrap; } }', 2);
       styleEl.sheet.insertRule('@media screen { :host([reparent-target]) .type-label { display: block; background: rgba(255, 152, 0, 0.85); } }', 3);
-      styleEl.sheet.insertRule('@media print { .type-label { display: none !important; } }', 4);
       const rule = styleEl.sheet.cssRules[0] as CSSStyleRule;
       rule.style.setProperty('background-color', '#ffffff', 'important');
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
@@ -538,10 +531,8 @@ export class LayoutDocumentElement extends HTMLElement {
         }
       }
 
-      if (!this._isPrint) {
-        this.layout();
-        this.render();
-      }
+      this.layout();
+      this.render();
     } finally {
       this._rebuildingChildren = false;
       this._pendingData = null;

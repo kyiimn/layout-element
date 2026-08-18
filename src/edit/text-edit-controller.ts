@@ -121,10 +121,6 @@ export class TextEditController {
     shadowRoot.appendChild(this._cursorEl);
     shadowRoot.appendChild(this._selectionEl);
 
-    const printStyle = document.createElement('style');
-    printStyle.textContent = '@media print { textarea, x-layout-cursor, x-layout-selection { visibility: hidden !important; } }';
-    shadowRoot.appendChild(printStyle);
-
     paragraph.addEventListener("click", this._handleClick);
     paragraph.addEventListener("mousedown", this._handleMouseDown);
     paragraph.addEventListener("dblclick", this._handleDoubleClick);

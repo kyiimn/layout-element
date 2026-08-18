@@ -15,7 +15,7 @@ import type { ColorRegistryEngine } from "./types";
  *
  * `init(colorSet)`으로 색상 데이터를 주입받아
  * `getCSSColor(name)`에서 CMYK→RGB→hex 변환을 수행한다.
- * `fetch`나 `window.matchMedia`를 사용하지 않는다.
+ * `fetch`나 DOM API를 사용하지 않는다.
  *
  * @example
  * const engine = ColorRegistryEngineImpl.create();

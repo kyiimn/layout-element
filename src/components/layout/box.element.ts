@@ -60,7 +60,6 @@ export class LayoutBoxElement extends HTMLElement {
   private _priority?: number;
   private _lock: boolean = false;
   private _editableLayout: boolean = false;
-  private _isPrint: boolean = window.matchMedia("print").matches;
 
   private _savedColumns: number | number[] = 1;
   private _savedGap: number | number[] = 0;
@@ -377,8 +376,7 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule("@media screen { :host([selected]) { outline: red solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }", 3);
       styleEl.sheet.insertRule("@media screen { :host([content-type-null][selected]) { outline: red solid 3px !important; outline-offset: -2px !important; box-shadow: none !important; } }", 4);
       styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { outline: #ff9800 solid 2px !important; outline-offset: -2px !important; box-shadow: none !important; } }", 5);
-      styleEl.sheet.insertRule(`@media print { [border] { display: none !important; } }`, 6);
-      styleEl.sheet.insertRule('@media screen { .resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: ' + Z_INDEX_RESIZE_HANDLE + '; pointer-events: auto; display: none; } }', 7);
+      styleEl.sheet.insertRule('@media screen { .resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: ' + Z_INDEX_RESIZE_HANDLE + '; pointer-events: auto; display: none; } }', 6);
       styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .resize-handle { display: block; } }', 8);
       styleEl.sheet.insertRule('@media screen { :host([td-static]) .resize-handle { display: none !important; } }', 9);
       styleEl.sheet.insertRule('@media screen { :host([td-static][hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 10);
@@ -400,7 +398,6 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule('@media screen { :host([text-focused]) .type-label { display: none; } }', 26);
       styleEl.sheet.insertRule('@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }', 27);
       styleEl.sheet.insertRule('@media screen { .type-label .parent-btn:hover { opacity: 1; } }', 28);
-      styleEl.sheet.insertRule('@media print { .type-label { display: none !important; } }', 29);
 
       this._shadowRoot.appendChild(document.createElement('slot'));
 
@@ -1438,7 +1435,6 @@ export class LayoutBoxElement extends HTMLElement {
   get editableLayout() { return this._editableLayout; }
 
   set editableLayout(value: boolean) {
-    if (this._isPrint) return;
     if (this._editableLayout === value) return;
     this._editableLayout = value;
 
@@ -1454,7 +1450,6 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   private _onLayoutMouseEnter = (): void => {
-    if (this._isPrint) return;
     if (this._lock) return;
     const manager = this.editManager;
     if (!manager) return;
@@ -1472,7 +1467,6 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   private _onLayoutMouseLeave = (event: MouseEvent): void => {
-    if (this._isPrint) return;
     this.removeAttribute('hovered');
     const manager = this.editManager;
     if (!manager) return;
@@ -1513,7 +1507,6 @@ export class LayoutBoxElement extends HTMLElement {
    * 매칭 성공 시 `preventDefault` + `stopPropagation`으로 후속 핸들러를 차단한다.
    */
   private _onPlaceGunMouseDown = (event: MouseEvent): void => {
-    if (this._isPrint) return;
     const manager = this.editManager;
     if (!manager) return;
     if (!manager.placeGunActive) return;

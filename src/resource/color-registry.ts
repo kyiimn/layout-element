@@ -28,9 +28,6 @@ export type ColorLoaderFn = () => Promise<CMYKColorSet>;
  * 컴포넌트에서 `backgroundColor: "red"`처럼 등록된 CMYK 이름을 사용하면
  * `getCSSColor()`가 반환한 hex 문자열로 렌더링된다.
  *
- * 인쇄 모드(`window.matchMedia("print")`)에서는 서버 로딩을 생략하고
- * `colorSet` setter를 통해 데이터를 주입받는다.
- *
  * `registerLoader()`로 커스텀 로더를 등록하면 기본 `fetch('color.json')` 대신
  * 해당 로더를 사용한다.
  */
@@ -42,10 +39,8 @@ export class ColorRegistry {
   private _defaultColor: CMYKColor = { c: 0, m: 0, y: 0, k: 0 };
 
   private _ready: boolean = false;
-  private _isPrint: boolean = false;
 
   private constructor() {
-    this._isPrint = window.matchMedia("print").matches;
   }
 
   /**
@@ -127,17 +122,10 @@ export class ColorRegistry {
   }
 
   public async init(colorSet?: CMYKColorSet) {
-    let newColorSet: CMYKColorSet = {};
-
     try {
-      if (this._isPrint) {
-        if (!colorSet) throw new Error('not given color set');
-        newColorSet = colorSet;
-      } else {
-        newColorSet = await this._loadServer();
-      }
+      colorSet ??= await this._loadServer();
       this._defaultColor = { c: 0, m: 0, y: 0, k: 255 };
-      this._colorSet = newColorSet;
+      this._colorSet = colorSet;
 
       this._ready = true;
 

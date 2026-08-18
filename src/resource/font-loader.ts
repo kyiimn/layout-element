@@ -26,8 +26,9 @@ export type FontLoaderFn = () => Promise<Font[]>;
  * `fonts.json`에서 `Font[]` 데이터를 로드하고,
  * `FontFace` API로 브라우저에 폰트를 등록한다.
  *
- * 인쇄 모드에서는 `base64Data`를 사용하여 외부 서버 요청 없이 폰트를 로드한다.
- * 화면 모드에서는 `ttfFilename`으로 서버에서 TTF 파일을 가져온다.
+ * `base64Data`가 있는 폰트는 인라인 데이터로 로드하고,
+ * `ttfFilename`만 있는 폰트는 서버에서 TTF 파일을 가져온다.
+ * `base64Data`가 우선순위를 갖는다.
  *
  * `registerLoader()`로 커스텀 로더를 등록하면 기본 `fetch('fonts.json')` 대신
  * 해당 로더를 사용한다.
@@ -38,7 +39,6 @@ export class FontLoader {
 
   private _fontFaces: { name: string, fontFace: FontFace; }[] = [];
   private _ready: boolean = false;
-  private _isPrint: boolean = false;
   private _lastFontsSignature?: string;
 
   /**
@@ -56,7 +56,6 @@ export class FontLoader {
   private _parsed: boolean = false;
 
   private constructor() {
-    this._isPrint = window.matchMedia("print").matches;
   }
 
   /**
@@ -127,38 +126,22 @@ export class FontLoader {
     globalThis.document?.fonts.clear();
 
     try {
-      if (this._isPrint) {
-        if (!fonts) throw new Error('not given fonts');
-        this._fontFaces = await Promise.all(
-          fonts.filter(f => f.base64Data).map(async f => {
-            const fontFace = new FontFace(
-              f.family,
-              `url("data:font/ttf;base64,${f.base64Data}") format("truetype")`,
-              { style: f.style, weight: `${f.weight}` }
-            );
-            globalThis.document?.fonts.add(fontFace);
+      fonts ??= await this._loadServer();
+      this._fontFaces = await Promise.all(
+        fonts.filter(f => f.ttfFilename || f.base64Data).map(async f => {
+          const source = f.base64Data
+            ? `url("data:font/ttf;base64,${f.base64Data}") format("truetype")`
+            : `url("${f.ttfFilename}") format("truetype")`;
+          const fontFace = new FontFace(
+            f.family,
+            source,
+            { style: f.style, weight: `${f.weight}` }
+          );
+          globalThis.document?.fonts.add(fontFace);
 
-            return { name: f.family, fontFace: await fontFace.load() };
-          })
-        );
-      } else {
-        fonts = await this._loadServer();
-        this._fontFaces = await Promise.all(
-          fonts.filter(f => f.ttfFilename || f.base64Data).map(async f => {
-            const source = f.base64Data
-              ? `url("data:font/ttf;base64,${f.base64Data}") format("truetype")`
-              : `url("${f.ttfFilename}") format("truetype")`;
-            const fontFace = new FontFace(
-              f.family,
-              source,
-              { style: f.style, weight: `${f.weight}` }
-            );
-            globalThis.document?.fonts.add(fontFace);
-
-            return { name: f.family, fontFace: await fontFace.load() };
-          })
-        );
-      }
+          return { name: f.family, fontFace: await fontFace.load() };
+        })
+      );
       this._ready = true;
       this._lastFontsSignature = this._computeFontsSignature(fonts);
 

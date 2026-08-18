@@ -170,7 +170,6 @@ export class LayoutImageElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
-      styleEl.sheet.insertRule(`@media print { :host { visibility: hidden; } }`, 1);
 
       this._shadowRoot.appendChild(document.createElement('slot'));
 

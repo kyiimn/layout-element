@@ -45,7 +45,6 @@ export class LayoutParagraphElement extends HTMLElement {
   private _editableText: boolean = false;
   private _editController: TextEditController | null = null;
   private _editManagerRef: EditManager | null = null;
-  private _isPrint: boolean = window.matchMedia("print").matches;
 
   /** 성능 최적화: 구조 변경 여부 플래그. true면 다음 render()에서 전체 재생성을 수행한다. */
   private _perfStructureChanged: boolean = true;
@@ -227,7 +226,6 @@ export class LayoutParagraphElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
-      styleEl.sheet.insertRule(`@media print { :host { overflow: hidden; } }`, 1);
 
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
         (styleEl.sheet.cssRules[0] as CSSStyleRule).style,
@@ -254,7 +252,7 @@ export class LayoutParagraphElement extends HTMLElement {
         top: `${paddingTop}mm`,
         width: `${this.absWidth}mm`,
         zIndex: `${this.zIndex + 100}`,
-        boxShadow: this._hasOverflow && !this._isPrint
+        boxShadow: this._hasOverflow
           ? 'inset 0 -8px 0 0 #ff0000'
           : '',
       }
@@ -470,7 +468,7 @@ export class LayoutParagraphElement extends HTMLElement {
       id: this.id,
       placed: { chars: placedChars, lines: placedLines },
       overflow: {
-        hasOverflow: !this._isPrint && (overflowChars > 0 || overflowLines > 0),
+        hasOverflow: overflowChars > 0 || overflowLines > 0,
         chars: overflowChars,
         lines: overflowLines,
       },
@@ -936,7 +934,6 @@ export class LayoutParagraphElement extends HTMLElement {
   }
 
   set editableText(value: boolean) {
-    if (this._isPrint) return;
     if (value && !this._editController) {
       const manager = this._editManagerRef ?? this.editManager;
       if (manager) {

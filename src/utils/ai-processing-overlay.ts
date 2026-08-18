@@ -49,9 +49,6 @@ const OVERLAY_STYLE = `
 @keyframes __ai_spin__ {
   to { transform: rotate(360deg); }
 }
-@media print {
-  .__ai-overlay__ { display: none !important; }
-}
 `;
 
 /**

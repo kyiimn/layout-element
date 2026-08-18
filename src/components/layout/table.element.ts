@@ -383,7 +383,6 @@ export class LayoutTableElement extends HTMLElement {
       this._shadowRoot.appendChild(styleEl);
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
       styleEl.sheet.insertRule(":host { display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; }", 0);
-      styleEl.sheet.insertRule("@media print { .border-layer { display: none !important; } }", 1);
 
       this._shadowRoot.appendChild(document.createElement('slot'));
     }

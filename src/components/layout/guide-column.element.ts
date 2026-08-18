@@ -70,7 +70,6 @@ export class LayoutGuideColumnElement extends HTMLElement {
         width: `${this._width}mm`,
         zIndex: '0',
       });
-      styleEl.sheet.insertRule(`@media print { :host { visibility: hidden; } }`, 1);
     }
 
     const totalLine = Math.floor(this._height / this._lineHeight);
