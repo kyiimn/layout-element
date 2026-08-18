@@ -33,8 +33,8 @@ const model = TextLayoutEngine.create({
 - 모든 레이아웃 크기는 **mm**(밀리미터) 단위이다.
 - `ppm`(pixels-per-mm)을 통해 화면 픽셀로 변환한다.
 - 텍스트 래핑은 **폰트 메트릭(`glyph.advanceWidth`)** 기반으로 수행한다. DOM `scrollWidth > clientWidth` 방식은 사용하지 않는다.
-- 오버랩 회피는 실제 렌더링된 요소의 `getBoundingClientRect()`를 기준으로 계산한다.
-- 한 렌더링 사이클 내에서 오버랩 요소의 `DOMRect`를 캐싱하여 반복 측정을 줄인다.
+- 오버랩 회피는 요소의 mm 좌표(`absLeft`/`absTop`/`absWidth`/`absHeight`)를 기준으로 계산한다. `getBoundingClientRect()`를 사용하지 않는다.
+- 한 렌더링 사이클 내에서 오버랩 요소의 mm rect를 캐싱하여 반복 측정을 줄인다.
 
 ---
 
@@ -1269,7 +1269,7 @@ private _detectOverlapWithCache(lineEl: HTMLElement): { cover: boolean; overlapP
 private _computeFreeRegions(lineWidth: number, overlapParts: OverlapParts[]): FreeRegion[]
 ```
 
-- `_detectOverlapWithCache()`은 `getBoundingClientRect()`로 라인과 이미지의 실제 렌더링 영역을 측정한다. `_overlayRects` 캐시를 사용한다.
+- `_detectOverlapWithCache()`은 `getOverlapSizeMm()`을 통해 mm 좌표계에서 라인과 오버랩 요소의 겹침을 판정한다. `getBoundingClientRect()`를 호출하지 않으며, `_overlayRectsMm` 캐시를 사용한다.
 - `_computeFreeRegions()`은 겹침 구간의 여집합을 기하학적으로 계산한다.
 - 두 메서드 모두 `textAlign`, `justifyContent`와 같은 정렬 속성을 읽지 않는다.
 

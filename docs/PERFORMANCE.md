@@ -783,7 +783,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | `findVisualLineBounds()` | `EditCoordinateMapper` | Home/End 키 처리 시 span마다 `getBoundingClientRect()` 수행 |
 | 라인 rect 측정 | `_detectOverlapWithCache()` | `_overlayRectsMm`는 오버랩 요소만 캐싱, 라인 자체의 rect는 라인마다 측정 |
 | `getImageData` 캐싱 | `getOverlapSizeMm()` | 동일 이미지에 대해 라인마다 `getImageData()` 재호출 |
-| `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산. 단, `overlapMode === 'none'` 이미지는 `checkOverlap()` 이전에 제외하여 `getBoundingClientRect()` 강제 리플로우 비용을 피함 |
+| `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산. `overlapMode === 'none'` 이미지/paragraph는 `checkOverlap()` 이전에 제외. `checkOverlap()`은 mm 좌표(`absLeft`/`absTop`/`absWidth`/`absHeight`) 기반으로 동작하므로 `getBoundingClientRect()` 강제 리플로우 비용이 발생하지 않음 |
 
 ---
 

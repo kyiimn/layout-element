@@ -2240,8 +2240,8 @@ mouseup
 | `_collectParagraphs()` 재귀 순회 | O(트리 노드 수) | rAF 프레임마다 |
 | `paragraph.layout()` | DOM 측정, GridCalculator 재생성/업데이트 | `_structureDirty` 변경 시 |
 | `TextLayoutEngine.layoutText()` | 문자 단위 줄바꿈 + 오버랩 계산 | rAF 프레임마다 |
-| `_createLineWithParts()` | 가상 컬럼 생성 + `getBoundingClientRect()` | 매 라인마다 |
-| `_applyOverlap()` | `getBoundingClientRect()` 호출 | 매 라인마다, 오버랩 요소마다 |
+| `_createLineWithParts()` | 가상 컬럼 생성 (mm 좌표계) | 매 라인마다 |
+| `_applyOverlap()` | `getOverlapSizeMm()` 호출 (mm 좌표계) | 매 라인마다, 오버랩 요소마다 |
 | `column.renderText()` | span 단위 diff + DOM 조작 | rAF 프레임마다 |
 
 #### 10.6.3 최적화 전략
@@ -2264,9 +2264,9 @@ mouseup
 - 또는 `requestAnimationFrame`을 사용해 화면 갱신 직전에 한 번에 처리.
 
 **5. 오버랩 캐시 갱신 최소화**
-- `_applyOverlap()`은 매 라인마다 `getBoundingClientRect()`를 호출하고, `_overlayRects`는 `_layoutTextIntoColumns()` 시작 시 초기화된다.
+- `_applyOverlap()`은 `getOverlapSizeMm()`를 통해 mm 좌표계에서 겹침을 판정하고, `_overlayRectsMm`는 `_layoutTextIntoColumns()` 시작 시 초기화된다.
 - 드래그 중 박스 위치만 변할 때는 오버랩 요소의 **rect가 이미 알고 있으므로** 매번 DOM 측정 대신 마지막 위치에서 이동량을 더하는 식으로 추정 가능.
-- 또는 `_overlayRects`를 `_layoutTextIntoColumns()` 외부에서 미리 계산해두고, 텍스트 배치 중에는 캐시만 참조.
+- 또는 `_overlayRectsMm`를 `_layoutTextIntoColumns()` 외부에서 미리 계산해두고, 텍스트 배치 중에는 캐시만 참조.
 
 **6. 증분 텍스트 레이아웃 활용**
 - `TextLayoutEngine`은 이미 `layoutText()`만 호출하면 `_columnContents`를 증분 갱신할 수 있다.
@@ -2274,8 +2274,7 @@ mouseup
 - 박스 이동 시 컬럼 구조(폭, 간격)가 변하지 않으면 `_structureDirty = false`로 유지할 수 있다면 증분 갱신 가능.
 
 **7. DOM 측정 최소화**
-- `_createLineWithParts()`에서 `lineEl.getBoundingClientRect()`를 호출하여 라인 폭을 얻는다.
-- 이 값은 이미 `_columnWidths`에서 알 수 있으므로, `getBoundingClientRect()` 대신 계산된 값을 사용하면 reflow/layout 비용을 줄일 수 있다.
+- `_createLineWithParts()`에서 라인 폭을 계산할 때 `_columnWidths`의 mm 값을 직접 사용한다. `getBoundingClientRect()`를 호출하지 않으므로 reflow/layout 비용이 발생하지 않는다.
 
 **7. 중첩 트리 순회 최적화**
 - `_collectParagraphs()`는 재귀적으로 모든 하위 박스를 탐색한다.
