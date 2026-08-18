@@ -282,6 +282,7 @@ export class LayoutDocumentElement extends HTMLElement {
     const fontLoader = new FontLoaderSingletonAdapter(FontLoader.getInstance());
     const colorRegistry = new ColorRegistrySingletonAdapter(ColorRegistry.getInstance());
     const docData: DocumentData = {
+      id: this.id,
       width: this._width,
       height: this._height,
       paddingTop: this._paddingTop,
@@ -292,12 +293,17 @@ export class LayoutDocumentElement extends HTMLElement {
       gap: this._gap,
       paragraphStyle: this._paragraphStyle,
       textStyle: this._textStyle,
+      children: this.items.map(e => e.data),
     };
     if (!this._engine) {
       this._engine = DocumentEngine.create(docData, fontLoader, colorRegistry, this._ppm);
     } else {
       this._engine.data = docData;
       this._engine.ppm = this._ppm;
+    }
+
+    if (!this._isPrint) {
+      this._engine.layout();
     }
 
     return this;

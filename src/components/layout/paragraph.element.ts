@@ -3,7 +3,8 @@ import { EditManager } from "@/edit/edit-manager";
 import { DEFAULT_LINE_GAP } from "@/constants";
 import { ColorRegistry, FontLoader } from "@/resource";
 import { InheritStyle, ParagraphData, ParagraphOverlapMode, ParagraphStyle, PrintPostData, PrintPostDataChar, RenderCompleteEventDetail, TextBlockData, TextStyle } from "@/types";
-import { checkOverlap, genUUID, valueEqual, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay } from "@/utils";
+import { genUUID, valueEqual, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay } from "@/utils";
+import { checkOverlapMm } from "@/engine";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutImageElement } from "./image.element";
 import { LayoutColumnElement } from "./column.element";
@@ -128,6 +129,12 @@ export class LayoutParagraphElement extends HTMLElement {
     const parentBox = this.parentElement;
     if (!parentBox) return;
 
+    const parentBoxEngine = parentBox.engine;
+    const existing = parentBoxEngine?.childEngines.find(e => e instanceof ParagraphEngine);
+    if (existing) {
+      this._model = existing;
+    }
+
     const overlayBoxEngines: import("@/engine").BoxEngine[] = this.overlayElements
       .map(el => {
         const engine = el.engine;
@@ -170,6 +177,9 @@ export class LayoutParagraphElement extends HTMLElement {
 
     if (!this._model) {
       this._model = ParagraphEngine.create(engineData);
+      if (parentBoxEngine) {
+        parentBoxEngine.childEngines = [...parentBoxEngine.childEngines, this._model];
+      }
     } else {
       this._model.data = engineData;
     }
@@ -286,6 +296,7 @@ export class LayoutParagraphElement extends HTMLElement {
     const overflowBefore = this._model.previousOverflow;
 
     if (this._perfStructureChanged) {
+      this._layoutStructure();
       this._model.resetIncrementalState();
       this._model.layoutStructure();
       this._model.layoutText();
@@ -758,7 +769,7 @@ export class LayoutParagraphElement extends HTMLElement {
           const paraEl = el.contentElement as LayoutParagraphElement | null;
           if (paraEl && paraEl.overlapMode === 'none') return false;
         }
-        return checkOverlap(el, this);
+        return checkOverlapMm(el, this);
       });
 
     const self: any = this;
@@ -775,7 +786,7 @@ export class LayoutParagraphElement extends HTMLElement {
       }
       return true;
     });
-    overlay = overlay.filter(i => checkOverlap(i, this));
+    overlay = overlay.filter(i => checkOverlapMm(i, this));
 
     list.push(...overlay);
 
@@ -785,9 +796,6 @@ export class LayoutParagraphElement extends HTMLElement {
   get printPostData(): PrintPostData[] {
     const docEl = this._findDocumentElement();
     const ppm = docEl?.ppm ?? 3.78;
-    const chars: PrintPostDataChar[] = [];
-    const registry = ColorRegistry.getInstance();
-    const fontLoader = FontLoader.getInstance();
     const model = this._model;
 
     if (model === undefined) {
@@ -799,125 +807,42 @@ export class LayoutParagraphElement extends HTMLElement {
           width: (this._inheritStyle?.parentWidth ?? 0) * ppm,
           height: (this._inheritStyle?.parentHeight ?? 0) * ppm,
         },
-        chars,
+        chars: [],
       }];
     }
 
-    const lineHeightMm = model.lineHeight;
-
-    for (const col of this.columnEl) {
-      const columnIndex = col.index;
-      if (columnIndex === undefined) continue;
-      const lines = model.columnContents[columnIndex] ?? [];
-      const colAbsLeftMm = col.absLeft;
-      const colAbsTopMm = col.absTop;
-
-      let visibleLineIndex = 0;
-      for (let li = 0; li < lines.length; li++) {
-        const lineData = lines[li];
-        if (lineData === undefined) continue;
-
-        // 오버플로우된 라인 건너뛰기 — column.element.renderText()의
-        // accumulatedHeightMm 기준과 동일하게, 누적 높이가 컬럼 높이를 초과하면 제외.
-        const columnHeightMm = model.inheritStyle?.parentHeight ?? 0;
-        if (columnHeightMm > 0 && visibleLineIndex * lineHeightMm >= columnHeightMm) break;
-
-        const { textBlockStyle } = lineData;
-        const colorName = textBlockStyle?.color
-          ?? this._textStyle?.color
-          ?? this._inheritStyle?.color;
-        const cmyk = colorName !== undefined
-          ? registry.get(colorName)
-          : registry.get('default');
-
-        // textBlockStyle이 lineHeight를 오버라이드하는 경우 (genLineStyle 참조)
-        const lineGap = this._paragraphStyle?.lineGap ?? this._inheritStyle?.lineGap ?? DEFAULT_LINE_GAP;
-        const fontSizeMm = textBlockStyle?.fontSize
-          ?? this._textStyle?.fontSize
-          ?? this._inheritStyle?.fontSize
-          ?? 4;
-        let effectiveLineHeightMm = lineHeightMm;
-        if (textBlockStyle?.fontSize && lineHeightMm < fontSizeMm * lineGap) {
-          effectiveLineHeightMm = Math.ceil((fontSizeMm * lineGap) / lineHeightMm) * lineHeightMm;
-        }
-
-        const lineTopMm = colAbsTopMm + visibleLineIndex * lineHeightMm;
-
-        for (let pi = 0; pi < lineData.parts.length; pi++) {
-          const part = lineData.parts[pi]!;
-          const { content, charOffsets, left: partLeftMm } = part;
-          if (content.length === 0) continue;
-
-          // _stripSpaces와 동일한 leading/trailing space 제거
-          const isFirst = pi === 0;
-          const isLast = pi === lineData.parts.length - 1;
-          const firstOfBlock = lineData.firstOfBlock === true;
-          const endOfBlock = lineData.endOfBlock === true;
-
-          let stripStart = 0;
-          let stripEnd = content.length;
-          if (isFirst && !firstOfBlock) {
-            while (stripStart < stripEnd && content[stripStart] === ' ') stripStart++;
-          }
-          if (isLast && !endOfBlock) {
-            while (stripEnd > stripStart && content[stripEnd - 1] === ' ') stripEnd--;
-          }
-
-          for (let j = stripStart; j < stripEnd; j++) {
-            const char = content[j]!;
-            if (char.length === 0) continue;
-
-            // charOffset이 있으면 사용, 없으면 0
-            const charOffsetMm = charOffsets !== undefined && j < charOffsets.length
-              ? charOffsets[j]!
-              : 0;
-            const charXMm = colAbsLeftMm + partLeftMm + charOffsetMm;
-
-            const { swidth } = model.getCharWidths(char, textBlockStyle);
-            const charWidthPx = swidth * ppm;
-            const charHeightPx = effectiveLineHeightMm * ppm;
-
-            const widthRatio = model.widthRatio;
-
-            const charFontFamily = textBlockStyle?.fontFamily
-              ? fontLoader.getFontFamily(textBlockStyle.fontFamily)
-              : fontLoader.getFontFamily();
-            const charFontSize = `${fontSizeMm}mm`;
-            const charFontWeight = String(
-              textBlockStyle?.fontWeight
-              ?? this._textStyle?.fontWeight
-              ?? this._inheritStyle?.fontWeight
-              ?? 400
-            );
-
-            chars.push({
-              char,
-              rect: {
-                x: charXMm * ppm,
-                y: lineTopMm * ppm,
-                width: charWidthPx,
-                height: charHeightPx,
-              },
-              fontFamily: charFontFamily,
-              fontSize: charFontSize,
-              fontWeight: charFontWeight,
-              widthRatio,
-              color: cmyk,
-            });
-          }
-        }
-
-        visibleLineIndex++;
-      }
+    const enginePostData = model.printPostData;
+    if (enginePostData.length === 0) {
+      return [{
+        data: this.data,
+        rect: {
+          x: this.absLeft * ppm,
+          y: this.absTop * ppm,
+          width: (this._inheritStyle?.parentWidth ?? 0) * ppm,
+          height: (this._inheritStyle?.parentHeight ?? 0) * ppm,
+        },
+        chars: [],
+      }];
     }
+
+    const first = enginePostData[0];
+    const chars: PrintPostDataChar[] = first.chars?.map((char) => ({
+      ...char,
+      rect: {
+        x: char.rect.x * ppm,
+        y: char.rect.y * ppm,
+        width: char.rect.width * ppm,
+        height: char.rect.height * ppm,
+      },
+    })) ?? [];
 
     return [{
       data: this.data,
       rect: {
-        x: this.absLeft * ppm,
-        y: this.absTop * ppm,
-        width: (this._inheritStyle?.parentWidth ?? 0) * ppm,
-        height: (this._inheritStyle?.parentHeight ?? 0) * ppm,
+        x: first.rect.x * ppm,
+        y: first.rect.y * ppm,
+        width: first.rect.width * ppm,
+        height: first.rect.height * ppm,
       },
       chars,
     }];

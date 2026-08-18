@@ -1,5 +1,6 @@
 import { InheritStyle, ImageData, ImageObjectFit, OverlapMode, PrintPostData } from "@/types";
 import { LayoutBoxElement } from "./box.element";
+import { LayoutDocumentElement } from "./document.element";
 import { genUUID, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay, computeObjectFit } from "@/utils";
 import { DEFAULT_IMAGE_DPI } from "@/constants";
 import { ImageEngine } from "@/engine";
@@ -297,11 +298,20 @@ export class LayoutImageElement extends HTMLElement {
     if (w <= 0 || h <= 0) return;
     try {
       const imageData = ctx.getImageData(0, 0, w, h);
-      this._engine.rgbaData = {
+      const rgbaData = {
         data: new Uint8Array(imageData.data.buffer),
         width: w,
         height: h,
       };
+      this._engine.rgbaData = rgbaData;
+
+      const parentBoxEngine = this.parentElement?.engine;
+      if (parentBoxEngine) {
+        const treeImgEngine = parentBoxEngine.childEngines.find(e => e instanceof ImageEngine) as ImageEngine | undefined;
+        if (treeImgEngine && treeImgEngine !== this._engine) {
+          treeImgEngine.rgbaData = rgbaData;
+        }
+      }
     } catch {
       // CORS taint 등 — 엔진은 rgbaData 없이 기하학적 fallback 사용
     }
@@ -485,6 +495,13 @@ export class LayoutImageElement extends HTMLElement {
    * ImageEngine 인스턴스를 생성/갱신한다.
    */
   private _updateEngine(): void {
+    const parentBox = this.parentElement;
+    const parentBoxEngine = parentBox?.engine;
+    const existing = parentBoxEngine?.childEngines.find(e => e instanceof ImageEngine);
+    if (existing) {
+      this._engine = existing;
+    }
+
     const engineData = {
       url: this._url || '',
       x: this._x,
@@ -500,6 +517,9 @@ export class LayoutImageElement extends HTMLElement {
     };
     if (!this._engine) {
       this._engine = ImageEngine.create(engineData);
+      if (parentBoxEngine) {
+        parentBoxEngine.childEngines = [...parentBoxEngine.childEngines, this._engine];
+      }
     } else {
       this._engine.data = engineData;
     }
@@ -737,16 +757,50 @@ export class LayoutImageElement extends HTMLElement {
   }
 
   get printPostData(): PrintPostData[] {
-    const rect = this.getBoundingClientRect();
+    const docEl = this._findDocumentElement();
+    const ppm = docEl?.ppm ?? 3.78;
+    const engine = this._engine;
+    if (engine) {
+      const mmPostData = engine.buildPrintPostData(
+        {
+          absLeft: this.absLeft,
+          absTop: this.absTop,
+          absWidth: this.absWidth,
+          absHeight: this.absHeight,
+        },
+        this.data,
+      );
+      if (mmPostData.length > 0) {
+        const first = mmPostData[0];
+        return [{
+          data: first.data,
+          rect: {
+            x: first.rect.x * ppm,
+            y: first.rect.y * ppm,
+            width: first.rect.width * ppm,
+            height: first.rect.height * ppm,
+          },
+        }];
+      }
+    }
     return [{
       data: this.data,
       rect: {
-        x: rect.left + window.scrollX,
-        y: rect.top + window.scrollY,
-        width: rect.width,
-        height: rect.height
-      }
+        x: this.absLeft * ppm,
+        y: this.absTop * ppm,
+        width: this.absWidth * ppm,
+        height: this.absHeight * ppm,
+      },
     }];
+  }
+
+  private _findDocumentElement(): LayoutDocumentElement | null {
+    let el: Element | null = this.parentElement;
+    while (el) {
+      if (el instanceof LayoutDocumentElement) return el;
+      el = el.parentElement;
+    }
+    return null;
   }
 }
 customElements.define("x-layout-image", LayoutImageElement);
