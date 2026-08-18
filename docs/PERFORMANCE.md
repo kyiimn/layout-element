@@ -651,7 +651,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `check-overlap.ts:18-34` |
+| 위치 | `engine/overlap-engine.ts` |
 
 오버랩 파트를 `x1` 기준 정렬 후 O(n) 순회로 겹치는/접하는 구간을 병합. 텍스트 래퍼가 처리해야 할 구간 수를 감소.
 
@@ -659,7 +659,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `check-overlap.ts:207, 224-227` |
+| 위치 | `engine/overlap-engine.ts` (ellipse detection) |
 
 `overlapPadding`이 설정된 경우 `opaqueColumns: Set<number>`로 불투명 픽셀의 열을 기록. 정규화된 타원 거리(`ndx² + ndy² ≤ 1`) 조건으로만 차단 여부를 판정. 투명 픽셀은 제외. 기하 fallback은 캔버스를 사용할 수 없는 경우에만 사용.
 

@@ -412,23 +412,30 @@ static create(data: TableData, parentBox: BoxEngine): TableEngine
 
 | 멤버 | 타입 | 설명 |
 |------|------|------|
-| `absRect` | `AbsRect` | 셀 절대 rect |
+| `absRect` | `AbsRect` | 셀 절대 rect. `TableEngine.layout()`에서 `parentAbsRect`를 설정하면 페이지 기준 절대 좌표, 미설정 시 테이블 상대 좌표 |
 | `isDocument` | `false` | 셀 식별 |
-| `gridCalculator` | `null` | 셀은 그리드 계산기 없음 |
+| `gridCalculator` | `GridCalculatorEngine \| null` | 셀 단일 컬럼 그리드 계산기 |
 | `overlayElements` | `[]` | 셀은 오버레이 없음 |
 | `childBoxEngines` | `BoxEngine[]` | 셀 내부 박스 엔진 |
-| `boxEngine` | `BoxEngine \| undefined` | 셀 내부 박스 엔진 getter/setter |
+| `boxEngine` | `BoxEngine \| null` | 셀 내부 박스 엔진 getter/setter |
+| `parentAbsRect` | setter | `TableEngine.layout()`에서 상위 박스의 절대 rect를 주입 |
 | `setCellMetrics` | `(x, y, width, height, cellLabel, labels): void` | 셀 메트릭 설정 |
 | `x`, `y`, `width`, `height` | `number` | 셀 좌표/크기 |
-| `cellLabel`, `labels` | — | 셀 라벨 |
+| `cellLabel` | `string` | 셀 라벨 (예: `"A1"`). `TableEngine.layout()`에서 산출 |
+| `labels` | `string[]` | 셀이 커버하는 모든 라벨. span 셀의 경우 복수 |
+
+셀의 `gridCalculator`는 `columns: 1`인 단일 컬럼 그리드이며, `TableEngine.layout()`에서 셀 메트릭 계산 후 생성된다. 이를 통해 셀 내부 BoxEngine은 `BoxEngineParent.gridCalculator`를 통해 좌표를 계산한다. `parentAbsRect`가 주입되면 `absRect`는 페이지 기준 절대 좌표를 반환하므로, 셀 내부 박스의 `BoxEngine.absRect`도 누적된 페이지 절대 좌표가 된다.
 
 #### `TableRowEngine`
 
 | 멤버 | 타입 | 설명 |
 |------|------|------|
-| `setRowMetrics` | `(y, height, _contentWidth, rowIndex): void` | 행 메트릭 설정 |
+| `setRowMetrics` | `(y, height, _contentWidth, rowIndex, rowLabel): void` | 행 메트릭 설정 |
 | `y`, `height`, `rowIndex` | `number` | 행 좌표/높이/인덱스 |
+| `rowLabel` | `string` | 행 라벨 (예: `"A"`). `TableEngine.layout()`에서 산출 |
 | `cellEngines` | `TableCellEngine[]` | 셀 엔진 getter/setter |
+
+`TableEngine.layout()`은 그리드 해석 후 각 행의 `rowLabel`을 산출하고, 각 셀에 `cellLabel`과 병합(span) 시 커버하는 전체 `labels`를 계산한다.
 
 ---
 
@@ -549,8 +556,9 @@ DocumentEngine (root, owns ppm + resources)
        │    └─ rgbaData injected by browser element or pngjs
        └─ TableEngine (for table content)
             └─ TableRowEngine[]
-                 └─ TableCellEngine[] (implements BoxEngineParent)
-                      └─ BoxEngine (cell content, recursive)
+     └─ TableCellEngine[] (implements BoxEngineParent)
+                       ├─ GridCalculatorEngine (columns: 1)
+                       └─ BoxEngine (cell content, recursive)
 ```
 
 ### 좌표 전파
@@ -565,6 +573,12 @@ DocumentEngine (root, owns ppm + resources)
 - `DocumentEngine.resources`로 하위 엔진에 전파
 - `ParagraphEngine`은 `ParagraphEngineData.resources`로 수신
 - `BoxEngine.printPostData`는 문서 엔진까지 올라가 `_colorRegistry` 접근
+
+### printPostData 변환
+
+- 엔진 `printPostData`는 mm 단위 rect를 반환
+- Custom Element(`<x-layout-document>`, `<x-layout-box>`, `<x-layout-paragraph>`, `<x-layout-image>`, `<x-layout-table>`, `<x-layout-td>`)의 `printPostData` getter는 엔진이 계산한 mm 좌표를 `LayoutDocumentElement.ppm`으로 곱해 픽셀 단위로 변환하여 반환
+- 인쇄 모드에서도 DOM `getBoundingClientRect()`에 의존하지 않고 엔진 좌표를 사용
 
 ---
 
@@ -608,8 +622,10 @@ DocumentEngine (root, owns ppm + resources)
 
 ### 엔진 접근 패턴
 
-- **Lazy creation**: 엔진은 `_layoutStructure()` / `_updateEngine()`에서 최초 생성 후 `.data = ...` setter로 재사용
-- **Parent 구축**: `box.element.ts._buildParentEngineParent()`가 부모 요소에서 `DocumentEngine`/`BoxEngine`/`TableCellEngine` 추출
+- **Document builds the engine tree**: `LayoutDocumentElement._layoutStructure()`는 `DocumentEngine.layout()`을 호출하여 `DocumentData`로부터 전체 엔진 트리를 구축. 이후 자식 `LayoutBoxElement`는 같은 트리의 `BoxEngine` 인스턴스를 재사용.
+- **Box attaches to tree engine**: `LayoutBoxElement._layoutStructure()`는 부모 엔진(`DocumentEngine`/`BoxEngine`/`TableCellEngine.boxEngine`)에서 `findBoxEngineById(this.id)`로 미리 구축된 `BoxEngine`을 찾아 연결. `id`가 없거나 트리에 없는 경우(`appendChildData`로 새로 추가된 경우)에만 새 `BoxEngine`을 생성하고 부모 `childEngines`에 등록.
+- **Reuse in place**: 좌표/크기/role/zIndex 등의 setter가 실행되면 `LayoutBoxElement`는 `BoxEngine.data`를 갱신하여 같은 엔진 인스턴스를 재사용. `_updateEngine()`은 새 엔진을 만들지 않고 기존 엔진의 `data`/`parent`만 갱신.
+- **Parent 구축**: `box.element.ts._findParentEngine()`이 부모 요소에서 `DocumentEngine`/`BoxEngine`/`TableCellEngine.boxEngine` 추출
 - **Overlay wiring**: `paragraph.element.ts`가 `overlayElements` 박스의 `BoxEngine`을 수집해 `ParagraphEngineData.overlayEngines`로 전달
 - **RGBA injection**: `image.element.ts._feedRgbaToEngine()`가 canvas `getImageData()`를 `ImageEngine.rgbaData`에 주입
 
@@ -658,7 +674,7 @@ LayoutTableCellElement.engine: TableCellEngine | undefined
 | `overlayElement.canvas.getContext('2d').getImageData()` | `image.rgbaData: Uint8Array` |
 | `overlayElement.absLeft/absTop/absWidth/absHeight` | `overlay.absRect: AbsRect` |
 
-> `getOverlapSizeMm`는 `src/utils/check-overlap.ts`에서 **제거됨**. `src/utils/check-overlap.ts`에는 `checkOverlap`, `MmRect`, `mergeOverlapParts`만 남음.
+> `getOverlapSizeMm`는 제거됨. `src/utils/check-overlap.ts` 파일 자체가 삭제됨. `checkOverlap`은 `engine/overlap-engine.ts`의 `checkOverlapMm`로, `mergeOverlapParts`는 `engine/overlap-engine.ts`의 동일 함수로 통합됨.
 
 ### 6.4 ppm 접근 방식 변경
 

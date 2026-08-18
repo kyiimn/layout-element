@@ -2082,10 +2082,10 @@ private _onKeyDown = (event: KeyboardEvent): void => {
 | `src/edit/edit-manager.ts` | 레이아웃 편집 모드/필터(`layoutEditMode`, `editableRoles`, `editableBoxIds`, `isBoxEditable`), 레이아웃 선택 상태 관리, `selectLayout`, `clearLayoutSelection(preserveFocusedBox?)`, `_lastFocusedBox`, `_reduceSelectionToSingleForTextMode`, `_startLayoutDrag`, `_endLayoutDrag`, `_startLayoutResize`, `_endLayoutResize`, `_isDraggingLayout`, `_isResizingLayout`, `getTopLevelDragTargets`, `_unregisterLayout`, `layoutSelectionChange` 이벤트, `_dispatchLayoutResize`, `insertMode`, `activateInsert`, `deactivateInsert`, `insert`/`insertCancel` 이벤트 |
 | `src/edit/layout-edit-controller.ts` | 문서 수준 이벤트 처리, 드래그/리사이즈 상태(`Map` 기반), `_computeNewPosition`, `_computeNewSize`, ESC 취소, `applyPositionConversion` 호출, 영향받는 단락 재렌더링 |
 | `src/react/hooks/use-edit-manager.ts` | React 훅: `selectedLayouts`, `selectLayout`, `clearLayoutSelection`, `layoutEditMode`, `setLayoutEditMode`, `setEditableRoles`, `setEditableBoxIds`, `onLayoutSelectionChange` |
-| `src/core/text-layout-engine.ts` | `_layoutTextIntoColumns`, 오버랩 회피, COVER 라인, PART 분할 |
+| `src/engine/paragraph-engine.ts` | `_layoutTextIntoColumns`, 오버랩 회피, COVER 라인, PART 분할 |
 | `src/components/layout/paragraph.element.ts` | `render()`, `_structureDirty`, ParagraphEngine 생성 |
 | `src/components/layout/column.element.ts` | `renderText()`, span 기반 diff 렌더링 |
-| `src/utils/check-overlap.ts` | `checkOverlap()`, `mergeOverlapParts()`, `computeOverlapSizeMm()` |
+| `src/engine/overlap-engine.ts` | `checkOverlapMm()`, `mergeOverlapParts()`, `computeOverlapSizeMm()` |
 
 ### 10.2 드래그/리사이즈 관련 상태
 

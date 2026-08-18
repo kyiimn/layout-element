@@ -190,7 +190,7 @@ class LayoutDocumentElement extends HTMLElement
 | 이름 | 타입 | 설명 |
 |---|---|---|
 | `visibleGuide` (set) | `boolean` | 가이드 컬럼의 표시 여부 토글. |
-| `printPostData` (get) | `PrintPostData[]` | 인쇄 후처리용 위치/데이터 배열. 인쇄 모드에서 사용. 자식 요소를 z-index **오름차순**(낮은 것부터)으로 재귀 수집하여 반환. PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로, CSS z-index 동작(낮은 것이 먼저 그려지고 높은 것이 위에 덮임)과 일치함. |
+| `printPostData` (get) | `PrintPostData[]` | 인쇄 후처리용 위치/데이터 배열. 인쇄 모드에서 사용. 각 요소의 엔진 계산 mm 좌표를 `ppm`으로 환산한 픽셀 rect를 반환. DOM `getBoundingClientRect()`에 의존하지 않는다. 자식 요소를 z-index **오름차순**(낮은 것부터)으로 재귀 수집하여 반환. PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로, CSS z-index 동작(낮은 것이 먼저 그려지고 높은 것이 위에 덮임)과 일치함. |
 
 #### 인쇄 모드 동작
 
@@ -549,7 +549,7 @@ class LayoutImageElement extends HTMLElement
 | `absWidth` | `number` (mm) | 절대 너비. `inheritStyle.parentWidth`(부모 editableWidth, 이미 padding 차감됨)을 그대로 사용. 위치 보정은 `relLeft`(`paddingLeft`)에서 처리. |
 | `absHeight` | `number` (mm) | 절대 높이. `inheritStyle.parentHeight`를 그대로 사용. |
 | `type` | `'image'` | 타입 리터럴. |
-| `printPostData` | `PrintPostData[]` | 인쇄 후처리 데이터. |
+| `printPostData` | `PrintPostData[]` | 인쇄 후처리 데이터. `ImageEngine.buildPrintPostData()` 결과를 `ppm`으로 환산한 픽셀 rect와 원본 `ImageData`를 반환. |
 
 #### `overlapPadding` 사용
 
@@ -3402,8 +3402,7 @@ doc.data = exampleData;
    `data` 설정 후 `layout()` + `render()`를 수동 호출.
 4. **이미지/가이드 숨김**: `@media print` CSS 규칙으로 `visibility: hidden`.
 5. **편집 차단**: `editableLayout`/`editableText` setter는 인쇄 모드에서 무시.
-6. **printPostData**: 각 요소의 화면상 위치/크기를 `printPostData` getter로 수집하여
-   후처리 시스템에 전달.
+6. **printPostData**: 각 요소의 엔진 계산 mm 좌표(`BoxEngine.absRect`, `ParagraphEngine.printPostData`, `ImageEngine.buildPrintPostData`, 테이블/셀 엔진 메트릭)를 `ppm`으로 환산한 픽셀 위치/크기를 `printPostData` getter로 수집하여 후처리 시스템에 전달. 인쇄 모드에서도 DOM `getBoundingClientRect()`에 의존하지 않는다.
 
 ```ts
 // 인쇄 모드 진입

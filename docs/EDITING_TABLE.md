@@ -2,7 +2,7 @@
 
 > **엔진 마이그레이션**: `GridCalculator` → `GridCalculatorEngine`, ppm 접근 방식 변경. 상세는 [ENGINE.md](./ENGINE.md) 참고.
 
-> 작성 기준: `src/components/layout/table.element.ts`, `src/components/layout/tr.element.ts`, `src/components/layout/td.element.ts`, `src/edit/table-keyboard-controller.ts`, `src/edit/table-structure-editor.ts`, `src/edit/layout-selection-controller.ts`, `src/edit/layout-edit-controller.ts`, `src/components/layout/box.element.ts`, `src/components/layout/document.element.ts`, `src/core/table-grid-resolver.ts`, `src/core/border-resolver.ts`, `src/types/layout/table.type.ts`, `src/types/edit/table-selection.type.ts`, `src/constants/defaults.ts`
+> 작성 기준: `src/components/layout/table.element.ts`, `src/components/layout/tr.element.ts`, `src/components/layout/td.element.ts`, `src/edit/table-keyboard-controller.ts`, `src/edit/table-structure-editor.ts`, `src/edit/layout-selection-controller.ts`, `src/edit/layout-edit-controller.ts`, `src/components/layout/box.element.ts`, `src/components/layout/document.element.ts`, `src/engine/table-grid-resolver.ts`, `src/engine/border-resolver.ts`, `src/types/layout/table.type.ts`, `src/types/edit/table-selection.type.ts`, `src/constants/defaults.ts`
 >
 > 본 문서는 `layout-element` 라이브러리의 표(table) 요소 렌더링, 셀 블록 선택, 마우스 리사이즈, 키보드 단축키, 구조 편집(병합/삽입/삭제), 이벤트 충돌 처리, 구현 제약사항을 상세히 기술한다.
 >
@@ -123,7 +123,7 @@ type CellBorderEdge = {
 
 ### 3.1 resolveTableGrid
 
-`src/core/table-grid-resolver.ts`의 `resolveTableGrid()`는 TableData에서 논리 그리드를 계산한다.
+`src/engine/table-grid-resolver.ts`의 `resolveTableGrid()`는 TableData에서 논리 그리드를 계산한다.
 
 **입력**: `colWidths`, `rows`(TableRowData[]), `containerWidth`(mm), `containerHeight`(mm)
 
@@ -604,7 +604,7 @@ Selection overlay는 다음 시점에 갱신된다:
 
 ### 9.1 resolveTableBorders
 
-`src/core/border-resolver.ts`의 `resolveTableBorders(edges)`는 인접 셀의 border 선언을 바탕으로 border-collapse 규칙으로 단일 border 라인을 결정한다.
+`src/engine/border-resolver.ts`의 `resolveTableBorders(edges)`는 인접 셀의 border 선언을 바탕으로 border-collapse 규칙으로 단일 border 라인을 결정한다.
 
 - 각 셀은 방향별로 `borderTopWidth`/`borderTopColor`/`borderTopStyle`, `borderRightWidth`/..., `borderBottomWidth`/..., `borderLeftWidth`/... 의 개별 속성을 선언한다
 - 인접한 두 셀의 border는 동일 엣지를 공유 (A의 우측 보더 ↔ B의 좌측 보더)
