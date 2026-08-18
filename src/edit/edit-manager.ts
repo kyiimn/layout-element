@@ -3,7 +3,6 @@ import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { LayoutTableElement } from "@/components/layout/table.element";
-import { GridCalculator } from "@/core";
 import type { TextEditController, CurrentStyle } from "./text-edit-controller";
 import { InsertController } from "./insert-controller";
 import { LayoutEditController } from "./layout-edit-controller";
@@ -439,7 +438,7 @@ export class EditManager {
    * ```
    */
   screenPxToMm(px: number): number {
-    return px / (GridCalculator.ppm * this._scale);
+    return px / (this._docEl.ppm * this._scale);
   }
 
   /**
@@ -447,7 +446,7 @@ export class EditManager {
    * `screenPxToMm`의 델타 전용 wrapper.
    */
   screenDeltaToMm(deltaPx: number): number {
-    return deltaPx / (GridCalculator.ppm * this._scale);
+    return deltaPx / (this._docEl.ppm * this._scale);
   }
 
   /**

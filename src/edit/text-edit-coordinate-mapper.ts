@@ -30,6 +30,16 @@ export interface CursorPlacement {
  * local coordinate와 동일하여 보정하지 않는다.
  */
 export class TextEditCoordinateMapper {
+  /**
+   * 엔진 좌표 쿼리 사용 여부 (피처 플래그).
+   *
+   * `false`(기본값): 기존 DOM 기반 `getBoundingClientRect()` 경로 사용.
+   * `true`: `ParagraphEngine.getCharRect()` / `getOffsetFromPoint()` 엔진 쿼리 사용.
+   *
+   * 전환 후 manual QA(Korean IME, English, mixed)를 거쳐 `true`로 설정.
+   */
+  static useEngineCoordinateQueries: boolean = false;
+
   private _paragraph: LayoutParagraphElement;
   private _manager: EditManager;
 
@@ -349,6 +359,9 @@ export class TextEditCoordinateMapper {
    * @returns DOMRect 또는 null
    */
   getCharRect(sourceOffset: number): DOMRect | null {
+    if (TextEditCoordinateMapper.useEngineCoordinateQueries) {
+      return this._getCharRectFromEngine(sourceOffset);
+    }
     const span = this.getSpanByOffset(sourceOffset);
     if (!span) return null;
 
@@ -361,6 +374,28 @@ export class TextEditCoordinateMapper {
       (spanRect.top - paragraphRect.top) / scale,
       spanRect.width / scale,
       spanRect.height / scale,
+    );
+  }
+
+  /**
+   * 엔진 쿼리 경로: `ParagraphEngine.getCharRect()`에서 mm 좌표를 받아
+   * viewport 픽셀 좌표로 변환한다.
+   */
+  private _getCharRectFromEngine(sourceOffset: number): DOMRect | null {
+    const engine = this._paragraph.engine;
+    if (!engine) return null;
+    const mmRect = engine.getCharRect(sourceOffset);
+    if (!mmRect) return null;
+
+    const scale = this._manager.scale;
+    const docEl = (this._paragraph as unknown as { _findDocumentElement: () => { engine?: { ppm: number } } | null })._findDocumentElement();
+    const ppm = docEl?.engine?.ppm ?? 3.78;
+
+    return new DOMRect(
+      (mmRect.left * ppm) / scale,
+      (mmRect.top * ppm) / scale,
+      (mmRect.width * ppm) / scale,
+      (mmRect.height * ppm) / scale,
     );
   }
 

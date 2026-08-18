@@ -4,7 +4,6 @@ import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
-import { GridCalculator } from "@/core";
 import { staticGridContains, clampStaticToContainer, clampAbsoluteToContainer } from "@/utils";
 import { DEFAULT_IMAGE_DPI, Z_INDEX_INSERT_PREVIEW, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER, Z_INDEX_MAX_LAYOUT } from "@/constants";
 import type { PlaceGunItem, ArticleContent, ImageContent, ElementPatternContent, StylePatternContent } from "@/types/edit";
@@ -863,7 +862,7 @@ export class PlaceGunController {
       : null;
     const root = (rootEl && !rootEl.lock) ? rootEl : manager.docEl;
     const rect = root.getBoundingClientRect();
-    const screenPpm = GridCalculator.ppm * manager.scale;
+    const screenPpm = manager.docEl.ppm * manager.scale;
 
     const cx = Math.max(rect.left, Math.min(clientX, rect.right));
     const cy = Math.max(rect.top, Math.min(clientY, rect.bottom));

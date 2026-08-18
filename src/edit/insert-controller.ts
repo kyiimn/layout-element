@@ -1,5 +1,4 @@
 import { Z_INDEX_INSERT_PREVIEW, Z_INDEX_MAX_LAYOUT, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER } from "@/constants";
-import { GridCalculator } from "@/core";
 import { EditManager } from "./edit-manager";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
@@ -761,7 +760,7 @@ export class InsertController {
 
     const editAreaLeftMm = columnCoords[0]?.x1 ?? 0;
     const editAreaTopMm = columnCoords[0]?.y1 ?? 0;
-    const screenPpm = GridCalculator.ppm * manager.scale;
+    const screenPpm = manager.docEl.ppm * manager.scale;
 
     const leftMm = Math.max(0, manager.screenPxToMm(leftPx - rect.left) - containerPaddingLeft);
     const topMm = Math.max(0, manager.screenPxToMm(topPx - rect.top) - containerPaddingTop);

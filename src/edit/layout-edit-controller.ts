@@ -8,7 +8,7 @@ import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { LayoutTableElement } from "@/components/layout/table.element";
 import { genUUID, clampStaticToContainer, clampAbsoluteToContainer } from "@/utils";
 import { EditManager } from "./edit-manager";
-import type { GridCalculator } from "@/core";
+import type { GridCalculatorEngine } from "@/engine";
 import type { BoxData } from "@/types/layout/box.type";
 import type { TableCellSelection, CellCoord } from "@/types";
 
@@ -1414,7 +1414,7 @@ export class LayoutEditController {
     top: number,
     width: number,
     height: number,
-    parentModel: GridCalculator | null,
+    parentModel: GridCalculatorEngine | null,
     thresholdMm: number,
   ): { left: number; top: number } {
     if (!parentModel) return { left, top };
@@ -1516,7 +1516,7 @@ export class LayoutEditController {
     top: number,
     width: number,
     height: number,
-    parentModel: GridCalculator | null,
+    parentModel: GridCalculatorEngine | null,
     thresholdMm: number,
   ): { left: number; top: number; width: number; height: number } {
     if (!parentModel) return { left, top, width, height };
