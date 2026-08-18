@@ -1174,8 +1174,6 @@ export class LayoutBoxElement extends HTMLElement {
     }
 
     let overlay = this.parentElement.items.filter(i => i.type === 'box' && i !== this && i.zIndex > this.zIndex) as LayoutBoxElement[];
-    // overlapMode === 'none'인 이미지/paragraph 박스는 checkOverlap() 이전에 제외하여
-    // getBoundingClientRect() 강제 리플로우 비용을 피한다.
     overlay = overlay.filter(i => {
       if (i.contentType === 'image') {
         const imgEl = i.contentElement as LayoutImageElement | null;

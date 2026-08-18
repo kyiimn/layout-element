@@ -694,8 +694,6 @@ export class LayoutParagraphElement extends HTMLElement {
     // paragraph 기준으로 다시 한 번 필터링한다.
     const list: LayoutBoxElement[] = this.parentElement.overlayElements
       .filter(el => {
-        // overlapMode === 'none'인 이미지/paragraph 박스는 checkOverlap() 이전에 제외하여
-        // getBoundingClientRect() 강제 리플로우 비용을 피한다.
         if (el.contentType === 'image') {
           const imgEl = el.contentElement as LayoutImageElement | null;
           if (imgEl && imgEl.overlapMode === 'none') return false;
@@ -710,7 +708,6 @@ export class LayoutParagraphElement extends HTMLElement {
     const self: any = this;
 
     let overlay = this.parentElement.items.filter(i => i.type === 'box' && i !== self && i.zIndex > this.zIndex) as LayoutBoxElement[];
-    // overlapMode === 'none'인 이미지/paragraph 박스는 checkOverlap() 이전에 제외
     overlay = overlay.filter(i => {
       if (i.contentType === 'image') {
         const imgEl = i.contentElement as LayoutImageElement | null;
