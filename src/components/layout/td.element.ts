@@ -15,6 +15,8 @@ import { LayoutBoxElement } from "./box.element";
 import { LayoutDocumentElement } from "./document.element";
 import { LayoutImageElement } from "./image.element";
 import { LayoutParagraphElement } from "./paragraph.element";
+import { LayoutTableElement } from "./table.element";
+import { LayoutTableRowElement } from "./tr.element";
 
 /**
  * 테이블 셀 요소. `<x-layout-td>` 커스텀 엘리먼트.
@@ -383,12 +385,12 @@ export class LayoutTableCellElement extends HTMLElement {
   }
 
   _setCellMetrics(x: number, y: number, width: number, height: number, cellLabel: string = '', cellLabels: string[] = []): void {
-    const changed = this._x !== x || this._y !== y
-      || this._width !== width || this._height !== height;
-    this._x = x;
-    this._y = y;
-    this._width = width;
-    this._height = height;
+    const changed = this._cellEngine
+      ? (this._cellEngine.x !== x || this._cellEngine.y !== y
+        || this._cellEngine.width !== width || this._cellEngine.height !== height
+        || this._cellEngine.cellLabel !== cellLabel)
+      : true;
+    this._cellEngine?.setCellMetrics(x, y, width, height, cellLabel, cellLabels);
     this._cellLabel = cellLabel;
     this._cellLabels = cellLabels;
     if (changed && this.isConnected) {
@@ -419,8 +421,21 @@ export class LayoutTableCellElement extends HTMLElement {
   private _layoutStructure(): void {
     if (!this.isConnected) return;
 
+    const parentTable = this._getParentTableElement();
+    if (!parentTable) return;
+
+    const found = parentTable.engine?.findCellEngineByLabel(this.cellLabel);
+    if (found instanceof TableCellEngine) {
+      this._cellEngine = found;
+      this._model = found.gridCalculator ?? undefined;
+      return;
+    }
+
     const ppm = this._getPpm();
     if (ppm <= 0) return;
+
+    const fallback = this._ensureFallbackCellEngine(ppm);
+    this._model = fallback.gridCalculator ?? undefined;
 
     this._model ??= GridCalculatorEngine.create({
       width: 0, height: 0, columns: 1, gap: 0,
@@ -443,6 +458,39 @@ export class LayoutTableCellElement extends HTMLElement {
   }
 
   /**
+   * 부모 테이블 요소를 반환한다.
+   */
+  private _getParentTableElement(): LayoutTableElement | null {
+    let el: Element | null = this.parentElement;
+    while (el) {
+      if (el instanceof LayoutTableRowElement) {
+        el = el.parentElement;
+      } else if (el instanceof LayoutTableElement) {
+        return el;
+      } else {
+        el = el.parentElement;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 과거 로직과의 호환을 위한 fallback cell engine.
+   * 부모 TableEngine에서 셀 엔진을 찾지 못한 경우에만 사용.
+   */
+  private _ensureFallbackCellEngine(ppm: number): TableCellEngine {
+    if (!this._cellEngine) {
+      this._cellEngine = new TableCellEngine();
+      this._cellEngine.setCellMetrics(this._x, this._y, this._width, this._height, this._cellLabel, this._cellLabels);
+      this._cellEngine._gridCalculator = GridCalculatorEngine.create({
+        width: 0, height: 0, columns: 1, gap: 0,
+        paragraphStyle: {}, textStyle: {}, isBox: true,
+      }, ppm);
+    }
+    return this._cellEngine;
+  }
+
+  /**
    * 문서 요소에서 ppm을 가져온다.
    */
   private _getPpm(): number {
@@ -458,6 +506,11 @@ export class LayoutTableCellElement extends HTMLElement {
 
   private _applyStyle(): void {
     if (!this.isConnected) return;
+
+    const x = this._cellEngine?.x ?? this._x;
+    const y = this._cellEngine?.y ?? this._y;
+    const width = this._cellEngine?.width ?? this._width;
+    const height = this._cellEngine?.height ?? this._height;
 
     let styleEl = this._shadowRoot.querySelector('style');
     let needsInit = !styleEl
@@ -490,10 +543,10 @@ export class LayoutTableCellElement extends HTMLElement {
         display: 'block',
         boxSizing: 'border-box',
         position: 'absolute',
-        left: `${this._x}mm`,
-        top: `${this._y}mm`,
-        width: `${this._width}mm`,
-        height: `${this._height}mm`,
+        left: `${x}mm`,
+        top: `${y}mm`,
+        width: `${width}mm`,
+        height: `${height}mm`,
         backgroundColor: bg,
       },
     );
@@ -507,8 +560,10 @@ export class LayoutTableCellElement extends HTMLElement {
     if (this._isPrint) return;
 
     const ppm = this._getPpm();
-    const widthPx = this._width * ppm;
-    const heightPx = this._height * ppm;
+    const width = this._cellEngine?.width ?? this._width;
+    const height = this._cellEngine?.height ?? this._height;
+    const widthPx = width * ppm;
+    const heightPx = height * ppm;
 
     const cssColor = ColorRegistry.getInstance().getCSSColor(this._diagonalColor ?? 'black');
     const widthPxBorder = Math.max(1, Math.ceil(this._diagonalWidth * ppm));
@@ -578,8 +633,10 @@ export class LayoutTableCellElement extends HTMLElement {
     const isLastCol = maxCol >= grid.colCount - 1;
 
     const ppm = this._getPpm();
-    const widthPx = this._width * ppm;
-    const heightPx = this._height * ppm;
+    const width = this._cellEngine?.width ?? this._width;
+    const height = this._cellEngine?.height ?? this._height;
+    const widthPx = width * ppm;
+    const heightPx = height * ppm;
     const borderWidth = '1px';
     const borderStyle = 'dashed';
     const borderColor = '#aaaaaa';
@@ -631,17 +688,7 @@ export class LayoutTableCellElement extends HTMLElement {
    * 부모 테이블 요소를 반환한다.
    * 순환 의존성을 피하기 위해 `instanceof` 대신 `gridResolution` getter로 판별한다.
    */
-  private _getParentTableElement(): { gridResolution: { rowCount: number; colCount: number } | undefined } | null {
-    let el: Element | null = this.parentElement;
-    while (el) {
-      const maybeTable = el as unknown as { gridResolution?: unknown };
-      if (maybeTable.gridResolution !== undefined && 'gridResolution' in el) {
-        return el as unknown as { gridResolution: { rowCount: number; colCount: number } | undefined };
-      }
-      el = el.parentElement;
-    }
-    return null;
-  }
+
 
   /**
    * `_cellLabels`에서 이 셀이 커버하는 최대 논리 행 인덱스를 추출한다.
@@ -682,17 +729,17 @@ export class LayoutTableCellElement extends HTMLElement {
 
   private _propagateInheritStyle(): void {
     if (!this._inheritStyle) return;
-    const ppm = this._getPpm();
+    const width = this._cellEngine?.width ?? this._width;
+    const height = this._cellEngine?.height ?? this._height;
     const childInherit: InheritStyle = {
       ...this._inheritStyle,
-      parentWidth: this._width - this._paddingLeft - this._paddingRight,
-      parentHeight: this._height - this._paddingTop - this._paddingBottom,
+      parentWidth: width - this._paddingLeft - this._paddingRight,
+      parentHeight: height - this._paddingTop - this._paddingBottom,
       paddingTop: this._paddingTop,
       paddingRight: this._paddingRight,
       paddingBottom: this._paddingBottom,
       paddingLeft: this._paddingLeft,
     };
-    void ppm;
     for (const child of this.items) {
       child.inheritStyle = childInherit;
     }
@@ -745,20 +792,20 @@ export class LayoutTableCellElement extends HTMLElement {
 
   get absLeft(): number {
     const parent = this.parentElement as unknown as { absLeft?: number } | null;
-    return (parent?.absLeft ?? 0) + this._x;
+    return (parent?.absLeft ?? 0) + (this._cellEngine?.x ?? this._x);
   }
 
   get absTop(): number {
     const parent = this.parentElement as unknown as { absTop?: number } | null;
-    return (parent?.absTop ?? 0) + this._y;
+    return (parent?.absTop ?? 0) + (this._cellEngine?.y ?? this._y);
   }
 
   get absWidth(): number {
-    return this._width;
+    return this._cellEngine?.width ?? this._width;
   }
 
   get absHeight(): number {
-    return this._height;
+    return this._cellEngine?.height ?? this._height;
   }
 
   get overlayElements(): LayoutBoxElement[] {
@@ -768,7 +815,7 @@ export class LayoutTableCellElement extends HTMLElement {
   }
 
   get model(): GridCalculatorEngine | undefined {
-    return this._model;
+    return this._cellEngine?.gridCalculator ?? this._model;
   }
 
   get engine(): TableCellEngine | undefined {
@@ -796,18 +843,22 @@ export class LayoutTableCellElement extends HTMLElement {
 
   get printPostData(): PrintPostData[] {
     const data: PrintPostData[] = [];
-    const rect = this.getBoundingClientRect();
+    const ppm = this._getPpm();
     const colorRegistry = ColorRegistry.getInstance();
+
+    const x = this.absLeft;
+    const y = this.absTop;
+    const width = this.absWidth;
+    const height = this.absHeight;
 
     const diagonals: PrintPostDiagonal[] = [];
     if (this._diagonals && this._diagonals.length > 0) {
-      const ppm = this._getPpm();
       const color = colorRegistry.get(this._diagonalColor ?? 'black');
       const widthPx = Math.max(1, Math.ceil(this._diagonalWidth * ppm));
-      const x1 = rect.x + window.scrollX;
-      const y1 = rect.y + window.scrollY;
-      const x2 = x1 + rect.width;
-      const y2 = y1 + rect.height;
+      const x1 = x * ppm;
+      const y1 = y * ppm;
+      const x2 = x1 + width * ppm;
+      const y2 = y1 + height * ppm;
       for (const dir of this._diagonals) {
         if (dir === 'tl-br') {
           diagonals.push({ direction: 'tl-br', x1, y1, x2, y2, width: widthPx, color });
@@ -824,10 +875,10 @@ export class LayoutTableCellElement extends HTMLElement {
       backgroundOpacity: this._backgroundOpacity,
       data: this.data,
       rect: {
-        x: rect.x + window.scrollX,
-        y: rect.y + window.scrollY,
-        width: rect.width,
-        height: rect.height,
+        x: x * ppm,
+        y: y * ppm,
+        width: width * ppm,
+        height: height * ppm,
       },
       diagonals: diagonals.length > 0 ? diagonals : undefined,
     });

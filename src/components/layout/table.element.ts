@@ -10,9 +10,9 @@ import {
   GridResolution,
   BorderResolution,
   ResolvedBorderEdge,
-  resolveTableGrid,
   resolveTableBorders,
-} from "@/core";
+  TableEngine,
+} from "@/engine";
 import { ColorRegistry } from "@/resource";
 import { Z_INDEX_TABLE_BORDER, Z_INDEX_TABLE_RESIZE, Z_INDEX_TABLE_SELECTION, MIN_TABLE_COL_WIDTH, MIN_TABLE_ROW_HEIGHT } from "@/constants";
 import { genUUID } from "@/utils";
@@ -22,7 +22,6 @@ import { TableStructureEditor } from "@/edit/table-structure-editor";
 import { LayoutDocumentElement } from "./document.element";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutTableRowElement } from "./tr.element";
-import { TableEngine } from "@/engine";
 
 interface TableResizeState {
   isResizing: boolean;
@@ -215,6 +214,7 @@ export class LayoutTableElement extends HTMLElement {
   set colWidths(value: number | number[] | undefined) {
     this._colWidths = value;
     if (this.isConnected) {
+      this._engine?.layout();
       this.layout();
       void this.render();
     }
@@ -278,94 +278,17 @@ export class LayoutTableElement extends HTMLElement {
 
     const contentWidth = parentBox.absWidth
       - (parentBox.paddingLeft ?? 0) - (parentBox.paddingRight ?? 0);
-    const contentHeight = parentBox.absHeight
-      - (parentBox.paddingTop ?? 0) - (parentBox.paddingBottom ?? 0);
 
-    this._gridResolution = resolveTableGrid(
-      this._rows,
-      contentWidth,
-      contentHeight,
-      this._colWidths,
-    );
-
-    this._resolvedColWidths = this._gridResolution.colWidths;
-
-    // 계산된 rowHeights/colWidths를 원본 데이터에 write-back하여
-    // 이후 layout(부모 box 리사이즈 등)에서 리사이즈된 값이 입력으로 사용되도록 한다.
-    // 리사이즈 핸들 드래그 중에는 핸들러가 직접 _colWidths/_rows.height를
-    // 관리하므로 write-back하지 않는다.
-    if (!this._resizeState) {
-      const resolvedRowHeights = this._gridResolution.rowHeights;
-      for (let r = 0; r < this._rows.length && r < resolvedRowHeights.length; r++) {
-        this._rows[r].height = resolvedRowHeights[r];
-      }
-      if (this._colWidths === undefined || typeof this._colWidths === 'number') {
-        this._colWidths = [...this._gridResolution.colWidths];
-      }
+    const parentBoxEngine = parentBox.engine;
+    if (!parentBoxEngine) {
+      this._gridResolution = undefined;
+      return;
     }
 
-    if (this._gridResolution.warnings.length > 0) {
-      this.dispatchEvent(new CustomEvent('render-error', {
-        detail: { type: 'table-grid', warnings: this._gridResolution.warnings },
-      }));
+    const existing = parentBoxEngine.childEngines.find(e => e instanceof TableEngine);
+    if (existing) {
+      this._engine = existing;
     }
-
-    for (let r = 0; r < this._rows.length; r++) {
-      const trEl = this.children[r] as LayoutTableRowElement | undefined;
-      if (trEl && trEl.localName === 'x-layout-tr') {
-        const rowHeight = this._gridResolution.rowHeights[r];
-        const y = this._gridResolution.rowHeights
-          .slice(0, r).reduce((sum, h) => sum + h, 0);
-        trEl._setRowMetrics(y, rowHeight, contentWidth, r);
-      }
-    }
-
-    const placementByRow = new Map<number, typeof this._gridResolution.placements>();
-    for (const placement of this._gridResolution.placements) {
-      const existing = placementByRow.get(placement.gridRow) ?? [];
-      existing.push(placement);
-      placementByRow.set(placement.gridRow, existing);
-    }
-
-    for (const [rowIdx, rowPlacements] of placementByRow) {
-      const trEl = this.children[rowIdx] as LayoutTableRowElement | undefined;
-      if (!trEl) continue;
-      const trY = this._gridResolution.rowHeights
-        .slice(0, rowIdx).reduce((sum, h) => sum + h, 0);
-      const tdEls = trEl.items;
-      const rowLabel = trEl.rowLabel;
-      for (let i = 0; i < rowPlacements.length && i < tdEls.length; i++) {
-        const placement = rowPlacements[i];
-        const tdEl = tdEls[i];
-        const colLabel = String(placement.gridCol + 1);
-        const cellLabel = `${rowLabel}${colLabel}`;
-        const labels: string[] = [];
-        for (let dr = 0; dr < placement.spanRows; dr++) {
-          let subRowLabel = '';
-          let n = placement.gridRow + dr;
-          do {
-            subRowLabel = String.fromCharCode(65 + (n % 26)) + subRowLabel;
-            n = Math.floor(n / 26) - 1;
-          } while (n >= 0);
-          for (let dc = 0; dc < placement.spanCols; dc++) {
-            labels.push(`${subRowLabel}${placement.gridCol + dc + 1}`);
-          }
-        }
-        tdEl._setCellMetrics(placement.x, placement.y - trY, placement.width, placement.height, cellLabel, labels);
-      }
-    }
-
-    this._updateEngine();
-  }
-
-  /**
-   * TableEngine 인스턴스를 생성/갱신한다.
-   */
-  private _updateEngine(): void {
-    const parentBox = this.parentElement;
-    if (!(parentBox instanceof LayoutBoxElement)) return;
-    const boxEngine = parentBox.engine;
-    if (!boxEngine) return;
 
     const tableData: TableData = {
       type: 'table',
@@ -375,11 +298,62 @@ export class LayoutTableElement extends HTMLElement {
     };
 
     if (!this._engine) {
-      this._engine = TableEngine.create(tableData, boxEngine);
+      this._engine = TableEngine.create(tableData, parentBoxEngine);
+      parentBoxEngine.childEngines = [...parentBoxEngine.childEngines, this._engine];
     } else {
       this._engine.data = tableData;
     }
     this._engine.layout();
+
+    this._gridResolution = this._engine.gridResolution ?? undefined;
+    this._resolvedColWidths = this._gridResolution?.colWidths ?? [];
+
+    // 계산된 rowHeights/colWidths를 원본 데이터에 write-back하여
+    // 이후 layout(부모 box 리사이즈 등)에서 리사이즈된 값이 입력으로 사용되도록 한다.
+    // 리사이즈 핸들 드래그 중에는 핸들러가 직접 _colWidths/_rows.height를
+    // 관리하므로 write-back하지 않는다.
+    if (this._gridResolution && !this._resizeState) {
+      const resolvedRowHeights = this._gridResolution.rowHeights;
+      for (let r = 0; r < this._rows.length && r < resolvedRowHeights.length; r++) {
+        this._rows[r].height = resolvedRowHeights[r];
+      }
+      if (this._colWidths === undefined || typeof this._colWidths === 'number') {
+        this._colWidths = [...this._gridResolution.colWidths];
+      }
+    }
+
+    if (this._gridResolution && this._gridResolution.warnings.length > 0) {
+      this.dispatchEvent(new CustomEvent('render-error', {
+        detail: { type: 'table-grid', warnings: this._gridResolution.warnings },
+      }));
+    }
+
+    const engineRows = this._engine.rowEngines;
+    for (let r = 0; r < engineRows.length; r++) {
+      const rowEngine = engineRows[r];
+      if (!rowEngine) continue;
+      const trEl = this.children[r] as LayoutTableRowElement | undefined;
+      if (trEl && trEl.localName === 'x-layout-tr') {
+        trEl._setRowMetrics(rowEngine.y, rowEngine.height, contentWidth, r);
+      }
+    }
+
+    for (let r = 0; r < engineRows.length; r++) {
+      const rowEngine = engineRows[r];
+      if (!rowEngine) continue;
+      const trEl = this.children[r] as LayoutTableRowElement | undefined;
+      if (!trEl) continue;
+      const tdEls = trEl.items;
+      const rowLabel = trEl.rowLabel;
+      const cellEngines = rowEngine.cellEngines;
+      for (let i = 0; i < cellEngines.length && i < tdEls.length; i++) {
+        const cellEngine = cellEngines[i];
+        if (!cellEngine) continue;
+        const tdEl = tdEls[i];
+        const cellLabel = cellEngine.cellLabel || `${rowLabel}${i + 1}`;
+        tdEl._setCellMetrics(cellEngine.x, cellEngine.y, cellEngine.width, cellEngine.height, cellLabel, cellEngine.labels);
+      }
+    }
   }
 
   private _findDocumentElement(): LayoutDocumentElement | null {
@@ -520,6 +494,7 @@ export class LayoutTableElement extends HTMLElement {
   refreshBorder(): void {
     if (!this.isConnected) return;
     this._rows = this._serializeChildren();
+    this._engine?.layout();
     this._layoutStructure();
     this._renderBorder();
   }
@@ -711,6 +686,7 @@ export class LayoutTableElement extends HTMLElement {
     if (newTop === oldTop) return;
     this._rows[topIdx].height = newTop;
     this._rows[bottomIdx].height = newBottom;
+    this._engine?.layout();
     this.layout();
     void this.render();
     this._notifyTablePropertyChange();
@@ -978,15 +954,14 @@ export class LayoutTableElement extends HTMLElement {
     const data: PrintPostData[] = [];
     const ppm = this._getPpm();
     const colorRegistry = ColorRegistry.getInstance();
-    const tableRect = this.getBoundingClientRect();
 
     const borderEdges: PrintPostBorderEdge[] = [];
     if (this._borderResolution) {
       for (const edge of this._borderResolution.edges) {
         borderEdges.push({
           direction: edge.direction,
-          x: tableRect.x + window.scrollX + edge.x * ppm,
-          y: tableRect.y + window.scrollY + edge.y * ppm,
+          x: (this.absLeft + edge.x) * ppm,
+          y: (this.absTop + edge.y) * ppm,
           length: edge.length * ppm,
           width: Math.ceil(edge.width * ppm),
           color: colorRegistry.get(edge.color),
@@ -998,10 +973,10 @@ export class LayoutTableElement extends HTMLElement {
     data.push({
       data: this.data,
       rect: {
-        x: tableRect.x + window.scrollX,
-        y: tableRect.y + window.scrollY,
-        width: tableRect.width,
-        height: tableRect.height,
+        x: this.absLeft * ppm,
+        y: this.absTop * ppm,
+        width: this.absWidth * ppm,
+        height: this.absHeight * ppm,
       },
       borderEdges: borderEdges.length > 0 ? borderEdges : undefined,
     });
