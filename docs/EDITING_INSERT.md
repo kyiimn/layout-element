@@ -1,5 +1,7 @@
 # layout-element 삽입 모드 (Insert Mode) 상세 명세
 
+> **엔진 마이그레이션**: `GridCalculator` → `GridCalculatorEngine`, ppm 접근 방식 변경. 상세는 [ENGINE.md](./ENGINE.md) 참고.
+
 > 작성 기준: `src/edit/insert-controller.ts`, `src/edit/edit-manager.ts`, `src/types/edit/insert.type.ts`
 >
 > 본 문서는 `layout-element` 라이브러리의 삽입 모드(`InsertController`) 기능, 공개 API, 대상 컨테이너 찾기 알고리즘, 좌표 변환, 미리보기, ESC 취소, 레이아웃 편집 모드와의 상호작용을 상세히 기술한다.
@@ -458,7 +460,7 @@ const boxData: BoxData = {
 
 ### 6.2 `column`/`gap` 상속
 
-`text`와 `paragraph` 삽입 시 `ParagraphData`의 `column`과 `gap`을 명시적으로 설정하지 않는다. `LayoutParagraphElement._layoutStructure()`에서 `_column`과 `_gap`이 `undefined`이면 부모 `GridCalculator`의 `columnWidth`/`gaps`를 상속받아, static 모드에서는 부모 박스가 차지하는 컬럼 수와 동일한 컬럼 구성을 자동으로 갖게 된다.
+`text`와 `paragraph` 삽입 시 `ParagraphData`의 `column`과 `gap`을 명시적으로 설정하지 않는다. `LayoutParagraphElement._layoutStructure()`에서 `_column`과 `_gap`이 `undefined`이면 부모 `GridCalculatorEngine`의 `columnWidth`/`gaps`를 상속받아, static 모드에서는 부모 박스가 차지하는 컬럼 수와 동일한 컬럼 구성을 자동으로 갖게 된다.
 
 ### 6.3 구현 순서
 
@@ -496,7 +498,7 @@ topMm  = screenPxToMm(clientY - rect.top)  - containerPaddingTop
 ```
 
 - 음수 좌표 클램핑 없음 — 컨테이너 바깥의 좌표는 음수로 반환되어 `staticGridContains`가 거부
-- `screenPxToMm(px) = px / (GridCalculator.ppm * manager.scale)` — scale 보정 적용
+- `screenPxToMm(px) = px / (manager.docEl.ppm * manager.scale)` — scale 보정 적용
 
 ### 7.2 `_mmToStatic(leftMm, topMm, widthMm, heightMm, container)`
 
@@ -617,7 +619,7 @@ avgColWidth = editableWidth / columnCount
 
 editAreaLeftMm = columnCoords[0].x1
 editAreaTopMm  = columnCoords[0].y1
-screenPpm = GridCalculator.ppm * manager.scale
+screenPpm = manager.docEl.ppm * manager.scale
 
 leftMm  = max(0, screenPxToMm(leftPx - rect.left) - containerPaddingLeft)
 topMm   = max(0, screenPxToMm(topPx  - rect.top)  - containerPaddingTop)

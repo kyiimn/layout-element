@@ -1,5 +1,7 @@
 # layout-element 표(table) 편집 상세 명세
 
+> **엔진 마이그레이션**: `GridCalculator` → `GridCalculatorEngine`, ppm 접근 방식 변경. 상세는 [ENGINE.md](./ENGINE.md) 참고.
+
 > 작성 기준: `src/components/layout/table.element.ts`, `src/components/layout/tr.element.ts`, `src/components/layout/td.element.ts`, `src/edit/table-keyboard-controller.ts`, `src/edit/table-structure-editor.ts`, `src/edit/layout-selection-controller.ts`, `src/edit/layout-edit-controller.ts`, `src/components/layout/box.element.ts`, `src/components/layout/document.element.ts`, `src/core/table-grid-resolver.ts`, `src/core/border-resolver.ts`, `src/types/layout/table.type.ts`, `src/types/edit/table-selection.type.ts`, `src/constants/defaults.ts`
 >
 > 본 문서는 `layout-element` 라이브러리의 표(table) 요소 렌더링, 셀 블록 선택, 마우스 리사이즈, 키보드 단축키, 구조 편집(병합/삽입/삭제), 이벤트 충돌 처리, 구현 제약사항을 상세히 기술한다.
@@ -627,7 +629,7 @@ Selection overlay는 다음 시점에 갱신된다:
 
 ### 10.1 static box 자동 맞춤
 
-TD 내부의 `position: 'static'` box는 TD의 content 영역(padding 제외)에 100%로 자동 맞춤된다. box의 `_layoutStructure()`가 parent(TD)의 `GridCalculator`를 통해 columnCoords를 읽어 `left=0, top=0, width=tdContentWidth, height=tdContentHeight`로 설정한다.
+TD 내부의 `position: 'static'` box는 TD의 content 영역(padding 제외)에 100%로 자동 맞춤된다. box의 `_layoutStructure()`가 parent(TD)의 `GridCalculatorEngine`를 통해 columnCoords를 읽어 `left=0, top=0, width=tdContentWidth, height=tdContentHeight`로 설정한다.
 
 ### 10.2 resize handle 숨김
 
@@ -652,7 +654,7 @@ TD 내부 box의 type-label에 있는 parent-btn(상위 선택 화살표)을 클
 ### 10.5 appendChildData
 
 `td.appendChildData(child)`:
-- `_layoutStructure()`를 먼저 호출하여 TD의 `GridCalculator` columnCoords를 갱신한다
+- `_layoutStructure()`를 먼저 호출하여 TD의 `GridCalculatorEngine` columnCoords를 갱신한다
 - 새 box를 생성하고 `box.data = child`를 설정 (전체 초기화 파이프라인 실행)
 - box를 TD에 appendChild
 
@@ -761,7 +763,7 @@ if (element.type === 'table') {
 
 ### 12.1 셀 내용은 반드시 box로 감싸야 함
 
-`TableCellData.children`은 `BoxData[]`만 허용한다. paragraph/image/table을 직접 넣을 수 없고 반드시 box로 감싸야 한다. 이는 TD의 `GridCalculator`가 box 배치 컨텍스트로 동작하기 위함이다.
+`TableCellData.children`은 `BoxData[]`만 허용한다. paragraph/image/table을 직접 넣을 수 없고 반드시 box로 감싸야 한다. 이는 TD의 `GridCalculatorEngine`가 box 배치 컨텍스트로 동작하기 위함이다.
 
 ### 12.2 셀 블록 모드는 모달 서브 상태
 
@@ -789,7 +791,7 @@ TD 내부 box에 다시 표를 넣을 수 있다 (중첩 표). `_collectParagrap
 
 **리사이즈 핸들 소유권 검증**: `_startTableResize`는 `composedPath()`에서 찾은 handle이 `this._resizeHandleEls`에 포함되는지 검증하고 `event.stopPropagation()`을 호출한다. 중첩 표에서 `composedPath()`가 shadow DOM 경계를 넘어 자식 표의 handle을 부모 표의 pointerdown 리스너까지 전달하는 것을 차단한다.
 
-**중첩 표 크기 계산**: TD 내부 static box의 `absHeight`는 TD의 `GridCalculator.contentHeight`를 반환한다. 일반 static box처럼 `lineHeight * height` 공식을 적용하면 height=1(라인 수)이므로 `fontSize` 수준으로 붕괴하여, 이 box를 부모로 하는 중첩 표의 `contentHeight`가 폰트 크기 수준으로 고장난다.
+**중첩 표 크기 계산**: TD 내부 static box의 `absHeight`는 TD의 `GridCalculatorEngine.contentHeight`를 반환한다. 일반 static box처럼 `lineHeight * height` 공식을 적용하면 height=1(라인 수)이므로 `fontSize` 수준으로 붕괴하여, 이 box를 부모로 하는 중첩 표의 `contentHeight`가 폰트 크기 수준으로 고장난다.
 
 ### 12.6 다중 표 처리
 

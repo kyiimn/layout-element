@@ -1,5 +1,7 @@
 # layout-element Place Gun 상세 명세
 
+> **엔진 마이그레이션**: `GridCalculator` → `GridCalculatorEngine`, ppm 접근 방식 변경. 상세는 [ENGINE.md](./ENGINE.md) 참고.
+
 > 작성 기준: `src/edit/edit-manager.ts`, `src/edit/place-gun-controller.ts`, `src/types/edit/place-gun.type.ts`
 >
 > 본 문서는 `layout-element` 라이브러리의 Place Gun 기능(장전, 클릭 배치, 일시정지, 순서 변경)의 공개 API, 컨트롤러 아키텍처, 배치 알고리즘, 이벤트를 상세히 기술한다.
@@ -357,7 +359,7 @@ paragraph 주입은 `_injectText` 헬퍼를 사용한다. 부모 box의 `request
 Place Gun이 활성 상태이고 다음으로 쏠 항목의 `contentType === 'element'`일 때, 마우스 커서를 따라 점선 박스 미리보기가 표시된다. Insert 모드의 미리보기와 동일한 스타일(`2px dashed #1a73e8`, `rgba(26, 115, 232, 0.1)` 배경, `Z_INDEX_INSERT_PREVIEW`)을 사용한다.
 
 - **mousemove**: `PlaceGunController._onMouseMove`가 마우스 위치에서 배치될 컨테이너(`_findPatternContainer`)와 좌표를 계산하여 preview 박스의 화면 위치/크기를 갱신한다. 동시에 `_updateHighlight`로 배치될 부모 컨테이너에 `reparent-target` 속성(주황색 `#ff9800` 2px 테두리)을 설정하여 시각적으로 표시한다. 이전 하이라이트 대상과 다르면 이전 속성을 제거하고 새 컨테이너에 설정한다.
-- **absolute 패턴**: 마우스 위치를 root 요소 기준 mm 좌표로 변환 → 점선 박스 좌상단을 마우스 위치로, 크기는 `boxData.width`/`height`(mm)를 `GridCalculator.ppm × scale`로 화면 px 변환.
+- **absolute 패턴**: 마우스 위치를 root 요소 기준 mm 좌표로 변환 → 점선 박스 좌상단을 마우스 위치로, 크기는 `boxData.width`/`height`(mm)를 `manager.docEl.ppm × scale`로 화면 px 변환.
 - **static 패턴**: root 요소의 컬럼/라인 그리드에 스냅. `columnCoords[startCol].x1` ~ `columnCoords[endCol].x2`로 스냅된 x범위, `줄 수 × lineHeight`로 높이를 화면 px로 변환. 컬럼 span은 `boxData.width`(컬럼 개수)를 사용하며 컨테이너의 컬럼 수를 초과하지 않도록 클램핑. 라인 상한은 `containerLineCount - boxData.height`로 클램핑하여 preview가 root 하단을 넘지 않도록 함.
 - **root 요소 기준**: preview는 `editableRootId`가 지정한 박스(없으면 document)의 그리드에 스냅한다. 특정 박스 기준이 아니므로 마우스가 박스 경계를 넘어도 자유롭게 따라간다.
 - **표시 조건**: `placeGunActive === true` && 다음 항목 `contentType === 'element'` && 마우스 커서가 `<x-layout-document>` 영역 내 && `_findPatternContainer`가 컨테이너를 반환. 항목이 없거나 element가 아니거나 커서가 문서 밖이거나 컨테이너를 찾지 못하면 preview 및 하이라이트 제거.
@@ -365,11 +367,11 @@ Place Gun이 활성 상태이고 다음으로 쏠 항목의 `contentType === 'el
 
 #### absolute 패턴
 
-클릭한 위치를 부모 컨테이너 기준 mm 좌표로 변환하여 `boxData.left`/`boxData.top`으로 설정한다. `GridCalculator.ppm`으로 픽셀→mm 변환을 수행한다.
+클릭한 위치를 부모 컨테이너 기준 mm 좌표로 변환하여 `boxData.left`/`boxData.top`으로 설정한다. `manager.docEl.ppm`으로 픽셀→mm 변환을 수행한다.
 
 #### static 패턴
 
-클릭한 위치에서 컬럼 인덱스와 줄 수를 계산한다. 부모의 `GridCalculator`에서 `columnCoords`와 `lineHeight`를 가져와:
+클릭한 위치에서 컬럼 인덱스와 줄 수를 계산한다. 부모의 `GridCalculatorEngine`에서 `columnCoords`와 `lineHeight`를 가져와:
 1. 클릭 x 좌표가 어느 컬럼에 속하는지 인덱스(`left`) 계산
 2. 클릭 y 좌표가 컬럼 상단에서 몇 줄째인지(`top`) 계산: `Math.round((y - columnY1) / lineHeight)`
 

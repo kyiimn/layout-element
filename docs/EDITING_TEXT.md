@@ -1,5 +1,7 @@
 # layout-element 텍스트 편집 모드 상세 명세
 
+> **엔진 마이그레이션**: `GridCalculator` → `GridCalculatorEngine`, ppm 접근 방식 변경. 상세는 [ENGINE.md](./ENGINE.md) 참고.
+
 > 작성 기준: `src/edit/text-edit-controller.ts`, `src/edit/text-edit-coordinate-mapper.ts`, `src/edit/edit-manager.ts`, `src/types/edit/`, `src/components/edit/cursor.element.ts`, `src/components/edit/selection.element.ts`, `src/components/layout/paragraph.element.ts`
 >
 > 본 문서는 `layout-element` 라이브러리의 텍스트 편집 모드 기능, 공개 API, 키보드/마우스 입력 처리, IME 조합, 렌더링 생명 주기, 글로벌 편집 관리(`EditManager`), 그리고 호스트 프로그램 연동 방법을 상세히 기술한다.
@@ -40,7 +42,7 @@ flowchart TD
 
     UserInput -->|이벤트| TA
     TA -->|input/composition| EC["TextEditController"]
-    EC -->|model.textContent 갱신| TLE["TextLayoutEngine"]
+    EC -->|model.textContent 갱신| TLE["ParagraphEngine"]
     TLE -->|columnContents| RENDER["paragraph.render()"]
     RENDER --> COL
     RENDER -->|postRender()| EC
@@ -57,7 +59,7 @@ flowchart TD
 - 소스 오프셋: `model.textContent` 문자열 내 0-based 인덱스. `\n`과 제거되지 않은 공백을 모두 포함한다.
 - 렌더링 오프셋: 실제 DOM span의 `data-offset` 값. `\n`과 줄 앞뒤로 제거된 공백은 매핑에서 제외된다.
 
-매퍼는 `rebuild()` 호출 시 `TextLayoutEngine.columnContents`를 순회하며 두 Map(`_renderedToSource`, `_sourceToRendered`)을 재구축한다. 이 매핑은 커서/선택 위치 계산, 마우스 클릭 처리, 클립보드 복사 등 거의 모든 편집 동작의 기반이 된다.
+매퍼는 `rebuild()` 호출 시 `ParagraphEngine.columnContents`를 순회하며 두 Map(`_renderedToSource`, `_sourceToRendered`)을 재구축한다. 이 매핑은 커서/선택 위치 계산, 마우스 클릭 처리, 클립보드 복사 등 거의 모든 편집 동작의 기반이 된다.
 
 ### 1.3 렌더링 엔진과 텍스트 편집 컨트롤러의 관계
 
@@ -67,7 +69,7 @@ flowchart TD
 flowchart LR
     A[사용자 입력] --> B["textarea 이벤트"]
     B --> C[TextEditController 핸들러]
-    C -->|textContent 변경| D["TextLayoutEngine.model"]
+    C -->|textContent 변경| D["ParagraphEngine.model"]
     D --> E[paragraph.render]
     E -->|needsFullRecreate| F[DOM 컬럼/span 갱신]
     E --> G["editController.postRender()"]
@@ -87,7 +89,7 @@ sequenceDiagram
     participant TA as textarea
     participant EC as TextEditController
     participant ECM as TextEditCoordinateMapper
-    participant TLE as TextLayoutEngine
+    participant TLE as ParagraphEngine
     paragraph P as LayoutParagraphElement
     participant DOM as x-layout-column/spans
 
@@ -273,7 +275,7 @@ flowchart LR
 |-----|------|------|
 | `editableText` | `boolean` get/set | 텍스트 편집 모드를 활성화하거나 비활성화한다. `true` 설정 시 `TextEditController`가 생성되고, `false` 설정 시 제거된다. |
 | `editController` | `TextEditController \| null` get | 현재 연결된 `TextEditController` 인스턴스를 반환한다. 텍스트 편집 모드가 꺼져 있으면 `null`이다. |
-| `model` | `TextLayoutEngine \| null` get | 단락에 연결된 `TextLayoutEngine` 모델을 반환한다. |
+| `model` | `ParagraphEngine \| null` get | 단락에 연결된 `ParagraphEngine` 모델을 반환한다. |
 | `render()` | `void` | 단락을 다시 렌더링한다. 편집 중이면 `editController.postRender()`를 자동으로 호출한다. 렌더링 완료 후 항상 `render-complete` 커스텀 이벤트를 디스패치하여 배치/오버플로우 통계를 전달한다. 오버플로우 발생 시에는 `render-error` 커스텀 이벤트도 디스패치한다. 오버플로우 시 하단 8px 빨간 inset shadow로 시각적 표시를 적용한다 (인쇄 모드 제외). |
 
 ### 3.2 `TextEditController`
@@ -399,6 +401,20 @@ type CurrentStyle = {
   paragraphStyle: ParagraphStyle;  // 커서 위치의 유효한 문단 스타일
 };
 ```
+
+### 3.5.1 `TextEditCoordinateMapper.useEngineCoordinateQueries` (마이그레이션 플래그)
+
+`TextEditCoordinateMapper`는 정적 프로퍼티 `useEngineCoordinateQueries: boolean = false`를 가진다. 이 플래그는 `getCharRect()`의 동작 경로를 전환한다. 점진적 엔진 마이그레이션을 위한 기능 플래그이다.
+
+| 값 | `getCharRect()` 동작 경로 |
+|----|---------------------------|
+| `false` (기본값) | DOM `getBoundingClientRect()` 기반. span rect에서 paragraph rect를 빼고 `EditManager.scale`로 나누어 paragraph local coordinate(mm)를 반환. 기존 동작. |
+| `true` | `ParagraphEngine.getCharRect()` 엔진 쿼리 기반. 엔진이 mm 단위로 직접 계산한 결과를 `ppm`으로 변환하여 반환. DOM 의존성 없음. |
+
+- **기본값 `false`**: 기존 동작을 유지하여 호환성 보장.
+- **`true`로 전환 시**: `ParagraphEngine.getCharRect()`가 mm 단위로 반환한 결과를 `ppm`으로 나누어 픽셀 좌표로 변환. DOM 측정(`getBoundingClientRect`)을 거치지 않으므로 transform: scale 환경에서의 보정(`EditManager.scale`로 나누기)이 불필요.
+- **마이그레이션 목적**: 엔진 레이어(`src/engine/paragraph-engine.ts`)로의 점진적 전환을 위해 도입. 전체 전환 전 두 경로를 공존시켜 검증할 수 있다.
+- **적용 범위**: 현재 `getCharRect()`에만 영향. `getTextRange()`, `getFirstColumnRect()`, `getLineRect()` 등 다른 좌표 API는 여전히 DOM 기반.
 
 - `anchor`는 선택이 시작된 위치, `focus`는 선택이 끝난 위치이다.
 - 역방향 드래그(아래에서 위로)라면 `anchor.textOffset > focus.textOffset`이 될 수 있다.
@@ -1235,7 +1251,7 @@ sequenceDiagram
     participant TA as textarea
     participant EC as TextEditController
     participant Span as 조합 span
-    participant Model as TextLayoutEngine
+    participant Model as ParagraphEngine
 
     User->>TA: 한글 조합 시작
     TA->>EC: compositionstart
@@ -1349,7 +1365,7 @@ sequenceDiagram
 ### 6.7 조합 중 동작 요약
 
 - 커서 위치에 임시 `span`을 삽입한다. 이 span은 `text-decoration: underline` 스타일을 가진다.
-- `compositionupdate`가 발생할 때마다 span의 `innerText`를 갱신하고, `TextLayoutEngine.genCharStyle()`로 글자 스타일을 적용한 뒤 밑줄을 다시 적용한다.
+- `compositionupdate`가 발생할 때마다 span의 `innerText`를 갱신하고, `ParagraphEngine.genCharStyle()`로 글자 스타일을 적용한 뒤 밑줄을 다시 적용한다.
 - 조합 중에 화살표 키를 누르면, 조합을 시각적으로 취소하고 `textarea` 커서를 조합 시작 위치로 되돌린다.
 - `Escape` 키를 누르면 조합 span을 제거하고 조합 상태를 해제한다. `model.textContent`는 조합 전 내용으로 복원된다.
 
@@ -1505,7 +1521,7 @@ flowchart LR
 
 - 낙관적 span은 `data-temporary="true"` 속성을 가진다.
 - 삽입된 문자 바로 이전(또는 `\n` 위치라면 이전 문자 다음)에 생성된다.
-- `TextEditController._createOptimisticSpan()`은 `TextLayoutEngine.genCharStyle()`로 스타일을 적용한다.
+- `TextEditController._createOptimisticSpan()`은 `ParagraphEngine.genCharStyle()`로 스타일을 적용한다.
 - 다음 `postRender()` 호출 시 낙관적 span은 제거되고, 실제 렌더링된 span으로 대체된다.
 
 이 메커니즘은 키 입력과 화면 갱신 사이의 지연을 줄여, 사용자가 입력 지연을 덜 느끼도록 한다.
@@ -2110,6 +2126,6 @@ function redo() {
 
 ## 15. 연관 문서
 
-- `docs/TEXT_ENGINE.md` — `TextLayoutEngine`의 렌더링 파이프라인과 텍스트 래핑 상세 설명
+- `docs/TEXT_ENGINE.md` — `ParagraphEngine`의 렌더링 파이프라인과 텍스트 래핑 상세 설명
 - `AGENTS.md` — 프로젝트 전체 아키텍처 개요
 - `RULES.md` — 코드 수정 규칙과 의도된 설계 결정
