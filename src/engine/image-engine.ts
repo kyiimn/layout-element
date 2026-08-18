@@ -14,6 +14,7 @@ import { DEFAULT_IMAGE_DPI } from "@/constants";
 import type { OverlapMode } from "@/types";
 import type { ImageData, PrintPostData } from "@/types";
 import type { ImageEngineData, MmRect, OverlapResult, OverlapParts, AbsRect } from "./types";
+import { mergeOverlapParts } from "./overlap-engine";
 
 /**
  * RGBA 픽셀 데이터.
@@ -259,7 +260,7 @@ export class ImageEngine {
           return { direction: 'NONE', parts: [] };
         }
 
-        const merged = this._mergeOverlapParts(paddedParts);
+        const merged = mergeOverlapParts(paddedParts);
         if (merged.length === 1 && merged[0].x1 <= 0 && merged[0].x2 >= r1.width) {
           return { direction: 'COVERS', parts: [{ x1: 0, x2: r1.width }] };
         }
@@ -421,25 +422,6 @@ export class ImageEngine {
       }
     }
     return opaqueColumns;
-  }
-
-  /**
-   * 인접한 오버랩 구간을 병합한다.
-   * 기존 `mergeOverlapParts()`와 동일 로직.
-   */
-  private _mergeOverlapParts(parts: OverlapParts[]): OverlapParts[] {
-    if (parts.length === 0) return [];
-    const sorted = [...parts].sort((a, b) => a.x1 - b.x1);
-    const merged: OverlapParts[] = [{ ...sorted[0] }];
-    for (let i = 1; i < sorted.length; i++) {
-      const last = merged[merged.length - 1];
-      if (sorted[i].x1 <= last.x2) {
-        last.x2 = Math.max(last.x2, sorted[i].x2);
-      } else {
-        merged.push({ ...sorted[i] });
-      }
-    }
-    return merged;
   }
 
   /**

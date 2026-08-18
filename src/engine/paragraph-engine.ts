@@ -36,9 +36,9 @@ import {
   PrintPostDataChar,
 } from "@/types";
 import type { BoxEngine } from "./box-engine";
+import type { CursorPlacement } from "@/edit/text-edit-coordinate-mapper";
 import {
   AbsRect,
-  CursorPlacement,
   CursorPosition,
   EngineResources,
   ImageEngineRef,
@@ -46,7 +46,7 @@ import {
   OverlapMode,
   ParagraphOverlapMode,
 } from "./types";
-import { computeOverlapSizeMm } from "./overlap-engine";
+import { computeOverlapSizeMm, mergeOverlapParts } from "./overlap-engine";
 
 /** 엔진 생성 옵션. */
 export interface ParagraphEngineData {
@@ -950,6 +950,7 @@ export class ParagraphEngine {
     this._previousLineCount = -1;
     this._previousOverflow = -1;
     this._layoutCache = null;
+    this._overlayRectsMm = null;
   }
 
   /** 컬럼 스타일 생성 (Flexbox 컨테이너) */
@@ -1356,7 +1357,10 @@ export class ParagraphEngine {
     return this._inheritStyle;
   }
 
-  /** 전체 엔진 데이터를 설정한다. */
+  get data(): ParagraphEngineData {
+    return this._data;
+  }
+
   set data(options: ParagraphEngineData) {
     this._lineHeight = 0;
 
@@ -1504,28 +1508,6 @@ export class ParagraphEngine {
       this._inheritStyle?.parentHeight ?? 0,
     );
   }
-}
-
-/**
- * 인접한 오버랩 구간을 병합한다.
- * `overlap-engine.ts`의 `mergeOverlapParts`와 동일한 로직.
- *
- * @param parts - 병합할 오버랩 구간 배열
- * @returns 병합된 오버랩 구간 배열
- */
-function mergeOverlapParts(parts: OverlapParts[]): OverlapParts[] {
-  if (parts.length === 0) return [];
-  const sorted = [...parts].sort((a, b) => a.x1 - b.x1);
-  const merged: OverlapParts[] = [{ ...sorted[0] }];
-  for (let i = 1; i < sorted.length; i++) {
-    const last = merged[merged.length - 1];
-    if (sorted[i].x1 <= last.x2) {
-      last.x2 = Math.max(last.x2, sorted[i].x2);
-    } else {
-      merged.push({ ...sorted[i] });
-    }
-  }
-  return merged;
 }
 
 /**

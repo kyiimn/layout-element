@@ -9,6 +9,8 @@
  */
 
 export * from "./types";
+export * from "./table-grid-resolver";
+export * from "./border-resolver";
 export * from "./grid-calculator-engine";
 export * from "./image-engine";
 export * from "./overlap-engine";
@@ -18,4 +20,3 @@ export * from "./paragraph-engine";
 export * from "./document-engine";
 export * from "./font-loader-engine";
 export * from "./color-registry-engine";
-export * from "./paragraph-engine";
