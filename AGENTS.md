@@ -36,6 +36,7 @@ Before working on any feature, you **must** read the corresponding documentation
 | Rendering performance | `docs/PERFORMANCE.md` | Any request, modification, or work involving rendering optimization, LRU caching, char width cache, style cache, span skip condition, queueMicrotask batch rendering, incremental style sheet update, or performance-critical hot paths in TextLayoutEngine or column rendering |
 | Vanilla JS API reference | `docs/API.md` | Any request, modification, or work involving Custom Element public API (properties, methods, events), paragraph/image element public properties, utility functions, or constants |
 | React component layer | `docs/REACT_COMPONENT.md` | Any request, modification, or work involving React wrapper components (`LayoutDocument`, `LayoutBox`, `LayoutParagraph`, `LayoutImage`, `LayoutTable`, `LayoutTableRow`, `LayoutTableCell`), their props, or hooks (`useEditManager`, `useLayoutElement`, `useEditableText`) |
+| Engine layer (Node.js) | `docs/ENGINE.md` | Any request, modification, or work involving `src/engine/` classes (`DocumentEngine`, `BoxEngine`, `ParagraphEngine`, `ImageEngine`, `TableEngine`, `GridCalculatorEngine`, `FontLoaderEngineImpl`, `ColorRegistryEngineImpl`), ppm injection, RGBA data, overlap detection, or Node.js compatibility |
 
 **Rule**: Load the doc → understand current state → implement changes → update the doc to reflect what changed.
 
@@ -188,10 +189,22 @@ src/
       index.ts
     index.ts
   core/
-    grid-calculator.ts       # GridCalculator (column grid calculation)
-    text-layout-engine.ts    # TextLayoutEngine (text wrapping engine)
+    grid-calculator.ts       # GridCalculator (column grid calculation, DOM-coupled — legacy)
+    text-layout-engine.ts    # TextLayoutEngine (text wrapping engine — legacy)
     table-grid-resolver.ts   # resolveTableGrid, normalizeWidths (table grid placement + cell size normalization)
     border-resolver.ts       # resolveTableBorders (table border-collapse edge resolution)
+    index.ts                 # re-exports legacy + new engine classes
+  engine/                    # Node.js-compatible pure computation (no DOM/Canvas/FontFace)
+    types.ts                     # AbsRect, MmRect, OverlapResult, EngineResources, etc.
+    grid-calculator-engine.ts    # GridCalculatorEngine (ppm-injected, isBox flag — replaces GridCalculator)
+    image-engine.ts              # ImageEngine (rgbaData-based overlap — replaces canvas getImageData)
+    overlap-engine.ts            # computeOverlapSizeMm, checkOverlapMm (pure functions — replaces getOverlapSizeMm)
+    box-engine.ts                # BoxEngine (abs coords, overlayElements — replaces LayoutBoxElement getters)
+    table-engine.ts              # TableEngine, TableRowEngine, TableCellEngine (wraps resolveTableGrid)
+    paragraph-engine.ts          # ParagraphEngine (refactored TextLayoutEngine + getCharRect/getOffsetFromPoint query API)
+    document-engine.ts           # DocumentEngine (root — ppm injection, resource management)
+    font-loader-engine.ts        # FontLoaderEngineImpl (opentype.js only, no FontFace)
+    color-registry-engine.ts     # ColorRegistryEngineImpl (CMYK→RGB, no fetch)
     index.ts
   edit/
     text-edit-context-adapter.ts  # TextEditContextAdapter (Browser EditContext API adapter)
