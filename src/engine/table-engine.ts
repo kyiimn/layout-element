@@ -7,10 +7,11 @@
  * @file src/engine/table-engine.ts
  */
 
-import { resolveTableGrid, type GridResolution } from "@/core/table-grid-resolver";
+import { resolveTableGrid, type GridResolution } from "./table-grid-resolver";
 import type { TableData } from "@/types";
-import type { BoxEngine } from "./box-engine";
-import type { GridCalculatorEngine } from "./grid-calculator-engine";
+import { BoxEngine } from "./box-engine";
+import { GridCalculatorEngine } from "./grid-calculator-engine";
+import type { AbsRect } from "./types";
 
 /**
  * 테이블 셀 레이아웃 엔진.
@@ -25,6 +26,8 @@ export class TableCellEngine {
   private _cellLabel: string = '';
   private _labels: string[] = [];
   private _boxEngine: BoxEngine | null = null;
+  private _parentAbsRect?: AbsRect;
+  _gridCalculator?: GridCalculatorEngine;
 
   /**
    * 셀 메트릭을 설정한다.
@@ -64,15 +67,23 @@ export class TableCellEngine {
   set boxEngine(engine: BoxEngine | null) { this._boxEngine = engine; }
 
   /**
+   * 상위 테이블(또는 상위 박스)의 절대 사각형을 설정한다.
+   * 셀 내부 박스 엔진이 누적된 페이지 절대 좌표를 계산할 수 있도록 한다.
+   */
+  set parentAbsRect(rect: AbsRect | undefined) { this._parentAbsRect = rect; }
+
+  /**
    * `BoxEngineParent` 인터페이스 구현.
    * 셀 내부 박스가 부모로 참조할 때 사용.
    */
 
-  /** 절대 사각형 (mm) — 셀의 x, y, width, height를 절대 좌표로 변환 */
+  /** 절대 사각형 (mm) — parentAbsRect가 설정되면 페이지 절대 좌표, 아니면 테이블 상대 좌표 */
   get absRect(): { absLeft: number; absTop: number; absWidth: number; absHeight: number } {
+    const dx = this._parentAbsRect?.absLeft ?? 0;
+    const dy = this._parentAbsRect?.absTop ?? 0;
     return {
-      absLeft: this._x,
-      absTop: this._y,
+      absLeft: this._x + dx,
+      absTop: this._y + dy,
       absWidth: this._width,
       absHeight: this._height,
     };
@@ -83,9 +94,9 @@ export class TableCellEngine {
     return false;
   }
 
-  /** 그리드 계산기 (셀은 자체 그리드 없음, null 반환) */
+  /** 그리드 계산기 (셀은 단일 컬럼 그리드) */
   get gridCalculator(): GridCalculatorEngine | null {
-    return null;
+    return this._gridCalculator ?? null;
   }
 
   /** 오버랩 요소 목록 (셀 자체는 오버랩 대상 아님, 빈 배열) */
@@ -97,6 +108,10 @@ export class TableCellEngine {
   get childBoxEngines(): BoxEngine[] {
     return this._boxEngine ? [this._boxEngine] : [];
   }
+
+  findBoxEngineById(id: string): BoxEngine | undefined {
+    return this._boxEngine?.data.id === id ? this._boxEngine : undefined;
+  }
 }
 
 /**
@@ -107,6 +122,7 @@ export class TableRowEngine {
   private _y: number = 0;
   private _height: number = 0;
   private _rowIndex: number = 0;
+  private _rowLabel: string = '';
   private _cellEngines: TableCellEngine[] = [];
 
   /**
@@ -116,12 +132,17 @@ export class TableRowEngine {
    * @param height - 행 높이 (mm)
    * @param contentWidth - 콘텐츠 너비 (mm)
    * @param rowIndex - 행 인덱스
+   * @param rowLabel - 행 라벨 (예: "A")
    */
-  setRowMetrics(y: number, height: number, _contentWidth: number, rowIndex: number): void {
+  setRowMetrics(y: number, height: number, _contentWidth: number, rowIndex: number, rowLabel: string = ''): void {
     this._y = y;
     this._height = height;
     this._rowIndex = rowIndex;
+    this._rowLabel = rowLabel;
   }
+
+  /** 행 라벨 */
+  get rowLabel(): string { return this._rowLabel; }
 
   /** 행 Y (mm) */
   get y(): number { return this._y; }
@@ -203,6 +224,16 @@ export class TableEngine {
   }
 
   /**
+   * 셀 라벨로 셀 엔진을 찾는다.
+   *
+   * @param label - 셀 라벨 (예: "A1")
+   * @returns 일치하는 TableCellEngine 또는 undefined
+   */
+  findCellEngineByLabel(label: string): TableCellEngine | undefined {
+    return this.cellEngines.find(e => e.cellLabel === label);
+  }
+
+  /**
    * 테이블 그리드를 해석하고 셀 배치를 계산한다.
    * `resolveTableGrid()`를 호출하고 결과를 행/셀 엔진에 분배.
    */
@@ -226,24 +257,86 @@ export class TableEngine {
     for (let r = 0; r < rows.length && r < this._gridResolution.rowHeights.length; r++) {
       const rowHeight = this._gridResolution.rowHeights[r];
       const y = this._gridResolution.rowHeights.slice(0, r).reduce((sum, h) => sum + h, 0);
-      this._rowEngines[r].setRowMetrics(y, rowHeight, contentWidth, r);
+      const rowLabel = TableEngine._indexToRowLabel(r);
+      this._rowEngines[r].setRowMetrics(y, rowHeight, contentWidth, r, rowLabel);
 
       // 셀 엔진 구축
       const rowPlacements = this._gridResolution.placements.filter(p => p.gridRow === r);
-      const cellEngines = rowPlacements.map(p => {
+      const cellEngines = rowPlacements.map((p, idx) => {
         const cellEngine = new TableCellEngine();
         const trY = y;
+        const cellData = rows[r].children[idx];
+        const cellLabel = TableEngine._buildCellLabel(rowLabel, p.gridCol);
+        const labels = TableEngine._buildCellLabels(p);
         cellEngine.setCellMetrics(
           p.x,
           p.y - trY,
           p.width,
           p.height,
-          '',  // cellLabel — 엘리먼트에서 설정
-          [],  // labels — 엘리먼트에서 설정
+          cellLabel,
+          labels,
         );
+        cellEngine.parentAbsRect = parentAbsRect;
+        cellEngine._gridCalculator = GridCalculatorEngine.create({
+          width: p.width,
+          height: p.height,
+          columns: 1,
+          gap: 0,
+          paddingTop: cellData?.paddingTop ?? 0,
+          paddingRight: cellData?.paddingRight ?? 0,
+          paddingBottom: cellData?.paddingBottom ?? 0,
+          paddingLeft: cellData?.paddingLeft ?? 0,
+          paragraphStyle: {},
+          textStyle: {},
+          isBox: true,
+        });
         return cellEngine;
       });
       this._rowEngines[r].cellEngines = cellEngines;
     }
+  }
+
+  /**
+   * 행 인덱스를 행 라벨로 변환한다 (0 → "A", 1 → "B", ...).
+   *
+   * @param index - 행 인덱스
+   * @returns 행 라벨 문자열
+   */
+  private static _indexToRowLabel(index: number): string {
+    let label = '';
+    let n = index;
+    do {
+      label = String.fromCharCode(65 + (n % 26)) + label;
+      n = Math.floor(n / 26) - 1;
+    } while (n >= 0);
+    return label;
+  }
+
+  /**
+   * 셀 라벨을 생성한다 (예: "A1").
+   *
+   * @param rowLabel - 행 라벨
+   * @param gridCol - 그리드 열 인덱스
+   * @returns 셀 라벨 문자열
+   */
+  private static _buildCellLabel(rowLabel: string, gridCol: number): string {
+    return `${rowLabel}${gridCol + 1}`;
+  }
+
+  /**
+   * 셀이 커버하는 모든 라벨 목록을 생성한다.
+   *
+   * @param placement - 셀 배치 정보
+   * @returns 커버하는 라벨 문자열 배열
+   */
+  private static _buildCellLabels(placement: GridResolution['placements'][number]): string[] {
+    const labels: string[] = [];
+    for (let dr = 0; dr < placement.spanRows; dr++) {
+      const subRowLabel = TableEngine._indexToRowLabel(placement.gridRow + dr);
+      for (let dc = 0; dc < placement.spanCols; dc++) {
+        labels.push(`${subRowLabel}${placement.gridCol + dc + 1}`);
+      }
+    }
+    return labels;
   }
 }

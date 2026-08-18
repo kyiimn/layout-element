@@ -22,7 +22,9 @@ import type {
   TextStyle,
   TextLineData,
 } from "@/types";
-import type { GridResolution } from "@/core/table-grid-resolver";
+import type { GridResolution } from "./table-grid-resolver";
+import type { BoxEngine } from "./box-engine";
+import type { GridCalculatorEngine } from "./grid-calculator-engine";
 
 // 로컬에서 사용하지 않고 재내보내기만 하는 타입 (noUnusedLocals 회피)
 export type {
@@ -135,6 +137,16 @@ export interface ImageEngineRef {
 
 /** 박스가 담고 있는 콘텐츠의 종류 */
 export type BoxContentType = "image" | "paragraph" | "table" | null;
+
+/** BoxEngine이 부모로 참조하는 최소 인터페이스. */
+export interface BoxEngineParent {
+  gridCalculator: GridCalculatorEngine | null;
+  absRect: AbsRect;
+  isDocument: boolean;
+  overlayElements: BoxEngine[];
+  childBoxEngines: BoxEngine[];
+  findBoxEngineById(id: string): BoxEngine | undefined;
+}
 
 // ─────────────────────────────────────────────────────────────
 // 리소스 엔진 인터페이스
@@ -354,20 +366,6 @@ export type LayoutResult =
   | ParagraphLayoutResult;
 
 // ─────────────────────────────────────────────────────────────
-// 커서 배치 타입 (엔진 쿼리 API용)
-// ─────────────────────────────────────────────────────────────
-
-/**
- * 커서 배치 정보.
- * 특정 source offset에 커서를 표시할 위치를 나타낸다.
- */
-export interface CursorPlacement {
-  /** 커서가 참조할 가시 문자의 source offset */
-  sourceOffset: number;
-  /** true면 커서를 문자의 우측 끝에 배치, false면 좌측에 배치 */
-  atEndOfChar: boolean;
-}
-
 // 로컬에서 import한 타입을 엔진 파일들이 ./types에서 import할 수 있도록 재내보내기.
 export type {
   OverlapParts,
@@ -383,4 +381,4 @@ export type {
   TextLineData,
 } from "@/types";
 
-export type { GridResolution } from "@/core/table-grid-resolver";
+export type { GridResolution } from "./table-grid-resolver";

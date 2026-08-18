@@ -17,8 +17,7 @@ import { GridCalculatorEngine } from "./grid-calculator-engine";
 import { BoxEngine } from "./box-engine";
 import { ImageEngine } from "./image-engine";
 import { ParagraphEngine } from "./paragraph-engine";
-import { TableEngine } from "./table-engine";
-import type { TableCellEngine } from "./table-engine";
+import { TableEngine, type TableCellEngine } from "./table-engine";
 
 /**
  * 문서 전체의 레이아웃을 계산하는 루트 엔진.
@@ -157,6 +156,14 @@ export class DocumentEngine {
   }
 
   /**
+   * 자신을 부모로 하는 직계 박스 엔진 중 ID가 일치하는 것을 반환한다.
+   * BoxEngineParent 인터페이스를 구현.
+   */
+  findBoxEngineById(id: string): BoxEngine | undefined {
+    return this._childBoxEngines.find(e => e.data != null && e.data.id === id);
+  }
+
+  /**
    * 엔진 리소스 번들을 반환한다.
    * 하위 엔진 생성 시 전달용.
    */
@@ -227,6 +234,28 @@ export class DocumentEngine {
       boxEngines.push(be);
     }
     this._childBoxEngines = boxEngines;
+    this._refreshParagraphOverlays(boxEngines);
+  }
+
+  private _refreshParagraphOverlays(boxEngines: BoxEngine[]): void {
+    for (const be of boxEngines) {
+      const childEngines = be.childEngines;
+      for (const ce of childEngines) {
+        if (ce instanceof ParagraphEngine) {
+          const overlayEngines = be.overlayElements;
+          if (overlayEngines.length > 0) {
+            ce.data = { ...ce.data, overlayEngines };
+            ce.resetIncrementalState();
+            ce.layoutStructure();
+            ce.layoutText();
+          }
+        }
+      }
+      const childBoxes = be.childBoxEngines;
+      if (childBoxes.length > 0) {
+        this._refreshParagraphOverlays(childBoxes);
+      }
+    }
   }
 
   /**
@@ -236,8 +265,13 @@ export class DocumentEngine {
    * @param parent - 부모 엔진 (DocumentEngine | BoxEngine | TableCellEngine)
    * @returns 구축된 BoxEngine
    */
-  private _buildBoxEngine(boxData: BoxData, parent: BoxEngine | DocumentEngine | import("./table-engine").TableCellEngine): BoxEngine {
-    const boxEngine = BoxEngine.create(boxData, parent);
+  private _buildBoxEngine(boxData: BoxData, parent: BoxEngine | DocumentEngine | TableCellEngine): BoxEngine {
+    const existingBox = parent.findBoxEngineById?.(boxData.id ?? '');
+    const boxEngine = existingBox ?? BoxEngine.create(boxData, parent);
+    if (existingBox) {
+      existingBox.data = boxData;
+      existingBox.parent = parent;
+    }
 
     // 박스 자체 그리드 계산기 생성 (자식 박스 배치용)
     const inheritStyle = this._buildInheritStyle(boxData, parent);
@@ -325,6 +359,15 @@ export class DocumentEngine {
       resources: this.resources,
     };
 
+    const existingPara = parentBox.childEngines.find(e => e instanceof ParagraphEngine);
+    if (existingPara) {
+      const pe = existingPara as ParagraphEngine;
+      pe.data = engineData;
+      pe.layoutStructure();
+      pe.layoutText();
+      return pe;
+    }
+
     const pe = ParagraphEngine.create(engineData);
     pe.layoutStructure();
     pe.layoutText();
@@ -335,7 +378,25 @@ export class DocumentEngine {
    * ImageData로부터 ImageEngine을 구축한다.
    * rgbaData는 이 시점에서 주입되지 않는다 — 외부에서 별도로 주입해야 한다.
    */
-  private _buildImageEngine(imgData: ImageData, _parentBox: BoxEngine): ImageEngine {
+  private _buildImageEngine(imgData: ImageData, parentBox: BoxEngine): ImageEngine {
+    const existing = parentBox.childEngines.find(e => e instanceof ImageEngine);
+    if (existing) {
+      const imgEngine = existing as ImageEngine;
+      imgEngine.data = {
+        url: imgData.url,
+        x: imgData.x,
+        y: imgData.y,
+        width: imgData.width,
+        height: imgData.height,
+        dpi: imgData.dpi,
+        overlapPadding: imgData.overlapPadding,
+        overlapMode: imgData.overlapMode ?? 'path',
+        objectFit: imgData.objectFit ?? 'cover',
+        originalWidth: imgData.originalWidth,
+        originalHeight: imgData.originalHeight,
+      };
+      return imgEngine;
+    }
     return ImageEngine.create({
       url: imgData.url,
       x: imgData.x,
@@ -351,12 +412,28 @@ export class DocumentEngine {
     });
   }
 
-  /**
-   * TableData로부터 TableEngine을 구축한다.
-   */
   private _buildTableEngine(tableData: TableData, parentBox: BoxEngine): TableEngine {
     const te = TableEngine.create(tableData, parentBox);
     te.layout();
+
+    const rows = tableData.children ?? [];
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      const cellEngines = te.rowEngines[r]?.cellEngines ?? [];
+      for (let c = 0; c < cellEngines.length && c < row.children.length; c++) {
+        const cellEngine = cellEngines[c];
+        const cellData = row.children[c];
+        const cellChildren = cellData?.children;
+        if (!cellChildren || cellChildren.length === 0) continue;
+
+        const cellBoxData = cellChildren.length === 1
+          ? cellChildren[0]
+          : { type: 'box' as const, left: 0, top: 0, width: 1, height: 1, children: cellChildren };
+        const cellBoxEngine = this._buildBoxEngine(cellBoxData, cellEngine);
+        cellEngine.boxEngine = cellBoxEngine;
+      }
+    }
+
     return te;
   }
 

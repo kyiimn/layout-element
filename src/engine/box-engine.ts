@@ -19,15 +19,9 @@ import { ImageEngine } from "./image-engine";
 import { ParagraphEngine } from "./paragraph-engine";
 import { TableEngine } from "./table-engine";
 import { checkOverlapMm } from "./overlap-engine";
+import type { BoxEngineParent } from "./types";
 import { DocumentEngine } from "./document-engine";
-import type { TableCellEngine } from "./table-engine";
 import { DEFAULT_BORDER_STYLE } from "@/constants";
-
-/**
- * 박스 엔진의 부모 타입.
- * DocumentEngine, BoxEngine, TableCellEngine 중 하나.
- */
-export type BoxEngineParent = DocumentEngine | BoxEngine | TableCellEngine;
 
 /**
  * 박스 레이아웃과 좌표를 계산하는 순수 엔진.
@@ -290,6 +284,20 @@ export class BoxEngine {
 
     list.push(...overlay);
     return list;
+  }
+
+  findChildEngineById(id: string): BoxEngine | ImageEngine | ParagraphEngine | TableEngine | undefined {
+    return this._childEngines.find(e => e.data != null && 'id' in e.data && e.data.id === id);
+  }
+
+  /**
+   * 자신을 부모로 하는 직계 박스 엔진 중 ID가 일치하는 것을 반환한다.
+   * BoxEngineParent 인터페이스를 구현.
+   */
+  findBoxEngineById(id: string): BoxEngine | undefined {
+    return this._childEngines.find(
+      (e): e is BoxEngine => e instanceof BoxEngine && e.data.id === id,
+    );
   }
 
   /**
