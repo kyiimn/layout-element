@@ -188,17 +188,15 @@ src/
       td.element.ts             # <x-layout-td> (table cell, box-equivalent)
       index.ts
     index.ts
-  core/
-    table-grid-resolver.ts   # resolveTableGrid, normalizeWidths (table grid placement + cell size normalization)
-    border-resolver.ts       # resolveTableBorders (table border-collapse edge resolution)
-    index.ts                 # re-exports engine classes + table/border resolvers
   engine/                    # Node.js-compatible pure computation (no DOM/Canvas/FontFace)
     types.ts                     # AbsRect, MmRect, OverlapResult, EngineResources, etc.
+    table-grid-resolver.ts       # resolveTableGrid, normalizeWidths (table grid placement + cell size normalization)
+    border-resolver.ts           # resolveTableBorders (table border-collapse edge resolution)
     grid-calculator-engine.ts    # GridCalculatorEngine (ppm-injected, isBox flag — replaces GridCalculator)
     image-engine.ts              # ImageEngine (rgbaData-based overlap — replaces canvas getImageData)
-    overlap-engine.ts            # computeOverlapSizeMm, checkOverlapMm (pure functions — replaces getOverlapSizeMm)
-    box-engine.ts                # BoxEngine (abs coords, overlayElements — replaces LayoutBoxElement getters)
-    table-engine.ts              # TableEngine, TableRowEngine, TableCellEngine (wraps resolveTableGrid)
+    overlap-engine.ts            # computeOverlapSizeMm, checkOverlapMm, mergeOverlapParts (pure functions)
+    box-engine.ts                # BoxEngine (abs coords, overlayElements, findChildEngineById — replaces LayoutBoxElement getters)
+    table-engine.ts              # TableEngine, TableRowEngine, TableCellEngine (wraps resolveTableGrid, findCellEngineByLabel)
     paragraph-engine.ts          # ParagraphEngine (refactored TextLayoutEngine + getCharRect/getOffsetFromPoint query API)
     document-engine.ts           # DocumentEngine (root — ppm injection, resource management)
     font-loader-engine.ts        # FontLoaderEngineImpl (opentype.js only, no FontFace)
@@ -259,9 +257,8 @@ src/
     defaults.ts              # DEFAULT_*, Z_INDEX_* constants
     line-break.ts            # LINE_START_FORBIDDEN / LINE_END_FORBIDDEN + isLineStartForbidden / isLineEndForbidden (한글 금칙문자)
     index.ts
-  utils/                     # checkOverlap, mergeOverlapParts, MmRect, genUUID, ai-processing-overlay, objectFit, valueEqual, staticGridContains, clampStaticToContainer, clampAbsoluteToContainer
+  utils/                     # genUUID, ai-processing-overlay, objectFit, valueEqual, staticGridContains, clampStaticToContainer, clampAbsoluteToContainer
     ai-processing-overlay.ts   # createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay
-    check-overlap.ts
     gen-uuid.ts
     image-fit.ts               # computeObjectFit (objectFit 프리셋 → mm 좌표/크기 변환)
     lru-cache.ts               # LRU<K,V> 제네릭 LRU 캐시 (LRU eviction, capacity 기반)

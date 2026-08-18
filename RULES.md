@@ -478,7 +478,7 @@
 
 ### 8.3 타입/코어/리소스 재출력 확인
 
-- `src/types/`, `src/core/`, `src/resource/`, `src/constants/`, `src/edit/`에
+- `src/types/`, `src/engine/`, `src/resource/`, `src/constants/`, `src/edit/`에
   새로운 공개 export를 추가하면 `src/react/index.ts`에서 재출력되는지 확인할 것.
 - React 엔트리는 vanilla 라이브러리의 모든 공개 API를 노출해야 한다.
 
