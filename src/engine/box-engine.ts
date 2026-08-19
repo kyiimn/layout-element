@@ -390,7 +390,7 @@ export class BoxEngine {
         }));
       }
       else if (child instanceof TableEngine) {
-        // TableEngine의 printPostData는 향후 구현
+        data.push(...child.printPostData);
       }
     }
 

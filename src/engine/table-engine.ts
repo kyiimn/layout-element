@@ -8,7 +8,7 @@
  */
 
 import { resolveTableGrid, type GridResolution } from "./table-grid-resolver";
-import type { TableData } from "@/types";
+import type { TableData, PrintPostData } from "@/types";
 import { BoxEngine } from "./box-engine";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
 import type { AbsRect } from "./types";
@@ -294,6 +294,27 @@ export class TableEngine {
       });
       this._rowEngines[r].cellEngines = cellEngines;
     }
+  }
+
+  /**
+   * 테이블의 printPostData를 생성한다.
+   *
+   * 각 셀의 boxEngine이 가진 printPostData를 z-index 오름차순으로 수집하여 반환.
+   * 셀에 boxEngine이 없으면 빈 배열을 반환.
+   *
+   * @returns PrintPostData 배열 (z-index 오름차순, mm 단위)
+   */
+  get printPostData(): PrintPostData[] {
+    const data: PrintPostData[] = [];
+    for (const rowEngine of this._rowEngines) {
+      for (const cellEngine of rowEngine.cellEngines) {
+        const boxEngine = cellEngine.boxEngine;
+        if (boxEngine) {
+          data.push(...boxEngine.printPostData);
+        }
+      }
+    }
+    return data;
   }
 
   /**
