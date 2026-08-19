@@ -142,9 +142,9 @@ export class LayoutParagraphElement extends HTMLElement {
       this._model = existing;
     }
 
-    const overlayBoxEngines: import("@/engine").BoxEngine[] = this.overlayElements
-      .map(el => el.engine)
-      .filter((e): e is import("@/engine").BoxEngine => e !== undefined);
+    const overlayBoxEngines: import("@/engine").BoxEngine[] = parentBoxEngine
+      ? parentBoxEngine.overlayElements
+      : [];
 
     const engineData: ParagraphEngineData = {
       content: this._model?.textContent ?? this._sourceContent,
@@ -289,9 +289,10 @@ export class LayoutParagraphElement extends HTMLElement {
     } else {
       const parentBox = this.parentElement;
       if (parentBox) {
-        const overlayBoxEngines: import("@/engine").BoxEngine[] = this.overlayElements
-          .map(el => el.engine)
-          .filter((e): e is import("@/engine").BoxEngine => e !== undefined);
+        const parentBoxEngine = parentBox.engine;
+        const overlayBoxEngines: import("@/engine").BoxEngine[] = parentBoxEngine
+          ? parentBoxEngine.overlayElements
+          : [];
         this._model.updateOverlayContext(
           overlayBoxEngines,
           {

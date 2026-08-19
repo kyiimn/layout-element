@@ -1247,48 +1247,17 @@ export class LayoutBoxElement extends HTMLElement {
 
   get absHeight(): number { return this._engine?.absHeight ?? 0; }
 
-  get overlayElements() {
-    const list: LayoutBoxElement[] = [];
-    if (this._getParentType() !== 'document') {
-      list.push(...this._getParentOverlayElements());
-    }
-
-    let overlay = this.parentElement.items.filter(i => i.type === 'box' && i !== this && i.zIndex > this.zIndex) as LayoutBoxElement[];
-    overlay = overlay.filter(i => {
-      if (i.contentType === 'image') {
-        const imgEl = i.contentElement as LayoutImageElement | null;
-        if (imgEl && imgEl.overlapMode === 'none') return false;
-      }
-      if (i.contentType === 'paragraph') {
-        const paraEl = i.contentElement as LayoutParagraphElement | null;
-        if (paraEl && paraEl.overlapMode === 'none') return false;
-      }
-      if (i.contentType === null) {
-        const paraEl = i.querySelector('x-layout-paragraph') as LayoutParagraphElement | null;
-        if (paraEl && paraEl.overlapMode === 'none') return false;
-      }
-      return true;
-    });
-    overlay = overlay.filter(i => checkOverlapMm(i, this));
-
-    list.push(...overlay);
-
-    return list;
-  }
-
-  private _getParentType(): 'document' | 'box' | 'td' | 'unknown' {
-    const p = this.parentElement as LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement;
-    if (p instanceof LayoutDocumentElement) return 'document';
-    if (p instanceof LayoutBoxElement) return 'box';
-    if (p.type === 'td') return 'td';
-    return 'unknown';
-  }
-
-  private _getParentOverlayElements(): LayoutBoxElement[] {
-    const p = this.parentElement as LayoutBoxElement | LayoutTableCellElement;
-    if (p instanceof LayoutBoxElement) return p.overlayElements;
-    if (p.type === 'td') return (p as LayoutTableCellElement).overlayElements;
-    return [];
+  get overlayElements(): LayoutBoxElement[] {
+    if (!this._engine) return [];
+    const engineOverlay = this._engine.overlayElements;
+    return engineOverlay
+      .map(e => {
+        const id = e.data.id;
+        if (!id) return undefined;
+        const docEl = this._findDocumentElement();
+        return docEl?.querySelector('#' + CSS.escape(id)) as LayoutBoxElement | null;
+      })
+      .filter((el): el is LayoutBoxElement => el instanceof LayoutBoxElement);
   }
 
   get printPostData() {
