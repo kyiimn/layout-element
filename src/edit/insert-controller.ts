@@ -612,8 +612,6 @@ export class InsertController {
 
   /** 삽입할 DOM 요소를 생성한다. */
   private _createElement(mode: InsertMode, container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement, left: number, top: number, width: number, height: number, zIndex: number): HTMLElement {
-    const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
-
     const boxData: BoxData = {
       type: 'box',
       left,
@@ -637,11 +635,7 @@ export class InsertController {
       boxData.children = this._createTableData(rows, cols, fillCells);
     }
 
-    boxEl.data = boxData;
-
-    container.appendChild(boxEl);
-
-    boxEl.requestRerenderAffectedParagraphs();
+    const boxEl = container.appendChildData(boxData);
 
     return boxEl;
   }

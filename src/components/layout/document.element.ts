@@ -309,7 +309,27 @@ export class LayoutDocumentElement extends HTMLElement {
 
     this._engine.layout();
 
+    this._syncEngineIdsToDom();
+
     return this;
+  }
+
+  /**
+   * 엔진 트리의 id를 DOM 자식 요소에 동기화한다.
+   * DocumentEngine._buildBoxEngine이 BoxData.id가 없을 때 generateEngineId()로
+   * id를 발급한다. 이 id를 DOM 요소에 write-back하여,
+   * 자식 connectedCallback의 findBoxEngineById(this.id)가 정상 작동하도록 한다.
+   */
+  private _syncEngineIdsToDom(): void {
+    if (!this._engine) return;
+    const engineBoxes = this._engine.childBoxEngines;
+    const domBoxes = this.items;
+    for (let i = 0; i < engineBoxes.length && i < domBoxes.length; i++) {
+      const engineId = engineBoxes[i].data.id;
+      if (engineId && domBoxes[i].id !== engineId) {
+        domBoxes[i].id = engineId;
+      }
+    }
   }
 
   /**

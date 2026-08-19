@@ -215,27 +215,67 @@ export class LayoutBoxElement extends HTMLElement {
     const parentEngine = this._findParentEngine();
     if (!parentEngine) return;
 
+    const boxData: BoxData = {
+      type: 'box',
+      id: this.id || undefined,
+      left: this._left,
+      top: this._top,
+      width: this._width,
+      height: this._height,
+      position: this._position,
+      zIndex: this._zIndex,
+      role: this._role,
+      paddingTop: this._paddingTop,
+      paddingRight: this._paddingRight,
+      paddingBottom: this._paddingBottom,
+      paddingLeft: this._paddingLeft,
+    };
+
     const found = this.id ? parentEngine.findBoxEngineById(this.id) : undefined;
     if (found instanceof BoxEngine) {
       this._engine = found;
       this._model = found.gridCalculator ?? undefined;
+      found.data = boxData;
+      found.parent = parentEngine;
       if (this._model) {
         this._syncGridCalculatorData();
       }
-      this._updateEngine(parentEngine);
       return;
     }
 
-    this._updateEngine(parentEngine);
-
-    if (this._engine && !parentEngine.childBoxEngines.includes(this._engine)) {
-      if (parentEngine instanceof BoxEngine) {
-        parentEngine.childEngines = [...parentEngine.childEngines, this._engine];
-      } else if (parentEngine instanceof DocumentEngine) {
-        parentEngine.childBoxEngines = [...parentEngine.childBoxEngines, this._engine];
-      } else if (parentEngine instanceof TableCellEngine) {
-        parentEngine.boxEngine = this._engine;
+    if (!this._engine) {
+      this._engine = BoxEngine.create(boxData, parentEngine);
+      if (!this._model) {
+        this._model = GridCalculatorEngine.create({
+          width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}, isBox: true,
+        }, this._getPpm());
       }
+      this._engine.gridCalculator = this._model;
+      this._registerInParent(parentEngine);
+    } else {
+      this._engine.data = boxData;
+      this._engine.parent = parentEngine;
+      if (this._model && this._engine.gridCalculator !== this._model) {
+        this._engine.gridCalculator = this._model;
+      }
+      if (this._model) {
+        this._syncGridCalculatorData();
+      }
+    }
+  }
+
+  /**
+   * 부모 엔진 트리에 this._engine을 등록한다.
+   * 이미 등록되어 있으면 스킵하여 중복을 방지한다.
+   */
+  private _registerInParent(parentEngine: BoxEngineParent): void {
+    if (!this._engine || parentEngine.childBoxEngines.includes(this._engine)) return;
+    if (parentEngine instanceof BoxEngine) {
+      parentEngine.childEngines = [...parentEngine.childEngines, this._engine];
+    } else if (parentEngine instanceof DocumentEngine) {
+      parentEngine.childBoxEngines = [...parentEngine.childBoxEngines, this._engine];
+    } else if (parentEngine instanceof TableCellEngine) {
+      parentEngine.boxEngine = this._engine;
     }
   }
 
@@ -310,56 +350,6 @@ export class LayoutBoxElement extends HTMLElement {
       return (tdParent as LayoutTableCellElement).engine?.boxEngine ?? null;
     }
     return null;
-  }
-
-  /**
-   * BoxEngine 인스턴스를 재사용/생성하고 데이터를 갱신한다.
-   * 부모 엔진 트리가 이미 BoxEngine을 포함하면 그것을 재사용.
-   */
-  private _updateEngine(parentEngineParent: BoxEngineParent): void {
-    const boxData: BoxData = {
-      type: 'box',
-      id: this.id || undefined,
-      left: this._left,
-      top: this._top,
-      width: this._width,
-      height: this._height,
-      position: this._position,
-      zIndex: this._zIndex,
-      role: this._role,
-      paddingTop: this._paddingTop,
-      paddingRight: this._paddingRight,
-      paddingBottom: this._paddingBottom,
-      paddingLeft: this._paddingLeft,
-    };
-
-    const prebuilt = this.id ? parentEngineParent.findBoxEngineById(this.id) : undefined;
-    if (prebuilt instanceof BoxEngine) {
-      this._engine = prebuilt;
-      prebuilt.data = boxData;
-      prebuilt.parent = parentEngineParent;
-      this._model = prebuilt.gridCalculator ?? undefined;
-      if (this._model) {
-        this._syncGridCalculatorData();
-      }
-      return;
-    }
-
-    if (!this._engine) {
-      this._engine = BoxEngine.create(boxData, parentEngineParent);
-      if (!this._model) {
-        this._model = GridCalculatorEngine.create({
-          width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}, isBox: true,
-        }, this._getPpm());
-      }
-      this._engine.gridCalculator = this._model;
-    } else {
-      this._engine.data = boxData;
-      this._engine.parent = parentEngineParent;
-      if (this._model && this._engine.gridCalculator !== this._model) {
-        this._engine.gridCalculator = this._model;
-      }
-    }
   }
 
   private _findDocumentElement(): LayoutDocumentElement | null {

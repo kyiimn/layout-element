@@ -680,10 +680,7 @@ export class PlaceGunController {
       zIndex,
     };
 
-    const newBoxEl = document.createElement('x-layout-box') as LayoutBoxElement;
-    newBoxEl.data = newBoxData;
-    container.appendChild(newBoxEl);
-    newBoxEl.requestRerenderAffectedParagraphs();
+    const newBoxEl = container.appendChildData(newBoxData) as LayoutBoxElement;
 
     this._manager._dispatchLayoutAdd({
       element: newBoxEl,

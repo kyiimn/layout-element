@@ -19,6 +19,17 @@ import { ImageEngine } from "./image-engine";
 import { ParagraphEngine } from "./paragraph-engine";
 import { TableEngine, TableCellEngine } from "./table-engine";
 
+let _engineIdCounter = 0;
+
+function generateEngineId(): string {
+  _engineIdCounter++;
+  const cryptoApi = (typeof globalThis !== 'undefined' && (globalThis as { crypto?: Crypto }).crypto);
+  if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+    return cryptoApi.randomUUID();
+  }
+  return 'eng-' + Date.now().toString(36) + '-' + _engineIdCounter.toString(36);
+}
+
 /**
  * 문서 전체의 레이아웃을 계산하는 루트 엔진.
  *
@@ -332,6 +343,10 @@ export class DocumentEngine {
    * @returns 구축된 BoxEngine
    */
   private _buildBoxEngine(boxData: BoxData, parent: BoxEngine | DocumentEngine | TableCellEngine): BoxEngine {
+    if (!boxData.id) {
+      boxData = { ...boxData, id: generateEngineId() };
+    }
+
     const existingBox = parent.findBoxEngineById?.(boxData.id ?? '');
     if (existingBox) {
       const oldParent = existingBox.parent;
