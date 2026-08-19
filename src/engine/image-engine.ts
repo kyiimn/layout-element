@@ -205,6 +205,9 @@ export class ImageEngine {
     };
 
     const rgba = this._rgbaData!;
+    if (imgMmRect.width <= 0 || imgMmRect.height <= 0) {
+      return { direction: 'NONE', parts: [] };
+    }
     const scaleX = rgba.width / imgMmRect.width;
     const scaleY = rgba.height / imgMmRect.height;
 

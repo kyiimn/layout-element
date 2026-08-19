@@ -11,13 +11,13 @@
  */
 
 import type { DocumentData, BoxData, ParagraphData, ImageData, TableData, InheritStyle } from "@/types";
-import type { AbsRect, FontLoaderEngine, ColorRegistryEngine } from "./types";
+import type { AbsRect, FontLoaderEngine, ColorRegistryEngine, BoxEngineParent } from "./types";
 import type { PrintPostData } from "@/types";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
 import { BoxEngine } from "./box-engine";
 import { ImageEngine } from "./image-engine";
 import { ParagraphEngine } from "./paragraph-engine";
-import { TableEngine, type TableCellEngine } from "./table-engine";
+import { TableEngine, TableCellEngine } from "./table-engine";
 
 /**
  * 문서 전체의 레이아웃을 계산하는 루트 엔진.
@@ -83,6 +83,7 @@ export class DocumentEngine {
   set data(d: DocumentData) {
     this._data = d;
     this._gridCalculator = this._createGridCalculator();
+    this._childBoxEngines = [];
   }
 
   /** 현재 문서 데이터 */
@@ -223,6 +224,30 @@ export class DocumentEngine {
   }
 
   /**
+   * 기존 부모 엔진에서 박스 엔진 참조를 제거한다.
+   *
+   * `_buildBoxEngine`에서 reparent(동일 id 박스가 다른 컨테이너로 이동) 시
+   * 기존 부모의 `childEngines`/`childBoxEngines`/`boxEngine`에서 제거하지 않으면
+   * 두 부모가 동일 child를 소유하여 `printPostData` 순회 시 잘못된 absRect 계산이
+   * 발생한다. 부모 타입에 따라 적절한 컬렉션에서 제거한다.
+   *
+   * @param box - 제거할 박스 엔진
+   * @param oldParent - 기존 부모 엔진 (BoxEngineParent 인터페이스)
+   */
+  private _removeBoxFromParent(box: BoxEngine, oldParent: BoxEngineParent): void {
+    if (oldParent instanceof BoxEngine) {
+      const children = oldParent.childEngines;
+      const idx = children.indexOf(box);
+      if (idx >= 0) children.splice(idx, 1);
+    } else if (oldParent instanceof DocumentEngine) {
+      const idx = oldParent.childBoxEngines.indexOf(box);
+      if (idx >= 0) oldParent.childBoxEngines.splice(idx, 1);
+    } else if (oldParent instanceof TableCellEngine) {
+      if (oldParent.boxEngine === box) oldParent.boxEngine = null;
+    }
+  }
+
+  /**
    * DocumentData로부터 전체 엔진 트리를 재귀적으로 구축한다.
    *
    * @param data - 문서 데이터
@@ -239,12 +264,21 @@ export class DocumentEngine {
 
   private _refreshParagraphOverlays(boxEngines: BoxEngine[]): void {
     for (const be of boxEngines) {
+      const inheritStyle = this._buildInheritStyle(be.data, be.parent);
       const childEngines = be.childEngines;
       for (const ce of childEngines) {
         if (ce instanceof ParagraphEngine) {
           const overlayEngines = be.overlayElements;
           if (overlayEngines.length > 0) {
-            ce.data = { ...ce.data, overlayEngines };
+            ce.data = {
+              ...ce.data,
+              overlayEngines,
+              inheritStyle: {
+                ...inheritStyle,
+                parentHeight: be.absHeight,
+                parentWidth: be.absWidth,
+              },
+            };
             ce.resetIncrementalState();
             ce.layoutStructure();
             ce.layoutText();
@@ -267,11 +301,15 @@ export class DocumentEngine {
    */
   private _buildBoxEngine(boxData: BoxData, parent: BoxEngine | DocumentEngine | TableCellEngine): BoxEngine {
     const existingBox = parent.findBoxEngineById?.(boxData.id ?? '');
-    const boxEngine = existingBox ?? BoxEngine.create(boxData, parent);
     if (existingBox) {
+      const oldParent = existingBox.parent;
+      if (oldParent !== parent) {
+        this._removeBoxFromParent(existingBox, oldParent);
+      }
       existingBox.data = boxData;
       existingBox.parent = parent;
     }
+    const boxEngine = existingBox ?? BoxEngine.create(boxData, parent);
 
     // 박스 자체 그리드 계산기 생성 (자식 박스 배치용)
     const inheritStyle = this._buildInheritStyle(boxData, parent);
@@ -442,13 +480,13 @@ export class DocumentEngine {
    */
   private _buildInheritStyle(
     _boxData: BoxData,
-    parent: BoxEngine | DocumentEngine | TableCellEngine,
+    parent: BoxEngineParent,
   ): InheritStyle {
     const gc = parent.gridCalculator;
-    const padTop = 'paddingTop' in parent ? parent.paddingTop : 0;
-    const padRight = 'paddingRight' in parent ? parent.paddingRight : 0;
-    const padBottom = 'paddingBottom' in parent ? parent.paddingBottom : 0;
-    const padLeft = 'paddingLeft' in parent ? parent.paddingLeft : 0;
+    const padTop = (parent as { paddingTop?: number }).paddingTop ?? 0;
+    const padRight = (parent as { paddingRight?: number }).paddingRight ?? 0;
+    const padBottom = (parent as { paddingBottom?: number }).paddingBottom ?? 0;
+    const padLeft = (parent as { paddingLeft?: number }).paddingLeft ?? 0;
     return {
       ...this._data.textStyle,
       ...this._data.paragraphStyle,

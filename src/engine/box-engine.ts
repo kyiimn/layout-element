@@ -206,7 +206,8 @@ export class BoxEngine {
       const { fontSize, lineHeight, contentHeight } = gc;
       let calcHeight = lineHeight * this.height - (lineHeight - fontSize);
       if (contentHeight) {
-        calcHeight = Math.min(calcHeight, contentHeight - (this.relTop - (this._data.paddingTop ?? 0)));
+        const parentPadTop = 'paddingTop' in this._parent ? (this._parent.paddingTop as number) : 0;
+        calcHeight = Math.min(calcHeight, contentHeight - (this.relTop - parentPadTop));
       }
       return Math.max(0, calcHeight);
     }
@@ -229,8 +230,7 @@ export class BoxEngine {
    */
   get contentType(): BoxContentType {
     if (this._childEngines.length !== 1) {
-      const hasTable = this._childEngines.some(e => e instanceof TableEngine);
-      return hasTable ? 'table' : null;
+      return null;
     }
     const child = this._childEngines[0];
     if (child instanceof BoxEngine) return child.contentType;
@@ -246,8 +246,7 @@ export class BoxEngine {
    */
   get contentElement(): ImageEngine | ParagraphEngine | TableEngine | null {
     if (this._childEngines.length !== 1) {
-      const table = this._childEngines.find(e => e instanceof TableEngine);
-      return table ?? null;
+      return null;
     }
     const child = this._childEngines[0];
     if (child instanceof BoxEngine) return child.contentElement;
@@ -262,7 +261,7 @@ export class BoxEngine {
   get overlayElements(): BoxEngine[] {
     const list: BoxEngine[] = [];
     if (!this._parent.isDocument) {
-      list.push(...this._parent.overlayElements);
+      list.push(...this._parent.overlayElements.filter(e => checkOverlapMm(e.absRect, this.absRect)));
     }
 
     const siblingBoxes = this._parent.childBoxEngines;
@@ -278,16 +277,16 @@ export class BoxEngine {
         const para = e.contentElement as ParagraphEngine | null;
         if (para && para.overlapMode === 'none') return false;
       }
+      if (ct === null) {
+        const para = e.childEngines.find(ce => ce instanceof ParagraphEngine) as ParagraphEngine | undefined;
+        if (para && para.overlapMode === 'none') return false;
+      }
       return true;
     });
     overlay = overlay.filter(e => checkOverlapMm(e.absRect, this.absRect));
 
     list.push(...overlay);
     return list;
-  }
-
-  findChildEngineById(id: string): BoxEngine | ImageEngine | ParagraphEngine | TableEngine | undefined {
-    return this._childEngines.find(e => e.data != null && 'id' in e.data && e.data.id === id);
   }
 
   /**

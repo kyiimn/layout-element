@@ -154,7 +154,6 @@ export class ParagraphEngine {
     this._columnContents = [];
     this._overflow = 0;
 
-    this._lineHeight = 0;
     this._lineHeight = fontSize * lineGap;
   }
 
@@ -324,8 +323,6 @@ export class ParagraphEngine {
 
         const textAlign = line.textBlockStyle?.textAlign ?? defaultTextAlign;
         const isLastLineOfBlock = line.endOfBlock === true;
-        const firstOfBlock = line.firstOfBlock === true;
-        const endOfBlock = line.endOfBlock === true;
         const partCount = line.parts.length;
 
         for (let p = 0; p < partCount; p++) {
@@ -337,16 +334,7 @@ export class ParagraphEngine {
             continue;
           }
 
-          const isFirst = p === 0;
-          const isLast = p === partCount - 1;
-          let stripStart = 0;
-          let stripEnd = content.length;
-          if (isFirst && !firstOfBlock) {
-            while (stripStart < stripEnd && content[stripStart] === " ") stripStart++;
-          }
-          if (isLast && !endOfBlock) {
-            while (stripEnd > stripStart && content[stripEnd - 1] === " ") stripEnd--;
-          }
+          const { stripStart, stripEnd } = this._computeStripRange(part, line, p);
           const strippedCount = stripEnd - stripStart;
           if (strippedCount === 0) {
             part.charOffsets = [];
@@ -900,14 +888,27 @@ export class ParagraphEngine {
     const overlapEls = this._data.overlayEngines;
     for (const el of overlapEls) {
       let mode: OverlapMode | ParagraphOverlapMode = "path";
+      let hasRgba = false;
+      let paddingKey = "";
       if (el.contentType === "image") {
         const img = el.contentElement as ImageEngineRef | null;
-        if (img) mode = img.overlapMode;
+        if (img) {
+          mode = img.overlapMode;
+          hasRgba = img.rgbaData !== null;
+          const pad = img.overlapPadding;
+          if (pad === undefined) {
+            paddingKey = "0";
+          } else if (typeof pad === "number") {
+            paddingKey = "n" + pad;
+          } else {
+            paddingKey = "o" + (pad.top ?? 0) + "," + (pad.right ?? 0) + "," + (pad.bottom ?? 0) + "," + (pad.left ?? 0);
+          }
+        }
       }
       const rect = el.absRect;
       const relLeft = rect.absLeft - pAbsLeft;
       const relTop = rect.absTop - pAbsTop;
-      parts.push("o:" + relLeft + "," + relTop + "," + rect.absWidth + "," + rect.absHeight + "," + mode);
+      parts.push("o:" + relLeft + "," + relTop + "," + rect.absWidth + "," + rect.absHeight + "," + mode + "," + (hasRgba ? 1 : 0) + "," + paddingKey);
     }
 
     parts.push(
@@ -1194,6 +1195,11 @@ export class ParagraphEngine {
   /**
    * source offset에 해당하는 문자의 절대 mm 사각형을 반환한다.
    *
+   * `charOffsets`는 `_computeCharOffsets`에서 leading/trailing space를 strip한
+   * 기준으로 산출되므로, raw content index를 stripped index로 변환하여
+   * 조회해야 한다. strip 범위 밖(leading/trailing space)의 offset에 대해서는
+   * 인접한 stripped 문자의 rect를 반환한다.
+   *
    * @param sourceOffset - 소스 텍스트 내 문자 오프셋
    * @returns 문자 절대 사각형 (mm). 해당 문자가 없으면 null.
    */
@@ -1211,18 +1217,28 @@ export class ParagraphEngine {
         const line = column[li];
         const lineTopMm = this._data.parentAbsRect.absTop + li * this._lineHeight;
 
-        for (const part of line.parts) {
+        for (let p = 0; p < line.parts.length; p++) {
+          const part = line.parts[p];
           if (sourceOffset >= offset && sourceOffset < offset + part.content.length) {
             const localIdx = sourceOffset - offset;
             const charOffsets = part.charOffsets;
             let charLeftInPart = 0;
             let charWidth = 0;
-            if (charOffsets && charOffsets.length > localIdx) {
-              charLeftInPart = charOffsets[localIdx];
+            if (charOffsets && charOffsets.length > 0) {
+              const { stripStart, stripEnd } = this._computeStripRange(part, line, p);
+              let strippedIdx: number;
+              if (localIdx < stripStart) {
+                strippedIdx = 0;
+              } else if (localIdx >= stripEnd) {
+                strippedIdx = charOffsets.length - 1;
+              } else {
+                strippedIdx = localIdx - stripStart;
+              }
+              charLeftInPart = charOffsets[strippedIdx];
               charWidth =
-                localIdx + 1 < charOffsets.length
-                  ? charOffsets[localIdx + 1] - charOffsets[localIdx]
-                  : part.width - charOffsets[localIdx];
+                strippedIdx + 1 < charOffsets.length
+                  ? charOffsets[strippedIdx + 1] - charOffsets[strippedIdx]
+                  : part.width - charOffsets[strippedIdx];
             }
             const left = this._data.parentAbsRect.absLeft + columnLeftMm + part.left + charLeftInPart;
             const top = lineTopMm;
@@ -1244,6 +1260,21 @@ export class ParagraphEngine {
   }
 
   /**
+   * 파트의 leading/trailing space strip 범위를 계산한다.
+   *
+   * `_computeCharOffsets`와 동일한 strip 로직을 적용하여
+   * `charOffsets` 인덱스를 raw content 인덱스로 변환할 때 사용한다.
+   *
+   * @param part - 파트 데이터
+   * @param line - 파트가 속한 라인
+   * @param partIdx - 라인 내 파트 인덱스
+   * @returns `{ stripStart, stripEnd }` — raw content 기준 strip 범위
+   */
+  private _computeStripRange(part: TextPartData, line: TextLineData, partIdx: number): { stripStart: number; stripEnd: number } {
+    return computeStripRange(part, line, partIdx);
+  }
+
+  /**
    * mm 좌표에 가장 가까운 source offset을 반환한다.
    *
    * @param xMm - 지면 기준 절대 X (mm)
@@ -1261,7 +1292,8 @@ export class ParagraphEngine {
         this._columnWidths.slice(0, c).reduce((a, b) => a + b, 0) +
         this._gaps.slice(0, c).reduce((a, b) => a + b, 0);
       const xEnd = xStart + this._columnWidths[c];
-      if (relX >= xStart && relX < xEnd) {
+      const isLastColumn = c === this._columnWidths.length - 1;
+      if (relX >= xStart && (isLastColumn ? relX <= xEnd : relX < xEnd)) {
         columnIdx = c;
         columnLeftMm = xStart;
         break;
@@ -1291,7 +1323,8 @@ export class ParagraphEngine {
       for (let li = 0; li < col.length; li++) {
         const ln = col[li];
         const isTargetLine = ci === columnIdx && li === lineIdx;
-        for (const part of ln.parts) {
+        for (let p = 0; p < ln.parts.length; p++) {
+          const part = ln.parts[p];
           if (part.content.length === 0) continue;
 
           if (isTargetLine) {
@@ -1300,6 +1333,7 @@ export class ParagraphEngine {
               const charOffsets = part.charOffsets;
               if (!charOffsets || charOffsets.length === 0) return null;
 
+              const { stripStart } = this._computeStripRange(part, ln, p);
               const partRelX = relLineX - part.left;
               let offsetInPart = 0;
               for (let i = 0; i < charOffsets.length; i++) {
@@ -1312,7 +1346,7 @@ export class ParagraphEngine {
                 offsetInPart = i + 1;
               }
 
-              return { textOffset: globalOffset + offsetInPart };
+              return { textOffset: globalOffset + stripStart + offsetInPart };
             }
           }
 
@@ -1335,14 +1369,36 @@ export class ParagraphEngine {
    * @returns 커서 배치 정보 또는 null
    */
   public getCursorPlacement(sourceOffset: number, preferLineEnd = false): CursorPlacement | null {
-    const rect = this.getCharRect(sourceOffset);
-    if (!rect) return null;
-
     if (preferLineEnd) {
-      return { sourceOffset, atEndOfChar: true };
+      const lineInfo = this._findLineBySourceOffset(sourceOffset);
+      if (!lineInfo) return null;
+      const lastPart = lineInfo.line.parts[lineInfo.line.parts.length - 1];
+      if (!lastPart || lastPart.content.length === 0) return null;
+      const lastCharOffset = lineInfo.globalOffset + lineInfo.offsetInLine + lastPart.content.length - 1;
+      return { sourceOffset: lastCharOffset, atEndOfChar: true };
     }
 
+    const rect = this.getCharRect(sourceOffset);
+    if (!rect) return null;
     return { sourceOffset, atEndOfChar: false };
+  }
+
+  private _findLineBySourceOffset(sourceOffset: number): { line: TextLineData; globalOffset: number; offsetInLine: number } | null {
+    if (!this._columnContents) return null;
+    let globalOffset = 0;
+    for (let c = 0; c < this._columnContents.length; c++) {
+      const column = this._columnContents[c];
+      for (let li = 0; li < column.length; li++) {
+        const line = column[li];
+        let lineLen = 0;
+        for (const part of line.parts) lineLen += part.content.length;
+        if (sourceOffset >= globalOffset && sourceOffset <= globalOffset + lineLen) {
+          return { line, globalOffset, offsetInLine: sourceOffset - globalOffset };
+        }
+        globalOffset += lineLen;
+      }
+    }
+    return null;
   }
 
   /** 상속 스타일을 설정한다. */
@@ -1568,6 +1624,23 @@ class _LRU<K, V> {
  * @param parentHeightMm - 부모 높이 (mm)
  * @returns PrintPostData 배열
  */
+function computeStripRange(part: TextPartData, line: TextLineData, partIdx: number): { stripStart: number; stripEnd: number } {
+  const content = part.content;
+  const isFirst = partIdx === 0;
+  const isLast = partIdx === line.parts.length - 1;
+  const firstOfBlock = line.firstOfBlock === true;
+  const endOfBlock = line.endOfBlock === true;
+  let stripStart = 0;
+  let stripEnd = content.length;
+  if (isFirst && !firstOfBlock) {
+    while (stripStart < stripEnd && content[stripStart] === " ") stripStart++;
+  }
+  if (isLast && !endOfBlock) {
+    while (stripEnd > stripStart && content[stripEnd - 1] === " ") stripEnd--;
+  }
+  return { stripStart, stripEnd };
+}
+
 export function buildParagraphPrintPostData(
   engine: ParagraphEngine,
   colorRegistry: { get: (name: string) => { c: number; m: number; y: number; k: number } },
@@ -1629,19 +1702,7 @@ export function buildParagraphPrintPostData(
 
         const { content, charOffsets, left: partLeftMm } = part;
 
-        const isFirst = pi === 0;
-        const isLast = pi === lineData.parts.length - 1;
-        const firstOfBlock = lineData.firstOfBlock === true;
-        const endOfBlock = lineData.endOfBlock === true;
-
-        let stripStart = 0;
-        let stripEnd = content.length;
-        if (isFirst && !firstOfBlock) {
-          while (stripStart < stripEnd && content[stripStart] === ' ') stripStart++;
-        }
-        if (isLast && !endOfBlock) {
-          while (stripEnd > stripStart && content[stripEnd - 1] === ' ') stripEnd--;
-        }
+        const { stripStart, stripEnd } = computeStripRange(part, lineData, pi);
 
         for (let j = stripStart; j < stripEnd; j++) {
           const char = content[j];

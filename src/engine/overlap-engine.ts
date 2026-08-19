@@ -137,6 +137,9 @@ function computePixelOverlap(
   const imgRectMm: MmRect = r2; // overlay.absRect이 이미지 자체 좌표
 
   const rgba = image.rgbaData!;
+  if (imgRectMm.width <= 0 || imgRectMm.height <= 0) {
+    return { direction: 'NONE', parts: [] };
+  }
   const scaleX = rgba.width / imgRectMm.width;
   const scaleY = rgba.height / imgRectMm.height;
 

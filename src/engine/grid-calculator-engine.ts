@@ -98,7 +98,7 @@ export class GridCalculatorEngine {
       const gaps = typeof this._inputGap === 'number'
         ? Array.from({ length: this._inputColumns - 1 }).map(() => this._inputGap as number)
         : this._inputGap;
-      const editableWidth = this._width - paddingLeft - paddingRight - gaps.reduce((a, b) => a + b, 0);
+      const editableWidth = Math.max(0, this._width - paddingLeft - paddingRight - gaps.reduce((a, b) => a + b, 0));
       const editableHeight = Math.floor((this._height - paddingTop - paddingBottom) / this._lineHeight) * this._lineHeight;
       const columnWidth = editableWidth / this._inputColumns;
 
@@ -118,7 +118,7 @@ export class GridCalculatorEngine {
       const gaps = typeof this._inputGap === 'number'
         ? Array.from({ length: this._inputColumns.length - 1 }).map(() => this._inputGap as number)
         : this._inputGap;
-      const editableHeight = this._height - paddingTop - paddingBottom;
+      const editableHeight = Math.floor((this._height - paddingTop - paddingBottom) / this._lineHeight) * this._lineHeight;
 
       this._columnWidths = [...this._inputColumns];
       this._gaps = [...gaps];
