@@ -431,6 +431,10 @@ export class ImageEngine {
    * 이미지 레이아웃을 계산한다.
    * objectFit/originalWidth/originalHeight로부터 크롭/디스플레이 영역을 산출.
    *
+   * `objectFit !== 'none'`이고 `originalWidth`/`originalHeight`가 설정된 경우,
+   * `computeObjectFit` 로직을 적용하여 박스 내 표시 위치/크기를 계산한다.
+   * `objectFit === 'none'`이면 raw `x/y/w/h`를 그대로 사용한다.
+   *
    * @returns 이미지 레이아웃 결과 (mm)
    */
   layout(): { cropRectMm: AbsRect; displayRectMm: AbsRect } {
@@ -439,6 +443,50 @@ export class ImageEngine {
     const y = d.y ?? 0;
     const width = d.width ?? 0;
     const height = d.height ?? 0;
+
+    const objectFit = d.objectFit ?? 'cover';
+    const originalWidth = d.originalWidth;
+    const originalHeight = d.originalHeight;
+
+    if (objectFit !== 'none' && originalWidth !== undefined && originalHeight !== undefined && originalWidth > 0 && originalHeight > 0 && width > 0 && height > 0) {
+      const imgAspect = originalWidth / originalHeight;
+      const boxAspect = width / height;
+
+      let fitX: number, fitY: number, fitW: number, fitH: number;
+
+      if (objectFit === 'fill') {
+        fitX = 0; fitY = 0; fitW = width; fitH = height;
+      } else if (objectFit === 'cover') {
+        if (imgAspect > boxAspect) {
+          fitH = height;
+          fitW = height * imgAspect;
+          fitX = (width - fitW) / 2;
+          fitY = 0;
+        } else {
+          fitW = width;
+          fitH = width / imgAspect;
+          fitX = 0;
+          fitY = (height - fitH) / 2;
+        }
+      } else {
+        if (imgAspect > boxAspect) {
+          fitW = width;
+          fitH = width / imgAspect;
+          fitX = 0;
+          fitY = (height - fitH) / 2;
+        } else {
+          fitH = height;
+          fitW = height * imgAspect;
+          fitX = (width - fitW) / 2;
+          fitY = 0;
+        }
+      }
+
+      return {
+        cropRectMm: { absLeft: x + fitX, absTop: y + fitY, absWidth: fitW, absHeight: fitH },
+        displayRectMm: { absLeft: x + fitX, absTop: y + fitY, absWidth: fitW, absHeight: fitH },
+      };
+    }
 
     return {
       cropRectMm: { absLeft: x, absTop: y, absWidth: width, absHeight: height },
