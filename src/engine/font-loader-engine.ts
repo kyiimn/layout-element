@@ -105,20 +105,22 @@ export class FontLoaderEngineImpl implements FontLoaderEngine {
   /**
    * 파싱된 폰트 객체를 반환한다.
    *
-   * @param fontName - 폰트 family 이름. 생략 시 첫 번째 폰트.
-   * @returns ParsedFont 객체. 파싱 실패/누락 시 null.
+   * @param fontName - 폰트 family 이름. 생략 시 첫 번째 입력 폰트.
+   * @returns ParsedFont 객체.
+   * @throws {Error} 초기화 전이거나 폰트가 없는 경우.
+   * @throws {Error} `fontName`이 지정되었으나 파싱 실패한 경우.
+   * @throws {Error} `fontName` 생략 시 첫 번째 폰트가 파싱 실패한 경우.
    */
   getParsedFont(fontName?: string): ParsedFont | null {
-    if (!this._ready || this._fonts.length === 0) return null;
-
-    if (fontName) {
-      const parsed = this._parsedFonts.get(fontName);
-      if (parsed) return parsed;
+    if (!this._ready || this._fonts.length === 0) {
+      throw new Error("font map is not ready");
     }
 
-    // 폴백: 첫 번째 파싱된 폰트
-    const firstParsed = this._parsedFonts.values().next();
-    return firstParsed.done ? null : firstParsed.value;
+    const targetName = fontName ?? this._fonts[0]!.family;
+    const parsed = this._parsedFonts.get(targetName);
+    if (parsed) return parsed;
+
+    throw new Error(`parsed font not found: "${targetName}"`);
   }
 
   /**

@@ -141,7 +141,14 @@ try {
   // init without fonts (empty array — should not throw)
   await fontEngine.init([]);
   assert(fontEngine.ready === true, 'ready after init');
-  assert(fontEngine.getParsedFont() === null, 'getParsedFont returns null with no fonts');
+  // getParsedFont now throws when not ready or no fonts
+  let threw = false;
+  try {
+    fontEngine.getParsedFont();
+  } catch (e) {
+    threw = true;
+  }
+  assert(threw === true, 'getParsedFont throws with no fonts');
 } catch (e) {
   failCount++;
   console.error(`  ✗ FontLoaderEngineImpl threw: ${e.message}`);
