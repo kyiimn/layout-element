@@ -502,7 +502,16 @@ export class ParagraphEngine {
     const { cover, overlapParts } = this._detectOverlapWithCache(lineRectMm);
 
     const parentHeight = this._inheritStyle?.parentHeight ?? 0;
-    const isOverflow = (lineIndexInColumn + 1) * this._lineHeight > parentHeight + 1e-6;
+    // 마지막 라인은 lineHeight가 아닌 fontSize만큼만 높이를 차지하므로,
+    // 컬럼 수용력은 parentHeight + (lineHeight - fontSize)와 같다.
+    // (BoxEngine.absHeight = lineHeight * height - (lineHeight - fontSize))
+    // 단, textBlockStyle.fontSize가 기본과 다르면 자체 높이를 가지므로
+    // 마지막 라인 규칙을 적용하지 않는다.
+    const blockFontSize = textBlockStyle?.fontSize;
+    const effectiveColumnHeight = (blockFontSize === undefined || blockFontSize === this.fontSize)
+      ? parentHeight + (this._lineHeight - this.fontSize)
+      : parentHeight;
+    const isOverflow = (lineIndexInColumn + 1) * this._lineHeight > effectiveColumnHeight + 1e-6;
 
     if (cover) {
       const lineData: TextLineData = {
@@ -1488,6 +1497,20 @@ export class ParagraphEngine {
   /** 줄 높이 (mm) */
   public get lineHeight(): number {
     return this._lineHeight;
+  }
+
+  /**
+   * 현재 적용된 폰트 크기 (mm).
+   * `textStyle.fontSize` → `inheritStyle.fontSize` → `DEFAULT_FONT_SIZE` 순서로 해결.
+   *
+   * 마지막 라인은 `lineHeight`가 아닌 `fontSize`만큼만 높이를 차지하는 규칙
+   * (`BoxEngine.absHeight`의 `lineHeight * height - (lineHeight - fontSize)` 공식)과
+   * 일관되게 참조하기 위해 사용한다.
+   *
+   * @returns 폰트 크기 (mm)
+   */
+  public get fontSize(): number {
+    return this.textStyle?.fontSize ?? this.inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
   }
 
   /** 오버플로우된 문자 수 */
