@@ -309,7 +309,7 @@ class LayoutBoxElement extends HTMLElement
 | `engine` | `BoxEngine \| undefined` | — | 박스 엔진 (절대 좌표, 오버레이, contentType). |
 | `items` | `(Box \| Paragraph \| Image)[]` | — | 직속 자식 요소 배열. |
 | `overlayElements` | `LayoutBoxElement[]` | — | 오버랩된 형제 박스들. |
-| `contentType` | `'image' \| 'paragraph' \| 'table' \| null` | — | 자식이 1개일 때 그 타입. |
+| `contentType` | `'image' \| 'paragraph' \| 'table' \| null` | — | 자식이 1개일 때 그 타입. `'table'`은 `LayoutTableElement` 자식을 나타냄. |
 | `type` | `'box'` | — | 타입 리터럴. |
 
 #### `data` setter 동작
@@ -519,8 +519,6 @@ class LayoutImageElement extends HTMLElement
 #### 렌더링 모델 — clip-as-crop
 
 `LayoutImageElement`는 원본 이미지 전체를 `width`×`height`(mm) 크기로 리사이즈하여 박스 내 `(x, y)` 위치에 배치한다. 캔버스 크기 = 박스 크기이므로 박스 밖 영역은 자동으로 clip되어 크롭 효과를 낸다. `objectFit`은 렌더링에 사용되지 않으며 편집 UI 메타데이터로만 보존된다.
-
-#### 데이터 프로퍼티
 
 | 이름 | 타입 | 단위 | 설명 |
 |---|---|---|---|

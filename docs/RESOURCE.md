@@ -60,8 +60,9 @@ flowchart LR
 
 `FontLoader`는 폰트 메타데이터를 로드하고, `FontFace` API로 브라우저에 폰트를 등록하는 싱글톤 매니저이다.
 
-- **화면 모드**: `fonts.json` (또는 커스텀 로더)에서 `Font[]`를 가져오고, 각 폰트의 `ttfFilename`을 이용해 `FontFace`를 생성하여 브라우저에 등록한다.
+- **화면 모드**: `fonts.json` (또는 커스텀 로더)에서 `Font[]`를 가져오고, 각 폰트의 `ttfFilename` 또는 `base64Data`를 이용해 `FontFace`를 생성하여 브라우저에 등록한다.
 - **인쇄 모드**: 외부에서 주입한 `Font[]`의 `base64Data`를 이용해 `data:` URI로 `FontFace`를 생성한다. 서버 요청을 하지 않는다.
+- **인쇄 모드 미사용 시**: `init()`을 `fonts` 없이 호출하면 `_loadServer()`로 데이터를 가져온다.
 
 스타일 필드(`TextStyle.fontFamily`, `TextBlockStyle.fontFamily`)에서 지정하는 폰트 패밀리값은 `FontLoader.getFontFamily()`를 통해 `Font.family`와 매칭되어 실제 `FontFace.family`로 변환된다. 일치하는 `family`가 없으면 등록된 첫 번째 폰트로 폴백된다. CSS `font-family` 키워드(`"serif"`, `"sans-serif"` 등)는 사용할 수 없다.
 

@@ -85,7 +85,7 @@
 
 #### 글로벌 레이아웃 편집 모드 (`EditManager.layoutEditMode`)
 
-레이아웃 편집 모드는 `EditManager`의 글로벌 상태로 제어한다.
+레이아웃 편집 모드는 per-document `EditManager`의 글로벌 상태로 제어한다.
 
 ```typescript
 const manager = layoutDocEl.editManager;
@@ -652,7 +652,7 @@ private _resizeStates = new Map<LayoutBoxElement, BoxResizeState>();
 
 ### 2.3 EditManager API
 
-`EditManager`는 텍스트 편집과 레이아웃 선택 모두를 관리하는 글로벌 싱글톤이다.
+`EditManager`는 텍스트 편집과 레이아웃 선택 모두를 관리하는 **per-document 인스턴스**이다 (싱글톤 아님).
 
 #### 레이아웃 편집 모드 및 필터
 

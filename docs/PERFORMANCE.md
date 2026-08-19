@@ -128,7 +128,7 @@
 | 위치 | `ParagraphEngine._charOuterStyleCache` (`paragraph-engine.ts:66`) |
 | 타입 | `LRU<string, Partial<CSSStyleDeclaration>>` |
 | 용량 | 5000 |
-| 키 | `${char}\|${widthRatio}\|${letterSpacing}\|${spaceRatio}` |
+| 키 | `${char}\|${widthRatio}\|${letterSpacing}\|${spaceRatio}\|${fontSize}` |
 | 값 | `genCharStyle()` 결과 CSS 스타일 객체 |
 
 `genCharStyle()`은 장평을 적용한 최종 `width`를 CSS 값으로 포함하므로 장평이 키에 포함된다. `width` 계산에 `letterSpacing`(`lsMm`)과 `spaceRatio`도 사용되므로 이 값들도 키에 포함된다 — 자간이나 공백 비율이 변경되면 별도 캐시 항목이 생성되어 잘못된 스타일이 반환되는 것을 방지한다. 이전에는 `Map` + `size > 5000 → clear()` 전체 삭제 정책이었으나 LRU eviction으로 변경하여 성능 cliff를 제거.

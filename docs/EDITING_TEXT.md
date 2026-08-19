@@ -22,7 +22,7 @@
 2. `<x-layout-cursor>`: 1px 너비의 수직 커서. 실제 DOM 위치는 `TextEditCoordinateMapper`가 반환하는 문자 rect 기준으로 계산한다.
 3. `<x-layout-selection>`: 선택된 텍스트 위에 반투명 사각형 오버레이를 렌더링한다.
 
-모든 `TextEditController` 인스턴스는 생성 시 `EditManager` 싱글톤에 등록된다. `EditManager`는 문서 전체의 편집 상태를 글로벌하게 관리하며, 한 번에 하나의 단락만 포커스를 가지도록 보장한다. 포커스가 다른 단락으로 이동하면 이전 단락의 선택 영역이 자동으로 해제된다.
+모든 `TextEditController` 인스턴스는 생성 시 per-document `EditManager`에 등록된다. `EditManager`는 문서 전체의 편집 상태를 관리하며, 한 번에 하나의 단락만 포커스를 가지도록 보장한다. 포커스가 다른 단락으로 이동하면 이전 단락의 선택 영역이 자동으로 해제된다.
 
 ```mermaid
 flowchart TD
@@ -453,9 +453,9 @@ InheritStyle (부모에서 상속)
 
 ---
 
-## 3.6 `EditManager` — 글로벌 편집 관리자
+## 3.6 `EditManager` — 문서 단위 편집 관리자
 
-`EditManager`는 문서 전체의 편집 상태를 중앙에서 관리하는 싱글톤이다. `ColorRegistry`, `FontLoader`와 동일한 싱글톤 패턴을 따른다.
+`EditManager`는 문서 전체의 편집 상태를 중앙에서 관리하는 **per-document 인스턴스**이다. `ColorRegistry`, `FontLoader`와 달리 싱글톤이 아니며, 각 `LayoutDocumentElement`가 자체 `EditManager`를 소유한다.
 
 ### 3.6.1 역할
 
@@ -470,7 +470,7 @@ InheritStyle (부모에서 상속)
 
 | API | 타입 | 설명 |
 |-----|------|------|
-| `getInstance()` | `EditManager` static | 싱글톤 인스턴스를 반환한다. |
+| `getInstance()` | — | (제거됨) per-document 인스턴스는 `LayoutDocumentElement.editManager`로 접근 |
 | `focusedParagraph` | `LayoutParagraphElement \| null` get | 현재 포커스된 단락 요소. 없으면 `null`. |
 | `focusedController` | `TextEditController \| null` get | 현재 포커스된 편집 컨트롤러. 없으면 `null`. |
 | `cursorOffset` | `number \| null` get | 현재 커서 위치. 포커스된 단락이 없으면 `null`. |
@@ -829,7 +829,7 @@ manager.deactivateAll();
 
 ```mermaid
 flowchart TD
-    subgraph EM["EditManager (싱글톤)"]
+    subgraph EM["EditManager (per-document)"]
         FC["_focusedController"]
         CS["_controllers (Set)"]
         LST["_listeners (Map)"]

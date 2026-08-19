@@ -8,7 +8,7 @@
 
 ## 1. 개요 (Overview)
 
-`EditManager`는 `layout-element`의 글로벌 편집 관리 싱글톤으로, 텍스트 편집, 레이아웃 선택, 드래그 이동, 리사이즈, 요소 삽입, Box 속성 변경, 셀 블록 선택 등의 상태 변화를 외부 UI에 알리기 위해 16가지 이벤트 타입을 제공한다. 외부 편집 UI는 `addEventListener`로 이벤트를 수신하여 상태 동기화, undo/redo 스택, 스타일 패널 갱신 등을 수행한다.
+`EditManager`는 `layout-element`의 **문서 단위 인스턴스**(per-document, 싱글톤 아님)로, 텍스트 편집, 레이아웃 선택, 드래그 이동, 리사이즈, 요소 삽입, Box 속성 변경, 셀 블록 선택 등의 상태 변화를 외부 UI에 알리기 위해 20가지 이벤트 타입을 제공한다. 외부 편집 UI는 `addEventListener`로 이벤트를 수신하여 상태 동기화, undo/redo 스택, 스타일 패널 갱신 등을 수행한다.
 
 > **참고: 요소 자체 CustomEvent와의 관계**
 >
@@ -108,7 +108,7 @@ function MyComponent() {
 
 ### 2.4 `reset()` — 편집 상태 전체 초기화 (unmount용)
 
-`EditManager`는 싱글톤이므로 컴포넌트 전환(React unmount/remount 등) 시에도 인스턴스가
+`EditManager`는 per-document 인스턴스이므로 컴포넌트 전환(React unmount/remount 등) 시에도 인스턴스가
 유지된다. 이전 문서의 편집 상태(선택, 포커스, 모드, 컨트롤러, 필터)가 새 문서로
 누출되어 요소 그리기 등의 동작을 방해하지 않도록, `LayoutEditor` 컴포넌트가
 unmount될 때 `reset()`을 호출한다.
