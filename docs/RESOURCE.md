@@ -319,7 +319,7 @@ ColorRegistry.resetLoader();
 _cmykToRgb(cmyk?: CMYKColor): RGBColor
 ```
 
-변환 공식:
+변환 공식 (표준 인쇄 변환):
 
 ```
 c_ = clamp(c / 255, 0, 1)
@@ -327,27 +327,29 @@ m_ = clamp(m / 255, 0, 1)
 y_ = clamp(y / 255, 0, 1)
 k_ = clamp(k / 255, 0, 1)
 
-r = round(255 * (1 - min(1, c_ + k_)))
-g = round(255 * (1 - min(1, m_ + k_)))
-b = round(255 * (1 - min(1, y_ + k_)))
+r = round(255 * (1 - c_) * (1 - k_))
+g = round(255 * (1 - m_) * (1 - k_))
+b = round(255 * (1 - y_) * (1 - k_))
 ```
 
-- `cmyk`가 생략되면 `_defaultColor`({ c: 0, m: 0, y: 0, k: 0 })를 사용한다.
-- `min(1, ...)`으로 1을 넘지 않도록 클램프한다.
+- `cmyk`가 생략되면 `_defaultColor`({ c: 0, m: 0, y: 0, k: 255 }, K100 검정)를 사용한다.
+- 검은 잉크(k)가 포함된 중간 톤도 올바르게 변환된다 (예: C128 + K128 → R64).
 
 ### 3.7 색상 변환 및 적용
 
 `init()`은 로드한 `CMYKColorSet`을 내부에 보관하고, `getCSSColor(name)` 호출 시 해당 색상을 CMYK → RGB → `#RRGGBB` hex로 변환하여 반환한다. 스타일시트에 CSS 변수를 주입하지 않는다 — 런타임에서 `getCSSColor()`가 직접 hex를 반환한다.
 
+**`'default'` 색상 이름 사용 금지**: `getCSSColor('default')` / `get('default')`는 `Error`를 throw한다. 외부 코드는 명시적인 색상 이름을 사용해야 한다.
+
 ```
-getCSSColor('default') → '#FFFFFF'  (CMYK 0,0,0,255 → RGB 255,255,255)
 getCSSColor('red')     → '#FF0000'  (예시)
 getCSSColor('blue')    → '#0000FF'  (예시)
+getCSSColor('default') → throw Error  (사용 금지)
 ```
 
 - 런타임 색상 적용: `getCSSColor(name)` → `#RRGGBB` hex 직접 반환
 - 투명도 결합: `getCSSColor(name) + getOpacityHex(opacity)` → `#RRGGBBAA` 8자리 hex
-- 기본 색상: 등록되지 않은 이름 폴백 시 사용
+- 기본 색상: 등록되지 않은 이름 폴백 시 `_defaultColor`(K100 검정) 사용
 - SSR/테스트 환경에서도 stylesheet 접근 없이 `getCSSColor()`/`colorMap`이 동작한다 (데이터는 `_colorSet` 기반으로 동작).
 
 ### 3.8 공개 API
@@ -364,10 +366,10 @@ getCSSColor('blue')    → '#0000FF'  (예시)
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `init(colorSet?)` | `(colorSet?: CMYKColorSet) => Promise<ColorMap[]>` | 색상을 로드하여 내부에 보관한다. 인쇄 모드에서는 `colorSet`을 직접 주입받는다. 화면 모드에서는 `_loadServer()`로 데이터를 가져온다. `getCSSColor()` 호출 시 CMYK → RGB → hex 변환을 수행한다. |
-| `getCSSColor(name)` | `(name: string) => string` | `#RRGGBB` hex 문자열을 반환한다. `name`이 `CMYKColorSet`에 등록된 키이면 해당 색상의 hex, 등록되지 않은 이름(또는 CSS 색상 문자열)이면 기본 색상 hex로 폴백된다. `getOpacityHex()`로 생성한 alpha hex를 뒤에 결합하여 `#RRGGBBAA` 형태로 투명도를 적용할 수 있다. |
+| `init(colorSet?)` | `(colorSet?: CMYKColorSet) => Promise<ColorMap[]>` | 색상을 로드하여 내부에 보관한다. `colorSet`을 직접 주입하면 그것을 사용하고, 생략하면 `_loadServer()`로 데이터를 가져온다. `getCSSColor()` 호출 시 CMYK → RGB → hex 변환을 수행한다. |
+| `getCSSColor(name)` | `(name: string) => string` | `#RRGGBB` hex 문자열을 반환한다. `name`이 `CMYKColorSet`에 등록된 키이면 해당 색상의 hex, 등록되지 않은 이름(또는 CSS 색상 문자열)이면 기본 색상(K100 검정) hex로 폴백된다. **`name === 'default'`인 경우 `Error`를 throw한다.** `getOpacityHex()`로 생성한 alpha hex를 뒤에 결합하여 `#RRGGBBAA` 형태로 투명도를 적용할 수 있다. |
 | `getOpacityHex(opacity)` | `(opacity: number) => string` | 0~1 투명도 값을 2자리 hex alpha 문자열(`00`~`FF`)로 변환한다. 범위를 벗어나면 clamp 처리된다. `getCSSColor()` 반환값 뒤에 결합하여 사용한다. |
-| `get(name)` | `(name: string) => CMYKColor` | 색상 이름으로 CMYK 값을 반환한다. 등록되지 않은 이름이면 `_defaultColor`({ c: 0, m: 0, y: 0, k: 0 })를 반환한다. |
+| `get(name)` | `(name: string) => CMYKColor` | 색상 이름으로 CMYK 값을 반환한다. 등록되지 않은 이름이면 `_defaultColor`({ c: 0, m: 0, y: 0, k: 255 }, K100 검정)를 반환한다. **`name === 'default'`인 경우 `Error`를 throw한다.** |
 
 #### 게터
 

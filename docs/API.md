@@ -309,7 +309,7 @@ class LayoutBoxElement extends HTMLElement
 | `engine` | `BoxEngine \| undefined` | — | 박스 엔진 (절대 좌표, 오버레이, contentType). |
 | `items` | `(Box \| Paragraph \| Image)[]` | — | 직속 자식 요소 배열. |
 | `overlayElements` | `LayoutBoxElement[]` | — | 오버랩된 형제 박스들. |
-| `contentType` | `'image' \| 'paragraph' \| null` | — | 자식이 1개일 때 그 타입. |
+| `contentType` | `'image' \| 'paragraph' \| 'table' \| null` | — | 자식이 1개일 때 그 타입. |
 | `type` | `'box'` | — | 타입 리터럴. |
 
 #### `data` setter 동작
@@ -404,7 +404,7 @@ class LayoutParagraphElement extends HTMLElement
 | 이름 | 타입 | 단위 | 설명 |
 |---|---|---|---|
 | `data` | `ParagraphData` | — | 한 번에 갱신. `content` 필드는 렌더링된 실제 텍스트를 반환 (편집 반영). |
-| `content` | `string \| (string \| TextBlockData)[]` | — | 텍스트 콘텐츠 단독 갱신/조회. setter는 `_sourceContent`와 `model.textContent`(`string`인 경우)를 동시에 동기화한 뒤 `markStructureChangedAndRender()`로 재렌더링까지 수행. `data` setter는 이 setter를 거치지 않고 내부 필드를 직접 갱신 후 `layout()` 호출 (중복 렌더링 방지). |
+| `content` | `string \| (string \| TextBlockData)[]` | — | 텍스트 콘텐츠 단독 갱신/조회. setter는 `_sourceContent`와 `model.textContent`를 동시에 동기화한 뒤 `markStructureChangedAndRender()`로 재렌더링까지 수행. `data` setter는 이 setter를 거치지 않고 내부 필드를 직접 갱신 후 `layout()` + `scheduleRender()` 호출 (중복 렌더링 방지). |
 | `column` | `number \| number[]` (via `data`) | — | 하위 컬럼 그리드 (생략 시 부모 상속). |
 | `gap` | `number \| number[]` (via `data`) | mm | 하위 컬럼 간격. |
 | `zIndex` | `number` (via `data`) | — | 렌더링 순서. |
@@ -456,7 +456,7 @@ paragraph.addEventListener('render-error', (e) => {
 
 #### `data` setter 동작
 
-- `content` 변경 → 전체 텍스트 재생성.
+- `content` 필드(`string` 또는 `TextBlockData[]`)를 `model.textContent`에 전파한 후 `layout()` + `scheduleRender()` 호출.
 - 구조 변경이 감지되면 `_perfStructureChanged` 플래그가 켜져 다음 `render()`에서
   모든 `<x-layout-column>`을 다시 만듭니다. 변경이 없는 부분(같은 `data-source-offset`)은
   diff로 재사용됩니다.
@@ -812,7 +812,7 @@ class LayoutTableCellElement extends HTMLElement
 | `model` | `GridCalculatorEngine \| undefined` | 셀 내부 그리드 계산기. |
 | `engine` | `TableCellEngine \| undefined` | 테이블 셀 엔진 (BoxEngineParent 구현). |
 | `contentType` | `'box' \| 'paragraph' \| 'image' \| 'table' \| undefined` | 첫 번째 자식 box의 콘텐츠 타입. |
-| `contentElement` | `LayoutBoxElement \| LayoutParagraphElement \| LayoutImageElement \| null` | 가장 깊은 콘텐츠 요소. |
+| `contentElement` | `LayoutBoxElement \| LayoutParagraphElement \| LayoutImageElement \| LayoutTableElement \| null` | 가장 깊은 콘텐츠 요소. |
 | `items` | `LayoutBoxElement[]` | 직계 자식 box 요소 배열. |
 | `inheritStyle` | `InheritStyle \| undefined` | 부모 tr에서 전달받은 상속 스타일. |
 | `editManager` | `EditManager \| null` | 부모 체인에서 조회. |

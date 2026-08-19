@@ -502,7 +502,7 @@ InheritStyle (부모에서 상속)
 | `focusChange` | 포커스가 다른 단락으로 이동할 때 | `paragraph`, `controller`, `previousParagraph`, `previousController` |
 | `textChange` | 텍스트 내용이 변경될 때 (입력, 삭제, 붙여넣기, 줄바꿈) | `paragraph`, `controller` |
 | `styleChange` | 커서 위치가 변경되어 유효 스타일이 달라질 때 | `paragraph`, `controller` |
-| `cursorMove` | 커서 위치가 변경될 때. 키보드 연속 입력 시 최초 KeyDown에만 발생 | `paragraph`, `controller` |
+| `cursorMove` | 커서 위치가 변경될 때. 키보드 연속 입력 시 모든 KeyDown과 마지막 KeyUp에 발생 | `paragraph`, `controller` |
 | `selectionStart` | 텍스트 선택이 생성될 때 (드래그 시작, 더블클릭, Ctrl+A, triple-click) | `paragraph`, `controller` |
 | `selectionEnd` | 텍스트 선택이 확정/제거될 때 (드래그 종료, 더블클릭, Ctrl+A, triple-click, ESC 해제) | `paragraph`, `controller` |
 
@@ -1600,7 +1600,7 @@ return new DOMRect(
 
 > **transform: scale 환경에서의 보정**: 부모 요소에 CSS `transform: scale(s)`가 적용되어 있으면 `getBoundingClientRect()`는 transform 적용 후의 viewport 픽셀을 반환한다. 그런데 커서/선택 DOM 요소는 paragraph의 shadow root 자식이라 paragraph local coordinate(transform 적용 전 픽셀)를 기대한다. 따라서 `getCharRect` / `getFirstColumnRect` / `getTextRange`가 반환하는 top/left/width/height는 모두 `EditManager.scale`로 나누어 local coordinate로 변환한다. 단 `fontSize`는 `getComputedStyle`에서 오므로 local coordinate와 동일하여 보정하지 않는다.
 >
-> EditContext API(`TextEditContextAdapter`)는 viewport coordinate를 요구하므로, adapter에서 `getCharRect` 결과에 다시 `scale`을 곱하고 `paragraphRect.left/top`을 더해 viewport 좌표로 복원한다.
+> ~EditContext API(`TextEditContextAdapter`)는 viewport coordinate를 요구하므로, adapter에서 `getCharRect` 결과에 다시 `scale`을 곱하고 `paragraphRect.left/top`을 더해 viewport 좌표로 복원한다.~ **사용 중단**: `TextEditContextAdapter`는 Safari에서 EditContext API가 구현될 때까지 사용하지 않습니다. 모든 브라우저에서 textarea 기반 경로로 동작합니다.
 
 ### 9.2 `getCharOffsetFromPoint()`의 binary search 전략
 

@@ -32,7 +32,7 @@
 │  ├── _clickConsumeHandler: ((e: MouseEvent) => void) | null         │
 │  │   (드래그/리사이즈 후 window capture 클릭 소비 리스너)            │
 │  ├── _clickConsumeTimer: ReturnType<setTimeout> | null              │
-│  │   (click 소비 리스너 자동 제거 타이머, 200ms)                     │
+│  │   (click 소비 리스너 자동 제거 타이머, 350ms)                     │
 │                                                                      │
 │  공개 API:                                                            │
 │  ├── addEventListener(type, listener)                                │
@@ -377,7 +377,7 @@ manager.addEventListener('selectionEnd', (event) => {
 
 ### 5.6 `cursorMove`
 
-커서 위치가 변경될 때 발생한다. 키보드 입력, 마우스 클릭, 외부 API 등 커서 위치가 변경될 때마다 발생한다. **키보드 연속 입력 시 최초 KeyDown과 마지막 KeyUp에만 발생**한다 (쓰로틀링).
+커서 위치가 변경될 때 발생한다. 키보드 입력, 마우스 클릭, 외부 API 등 커서 위치가 변경될 때마다 발생한다. **키보드 연속 입력 시 모든 KeyDown과 마지막 KeyUp에 발생**한다.
 
 ```typescript
 manager.addEventListener('cursorMove', (event) => {
@@ -394,7 +394,7 @@ manager.addEventListener('cursorMove', (event) => {
 
 **발생 트리거**: `TextEditController`에서 커서 위치가 변경될 때 `EditManager._notifyCursorMove(controller)` → `_dispatch('cursorMove', controller)`.
 
-**쓰로틀링**: 키보드 연속 입력(예: 한 글자씩 빠르게 타이핑) 중에는 매 입력마다 `cursorMove`가 발생하지 않고, 최초 KeyDown에만 발생한다. 이는 편집 UI의 불필요한 갱신을 방지하기 위함이다.
+**발생 패턴**: 키보드 연속 입력(예: 화살표 키 길게 누름) 중에는 매 KeyDown마다 `cursorMove`가 발생하며, 키를 놓을 때 마지막 KeyUp에서도 발생한다. 외부 UI 커서 위치 표시기가 화살표 키 연속 입력 중에도 갱신된다.
 
 ---
 
@@ -576,7 +576,7 @@ manager.addEventListener('insert', (event) => {
 
 **`layoutAdd` 이벤트 동시 발생**: `_dispatchInsert` 호출 직후 `_dispatchLayoutAdd`도 함께 발생한다. `insert` 이벤트의 리스너에서 `layoutAdd` 이벤트도 함께 처리해야 하는 경우, 별도 리스너로 `layoutAdd`를 구독하면 된다.
 
-**`_suppressLayoutClick` 호출**: `_dispatchInsert`는 `_suppressLayoutClick()`을 호출하여, 삽입 직후 발생하는 클릭 이벤트를 window capture phase에서 소비(`stopPropagation()` + `preventDefault()`)하여 `LayoutSelectionController._onClick`에 도달하지 않도록 한다. click이 발생하지 않으면 200ms 타임아웃으로 자동 제거된다. 자세한 내용은 [9. 클릭 억제](#11-클릭-억제-_suppresslayoutclick)를 참조한다.
+**`_suppressLayoutClick` 호출**: `_dispatchInsert`는 `_suppressLayoutClick()`을 호출하여, 삽입 직후 발생하는 클릭 이벤트를 window capture phase에서 소비(`stopPropagation()` + `preventDefault()`)하여 `LayoutSelectionController._onClick`에 도달하지 않도록 한다. click이 발생하지 않으면 350ms 타임아웃으로 자동 제거된다. 자세한 내용은 [9. 클릭 억제](#11-클릭-억제-_suppresslayoutclick)를 참조한다.
 
 ### 7.2 `insertCancel`
 
@@ -939,7 +939,7 @@ interface EditModeState {
 
 ### 11.2 메커니즘
 
-`_suppressLayoutClick()`은 **window capture phase 일회성 click 리스너**를 등록한다. 이 리스너는 `LayoutSelectionController._onClick`(document capture phase)보다 먼저 실행되어 click을 소비(`stopPropagation()` + `preventDefault()`)한다. click이 발생하지 않으면 200ms 타임아웃으로 리스너가 자동 제거된다.
+`_suppressLayoutClick()`은 **window capture phase 일회성 click 리스너**를 등록한다. 이 리스너는 `LayoutSelectionController._onClick`(document capture phase)보다 먼저 실행되어 click을 소비(`stopPropagation()` + `preventDefault()`)한다. click이 발생하지 않으면 350ms 타임아웃으로 리스너가 자동 제거된다.
 
 과거에는 삽입 완료/취소에 `_suppressNextClick` 불린 플래그를 사용했으나, 이 방식은 mousedown의 `preventDefault()`로 인해 브라우저가 click 이벤트를 발생시키지 않을 때 플래그가 소비되지 않고 남아 다음 정상 클릭을 잘못 무시하는 문제가 있었다 (EVENT_SYSTEM_AUDIT.md C1). 이를 해결하기 위해 삽입 경로도 `_suppressLayoutClick()`으로 통합되었다.
 
@@ -963,7 +963,7 @@ interface EditModeState {
 EditManager._suppressLayoutClick() 호출
     ├── 기존 click 소비 리스너가 있으면 제거 (_removeClickConsumeHandler)
     ├── window capture phase에 일회성 click 리스너 등록
-    └── 200ms 타임아웃 설정 (자동 제거용)
+    └── 350ms 타임아웃 설정 (자동 제거용)
     │
     ▼
 (브라우저가 click 이벤트 발생)
@@ -979,7 +979,7 @@ LayoutSelectionController._onClick는 호출되지 않음 (stopPropagation으로
 (또는 click이 발생하지 않은 경우)
     │
     ▼
-200ms 타임아웃 → _removeClickConsumeHandler() → 리스너 제거
+350ms 타임아웃 → _removeClickConsumeHandler() → 리스너 제거
 ```
 
 ### 11.5 API
@@ -989,7 +989,7 @@ LayoutSelectionController._onClick는 호출되지 않음 (stopPropagation으로
  * 편집 액션(삽입/취소/드래그/리사이즈/Place Gun) 완료 직후 발생하는
  * 클릭 이벤트를 억제한다. window capture phase에 일회성 click 리스너를
  * 등록하여 LayoutSelectionController._onClick보다 먼저 click을 소비한다.
- * click이 발생하지 않으면 200ms 타임아웃으로 자동 제거된다.
+ * click이 발생하지 않으면 350ms 타임아웃으로 자동 제거된다.
  * @internal
  */
 _suppressLayoutClick(): void
@@ -999,7 +999,7 @@ _suppressLayoutClick(): void
 
 ### 11.6 일회성 소비
 
-`_suppressLayoutClick()`의 window capture 리스너는 click 소비 후 즉시 제거되며, click이 발생하지 않으면 200ms 후 자동 제거된다. 이후의 클릭 이벤트는 정상적으로 처리된다.
+`_suppressLayoutClick()`의 window capture 리스너는 click 소비 후 즉시 제거되며, click이 발생하지 않으면 350ms 후 자동 제거된다. 이후의 클릭 이벤트는 정상적으로 처리된다.
 
 ---
 
@@ -1156,7 +1156,7 @@ window capture 리스너가 click 소비 (stopPropagation + preventDefault)
 | `styleChange` | 텍스트 | `paragraph`, `controller` | 유효 스타일 변경 |
 | `selectionStart` | 텍스트 | `paragraph`, `controller` | 텍스트 선택 생성 (드래그 시작, 더블클릭, Ctrl+A, triple-click) |
 | `selectionEnd` | 텍스트 | `paragraph`, `controller` | 텍스트 선택 확정/제거 (드래그 종료, 더블클릭, Ctrl+A, triple-click, ESC 해제) |
-| `cursorMove` | 텍스트 | `paragraph`, `controller` | 커서 위치 변경 (쓰로틀링) |
+| `cursorMove` | 텍스트 | `paragraph`, `controller` | 커서 위치 변경 (모든 KeyDown + 마지막 KeyUp) |
 | `layoutSelectionChange` | 레이아웃 | `selectedLayouts`, `previousLayouts` | box 선택 변경 |
 | `layoutMove` | 레이아웃 | `layoutElement`, `previousLeft/Top`, `left/top`, `canceled`, `newContainer?`, `previousContainer?` | 드래그 이동 완료/취소 (reparent 모드 시 부모 정보 포함) |
 | `layoutResize` | 레이아웃 | `layoutElement`, `previous*`, `left/top/width/height`, `canceled` | 리사이즈 완료/취소 |
@@ -1200,10 +1200,10 @@ window capture 리스너가 click 소비 (stopPropagation + preventDefault)
 - **예외 격리**: 리스너에서 예외가 발생해도 `console.error`로만 출력되고 다른 리스너나 `EditManager` 상태에는 영향을 주지 않는다.
 - **`paragraph`/`controller`의 `null` 처리**: 레이아웃/삽입 이벤트에서 `paragraph`와 `controller`는 `null`이다. `focusChange`의 blur/unregister 경로에서도 `controller`는 `null`이다. 외부 UI는 `event.type`과 `event.controller === null`을 확인하여 필드 접근 여부를 결정해야 한다.
 - **`selectedLayouts`는 복사본**: `layoutSelectionChange`의 `selectedLayouts`는 `[...this._selectedLayouts]`로 새 배열이므로, 리스너에서 직접 수정해도 내부 상태에 영향을 주지 않는다.
-- **`cursorMove` 쓰로틀링**: 키보드 연속 입력 중에는 최초 KeyDown에만 `cursorMove`가 발생한다. 매 입력마다 발생하지 않으므로, 실시간 커서 위치가 필요하면 `controller.cursorOffset`을 직접 조회한다.
+- **`cursorMove` 발생 패턴**: 키보드 연속 입력 중에는 모든 KeyDown마다 `cursorMove`가 발생하며, 마지막 KeyUp에서도 발생한다. 외부 UI 커서 위치 표시기가 화살표 키 연속 입력 중에도 갱신된다.
 - **`layoutMove`/`layoutResize` 발생 조건**: 3px 이하의 이동(클릭으로 간주)에서는 발생하지 않는다. `BoxDragState.dragMoved`/`BoxResizeState.moved`가 `true`일 때만 발생한다.
 - **`insert` 발생 조건**: 드래그 거리 3px 이상, width/height 1 이상일 때만 발생한다. 임계값 미만이면 `_cleanup()` 후 return하여 이벤트가 발생하지 않는다.
-- **`_suppressLayoutClick` 일회성**: 편집 액션(삽입/취소/드래그/리사이즈/Place Gun) 직후의 첫 번째 클릭만 억제된다. window capture 리스너가 click 소비 후 즉시 제거되며, click이 발생하지 않으면 200ms 타임아웃으로 자동 제거된다. 이후 클릭은 정상적으로 처리된다.
+- **`_suppressLayoutClick` 일회성**: 편집 액션(삽입/취소/드래그/리사이즈/Place Gun) 직후의 첫 번째 클릭만 억제된다. window capture 리스너가 click 소비 후 즉시 제거되며, click이 발생하지 않으면 350ms 타임아웃으로 자동 제거된다. 이후 클릭은 정상적으로 처리된다.
 - **리스너 등록 순서**: 동일 `type`에 여러 리스너를 등록하면 등록 순서대로 호출된다 (`Set`의 삽입 순서 보장).
 - **리스너 제거 시점**: 리스너를 제거하면 현재 디스패치 중인 `Set`에서도 즉시 제외되지만, 이미 실행 중인 리스너는 완료된다.
 - **`modeChange` 중간 상태 억제**: 모드 setter가 내부적으로 다른 모드 setter를 호출할 때 `_modeChangeSuppressed` 플래그로 중간 상태의 이벤트가 억제된다. 최종적으로 모드가 확정된 후 한 번만 `modeChange` 이벤트가 발생한다. 예: `textEditMode = true` 호출 시 내부적으로 `layoutEditMode = false`와 `insertMode = null`이 호출되지만, `modeChange` 이벤트는 최종적으로 `textEditMode = true`가 확정된 후 한 번만 발생한다.
