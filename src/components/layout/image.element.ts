@@ -285,7 +285,10 @@ export class LayoutImageElement extends HTMLElement {
     }
 
     const img = await this._loadImage(resolvedUrl);
-    if (!img) return;
+    if (!img) {
+      this._dispatchRenderError('image-load-failed', resolvedUrl);
+      return;
+    }
     this._drawImage(ctx, img);
     this._feedRgbaToEngine(ctx);
 
@@ -406,9 +409,23 @@ export class LayoutImageElement extends HTMLElement {
 
     try {
       ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, dx, dy, dw, dh);
-    } catch (_) {
-      // drawImage 실패 — 무시
+    } catch (e) {
+      this._dispatchRenderError('image-draw-failed', String(e));
     }
+  }
+
+  /**
+   * `render-error` CustomEvent를 디스패치한다.
+   *
+   * @param type - 에러 타입 (`'image-load-failed'` | `'image-draw-failed'`)
+   * @param message - 에러 메시지
+   */
+  private _dispatchRenderError(type: string, message: string): void {
+    this.dispatchEvent(new CustomEvent('render-error', {
+      detail: { id: this.id, type, message },
+      bubbles: true,
+      composed: true,
+    }));
   }
 
   /**

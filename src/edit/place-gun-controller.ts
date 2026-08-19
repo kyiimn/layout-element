@@ -157,6 +157,12 @@ export class PlaceGunController {
     } else if (item.contentType === 'element') {
       this._injectElementPattern(item, event);
     } else if (item.contentType === 'style') {
+      const paragraph = this._findParagraphInBox(box);
+      if (!paragraph) {
+        manager._dispatchPlaceGunAfter(item, box, false);
+        manager._suppressLayoutClick();
+        return false;
+      }
       this._injectStylePattern(box, item);
     } else {
       this._injectImageOrAd(box, item);

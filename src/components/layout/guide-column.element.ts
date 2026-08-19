@@ -176,16 +176,28 @@ export class LayoutGuideColumnElement extends HTMLElement {
   }
 
   get printPostData(): PrintPostData<GuideColumnData>[] {
-    const rect = this.getBoundingClientRect();
+    const ppm = this._getPpm();
     return [{
       data: this.data,
       rect: {
-        x: rect.left + window.scrollX,
-        y: rect.top + window.scrollY,
-        width: rect.width,
-        height: rect.height,
+        x: this._left * ppm,
+        y: this._top * ppm,
+        width: this._width * ppm,
+        height: this._height * ppm,
       } as PrintPostDataRect,
     }];
+  }
+
+  private _getPpm(): number {
+    let el: Element | null = this.parentElement;
+    while (el) {
+      if (el instanceof (customElements.get('x-layout-document') as typeof HTMLElement)) {
+        const docEl = el as unknown as { ppm?: number };
+        return docEl.ppm ?? 3.78;
+      }
+      el = el.parentElement;
+    }
+    return 3.78;
   }
 }
 customElements.define('x-layout-guide-column', LayoutGuideColumnElement);

@@ -1182,8 +1182,10 @@ export class TextEditController {
     const model = this._paragraph.model;
     if (!model) return;
 
-    const pastedText = event.clipboardData?.getData("text/plain") ?? "";
-    if (pastedText.length === 0) return;
+    const rawPastedText = event.clipboardData?.getData("text/plain") ?? "";
+    if (rawPastedText.length === 0) return;
+
+    const pastedText = rawPastedText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
     if (typeof model.textContent !== "string") return;
 
