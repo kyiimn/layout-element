@@ -1006,7 +1006,7 @@ class GridCalculatorEngine {
   get lineHeight: number;             // fontSize × lineGap
   get editableWidth: number;          // mm
   get editableHeight: number;         // mm (lineHeight의 정수 배로 내림)
-  get editableTextHeight: number;     // editableHeight + (lineHeight - fontSize)
+  get editableTextHeight: number;     // height - paddingTop - paddingBottom (마지막 라인 fontSize 규칙 반영)
   get contentHeight: number;          // mm
   get fontSize: number;               // 상속 또는 기본값 (4)
   get lineGap: number;                // 상속 또는 기본값 (1.25)

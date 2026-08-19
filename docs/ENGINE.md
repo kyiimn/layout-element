@@ -135,7 +135,7 @@ static create(data: GridCalculatorEngineOptions, ppm?: number): GridCalculatorEn
 | `lineHeight` | `number` | 라인 높이 (fontSize * lineGap) |
 | `editableWidth` | `number` | 편집 가능 너비 (mm) |
 | `editableHeight` | `number` | 편집 가능 높이 (mm, lineHeight의 정수 배로 내림) |
-| `editableTextHeight` | `number` | 편집 가능 텍스트 높이 (lineHeight - fontSize 추가 후 1e-6 반올림) |
+| `editableTextHeight` | `number` | 텍스트 배치 가능 높이 (mm). padding 제외 전체 높이로, 마지막 라인 fontSize 높이 규칙 반영 |
 | `contentHeight` | `number` | 콘텐츠 높이 |
 | `fontSize` | `number` | 폰트 크기 |
 | `lineGap` | `number` | 라인 갭 |
@@ -153,7 +153,7 @@ static create(data: GridCalculatorEngineOptions, ppm?: number): GridCalculatorEn
 - `columns: number` = 동일 너비 컬럼, `columns: number[]` = 명시적 컬럼 너비
 - `isBox === true`일 때 첫/마지막 명시적 컬럼 너비에서 좌/우 패딩만큼 감소
 - `editableHeight`는 `lineHeight`의 정수 배로 내림
-- `editableTextHeight`는 `lineHeight - fontSize` 추가 후 부동소수점 오류 방지를 위해 1e-6 반올림
+- `editableTextHeight`는 padding 제외 전체 높이(`height - paddingTop - paddingBottom`)로, 마지막 라인이 `lineHeight`가 아닌 `fontSize`만큼만 차지하는 규칙(`BoxEngine.absHeight = lineHeight * height - (lineHeight - fontSize)`)을 정확히 반영하여 N 라인 Box가 N 라인을 모두 수용하도록 보장
 
 ---
 

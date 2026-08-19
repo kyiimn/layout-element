@@ -964,6 +964,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `columnContents` | `TextLineData[][]` | 컬럼별 줄 데이터. 컬럼 요소가 렌더링에 사용 |
 | `gaps` | `number[]` | 컬럼 간 간격(mm) 배열 |
 | `lineHeight` | `number` | 줄 높이(mm) |
+| `fontSize` | `number` | 폰트 크기(mm). `textStyle.fontSize` → `inheritStyle.fontSize` → `DEFAULT_FONT_SIZE` 순서. 마지막 라인 높이 규칙에서 사용 |
 | `overflow` | `number` | 오버플로우된 문자 수 |
 | `widthRatio` | `number` | 장평 비율 |
 | `spaceRatio` | `number` | 공백 너비 비율 (em 단위). 기본값: 0.5 |
@@ -1225,6 +1226,7 @@ overlay = overlay.filter(i => {
   - 초과한 라인에는 `lineEl.style.display = 'none'`을 적용하여 시각적으로 숨긴다
   - `columnHeightMm`이 0이면(부모 높이 미설정) 오버플로우 판정을 생략한다
   - mm 기반 계산이므로 scale에 무관하게 동작한다
+  - **마지막 라인 높이 규칙**: 컬럼의 마지막 라인(`i === lines.length - 1`)은 `lineHeight`가 아닌 `fontSize`만큼만 높이를 차지한다. 이는 `BoxEngine.absHeight`의 `lineHeight * height - (lineHeight - fontSize)` 공식과 일치하며, N 라인 Box의 실제 높이는 `(N-1) * lineHeight + fontSize`이다. `renderText()`는 마지막 라인의 `lineEl.style.height`를 `fontSize` mm로 덮어쓰고, `_getLineHeightMm()`이 그 값을 반환하므로 누적 높이 계산에 반영된다. 단, `textBlockStyle.fontSize`가 기본 `fontSize`와 다른 라인은 자체 높이를 가지므로 이 규칙을 적용하지 않는다.
 - **key 기반 증분 렌더링** (commit cec32e4):
   - `data-source-offset` 속성을 key로 사용하여 기존 span 재사용
   - `data-offset` (rendered offset)은 `EditCoordinateMapper` 호환성을 위해 유지
@@ -1242,7 +1244,7 @@ overlay = overlay.filter(i => {
 
 ### 18.3 `LayoutColumnElement`
 
-> `LayoutVirtualColumnElement`는 mm 좌표계 마이그레이션으로 제거됨. 텍스트 래핑은 `_layoutTextIntoColumns()`에서 mm 좌표로 직접 수행하며, `isOverflow` 판정은 `(lineIndexInColumn + 1) * lineHeight > parentHeight + 1e-6`로 계산한다.
+> `LayoutVirtualColumnElement`는 mm 좌표계 마이그레이션으로 제거됨. 텍스트 래핑은 `_layoutTextIntoColumns()`에서 mm 좌표로 직접 수행하며, `isOverflow` 판정은 마지막 라인 높이 규칙을 반영하여 `(lineIndexInColumn + 1) * lineHeight > parentHeight + (lineHeight - fontSize) + 1e-6`로 계산한다 (`textBlockStyle.fontSize`가 기본과 다르면 `parentHeight`만 사용).
 
 ---
 
