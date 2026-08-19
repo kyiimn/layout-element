@@ -329,7 +329,7 @@ freeRegions = [
 
 ### 6.1 개요
 
-`_charWidthMm()`는 폰트 메트릭 테이블(`hmtx`)을 직접 파싱하여 문자의 advance width를 mm 단위로 반환한다. opentype.js로 파싱된 폰트 객체에서 `glyph.advanceWidth / unitsPerEm * fontSize`로 계산한다. 같은 TTF 파일을 사용하는 한 환경(브라우저 엔진/OS/DPI)에 무관하게 동일한 값을 반환하므로, 모니터 작업 결과가 서버 재렌더링/윤전기 인쇄물과 동일하게 보장된다.
+`_charWidthMm()`는 폰트 메트릭 테이블(`hmtx`)을 직접 파싱하여 문자의 advance width를 mm 단위로 반환한다. opentype.js로 파싱된 폰트 객체에서 `glyph.advanceWidth / unitsPerEm * fontSize`로 계산한다. 같은 TTF 파일을 사용하는 한 환경(브라우저 엔진/OS/DPI)에 무관하게 동일한 값을 반환하므로, 모니터 작업 결과가 서버 재렌더링/후처리 시스템과 동일하게 보장된다.
 
 ```ts
 private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle): number {
@@ -384,7 +384,7 @@ private _charWidthMmFromFont(char: string, textBlockStyle: TextBlockStyle | unde
 
 - 폰트 파싱에 실패했거나 특정 글리프를 찾을 수 없는 경우 `_charWidthMmFromFont`가 `null`을 반환하고 `_charWidthMm`은 `minWidthMm` 바닥값을 사용한다.
 - `FontLoader._parsed === false`이면 이후 모든 폰트 조회 시도가 즉시 `null`을 반환하여 불필요한 오버헤드를 방지한다.
-- **`base64Data`가 없는 폰트**: `ttfFilename` 경로의 폰트는 별도 fetch가 필요하므로 파싱 캐시에서 누락될 수 있다. 화면 모드에서 `base64Data`가 우선되므로 대부분의 케이스가 커버된다.
+- **`base64Data`가 없는 폰트**: `ttfFilename` 경로의 폰트는 별도 fetch가 필요하므로 파싱 캐시에서 누락될 수 있다. `base64Data`가 우선되므로 대부분의 케이스가 커버된다.
 
 ---
 
@@ -857,7 +857,7 @@ flexbox 정렬에 사용되고 inner의 `scale`이 glyph 축소를 담당한다.
 `charOffsets`가 산출한 mm 단위 오프셋은 ppm을 곱해 픽셀로 변환하면
 브라우저 DOM 측정값(`getBoundingClientRect()`)과 정확히 일치한다 —
 `position: absolute; left`를 사용하므로 flexbox float 연산 오차가 원천 제거된다.
-따라서 pdf-gen이 Playwright 없이 동일한 `PrintPostDataChar.rect`를 산출할 수 있다.
+따라서 후처리 시스템이 동일한 `PrintPostDataChar.rect`를 산출할 수 있다.
 
 `width`와 `scale`은 분리되어 작동한다:
 - 외부 span의 `width`는 `_charWidthMm(char)`으로 측정한 원본 폭에 장평을 곱해 정확히 고정한다. 측정값과 DOM 렌더링이 결정론적으로 일치하며, 마지막 글자가 틀을 넘어가는 현상을 방지한다.
@@ -1256,7 +1256,7 @@ overlay = overlay.filter(i => {
 - `overlapPadding`이 설정된 이미지는 타원 기반 감지를 사용한다. 캔버스가 없으면 기하학적 확장 사각형으로 폴백하며, 이 경우 투명 영역 구분이 불가능하다.
 - `overlapMode`가 `'box'`인 이미지는 캔버스 픽셀 검사를 수행하지 않고 기하학적 rect 기준으로 오버랩을 판정한다. `overlapPadding`은 적용되지만 투명 영역도 텍스트를 차단한다. `'none'`인 이미지는 `overlayElements`에서 제외되어 오버랩 회피가 전혀 수행되지 않는다.
 - 텍스트 오버플로우는 마지막 컬럼에서 `_overflow`로 집계되며 `render-error` 이벤트로 통지된다. 오버플로우된 라인은 `renderText()`에서 `display: none` 처리되어 시각적으로 숨겨진다. `_createLineWithParts()`가 overflow를 반환한 경우에도 라인 데이터를 `columnContent`에 포함시켜, `_computeRenderStats()`가 라인 기반 오버플로우를 감지할 수 있도록 한다. 이는 텍스트 끝의 `\n`으로 인해 발생하는 빈 라인 오버플로우도 감지하기 위함이다.
-- 오버플로우 발생 시 `LayoutParagraphElement`의 `:host`에 하단 8px 빨간 inset shadow(`inset 0 -8px 0 0 #ff0000`)가 자동 적용되어 사용자에게 오버플로우를 시각적으로 알린다. 인쇄 모드에서는 적용되지 않는다. 오버플로우가 해제되면 shadow도 자동 제거된다.
+- 오버플로우 발생 시 `LayoutParagraphElement`의 `:host`에 하단 8px 빨간 inset shadow(`inset 0 -8px 0 0 #ff0000`)가 자동 적용되어 사용자에게 오버플로우를 시각적으로 알린다. 오버플로우가 해제되면 shadow도 자동 제거된다.
 - 폰트 메트릭 테이블에서 직접 읽은 advance width를 사용하므로 브라우저 렌더링 파이프라인 차이에서 오는 불일치가 발생하지 않는다. 폰트 파싱에 실패하면 `minWidthMm` 바닥값으로 폴백한다.
 - `LayoutParagraphElement.render()` 완료 후 항상 `render-complete` 커스텀 이벤트가 디스패치된다. 오버플로우 발생 여부와 무관하게 렌더링 결과를 통지하며, 페이로드는 `RenderCompleteEventDetail` 타입을 따른다. 배치된 글자/라인 수(`placed.chars`, `placed.lines`), 오버플로우 여부 및 통계(`overflow.hasOverflow`, `overflow.chars`, `overflow.lines`), 컬럼 수(`columnCount`)를 포함한다. `render-error`와 독립적으로 동작하며 기존 이벤트에 영향을 주지 않는다.
 

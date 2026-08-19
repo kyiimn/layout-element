@@ -165,6 +165,31 @@ export class DocumentEngine {
   }
 
   /**
+   * 엔진 트리에서 특정 자식 엔진을 제거한다.
+   *
+   * 엔진 우선 원칙: DOM 요소 제거 시 엔진 트리 동기화는 엔진이 담당한다.
+   * DOM `disconnectedCallback`에서 `parentElement`가 이미 null이므로,
+   * `connectedCallback` 시점에 캐싱한 부모 엔진 참조를 통해 이 메서드를 호출한다.
+   *
+   * @param engine - 제거할 자식 엔진 (BoxEngine | ParagraphEngine | ImageEngine | TableEngine)
+   * @param parentEngine - 해당 엔진의 부모 (BoxEngine | DocumentEngine | TableCellEngine)
+   */
+  removeChildEngine(
+    engine: BoxEngine | ParagraphEngine | ImageEngine | TableEngine,
+    parentEngine: BoxEngineParent,
+  ): void {
+    if (engine instanceof BoxEngine) {
+      this._removeBoxFromParent(engine, parentEngine);
+    } else {
+      if (parentEngine instanceof BoxEngine) {
+        const children = parentEngine.childEngines;
+        const idx = children.indexOf(engine as ParagraphEngine | ImageEngine | TableEngine);
+        if (idx >= 0) children.splice(idx, 1);
+      }
+    }
+  }
+
+  /**
    * 엔진 리소스 번들을 반환한다.
    * 하위 엔진 생성 시 전달용.
    */
@@ -262,6 +287,15 @@ export class DocumentEngine {
     this._refreshParagraphOverlays(boxEngines);
   }
 
+  /**
+   * 모든 박스의 paragraph overlayEngines를 갱신한다.
+   *
+   * 엔진 우선 원칙: 엔진 트리가 단일 소스 오브 트루스로 overlay 관계를 결정한다.
+   * overlay가 0개인 paragraph도 갱신하여, 이전 렌더링에서 overlay가 있었지만
+   * 현재 사라진 경우 stale overlayEngines가 남지 않도록 한다.
+   *
+   * @param boxEngines - 갱신할 박스 엔진 배열 (재귀 순회)
+   */
   private _refreshParagraphOverlays(boxEngines: BoxEngine[]): void {
     for (const be of boxEngines) {
       const inheritStyle = this._buildInheritStyle(be.data, be.parent);
@@ -269,20 +303,18 @@ export class DocumentEngine {
       for (const ce of childEngines) {
         if (ce instanceof ParagraphEngine) {
           const overlayEngines = be.overlayElements;
-          if (overlayEngines.length > 0) {
-            ce.data = {
-              ...ce.data,
-              overlayEngines,
-              inheritStyle: {
-                ...inheritStyle,
-                parentHeight: be.absHeight,
-                parentWidth: be.absWidth,
-              },
-            };
-            ce.resetIncrementalState();
-            ce.layoutStructure();
-            ce.layoutText();
-          }
+          ce.data = {
+            ...ce.data,
+            overlayEngines,
+            inheritStyle: {
+              ...inheritStyle,
+              parentHeight: be.absHeight,
+              parentWidth: be.absWidth,
+            },
+          };
+          ce.resetIncrementalState();
+          ce.layoutStructure();
+          ce.layoutText();
         }
       }
       const childBoxes = be.childBoxEngines;
@@ -311,8 +343,15 @@ export class DocumentEngine {
     }
     const boxEngine = existingBox ?? BoxEngine.create(boxData, parent);
 
-    // 박스 자체 그리드 계산기 생성 (자식 박스 배치용)
     const inheritStyle = this._buildInheritStyle(boxData, parent);
+    const parentGc = parent.gridCalculator;
+    const isStatic = boxData.position !== 'absolute';
+    const columns = isStatic && parentGc
+      ? parentGc.columnWidth.slice(boxData.left, boxData.left + boxData.width)
+      : [boxData.width];
+    const gap = isStatic && parentGc
+      ? parentGc.gaps.slice(boxData.left, boxData.left + boxData.width - 1)
+      : [];
     const gc = GridCalculatorEngine.create({
       width: boxEngine.absWidth,
       height: boxEngine.absHeight,
@@ -320,12 +359,8 @@ export class DocumentEngine {
       paddingBottom: boxData.paddingBottom,
       paddingLeft: boxData.paddingLeft,
       paddingRight: boxData.paddingRight,
-      columns: boxData.position !== 'absolute'
-        ? parent.gridCalculator!.columnWidth.slice(boxData.left, boxData.left + boxData.width)
-        : [boxData.width],
-      gap: boxData.position !== 'absolute'
-        ? parent.gridCalculator!.gaps.slice(boxData.left, boxData.left + boxData.width - 1)
-        : [],
+      columns,
+      gap,
       paragraphStyle: this._data.paragraphStyle,
       textStyle: this._data.textStyle,
       isBox: true,
@@ -375,7 +410,10 @@ export class DocumentEngine {
     parentBox: BoxEngine,
     inheritStyle: InheritStyle,
   ): ParagraphEngine {
-    const gc = parentBox.gridCalculator!;
+    const gc = parentBox.gridCalculator;
+    if (!gc) {
+      throw new Error('parentBox.gridCalculator must be set before building ParagraphEngine');
+    }
     const column = paraData.column ?? gc.columnWidth;
     const gap = paraData.gap ?? gc.gaps;
 
@@ -454,22 +492,25 @@ export class DocumentEngine {
     const te = TableEngine.create(tableData, parentBox);
     te.layout();
 
-    const rows = tableData.children ?? [];
-    for (let r = 0; r < rows.length; r++) {
-      const row = rows[r];
-      const cellEngines = te.rowEngines[r]?.cellEngines ?? [];
-      for (let c = 0; c < cellEngines.length && c < row.children.length; c++) {
-        const cellEngine = cellEngines[c];
-        const cellData = row.children[c];
-        const cellChildren = cellData?.children;
-        if (!cellChildren || cellChildren.length === 0) continue;
+    const placements = te.gridResolution?.placements ?? [];
+    for (const placement of placements) {
+      const rowEngine = te.rowEngines[placement.gridRow];
+      if (!rowEngine) continue;
 
-        const cellBoxData = cellChildren.length === 1
-          ? cellChildren[0]
-          : { type: 'box' as const, left: 0, top: 0, width: 1, height: 1, children: cellChildren };
-        const cellBoxEngine = this._buildBoxEngine(cellBoxData, cellEngine);
-        cellEngine.boxEngine = cellBoxEngine;
-      }
+      const placementIdx = rowEngine.cellEngines.findIndex(
+        ce => ce.x === placement.x && ce.y === (placement.y - rowEngine.y),
+      );
+      if (placementIdx < 0) continue;
+      const cellEngine = rowEngine.cellEngines[placementIdx];
+
+      const cellChildren = placement.cell.children;
+      if (!cellChildren || cellChildren.length === 0) continue;
+
+      const cellBoxData = cellChildren.length === 1
+        ? cellChildren[0]
+        : { type: 'box' as const, left: 0, top: 0, width: 1, height: 1, children: cellChildren };
+      const cellBoxEngine = this._buildBoxEngine(cellBoxData, cellEngine);
+      cellEngine.boxEngine = cellBoxEngine;
     }
 
     return te;

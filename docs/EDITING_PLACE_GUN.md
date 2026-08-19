@@ -59,7 +59,6 @@ Place Gun이 활성 상태(항목 ≥ 1, 일시정지 아님)이면 문서 커�
 
 ### 1.2 사전 조건
 
-- Place Gun은 인쇄 모드에서 완전히 차단된다 (`_isPrint` 가드).
 - `<x-layout-document>` 요소가 DOM에 없으면 클릭 배치가 동작하지 않는다 (no-op).
 
 ---
@@ -410,7 +409,6 @@ Place Gun이 활성 상태면 이 컨트롤러가 속한 `EditManager`가 관리
 
 ## 8. 주의사항
 
-- **인쇄 모드 차단**: `loadPlaceGun()`은 인쇄 모드에서 no-op이다. `_isPrint` 가드로 차단.
 - **드래그 아님**: Place Gun은 단일 클릭으로 배치한다. 드래그(영역 그리기)는 `InsertController`의 역할이다.
 - **새 요소 생성 안 함**: 클릭 위치에 매칭되는 기존 paragraph/image 요소가 있으면 그 요소에 데이터를 주입한다. 매칭되는 요소가 없으면 항목을 소비하지 않고 no-op로 종료한다. 새 박스/요소를 생성하지 않는다.
 - **매칭 규칙**: text 항목은 `contentType === 'paragraph'`인 box의 paragraph 자식에만 매칭되고, image 항목은 `contentType === 'image'`인 box의 image 자식에만 매칭된다. 빈 box(`contentType === null`)에는 매칭되지 않는다.

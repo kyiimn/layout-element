@@ -445,7 +445,7 @@ export class LayoutDocumentElement extends HTMLElement {
    */
   async render() {
     if (!this.isConnected) return null;
-    const sortedItems = [...this.items].sort((a, b) => a.zIndex - b.zIndex).reverse();
+    const sortedItems = [...this.items].sort((a, b) => b.zIndex - a.zIndex);
     for (let i = 0; i < sortedItems.length; i++) {
       await sortedItems[i].render()
     }

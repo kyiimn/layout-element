@@ -103,7 +103,7 @@ manager.layoutEditMode = false;
 console.log(manager.layoutEditType); // 'move' | 'reparent'
 ```
 
-`layoutEditMode`가 `true`(또는 `{ type: ... }`)가 되면 `EditManager`는 문서 안의 모든 `<x-layout-box>`를 순회하며, `isBoxEditable(box)` 결과에 따라 각 box의 `editableLayout` 속성을 갱신한다. `false`로 설정되면 모든 box의 `editableLayout` 속성이 `false`가 된다. **선택 컨트롤러(`LayoutSelectionController`)는 레이아웃 편집 모드와 무관하게 항상 부착되어 있으며**, 인쇄 모드와 삽입 모드를 제외하면 항상 동작한다. 단, **선택 가능 여부(`isBoxSelectable`)는 `selectableRoles`/`selectableBoxIds`가 `null`일 때 `editableRoles`/`editableBoxIds`를 fallback으로 사용**하므로, 편집 필터를 설정하면 선택 필터도 같이 좁아진다. 자세한 내용은 [선택 필터](#선택-필터-setselectableroles-roles--setselectableboxids-ids--setselectablerootidid) 섹션을 참조.
+`layoutEditMode`가 `true`(또는 `{ type: ... }`)가 되면 `EditManager`는 문서 안의 모든 `<x-layout-box>`를 순회하며, `isBoxEditable(box)` 결과에 따라 각 box의 `editableLayout` 속성을 갱신한다. `false`로 설정되면 모든 box의 `editableLayout` 속성이 `false`가 된다. **선택 컨트롤러(`LayoutSelectionController`)는 레이아웃 편집 모드와 무관하게 항상 부착되어 있으며**, 삽입 모드를 제외하면 항상 동작한다. 단, **선택 가능 여부(`isBoxSelectable`)는 `selectableRoles`/`selectableBoxIds`가 `null`일 때 `editableRoles`/`editableBoxIds`를 fallback으로 사용**하므로, 편집 필터를 설정하면 선택 필터도 같이 좁아진다. 자세한 내용은 [선택 필터](#선택-필터-setselectableroles-roles--setselectableboxids-ids--setselectablerootidid) 섹션을 참조.
 
 **필터 좁힘 시 선택 자동 해제**: `layoutEditMode` setter, `setEditableRoles()`, `setEditableBoxIds()`, `addEditableBox()`, `removeEditableBox()`, `setEditableRootId()` 호출 시, 필터 변경으로 인해 더 이상 `isBoxSelectable()`을 통과하지 못하게 된 선택된 box는 자동으로 선택 해제된다. `layoutSelectionChange` 이벤트가 발생한다. 포커스된 paragraph의 부모 box는 텍스트 편집 포커스 유지를 위해 보존된다.
 
@@ -191,12 +191,12 @@ const editable = manager.isBoxEditable(box); // boolean
 
 #### 선택 (항상 활성)
 
-레이아웃 선택은 기본적으로 항상 활성이다. `LayoutSelectionController`는 처음부터 부착되어 있으며, 인쇄 모드와 삽입 모드를 제외하면 항상 동작한다. 선택 컨트롤러의 부착 여부는 `layoutEditMode`와 독립적이지만, **개별 box의 선택 가능 여부(`isBoxSelectable`)는 편집 필터의 영향을 받는다** — `selectableRoles`/`selectableBoxIds`가 `null`이면 `editableRoles`/`editableBoxIds`를 fallback으로 사용하므로, 편집 필터를 좁히면 선택도 같이 좁아진다.
+레이아웃 선택은 기본적으로 항상 활성이다. `LayoutSelectionController`는 처음부터 부착되어 있으며, 삽입 모드를 제외하면 항상 동작한다. 선택 컨트롤러의 부착 여부는 `layoutEditMode`와 독립적이지만, **개별 box의 선택 가능 여부(`isBoxSelectable`)는 편집 필터의 영향을 받는다** — `selectableRoles`/`selectableBoxIds`가 `null`이면 `editableRoles`/`editableBoxIds`를 fallback으로 사용하므로, 편집 필터를 좁히면 선택도 같이 좁아진다.
 
 ```typescript
 const manager = layoutDocEl.editManager;
 
-// 항상 클릭 선택 가능 (인쇄/삽입 모드 제외)
+// 항상 클릭 선택 가능 (삽입 모드 제외)
 // 단, isBoxSelectable 통과 필요 — selectableRoles가 null이면 editableRoles를 fallback 사용
 manager.selectLayout(box);
 
@@ -206,7 +206,6 @@ manager.layoutEditMode = true;
 
 | 조건 | 선택 | 이동/리사이즈 |
 |---|---|---|
-| 인쇄 모드 | ✗ | ✗ |
 | 삽입 모드 | ✗ | ✗ |
 | 기본 상태 (필터 `null`) | ✓ | ✗ |
 | 기본 상태 (`editableRoles` 설정) | `isBoxSelectable` 통과 시만 | ✗ |
@@ -305,7 +304,6 @@ element.editableLayout = false;
 |------|-------------------|
 | `true` 설정 | `cursor: grab`, `editable-layout` DOM 속성 추가, 호버/선택 시각적 피드백 활성화 |
 | `false` 설정 | `hovered`·`editable-layout` 제거, `cursor` 초기화. **`selected`는 제거되지 않는다** — 선택은 항상 활성 상태로 별도 토글이 없으므로 `editableLayout` 속성 변경과 무관하게 관리된다. `_unregisterLayout()`은 더 이상 호출되지 않는다 |
-| 인쇄 모드 | `editableLayout` 설정 무시 |
 
 > **설계**: `editableLayout` 속성은 더 이상 이벤트 리스너를 직접 등록하지 않는다. `connectedCallback`은 `mouseenter`와 `mouseleave`만 등록하고, `click`/`mousedown`/리사이즈 핸들 이벤트는 `LayoutEditController`가 문서 수준에서 처리한다. 개별 box에 `editableLayout = true`를 설정하면 `EditManager.isBoxEditable()`은 아니지만 `LayoutEditController`가 이전 버전과의 호환을 위해 여전히 편집 가능한 것으로 간주한다.
 
@@ -341,7 +339,6 @@ element.editableLayout = false;
 | **선택 없을 때 Tab** | 첫 번째 선택 가능한 box를 단일 선택 |
 | **선택 없을 때 Shift+Tab** | 마지막 선택 가능한 box를 단일 선택 |
 | **Tab** (insertMode) | 동작 안 함. 삽입 모드에서는 Tab 키가 레이아웃 선택 이동을 수행하지 않는다 |
-| **Tab** (printMode) | 동작 안 함. 인쇄 모드에서는 모든 편집 기능이 차단된다 |
 
 **이동 순서**:
 
@@ -369,7 +366,7 @@ manager.navigateByTab(true);     // Shift+Tab: 이전 요소
 
 | 메서드 | 시그니처 | 설명 |
 |--------|---------|------|
-| `EditManager.navigateByTab(shiftKey)` | `(shiftKey: boolean) => boolean` | `false`면 다음 요소로, `true`면 이전 요소로 단일 선택 이동. 이동에 성공하면 `true`, 이동할 후보가 없거나 insertMode/printMode면 `false` |
+| `EditManager.navigateByTab(shiftKey)` | `(shiftKey: boolean) => boolean` | `false`면 다음 요소로, `true`면 이전 요소로 단일 선택 이동. 이동에 성공하면 `true`, 이동할 후보가 없거나 insertMode면 `false` |
 
 #### 드래그 이동 동작
 
@@ -476,7 +473,6 @@ manager.navigateByTab(true);     // Shift+Tab: 이전 요소
 
 - `role`이 `'none'`이 아닌 경우 `[role=XXX]` 접미사가 붙는다. 예: `텍스트[role=body]`, `박스[role=group-article]`, `이미지[role=image]`.
 - 라벨은 `layout()` 호출 시, `role` 속성 변경 시(`attributeChangedCallback`), `appendChildData`/`data` 세터로 자식이 변경될 때(=`_childObserver` → `layout()` 흐름) 자동 갱신된다.
-- 인쇄 모드에서는 `selected`/`hovered`/`reparent-target` 어느 것도 설정되지 않으므로 라벨도 표시되지 않는다.
 - **`content-type-null` 속성**: `_updateLabelText()`는 `contentType === null`인 경우 `content-type-null` DOM 속성을 설정하고, 아닌 경우 제거한다. 이 속성은 `:host([content-type-null][selected])` CSS 규칙과 함께 `contentType`이 `null`인 box가 선택되었을 때 3px 두께의 빨간색 테두리를 적용하기 위해 사용된다. `td-static` 박스에도 동일한 3px 규칙이 적용된다(`:host([td-static][content-type-null][selected])`).
 
 **지면 라벨** — `<x-layout-document>`에도 동일한 `.type-label` 요소가 shadow DOM(루트 div 내부)에 존재하며, `reparent-target` 속성이 설정된 경우에만 `지면`이라는 텍스트로 표시된다. reparent/insert 드래그 중 후보 컨테이너가 document일 때 주황색 라벨이 노출된다.
@@ -509,7 +505,7 @@ manager.navigateByTab(true);     // Shift+Tab: 이전 요소
 
 **호버 동작 규칙**:
 
-1. 인쇄 모드가 아니고 `selected`가 없으며 `lock`이 `false`인 `<x-layout-box>`에 마우스가 올라가면 `hovered`가 설정된다. 레이아웃 편집 모드 여부와 관계없이 화면 렌더링 중에는 항상 동작한다.
+1. `selected`가 없으며 `lock`이 `false`인 `<x-layout-box>`에 마우스가 올라가면 `hovered`가 설정된다. 레이아웃 편집 모드 여부와 관계없이 화면 렌더링 중에는 항상 동작한다.
 2. 이미 선택된 요소(`selected`)는 호버 표시가 나타나지 않는다. 텍스트 편집 포커스로 인해 `selected`가 설정된 box도 동일하게 호버가 억제된다.
 3. **paragraph 포커스로 인해 부모 box가 `selected`로 전환될 때, 해당 box의 기존 `hovered` 속성은 제거된다**. 이는 paragraph 위에 마우스가 있는 상태에서 클릭으로 포커스를 줄 때, 즉시 빨간색 `selected` 테두리가 파란색 `hovered` 테두리를 덮어쓰도록 보장한다.
 4. 마우스가 요소에 진입하면 **조상 요소의 `hovered`를 모두 제거**하여, 가장 안쪽(최상위) 요소만 호버 표시가 보인다
@@ -529,7 +525,6 @@ manager.navigateByTab(true);     // Shift+Tab: 이전 요소
 | `editableLayout = true` (선택됨, 대기) | `grab` | 빨간색 테두리 (`selected`), 리사이즈 핸들 4개 표시 |
 | `editableLayout = true` (드래그 중) | `grabbing` | 빨간색 테두리 (`selected`) |
 | `editableLayout = true` (리사이즈 중) | 핸들 방향별 (`ns-resize`/`ew-resize`) | 빨간색 테두리 (`selected`) |
-| 인쇄 모드 | (해당 없음) | hover/선택 highlight 모두 억제 |
 
 #### 리사이즈 핸들 (Resize Handles)
 

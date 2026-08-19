@@ -13,8 +13,8 @@
 import { DEFAULT_IMAGE_DPI } from "@/constants";
 import type { OverlapMode } from "@/types";
 import type { ImageData, PrintPostData } from "@/types";
-import type { ImageEngineData, MmRect, OverlapResult, OverlapParts, AbsRect } from "./types";
-import { mergeOverlapParts } from "./overlap-engine";
+import type { ImageEngineData, MmRect, OverlapResult, AbsRect } from "./types";
+import { computeOverlapSizeMm } from "./overlap-engine";
 
 /**
  * RGBA 픽셀 데이터.
@@ -118,6 +118,7 @@ export class ImageEngine {
   /**
    * 라인 사각형과 이미지 사각형의 오버랩을 판정한다.
    *
+   * `overlap-engine.ts`의 `computeOverlapSizeMm()`에 위임한다.
    * `overlapMode === 'path'`이고 `rgbaData`가 있으면 픽셀 단위 판정을 수행한다.
    * `rgbaData`가 없으면 기하학적 rect 기반 fallback.
    * `overlapMode === 'box'`이면 항상 기하학적 rect 기반.
@@ -127,304 +128,17 @@ export class ImageEngine {
    * @returns 오버랩 판정 결과
    */
   computeOverlap(lineRectMm: MmRect, imgRectMm: AbsRect): OverlapResult {
-    const r1 = lineRectMm;
-    const r2: MmRect = {
-      left: imgRectMm.absLeft,
-      right: imgRectMm.absLeft + imgRectMm.absWidth,
-      top: imgRectMm.absTop,
-      bottom: imgRectMm.absTop + imgRectMm.absHeight,
-      width: imgRectMm.absWidth,
-      height: imgRectMm.absHeight,
-    };
-
-    let padTop = 0, padRight = 0, padBottom = 0, padLeft = 0;
-    let hasOverlapPadding = false;
-    const padding = this._data.overlapPadding;
-    if (padding !== undefined) {
-      padTop = typeof padding === 'number' ? padding : padding.top ?? 0;
-      padRight = typeof padding === 'number' ? padding : padding.right ?? 0;
-      padBottom = typeof padding === 'number' ? padding : padding.bottom ?? 0;
-      padLeft = typeof padding === 'number' ? padding : padding.left ?? 0;
-      hasOverlapPadding = true;
-    }
-
-    const effectiveR2 = hasOverlapPadding
-      ? { left: r2.left - padLeft, right: r2.right + padRight, top: r2.top - padTop, bottom: r2.bottom + padBottom }
-      : { left: r2.left, right: r2.right, top: r2.top, bottom: r2.bottom };
-
-    if (r1.bottom <= effectiveR2.top || r1.top >= effectiveR2.bottom) {
-      return { direction: 'NONE', parts: [] };
-    }
-
-    const intersectionStart = Math.max(r1.left, effectiveR2.left);
-    const intersectionEnd = Math.min(r1.right, effectiveR2.right);
-    const rawOverlapWidth = intersectionEnd - intersectionStart;
-    if (rawOverlapWidth <= 0) {
-      return { direction: 'NONE', parts: [] };
-    }
-
-    const overlapMode = this._data.overlapMode;
-
-    // 'path' 모드 + RGBA 데이터 있음 → 픽셀 단위 판정
-    if (overlapMode === 'path' && this._rgbaData) {
-      return this._computePixelOverlap(r1, imgRectMm, padTop, padRight, padBottom, padLeft, hasOverlapPadding);
-    }
-
-    // 'box' 모드 또는 RGBA 없음 → 기하학적 판정
-    if (r2.left <= r1.left && r2.right >= r1.right) {
-      return { direction: 'COVERS', parts: [{ x1: 0, x2: r1.width }] };
-    }
-
-    const relStart = intersectionStart - r1.left;
-    const relEnd = intersectionEnd - r1.left;
-    return { direction: 'PART', parts: [{ x1: relStart, x2: relEnd }] };
-  }
-
-  /**
-   * RGBA 픽셀 데이터를 사용한 정밀 오버랩 판정.
-   *
-   * 기존 `check-overlap.ts`의 canvas 기반 알고리즘을 Uint8Array 기반으로 포팅.
-   * 타원 패딩(overlapPadding)과 opaque column 그룹화 로직은 동일.
-   */
-  private _computePixelOverlap(
-    r1: MmRect,
-    imgRectMm: AbsRect,
-    padTop: number,
-    padRight: number,
-    padBottom: number,
-    padLeft: number,
-    hasOverlapPadding: boolean,
-  ): OverlapResult {
-    const imgMmRect: MmRect = {
-      left: imgRectMm.absLeft,
-      right: imgRectMm.absLeft + imgRectMm.absWidth,
-      top: imgRectMm.absTop,
-      bottom: imgRectMm.absTop + imgRectMm.absHeight,
-      width: imgRectMm.absWidth,
-      height: imgRectMm.absHeight,
-    };
-
-    const rgba = this._rgbaData!;
-    if (imgMmRect.width <= 0 || imgMmRect.height <= 0) {
-      return { direction: 'NONE', parts: [] };
-    }
-    const scaleX = rgba.width / imgMmRect.width;
-    const scaleY = rgba.height / imgMmRect.height;
-
-    if (hasOverlapPadding) {
-      const sampleTopMm = Math.max(imgMmRect.top, r1.top - padBottom);
-      const sampleBottomMm = Math.min(imgMmRect.bottom, r1.bottom + padTop);
-
-      let sy: number;
-      let sh: number;
-
-      if (sampleBottomMm > sampleTopMm) {
-        const relY = sampleTopMm - imgMmRect.top;
-        sy = Math.max(0, Math.floor(relY * scaleY));
-        sh = Math.min(rgba.height - sy, Math.ceil((sampleBottomMm - sampleTopMm) * scaleY));
-      } else if (r1.bottom <= imgMmRect.top) {
-        sy = 0;
-        sh = Math.min(rgba.height, Math.ceil(padTop * scaleY));
-      } else {
-        sh = Math.min(rgba.height, Math.ceil(padBottom * scaleY));
-        sy = rgba.height - sh;
-      }
-
-      const sx = 0;
-      const sw = rgba.width;
-
-      if (sw > 0 && sh > 0) {
-        const opaqueColumns = this._findOpaqueColumnsEllipse(
-          rgba.data, rgba.width,
-          sx, sy, sw, sh,
-          scaleX, scaleY,
-          imgMmRect, r1,
-          padTop, padBottom, padLeft, padRight,
-        );
-
-        if (opaqueColumns.size === 0) {
-          return { direction: 'NONE', parts: [] };
-        }
-
-        const mmPerColumn = imgMmRect.width / rgba.width;
-        const paddedParts: { x1: number; x2: number }[] = [];
-        for (const col of Array.from(opaqueColumns).sort((a, b) => a - b)) {
-          const colStart = imgMmRect.left - r1.left + col * mmPerColumn - padLeft;
-          const colEnd = imgMmRect.left - r1.left + (col + 1) * mmPerColumn + padRight;
-          if (colEnd > 0 && colStart < r1.width) {
-            paddedParts.push({
-              x1: Math.max(0, colStart),
-              x2: Math.min(r1.width, colEnd),
-            });
-          }
-        }
-
-        if (paddedParts.length === 0) {
-          return { direction: 'NONE', parts: [] };
-        }
-
-        const merged = mergeOverlapParts(paddedParts);
-        if (merged.length === 1 && merged[0].x1 <= 0 && merged[0].x2 >= r1.width) {
-          return { direction: 'COVERS', parts: [{ x1: 0, x2: r1.width }] };
-        }
-        return { direction: 'PART', parts: merged };
-      }
-    }
-
-    // overlapPadding 없음 → 단순 opaque column 판정
-    const imgIntersectionStart = Math.max(r1.left, imgMmRect.left);
-    const imgIntersectionEnd = Math.min(r1.right, imgMmRect.right);
-    const imgRawOverlapWidth = imgIntersectionEnd - imgIntersectionStart;
-    if (imgRawOverlapWidth <= 0) {
-      return { direction: 'NONE', parts: [] };
-    }
-
-    const relativeX = imgIntersectionStart - imgMmRect.left;
-    const relativeY = Math.max(r1.top, imgMmRect.top) - imgMmRect.top;
-    const relativeHeight = Math.min(r1.bottom, imgMmRect.bottom) - Math.max(r1.top, imgMmRect.top);
-
-    const sx = Math.floor(relativeX * scaleX);
-    const sy = Math.floor(relativeY * scaleY);
-    const sw = Math.ceil(imgRawOverlapWidth * scaleX);
-    const sh = Math.ceil(relativeHeight * scaleY);
-
-    if (sw <= 0 || sh <= 0) {
-      return { direction: 'NONE', parts: [] };
-    }
-
-    const opaqueColumns = this._findOpaqueColumnsSimple(
-      rgba.data, rgba.width,
-      sx, sy, sw, sh,
-    );
-
-    if (opaqueColumns.size === 0) {
-      return { direction: 'NONE', parts: [] };
-    }
-
-    const isFullyCovering = opaqueColumns.size === sw
-      && imgIntersectionStart <= r1.left
-      && imgIntersectionEnd >= r1.right;
-    if (isFullyCovering) {
-      return { direction: 'COVERS', parts: [{ x1: 0, x2: r1.width }] };
-    }
-
-    const sortedCols = Array.from(opaqueColumns).sort((a, b) => a - b);
-    const mmPerColumn = imgRawOverlapWidth / sw;
-    const imgRelStart = imgIntersectionStart - r1.left;
-
-    const parts: OverlapParts[] = [];
-    let partStart = sortedCols[0];
-    let prevCol = sortedCols[0];
-
-    for (let i = 1; i < sortedCols.length; i++) {
-      if (sortedCols[i] === prevCol + 1) {
-        prevCol = sortedCols[i];
-      } else {
-        parts.push({
-          x1: imgRelStart + partStart * mmPerColumn,
-          x2: imgRelStart + (prevCol + 1) * mmPerColumn,
-        });
-        partStart = sortedCols[i];
-        prevCol = sortedCols[i];
-      }
-    }
-    parts.push({
-      x1: imgRelStart + partStart * mmPerColumn,
-      x2: imgRelStart + (prevCol + 1) * mmPerColumn,
+    return computeOverlapSizeMm(lineRectMm, {
+      absRect: imgRectMm,
+      overlapMode: this._data.overlapMode,
+      overlapPadding: this._data.overlapPadding,
+      image: this._rgbaData ? {
+        rgbaData: this._rgbaData,
+        overlapMode: this._data.overlapMode,
+        overlapPadding: this._data.overlapPadding,
+      } : null,
+      contentType: 'image',
     });
-
-    return { direction: 'PART', parts };
-  }
-
-  /**
-   * 타원 기반 패딩을 적용하여 불투명 픽셀 열을 찾는다.
-   * `ndx² + ndy² ≤ 1` 조건으로 패딩 영역 내 픽셀을 판정.
-   */
-  private _findOpaqueColumnsEllipse(
-    data: Uint8Array,
-    imgWidth: number,
-    sx: number,
-    sy: number,
-    sw: number,
-    sh: number,
-    scaleX: number,
-    scaleY: number,
-    imgMmRect: MmRect,
-    r1: MmRect,
-    padTop: number,
-    padBottom: number,
-    padLeft: number,
-    padRight: number,
-  ): Set<number> {
-    const opaqueColumns = new Set<number>();
-
-    for (let y = 0; y < sh; y++) {
-      const pixelMmY = (sy + y) / scaleY + imgMmRect.top;
-
-      let dy: number;
-      if (pixelMmY < r1.top) {
-        dy = r1.top - pixelMmY;
-      } else if (pixelMmY > r1.bottom) {
-        dy = pixelMmY - r1.bottom;
-      } else {
-        dy = 0;
-      }
-
-      const vertPad = pixelMmY < r1.top ? padBottom : padTop;
-      if (vertPad <= 0 && dy > 0) continue;
-      if (vertPad > 0 && dy > vertPad) continue;
-
-      for (let x = 0; x < sw; x++) {
-        const alphaIdx = ((y + sy) * imgWidth + (x + sx)) * 4 + 3;
-        if (data[alphaIdx] === 0) continue;
-
-        const pixelMmX = (sx + x) / scaleX + imgMmRect.left;
-
-        let dx: number;
-        if (pixelMmX < r1.left) {
-          dx = r1.left - pixelMmX;
-        } else if (pixelMmX > r1.right) {
-          dx = pixelMmX - r1.right;
-        } else {
-          dx = 0;
-        }
-
-        const horizPad = pixelMmX < r1.left ? padRight : padLeft;
-        if (horizPad <= 0 && dx > 0) continue;
-
-        const ndx = horizPad > 0 ? dx / horizPad : 0;
-        const ndy = vertPad > 0 ? dy / vertPad : 0;
-
-        if (ndx * ndx + ndy * ndy <= 1) {
-          opaqueColumns.add(x + sx);
-        }
-      }
-    }
-
-    return opaqueColumns;
-  }
-
-  /**
-   * 단순 불투명 픽셀 열 찾기 (타원 패딩 없음).
-   */
-  private _findOpaqueColumnsSimple(
-    data: Uint8Array,
-    imgWidth: number,
-    sx: number,
-    sy: number,
-    sw: number,
-    sh: number,
-  ): Set<number> {
-    const opaqueColumns = new Set<number>();
-    for (let y = 0; y < sh; y++) {
-      for (let x = 0; x < sw; x++) {
-        const alphaIdx = ((y + sy) * imgWidth + (x + sx)) * 4 + 3;
-        if (data[alphaIdx] > 0) {
-          opaqueColumns.add(x + sx);
-        }
-      }
-    }
-    return opaqueColumns;
   }
 
   /**

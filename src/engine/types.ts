@@ -146,6 +146,7 @@ export interface BoxEngineParent {
   overlayElements: BoxEngine[];
   childBoxEngines: BoxEngine[];
   findBoxEngineById(id: string): BoxEngine | undefined;
+  paddingTop: number;
 }
 
 // ─────────────────────────────────────────────────────────────

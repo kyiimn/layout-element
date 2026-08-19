@@ -953,6 +953,34 @@ export class ParagraphEngine {
   }
 
   /**
+   * 오버랩 문맥(overlayEngines, parentAbsRect, inheritStyle)만 경량 갱신한다.
+   *
+   * `data` setter와 달리 `_layoutCache`를 무효화하지 않는다.
+   * 박스 드래그/리사이즈 시 오버랩 관계가 변할 수 있지만,
+   * 텍스트 레이아웃 입력 해시가 동일하면 캐시된 결과를 재사용한다.
+   * `_overlayRectsMm`만 null로 리셋하여 다음 `_detectOverlapWithCache`가
+   * 새 rect를 구성하도록 한다.
+   *
+   * @param overlayEngines - 새 오버랩 엔진 배열
+   * @param parentAbsRect - 새 부모 박스 절대 사각형
+   * @param inheritStyle - 새 상속 스타일 (parentHeight/parentWidth 포함)
+   */
+  public updateOverlayContext(
+    overlayEngines: BoxEngine[],
+    parentAbsRect: AbsRect,
+    inheritStyle: InheritStyle,
+  ): void {
+    this._data = {
+      ...this._data,
+      overlayEngines,
+      parentAbsRect,
+      inheritStyle,
+    };
+    this._inheritStyle = inheritStyle;
+    this._overlayRectsMm = null;
+  }
+
+  /**
    * 증분 렌더링 상태를 초기화한다. 구조 변경 후 전체 재생성을 보장하기 위해
    * `previousLineCount`와 `previousOverflow`를 -1로 설정한다.
    */

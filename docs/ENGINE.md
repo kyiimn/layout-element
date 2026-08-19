@@ -15,6 +15,7 @@
 - **RGBA 데이터 주입**: `ImageEngine`은 canvas `getImageData()` 또는 `pngjs.decode()` 결과를 `Uint8Array`로 받음
 - **엔진 캐싱 / 엘리먼트 DOM 캐싱**: 엔진은 연산 결과(글리프 폭, 레이아웃 결과, 오버랩 결과) 캐싱, 엘리먼트는 DOM 노드(span, div) 캐싱
 - **자체 트리 관리**: 엔진 간 직접 참조로 부모-자식 트리 구성. `DocumentEngine.layout()` 하나로 전체 엔진 트리 자동 구축
+- **엔진 우선 원칙**: 엔진 트리가 모든 레이아웃 계산의 유일한 진실 공급원이며, DOM 요소는 엔진 결과를 소비하기만 한다
 
 ---
 
@@ -52,7 +53,7 @@ static create(
 | `isDocument` | `true` | 루트 식별 |
 | `overlayElements` | `[]` | 루트는 오버레이 없음 |
 | `resources` | `{ ppm, fontLoader, colorRegistry }` | 하위 엔진에 전파되는 리소스 번들 |
-| `printPostData` | `PrintPostData[]` | z-index 정렬된 자식 printPostData (mm 단위) |
+| `printPostData` | `PrintPostData[]` | z-index 정렬된 자식 printPostData (mm 단위). 후처리 시스템용 데이터 export |
 
 #### 퍼블릭 세터
 
@@ -67,6 +68,7 @@ static create(
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
 | `layout()` | `(): void` | `DocumentData`로부터 전체 엔진 트리 재구축 |
+| `removeChildEngine` | `(engine, parentEngine): void` | 엔진 트리에서 특정 자식 엔진 제거 (DOM 요소 제거 시 엔진 트리 동기화용) |
 
 #### 내부 메커니즘
 
@@ -75,7 +77,7 @@ static create(
 - `_buildBoxEngine(boxData, parent)`: 박스별 `GridCalculatorEngine` 생성 (`isBox: true`), static 박스는 부모 그리드에서 컬럼/갭 슬라이스
 - `_buildParagraphEngine(paraData, parentBox)`: `parentBox.overlayElements`로 오버레이 계산
 - `_buildInheritStyle()`: 문서 텍스트/단락 스타일 + 부모 dimensions/padding 머지
-- `printPostData`: 자식 박스를 z-index로 정렬 후 각 박스의 `printPostData` 위임
+- `printPostData`: 자식 박스를 z-index로 정렬 후 각 박스의 `printPostData` 위임. mm 단위 좌표를 후처리 시스템에 제공
 
 #### 사용 예시
 
@@ -96,7 +98,7 @@ const engine = DocumentEngine.create(
 );
 engine.layout();
 console.log(engine.gridCalculator.columnCoords);  // mm 단위
-console.log(engine.printPostData);  // mm 단위
+console.log(engine.printPostData);  // mm 단위. 후처리 시스템용 데이터 export
 ```
 
 ```ts
@@ -201,7 +203,7 @@ static create(data: BoxData, parent: BoxEngineParent): BoxEngine
 | `childBoxEngines` | `BoxEngine[]` | 자식 박스 엔진만 필터링 |
 | `gridCalculator` | `GridCalculatorEngine \| null` | 박스 레벨 그리드 계산기 |
 | `isDocument` | `false` | 박스 식별 |
-| `printPostData` | `PrintPostData[]` | z-index 정렬된 자식 printPostData (mm 단위) |
+| `printPostData` | `PrintPostData[]` | z-index 정렬된 자식 printPostData (mm 단위). 후처리 시스템용 데이터 export |
 
 #### 퍼블릭 세터
 
@@ -219,7 +221,7 @@ static create(data: BoxData, parent: BoxEngineParent): BoxEngine
 - absolute: `left`/`top`/`width`/`height` = mm
 - `overlayElements`: 부모 오버레이 + 형제 박스(z-index 더 높고 공간 겹침, `overlapMode !== 'none'`) 머지
 - `contentType`/`contentElement`: 단일 중첩 박스를 재귀 통과
-- `printPostData`: 자식을 z-index 정렬, 각 엔진 printPostData 위임, `DEFAULT_BORDER_STYLE` 폴백
+- `printPostData`: 자식을 z-index 정렬, 각 엔진 printPostData 위임, `DEFAULT_BORDER_STYLE` 폴백. mm 단위 좌표를 후처리 시스템에 제공
 
 ---
 
@@ -265,7 +267,7 @@ static create(data: ImageEngineData): ImageEngine
 |--------|----------|------|
 | `computeOverlap` | `(lineRectMm: MmRect, imgRectMm: AbsRect): OverlapResult` | 라인과 이미지의 오버랩 판정 |
 | `layout` | `(): { cropRectMm: AbsRect; displayRectMm: AbsRect }` | 크롭/디스플레이 영역 계산 |
-| `buildPrintPostData` | `(absRect: AbsRect, imageData: ImageData): PrintPostData[]` | printPostData 생성 (mm 단위) |
+| `buildPrintPostData` | `(absRect: AbsRect, imageData: ImageData): PrintPostData[]` | 후처리 시스템용 printPostData 생성 (mm 단위) |
 
 #### 내부 메커니즘
 
@@ -312,6 +314,7 @@ static create(data: ParagraphEngineData): ParagraphEngine
 | `layoutStructure` | `(): void` | 단락 구조 레이아웃 |
 | `layoutText` | `(): void` | 텍스트 컬럼 래핑 실행 |
 | `resetIncrementalState` | `(): void` | 스켈레톤 캐시 초기화 |
+| `updateOverlayContext` | `(overlayEngines, parentAbsRect, inheritStyle): void` | 오버랩 문맥 경량 갱신 (`_layoutCache` 보존) |
 | `genColumnStyle` | `(idx: number): Partial<CSSStyleDeclaration>` | 컬럼 CSS 스타일 생성 |
 | `genLineStyle` | `(textBlockStyle?): Partial<CSSStyleDeclaration>` | 라인 CSS 스타일 |
 | `genPartStyle` | `(textBlockStyle?): Partial<CSSStyleDeclaration>` | 파트 CSS 스타일 |
@@ -346,7 +349,7 @@ static create(data: ParagraphEngineData): ParagraphEngine
 | `previousOverflow` | `number` | 이전 오버플로우 |
 | `scale` | `number` | 스케일 (현재 no-op) |
 | `overlapMode` | `ParagraphOverlapMode` | 단락 오버랩 모드 |
-| `printPostData` | `PrintPostData[]` | 문자별 printPostData (mm 단위) |
+| `printPostData` | `PrintPostData[]` | 문자별 printPostData (mm 단위). 후처리 시스템용 데이터 export |
 
 #### 퍼블릭 세터
 
@@ -369,7 +372,7 @@ static create(data: ParagraphEngineData): ParagraphEngine
 - `_detectOverlapWithCache()`: 렌더 사이클별 오버레이 rect 캐싱
 - `_createLineWithParts()`: 오버랩 파트에서 자유 영역 계산, `minCharWidthMm = widthRatio * fontSize + letterSpacing`
 - 커서/오프셋 쿼리: `getCharRect`, `getOffsetFromPoint`, `getCursorPlacement`
-- `buildParagraphPrintPostData()`: 문자별 print data 생성
+- `buildParagraphPrintPostData()`: 문자별 print data 생성. mm 단위 좌표를 후처리 시스템에 제공
 - `data` setter 호출 시 `resetIncrementalState()` 자동 실행
 
 ---
@@ -578,7 +581,7 @@ DocumentEngine (root, owns ppm + resources)
 
 - 엔진 `printPostData`는 mm 단위 rect를 반환
 - Custom Element(`<x-layout-document>`, `<x-layout-box>`, `<x-layout-paragraph>`, `<x-layout-image>`, `<x-layout-table>`, `<x-layout-td>`)의 `printPostData` getter는 엔진이 계산한 mm 좌표를 `LayoutDocumentElement.ppm`으로 곱해 픽셀 단위로 변환하여 반환
-- 인쇄 모드에서도 DOM `getBoundingClientRect()`에 의존하지 않고 엔진 좌표를 사용
+- DOM `getBoundingClientRect()`에 의존하지 않고 엔진 좌표를 사용
 
 ---
 
@@ -727,7 +730,7 @@ const grid = engine.gridCalculator;
 console.log(grid.columnCoords);  // mm 단위 컬럼 좌표
 console.log(grid.lineHeight);    // 4.8
 
-// 4. printPostData (mm 단위)
+// 4. printPostData (mm 단위). 후처리 시스템용 데이터 export
 console.log(engine.printPostData);
 
 // 5. 이미지 오버랩 (pngjs 사용)
@@ -759,9 +762,9 @@ npm run build           # IIFE + React ESM 빌드
 
 ---
 
-## 9. 엔진 내보내기 (`src/index.ts`)
+## 9. 엔진보내기 (`src/index.ts`)
 
-vanilla 진입점에서 명시적 engine 내보내기:
+vanilla 진입점에서 명시적 engine보내기:
 
 **값**:
 `GridCalculatorEngine`, `ImageEngine`, `checkOverlapMm`, `computeOverlapSizeMm`, `engineMergeOverlapParts` (alias), `BoxEngine`, `TableEngine`, `TableRowEngine`, `TableCellEngine`, `ParagraphEngine`, `DocumentEngine`, `FontLoaderEngineImpl`, `ColorRegistryEngineImpl`
@@ -811,3 +814,16 @@ src/engine/
 | `DEFAULT_VERTICAL_ALIGN` | `'top'` | 기본 수직 정렬 |
 | `Z_INDEX_ROLE_AD` | `91000` | 광고 역할 z-index |
 | `Z_INDEX_ROLE_HEADER` | `91001` | 헤더 역할 z-index |
+
+---
+
+## 12. 엔진 우선 원칙 (Engine-First Principle)
+
+`layout-element`의 핵심 아키텍처 규칙이다. 엔진 트리가 모든 레이아웃 계산의 유일한 진실 공급원이며, DOM 요소는 그 결과를 표시하고 WYSIWYG 편집에 사용할 뿐이다.
+
+- 엔진 트리(`DocumentEngine` → `BoxEngine` → `ParagraphEngine` / `ImageEngine` / `TableEngine`)가 모든 레이아웃 계산의 단일 진실 공급원이다.
+- DOM 요소는 엔진 결과를 표시와 WYSIWYG 편집을 위해 소비한다.
+- DOM 요소는 절대 엔진 트리를 만들거나 수정하지 않는다.
+- 편집이 발생하면 편집된 콘텐츠를 `DocumentData` / `BoxData`로 직렬화하고, 엔진이 이를 다시 처리한 뒤 결과를 DOM에 전파한다.
+- DOM 요소는 `engine.childEngines`를 DOM 자식으로부터 수동으로 채우는 등 엔진 트리를 우회해서는 안 된다.
+- 구체적인 구현 규칙은 `RULES.md` 섹션 2.9을 참조한다.

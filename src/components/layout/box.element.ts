@@ -101,6 +101,9 @@ export class LayoutBoxElement extends HTMLElement {
   /** `connectedCallback`에서 캐싱한 EditManager. `disconnectedCallback`에서 사용. */
   private _editManagerRef: EditManager | null = null;
 
+  /** `connectedCallback`에서 캐싱한 부모 엔진. `disconnectedCallback`에서 엔진 트리 정리용. */
+  private _parentEngineRef: BoxEngineParent | null = null;
+
   constructor() {
     super();
     this._shadowRoot = this.attachShadow({ mode: "open" });
@@ -109,6 +112,7 @@ export class LayoutBoxElement extends HTMLElement {
   connectedCallback() {
     if (!this.id) this.id = genUUID();
     this._editManagerRef = this.editManager;
+    this._parentEngineRef = this._findParentEngine();
     this._startChildObserver();
     this.addEventListener('mouseenter', this._onLayoutMouseEnter);
     this.addEventListener('mouseleave', this._onLayoutMouseLeave);
@@ -154,6 +158,22 @@ export class LayoutBoxElement extends HTMLElement {
     this.removeEventListener('mousedown', this._onPlaceGunMouseDown);
     this._editManagerRef?._unregisterLayout(this);
     this._editManagerRef = null;
+    if (this._parentEngineRef && this._engine) {
+      const docEl = this._findDocumentElement();
+      if (docEl?.engine) {
+        docEl.engine.removeChildEngine(this._engine, this._parentEngineRef);
+      } else {
+        if (this._parentEngineRef instanceof BoxEngine) {
+          const children = this._parentEngineRef.childEngines;
+          const idx = children.indexOf(this._engine);
+          if (idx >= 0) children.splice(idx, 1);
+        } else if (this._parentEngineRef instanceof DocumentEngine) {
+          const idx = this._parentEngineRef.childBoxEngines.indexOf(this._engine);
+          if (idx >= 0) this._parentEngineRef.childBoxEngines.splice(idx, 1);
+        }
+      }
+    }
+    this._parentEngineRef = null;
   }
 
   static get observedAttributes() {

@@ -206,7 +206,7 @@ export class BoxEngine {
       const { fontSize, lineHeight, contentHeight } = gc;
       let calcHeight = lineHeight * this.height - (lineHeight - fontSize);
       if (contentHeight) {
-        const parentPadTop = 'paddingTop' in this._parent ? (this._parent.paddingTop as number) : 0;
+        const parentPadTop = this._parent.paddingTop;
         calcHeight = Math.min(calcHeight, contentHeight - (this.relTop - parentPadTop));
       }
       return Math.max(0, calcHeight);

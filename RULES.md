@@ -40,7 +40,7 @@
 
 ### 1.4 `GridCalculator.ppm` 직접 교체 금지
 
-- `GridCalculator.ppm`은 줌, 인쇄, CSS transform 등에 의해
+- `GridCalculator.ppm`은 줌, CSS transform 등에 의해
   런타임에 변경될 수 있다. 측정 시점의 ppm을 캐싱하더라도
   `GridCalculator.ppm` 자체를 대체해서는 안 된다.
 - `static resetPpm()`은 ppm 재측정을 위한 공개 API이다.
@@ -178,12 +178,12 @@
   `_computeTextChange`의 삭제 처리 부족은 모바일 키보드에서만 영향이 있으며
   현재 워크플로우에서는 버그가 아니다.
 
-### 2.6 `_isPrint` 싱글톤 캐싱은 의도적 설계
+### 2.6 인쇄 모드는 제거됨
 
-- `ColorRegistry`와 `FontLoader`는 싱글톤 생성 시 `window.matchMedia("print")`를
-  한 번만 확인하여 `_isPrint`를 캐싱한다.
-  이것은 AGENTS.md에 명시된 설계 결정이다.
-  런타임에 인쇄 모드가 토글되는 것을 지원하지 않는다.
+- **인쇄 모드(`_isPrint`, `window.matchMedia("print")`)는 완전히 제거되었다.**
+- `ColorRegistry`와 `FontLoader`는 더 이상 `window.matchMedia("print")`를 확인하지 않는다.
+- `printPostData`는 인쇄 모드가 아닌 **후처리 시스템용 데이터 export API**로 유지된다.
+- 엔진이 계산한 mm 좌표를 외부 시스템(PDF 생성, 윤전기 제어 등)에 전달하기 위한 목적이며, 인쇄 모드와 무관하게 항상 사용 가능하다.
 
 ### 2.7 Zero-height span(공백 문자)과 좌표 계산
 
@@ -228,7 +228,44 @@
 
 ---
 
-## 3. 인쇄 모드 규칙
+## 2.9 엔진-DOM 동기화 규칙 (엔진 우선 원칙)
+
+### 2.9.1 엔진이 단일 소스 오브 트루스
+
+- **엔진 트리가 모든 레이아웃 계산의 단일 소스다.** DOM 요소는 엔진을 보완하거나 대체하지 않는다.
+- **DOM은 엔진 결과를 소비만 한다.** 엔진을 생성/수정하지 않고, 엔진이 계산한 좌표/스타일/레이아웃을 읽어 화면에 반영한다.
+- **편집 발생 시**: 편집된 내용을 `DocumentData`/`BoxData`로 직렬화하여 엔진에 전달 → 엔진 재처리 → 결과를 DOM에 전파.
+- **DOM에서 엔진 `childEngines`을 수동으로 채우지 말 것.** 엔진 트리가 불완전하면 엔진 트리 구축 로직을 수정해야지 DOM에서 보완하면 안 된다.
+
+### 2.9.2 `disconnectedCallback`에서 `parentElement`는 null
+
+- **DOM 명세에 따라 `disconnectedCallback` 호출 시점에 `this.parentElement`는 이미 null이다.**
+- 엔진 트리 정리가 필요한 요소는 `connectedCallback`에서 부모 엔진 참조를 `_parentEngineRef`에 캐싱해야 한다.
+- `disconnectedCallback`에서 `this.parentElement?.engine`을 읽으면 항상 `undefined`가 반환되어 dead code가 된다.
+- **적용 요소**: `LayoutBoxElement`, `LayoutParagraphElement`, `LayoutImageElement` — 모두 `_parentEngineRef` 패턴 사용.
+
+### 2.9.3 `_layoutCache` 자가 무효화 방지
+
+- **`ParagraphEngine.data` setter는 `resetIncrementalState()`를 호출하여 `_layoutCache`를 null로 만든다.**
+- `LayoutParagraphElement.render()`의 else 분기(구조 변경 없음, overlay 위치만 변경)에서 `_layoutStructure()`를 호출하면 `data` setter → `resetIncrementalState()` → `_layoutCache = null`이 되어 캐시가 사실상 동작하지 않는다.
+- **해결**: `ParagraphEngine.updateOverlayContext()` 메서드를 사용하여 `_layoutCache`를 보존하면서 overlay 문맥만 경량 갱신한다.
+- `_layoutStructure()`는 구조 변경(`_perfStructureChanged === true`) 시에만 호출해야 한다.
+
+### 2.9.4 `_refreshParagraphOverlays` 조건 제거
+
+- **`DocumentEngine._refreshParagraphOverlays()`는 모든 paragraph의 `overlayEngines`를 갱신해야 한다.**
+- `overlayEngines.length > 0` 조건을 걸면, 이전에 overlay가 있었지만 현재 사라진 paragraph가 stale `overlayEngines`를 유지한다.
+- z-index 변경이나 박스 이동으로 overlay 관계가 사라진 경우, paragraph는 더 이상 존재하지 않는 박스를 오버랩 요소로 처리하게 된다.
+
+### 2.9.5 `gridCalculator!` non-null assertion 금지
+
+- **`DocumentEngine._buildBoxEngine()`에서 `parent.gridCalculator!`를 사용하지 말 것.**
+- `TableCellEngine.gridCalculator`는 타입이 `GridCalculatorEngine | null`이므로 `!`로 우회하면 런타임 crash 위험이 있다.
+- null-safe 분기(`parentGc = parent.gridCalculator; isStatic && parentGc ? ... : ...`)로 처리할 것.
+
+---
+
+## 3. 후처리 데이터 export 규칙
 
 ### 3.1 `ColorRegistry.init()` — 스타일시트 없는 환경
 
@@ -241,10 +278,11 @@
 ### 3.2 모든 레이아웃 요소는 `printPostData` 게터를 가져야 함
 
 - `LayoutDocumentElement`, `LayoutBoxElement`, `LayoutParagraphElement`,
-  `LayoutImageElement`, `LayoutGuideColumnElement` — 모두 `printPostData` 게터 필요.
-- 인쇄 모드에서 요소가 `@media print`로 숨겨져도
-  렌더링된 위치/크기가 `printPostData`로 수집되어
-  외부 후처리 시스템에 전달된다.
+  `LayoutImageElement`, `LayoutGuideColumnElement`, `LayoutTableElement`,
+  `LayoutTableRowElement`, `LayoutTableCellElement` — 모두 `printPostData` 게터 필요.
+- `printPostData`는 엔진이 계산한 mm 좌표를 `ppm`으로 환산한 픽셀 rect와
+  원본 데이터를 외부 후처리 시스템(PDF 생성, 윤전기 제어 등)에 전달하기 위한 API다.
+  DOM `getBoundingClientRect()`에 의존하지 않고 엔진 좌표를 사용한다.
 - 새 레이아웃 요소를 추가할 때 반드시 `printPostData` 게터를 구현할 것.
 
 ---

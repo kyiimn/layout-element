@@ -271,7 +271,7 @@ export interface InsertEventDetail {
 |------|-----------|
 | `insertMode = (non-null)` | `layoutEditMode = false`, `textEditMode = false` |
 
-선택은 인쇄 모드와 인서트 모드를 제외하면 항상 활성이다.
+선택은 삽입 모드를 제외하면 항상 활성이다.
 
 ---
 

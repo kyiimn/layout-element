@@ -62,6 +62,7 @@ export type URLLoader = (
 export class LayoutImageElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
   private _engine?: ImageEngine;
+  private _parentEngineRef: import("@/engine").BoxEngine | null = null;
 
   private _canvas?: HTMLCanvasElement;
   private _shadowRoot: ShadowRoot;
@@ -125,6 +126,7 @@ export class LayoutImageElement extends HTMLElement {
 
   connectedCallback() {
     if (!this.id) this.id = genUUID();
+    this._parentEngineRef = this.parentElement?.engine ?? null;
     this.layout();
     createAiProcessingOverlay(this._shadowRoot);
   }
@@ -136,12 +138,12 @@ export class LayoutImageElement extends HTMLElement {
       this._objectUrl = undefined;
     }
     this._clearImageCache();
-    const parentBoxEngine = this.parentElement?.engine;
-    if (parentBoxEngine && this._engine) {
-      const children = parentBoxEngine.childEngines;
+    if (this._parentEngineRef && this._engine) {
+      const children = this._parentEngineRef.childEngines;
       const idx = children.indexOf(this._engine);
       if (idx >= 0) children.splice(idx, 1);
     }
+    this._parentEngineRef = null;
   }
 
   /**
@@ -272,6 +274,7 @@ export class LayoutImageElement extends HTMLElement {
     if (this._cachedImage && this._cachedImageSrc === resolvedUrl) {
       this._drawImage(ctx, this._cachedImage);
       this._feedRgbaToEngine(ctx);
+      this._notifyOverlapParagraphs();
       return;
     }
 

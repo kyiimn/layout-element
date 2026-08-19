@@ -15,7 +15,7 @@
 
 ## 1. 개요 (Overview)
 
-표(table)는 신문 레이아웃에서 데이터를 행렬 형태로 배치하는 요소이다. CSS grid로는 처리할 수 없는 mm 단위 정밀 좌표, colspan/rowspan 병합, border-collapse, 인쇄 post-processing을 지원한다.
+표(table)는 신문 레이아웃에서 데이터를 행렬 형태로 배치하는 요소이다. CSS grid로는 처리할 수 없는 mm 단위 정밀 좌표, colspan/rowspan 병합, border-collapse, 후처리(post-processing) 데이터 export를 지원한다.
 
 표는 독립된 레이아웃 요소가 아니라 `<x-layout-box>`의 content type이다. box가 표의 위치/크기/배경/외곽 테두리를 정의하고, `<x-layout-table>`은 box 내부 영역을 행×열 그리드로 분할하여 셀을 배치한다.
 
@@ -619,9 +619,9 @@ Selection overlay는 다음 시점에 갱신된다:
 - 각 border edge를 div 요소로 렌더링 (mm → px 변환)
 - `borderWidth = 0`인 edge는 렌더링하지 않음
 
-### 9.3 인쇄 모드
+### 9.3 후처리 데이터 export
 
-`@media print`에서 border 레이어는 숨김 처리되지 않는다. border 좌표/크기는 `printPostData`로 수집되어 외부 post-processing에서 사용된다.
+border 레이어의 좌표/크기는 `printPostData`로 수집되어 외부 후처리(post-processing) 시스템에서 사용된다. `_renderBorder()`로 생성된 DOM border 레이어는 시각적 피드백용이며, 후처리 시스템은 각 요소의 `printPostData` getter를 통해 엔진이 계산한 mm 기준 좌표와 크기, border 두께/색상/스타일, 대각선 정보, 배경색 정보 등을 받는다.
 
 ---
 
@@ -804,7 +804,7 @@ document 내 여러 표가 있을 때:
 
 ### 12.7 printPostData
 
-인쇄 모드에서 table, TR, TD는 각각 `printPostData` getter를 제공한다. border 레이어의 좌표/크기, 대각선 정보, 배경색 정보를 post-processing용으로 수집한다.
+table, TR, TD는 각각 `printPostData` getter를 제공한다. border 레이어의 좌표/크기, 대각선 정보, 배경색 정보를 후처리(post-processing)용으로 수집한다.
 
 ### 12.8 F5 브라우저 새로고침 충돌
 
@@ -876,7 +876,7 @@ class LayoutTableElement extends HTMLElement {
   // 자식 추가
   appendChildData(child: TableRowData): LayoutTableRowElement;
 
-  // 인쇄
+  // 후처리 데이터 export
   get printPostData(): PrintPostData[];
 }
 ```
@@ -1039,6 +1039,8 @@ class LayoutTableRowElement extends HTMLElement {
   get absHeight(): number;
 
   appendChildData(child: TableCellData): LayoutTableCellElement;
+
+  // 후처리 데이터 export
   get printPostData(): PrintPostData[];
 }
 ```

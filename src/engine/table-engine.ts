@@ -94,6 +94,11 @@ export class TableCellEngine {
     return false;
   }
 
+  /** 셀 패딩은 항상 0 (셀 내부 박스가 자체 padding 처리) */
+  get paddingTop(): number {
+    return 0;
+  }
+
   /** 그리드 계산기 (셀은 단일 컬럼 그리드) */
   get gridCalculator(): GridCalculatorEngine | null {
     return this._gridCalculator ?? null;
@@ -262,10 +267,10 @@ export class TableEngine {
 
       // 셀 엔진 구축
       const rowPlacements = this._gridResolution.placements.filter(p => p.gridRow === r);
-      const cellEngines = rowPlacements.map((p, idx) => {
+      const cellEngines = rowPlacements.map((p) => {
         const cellEngine = new TableCellEngine();
         const trY = y;
-        const cellData = rows[r].children[idx];
+        const cellData = p.cell;
         const cellLabel = TableEngine._buildCellLabel(rowLabel, p.gridCol);
         const labels = TableEngine._buildCellLabels(p);
         cellEngine.setCellMetrics(

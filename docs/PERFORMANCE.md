@@ -160,7 +160,7 @@
 | 타입 | `static number \| undefined` (싱글톤) |
 | 무효화 | `GridCalculatorEngine.resetPpm()` 호출 시 |
 
-최초 접근 시 100mm `<div>`를 생성하여 `getBoundingClientRect()`로 픽셀 폭을 측정하고 `px/100`을 `_ppm`에 저장. 이후 접근은 DOM 측정 없이 캐시된 값을 반환. 줌/인쇄/CSS transform 등으로 ppm이 변경될 수 있으므로 `resetPpm()`으로 수동 무효화 필요.
+최초 접근 시 100mm `<div>`를 생성하여 `getBoundingClientRect()`로 픽셀 폭을 측정하고 `px/100`을 `_ppm`에 저장. 이후 접근은 DOM 측정 없이 캐시된 값을 반환. 줌/CSS transform 등으로 ppm이 변경될 수 있으므로 `resetPpm()`으로 수동 무효화 필요.
 
 ### 2.5 이미지 3단계 캐시
 
@@ -282,7 +282,6 @@
 - 컬럼 수 변경 (`column` setter)
 - 컬럼 간격 변경 (`gap` setter)
 - 단락 폭 변경 (상속 스타일 변경)
-- 인쇄 모드 전환
 
 ### 3.4 Diff 기반 데이터 세터 (ID-keyed child reconciliation)
 

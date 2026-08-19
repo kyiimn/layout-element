@@ -4,7 +4,7 @@
 
 > 작성 기준: `src/resource/font-loader.ts`, `src/resource/color-registry.ts`, `src/react/context.tsx`, `src/types/style/font.type.ts`, `src/types/print/color-map.type.ts`
 >
-> 본 문서는 `FontLoader`와 `ColorRegistry`의 아키텍처, 초기화 흐름, 커스텀 로더 등록, 인쇄 모드 대응, React 연동, 공개 API를 상세히 기술한다.
+> 본 문서는 `FontLoader`와 `ColorRegistry`의 아키텍처, 초기화 흐름, 커스텀 로더 등록, 외부 데이터 주입, React 연동, 공개 API를 상세히 기술한다.
 
 ---
 
@@ -16,7 +16,7 @@
 
 - **싱글톤**: `getInstance()`로 유일한 인스턴스를 반환한다.
 - **초기화 필요**: 렌더링 전에 반드시 `init()`을 호출하고 대기해야 한다.
-- **이중 로딩 모드**: 화면 모드에서는 서버(`fonts.json` / `color.json`)에서 `fetch`하고, 인쇄 모드에서는 외부에서 직접 데이터를 주입한다.
+- **단일 로딩 경로**: 기본적으로 `_loadServer()`를 통해 `fonts.json` / `color.json`을 `fetch`하며, 외부 데이터 주입이 필요하면 `init(fonts)` / `init(colorSet)` 파라미터로 직접 전달한다.
 - **커스텀 로더 등록**: `registerLoader()`로 기본 `fetch` 동작을 대체할 수 있다.
 
 ```mermaid
@@ -60,9 +60,9 @@ flowchart LR
 
 `FontLoader`는 폰트 메타데이터를 로드하고, `FontFace` API로 브라우저에 폰트를 등록하는 싱글톤 매니저이다.
 
-- **화면 모드**: `fonts.json` (또는 커스텀 로더)에서 `Font[]`를 가져오고, 각 폰트의 `ttfFilename` 또는 `base64Data`를 이용해 `FontFace`를 생성하여 브라우저에 등록한다.
-- **인쇄 모드**: 외부에서 주입한 `Font[]`의 `base64Data`를 이용해 `data:` URI로 `FontFace`를 생성한다. 서버 요청을 하지 않는다.
-- **인쇄 모드 미사용 시**: `init()`을 `fonts` 없이 호출하면 `_loadServer()`로 데이터를 가져온다.
+- **기본 로드**: `fonts.json` (또는 커스텀 로더)에서 `Font[]`를 가져오고, 각 폰트의 `ttfFilename` 또는 `base64Data`를 이용해 `FontFace`를 생성하여 브라우저에 등록한다.
+- **외부 데이터 주입**: `init(fonts)`로 `Font[]`를 직접 주입할 수 있다. 이 경우 `_loadServer()`를 호출하지 않으며, `base64Data`가 있으면 `data:` URI로 `FontFace`를 생성한다.
+- **외부 데이터 미사용 시**: `init()`을 `fonts` 없이 호출하면 `_loadServer()`로 데이터를 가져온다.
 
 스타일 필드(`TextStyle.fontFamily`, `TextBlockStyle.fontFamily`)에서 지정하는 폰트 패밀리값은 `FontLoader.getFontFamily()`를 통해 `Font.family`와 매칭되어 실제 `FontFace.family`로 변환된다. 일치하는 `family`가 없으면 등록된 첫 번째 폰트로 폴백된다. CSS `font-family` 키워드(`"serif"`, `"sans-serif"` 등)는 사용할 수 없다.
 
@@ -90,8 +90,8 @@ type Font = {
 };
 ```
 
-- `ttfFilename`: 화면 모드에서 `FontFace`의 `src`에 URL로 사용된다.
-- `base64Data`: 인쇄 모드에서 `FontFace`의 `src`에 `data:` URI로 사용된다.
+- `ttfFilename`: 서버 로드 시 `FontFace`의 `src`에 URL로 사용된다.
+- `base64Data`: 외부 데이터 주입 또는 서버 로드 시 `FontFace`의 `src`에 `data:` URI로 사용된다.
 - `family`: 스타일 필드의 `fontFamily` 값이 참조하는 키이다. `FontLoader.getFontFamily(name)`이 일치하는 `family`를 찾아 실제 `FontFace.family`를 반환한다.
 
 ### 2.3 `FontLoaderFn` 타입
@@ -115,13 +115,13 @@ sequenceDiagram
     FL->>FL: _ready = false, _fontFaces = []
     FL->>FL: document.fonts.clear()
 
-    alt 인쇄 모드 (fonts 파라미터 있음)
+    alt 외부 데이터 주입 (fonts 파라미터 있음)
         FL->>FL: fonts.filter(f => f.base64Data)
         loop 각 폰트
             FL->>Browser: new FontFace(family, data:URI, {style, weight})
             Browser-->>FL: fontFace.load()
         end
-    else 화면 모드 (fonts 파라미터 없음)
+    else 서버 로드 (fonts 파라미터 없음)
         FL->>FL: _loadServer()
         alt _customLoader 등록됨
             FL->>Server: _customLoader()
@@ -130,9 +130,9 @@ sequenceDiagram
             FL->>Server: fetch('fonts.json')
             Server-->>FL: Font[]
         end
-        FL->>FL: fonts.filter(f => f.ttfFilename)
+        FL->>FL: fonts.filter(f => f.base64Data || f.ttfFilename)
         loop 각 폰트
-            FL->>Browser: new FontFace(family, url(ttfFilename), {style, weight})
+            FL->>Browser: new FontFace(family, url(ttfFilename) 또는 data:URI, {style, weight})
             Browser-->>FL: fontFace.load()
         end
     end
@@ -159,7 +159,7 @@ FontLoader.resetLoader();
 
 **등록 시점**: `init()` 호출 전에 `registerLoader()`를 호출해야 다음 초기화 시 반영된다. 이미 인스턴스가 존재하더라도 정적 필드이므로 즉시 적용된다.
 
-**인쇄 모드와의 관계**: 인쇄 모드에서는 `init(fonts)`로 데이터를 직접 주입하므로 `_loadServer()`가 호출되지 않는다. 커스텀 로더는 화면 모드에서만 의미가 있다.
+**외부 데이터 주입과의 관계**: `init(fonts)`로 폰트 데이터를 직접 주입하면 `_loadServer()`가 호출되지 않는다. 커스텀 로더는 서버 로드 경로에서만 사용된다.
 
 ### 2.6 공개 API
 
@@ -175,7 +175,7 @@ FontLoader.resetLoader();
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `init(fonts?)` | `(fonts?: Font[]) => Promise<FontFace[]>` | 폰트를 로드하고 브라우저에 등록한다. 인쇄 모드에서는 `fonts`를 직접 주입받는다. 화면 모드에서는 `_loadServer()`로 데이터를 가져온다. **이미 초기화된 상태에서 동일한 폰트 데이터로 재호출하면 스킵하고 기존 `_fontFaces`를 그대로 반환한다.** 동일성 판단은 `_computeFontsSignature()`로 생성한 signature 문자열 비교를 통해 수행한다. 화면 모드에서 `fonts` 파라미터 없이 호출한 경우에는 signature 비교가 불가능하므로 항상 재로드한다. **폰트 메트릭 파싱**: `init()` 완료 후 `base64Data`가 있는 폰트를 파싱하여 캐싱한다. `ParagraphEngine._charWidthMm`이 사용한다. |
+| `init(fonts?)` | `(fonts?: Font[]) => Promise<FontFace[]>` | 폰트를 로드하고 브라우저에 등록한다. `fonts`를 직접 주입하면 외부 데이터 주입 경로를 사용하고, 생략하면 `_loadServer()`로 데이터를 가져온다. **이미 초기화된 상태에서 동일한 폰트 데이터로 재호출하면 스킵하고 기존 `_fontFaces`를 그대로 반환한다.** 동일성 판단은 `_computeFontsSignature()`로 생성한 signature 문자열 비교를 통해 수행한다. `fonts` 파라미터 없이 호출한 경우에는 signature 비교가 불가능하므로 항상 재로드한다. **폰트 메트릭 파싱**: `init()` 완료 후 `base64Data`가 있는 폰트를 파싱하여 캐싱한다. `ParagraphEngine._charWidthMm`이 사용한다. |
 | `getFontFamily(fontName?)` | `(fontName?: string) => string` | 폰트 패밀리명을 반환한다. 등록된 `Font` 중 `family`가 `fontName`과 일치하는 폰트를 찾아 해당 `FontFace.family`를 반환한다. 일치하는 폰트가 없으면 등록된 첫 번째 폰트의 `FontFace.family`로 폴백된다. |
 
 #### 게터
@@ -191,13 +191,12 @@ FontLoader.resetLoader();
 
 - **Signature 비교**: `_computeFontsSignature(fonts)`는 각 폰트의 `family`/`weight`/`style`/`ttfFilename`/`base64Data`를 결합한 문자열을 생성하며, 이전 호출 시 저장한 `_lastFontsSignature`와 비교한다.
 - **스킵 조건**: `_ready === true` && `fonts !== undefined` && `_computeFontsSignature(fonts) === _lastFontsSignature`.
-- **화면 모드**: `init()`을 `fonts` 없이 호출하면 signature 비교가 불가능하므로 항상 재로드한다. 단, 재로드 후 `_lastFontsSignature`가 갱신되므로 이후 동일한 `fonts`를 인자로 넘겨 호출하면 스킵된다.
-- **인쇄 모드**: `init(fonts)`로 폰트를 주입하므로 signature 비교가 항상 가능하다. 같은 `fonts` 배열로 재호출하면 스킵된다.
+- **서버 로드**: `init()`을 `fonts` 없이 호출하면 signature 비교가 불가능하므로 항상 재로드한다. 단, 재로드 후 `_lastFontsSignature`가 갱신되므로 이후 동일한 `fonts`를 인자로 넘겨 호출하면 스킵된다.
+- **외부 데이터 주입**: `init(fonts)`로 폰트를 주입하면 signature 비교가 항상 가능하다. 같은 `fonts` 배열로 재호출하면 스킵된다.
 
 ### 2.8 에러 처리
 
 - `init()` 호출 전 `getFontFamily()`, `fontFaces`에 접근하면 `'font map is not ready'` 에러가 발생한다.
-- 인쇄 모드에서 `fonts` 파라미터 없이 `init()`을 호출하면 `'not given fonts'` 에러가 발생한다.
 - `fetch` 실패 또는 커스텀 로더 예외 시 `'server connection error'` 에러가 발생한다.
 
 ### 2.9 폰트 메트릭 파싱 (opentype.js 연동)
@@ -219,8 +218,8 @@ FontLoader.resetLoader();
 
 `ColorRegistry`는 CMYK 색상 데이터를 로드하고 RGB로 변환하여 제공하는 싱글톤 레지스트리이다.
 
-- **화면 모드**: `color.json` (또는 커스텀 로더)에서 `CMYKColorSet`을 가져와 내부에 보관한다.
-- **인쇄 모드**: 외부에서 주입한 `CMYKColorSet`을 직접 사용한다.
+- **기본 로드**: `color.json` (또는 커스텀 로더)에서 `CMYKColorSet`을 가져와 내부에 보관한다.
+- **외부 데이터 주입**: `init(colorSet)`으로 외부에서 주입한 `CMYKColorSet`을 직접 사용한다.
 
 스타일 필드(`TextStyle.color`, `TextBlockStyle.color`, `BoxData.backgroundColor`, `BoxData.borderColor`)에서 지정하는 색상값은 `ColorRegistry.getCSSColor()`를 통해 `#RRGGBB` hex 문자열로 변환된다. 여기서 `{name}`은 `CMYKColorSet`에 등록된 키(색상 이름)이어야 한다. 등록되지 않은 이름이나 CSS 색상 문자열(`#000`, `rgb(...)`)을 넣으면 기본 색상 hex로 폴백되어 의도한 색상이 나오지 않는다. 예: `backgroundColor: "red"` → `#FF0000`로 렌더링.
 
@@ -273,9 +272,9 @@ sequenceDiagram
     App->>CR: init(colorSet?)
     CR->>CR: _ready = false, _colorSet = {}
 
-    alt 인쇄 모드 (colorSet 파라미터 있음)
+    alt 외부 데이터 주입 (colorSet 파라미터 있음)
         CR->>CR: _colorSet = colorSet
-    else 화면 모드 (colorSet 파라미터 없음)
+    else 서버 로드 (colorSet 파라미터 없음)
         CR->>CR: _loadServer()
         alt _customLoader 등록됨
             CR->>Server: _customLoader()
@@ -310,7 +309,7 @@ ColorRegistry.resetLoader();
 
 **등록 시점**: `init()` 호출 전에 `registerLoader()`를 호출해야 다음 초기화 시 반영된다. 이미 인스턴스가 존재하더라도 정적 필드이므로 즉시 적용된다.
 
-**인쇄 모드와의 관계**: 인쇄 모드에서는 `init(colorSet)`로 데이터를 직접 주입하므로 `_loadServer()`가 호출되지 않는다. 커스텀 로더는 화면 모드에서만 의미가 있다.
+**외부 데이터 주입과의 관계**: `init(colorSet)`으로 색상 데이터를 직접 주입하면 `_loadServer()`가 호출되지 않는다. 커스텀 로더는 서버 로드 경로에서만 사용된다.
 
 ### 3.6 CMYK → RGB 변환
 
@@ -367,7 +366,7 @@ getCSSColor('default') → throw Error  (사용 금지)
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `init(colorSet?)` | `(colorSet?: CMYKColorSet) => Promise<ColorMap[]>` | 색상을 로드하여 내부에 보관한다. `colorSet`을 직접 주입하면 그것을 사용하고, 생략하면 `_loadServer()`로 데이터를 가져온다. `getCSSColor()` 호출 시 CMYK → RGB → hex 변환을 수행한다. |
+| `init(colorSet?)` | `(colorSet?: CMYKColorSet) => Promise<ColorMap[]>` | 색상을 로드하여 내부에 보관한다. `colorSet`을 직접 주입하면 외부 데이터 주입 경로를 사용하고, 생략하면 `_loadServer()`로 데이터를 가져온다. `getCSSColor()` 호출 시 CMYK → RGB → hex 변환을 수행한다. |
 | `getCSSColor(name)` | `(name: string) => string` | `#RRGGBB` hex 문자열을 반환한다. `name`이 `CMYKColorSet`에 등록된 키이면 해당 색상의 hex, 등록되지 않은 이름(또는 CSS 색상 문자열)이면 기본 색상(K100 검정) hex로 폴백된다. **`name === 'default'`인 경우 `Error`를 throw한다.** `getOpacityHex()`로 생성한 alpha hex를 뒤에 결합하여 `#RRGGBBAA` 형태로 투명도를 적용할 수 있다. |
 | `getOpacityHex(opacity)` | `(opacity: number) => string` | 0~1 투명도 값을 2자리 hex alpha 문자열(`00`~`FF`)로 변환한다. 범위를 벗어나면 clamp 처리된다. `getCSSColor()` 반환값 뒤에 결합하여 사용한다. |
 | `get(name)` | `(name: string) => CMYKColor` | 색상 이름으로 CMYK 값을 반환한다. 등록되지 않은 이름이면 `_defaultColor`({ c: 0, m: 0, y: 0, k: 255 }, K100 검정)를 반환한다. **`name === 'default'`인 경우 `Error`를 throw한다.** |
@@ -382,7 +381,6 @@ getCSSColor('default') → throw Error  (사용 금지)
 ### 3.9 에러 처리
 
 - `init()` 호출 전 `getCSSColor()`, `get()`, `colorMap`에 접근하면 `'color map is not ready'` 에러가 발생한다.
-- 인쇄 모드에서 `colorSet` 파라미터 없이 `init()`을 호출하면 `'not given color set'` 에러가 발생한다.
 - `fetch` 실패 또는 커스텀 로더 예외 시 `'server connection error'` 에러가 발생한다.
 
 ---
@@ -399,14 +397,14 @@ getCSSColor('default') → throw Error  (사용 금지)
 | 제거 메서드 | `FontLoader.resetLoader()` | `ColorRegistry.resetLoader()` |
 | 기본 로더 | `fetch('fonts.json')` | `fetch('color.json')` |
 | 우선순위 | `_customLoader` → 기본 `fetch` | `_customLoader` → 기본 `fetch` |
-| 인쇄 모드 | `init(fonts)` 직접 주입 | `init(colorSet)` 직접 주입 |
-| 인쇄 모드 시 `_loadServer` 호출 | 아니오 | 아니오 |
+| 외부 데이터 주입 | `init(fonts)` 직접 주입 | `init(colorSet)` 직접 주입 |
+| 외부 데이터 주입 시 `_loadServer` 호출 | 아니오 | 아니오 |
 
 ### 4.1 로더 선택 흐름
 
 ```mermaid
 flowchart TD
-    A["init() 호출"] --> B{인쇄 모드?}
+    A["init() 호출"] --> B{파라미터가 주어졌는가?}
     B -->|예| C["파라미터로 직접 주입"]
     B -->|아니오| D["_loadServer()"]
     D --> E{"_customLoader<br/>등록됨?"}
@@ -428,14 +426,14 @@ flowchart TD
 
 ```ts
 interface LayoutProviderProps {
-  colorSet?: CMYKColorSet;  // 인쇄 모드용 색상 데이터
-  fonts?: Font[];           // 인쇄 모드용 폰트 데이터
+  colorSet?: CMYKColorSet;  // 외부에서 주입할 색상 데이터
+  fonts?: Font[];           // 외부에서 주입할 폰트 데이터
   children: ReactNode;
 }
 ```
 
-- `colorSet`과 `fonts`를 생략하면 화면 모드로 동작하며, 각 매니저가 `_loadServer()`로 데이터를 가져온다.
-- `colorSet`이나 `fonts`를 제공하면 인쇄 모드로 간주하고, `init(colorSet)` / `init(fonts)`로 직접 주입한다.
+- `colorSet`과 `fonts`를 생략하면 `_loadServer()`로 데이터를 가져온다.
+- `colorSet`이나 `fonts`를 제공하면 외부 데이터 주입으로 처리하고, `init(colorSet)` / `init(fonts)`로 직접 주입한다.
 
 ### 5.2 초기화 흐름
 
@@ -452,7 +450,7 @@ sequenceDiagram
     alt colorSet 또는 fonts 제공됨
         RP->>CR: init(colorSet)
         RP->>FL: init(fonts)
-    else 제공되지 않음 (화면 모드)
+    else 제공되지 않음 (서버 로드)
         RP->>CR: init()
         CR->>CR: _loadServer()
         RP->>FL: init()
@@ -574,22 +572,22 @@ ColorRegistry.registerLoader(async () => {
 });
 ```
 
-### 6.5 인쇄 모드에서 데이터 주입
+### 6.5 외부 데이터 주입
 
 ```tsx
 import { LayoutProvider } from 'layout-element/react';
 
-// 인쇄 모드에서는 커스텀 로더 대신 직접 데이터 주입
-function PrintLayout({ printFonts, printColors }) {
+// 외부에서 데이터를 직접 주입하면 서버 fetch를 생략할 수 있다
+function InjectedLayout({ injectedFonts, injectedColors }) {
   return (
-    <LayoutProvider fonts={printFonts} colorSet={printColors}>
-      <PrintContent />
+    <LayoutProvider fonts={injectedFonts} colorSet={injectedColors}>
+      <MyContent />
     </LayoutProvider>
   );
 }
 ```
 
-> **참고**: 인쇄 모드에서 `init(fonts)` / `init(colorSet)`을 호출하면 `_loadServer()`가 실행되지 않으므로, 커스텀 로더는 사용되지 않는다.
+> **참고**: `init(fonts)` / `init(colorSet)`으로 데이터를 직접 주입하면 `_loadServer()`가 실행되지 않으므로, 커스텀 로더는 사용되지 않는다.
 
 ---
 
@@ -604,4 +602,3 @@ function PrintLayout({ printFonts, printColors }) {
 - **정적 필드**: `_customLoader`는 정적 필드이므로, `FontLoader.registerLoader()` / `ColorRegistry.registerLoader()`는 인스턴스가 없는 상태에서도 호출할 수 있다. 등록된 로더는 모든 인스턴스에 영향을 미친다.
 - **로더 재등록**: `registerLoader()`를 여러 번 호출하면 마지막에 등록한 로더가 사용된다. 이전 로더는 덮어쓰기된다.
 - **`resetLoader()`**: `resetLoader()`를 호출하면 커스텀 로더가 제거되고, 다음 `init()` 시 기본 `fetch` 동작으로 돌아간다.
-- **인쇄 모드 감지**: `window.matchMedia("print").matches`로 인쇄 모드를 감지한다. 이 값은 생성자에서 한 번만 평가된다.

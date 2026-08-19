@@ -45,6 +45,7 @@ export class LayoutParagraphElement extends HTMLElement {
   private _editableText: boolean = false;
   private _editController: TextEditController | null = null;
   private _editManagerRef: EditManager | null = null;
+  private _parentEngineRef: import("@/engine").BoxEngine | null = null;
 
   /** 성능 최적화: 구조 변경 여부 플래그. true면 다음 render()에서 전체 재생성을 수행한다. */
   private _perfStructureChanged: boolean = true;
@@ -73,6 +74,7 @@ export class LayoutParagraphElement extends HTMLElement {
   connectedCallback() {
     if (!this.id) this.id = genUUID();
     this._editManagerRef = this.editManager;
+    this._parentEngineRef = this.parentElement?.engine ?? null;
     this.layout();
     createAiProcessingOverlay(this._shadowRoot);
     if (this._editableText && !this._editController) {
@@ -112,12 +114,12 @@ export class LayoutParagraphElement extends HTMLElement {
     this._editController?.destroy();
     this._editController = null;
     this._editManagerRef = null;
-    const parentBoxEngine = this.parentElement?.engine;
-    if (parentBoxEngine && this._model) {
-      const children = parentBoxEngine.childEngines;
+    if (this._parentEngineRef && this._model) {
+      const children = this._parentEngineRef.childEngines;
       const idx = children.indexOf(this._model);
       if (idx >= 0) children.splice(idx, 1);
     }
+    this._parentEngineRef = null;
   }
 
   /**
@@ -141,23 +143,8 @@ export class LayoutParagraphElement extends HTMLElement {
     }
 
     const overlayBoxEngines: import("@/engine").BoxEngine[] = this.overlayElements
-      .map(el => {
-        const engine = el.engine;
-        if (engine) {
-          if (engine.childEngines.length === 0) {
-            const children: (import("@/engine").BoxEngine | import("@/engine").ImageEngine | import("@/engine").ParagraphEngine | import("@/engine").TableEngine)[] = [];
-            for (const childEl of el.items) {
-              if (childEl instanceof LayoutBoxElement && childEl.engine) children.push(childEl.engine);
-              else if (childEl instanceof LayoutImageElement && childEl.engine) children.push(childEl.engine);
-              else if (childEl instanceof LayoutParagraphElement && childEl.engine) children.push(childEl.engine);
-            }
-            engine.childEngines = children;
-          }
-          return engine;
-        }
-        return null;
-      })
-      .filter((e): e is import("@/engine").BoxEngine => e !== null);
+      .map(el => el.engine)
+      .filter((e): e is import("@/engine").BoxEngine => e !== undefined);
 
     const engineData: ParagraphEngineData = {
       content: this._model?.textContent ?? this._sourceContent,
@@ -266,25 +253,14 @@ export class LayoutParagraphElement extends HTMLElement {
   }
 
   /**
-   * InheritStyle 전파: 단락은 자식이 없으므로 아무 작업도 수행하지 않는다.
-   * 레이아웃 파이프라인 일관성을 위해 빈 메서드로 존재한다.
-   * 내부 전용.
-   */
-  private _propagateInheritStyle() {
-    // 단락 요소는 레이아웃 자식이 없으므로 전파할 대상이 없다.
-  }
-
-  /**
-   * 레이아웃 오케스트레이터. `_layoutStructure()`, `_applyStyle()`,
-   * `_propagateInheritStyle()`를 순서대로 호출한다.
-   * 기존 호출자와의 호환성을 위해 유지한다.
+   * 레이아웃 오케스트레이터. `_layoutStructure()`, `_applyStyle()`를
+   * 순서대로 호출한다. 기존 호출자와의 호환성을 위해 유지한다.
    */
   layout() {
     if (!this.isConnected || !this.parentModel || !this._inheritStyle) return;
 
     this._layoutStructure();
     this._applyStyle();
-    this._propagateInheritStyle();
   }
 
   /**
@@ -311,11 +287,26 @@ export class LayoutParagraphElement extends HTMLElement {
       this._model.layoutText();
       this._perfStructureChanged = false;
     } else {
-      // overlay 요소의 위치가 변경되었을 수 있으므로 overlayEngines를 갱신.
-      // _perfStructureChanged가 false여도 형제 박스의 드래그/리사이즈로
-      // 오버랩 관계가 변할 수 있다. _layoutStructure()를 호출하여
-      // 엔진의 overlayEngines/parentAbsRect를 최신화한다.
-      this._layoutStructure();
+      const parentBox = this.parentElement;
+      if (parentBox) {
+        const overlayBoxEngines: import("@/engine").BoxEngine[] = this.overlayElements
+          .map(el => el.engine)
+          .filter((e): e is import("@/engine").BoxEngine => e !== undefined);
+        this._model.updateOverlayContext(
+          overlayBoxEngines,
+          {
+            absLeft: parentBox.absLeft,
+            absTop: parentBox.absTop,
+            absWidth: parentBox.absWidth,
+            absHeight: parentBox.absHeight,
+          },
+          {
+            ...this._inheritStyle!,
+            parentHeight: this.absHeight,
+            parentWidth: this.absWidth,
+          },
+        );
+      }
       this._model.layoutText();
     }
 

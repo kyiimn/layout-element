@@ -185,18 +185,12 @@ class LayoutDocumentElement extends HTMLElement
 | `type` | `'document'` | 타입 리터럴. |
 | `zIndex` | `number` | 항상 0. |
 
-#### 가시성 / 인쇄 모드
+#### 가시성 / 후처리 데이터
 
 | 이름 | 타입 | 설명 |
 |---|---|---|
 | `visibleGuide` (set) | `boolean` | 가이드 컬럼의 표시 여부 토글. |
-| `printPostData` (get) | `PrintPostData[]` | 인쇄 후처리용 위치/데이터 배열. 인쇄 모드에서 사용. 각 요소의 엔진 계산 mm 좌표를 `ppm`으로 환산한 픽셀 rect를 반환. DOM `getBoundingClientRect()`에 의존하지 않는다. 자식 요소를 z-index **오름차순**(낮은 것부터)으로 재귀 수집하여 반환. PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로, CSS z-index 동작(낮은 것이 먼저 그려지고 높은 것이 위에 덮임)과 일치함. |
-
-#### 인쇄 모드 동작
-
-- `window.matchMedia("print").matches`가 `true`이면 `connectedCallback`은 `id` 자동 할당 직후 즉시 리턴 (`layout()`/`render()` 생략).
-- 사용자가 `data`를 직접 주입한 뒤 `layout()`과 `render()`를 수동 호출해야 함.
-- 편집 기능(`editableLayout`, `editableText`)은 인쇄 모드에서 완전히 차단됨.
+| `printPostData` (get) | `PrintPostData[]` | 후처리 시스템용 위치/데이터 배열. 각 요소의 엔진 계산 mm 좌표를 `ppm`으로 환산한 픽셀 rect를 반환. DOM `getBoundingClientRect()`에 의존하지 않는다. 자식 요소를 z-index **오름차순**(낮은 것부터)으로 재귀 수집하여 반환. PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로, CSS z-index 동작(낮은 것이 먼저 그려지고 높은 것이 위에 덮임)과 일치함. |
 
 #### 예제
 
@@ -216,7 +210,7 @@ const box = document.createElement('x-layout-box') as LayoutBoxElement;
   };
 doc.appendChild(box);
 
-// 4. 인쇄 모드 후처리 데이터 수집
+// 4. 후처리 데이터 수집
 const postData = doc.printPostData;
 
 // 5. 배치 반전
@@ -411,7 +405,7 @@ class LayoutParagraphElement extends HTMLElement
 | `overlapMode` (set) | `ParagraphOverlapMode` | — | 다른 paragraph가 이 paragraph를 감싼 박스를 텍스트 회피 대상으로 취급할지 제어 (`'box'` \| `'none'`). 기본값 `'box'`. `'none'`으로 설정하면 다른 paragraph가 이 박스와 겹쳐도 텍스트를 회피하지 않는다. 변경 시 부모 `requestRerenderAffectedParagraphs()` 호출. byline처럼 본문과 시각적으로 겹치되 텍스트 회피가 필요 없는 영역에 사용. |
 | `textStyle` (set) | `TextStyle` | — | 글자 스타일. 변경 시 구조 재계산 + 재렌더링. 기존 값과 같으면 no-op. |
 | `paragraphStyle` (set) | `ParagraphStyle` | — | 문단 스타일. 변경 시 구조 재계산 + 재렌더링. 기존 값과 같으면 no-op. |
-| `editableText` (set) | `boolean` | — | 텍스트 편집 모드. 인쇄 모드에서는 무시됨. |
+| `editableText` (set) | `boolean` | — | 텍스트 편집 모드. |
 | `aiProcessing` (set) | `boolean` | — | AI 처리 중 오버레이 토글. `true` 시 반투명 오버레이 + shimmer/spinner 애니메이션 표시. `pointer-events: auto`로 마우스 이벤트 차단. `data` getter에 포함되지 않는 휘발성 속성 (저장/직렬화 시 제외). `layout()`/`render()` 미호출. |
 | `inheritStyle` (set) | `InheritStyle \| undefined` | — | 상위 캐스케이드 스타일. |
 
@@ -430,7 +424,7 @@ class LayoutParagraphElement extends HTMLElement
 | `overlayElements` | `LayoutBoxElement[]` | 오버랩된 형제 박스. |
 | `type` | `'paragraph'` | 타입 리터럴. |
 | `zIndex` | `number` | 렌더링 순서. |
-| `printPostData` | `PrintPostData<ParagraphData>[]` | 인쇄 후처리 데이터. paragraph rect + `chars` 배열 (글자별 rect/폰트/장평/색상). |
+| `printPostData` | `PrintPostData<ParagraphData>[]` | 후처리 데이터. paragraph rect + `chars` 배열 (글자별 rect/폰트/장평/색상). |
 
 #### 메서드
 
@@ -478,7 +472,7 @@ p.data = {
 };
 box.appendChild(p);
 
-// 텍스트 편집 활성화 (인쇄 모드 X)
+// 텍스트 편집 활성화
 p.editableText = true;
 ```
 
@@ -547,7 +541,7 @@ class LayoutImageElement extends HTMLElement
 | `absWidth` | `number` (mm) | 절대 너비. `inheritStyle.parentWidth`(부모 editableWidth, 이미 padding 차감됨)을 그대로 사용. 위치 보정은 `relLeft`(`paddingLeft`)에서 처리. |
 | `absHeight` | `number` (mm) | 절대 높이. `inheritStyle.parentHeight`를 그대로 사용. |
 | `type` | `'image'` | 타입 리터럴. |
-| `printPostData` | `PrintPostData[]` | 인쇄 후처리 데이터. `ImageEngine.buildPrintPostData()` 결과를 `ppm`으로 환산한 픽셀 rect와 원본 `ImageData`를 반환. |
+| `printPostData` | `PrintPostData[]` | 후처리 데이터. `ImageEngine.buildPrintPostData()` 결과를 `ppm`으로 환산한 픽셀 rect와 원본 `ImageData`를 반환. |
 
 #### `overlapPadding` 사용
 
@@ -830,8 +824,7 @@ class LayoutTableCellElement extends HTMLElement
 #### Placeholder border
 
 보더가 선언되지 않은 면에 회색(`#aaaaaa`) 점선 placeholder border를 렌더링한다.
-`EditManager.showPlaceholderBorders`가 `false`면 렌더링하지 않는다.
-인쇄 모드에서도 렌더링하지 않는다. 자세한 내용은 `EDITING_TABLE.md` 참조.
+`EditManager.showPlaceholderBorders`가 `false`면 렌더링하지 않는다. 자세한 내용은 `EDITING_TABLE.md` 참조.
 
 > **우선순위**: `selected` > `hovered` > `reparent-target` > placeholder. box는 CSS attribute selector로 해당 상태일 때 placeholder 규칙이 제외되며, td는 `_renderPlaceholderBorder()`가 해당 속성을 감지해 div를 제거한다. 즉, 선택/호버/리페런트 타겟 상태에서는 placeholder border가 표시되지 않고 실제 상태 표시(outline)만 보인다. selected와 hovered가 동시에 있으면 selected(빨간 실선)가 우선한다.
 
@@ -881,7 +874,7 @@ class LayoutColumnElement extends HTMLElement
 ### `<x-layout-guide-column>`
 
 **텍스트 줄 위치 가이드**. 편집 모드에서 텍스트 줄의 위치/높이를 시각적으로 보여주는
-오버레이입니다. 인쇄 모드에서는 자동 숨김 처리됩니다.
+오버레이입니다.
 
 각 가이드 라인은 `position: absolute`로 `top: ${lineHeight * j}mm` 위치에 배치된다.
 이전에는 flexbox `gap`으로 라인 간격을 구현했으나, 브라우저의 mm→px 하위픽셀 변환
@@ -906,7 +899,7 @@ class LayoutGuideColumnElement extends HTMLElement
 | `lineHeight` | `number` | mm | 라인 간격. |
 | `visible` | `boolean` | — | 표시 여부. |
 | `data` (get) | `GuideColumnData` | — | 데이터 직렬화. |
-| `printPostData` (get) | `PrintPostData[]` | 인쇄 후처리. |
+| `printPostData` (get) | `PrintPostData[]` | 후처리 데이터 export. |
 
 #### 예제
 
@@ -1481,19 +1474,19 @@ static resetLoader(): void;
 /**
  * 색상 데이터를 로드하고 CSS 변수를 주입.
  *
- * - 화면 모드: `_loadServer()` (커스텀 로더 또는 `color.json` fetch)
- * - 인쇄 모드: `colorSet` 인자 직접 사용
+ * - `_loadServer()` (커스텀 로더 또는 `color.json` fetch)
+ * - 외부 데이터 주입 시: `colorSet` 인자 직접 사용
  * - stylesheet이 없으면 (SSR/test) `_ready = true`만 설정하고 colorMap은 반환
  *
- * @param colorSet - 인쇄 모드에서 사용할 CMYKColorSet
+ * @param colorSet - 외부 데이터 주입 시 사용할 CMYKColorSet
  * @returns ColorMap[] (RGB-CMYK 쌍)
- * @throws {Error} 인쇄 모드인데 `colorSet`이 없을 때
+ * @throws {Error} 외부 데이터 주입 시 `colorSet`이 없을 때
  *
  * @example
- * // 화면 모드
+ * // 기본 사용
  * await ColorRegistry.getInstance().init();
  *
- * // 인쇄 모드
+ * // 외부 데이터 주입
  * await ColorRegistry.getInstance().init({ black: { c:0, m:0, y:0, k:255 } });
  */
 async init(colorSet?: CMYKColorSet): Promise<ColorMap[]>;
@@ -1578,7 +1571,7 @@ const cmyk = registry.get('red');  // { c:0, m:255, y:255, k:0 }
 box.backgroundColor = 'red';
 box.backgroundOpacity = 0.5;   // getCSSColor('red') + getOpacityHex(0.5) → '#FF000080'
 
-// 인쇄 모드: 데이터 주입
+// 외부 데이터 주입
 const colorSet: CMYKColorSet = {
   red: { c: 0, m: 255, y: 255, k: 0 },
   blue: { c: 255, m: 0, y: 0, k: 0 },
@@ -1635,18 +1628,18 @@ static resetLoader(): void;
 /**
  * 폰트 데이터를 로드하고 `FontFace` API로 등록.
  *
- * - 화면 모드: `ttfFilename` 또는 `base64Data` 사용
- * - 인쇄 모드: `base64Data`만 사용
+ * - 일반 사용: `ttfFilename` 또는 `base64Data` 사용
+ * - 외부 데이터 주입 시: `base64Data` 권장
  *
- * @param fonts - 인쇄 모드에서 사용할 Font 배열
+ * @param fonts - 외부 데이터 주입 시 사용할 Font 배열
  * @returns 로드된 FontFace[] 배열
- * @throws {Error} 인쇄 모드인데 `fonts`가 없을 때
+ * @throws {Error} 외부 데이터 주입 시 `fonts`가 없을 때
  *
  * @example
- * // 화면 모드
+ * // 기본 사용
  * await FontLoader.getInstance().init();
  *
- * // 인쇄 모드
+ * // 외부 데이터 주입
  * await FontLoader.getInstance().init([
  *   { family: 'Myoungjo', weight: 400, style: 'normal', base64Data: '...' },
  * ]);
@@ -2066,7 +2059,7 @@ get selectedLayoutIds: string[];
  *
  * - `textEditMode === true`: 편집 가능한 paragraph 사이에서 포커스를 이동.
  * - `textEditMode === false`: 선택 가능한 box 사이에서 단일 선택을 이동.
- * - 후보가 없거나 인쇄 모드/삽입 모드면 `false`를 반환하고 아무 동작도 하지 않는다.
+ * - 후보가 없거나 삽입 모드면 `false`를 반환하고 아무 동작도 하지 않는다.
  *
  * @param shiftKey - true면 역방향(Shift+Tab), false면 순방향(Tab)
  * @returns 이동 성공 여부
@@ -3390,34 +3383,25 @@ doc.data = exampleData;
 
 ---
 
-## 인쇄 모드 가이드
+## 후처리 데이터 export 가이드
 
-인쇄 모드(`window.matchMedia("print").matches === true`)에서는 다음이 달라집니다:
+`printPostData` getter는 브라우저 DOM을 직접 읽지 않고 엔진이 계산한 mm 좌표를
+`ppm`으로 환산한 픽셀 rect를 수집합니다. 외부 후처리 시스템(PDF 생성 등)으로
+데이터를 전달할 때 사용합니다.
 
-1. **자동 로딩 비활성**: `ColorRegistry`와 `FontLoader`는 `fetch`를 호출하지 않음.
-2. **수동 데이터 주입**: `init({...})` 호출 시 `colorSet`/`fonts`를 명시.
-3. **렌더링 수동**: `<x-layout-document>`의 `connectedCallback`이 즉시 리턴하므로
-   `data` 설정 후 `layout()` + `render()`를 수동 호출.
-4. **이미지/가이드 숨김**: `@media print` CSS 규칙으로 `visibility: hidden`.
-5. **편집 차단**: `editableLayout`/`editableText` setter는 인쇄 모드에서 무시.
-6. **printPostData**: 각 요소의 엔진 계산 mm 좌표(`BoxEngine.absRect`, `ParagraphEngine.printPostData`, `ImageEngine.buildPrintPostData`, 테이블/셀 엔진 메트릭)를 `ppm`으로 환산한 픽셀 위치/크기를 `printPostData` getter로 수집하여 후처리 시스템에 전달. 인쇄 모드에서도 DOM `getBoundingClientRect()`에 의존하지 않는다.
+1. **엔진 기반 좌표**: 각 요소의 `BoxEngine.absRect`, `ParagraphEngine.printPostData`,
+   `ImageEngine.buildPrintPostData`, 테이블/셀 엔진 메트릭에서 rect를 계산합니다.
+2. **DOM 독립**: DOM `getBoundingClientRect()`에 의존하지 않습니다.
+3. **z-index 오름차순**: 자식 요소를 z-index **오름차순**(낮은 것부터)으로 재귀 수집합니다.
+   PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로, CSS z-index 동작과
+   일치합니다.
 
 ```ts
-// 인쇄 모드 진입
-const colorSet = { black: { c:0, m:0, y:0, k:255 } };
-const fonts = [
-  { family: 'Myoungjo', weight: 400, style: 'normal' as const, base64Data: '...' },
-];
-await ColorRegistry.getInstance().init(colorSet);
-await FontLoader.getInstance().init(fonts);
-
 const doc = document.querySelector('x-layout-document')!;
-doc.data = printDocumentData;
-doc.layout();
-await doc.render();
 
+// 렌더링 완료 후 데이터 수집
 const postData = doc.printPostData;
-// → 외부 인쇄 시스템에 전달
+// → 외부 후처리 시스템에 전달
 ```
 
 ---

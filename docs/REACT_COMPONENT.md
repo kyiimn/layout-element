@@ -117,15 +117,15 @@ import { LayoutProvider } from 'layout-element/react';
 
 | Prop | 타입 | 필수 | 설명 |
 |---|---|---|---|
-| `colorSet` | `CMYKColorSet` | 선택 | 인쇄 모드 또는 명시적 주입. 미지정 시 `color.json`을 fetch. |
-| `fonts` | `Font[]` | 선택 | 인쇄 모드용 인라인 폰트 데이터. 미지정 시 `fonts.json`을 fetch. |
+| `colorSet` | `CMYKColorSet` | 선택 | 외부 데이터 주입용. 미지정 시 `color.json`을 fetch. |
+| `fonts` | `Font[]` | 선택 | 외부 데이터 주입용 인라인 폰트 데이터. 미지정 시 `fonts.json`을 fetch. |
 | `children` | `ReactNode` | 필수 | 자식 컴포넌트. |
 
 #### 내부 동작
 
-- 화면 모드 (`colorSet` / `fonts` 미지정): `ColorRegistry.init()` + `FontLoader.init()`
+- 기본 모드 (`colorSet` / `fonts` 미지정): `ColorRegistry.init()` + `FontLoader.init()`
   모두 기본 fetch로 호출.
-- 인쇄 모드 (둘 중 하나 명시): 둘 다 `init({ ... })` 형태로 데이터 주입.
+- 외부 데이터 주입 (둘 중 하나 명시): 둘 다 `init({ ... })` 형태로 데이터 주입.
 - `useEffect` 내부에서 `initialize()` 호출 → 완료 시 `ready: true`, 에러 시 `error: Error` 노출.
 
 #### 예제
@@ -136,7 +136,7 @@ import { LayoutProvider } from 'layout-element/react';
   <Newspaper />
 </LayoutProvider>
 
-// 인쇄 모드 (PostScript/PDF 생성 시)
+// 외부 데이터 주입 (PostScript/PDF 생성 시)
 <LayoutProvider
   colorSet={{
     black: { c: 0, m: 0, y: 0, k: 255 },
@@ -362,7 +362,7 @@ import type { LayoutParagraphProps } from 'layout-element/react';
 | Prop | 타입 | 단위 | 필수 | 설명 |
 |---|---|---|---|---|
 | `data` | `ParagraphData` | — | **필수** | 단락 데이터. |
-| `editableText` | `boolean` | — | 선택 | 텍스트 편집 활성화. 인쇄 모드에서는 무시. |
+| `editableText` | `boolean` | — | 선택 | 텍스트 편집 활성화. |
 | `aiProcessing` | `boolean` | — | 선택 | AI 처리 중 오버레이 토글. `true` 시 반투명 오버레이 + shimmer/spinner 애니메이션. `pointer-events: auto`로 마우스 이벤트 차단. `data`에 포함되지 않는 휘발성 속성. |
 | `onRenderError` | `(event: CustomEvent) => void` | — | 선택 | 오버플로우 등 render-error 핸들러. |
 | `children` | `ReactNode` | — | 선택 | 자식. |
@@ -999,24 +999,24 @@ function DynamicNewspaper() {
 }
 ```
 
-### 인쇄 모드 진입
+### 외부 데이터 주입
 
 ```tsx
 import { LayoutProvider, LayoutDocument } from 'layout-element/react';
 import type { CMYKColorSet, Font } from 'layout-element';
 
-const printColors: CMYKColorSet = {
+const externalColors: CMYKColorSet = {
   black: { c: 0, m: 0, y: 0, k: 255 },
   red:   { c: 0, m: 255, y: 255, k: 0 },
 };
 
-const printFonts: Font[] = [
+const externalFonts: Font[] = [
   // base64 인코딩된 TTF 데이터
 ];
 
-function PrintView({ documentData }: { documentData: DocumentData }) {
+function ExternalDataView({ documentData }: { documentData: DocumentData }) {
   return (
-    <LayoutProvider colorSet={printColors} fonts={printFonts}>
+    <LayoutProvider colorSet={externalColors} fonts={externalFonts}>
       <LayoutDocument data={documentData} />
     </LayoutProvider>
   );
@@ -1099,8 +1099,8 @@ function WithRefs() {
 6. **children vs data.children**: `<LayoutDocument>`에 `data`로 트리를 주입할 때
    children prop도 같이 주면 안 됩니다. 한 가지 경로만 사용하세요.
 
-7. **인쇄 모드**: `LayoutProvider`에 `colorSet`/`fonts`를 주입하면 자동으로 인쇄 모드로
-   동작합니다.
+7. **외부 데이터 주입**: `LayoutProvider`에 `colorSet`/`fonts`를 주입하면 지정한 데이터로
+   초기화됩니다.
 
 8. **React 19+ 호환성**: 컴포넌트는 React 18+ 환경에서 동작합니다. React 19의
    `use()` hook, ref-as-prop 변경 등은 forwardRef 패턴과 호환됩니다.

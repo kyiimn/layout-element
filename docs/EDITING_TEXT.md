@@ -150,7 +150,6 @@ paragraph.editableText = false;
 - `editableText = true`를 처음 설정하면 `TextEditController` 인스턴스가 생성된다.
 - `editableText = false`를 설정하면 `TextEditController.destroy()`가 호출되며, 이벤트 리스너와 DOM 요소가 모두 제거된다.
 - 같은 단락에서 다시 `editableText = true`를 설정하면 새 `TextEditController`가 생성된다.
-- **인쇄 모드**에서는 `editableText` 설정이 무시된다. 인쇄 모드에서는 편집 기능을 활성화할 수 없다.
 - **lock 제한**: 조상 box 중 하나라도 `lock`이 `true`이면, `EditManager.isParagraphEditable()`은 이 단락에 대해 `false`를 반환하므로 `EditManager`를 통해 `editableText = true`로 강제할 수 없다. 단, 호스트 프로그램이 paragraph 요소에 직접 `editableText = true`를 설정하면 `TextEditController`는 생성되지만, `EditManager`의 전역 필터와 독립적으로 동작하며 이벤트/상태가 달라질 수 있으므로 권장하지 않는다.
 
 ### 2.2 더블클릭으로 텍스트 편집 모드 전환
@@ -169,7 +168,6 @@ paragraph.editableText = false;
 
 - **삽입 모드**: 삽입 모드(`insertMode !== null`)에서는 더블클릭이 무시된다.
 - **lock**: 조상 box 중 하나라도 `lock`이 `true`이면 더블클릭이 무시된다.
-- **인쇄 모드**: 인쇄 모드에서는 `textEditMode` 설정이 무시되므로 더블클릭이 무시된다.
 
 ```ts
 // 사용자가 paragraph를 더블클릭하면:
@@ -276,7 +274,7 @@ flowchart LR
 | `editableText` | `boolean` get/set | 텍스트 편집 모드를 활성화하거나 비활성화한다. `true` 설정 시 `TextEditController`가 생성되고, `false` 설정 시 제거된다. |
 | `editController` | `TextEditController \| null` get | 현재 연결된 `TextEditController` 인스턴스를 반환한다. 텍스트 편집 모드가 꺼져 있으면 `null`이다. |
 | `model` | `ParagraphEngine \| null` get | 단락에 연결된 `ParagraphEngine` 모델을 반환한다. |
-| `render()` | `void` | 단락을 다시 렌더링한다. 편집 중이면 `editController.postRender()`를 자동으로 호출한다. 렌더링 완료 후 항상 `render-complete` 커스텀 이벤트를 디스패치하여 배치/오버플로우 통계를 전달한다. 오버플로우 발생 시에는 `render-error` 커스텀 이벤트도 디스패치한다. 오버플로우 시 하단 8px 빨간 inset shadow로 시각적 표시를 적용한다 (인쇄 모드 제외). |
+| `render()` | `void` | 단락을 다시 렌더링한다. 편집 중이면 `editController.postRender()`를 자동으로 호출한다. 렌더링 완료 후 항상 `render-complete` 커스텀 이벤트를 디스패치하여 배치/오버플로우 통계를 전달한다. 오버플로우 발생 시에는 `render-error` 커스텀 이벤트도 디스패치한다. 오버플로우 시 하단 8px 빨간 inset shadow로 시각적 표시를 적용한다. |
 
 ### 3.2 `TextEditController`
 
@@ -940,7 +938,6 @@ flowchart TD
 #### 4.1.3 제약 조건
 
 - **삽입 모드**(`insertMode !== null`): `navigateByTab`은 아무 동작도 하지 않고 `false`를 반환한다.
-- **인쇄 모드**(`_isPrint === true`): 편집 기능 전체가 차단되므로 Tab 이동도 동작하지 않는다.
 - **레이아웃 편집 모드**(`textEditMode === false`, `layoutEditMode === true`): 단락이 아닌 선택 가능한 box 목록을 순환한다. 이 문서에서는 텍스트 편집 모드의 동작을 다룬다.
 - **외부 input/textarea/button/select 포커스**: `document.activeElement`가 `HTMLInputElement`, `HTMLTextAreaElement`, `HTMLButtonElement`, 또는 `HTMLSelectElement`인 경우(예: 호스트 프로그램의 툴바 입력창, 검색어 입력 필드, 버튼, 드롭다운), `_onWindowKeyDown`은 `navigateByTab`을 호출하지 않고 즉시 반환하여 외부 입력 요소의 기본 Tab 동작을 보존한다.
 
@@ -960,7 +957,7 @@ const handledReverse = manager.navigateByTab(true);
 
 - `shiftKey: false` — 순방향(Tab).
 - `shiftKey: true` — 역방향(Shift+Tab).
-- 반환값: 포커스 이동이 실제로 처리되면 `true`, 가드 조건(삽입 모드, 인쇄 모드, 후보 없음)으로 중단되면 `false`.
+- 반환값: 포커스 이동이 실제로 처리되면 `true`, 가드 조건(삽입 모드, 후보 없음)으로 중단되면 `false`.
 
 ### 4.2 각 키의 내부 처리 과정
 
@@ -2009,10 +2006,10 @@ paragraph.editableText = false;
 
 ### 13.1 초기화 순서 상세
 
-1. `ColorRegistry.getInstance().init()` — `color.json`을 fetch하거나 인쇄 모드 데이터를 받아 CSS 변수 `--colorman-{name}`을 주입.
-2. `FontLoader.getInstance().init()` — `fonts.json`을 fetch하거나 인쇄 모드 데이터를 받아 `FontFace`를 등록.
+1. `ColorRegistry.getInstance().init()` — `color.json`을 fetch하여 CSS 변수 `--colorman-{name}`을 주입.
+2. `FontLoader.getInstance().init()` — `fonts.json`을 fetch하여 `FontFace`를 등록.
 3. `<x-layout-document>`를 생성하고 `data` 속성에 `DocumentData`를 설정.
-4. `document.render()`를 호출. `connectedCallback`에서 자동으로 `layout()`은 실행되지만, 인쇄 모드에서는 수동 호출이 필요할 수 있다.
+4. `document.render()`를 호출. `connectedCallback`에서 자동으로 `layout()`은 실행되지만, 첫 렌더링을 보장하려면 수동 호출이 필요할 수 있다.
 5. 편집할 `<x-layout-paragraph>` 요소를 찾는다.
 6. `paragraph.editableText = true`로 텍스트 편집 모드를 활성화.
 
