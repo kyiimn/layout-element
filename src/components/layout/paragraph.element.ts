@@ -112,6 +112,12 @@ export class LayoutParagraphElement extends HTMLElement {
     this._editController?.destroy();
     this._editController = null;
     this._editManagerRef = null;
+    const parentBoxEngine = this.parentElement?.engine;
+    if (parentBoxEngine && this._model) {
+      const children = parentBoxEngine.childEngines;
+      const idx = children.indexOf(this._model);
+      if (idx >= 0) children.splice(idx, 1);
+    }
   }
 
   /**
@@ -130,7 +136,7 @@ export class LayoutParagraphElement extends HTMLElement {
 
     const parentBoxEngine = parentBox.engine;
     const existing = parentBoxEngine?.childEngines.find(e => e instanceof ParagraphEngine);
-    if (existing) {
+    if (existing && this._model !== existing) {
       this._model = existing;
     }
 
@@ -251,7 +257,7 @@ export class LayoutParagraphElement extends HTMLElement {
         left: `${this.relLeft}mm`,
         top: `${paddingTop}mm`,
         width: `${this.absWidth}mm`,
-        zIndex: `${this.zIndex + 100}`,
+        zIndex: `${this.zIndex}`,
         boxShadow: this._hasOverflow
           ? 'inset 0 -8px 0 0 #ff0000'
           : '',
@@ -289,6 +295,11 @@ export class LayoutParagraphElement extends HTMLElement {
    */
   render() {
     if (!this.isConnected || !this._model) return;
+
+    const manager = this._editManagerRef ?? this.editManager;
+    if (manager) {
+      this._model.scale = manager.scale;
+    }
 
     const lineCountBefore = this._model.previousLineCount;
     const overflowBefore = this._model.previousOverflow;
@@ -486,10 +497,17 @@ export class LayoutParagraphElement extends HTMLElement {
     if (data.overlapMode !== undefined) this._overlapMode = data.overlapMode;
 
     this._sourceContent = data.content;
-    if (this._model && typeof data.content === 'string') this._model.textContent = data.content;
+    if (this._model && data.content !== undefined) {
+      const manager = this._editManagerRef ?? this.editManager;
+      const isEditingThis = manager?.focusedParagraph === this;
+      if (!isEditingThis) {
+        this._model.textContent = data.content;
+      }
+    }
 
     this.layout();
     this._perfStructureChanged = true;
+    this.scheduleRender();
   }
 
   /**
@@ -556,7 +574,7 @@ export class LayoutParagraphElement extends HTMLElement {
    */
   set content(value: string | (string | TextBlockData)[]) {
     this._sourceContent = value;
-    if (this._model && typeof value === 'string') this._model.textContent = value;
+    if (this._model) this._model.textContent = value;
     this.markStructureChangedAndRender();
   }
 
@@ -767,6 +785,10 @@ export class LayoutParagraphElement extends HTMLElement {
           const paraEl = el.contentElement as LayoutParagraphElement | null;
           if (paraEl && paraEl.overlapMode === 'none') return false;
         }
+        if (el.contentType === null) {
+          const paraEl = el.querySelector('x-layout-paragraph') as LayoutParagraphElement | null;
+          if (paraEl && paraEl.overlapMode === 'none') return false;
+        }
         return checkOverlapMm(el, this);
       });
 
@@ -780,6 +802,10 @@ export class LayoutParagraphElement extends HTMLElement {
       }
       if (i.contentType === 'paragraph') {
         const paraEl = i.contentElement as LayoutParagraphElement | null;
+        if (paraEl && paraEl.overlapMode === 'none') return false;
+      }
+      if (i.contentType === null) {
+        const paraEl = i.querySelector('x-layout-paragraph') as LayoutParagraphElement | null;
         if (paraEl && paraEl.overlapMode === 'none') return false;
       }
       return true;

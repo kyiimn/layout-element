@@ -9,7 +9,7 @@ import { LayoutImageElement } from "./image.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutTableElement } from "./table.element";
 import { LayoutTableCellElement } from "./td.element";
-import { BoxEngine, DocumentEngine, GridCalculatorEngine, ParagraphEngine, ImageEngine, TableCellEngine } from "@/engine";
+import { BoxEngine, DocumentEngine, GridCalculatorEngine, ParagraphEngine, ImageEngine, TableEngine, TableCellEngine } from "@/engine";
 import type { BoxEngineParent } from "@/engine";
 
 /**
@@ -377,27 +377,27 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule("@media screen { :host([content-type-null][selected]) { outline: red solid 3px !important; outline-offset: -2px !important; box-shadow: none !important; } }", 4);
       styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { outline: #ff9800 solid 2px !important; outline-offset: -2px !important; box-shadow: none !important; } }", 5);
       styleEl.sheet.insertRule('@media screen { .resize-handle { position: absolute; width: 8px; height: 8px; background: white; border: 1px solid #4a90d9; border-radius: 50%; z-index: ' + Z_INDEX_RESIZE_HANDLE + '; pointer-events: auto; display: none; } }', 6);
-      styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .resize-handle { display: block; } }', 8);
-      styleEl.sheet.insertRule('@media screen { :host([td-static]) .resize-handle { display: none !important; } }', 9);
-      styleEl.sheet.insertRule('@media screen { :host([td-static][hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 10);
-      styleEl.sheet.insertRule('@media screen { :host([td-static][selected]) { outline: red solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 11);
-      styleEl.sheet.insertRule('@media screen { :host([td-static][content-type-null][selected]) { outline: red solid 3px !important; outline-offset: -2px !important; box-shadow: none !important; } }', 12);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 13);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 14);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 15);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="right"] { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 16);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="nw"] { top: -4px; left: -4px; cursor: nwse-resize; } }', 17);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="ne"] { top: -4px; right: -4px; cursor: nesw-resize; } }', 18);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="sw"] { bottom: -4px; left: -4px; cursor: nesw-resize; } }', 19);
-      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="se"] { bottom: -4px; right: -4px; cursor: nwse-resize; } }', 20);
-      styleEl.sheet.insertRule('@media screen { .type-label { position: absolute; top: 0; left: 0; padding: 0px 0px 0px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: auto; user-select: none; cursor: grab; z-index: ' + Z_INDEX_TYPE_LABEL + '; display: none; white-space: nowrap; } }', 21);
-      styleEl.sheet.insertRule('@media screen { :host([selected]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 0, 0, 0.85); cursor: grab; } }', 22);
-      styleEl.sheet.insertRule('@media screen { :host([hovered]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); cursor: grab; } }', 23);
-      styleEl.sheet.insertRule('@media screen { :host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); cursor: grab; } }', 24);
-      styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .type-label:active, :host([editable-layout][hovered]) .type-label:active { cursor: grabbing; } }', 25);
-      styleEl.sheet.insertRule('@media screen { :host([text-focused]) .type-label { display: none; } }', 26);
-      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }', 27);
-      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn:hover { opacity: 1; } }', 28);
+      styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .resize-handle { display: block; } }', 7);
+      styleEl.sheet.insertRule('@media screen { :host([td-static]) .resize-handle { display: none !important; } }', 8);
+      styleEl.sheet.insertRule('@media screen { :host([td-static][hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 9);
+      styleEl.sheet.insertRule('@media screen { :host([td-static][selected]) { outline: red solid 1px !important; outline-offset: -1px !important; box-shadow: none !important; } }', 10);
+      styleEl.sheet.insertRule('@media screen { :host([td-static][content-type-null][selected]) { outline: red solid 3px !important; outline-offset: -2px !important; box-shadow: none !important; } }', 11);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="top"] { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 12);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="bottom"] { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; } }', 13);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="left"] { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 14);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="right"] { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; } }', 15);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="nw"] { top: -4px; left: -4px; cursor: nwse-resize; } }', 16);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="ne"] { top: -4px; right: -4px; cursor: nesw-resize; } }', 17);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="sw"] { bottom: -4px; left: -4px; cursor: nesw-resize; } }', 18);
+      styleEl.sheet.insertRule('@media screen { .resize-handle[data-handle="se"] { bottom: -4px; right: -4px; cursor: nwse-resize; } }', 19);
+      styleEl.sheet.insertRule('@media screen { .type-label { position: absolute; top: 0; left: 0; padding: 0px 0px 0px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: auto; user-select: none; cursor: grab; z-index: ' + Z_INDEX_TYPE_LABEL + '; display: none; white-space: nowrap; } }', 20);
+      styleEl.sheet.insertRule('@media screen { :host([selected]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 0, 0, 0.85); cursor: grab; } }', 21);
+      styleEl.sheet.insertRule('@media screen { :host([hovered]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); cursor: grab; } }', 22);
+      styleEl.sheet.insertRule('@media screen { :host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); cursor: grab; } }', 23);
+      styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .type-label:active, :host([editable-layout][hovered]) .type-label:active { cursor: grabbing; } }', 24);
+      styleEl.sheet.insertRule('@media screen { :host([text-focused]) .type-label { display: none; } }', 25);
+      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }', 26);
+      styleEl.sheet.insertRule('@media screen { .type-label .parent-btn:hover { opacity: 1; } }', 27);
 
       this._shadowRoot.appendChild(document.createElement('slot'));
 
@@ -446,7 +446,7 @@ export class LayoutBoxElement extends HTMLElement {
         position: 'absolute',
         top: styleTop,
         width: styleWidth,
-        zIndex: `${this.zIndex + 100}`,
+        zIndex: `${this.zIndex}`,
         backgroundColor: this._backgroundColor
           ? colorRegistry.getCSSColor(this._backgroundColor) +
           colorRegistry.getOpacityHex(this._backgroundOpacity ?? 1)
@@ -585,7 +585,7 @@ export class LayoutBoxElement extends HTMLElement {
    * 내부 전용. `layout()`에서만 호출된다.
    */
   private _propagateInheritStyle() {
-    if (!this.isConnected || !this.parentModel) return;
+    if (!this.isConnected || !this.parentModel || !this._model) return;
 
     this.items.forEach(childEl => {
       const childInheritStyle: InheritStyle = {
@@ -731,9 +731,7 @@ export class LayoutBoxElement extends HTMLElement {
             (existingEl as unknown as { data: typeof child }).data = child.type === 'text'
               ? { ...child, type: 'paragraph' as const, column: 1, gap: 0 }
               : child;
-            if (existingEl !== this.children[i]) {
-              this.appendChild(existingEl);
-            }
+            this.appendChild(existingEl);
             continue;
           }
         }
@@ -1255,6 +1253,10 @@ export class LayoutBoxElement extends HTMLElement {
         const paraEl = i.contentElement as LayoutParagraphElement | null;
         if (paraEl && paraEl.overlapMode === 'none') return false;
       }
+      if (i.contentType === null) {
+        const paraEl = i.querySelector('x-layout-paragraph') as LayoutParagraphElement | null;
+        if (paraEl && paraEl.overlapMode === 'none') return false;
+      }
       return true;
     });
     overlay = overlay.filter(i => checkOverlapMm(i, this));
@@ -1336,7 +1338,7 @@ export class LayoutBoxElement extends HTMLElement {
    * `contentType === 'image'`인 경우, 실제 `LayoutImageElement`는 중첩 box 안에
    * 있을 수 있다. `getOverlapSizeMm` 등에서 `items[0]`을 직접 image로
    * 캐스트하면 중첩 box인 경우 잘못된 요소를 참조하게 되므로 이 getter로
-   * 실제 image/paragraph 요소를 안전하게 얻는다.
+   * 실제 image/paragraph/table 요소를 안전하게 얻는다.
    *
    * @returns 자식이 하나이고 그 자식이 box이면 재귀적으로 파고들어
    *          최종 non-box 자식을 반환. 자식이 없거나 여럿이면 null.
@@ -1346,7 +1348,7 @@ export class LayoutBoxElement extends HTMLElement {
    * // A.contentElement → C (LayoutImageElement)
    * // A.contentType → 'image'
    */
-  get contentElement(): LayoutImageElement | LayoutParagraphElement | null {
+  get contentElement(): LayoutImageElement | LayoutParagraphElement | LayoutTableElement | null {
     const engine = this._engine?.contentElement;
     if (engine instanceof ParagraphEngine) {
       return this.items.find(
@@ -1358,10 +1360,15 @@ export class LayoutBoxElement extends HTMLElement {
         (c): c is LayoutImageElement => c instanceof LayoutImageElement,
       ) ?? null;
     }
+    if (engine instanceof TableEngine) {
+      return this.items.find(
+        (c): c is LayoutTableElement => c instanceof LayoutTableElement,
+      ) ?? null;
+    }
     const child = this.items[0];
     if (!child) return null;
     if (child.type === 'box') return (child as LayoutBoxElement).contentElement;
-    return child as LayoutImageElement | LayoutParagraphElement;
+    return child as LayoutImageElement | LayoutParagraphElement | LayoutTableElement;
   }
 
   /**
@@ -1732,74 +1739,19 @@ export class LayoutBoxElement extends HTMLElement {
     }
 
     if (this.parentElement) {
-      const myRect = this._getRectInParentForCollection();
-      if (!myRect) {
-        // 부모가 없거나 rect를 계산할 수 없는 예외 상황. 안전하게 모든 형제 수집.
-        for (const sibling of this.parentElement.items) {
-          if (sibling === this) continue;
-          this._collectParagraphs(sibling, affected);
-        }
-        return affected;
-      }
       for (const sibling of this.parentElement.items) {
         if (sibling === this) continue;
-        // paragraph/image는 box가 아니므로 AABB 비교가 불가능하다.
-        // 텍스트 회피의 실제 대상이므로 무조건 수집한다.
         if (!(sibling instanceof LayoutBoxElement)) {
           this._collectParagraphs(sibling, affected);
           continue;
         }
-        const siblingRect = this._getSiblingRectInParent(sibling);
-        if (siblingRect && this._aabbIntersectsForCollection(myRect, siblingRect)) {
+        if (checkOverlapMm(sibling, this)) {
           this._collectParagraphs(sibling, affected);
         }
       }
     }
 
     return affected;
-  }
-
-  /**
-   * 부모 좌표계 기준 box의 사각형. CSS `transform`은 부모-자식에 동일하게
-   * 적용되므로 차이 계산 시 자동 상쇄된다.
-   */
-  private _getRectInParentForCollection(): { left: number; top: number; right: number; bottom: number } | null {
-    const parent = this.parentElement;
-    if (!parent) return null;
-    const parentRect = parent.getBoundingClientRect();
-    const myRect = this.getBoundingClientRect();
-    return {
-      left: myRect.left - parentRect.left,
-      top: myRect.top - parentRect.top,
-      right: myRect.right - parentRect.left,
-      bottom: myRect.bottom - parentRect.top,
-    };
-  }
-
-  /**
-   * 형제 box의 부모 좌표계 사각형.
-   */
-  private _getSiblingRectInParent(sibling: LayoutBoxElement): { left: number; top: number; right: number; bottom: number } | null {
-    const parent = this.parentElement;
-    if (!parent) return null;
-    const parentRect = parent.getBoundingClientRect();
-    const siblingRect = sibling.getBoundingClientRect();
-    return {
-      left: siblingRect.left - parentRect.left,
-      top: siblingRect.top - parentRect.top,
-      right: siblingRect.right - parentRect.left,
-      bottom: siblingRect.bottom - parentRect.top,
-    };
-  }
-
-  /**
-   * 두 AABB의 교차 여부. 경계 접촉만 있는 경우 교차하지 않는 것으로 간주.
-   */
-  private _aabbIntersectsForCollection(
-    a: { left: number; top: number; right: number; bottom: number },
-    b: { left: number; top: number; right: number; bottom: number },
-  ): boolean {
-    return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
   }
 
   /**

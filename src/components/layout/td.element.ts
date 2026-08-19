@@ -615,6 +615,7 @@ export class LayoutTableCellElement extends HTMLElement {
     if (this.hasAttribute('selected')) return;
     if (this.hasAttribute('hovered')) return;
     if (this.hasAttribute('reparent-target')) return;
+    if (this._cellLabels.length === 0) return;
 
     const parentTable = this._getParentTableElement();
     if (!parentTable) return;
@@ -744,6 +745,9 @@ export class LayoutTableCellElement extends HTMLElement {
     const boxEl = document.createElement('x-layout-box');
     boxEl.data = child;
     this.appendChild(boxEl);
+    if (!boxEl.engine) {
+      boxEl.layout();
+    }
     return boxEl;
   }
 
@@ -752,6 +756,9 @@ export class LayoutTableCellElement extends HTMLElement {
     const boxEl = document.createElement('x-layout-box');
     boxEl.data = child;
     this.appendChild(boxEl);
+    if (!boxEl.engine) {
+      boxEl.layout();
+    }
   }
 
   private _serializeChildren(): BoxData[] {
@@ -822,11 +829,11 @@ export class LayoutTableCellElement extends HTMLElement {
     return child.contentType ?? undefined;
   }
 
-  get contentElement(): LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | null {
+  get contentElement(): LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | LayoutTableElement | null {
     const child = this.items[0];
     if (!child) return null;
     if (child instanceof LayoutBoxElement) return child.contentElement;
-    return child as LayoutParagraphElement | LayoutImageElement;
+    return child as LayoutParagraphElement | LayoutImageElement | LayoutTableElement;
   }
 
   get items(): LayoutBoxElement[] {

@@ -3,6 +3,7 @@ import { DocumentData, ParagraphStyle, PrintPostData, TextStyle, BoxData, Font, 
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
+import type { LayoutTableElement } from "./table.element";
 import { genUUID, flipLayoutData, FlipLayoutOptions, BoxMetricsById } from "@/utils";
 import { EditManager } from "@/edit/edit-manager";
 import { DocumentEngine } from "@/engine";
@@ -207,12 +208,11 @@ export class LayoutDocumentElement extends HTMLElement {
     }
     if (event.altKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
       if (!hasSelectedBoxInTd) return;
-      const tables = this.querySelectorAll('x-layout-table');
-      for (const table of tables) {
-        const kc = (table as unknown as { keyboardController?: { selection: unknown } }).keyboardController;
+      const focusedTable = this._findFocusedTable();
+      if (focusedTable) {
+        const kc = (focusedTable as unknown as { keyboardController?: { selection: unknown } }).keyboardController;
         if (kc && kc.selection) {
           event.preventDefault();
-          break;
         }
       }
     }
@@ -228,6 +228,15 @@ export class LayoutDocumentElement extends HTMLElement {
       }
     }
   };
+
+  private _findFocusedTable(): LayoutTableElement | null {
+    const focused = this._editManager.focusedParagraph;
+    if (!focused) return null;
+    const td = focused.closest('x-layout-td');
+    if (!td) return null;
+    const table = td.closest('x-layout-table');
+    return table as LayoutTableElement | null;
+  }
 
   /**
    * Place Gun 활성 상태일 때 document 빈 공간 mousedown을 EditManager에 위임한다.
@@ -514,9 +523,7 @@ export class LayoutDocumentElement extends HTMLElement {
           const existingBox = existingById.get(childId)!;
           usedIds.add(childId);
           existingBox.data = child;
-          if (existingBox !== this.children[i]) {
-            this.appendChild(existingBox);
-          }
+          this.appendChild(existingBox);
         } else {
           const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
           boxEl.data = child;

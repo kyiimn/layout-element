@@ -188,9 +188,7 @@ export class LayoutTableElement extends HTMLElement {
           const existingEl = existingById.get(rowId)!;
           usedIds.add(rowId);
           existingEl.data = rowData;
-          if (existingEl !== this.children[i]) {
-            this.appendChild(existingEl);
-          }
+          this.appendChild(existingEl);
         } else {
           this._appendChildData(rowData);
           if (rowId) usedIds.add(rowId);
@@ -332,7 +330,8 @@ export class LayoutTableElement extends HTMLElement {
     for (let r = 0; r < engineRows.length; r++) {
       const rowEngine = engineRows[r];
       if (!rowEngine) continue;
-      const trEl = this.children[r] as LayoutTableRowElement | undefined;
+      const trEls = this.querySelectorAll<LayoutTableRowElement>(':scope > x-layout-tr');
+      const trEl = trEls[r] as LayoutTableRowElement | undefined;
       if (trEl && trEl.localName === 'x-layout-tr') {
         trEl._setRowMetrics(rowEngine.y, rowEngine.height, contentWidth, r);
       }
@@ -341,7 +340,8 @@ export class LayoutTableElement extends HTMLElement {
     for (let r = 0; r < engineRows.length; r++) {
       const rowEngine = engineRows[r];
       if (!rowEngine) continue;
-      const trEl = this.children[r] as LayoutTableRowElement | undefined;
+      const trEls = this.querySelectorAll<LayoutTableRowElement>(':scope > x-layout-tr');
+      const trEl = trEls[r] as LayoutTableRowElement | undefined;
       if (!trEl) continue;
       const tdEls = trEl.items;
       const rowLabel = trEl.rowLabel;
@@ -720,6 +720,7 @@ export class LayoutTableElement extends HTMLElement {
       for (let i = 0; i < state.startRowHeights.length; i++) {
         const trEl = this.children[i] as LayoutTableRowElement | undefined;
         if (trEl) trEl.height = state.startRowHeights[i];
+        this._rows[i].height = state.startRowHeights[i];
       }
     }
     this.layout();

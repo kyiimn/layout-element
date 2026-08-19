@@ -136,6 +136,12 @@ export class LayoutImageElement extends HTMLElement {
       this._objectUrl = undefined;
     }
     this._clearImageCache();
+    const parentBoxEngine = this.parentElement?.engine;
+    if (parentBoxEngine && this._engine) {
+      const children = parentBoxEngine.childEngines;
+      const idx = children.indexOf(this._engine);
+      if (idx >= 0) children.splice(idx, 1);
+    }
   }
 
   /**
@@ -207,7 +213,7 @@ export class LayoutImageElement extends HTMLElement {
         position: 'absolute',
         top: `${paddingTop}mm`,
         width: `${this.absWidth}mm`,
-        zIndex: `${this.zIndex + 100}`,
+        zIndex: `${this.zIndex}`,
       }
     );
   }
@@ -383,8 +389,8 @@ export class LayoutImageElement extends HTMLElement {
     const ppm = this.dpi / 25.4;
     const canvas = this.canvas!;
 
-    const canvasW = Math.round(this.absWidth * ppm);
-    const canvasH = Math.round(this.absHeight * ppm);
+    const canvasW = Math.ceil(this.absWidth * ppm);
+    const canvasH = Math.ceil(this.absHeight * ppm);
 
     if (canvas.width !== canvasW || canvas.height !== canvasH) {
       canvas.width = canvasW;
@@ -414,6 +420,9 @@ export class LayoutImageElement extends HTMLElement {
     this._cachedImageSrc = undefined;
     this._imageLoadingPromise = undefined;
     this._cachedResolvedUrl = undefined;
+    if (this._engine) {
+      this._engine.rgbaData = null;
+    }
   }
 
   /**
@@ -463,7 +472,7 @@ export class LayoutImageElement extends HTMLElement {
     if (data.id !== undefined) this.id = data.id;
     if (data.zIndex !== undefined) this._zIndex = data.zIndex;
     if (data.overlapPadding !== undefined) this._overlapPadding = data.overlapPadding;
-    this._overlapMode = data.overlapMode ?? 'path';
+    if (data.overlapMode !== undefined) this._overlapMode = data.overlapMode;
 
     const urlChanged = this._url !== data.url;
     this._x = data.x;
@@ -497,7 +506,7 @@ export class LayoutImageElement extends HTMLElement {
     const parentBox = this.parentElement;
     const parentBoxEngine = parentBox?.engine;
     const existing = parentBoxEngine?.childEngines.find(e => e instanceof ImageEngine);
-    if (existing) {
+    if (existing && this._engine !== existing) {
       this._engine = existing;
     }
 
@@ -527,24 +536,28 @@ export class LayoutImageElement extends HTMLElement {
   set x(value: number | undefined) {
     if (this._x === value) return;
     this._x = value;
+    this._updateEngine();
     this.render();
   }
 
   set y(value: number | undefined) {
     if (this._y === value) return;
     this._y = value;
+    this._updateEngine();
     this.render();
   }
 
   set width(value: number | undefined) {
     if (this._width === value) return;
     this._width = value;
+    this._updateEngine();
     this.render();
   }
 
   set height(value: number | undefined) {
     if (this._height === value) return;
     this._height = value;
+    this._updateEngine();
     this.render();
   }
 
@@ -717,6 +730,7 @@ export class LayoutImageElement extends HTMLElement {
     this._inheritStyle = style;
     this.layout();
     this._applyObjectFit();
+    this._updateEngine();
     this.render();
   }
 
