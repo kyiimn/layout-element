@@ -325,6 +325,17 @@ export class LayoutColumnElement extends HTMLElement {
         this._shadowRoot.appendChild(lineEl);
       }
 
+      // 마지막 라인은 lineHeight가 아닌 fontSize만큼만 높이를 차지한다.
+      // BoxEngine.absHeight = lineHeight * height - (lineHeight - fontSize)
+      // 단, textBlockStyle.fontSize가 기본 fontSize와 다르면 genLineStyle이
+      // 계산한 블록 전용 높이를 유지한다 (해당 라인은 자체 높이를 가짐).
+      const isLastLineInColumn = i === lines.length - 1;
+      const baseFontSizeMm = this.model!.fontSize;
+      const lineFontSizeMm = textBlockStyle?.fontSize ?? baseFontSizeMm;
+      if (isLastLineInColumn && lineFontSizeMm === baseFontSizeMm && lineEl.style.height !== `${lineFontSizeMm}mm`) {
+        lineEl.style.height = `${lineFontSizeMm}mm`;
+      }
+
       const lineHeightMm = this._getLineHeightMm(lineEl);
       const isOverflow = columnHeightMm > 0 && accumulatedHeightMm + lineHeightMm > columnHeightMm + 1e-6;
       lineEl.style.display = isOverflow ? 'none' : '';
