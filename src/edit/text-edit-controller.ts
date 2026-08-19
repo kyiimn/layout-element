@@ -45,6 +45,7 @@ export class TextEditController {
   private _handleFocus: () => void;
   private _handleBlur: () => void;
   private _handleKeydown: (event: KeyboardEvent) => void;
+  private _handleKeyup: (event: KeyboardEvent) => void;
 
   private _handleInput: (event: InputEvent) => void;
   private _handleCompositionStart: () => void;
@@ -57,7 +58,6 @@ export class TextEditController {
   private _handleMouseMove: (event: MouseEvent) => void;
   private _handleMouseUp: (event: MouseEvent) => void;
   private _handleDoubleClick: (event: MouseEvent) => void;
-  private _handleTripleClick: (event: MouseEvent) => void;
   private _handleVisibilityChange: () => void;
   private _clickCount: number = 0;
   private _clickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -99,6 +99,7 @@ export class TextEditController {
     this._handleFocus = () => this._onFocus();
     this._handleBlur = () => this._onBlur();
     this._handleKeydown = (event: KeyboardEvent) => this._onKeydown(event);
+    this._handleKeyup = (event: KeyboardEvent) => this._onKeyup(event);
 
     this._handleInput = (event: InputEvent) => this._onInput(event);
     this._handleCompositionStart = () => this._onCompositionStart();
@@ -111,8 +112,6 @@ export class TextEditController {
     this._handleMouseMove = (event: MouseEvent) => this._onMouseMove(event);
     this._handleMouseUp = (event: MouseEvent) => this._onMouseUp(event);
     this._handleDoubleClick = (event: MouseEvent) => this._onDoubleClick(event);
-    this._handleTripleClick = (event: MouseEvent) => this._onTripleClick(event);
-    void this._handleTripleClick;
 
     const shadowRoot = paragraph.shadowRoot;
     if (!shadowRoot) throw new Error("paragraph shadow root is not initialized");
@@ -135,6 +134,7 @@ export class TextEditController {
     this._textarea.addEventListener("compositionend", this._handleCompositionEnd as EventListener);
     this._textarea.addEventListener("compositioncancel", this._handleCompositionCancel);
     this._textarea.addEventListener("keydown", this._handleKeydown);
+    this._textarea.addEventListener("keyup", this._handleKeyup);
     this._textarea.addEventListener("paste", this._handlePaste as EventListener);
 
     this._handleVisibilityChange = () => {
@@ -257,6 +257,7 @@ export class TextEditController {
     this._textarea.removeEventListener("focus", this._handleFocus);
     this._textarea.removeEventListener("blur", this._handleBlur);
     this._textarea.removeEventListener("keydown", this._handleKeydown);
+    this._textarea.removeEventListener("keyup", this._handleKeyup);
     this._textarea.removeEventListener("input", this._handleInput as EventListener);
     this._textarea.removeEventListener("compositionstart", this._handleCompositionStart);
     this._textarea.removeEventListener("compositionupdate", this._handleCompositionUpdate as EventListener);
@@ -770,8 +771,7 @@ export class TextEditController {
     if (this._isComposing) {
       if (event.key === "Escape") {
         event.preventDefault();
-        this._isComposing = false;
-        this._removeCompositionSpan();
+        this._onCompositionCancel();
       } else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) {
         event.preventDefault();
         this._textarea.setSelectionRange(this._compositionStartOffset, this._compositionStartOffset);
@@ -867,7 +867,7 @@ export class TextEditController {
       if (!isShift) {
         this._emitStyleChange();
       }
-      if (!event.repeat && isCursorKey) {
+      if (isCursorKey) {
         this._manager._notifyCursorMove(this);
       }
       break;
@@ -918,7 +918,7 @@ export class TextEditController {
       if (!isShift) {
         this._emitStyleChange();
       }
-      if (!event.repeat && isCursorKey) {
+      if (isCursorKey) {
         this._manager._notifyCursorMove(this);
       }
       break;
@@ -943,7 +943,7 @@ export class TextEditController {
       if (!isShift) {
         this._emitStyleChange();
       }
-      if (!event.repeat && isCursorKey) {
+      if (isCursorKey) {
         this._manager._notifyCursorMove(this);
       }
       break;
@@ -988,7 +988,7 @@ export class TextEditController {
       this._updateCursorPosition();
       this._updateSelection();
       if (!isShift) { this._emitStyleChange(); }
-      if (!event.repeat && isCursorKey) { this._manager._notifyCursorMove(this); }
+      if (isCursorKey) { this._manager._notifyCursorMove(this); }
       break;
     }
     case "End": {
@@ -1028,7 +1028,7 @@ export class TextEditController {
       this._updateCursorPosition();
       this._updateSelection();
       if (!isShift) { this._emitStyleChange(); }
-      if (!event.repeat && isCursorKey) { this._manager._notifyCursorMove(this); }
+      if (isCursorKey) { this._manager._notifyCursorMove(this); }
       break;
     }
       case "Backspace": {
@@ -1091,6 +1091,24 @@ export class TextEditController {
       default:
         // Other keys are handled by input/composition handlers
         break;
+    }
+  }
+
+  /**
+   * keyup 이벤트 핸들러.
+   *
+   * 커서 이동 키(ArrowLeft/Right/Up/Down/Home/End)의 keyup에서 `cursorMove`
+   * 이벤트를 발생시킨다. keydown에서 반복 입력(`event.repeat === true`) 시에도
+   * `cursorMove`가 발생하므로, 외부 UI 커서 위치 표시기가 화살표 키 연속 입력
+   * 중에도 갱신된다. keyup은 연속 입력의 마지막 이벤트이므로 docs의
+   * "최초 KeyDown과 마지막 KeyUp에만 발생" 패턴을 구현한다.
+   *
+   * @param event - keyup 키보드 이벤트
+   */
+  private _onKeyup(event: KeyboardEvent): void {
+    const isCursorKey = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key);
+    if (isCursorKey) {
+      this._manager._notifyCursorMove(this);
     }
   }
 
@@ -1830,6 +1848,7 @@ export class TextEditController {
     }
     this._optimisticSpan = null;
     this._optimisticSpanWidthMm = 0;
+    this._mapper.invalidateSpanCache();
 
     if (!this._paragraph.model) return;
 

@@ -358,6 +358,10 @@ export class EditManager {
     this.insertMode = null;
     this._modeChangeSuppressed = false;
 
+    if (this._selectionController) {
+      this._selectionController.detach();
+    }
+
     this._editableRoles = null;
     this._editableBoxIds = null;
     this._editableTextRoles = null;
@@ -1841,8 +1845,9 @@ export class EditManager {
    * 마우스가 box 밖에서 mouseup되면 후속 click 이벤트가 빈 영역 클릭으로
    * 처리되어 선택이 해제되는 것을 방지한다. window capture phase에
    * 일회성 click 리스너를 등록하여 `LayoutSelectionController._onClick`보다
-   * 먼저 실행되어 click을 소비한다. click이 발생하지 않으면 타임아웃(200ms) 후
-   * 자동 제거된다.
+   * 먼저 실행되어 click을 소비한다. click이 발생하지 않으면 타임아웃(350ms) 후
+   * 자동 제거된다. 타이머는 브라우저 기본 dblclick 임계값(~300ms)보다 길게
+   * 설정하여 두 번째 click도 확실히 억제한다.
    * @internal
    */
   _suppressLayoutClick(): void {
@@ -1863,7 +1868,7 @@ export class EditManager {
 
     this._clickConsumeTimer = setTimeout(() => {
       this._removeClickConsumeHandler();
-    }, 200);
+    }, 350);
   }
 
   /**
@@ -2723,14 +2728,22 @@ export class EditManager {
     const isTextMode = this._textEditMode;
 
     if (isTextMode) {
-      // 텍스트 편집 모드: 편집 가능한 paragraph 평탄화.
-      // _flattenParagraphs는 LayoutElement(Box|TD)를 받지만 document도 items getter를
-      // 가지므로 구조적으로 호환됨 — 헬퍼 내부에서는 instanceof 분기만 사용한다.
+      const current = this.focusedParagraph;
+      if (current) {
+        const td = current.closest('x-layout-td') as LayoutTableCellElement | null;
+        if (td) {
+          const table = td.closest('x-layout-table') as LayoutTableElement | null;
+          const kc = table?.keyboardController;
+          if (table && kc && kc.handleTab(shiftKey)) {
+            return true;
+          }
+        }
+      }
+
       const candidates: LayoutParagraphElement[] = [];
       this._flattenParagraphs(this._docEl as unknown as LayoutElement, candidates);
       if (candidates.length === 0) return false;
 
-      const current = this.focusedParagraph;
       const currentIdx = current ? candidates.indexOf(current) : -1;
 
       const nextIdx = shiftKey

@@ -116,6 +116,11 @@ export class TextEditCoordinateMapper {
     this._rebuildMappings();
   }
 
+  invalidateSpanCache(): void {
+    this._spanCache.clear();
+    this._columnSpansCache.clear();
+  }
+
   /**
    * `columnContents`를 순회하며 source offset별 커서 배치 맵을 구축한다.
    *
@@ -762,10 +767,11 @@ export class TextEditCoordinateMapper {
     while (low <= high) {
       const mid = Math.floor((low + high) / 2);
       const range = this._columnRanges[mid];
+      const isLast = mid === this._columnRanges.length - 1;
 
       if (sourceOffset < range.start) {
         high = mid - 1;
-      } else if (sourceOffset >= range.end) {
+      } else if (isLast ? sourceOffset > range.end : sourceOffset >= range.end) {
         low = mid + 1;
       } else {
         return mid;

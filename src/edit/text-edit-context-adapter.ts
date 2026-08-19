@@ -4,9 +4,16 @@ import { EditManager } from "./edit-manager";
 /**
  * Adapter that bridges the browser EditContext API with the layout engine.
  *
- * Uses EditContext (Chromium 122+) when available for native IME support.
- * Falls back gracefully — `create()` returns `null` on unsupported browsers,
- * allowing TextEditController to use its textarea-based fallback path.
+ * @deprecated Safari에서 EditContext API가 구현될 때까지 사용하지 않습니다.
+ *
+ * EditContext API는 Chromium 122+에서만 구현되어 있고 Safari/Firefox는 미지원.
+ * 크로스 브라우저 지원이 확보될 때까지 `TextEditController`는 textarea 기반
+ * fallback 경로만 사용합니다. 이 어댑터는 `TextEditController`에 연결되어
+ * 있지 않으며(dead code), 모든 브라우저에서 textarea 경로로 동작합니다.
+ *
+ * Safari가 EditContext API를 구현하면 이 어댑터를 활성화하고 textarea
+ * 경로를 우회하도록 `TextEditController`에 연결 작업을 수행해야 합니다.
+ * 그 전까지는 이 파일을 사용하지 마십시오.
  */
 export class TextEditContextAdapter {
   private _editContext: BrowserEditContext | null;
@@ -43,7 +50,11 @@ export class TextEditContextAdapter {
     this._editContext.addEventListener("compositionend", this._boundOnCompositionEnd);
   }
 
-  /** Returns `true` when the browser provides the EditContext API (Chromium 122+). */
+  /**
+   * Returns `true` when the browser provides the EditContext API (Chromium 122+).
+   *
+   * @deprecated Safari에서 EditContext API가 구현될 때까지 사용하지 않습니다.
+   */
   static isSupported(): boolean {
     return "EditContext" in globalThis;
   }
@@ -52,24 +63,21 @@ export class TextEditContextAdapter {
    * Factory method. Creates an `TextEditContextAdapter` when the EditContext API
    * is available, otherwise returns `null`.
    *
-   * @param mapper - 좌표 변환에 사용할 TextEditCoordinateMapper
-   * @param manager - 이 adapter가 속한 EditManager 인스턴스
-   * @param callbacks - EditContext 이벤트 콜백
-   * @returns TextEditContextAdapter 인스턴스. 지원하지 않으면 `null`.
+   * @deprecated Safari에서 EditContext API가 구현될 때까지 항상 `null`을
+   * 반환합니다. 크로스 브라우저 지원이 확보되면 이 가드를 제거하고
+   * 실제 `EditContext` 인스턴스를 생성하도록 복원하십시오.
+   *
+   * @param _mapper - 좌표 변환에 사용할 TextEditCoordinateMapper
+   * @param _manager - 이 adapter가 속한 EditManager 인스턴스
+   * @param _callbacks - EditContext 이벤트 콜백
+   * @returns 항상 `null` (사용 중단 상태).
    */
   static create(
-    mapper: TextEditCoordinateMapper,
-    manager: EditManager,
-    callbacks: EditContextCallbacks,
+    _mapper: TextEditCoordinateMapper,
+    _manager: EditManager,
+    _callbacks: EditContextCallbacks,
   ): TextEditContextAdapter | null {
-    if (!TextEditContextAdapter.isSupported()) {
-      return null;
-    }
-
-    // EditContext is guaranteed to exist by isSupported() check above.
-    const EditContextCtor = (globalThis as unknown as { EditContext: new () => BrowserEditContext }).EditContext;
-    const editContext = new EditContextCtor();
-    return new TextEditContextAdapter(editContext, mapper, manager, callbacks);
+    return null;
   }
 
   /** Returns the underlying EditContext instance (for attaching to an element). */

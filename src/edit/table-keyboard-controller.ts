@@ -34,6 +34,10 @@ export class TableKeyboardController {
 
   set selection(value: TableCellSelection | null) {
     this._selection = value;
+    if (this._tableEl) {
+      (this._tableEl as unknown as { _renderSelectionOverlay(selection: TableCellSelection | null): void })
+        ._renderSelectionOverlay(value);
+    }
   }
 
   /**

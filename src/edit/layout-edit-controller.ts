@@ -928,6 +928,8 @@ export class LayoutEditController {
 
     for (const target of dragTargets) {
       target.flushDragRerender();
+      const targetState = this._dragStates.get(target);
+      if (targetState) targetState.reparentOutside = null;
     }
 
     manager._endLayoutDrag();
@@ -990,7 +992,9 @@ export class LayoutEditController {
       const targetState = this._getOrCreateDragState(target);
       this._applyPositionConversion(target, targetState.originalPosition, targetState.originalLeft, targetState.originalTop, targetState.originalWidth, targetState.originalHeight);
       manager._dispatchLayoutMove(target, targetState.originalLeft, targetState.originalTop, targetState.originalLeft, targetState.originalTop, true);
+      targetState.reparentOutside = null;
     }
+    state.reparentOutside = null;
 
     manager._endLayoutDrag();
     this._activeDragBox = null;
