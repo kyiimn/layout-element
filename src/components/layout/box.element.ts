@@ -792,42 +792,16 @@ export class LayoutBoxElement extends HTMLElement {
     * 기존 단락들이 새 자식과 겹치는 영역을 회피하도록 재렌더링된다.
     */
   appendChildData(child: BoxData | ParagraphData | TextData | ImageData | TableData): LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | HTMLElement {
-    if (child.type === 'box') {
-      const boxEl = document.createElement('x-layout-box');
-      boxEl.data = child;
-      this.appendChild(boxEl);
-      this.requestRerenderAffectedParagraphs();
-      return boxEl;
-    } else if (child.type === 'paragraph') {
-      const paragraphEl = document.createElement('x-layout-paragraph');
-      paragraphEl.data = child;
-      this.appendChild(paragraphEl);
-      this.requestRerenderAffectedParagraphs();
-      return paragraphEl;
-    } else if (child.type === 'text') {
-      const paragraphEl = document.createElement('x-layout-paragraph');
-      paragraphEl.data = {
-        ...child,
-        type: 'paragraph',
-        column: 1,
-        gap: 0,
-      };
-      this.appendChild(paragraphEl);
-      this.requestRerenderAffectedParagraphs();
-      return paragraphEl;
-    } else if (child.type === 'table') {
-      const tableEl = document.createElement('x-layout-table');
-      (tableEl as unknown as { data: TableData }).data = child;
-      this.appendChild(tableEl);
-      this.requestRerenderAffectedParagraphs();
-      return tableEl;
+    const currentData = this.data;
+    const currentChildren = currentData.children;
+    if (!currentChildren) {
+      this.data = { ...currentData, children: [child] as BoxData[] };
+    } else if (Array.isArray(currentChildren)) {
+      this.data = { ...currentData, children: [...currentChildren, child] as BoxData[] };
     } else {
-      const imageEl = document.createElement('x-layout-image');
-      imageEl.data = child;
-      this.appendChild(imageEl);
-      this.requestRerenderAffectedParagraphs();
-      return imageEl;
+      this.data = { ...currentData, children: [currentChildren, child] as BoxData[] };
     }
+    return this.items[this.items.length - 1] as LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | HTMLElement;
   }
 
   private _appendChildData(child: BoxData | ParagraphData | TextData | ImageData | TableData): void {

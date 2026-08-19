@@ -741,24 +741,15 @@ export class LayoutTableCellElement extends HTMLElement {
   }
 
   appendChildData(child: BoxData): LayoutBoxElement {
-    this._layoutStructure();
-    const boxEl = document.createElement('x-layout-box');
-    boxEl.data = child;
-    this.appendChild(boxEl);
-    if (!boxEl.engine) {
-      boxEl.layout();
-    }
-    return boxEl;
+    const currentData = this.data;
+    const currentChildren = currentData.children ?? [];
+    const newChildren = [...currentChildren, child];
+    this.data = { ...currentData, children: newChildren };
+    return this.items[this.items.length - 1] as LayoutBoxElement;
   }
 
   private _appendChildData(child: BoxData): void {
-    this._layoutStructure();
-    const boxEl = document.createElement('x-layout-box');
-    boxEl.data = child;
-    this.appendChild(boxEl);
-    if (!boxEl.engine) {
-      boxEl.layout();
-    }
+    this.appendChildData(child);
   }
 
   private _serializeChildren(): BoxData[] {

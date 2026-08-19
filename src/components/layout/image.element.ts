@@ -167,11 +167,11 @@ export class LayoutImageElement extends HTMLElement {
     if (!this.parentModel || !this._inheritStyle) return;
 
     let styleEl = this._shadowRoot.querySelector('style');
-    let needsInit = !styleEl
+    let needsStyleInit = !styleEl
       || !styleEl.sheet
       || styleEl.sheet.cssRules.length === 0;
 
-    if (needsInit) {
+    if (needsStyleInit) {
       if (styleEl) styleEl.remove();
       styleEl = document.createElement("style");
       this._shadowRoot.appendChild(styleEl);
@@ -180,7 +180,9 @@ export class LayoutImageElement extends HTMLElement {
       styleEl.sheet.insertRule(":host {}", 0);
 
       this._shadowRoot.appendChild(document.createElement('slot'));
+    }
 
+    if (!this._canvas || !this._canvas.isConnected) {
       this._canvas = document.createElement('canvas');
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
         this._canvas.style,
@@ -527,7 +529,11 @@ export class LayoutImageElement extends HTMLElement {
     const parentBoxEngine = parentBox?.engine;
     const existing = parentBoxEngine?.childEngines.find(e => e instanceof ImageEngine);
     if (existing && this._engine !== existing) {
+      const preservedRgba = this._engine?.rgbaData ?? null;
       this._engine = existing;
+      if (preservedRgba && !existing.rgbaData) {
+        existing.rgbaData = preservedRgba;
+      }
     }
 
     const engineData = {

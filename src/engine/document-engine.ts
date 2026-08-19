@@ -242,6 +242,31 @@ export class DocumentEngine {
    */
   layout(): void {
     this._buildTree(this._data);
+    this._syncIdsToData();
+  }
+
+  /**
+   * 엔진 트리에서 발급한 id를 this._data에 write-back한다.
+   * _buildBoxEngine이 BoxData.id가 없을 때 generateEngineId()로 id를 발급하지만,
+   * 지역 변수에만 적용되므로 layout() 완료 후 this._data에 반영해야
+   * engine.data에서 id가 포함된 DocumentData를 얻을 수 있다.
+   */
+  private _syncIdsToData(): void {
+    const engineBoxes = this._childBoxEngines;
+    const dataChildren = this._data.children;
+    if (!dataChildren || !Array.isArray(dataChildren)) return;
+    let changed = false;
+    const newChildren = dataChildren.map((child, i) => {
+      const engineId = engineBoxes[i]?.data.id;
+      if (engineId && child.id !== engineId) {
+        changed = true;
+        return { ...child, id: engineId };
+      }
+      return child;
+    });
+    if (changed) {
+      this._data = { ...this._data, children: newChildren };
+    }
   }
 
   /**
@@ -289,13 +314,37 @@ export class DocumentEngine {
    * @param data - 문서 데이터
    */
   private _buildTree(data: DocumentData): void {
+    const prevContentEnginesByBoxId = new Map<string, (ImageEngine | ParagraphEngine | TableEngine)[]>();
+    this._collectPrevContentEngines(this._childBoxEngines, prevContentEnginesByBoxId);
+
     const boxEngines: BoxEngine[] = [];
     for (const childData of data.children ?? []) {
-      const be = this._buildBoxEngine(childData, this);
+      const be = this._buildBoxEngine(childData, this, prevContentEnginesByBoxId);
       boxEngines.push(be);
     }
     this._childBoxEngines = boxEngines;
     this._refreshParagraphOverlays(boxEngines);
+  }
+
+  /**
+   * 이전 엔진 트리에서 모든 BoxEngine의 content 엔진(ImageEngine, ParagraphEngine, TableEngine)을
+   * boxId → contentEngines 맵으로 수집한다. 트리 재구축 시 새 BoxEngine이 만들어질 때
+   * 이전 content 엔진의 상태(rgbaData 등)를 보존하기 위해 사용한다.
+   */
+  private _collectPrevContentEngines(
+    boxEngines: BoxEngine[],
+    map: Map<string, (ImageEngine | ParagraphEngine | TableEngine)[]>,
+  ): void {
+    for (const be of boxEngines) {
+      const contentEngines = be.childEngines.filter(e => !(e instanceof BoxEngine)) as (ImageEngine | ParagraphEngine | TableEngine)[];
+      if (be.data.id) {
+        map.set(be.data.id, contentEngines);
+      }
+      const childBoxes = be.childBoxEngines;
+      if (childBoxes.length > 0) {
+        this._collectPrevContentEngines(childBoxes, map);
+      }
+    }
   }
 
   /**
@@ -342,7 +391,11 @@ export class DocumentEngine {
    * @param parent - 부모 엔진 (DocumentEngine | BoxEngine | TableCellEngine)
    * @returns 구축된 BoxEngine
    */
-  private _buildBoxEngine(boxData: BoxData, parent: BoxEngine | DocumentEngine | TableCellEngine): BoxEngine {
+  private _buildBoxEngine(
+    boxData: BoxData,
+    parent: BoxEngine | DocumentEngine | TableCellEngine,
+    prevContentEnginesByBoxId: Map<string, (ImageEngine | ParagraphEngine | TableEngine)[]>,
+  ): BoxEngine {
     if (!boxData.id) {
       boxData = { ...boxData, id: generateEngineId() };
     }
@@ -382,18 +435,25 @@ export class DocumentEngine {
     }, this._ppm);
     boxEngine.gridCalculator = gc;
 
-    // 자식 엔진 구축
     const children = boxData.children;
     if (!children) {
       boxEngine.childEngines = [];
       return boxEngine;
     }
 
+    const prevContentEngines = boxEngine.childEngines.filter(
+      e => !(e instanceof BoxEngine),
+    ) as (ImageEngine | ParagraphEngine | TableEngine)[];
+    if (prevContentEngines.length === 0 && boxData.id) {
+      const fromMap = prevContentEnginesByBoxId.get(boxData.id);
+      if (fromMap) prevContentEngines.push(...fromMap);
+    }
+
     const childEngines: (BoxEngine | ImageEngine | ParagraphEngine | TableEngine)[] = [];
 
     if (Array.isArray(children)) {
       for (const childBoxData of children) {
-        const childBE = this._buildBoxEngine(childBoxData, boxEngine);
+        const childBE = this._buildBoxEngine(childBoxData, boxEngine, prevContentEnginesByBoxId);
         childEngines.push(childBE);
       }
     } else {
@@ -405,15 +465,16 @@ export class DocumentEngine {
         const pe = this._buildParagraphEngine(paraData, boxEngine, inheritStyle);
         childEngines.push(pe);
       } else if (content.type === 'image') {
-        const ie = this._buildImageEngine(content, boxEngine);
+        const ie = this._buildImageEngine(content, boxEngine, prevContentEngines);
         childEngines.push(ie);
       } else if (content.type === 'table') {
-        const te = this._buildTableEngine(content, boxEngine);
+        const te = this._buildTableEngine(content, boxEngine, prevContentEnginesByBoxId);
         childEngines.push(te);
       }
     }
 
     boxEngine.childEngines = childEngines;
+
     return boxEngine;
   }
 
@@ -469,10 +530,16 @@ export class DocumentEngine {
    * ImageData로부터 ImageEngine을 구축한다.
    * rgbaData는 이 시점에서 주입되지 않는다 — 외부에서 별도로 주입해야 한다.
    */
-  private _buildImageEngine(imgData: ImageData, parentBox: BoxEngine): ImageEngine {
-    const existing = parentBox.childEngines.find(e => e instanceof ImageEngine);
+  private _buildImageEngine(
+    imgData: ImageData,
+    parentBox: BoxEngine,
+    prevContentEngines: (ImageEngine | ParagraphEngine | TableEngine)[],
+  ): ImageEngine {
+    const existing = parentBox.childEngines.find(e => e instanceof ImageEngine)
+      ?? prevContentEngines.find(e => e instanceof ImageEngine);
     if (existing) {
       const imgEngine = existing as ImageEngine;
+      const preservedRgba = imgEngine.rgbaData;
       imgEngine.data = {
         url: imgData.url,
         x: imgData.x,
@@ -486,6 +553,7 @@ export class DocumentEngine {
         originalWidth: imgData.originalWidth,
         originalHeight: imgData.originalHeight,
       };
+      imgEngine.rgbaData = preservedRgba;
       return imgEngine;
     }
     return ImageEngine.create({
@@ -503,7 +571,11 @@ export class DocumentEngine {
     });
   }
 
-  private _buildTableEngine(tableData: TableData, parentBox: BoxEngine): TableEngine {
+  private _buildTableEngine(
+    tableData: TableData,
+    parentBox: BoxEngine,
+    prevContentEnginesByBoxId: Map<string, (ImageEngine | ParagraphEngine | TableEngine)[]>,
+  ): TableEngine {
     const te = TableEngine.create(tableData, parentBox);
     te.layout();
 
@@ -524,7 +596,7 @@ export class DocumentEngine {
       const cellBoxData = cellChildren.length === 1
         ? cellChildren[0]
         : { type: 'box' as const, left: 0, top: 0, width: 1, height: 1, children: cellChildren };
-      const cellBoxEngine = this._buildBoxEngine(cellBoxData, cellEngine);
+      const cellBoxEngine = this._buildBoxEngine(cellBoxData, cellEngine, prevContentEnginesByBoxId);
       cellEngine.boxEngine = cellBoxEngine;
     }
 
