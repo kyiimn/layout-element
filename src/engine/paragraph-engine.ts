@@ -1816,6 +1816,28 @@ export function buildParagraphPrintPostData(
       ? parentHeightMm + (lineHeightMm - baseFontSizeMm)
       : 0;
 
+    const verticalAlign = paragraphStyle?.verticalAlign
+      ?? inheritStyle?.verticalAlign
+      ?? DEFAULT_VERTICAL_ALIGN;
+
+    let visibleLineCount = 0;
+    for (let li = 0; li < col.length; li++) {
+      const lineData = col[li];
+      if (!lineData) continue;
+      if (effectiveColumnHeightMm > 0 && visibleLineCount * lineHeightMm >= effectiveColumnHeightMm) break;
+      visibleLineCount++;
+    }
+
+    const contentHeightMm = visibleLineCount > 0
+      ? (visibleLineCount - 1) * lineHeightMm + baseFontSizeMm
+      : 0;
+    const columnHeightMm = parentHeightMm;
+    const alignOffsetMm = (verticalAlign === 'center' && columnHeightMm > contentHeightMm)
+      ? (columnHeightMm - contentHeightMm) / 2
+      : (verticalAlign === 'bottom' && columnHeightMm > contentHeightMm)
+        ? (columnHeightMm - contentHeightMm)
+        : 0;
+
     let visibleLineIndex = 0;
     for (let li = 0; li < col.length; li++) {
       const lineData = col[li];
@@ -1841,7 +1863,7 @@ export function buildParagraphPrintPostData(
         effectiveLineHeightMm = Math.ceil((fontSizeMm * lineGap) / lineHeightMm) * lineHeightMm;
       }
 
-      const lineTopMm = absTopMm + visibleLineIndex * lineHeightMm;
+      const lineTopMm = absTopMm + alignOffsetMm + visibleLineIndex * lineHeightMm;
 
       for (let pi = 0; pi < lineData.parts.length; pi++) {
         const part = lineData.parts[pi];

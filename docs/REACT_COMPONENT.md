@@ -834,7 +834,7 @@ export type {
 
 // Print types
 export type {
-  PrintPostData, PrintPostDataRect, ColorMap,
+  PrintPostData, PrintPostDataChar, PrintPostDataRect, ColorMap,
   RGBColor, CMYKColor, CMYKColorSet,
 };
 

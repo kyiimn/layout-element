@@ -448,13 +448,9 @@ flexbox 폴백 경로(`charOffsets === undefined`, 외부에서 임의로 `TextP
 | 스타일 속성 | outer `width`/`textAlign` + inner `scale` | `scale`/`transformOrigin`/`position`/`left` 통합 |
 | 편집 모드 | 미사용 (charOffsets 활성화) | 임시 span 동적 offset 계산 |
 
-#### `printPostData` 호환성
+#### `printPostData` 엔진 트리 단일화
 
-`paragraph.element.ts:770-778` — `printPostData`는 inner span 존재 여부로 분기:
-- inner 있으면(중첩 span): `inner.textContent`에서 글자, `inner.style.scale`에서 widthRatio 추출
-- inner 없으면(단일 span): `span.textContent`에서 글자, `span.style.scale`에서 widthRatio 추출
-
-두 경로 모두 자연스럽게 처리되므로 `printPostData`는 변경 없이 호환됨.
+`buildParagraphPrintPostData()`가 엔진의 `columnContents`/`charOffsets`에서 직접 char 데이터를 생성한다. DOM span에서 추출하던 이전 방식(inner span 존재 여부 분기)은 제거되었다. 엘리먼트의 개별 `printPostData` getter도 제거되고, `LayoutDocumentElement.printPostData` → `DocumentEngine.printPostData` 엔진 트리가 단일 소스다 (mm 단위).
 
 ---
 

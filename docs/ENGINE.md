@@ -203,6 +203,8 @@ static create(data: BoxData, parent: BoxEngineParent): BoxEngine
 | `gridCalculator` | `GridCalculatorEngine \| null` | 박스 레벨 그리드 계산기 |
 | `isDocument` | `false` | 박스 식별 |
 | `printPostData` | `PrintPostData[]` | z-index 정렬된 자식 printPostData (mm 단위). 후처리 시스템용 데이터 export |
+| `absRect` | `AbsRect` | 박스 절대 사각형 (mm). padding 포함 |
+| `contentAbsRect` | `AbsRect` | 콘텐츠 영역 절대 사각형 (mm). padding 제외. ImageEngine absRect 전달용 |
 
 #### 퍼블릭 세터
 
@@ -220,7 +222,9 @@ static create(data: BoxData, parent: BoxEngineParent): BoxEngine
 - absolute: `left`/`top`/`width`/`height` = mm
 - `overlayElements`: 부모 오버레이 + 형제 박스(z-index 더 높고 공간 겹침, `overlapMode !== 'none'`) 머지
 - `contentType`/`contentElement`: 단일 중첩 박스를 재귀 통과
-- `printPostData`: 자식을 z-index 정렬, 각 엔진 printPostData 위임, `DEFAULT_BORDER_STYLE` 폴백. mm 단위 좌표를 후처리 시스템에 제공
+- `absRect`: 박스 절대 사각형 (mm). padding 포함.
+- `contentAbsRect`: 콘텐츠 영역 절대 사각형 (mm). padding 제외. `LayoutImageElement.absLeft/absTop/absWidth/absHeight`와 동일 공식. ImageEngine `buildPrintPostData`에 전달.
+- `printPostData`: 자식을 z-index 정렬, 각 엔진 printPostData 위임, `DEFAULT_BORDER_STYLE` 폴백. mm 단위 좌표를 후처리 시스템에 제공. ImageEngine 자식에는 `this.contentAbsRect`를 전달 (이미지 영역, 부모 box 전체 영역 아님).
 
 ---
 
@@ -346,7 +350,7 @@ static create(data: ParagraphEngineData): ParagraphEngine
 | `previousOverflow` | `number` | 이전 오버플로우 |
 | `scale` | `number` | 스케일 (현재 no-op) |
 | `overlapMode` | `ParagraphOverlapMode` | 단락 오버랩 모드 |
-| `printPostData` | `PrintPostData[]` | 문자별 printPostData (mm 단위). 후처리 시스템용 데이터 export |
+| `printPostData` | `PrintPostData[]` | 문자별 printPostData (mm 단위). 후처리 시스템용 데이터 export. `verticalAlign`(top/center/bottom) 오프셋을 char rect.y에 반영. `letterSpacing`/`spaceRatio` 필드 포함 |
 
 #### 퍼블릭 세터
 
@@ -574,11 +578,12 @@ DocumentEngine (root, owns ppm + resources)
 - `ParagraphEngine`은 `ParagraphEngineData.resources`로 수신
 - `BoxEngine.printPostData`는 문서 엔진까지 올라가 `_colorRegistry` 접근
 
-### printPostData 변환
+### printPostData 단일화 (mm)
 
-- 엔진 `printPostData`는 mm 단위 rect를 반환
-- Custom Element(`<x-layout-document>`, `<x-layout-box>`, `<x-layout-paragraph>`, `<x-layout-image>`, `<x-layout-table>`, `<x-layout-td>`)의 `printPostData` getter는 엔진이 계산한 mm 좌표를 `LayoutDocumentElement.ppm`으로 곱해 픽셀 단위로 변환하여 반환
-- DOM `getBoundingClientRect()`에 의존하지 않고 엔진 좌표를 사용
+- 엔진 트리(`DocumentEngine.printPostData`)가 단일 소스. 모든 rect/char 좌표는 **mm 단위**.
+- `LayoutDocumentElement.printPostData`는 `DocumentEngine.printPostData` 엔진 트리 결과를 위임한다. box/paragraph/image/table/td/tr 엘리먼트의 개별 `printPostData` getter는 제거되었다.
+- `<x-layout-guide-column>`은 DOM 전용 요소(엔진 트리에 없음)이므로 `LayoutDocumentElement.printPostData`에서 별도 수집한다.
+- ppm 곱셈은 외부 후처리 시스템이 수행한다. 엔진은 mm만 다룬다.
 
 ---
 

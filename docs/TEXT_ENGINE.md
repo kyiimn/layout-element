@@ -688,7 +688,7 @@ public genColumnStyle(idx: number): Partial<CSSStyleDeclaration>
 - `left`: 이전 컬럼들의 너비 + 간격 합
 - `width`, `minWidth`, `maxWidth`, `flex`: `columnWidths[idx]`
 - `height`, `minHeight`, `maxHeight`: `inheritStyle.parentHeight`
-- `justifyContent`: `verticalAlign`에 따라 `center`, `flex-end`, `flex-start`
+- `justifyContent`: `verticalAlign`에 따라 `center`, `flex-end`, `flex-start`. `buildParagraphPrintPostData`도 동일한 `verticalAlign` 오프셋을 char rect.y에 반영한다 — `center`면 `(columnHeight - contentHeight) / 2`, `bottom`이면 `columnHeight - contentHeight`를 lineTopMm에 더한다.
 
 ### 11.2 `genLineStyle(textBlockStyle?)`
 
@@ -857,6 +857,15 @@ flexbox 정렬에 사용되고 inner의 `scale`이 glyph 축소를 담당한다.
 브라우저 DOM 측정값(`getBoundingClientRect()`)과 정확히 일치한다 —
 `position: absolute; left`를 사용하므로 flexbox float 연산 오차가 원천 제거된다.
 따라서 후처리 시스템이 동일한 `PrintPostDataChar.rect`를 산출할 수 있다.
+
+`PrintPostDataChar`는 다음 필드를 포함한다:
+- `rect`: 글자별 위치·크기 (mm)
+- `fontFamily`: `textBlockStyle → textStyle → inheritStyle` 폴백 체인으로 해결
+- `fontSize`, `fontWeight`: `textBlockStyle → textStyle → inheritStyle → default` 폴백
+- `widthRatio`: `textStyle → inheritStyle → DEFAULT_WIDTH_RATIO`
+- `letterSpacing`: `textStyle → inheritStyle → DEFAULT_LETTER_SPACING` (em 단위)
+- `spaceRatio`: `textStyle → inheritStyle → DEFAULT_SPACE_RATIO` (em 단위)
+- `color`: `textBlockStyle → textStyle → inheritStyle` 폴백 후 CMYK 변환. 모두 undefined면 K100 검정 `{ c:0, m:0, y:0, k:255 }`
 
 `width`와 `scale`은 분리되어 작동한다:
 - 외부 span의 `width`는 `_charWidthMm(char)`으로 측정한 원본 폭에 장평을 곱해 정확히 고정한다. 측정값과 DOM 렌더링이 결정론적으로 일치하며, 마지막 글자가 틀을 넘어가는 현상을 방지한다.

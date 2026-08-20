@@ -190,7 +190,7 @@ class LayoutDocumentElement extends HTMLElement
 | 이름 | 타입 | 설명 |
 |---|---|---|
 | `visibleGuide` (set) | `boolean` | 가이드 컬럼의 표시 여부 토글. |
-| `printPostData` (get) | `PrintPostData[]` | 후처리 시스템용 위치/데이터 배열. 각 요소의 엔진 계산 mm 좌표를 `ppm`으로 환산한 픽셀 rect를 반환. DOM `getBoundingClientRect()`에 의존하지 않는다. 자식 요소를 z-index **오름차순**(낮은 것부터)으로 재귀 수집하여 반환. PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로, CSS z-index 동작(낮은 것이 먼저 그려지고 높은 것이 위에 덮임)과 일치함. |
+| `printPostData` (get) | `PrintPostData[]` | 후처리 시스템용 위치/데이터 배열 (mm 단위). `DocumentEngine.printPostData` 엔진 트리 결과를 그대로 반환하며, 자식 요소를 z-index **오름차순**(낮은 것부터)으로 재귀 수집한다. PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로, CSS z-index 동작(낮은 것이 먼저 그려지고 높은 것이 위에 덮임)과 일치함. `<x-layout-guide-column>` 요소의 printPostData는 DOM 전용이므로 별도로 추가 수집한다. |
 
 #### 예제
 
@@ -424,7 +424,6 @@ class LayoutParagraphElement extends HTMLElement
 | `overlayElements` | `LayoutBoxElement[]` | 오버랩된 형제 박스. |
 | `type` | `'paragraph'` | 타입 리터럴. |
 | `zIndex` | `number` | 렌더링 순서. |
-| `printPostData` | `PrintPostData<ParagraphData>[]` | 후처리 데이터. paragraph rect + `chars` 배열 (글자별 rect/폰트/장평/색상). |
 | `totalChars` | `number` | 입력된 텍스트의 총 문자 수 (`\n` 제외). 엔진의 `totalChars` 전달. 엔진이 없으면 0. |
 | `visibleChars` | `number` | 컬럼 영역 내에 실제로 보이는(visible) 문자 수. 오버플로우로 숨겨진 라인의 문자는 제외. 엔진의 `visibleChars` 전달. 엔진이 없으면 0. |
 | `overflow` | `number` | 마지막 컬럼에서 오버플로우된 문자 수. 엔진의 `overflow` 전달. 엔진이 없으면 0. |
@@ -545,7 +544,6 @@ class LayoutImageElement extends HTMLElement
 | `absWidth` | `number` (mm) | 절대 너비. `inheritStyle.parentWidth`(부모 editableWidth, 이미 padding 차감됨)을 그대로 사용. 위치 보정은 `relLeft`(`paddingLeft`)에서 처리. |
 | `absHeight` | `number` (mm) | 절대 높이. `inheritStyle.parentHeight`를 그대로 사용. |
 | `type` | `'image'` | 타입 리터럴. |
-| `printPostData` | `PrintPostData[]` | 후처리 데이터. `ImageEngine.buildPrintPostData()` 결과를 `ppm`으로 환산한 픽셀 rect와 원본 `ImageData`를 반환. |
 
 #### `overlapPadding` 사용
 
@@ -2950,15 +2948,19 @@ type InheritStyle = TextStyle & ParagraphStyle & {
 #### `PrintPostData`
 
 ```ts
-type PrintPostData<T = BoxData | ImageData | ParagraphData> = {
-  color?: CMYKColor;       // 인쇄용 CMYK 색상
+type PrintPostData<T = BoxData | ImageData | ParagraphData | TableData | TableRowData | TableCellData> = {
+  color?: CMYKColor;       // 인쇄용 CMYK 색상 (box 테두리)
+  backgroundColor?: CMYKColor;  // 배경색 CMYK (box/td)
+  backgroundOpacity?: number;  // 배경 투명도 (box/td)
   data: T;                 // 원본 데이터. data.type이 요소 종류 구분자
-  rect: PrintPostDataRect;
+  rect: PrintPostDataRect;  // mm 단위
   chars?: PrintPostDataChar[];  // paragraph 전용. 글자별 렌더링 정보
+  borderEdges?: PrintPostBorderEdge[];  // table 전용. 보더 엣지 정보 (mm)
+  diagonals?: PrintPostDiagonal[];      // td 전용. 셀 대각선 정보 (mm)
 };
 
 type PrintPostDataRect = {
-  x: number;      // viewport 픽셀
+  x: number;      // mm
   y: number;
   width: number;
   height: number;
@@ -2966,11 +2968,13 @@ type PrintPostDataRect = {
 
 type PrintPostDataChar = {
   char: string;              // 글자
-  rect: PrintPostDataRect;   // 글자별 위치·크기 (픽셀)
+  rect: PrintPostDataRect;   // 글자별 위치·크기 (mm)
   fontFamily: string;        // CSS font-family
   fontSize: number;          // 폰트 크기 (mm)
   fontWeight: number;        // 폰트 굵기 (예: 400, 700)
   widthRatio: number;        // 장평 비율 (CSS scale에서 추출)
+  letterSpacing: number;     // 자간 (em 단위)
+  spaceRatio: number;        // 공백 너비 비율 (em 단위)
   color: CMYKColor;           // CMYK 색상 (ColorRegistry에서 색상 명칭으로 조회)
 };
 ```
@@ -2980,7 +2984,9 @@ type PrintPostDataChar = {
 1. `lineData.textBlockStyle.color` — 블록 단위 오버라이드
 2. `paragraph.textStyle.color` — 단락 수준 글자 스타일
 3. `paragraph.inheritStyle.color` — 부모에서 상속된 색상
-4. `ColorRegistry.get('default')` — 폴백 (`_defaultColor`, `init()` 후 `{ c:0, m:0, y:0, k:255 }`)
+4. 폴백 — K100 검정 `{ c:0, m:0, y:0, k:255 }` (`ColorRegistry._defaultColor`와 동일)
+
+> `ColorRegistry.get('default')`는 브라우저 구현에서 `Error`를 throw하므로, 엔진의 `buildParagraphPrintPostData`는 폴백 시 `ColorRegistry.get()`를 호출하지 않고 직접 `{ c:0, m:0, y:0, k:255 }` 리터럴을 사용한다.
 
 `textBlockStyle.color`만 확인하면 단락 레벨(`textStyle.color`)이나 상속(`inheritStyle.color`)으로 색상을 지정한 일반 텍스트가 검은색 default로 폴백되어, 검은 배경 박스 안의 흰 글자가 보이지 않는 버그가 발생한다.
 
@@ -3405,16 +3411,15 @@ doc.data = exampleData;
 
 ## 후처리 데이터 export 가이드
 
-`printPostData` getter는 브라우저 DOM을 직접 읽지 않고 엔진이 계산한 mm 좌표를
-`ppm`으로 환산한 픽셀 rect를 수집합니다. 외부 후처리 시스템(PDF 생성 등)으로
-데이터를 전달할 때 사용합니다.
+`printPostData` getter는 엔진 트리(`DocumentEngine.printPostData`)에서 계산된 **mm 단위** 좌표를 그대로 반환합니다. 외부 후처리 시스템(PDF 생성 등)으로 데이터를 전달할 때 사용합니다.
 
-1. **엔진 기반 좌표**: 각 요소의 `BoxEngine.absRect`, `ParagraphEngine.printPostData`,
-   `ImageEngine.buildPrintPostData`, 테이블/셀 엔진 메트릭에서 rect를 계산합니다.
-2. **DOM 독립**: DOM `getBoundingClientRect()`에 의존하지 않습니다.
-3. **z-index 오름차순**: 자식 요소를 z-index **오름차순**(낮은 것부터)으로 재귀 수집합니다.
+1. **엔진 트리 단일화**: `LayoutDocumentElement.printPostData`는 `DocumentEngine.printPostData` 엔진 트리 결과를 위임한다. box/paragraph/image/table/td/tr 엘리먼트의 개별 `printPostData` getter는 제거되었으며, 엔진 트리(`DocumentEngine → BoxEngine → ParagraphEngine/TableEngine/ImageEngine`)가 단일 소스다.
+2. **mm 단위**: 모든 rect/char 좌표는 mm 단위 number. 화면 표시용 ppm 변환은 외부에서 수행한다.
+3. **DOM 독립**: DOM `getBoundingClientRect()`에 의존하지 않는다.
+4. **z-index 오름차순**: 자식 요소를 z-index **오름차순**(낮은 것부터)으로 재귀 수집한다.
    PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로, CSS z-index 동작과
-   일치합니다.
+   일치한다.
+5. **guide-column**: `<x-layout-guide-column>`은 DOM 전용 요소(엔진 트리에 없음)이므로 `LayoutDocumentElement.printPostData`에서 별도로 수집한다.
 
 ```ts
 const doc = document.querySelector('x-layout-document')!;

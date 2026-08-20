@@ -84,6 +84,9 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **InheritStyle cascade**: `TextStyle` + `ParagraphStyle` + parent dimensions flow downward. Children override individual fields.
 - **Text overflow**: `render-error` CustomEvent with `{ type: 'text-overflow', overflow: number }`. `:host` gets `inset 0 -8px 0 0 #ff0000` when overflow.
 - **Render complete**: `render-complete` CustomEvent after every `LayoutParagraphElement.render()`. Payload: `RenderCompleteEventDetail`.
+- **printPostData 단일화 (mm)**: 엔진 트리(`DocumentEngine.printPostData`)가 단일 소스. `LayoutDocumentElement.printPostData`는 엔진 트리를 위임한다. box/paragraph/image/table/td/tr 엘리먼트의 개별 `printPostData` getter는 제거되었다. 모든 rect/char 좌표는 **mm 단위 number**. ppm 곱셈은 외부 후처리 시스템이 수행한다. `<x-layout-guide-column>`은 DOM 전용이므로 `LayoutDocumentElement`에서 별도 수집.
+- **`BoxEngine.contentAbsRect`**: padding 제외한 콘텐츠 영역 절대 사각형 (mm). ImageEngine `buildPrintPostData`에 이미지 absRect로 전달 — 부모 box 전체 absRect가 아닌 이미지 영역.
+- **`buildParagraphPrintPostData` verticalAlign 반영**: `paragraphStyle.verticalAlign`(top/center/bottom) 오프셋을 char rect.y에 반영. `center`면 `(columnHeight - contentHeight) / 2`, `bottom`이면 `columnHeight - contentHeight`를 lineTopMm에 더함. 화면 flex `justifyContent`와 동일 결과.
 - **Overlap padding**: `overlapPadding` on `ImageData` — mm values, `number` or `{ top?, right?, bottom?, left? }`. Ellipse-based detection: `ndx² + ndy² ≤ 1`.
 - **Overlap mode**: `overlapMode` on `ImageData` — `'path'` (default, pixel contour), `'box'` (solid box), `'none'` (no avoidance). Paragraph-level: `ParagraphData.overlapMode` — `'box'` (default), `'none'` (excludes box from overlay targets).
 - **AI processing overlay**: `<x-layout-paragraph>` and `<x-layout-image>` have volatile `aiProcessing: boolean` property. `true` → semi-transparent overlay with shimmer + spinner. Not included in `data` getter. Implemented in `src/utils/ai-processing-overlay.ts`.

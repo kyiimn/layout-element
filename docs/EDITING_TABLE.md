@@ -621,7 +621,7 @@ Selection overlay는 다음 시점에 갱신된다:
 
 ### 9.3 후처리 데이터 export
 
-border 레이어의 좌표/크기는 `printPostData`로 수집되어 외부 후처리(post-processing) 시스템에서 사용된다. `_renderBorder()`로 생성된 DOM border 레이어는 시각적 피드백용이며, 후처리 시스템은 각 요소의 `printPostData` getter를 통해 엔진이 계산한 mm 기준 좌표와 크기, border 두께/색상/스타일, 대각선 정보, 배경색 정보 등을 받는다.
+border 레이어의 좌표/크기는 `printPostData`로 수집되어 외부 후처리(post-processing) 시스템에서 사용된다. `_renderBorder()`로 생성된 DOM border 레이어는 시각적 피드백용이며, 후처리 시스템은 `TableEngine.printPostData` 엔진 트리를 통해 엔진이 계산한 mm 기준 좌표와 크기, border 두께/색상/스타일, 대각선 정보, 배경색 정보 등을 받는다. 엘리먼트의 개별 `printPostData` getter는 제거되었고, 엔진 트리가 단일 소스다.
 
 ---
 
@@ -804,7 +804,7 @@ document 내 여러 표가 있을 때:
 
 ### 12.7 printPostData
 
-table, TR, TD는 각각 `printPostData` getter를 제공한다. border 레이어의 좌표/크기, 대각선 정보, 배경색 정보를 후처리(post-processing)용으로 수집한다.
+table, TR, TD 엘리먼트의 개별 `printPostData` getter는 제거되었다. 엔진 트리(`TableEngine.printPostData`)가 단일 소스다. border 레이어의 좌표/크기, 대각선 정보, 배경색 정보를 mm 단위로 후처리(post-processing)용으로 수집한다. `LayoutDocumentElement.printPostData` → `DocumentEngine.printPostData` → `BoxEngine.printPostData` → `TableEngine.printPostData` 경로로 호출된다.
 
 ### 12.8 F5 브라우저 새로고침 충돌
 
@@ -875,9 +875,6 @@ class LayoutTableElement extends HTMLElement {
 
   // 자식 추가
   appendChildData(child: TableRowData): LayoutTableRowElement;
-
-  // 후처리 데이터 export
-  get printPostData(): PrintPostData[];
 }
 ```
 
@@ -1012,7 +1009,6 @@ class LayoutTableCellElement extends HTMLElement {
   get absHeight(): number;
 
   appendChildData(child: BoxData): LayoutBoxElement;
-  get printPostData(): PrintPostData[];
 }
 ```
 
@@ -1039,9 +1035,6 @@ class LayoutTableRowElement extends HTMLElement {
   get absHeight(): number;
 
   appendChildData(child: TableCellData): LayoutTableCellElement;
-
-  // 후처리 데이터 export
-  get printPostData(): PrintPostData[];
 }
 ```
 
