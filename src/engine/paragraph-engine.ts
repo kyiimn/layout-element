@@ -1546,6 +1546,97 @@ export class ParagraphEngine {
     return this._overflow;
   }
 
+  /**
+   * 오버플로우 발생 여부.
+   *
+   * `overflow > 0`와 동일하지만, 의미를 명확히 하기 위해 boolean 게터를 제공한다.
+   *
+   * @returns 오버플로우가 발생했으면 `true`
+   */
+  public get hasOverflow(): boolean {
+    return this._overflow > 0;
+  }
+
+  /**
+   * 입력된 텍스트의 총 문자 수.
+   *
+   * `textContent`가 문자열이면 `string.length`, 배열이면 각 블록의 `content.length` 합산.
+   * `TextBlockData` 원소는 `content` 필드 길이를 사용하고, 문자열 원소는 그 자체의 길이를 사용한다.
+   * `\n`은 `_parseContents`가 블록 분리에만 사용하므로 총 문자 수에는 포함되지 않는다.
+   *
+   * @returns 총 문자 수
+   * @example
+   * const model = ParagraphEngine.create({ content: "abc\ndef", ... });
+   * model.layoutStructure(); model.layoutText();
+   * model.totalChars; // 6 (개행 제외)
+   */
+  public get totalChars(): number {
+    if (typeof this._textContent === "string") {
+      return this._textContent.split("\n").reduce((sum, line) => sum + line.length, 0);
+    }
+    return this._textContent.reduce((sum, block) => {
+      const content = typeof block === "string" ? block : block.content;
+      return sum + content.split("\n").reduce((s, line) => s + line.length, 0);
+    }, 0);
+  }
+
+  /**
+   * 컬럼 영역 내에 실제로 보이는(visible) 문자 수.
+   *
+   * `_layoutTextIntoColumns`가 산출한 `columnContents`에서 컬럼 유효 높이를
+   * 초과하지 않는(visible) 라인의 part content 길이를 합산한다.
+   * 오버플로우로 `display: none` 처리된 라인의 문자는 제외된다.
+   *
+   * visible 판정 기준은 `_createLineWithParts`의 `isOverflow`와 동일하게
+   * `effectiveColumnHeight = parentHeight + (lineHeight - fontSize)`를 사용한다.
+   * 단, 마지막 라인은 `lineHeight`가 아닌 `fontSize`만큼만 높이를 차지하는 규칙을 반영하며,
+   * 한 번 overflow가 발생하면 이후 라인은 모두 overflow로 처리한다.
+   *
+   * @returns visible 문자 수
+   * @example
+   * const model = ParagraphEngine.create({ content: "...긴 텍스트...", ... });
+   * model.layoutStructure(); model.layoutText();
+   * console.log(model.visibleChars); // 예: 1800
+   * console.log(model.totalChars - model.visibleChars); // 오버플로우 문자 수
+   */
+  public get visibleChars(): number {
+    const parentHeight = this._inheritStyle?.parentHeight ?? 0;
+    if (parentHeight <= 0) {
+      return this.totalChars;
+    }
+
+    const effectiveColumnHeight = parentHeight + (this._lineHeight - this.fontSize);
+    const lineGap = this._paragraphStyle?.lineGap ?? this._inheritStyle?.lineGap ?? DEFAULT_LINE_GAP;
+    let visible = 0;
+
+    for (let c = 0; c < this._columnContents.length; c++) {
+      const lines = this._columnContents[c] || [];
+      let accumulatedHeightMm = 0;
+      let hasOverflowed = false;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const blockFontSize = line.textBlockStyle?.fontSize;
+        let lineHeightMm = this._lineHeight;
+        if (blockFontSize !== undefined && blockFontSize > 0 && this._lineHeight < blockFontSize * lineGap) {
+          lineHeightMm = Math.ceil((blockFontSize * lineGap) / this._lineHeight) * this._lineHeight;
+        }
+
+        const isOverflow = hasOverflowed
+          || accumulatedHeightMm + lineHeightMm > effectiveColumnHeight + 1e-6;
+        if (isOverflow) {
+          hasOverflowed = true;
+          continue;
+        }
+        accumulatedHeightMm += lineHeightMm;
+        for (const part of line.parts) {
+          visible += part.content.length;
+        }
+      }
+    }
+    return visible;
+  }
+
   /** 장평 비율 */
   public get widthRatio(): number {
     return this.textStyle?.widthRatio ?? this.inheritStyle?.widthRatio ?? DEFAULT_WIDTH_RATIO;

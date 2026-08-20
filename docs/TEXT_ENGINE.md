@@ -964,7 +964,10 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `gaps` | `number[]` | 컬럼 간 간격(mm) 배열 |
 | `lineHeight` | `number` | 줄 높이(mm) |
 | `fontSize` | `number` | 폰트 크기(mm). `textStyle.fontSize` → `inheritStyle.fontSize` → `DEFAULT_FONT_SIZE` 순서. 마지막 라인 높이 규칙에서 사용 |
-| `overflow` | `number` | 오버플로우된 문자 수 |
+| `overflow` | `number` | 오버플로우된 문자 수 (마지막 컬럼에서만 집계) |
+| `hasOverflow` | `boolean` | 오버플로우 발생 여부 (`overflow > 0`) |
+| `totalChars` | `number` | 입력된 텍스트의 총 문자 수 (`\n` 제외) |
+| `visibleChars` | `number` | 컬럼 영역 내 visible 문자 수. 오버플로우 라인의 문자 제외. visible 판정은 `effectiveColumnHeight = parentHeight + (lineHeight - fontSize)` 기준 |
 | `widthRatio` | `number` | 장평 비율 |
 | `spaceRatio` | `number` | 공백 너비 비율 (em 단위). 기본값: 0.5 |
 | `indent` | `number` | 첫 줄 들여쓰기 비율 (fontSize 대비, 0.0~1.0). 기본값: 0 |
@@ -1219,11 +1222,15 @@ overlay = overlay.filter(i => {
 - `genColumnStyle()`, `genLineStyle()`, `genPartStyle()`, `genCharStyle()` 사용
 - 마지막 파트 + `endOfBlock`이면 `justify-content: flex-start`로 조정
 - 양 끝 공백 제거 (단, 텍스트 블록(`\n`으로 분리된 각 블록)의 맨 앞/맨 끝 공백은 유지 — `firstOfBlock`/`endOfBlock` 플래그로 제어)
-- **오버플로우 라인 `display: none` 처리**:
-  - `renderText()`에서 각 라인의 누적 높이(mm)를 계산하여 컬럼 높이(`model.inheritStyle.parentHeight`, mm)를 초과하는 라인을 감지한다
+- **오버플로우 라인 DOM 노드 생략 처리**:
+  - `renderText()`에서 각 라인의 누적 높이(mm)를 계산하여 컬럼의 유효 높이를 초과하는 라인을 감지한다
+  - 유효 컬럼 높이는 `parentHeight + (lineHeight - fontSize)`이다. 이는 엔진(`_createLineWithParts`)의 overflow 판정 기준과 동일하며, 마지막 라인이 `lineHeight`가 아닌 `fontSize`만큼만 높이를 차지한다는 규칙을 반영한다. `renderText`가 이 기준을 사용하지 않으면 엔진이 visible로 판정한 라인이 overflow로 잘못 숨겨지거나, 반대로 overflow 이후의 라인이 다시 visible로 잘못 판정되어 빈 라인이 표시되는 버그가 발생한다.
   - 라인 높이는 `_getLineHeightMm()` 헬퍼로 `lineEl.style.height`에서 추출 (폴백: `model.lineHeight`)
   - 초과한 라인에는 `lineEl.style.display = 'none'`을 적용하여 시각적으로 숨긴다
-  - `columnHeightMm`이 0이면(부모 높이 미설정) 오버플로우 판정을 생략한다
+  - 한 번 overflow가 발생하면 이후 모든 라인도 overflow로 처리한다(`hasOverflowed` 플래그). 마지막 라인 높이 규칙으로 인해 `accumulatedHeightMm`가 유효 컬럼 높이에 근접한 상태에서 이후 라인이 다시 visible로 잘못 판정되는 것을 방지한다.
+  - 오버플로우 라인은 part/span DOM 노드 생성을 완전히 생략한다. `lineEl`의 기존 자식이 있으면 모두 제거하고, 새 partEl/spanEl을 생성하지 않는다. `lineEl` 자체는 diff 렌더링의 인덱스 매칭을 위해 보존한다.
+  - 이후 라인의 `data-source-offset` diff 키 정합성을 위해, `_computeSkippedLineOffsets()`로 오버플로우 라인의 part content 길이만큼 `renderedOffset`/`sourceOffset`을 advance시킨다. 정상 렌더링 경로와 동일한 `_stripSpaces`/선행·후행 공백/`endOfBlock`의 `\n` 처리를 미러링한다.
+  - 유효 컬럼 높이가 0 이하이면(부모 높이 미설정) 오버플로우 판정을 생략한다
   - mm 기반 계산이므로 scale에 무관하게 동작한다
   - **마지막 라인 높이 규칙**: 컬럼의 마지막 라인(`i === lines.length - 1`)은 `lineHeight`가 아닌 `fontSize`만큼만 높이를 차지한다. 이는 `BoxEngine.absHeight`의 `lineHeight * height - (lineHeight - fontSize)` 공식과 일치하며, N 라인 Box의 실제 높이는 `(N-1) * lineHeight + fontSize`이다. `renderText()`는 마지막 라인의 `lineEl.style.height`를 `fontSize` mm로 덮어쓰고, `_getLineHeightMm()`이 그 값을 반환하므로 누적 높이 계산에 반영된다. 단, `textBlockStyle.fontSize`가 기본 `fontSize`와 다른 라인은 자체 높이를 가지므로 이 규칙을 적용하지 않는다.
 - **key 기반 증분 렌더링** (commit cec32e4):
@@ -1254,7 +1261,7 @@ overlay = overlay.filter(i => {
 - 이미지 오버랩 탐지는 `LayoutImageElement.canvas`가 존재할 때만 픽셀 수준으로 수행한다.
 - `overlapPadding`이 설정된 이미지는 타원 기반 감지를 사용한다. 캔버스가 없으면 기하학적 확장 사각형으로 폴백하며, 이 경우 투명 영역 구분이 불가능하다.
 - `overlapMode`가 `'box'`인 이미지는 캔버스 픽셀 검사를 수행하지 않고 기하학적 rect 기준으로 오버랩을 판정한다. `overlapPadding`은 적용되지만 투명 영역도 텍스트를 차단한다. `'none'`인 이미지는 `overlayElements`에서 제외되어 오버랩 회피가 전혀 수행되지 않는다.
-- 텍스트 오버플로우는 마지막 컬럼에서 `_overflow`로 집계되며 `render-error` 이벤트로 통지된다. 오버플로우된 라인은 `renderText()`에서 `display: none` 처리되어 시각적으로 숨겨진다. `_createLineWithParts()`가 overflow를 반환한 경우에도 라인 데이터를 `columnContent`에 포함시켜, `_computeRenderStats()`가 라인 기반 오버플로우를 감지할 수 있도록 한다. 이는 텍스트 끝의 `\n`으로 인해 발생하는 빈 라인 오버플로우도 감지하기 위함이다.
+- 텍스트 오버플로우는 마지막 컬럼에서 `_overflow`로 집계되며 `render-error` 이벤트로 통지된다. 오버플로우된 라인은 `renderText()`에서 `display: none` 처리되며 part/span DOM 노드 생성을 생략하여 시각적으로 숨김과 동시에 DOM 노드 수를 줄인다. `_createLineWithParts()`가 overflow를 반환한 경우에도 라인 데이터를 `columnContent`에 포함시켜, `_computeRenderStats()`가 라인 기반 오버플로우를 감지할 수 있도록 한다. 이는 텍스트 끝의 `\n`으로 인해 발생하는 빈 라인 오버플로우도 감지하기 위함이다.
 - 오버플로우 발생 시 `LayoutParagraphElement`의 `:host`에 하단 8px 빨간 inset shadow(`inset 0 -8px 0 0 #ff0000`)가 자동 적용되어 사용자에게 오버플로우를 시각적으로 알린다. 오버플로우가 해제되면 shadow도 자동 제거된다.
 - 폰트 메트릭 테이블에서 직접 읽은 advance width를 사용하므로 브라우저 렌더링 파이프라인 차이에서 오는 불일치가 발생하지 않는다. 폰트 파싱에 실패하면 `minWidthMm` 바닥값으로 폴백한다.
 - `LayoutParagraphElement.render()` 완료 후 항상 `render-complete` 커스텀 이벤트가 디스패치된다. 오버플로우 발생 여부와 무관하게 렌더링 결과를 통지하며, 페이로드는 `RenderCompleteEventDetail` 타입을 따른다. 배치된 글자/라인 수(`placed.chars`, `placed.lines`), 오버플로우 여부 및 통계(`overflow.hasOverflow`, `overflow.chars`, `overflow.lines`), 컬럼 수(`columnCount`)를 포함한다. `render-error`와 독립적으로 동작하며 기존 이벤트에 영향을 주지 않는다.

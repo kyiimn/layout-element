@@ -442,14 +442,19 @@ export class LayoutParagraphElement extends HTMLElement {
     const defaultLineHeight = model.lineHeight;
     const lastColumnIdx = columnCount - 1;
 
-    let placedChars = 0;
+    // 엔진의 visibleChars/hasOverflow 판정 기준과 동일하게
+    // effectiveColumnHeight = parentHeight + (lineHeight - fontSize)를 사용한다.
+    const effectiveColumnHeight = parentHeight + (defaultLineHeight - model.fontSize);
+
     let placedLines = 0;
     let overflowLines = 0;
     const overflowChars = model.overflow;
+    const placedChars = model.visibleChars;
 
     for (let c = 0; c < columnCount; c++) {
       const lines = columnContents[c] || [];
       let accumulatedHeightMm = 0;
+      let hasOverflowed = false;
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
@@ -460,18 +465,17 @@ export class LayoutParagraphElement extends HTMLElement {
           lineHeightMm = Math.ceil((fontSize * lineGap) / defaultLineHeight) * defaultLineHeight;
         }
 
-        const isOverflowLine = parentHeight > 0 && accumulatedHeightMm + lineHeightMm > parentHeight + 1e-6;
+        const isOverflowLine = hasOverflowed
+          || (effectiveColumnHeight > 0 && accumulatedHeightMm + lineHeightMm > effectiveColumnHeight + 1e-6);
 
         if (isOverflowLine) {
+          hasOverflowed = true;
           if (c === lastColumnIdx) {
             overflowLines++;
           }
         } else {
           accumulatedHeightMm += lineHeightMm;
           placedLines++;
-          for (const part of line.parts) {
-            placedChars += part.content.length;
-          }
         }
       }
     }
@@ -632,6 +636,50 @@ export class LayoutParagraphElement extends HTMLElement {
 
   get model() {
     return this._model;
+  }
+
+  /**
+   * 입력된 텍스트의 총 문자 수.
+   *
+   * 엔진의 `totalChars` getter를 전달한다. `\n`은 포함되지 않는다.
+   *
+   * @returns 총 문자 수. 엔진이 없으면 0.
+   */
+  get totalChars(): number {
+    return this._model?.totalChars ?? 0;
+  }
+
+  /**
+   * 컬럼 영역 내에 실제로 보이는(visible) 문자 수.
+   *
+   * 엔진의 `visibleChars` getter를 전달한다. 오버플로우로 숨겨진 라인의 문자는 제외된다.
+   *
+   * @returns visible 문자 수. 엔진이 없으면 0.
+   */
+  get visibleChars(): number {
+    return this._model?.visibleChars ?? 0;
+  }
+
+  /**
+   * 오버플로우된 문자 수.
+   *
+   * 엔진의 `overflow` getter를 전달한다.
+   *
+   * @returns 오버플로우 문자 수. 엔진이 없으면 0.
+   */
+  get overflow(): number {
+    return this._model?.overflow ?? 0;
+  }
+
+  /**
+   * 오버플로우 발생 여부.
+   *
+   * 엔진의 `hasOverflow` getter를 전달한다.
+   *
+   * @returns 오버플로우가 발생했으면 `true`. 엔진이 없으면 `false`.
+   */
+  get hasOverflow(): boolean {
+    return this._model?.hasOverflow ?? false;
   }
 
   set inheritStyle(style: InheritStyle | undefined) {

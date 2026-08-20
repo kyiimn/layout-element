@@ -259,6 +259,9 @@ export class LayoutColumnElement extends HTMLElement {
   /**
    * Diff 기반 텍스트 렌더링: 기존 span 요소를 `data-source-offset` 키로 재사용하며
    * 변경된 부분만 업데이트한다. COVER 라인(`parts: []`)은 라인 div의 자식을 모두 제거한다.
+   *
+   * 오버플로우 라인은 part/span DOM 노드 생성을 생략하고 lineEl만 `display: none`으로 유지한다.
+   * 단, diff 렌더링의 인덱스 매칭을 위해 lineEl 자체는 보존한다.
    */
   renderText() {
     if (!this.isConnected) return;
@@ -312,7 +315,13 @@ export class LayoutColumnElement extends HTMLElement {
     let curSourceOffset = sourceOffset;
 
     const columnHeightMm = this.model.inheritStyle?.parentHeight ?? 0;
+    const baseLineHeightMm = this.model.lineHeight;
+    const baseFontSizeMm = this.model.fontSize;
+    // 엔진(_createLineWithParts)의 overflow 판정과 동일 기준:
+    // effectiveColumnHeight = parentHeight + (lineHeight - fontSize)
+    const effectiveColumnHeightMm = columnHeightMm + (baseLineHeightMm - baseFontSizeMm);
     let accumulatedHeightMm = 0;
+    let hasOverflowed = false;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -333,18 +342,31 @@ export class LayoutColumnElement extends HTMLElement {
       // 단, textBlockStyle.fontSize가 기본 fontSize와 다르면 genLineStyle이
       // 계산한 블록 전용 높이를 유지한다 (해당 라인은 자체 높이를 가짐).
       const isLastLineInColumn = i === lines.length - 1;
-      const baseFontSizeMm = this.model!.fontSize;
       const lineFontSizeMm = textBlockStyle?.fontSize ?? baseFontSizeMm;
       if (isLastLineInColumn && lineFontSizeMm === baseFontSizeMm && lineEl.style.height !== `${lineFontSizeMm}mm`) {
         lineEl.style.height = `${lineFontSizeMm}mm`;
       }
 
       const lineHeightMm = this._getLineHeightMm(lineEl);
-      const isOverflow = columnHeightMm > 0 && accumulatedHeightMm + lineHeightMm > columnHeightMm + 1e-6;
+      // 한 번 overflow 발생 후 이후 라인이 마지막 라인 높이 규칙(fontSize)으로
+      // 다시 visible로 잘못 판정되는 것을 방지한다.
+      const isOverflow = hasOverflowed
+        || (effectiveColumnHeightMm > 0 && accumulatedHeightMm + lineHeightMm > effectiveColumnHeightMm + 1e-6);
       lineEl.style.display = isOverflow ? 'none' : '';
 
       if (!isOverflow) {
         accumulatedHeightMm += lineHeightMm;
+      } else {
+        hasOverflowed = true;
+      }
+
+      if (isOverflow) {
+        while (lineEl.firstChild) lineEl.firstChild.remove();
+
+        const advanced = this._computeSkippedLineOffsets(line, curRenderedOffset, curSourceOffset);
+        curRenderedOffset = advanced.renderedOffset;
+        curSourceOffset = advanced.sourceOffset;
+        continue;
       }
 
       if (line.parts.length === 0) {
@@ -453,6 +475,66 @@ export class LayoutColumnElement extends HTMLElement {
     for (let i = lines.length; i < existingLineEls.length; i++) {
       existingLineEls[i].remove();
     }
+  }
+
+  /**
+   * 렌더링에서 생략된(오버플로우) 라인의 part content를 순회하며
+   * `renderedOffset`/`sourceOffset`을 렌더링하지 않은 만큼 advance시킨다.
+   *
+   * `renderText()`의 정상 part 렌더링 경로와 동일한 공백/`\n` 처리를 미러링하여
+   * 이후 라인의 `data-source-offset` diff 키가 정확히 일치하도록 보장한다.
+   *
+   * @param line - 생략된 라인 데이터
+   * @param renderedOffset - 현재 렌더링 오프셋
+   * @param sourceOffset - 현재 소스 오프셋
+   * @returns 갱신된 오프셋
+   * @example
+   * const adv = this._computeSkippedLineOffsets(line, 10, 20);
+   * // adv.renderedOffset === 14, adv.sourceOffset === 24
+   */
+  private _computeSkippedLineOffsets(
+    line: TextLineData,
+    renderedOffset: number,
+    sourceOffset: number,
+  ): { renderedOffset: number; sourceOffset: number } {
+    let curRendered = renderedOffset;
+    let curSource = sourceOffset;
+
+    for (let p = 0; p < line.parts.length; p++) {
+      const original = line.parts[p].content;
+      const isFirst = p === 0;
+      const isLast = p === line.parts.length - 1;
+
+      let leadingSpaces = 0;
+      if (isFirst && line.firstOfBlock !== true) {
+        for (let k = 0; k < original.length && original[k] === ' '; k++) leadingSpaces++;
+        curSource += leadingSpaces;
+      }
+
+      const content = this._stripSpaces(
+        original,
+        isFirst,
+        isLast,
+        line.firstOfBlock === true,
+        line.endOfBlock === true,
+      );
+
+      curRendered += content.length;
+      curSource += content.length;
+
+      if (isLast && line.endOfBlock !== true) {
+        const afterLeading: string[] = isFirst ? original.slice(leadingSpaces) : original;
+        let trailingSpaces = 0;
+        for (let k = afterLeading.length - 1; k >= 0 && afterLeading[k] === ' '; k--) trailingSpaces++;
+        curSource += trailingSpaces;
+      }
+    }
+
+    if (line.endOfBlock && curSource < (this.model?.textContent?.length ?? 0) && this.model?.textContent?.[curSource] === '\n') {
+      curSource++;
+    }
+
+    return { renderedOffset: curRendered, sourceOffset: curSource };
   }
 
   static get observedAttributes() { return ['index']; }

@@ -425,6 +425,10 @@ class LayoutParagraphElement extends HTMLElement
 | `type` | `'paragraph'` | 타입 리터럴. |
 | `zIndex` | `number` | 렌더링 순서. |
 | `printPostData` | `PrintPostData<ParagraphData>[]` | 후처리 데이터. paragraph rect + `chars` 배열 (글자별 rect/폰트/장평/색상). |
+| `totalChars` | `number` | 입력된 텍스트의 총 문자 수 (`\n` 제외). 엔진의 `totalChars` 전달. 엔진이 없으면 0. |
+| `visibleChars` | `number` | 컬럼 영역 내에 실제로 보이는(visible) 문자 수. 오버플로우로 숨겨진 라인의 문자는 제외. 엔진의 `visibleChars` 전달. 엔진이 없으면 0. |
+| `overflow` | `number` | 마지막 컬럼에서 오버플로우된 문자 수. 엔진의 `overflow` 전달. 엔진이 없으면 0. |
+| `hasOverflow` | `boolean` | 오버플로우 발생 여부 (`overflow > 0`). 엔진의 `hasOverflow` 전달. 엔진이 없으면 `false`. |
 
 #### 메서드
 
@@ -1108,6 +1112,9 @@ class ParagraphEngine {
   get gaps: number[];
   get lineHeight: number;
   get overflow: number;
+  get hasOverflow: boolean;
+  get totalChars: number;
+  get visibleChars: number;
   get previousLineCount: number;
   get previousOverflow: number;
   get widthRatio: number;
@@ -1162,7 +1169,29 @@ DOM을 만듭니다. **읽기 전용**으로 취급하세요.
 #### `overflow`
 
 컨테이너 밖으로 밀려난(잘린) 문자 수. `> 0`이면 `paragraph`가 `render-error` 이벤트를
-디스패치합니다.
+디스패치합니다. 마지막 컬럼에서만 집계됩니다.
+
+#### `hasOverflow`
+
+`overflow > 0`과 동일하지만 boolean으로 제공됩니다.
+
+#### `totalChars`
+
+입력된 텍스트의 총 문자 수 (`\n` 제외). `textContent`가 문자열이면 `string.length`에서
+`\n`을 뺀 값, 배열이면 각 블록 `content`의 `\n` 제외 길이 합산.
+
+#### `visibleChars`
+
+컬럼 영역 내에 실제로 보이는(visible) 문자 수. `_layoutTextIntoColumns`가 산출한
+`columnContents`에서 컬럼 유효 높이를 초과하지 않는 라인의 part content 길이를 합산합니다.
+오버플로우로 숨겨진 라인의 문자는 제외됩니다.
+
+visible 판정 기준은 `effectiveColumnHeight = parentHeight + (lineHeight - fontSize)`이며,
+한 번 overflow가 발생하면 이후 라인은 모두 overflow로 처리합니다.
+
+> **참고**: `totalChars - visibleChars`와 `overflow`의 값이 다를 수 있습니다.
+> `overflow`는 마지막 컬럼에서만 집계되지만, `totalChars - visibleChars`는 모든 컬럼의
+> visible하지 않은 문자를 포함합니다.
 
 #### 예제
 
