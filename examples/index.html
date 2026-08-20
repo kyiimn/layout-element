@@ -1,1904 +1,2585 @@
 <!doctype html>
 <html lang="ko">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Layout Element Demo</title>
-    <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
 
-      body {
-        background: #f0f0f0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        padding: 40px 20px;
-        min-height: 100vh;
-        font-family:
-          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      }
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Layout Element Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-      #toolbar {
-        display: flex;
-        gap: 8px;
-        margin-bottom: 16px;
-        flex-wrap: wrap;
-        justify-content: center;
-      }
+    body {
+      background: #f0f0f0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px;
+      min-height: 100vh;
+      font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
 
-      #toolbar button {
-        padding: 8px 18px;
-        border: 1px solid #ccc;
-        border-radius: 6px;
-        background: #fff;
-        cursor: pointer;
-        font-size: 14px;
-        transition: all 0.15s ease;
-      }
+    #toolbar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
 
-      #toolbar button:hover {
-        background: #f5f5f5;
-        border-color: #999;
-      }
+    #toolbar button {
+      padding: 8px 18px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.15s ease;
+    }
 
-      #toolbar button.active {
-        background: #1a73e8;
-        color: #fff;
-        border-color: #1a73e8;
-      }
+    #toolbar button:hover {
+      background: #f5f5f5;
+      border-color: #999;
+    }
 
-      #toolbar button.active-layout {
-        background: #e8451a;
-        color: #fff;
-        border-color: #e8451a;
-      }
+    #toolbar button.active {
+      background: #1a73e8;
+      color: #fff;
+      border-color: #1a73e8;
+    }
 
-      #toolbar button.active-insert {
-        background: #1a7e3a;
-        color: #fff;
-        border-color: #1a7e3a;
-      }
+    #toolbar button.active-layout {
+      background: #e8451a;
+      color: #fff;
+      border-color: #e8451a;
+    }
 
-      #toolbar button.active-layout-reparent {
-        background: #7a1ae8;
-        color: #fff;
-        border-color: #7a1ae8;
-      }
+    #toolbar button.active-insert {
+      background: #1a7e3a;
+      color: #fff;
+      border-color: #1a7e3a;
+    }
 
-      #toolbar button.active-ai {
-        background: #1a8e8e;
-        color: #fff;
-        border-color: #1a8e8e;
-      }
+    #toolbar button.active-layout-reparent {
+      background: #7a1ae8;
+      color: #fff;
+      border-color: #7a1ae8;
+    }
 
-      #toolbar select {
-        padding: 8px 12px;
-        border: 1px solid #ccc;
-        border-radius: 6px;
-        background: #fff;
-        font-size: 14px;
-        cursor: pointer;
-      }
+    #toolbar button.active-ai {
+      background: #1a8e8e;
+      color: #fff;
+      border-color: #1a8e8e;
+    }
 
-      #info-panel {
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: #fff;
-        border: 1px solid #ddd;
-        border-radius: 8px;
-        padding: 16px;
-        min-width: 260px;
-        max-width: 360px;
-        font-size: 13px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        z-index: 10000;
-      }
+    #toolbar select {
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      background: #fff;
+      font-size: 14px;
+      cursor: pointer;
+    }
 
-      #info-panel h3 {
-        margin-bottom: 8px;
-        font-size: 14px;
-        color: #333;
-      }
+    #info-panel {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 16px;
+      min-width: 260px;
+      max-width: 360px;
+      font-size: 13px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      z-index: 10000;
+    }
 
-      #info-panel .section {
-        margin-bottom: 12px;
-        padding-bottom: 12px;
-        border-bottom: 1px solid #eee;
-      }
+    #info-panel h3 {
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #333;
+    }
 
-      #info-panel .section:last-child {
-        border-bottom: none;
-        margin-bottom: 0;
-        padding-bottom: 0;
-      }
+    #info-panel .section {
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #eee;
+    }
 
-      #info-panel .label {
-        color: #888;
-        font-size: 11px;
-        text-transform: uppercase;
-        margin-bottom: 4px;
-      }
+    #info-panel .section:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
 
-      #info-panel .value {
-        color: #333;
-        font-weight: 500;
-      }
+    #info-panel .label {
+      color: #888;
+      font-size: 11px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
 
-      #info-panel .empty {
-        color: #aaa;
-        font-style: italic;
-      }
+    #info-panel .value {
+      color: #333;
+      font-weight: 500;
+    }
 
-      #info-panel .layout-item {
-        display: flex;
-        justify-content: space-between;
-        padding: 2px 0;
-      }
+    #info-panel .empty {
+      color: #aaa;
+      font-style: italic;
+    }
 
-      #info-panel .layout-item .id {
-        color: #1a73e8;
-        font-family: monospace;
-      }
+    #info-panel .layout-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 2px 0;
+    }
 
-      #info-panel .layout-item .type {
-        color: #888;
-        font-size: 11px;
-      }
+    #info-panel .layout-item .id {
+      color: #1a73e8;
+      font-family: monospace;
+    }
 
-      #hint {
-        margin-top: 8px;
-        font-size: 12px;
-        color: #888;
-        text-align: center;
-        max-width: 400px;
-      }
-    </style>
-  </head>
+    #info-panel .layout-item .type {
+      color: #888;
+      font-size: 11px;
+    }
 
-  <body>
-    <div id="toolbar">
-      <div
-        style="
+    #hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #888;
+      text-align: center;
+      max-width: 400px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="toolbar">
+    <div style="
           display: flex;
           gap: 8px;
           flex-wrap: wrap;
           justify-content: center;
           width: 100%;
-        "
-      >
-        <button id="btn-read" class="active">📄 읽기 모드</button>
-        <button id="btn-edit">✏️ 텍스트 편집 모드</button>
-        <button id="btn-layout">📐 레이아웃 편집 (move)</button>
-        <button id="btn-layout-reparent">🔀 레이아웃 편집 (reparent)</button>
-      </div>
-      <div
-        style="
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-          justify-content: center;
-          width: 100%;
-          margin-top: 8px;
-        "
-      >
-        <select id="insert-type">
-          <option value="box">📦 Box</option>
-          <option value="text">📝 Text</option>
-          <option value="paragraph">¶ Paragraph</option>
-          <option value="image">🖼️ Image</option>
-        </select>
-        <select id="insert-position">
-          <option value="absolute">Absolute</option>
-          <option value="static">Static</option>
-        </select>
-        <button id="btn-insert">📥 삽입 모드</button>
-      </div>
-      <div
-        style="
+        ">
+      <button id="btn-read" class="active">📄 읽기 모드</button>
+      <button id="btn-edit">✏️ 텍스트 편집 모드</button>
+      <button id="btn-layout">📐 레이아웃 편집 (move)</button>
+      <button id="btn-layout-reparent">🔀 레이아웃 편집 (reparent)</button>
+    </div>
+    <div style="
           display: flex;
           gap: 8px;
           flex-wrap: wrap;
           justify-content: center;
           width: 100%;
           margin-top: 8px;
-        "
-      >
-        <button id="btn-ai-toggle">🤖 AI 처리 오버레이 토글</button>
-        <button id="btn-ai-paragraph">🤖 단락에만 표시</button>
-        <button id="btn-ai-image">🤖 이미지에만 표시</button>
-        <button id="btn-ai-clear">🤖 모두 해제</button>
-      </div>
-      <div
-        style="
+        ">
+      <select id="insert-type">
+        <option value="box">📦 Box</option>
+        <option value="text">📝 Text</option>
+        <option value="paragraph">¶ Paragraph</option>
+        <option value="image">🖼️ Image</option>
+      </select>
+      <select id="insert-position">
+        <option value="absolute">Absolute</option>
+        <option value="static">Static</option>
+      </select>
+      <button id="btn-insert">📥 삽입 모드</button>
+    </div>
+    <div style="
           display: flex;
           gap: 8px;
           flex-wrap: wrap;
           justify-content: center;
           width: 100%;
           margin-top: 8px;
-        "
-      >
-        <button id="btn-tbl-insert-row-below">📋 행 아래에 삽입</button>
-        <button id="btn-tbl-insert-row-above">📋 행 위에 삽입</button>
-        <button id="btn-tbl-insert-col-right">📋 열 오른쪽에 삽입</button>
-        <button id="btn-tbl-insert-col-left">📋 열 왼쪽에 삽입</button>
-        <button id="btn-tbl-delete-row">📋 행 삭제</button>
-        <button id="btn-tbl-delete-col">📋 열 삭제</button>
-        <button id="btn-tbl-check">🔍 스타일 규칙 검사</button>
-      </div>
-      <div
-        style="
+        ">
+      <button id="btn-ai-toggle">🤖 AI 처리 오버레이 토글</button>
+      <button id="btn-ai-paragraph">🤖 단락에만 표시</button>
+      <button id="btn-ai-image">🤖 이미지에만 표시</button>
+      <button id="btn-ai-clear">🤖 모두 해제</button>
+    </div>
+    <div style="
           display: flex;
           gap: 8px;
           flex-wrap: wrap;
           justify-content: center;
           width: 100%;
           margin-top: 8px;
-        "
-      >
-        <button id="btn-flip-h">🔄 좌우 반전</button>
-        <button id="btn-flip-v">🔄 상하 반전</button>
-        <button id="btn-flip-both">🔄 상하좌우 반전</button>
-        <span
-          style="
+        ">
+      <button id="btn-tbl-insert-row-below">📋 행 아래에 삽입</button>
+      <button id="btn-tbl-insert-row-above">📋 행 위에 삽입</button>
+      <button id="btn-tbl-insert-col-right">📋 열 오른쪽에 삽입</button>
+      <button id="btn-tbl-insert-col-left">📋 열 왼쪽에 삽입</button>
+      <button id="btn-tbl-delete-row">📋 행 삭제</button>
+      <button id="btn-tbl-delete-col">📋 열 삭제</button>
+      <button id="btn-tbl-check">🔍 스타일 규칙 검사</button>
+    </div>
+    <div style="
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          justify-content: center;
+          width: 100%;
+          margin-top: 8px;
+        ">
+      <button id="btn-flip-h">🔄 좌우 반전</button>
+      <button id="btn-flip-v">🔄 상하 반전</button>
+      <button id="btn-flip-both">🔄 상하좌우 반전</button>
+      <span style="
             display: flex;
             align-items: center;
             font-size: 12px;
             color: #888;
-          "
-          >대상:</span
-        >
-        <select id="flip-target">
-          <option value="">문서 전체</option>
-        </select>
-      </div>
+          ">대상:</span>
+      <select id="flip-target">
+        <option value="">문서 전체</option>
+      </select>
     </div>
+  </div>
 
-    <div id="hint"></div>
+  <div id="hint"></div>
 
-    <x-layout-document id="doc"></x-layout-document>
+  <x-layout-document id="doc"></x-layout-document>
 
-    <div id="info-panel">
-      <h3>📊 상태 패널</h3>
-      <div class="section">
-        <div class="label">포커스된 단락</div>
-        <div id="focused-paragraph" class="value empty">없음</div>
-      </div>
-      <div class="section">
-        <div class="label">커서 위치</div>
-        <div id="cursor-offset" class="value empty">없음</div>
-      </div>
-      <div class="section">
-        <div class="label">선택된 레이아웃</div>
-        <div id="selected-layouts" class="value empty">없음</div>
-      </div>
-      <div class="section">
-        <div class="label">선택된 레이아웃 ID</div>
-        <div id="selected-layout-ids" class="value empty">없음</div>
-      </div>
+  <div id="info-panel">
+    <h3>📊 상태 패널</h3>
+    <div class="section">
+      <div class="label">포커스된 단락</div>
+      <div id="focused-paragraph" class="value empty">없음</div>
     </div>
+    <div class="section">
+      <div class="label">커서 위치</div>
+      <div id="cursor-offset" class="value empty">없음</div>
+    </div>
+    <div class="section">
+      <div class="label">선택된 레이아웃</div>
+      <div id="selected-layouts" class="value empty">없음</div>
+    </div>
+    <div class="section">
+      <div class="label">선택된 레이아웃 ID</div>
+      <div id="selected-layout-ids" class="value empty">없음</div>
+    </div>
+  </div>
 
-    <script type="module">
-      import "/src/index.ts";
+  <script type="module">
+    import "/src/index.ts";
 
-      import { ColorRegistry } from "/src/resource/color-registry";
-      import { FontLoader } from "/src/resource/font-loader";
-      import { exampleData } from "/src/examples";
+    import { ColorRegistry } from "/src/resource/color-registry";
+    import { FontLoader } from "/src/resource/font-loader";
+    import { exampleData } from "/src/examples";
 
-      (async () => {
-        await ColorRegistry.getInstance().init();
-        await FontLoader.getInstance().init();
+    (async () => {
+      await ColorRegistry.getInstance().init();
+      await FontLoader.getInstance().init();
 
-        const doc = document.getElementById("doc");
-        doc.data = {
-          id: "6wb35rhayex3",
-          width: 391,
-          height: 545,
-          paddingTop: 10,
-          paddingBottom: 10,
-          paddingLeft: 10,
-          paddingRight: 10,
-          columns: [
-            57.666666666666664, 57.666666666666664, 57.666666666666664,
-            57.666666666666664, 57.666666666666664, 57.666666666666664,
-          ],
-          gap: 5,
-          paragraphStyle: {
-            lineGap: 1.25,
-            textAlign: "justify",
-            verticalAlign: "top",
+      const doc = document.getElementById("doc");
+      doc.data = {
+        "id": "4e1s3ryzau5s",
+        "width": 391,
+        "height": 545,
+        "paddingTop": 10,
+        "paddingBottom": 10,
+        "paddingLeft": 10,
+        "paddingRight": 10,
+        "columns": [
+          57.666666666666664,
+          57.666666666666664,
+          57.666666666666664,
+          57.666666666666664,
+          57.666666666666664,
+          57.666666666666664
+        ],
+        "gap": 5,
+        "paragraphStyle": {
+          "lineGap": 1.25,
+          "textAlign": "justify",
+          "verticalAlign": "top"
+        },
+        "textStyle": {
+          "color": "",
+          "fontSize": 4,
+          "fontStyle": "normal",
+          "fontFamily": "중앙신문명조",
+          "fontWeight": 400,
+          "spaceRatio": 0.25,
+          "widthRatio": 0.8,
+          "letterSpacing": -0.1
+        },
+        "children": [
+          {
+            "id": "1kul1wgdi34o",
+            "type": "box",
+            "left": 10,
+            "top": 10,
+            "width": 371,
+            "height": 10,
+            "position": "absolute",
+            "zIndex": 91001,
+            "borderTopWidth": 0,
+            "borderBottomWidth": 0,
+            "borderLeftWidth": 0,
+            "borderRightWidth": 0,
+            "borderStyle": "solid",
+            "paddingTop": 0,
+            "paddingRight": 0,
+            "paddingBottom": 0,
+            "paddingLeft": 0,
+            "role": "header",
+            "priority": 0,
+            "lock": true,
+            "children": [
+              {
+                "id": "6d5tex11wm0j",
+                "type": "box",
+                "left": 0,
+                "top": 2.964661434150437,
+                "width": 24.24,
+                "height": 7.025338565849563,
+                "position": "absolute",
+                "zIndex": 1,
+                "borderTopWidth": 0,
+                "borderBottomWidth": 0,
+                "borderLeftWidth": 0,
+                "borderRightWidth": 0,
+                "borderStyle": "solid",
+                "paddingTop": 0,
+                "paddingRight": 0,
+                "paddingBottom": 0,
+                "paddingLeft": 0,
+                "priority": 0,
+                "lock": true,
+                "children": {
+                  "id": "2n52wslyzuuw",
+                  "column": 1,
+                  "content": "1면",
+                  "gap": 0,
+                  "paragraphStyle": {
+                    "textAlign": "center",
+                    "verticalAlign": "center",
+                    "lineGap": 1
+                  },
+                  "textStyle": {
+                    "fontSize": 6
+                  },
+                  "zIndex": 0,
+                  "overlapMode": "box",
+                  "type": "paragraph"
+                }
+              }
+            ]
           },
-          textStyle: {
-            color: "",
-            fontSize: 4,
-            fontStyle: "normal",
-            fontFamily: "신문명조",
-            fontWeight: 400,
-            spaceRatio: 0.25,
-            widthRatio: 0.8,
-            letterSpacing: -0.1,
-          },
-          children: [
-            {
-              id: "433w6o6i26t4",
-              type: "box",
-              left: 10,
-              top: 10,
-              width: 371,
-              height: 30,
-              position: "absolute",
-              zIndex: 91001,
-              borderTopWidth: 0,
-              borderBottomWidth: 0,
-              borderLeftWidth: 0,
-              borderRightWidth: 0,
-              borderStyle: "solid",
-              paddingTop: 0,
-              paddingRight: 0,
-              paddingBottom: 0,
-              paddingLeft: 0,
-              role: "header",
-              priority: 0,
-              lock: true,
-              children: [
-                {
-                  id: "4rq2itlrm4yi",
-                  type: "box",
-                  left: 3,
-                  top: 18.12,
-                  width: 18.04,
-                  height: 11.41,
-                  position: "absolute",
-                  zIndex: 1,
-                  borderTopWidth: 0,
-                  borderBottomWidth: 0,
-                  borderLeftWidth: 0,
-                  borderRightWidth: 0,
-                  borderStyle: "solid",
-                  paddingTop: 0,
-                  paddingRight: 0,
-                  paddingBottom: 0,
-                  paddingLeft: 0,
-                  priority: 0,
-                  lock: true,
-                  children: {
-                    id: "74igcnl0sups",
-                    column: 1,
-                    content: "1면",
-                    gap: 0,
-                    paragraphStyle: {
-                      textAlign: "center",
-                      verticalAlign: "center",
-                    },
-                    textStyle: {
-                      fontSize: 7,
-                    },
-                    zIndex: 0,
-                    type: "paragraph",
+          {
+            "id": "7cpukh49hgkq",
+            "type": "box",
+            "left": 0,
+            "top": 3,
+            "width": 3,
+            "height": 37,
+            "position": "static",
+            "zIndex": 1,
+            "borderTopWidth": 0,
+            "borderBottomWidth": 0,
+            "borderLeftWidth": 0,
+            "borderRightWidth": 0,
+            "borderStyle": "solid",
+            "paddingTop": 0,
+            "paddingRight": 0,
+            "paddingBottom": 0,
+            "paddingLeft": 0,
+            "role": "group-article",
+            "groupMember": "4337388f-5696-48b2-a473-81fc1d33e2de",
+            "priority": 0,
+            "children": [
+              {
+                "id": "71rzr2uiuitv",
+                "type": "box",
+                "left": 0,
+                "top": 0,
+                "width": 3,
+                "height": 4,
+                "position": "static",
+                "zIndex": 1,
+                "borderTopWidth": 0,
+                "borderBottomWidth": 0,
+                "borderLeftWidth": 0,
+                "borderRightWidth": 0,
+                "borderStyle": "solid",
+                "paddingTop": 0,
+                "paddingRight": 0,
+                "paddingBottom": 0,
+                "paddingLeft": 0,
+                "role": "title",
+                "contentUid": "4337388f-5696-48b2-a473-81fc1d33e2de",
+                "priority": 0,
+                "children": {
+                  "id": "6fwa4a7hmxut",
+                  "column": 1,
+                  "content": "테스트 기사",
+                  "gap": 0,
+                  "paragraphStyle": {
+                    "textAlign": "center",
+                    "verticalAlign": "center"
                   },
-                },
-              ],
-            },
-            {
-              id: "1nl1nqmfot02",
-              type: "box",
-              left: 0,
-              top: 7,
-              width: 3,
-              height: 29,
-              position: "static",
-              zIndex: 1,
-              borderTopWidth: 0,
-              borderBottomWidth: 0,
-              borderLeftWidth: 0,
-              borderRightWidth: 0,
-              borderStyle: "solid",
-              paddingTop: 0,
-              paddingRight: 0,
-              paddingBottom: 0,
-              paddingLeft: 0,
-              role: "group-article",
-              groupMember: "166b1712-99ed-41d8-8d16-1c8d9f2b672a",
-              priority: 0,
-              children: [
-                {
-                  id: "7i6rvnk5svdq",
-                  type: "box",
-                  left: 0,
-                  top: 0,
-                  width: 3,
-                  height: 3,
-                  position: "static",
-                  zIndex: 1,
-                  borderTopWidth: 0,
-                  borderBottomWidth: 0,
-                  borderLeftWidth: 0,
-                  borderRightWidth: 0,
-                  borderStyle: "solid",
-                  paddingTop: 0,
-                  paddingRight: 0,
-                  paddingBottom: 0,
-                  paddingLeft: 0,
-                  role: "title",
-                  contentUid: "166b1712-99ed-41d8-8d16-1c8d9f2b672a",
-                  priority: 0,
-                  children: {
-                    id: "3uwi2vpyjn61",
-                    column: 1,
-                    content: "미국은 아이슬란드와 함께 10위(180개국)를 차지",
-                    gap: 0,
-                    paragraphStyle: {
-                      lineGap: 1,
-                    },
-                    textStyle: {
-                      fontSize: 8,
-                    },
-                    zIndex: 0,
-                    type: "paragraph",
+                  "textStyle": {
+                    "fontSize": 12,
+                    "color": "검정"
                   },
-                },
-                {
-                  id: "w8em95cs5qy",
-                  type: "box",
-                  left: 0,
-                  top: 3,
-                  width: 3,
-                  height: 26,
-                  position: "static",
-                  zIndex: 2,
-                  borderTopWidth: 0,
-                  borderBottomWidth: 0,
-                  borderLeftWidth: 0,
-                  borderRightWidth: 0,
-                  borderStyle: "solid",
-                  paddingTop: 0,
-                  paddingRight: 0,
-                  paddingBottom: 0,
-                  paddingLeft: 0,
-                  role: "body",
-                  contentUid: "166b1712-99ed-41d8-8d16-1c8d9f2b672a",
-                  priority: 0,
-                  children: {
-                    id: "3uwi2vrn6rxx",
-                    content:
-                      '글로벌 시민권·거주 자문회사 헨리 앤드 파트너스가 21일(현지시간) 공개한 \'헨리여권지수 20주년 보고서\'에 따르면 한국은 전 세계 188개국을 비자 없이 또는 도착비자만으로 방문할 수 있어 일본, 아랍에미리트(UAE)와 함께 공동 2위를 차지했다. 1위는 192개국을 무비자로 방문할 수 있는 싱가포르다. 이 지수가 처음 개발된 2006년과 비교하면 한국의 무비자 입국 가능 국가는 73곳 늘었다. 일본은 60곳, UAE는 무려 153곳 증가했다.\n미국은 아이슬란드와 함께 10위(180개국)를 차지했다. 2006년 공동 1위였던 미국은 20년 만에 순위가 크게 하락했다. 헨리여권지수는 공동 순위를 하나의 순위로 집계하기 때문에 실제로는 미국보다 앞선 국가가 36개국에 달한다. 사실상 37번째 수준인 셈이다. 미국의 경우 상위권의 서방 선진국들과 달리 중국에 비자 없이 입국할 수 없다는 점 등이 순위 하락의 배경으로 꼽혔다.\n헨리앤드파트너스 회장이자 여권지수를 만든 크리스티안 켈린은 "20년간의 데이터를 보면 여권의 영향력은 한 국가가 보유한 지정학적 자산을 가장 잘 보여주는 지표 중 하나"라고 말했다. 그는 "가장 강력한 여권은 다른 나라들이 무역, 투자, 안보, 협력 파트너로 삼고 싶어 하는 국가들이 보유하고 있다"며 "결국 이동의 자유는 다른 국가들이 해당 국가와의 관계를 얼마나 가치 있게 평가하는지를 보여주는 척도"라고 설명했다.system-ui와 layout-ui의 각 화면에 있는 검색조건 콤보박스에 SK하이닉스가 사상 최대 분기 실적을 내며 최근 확산한 인공지능(AI) 과열론 진화에 나섰다. 고대역폭메모리(HBM)를 비롯한 고사양 메모리 공급 부족이 이어지면서 올해 연간 영업이익은 300조원에 육박할 전망이다. 다만 중장기 실적을 좌우할 빅테크(대형 정보기술 기업)들의 AI 투자 지속가능성이 변수로 꼽힌다.\\n◇HBM4 출하 본격화…메모리 공급 부족 2028년까지= 송현종 SK하이닉스 사장은 29일 2분기 실적발표 콘퍼런스콜에서 "주요 빅테크 고객들은 AI 서비스 사용량 증가와 컴퓨팅 용량 부족으로 인프라 투자를 확대하고 있고, AI 서비스에서 창출되는 매출과 수익 성장을 바탕으로 메모리 구매를 지속해서 확대하고 있다"며 "HBM4는 2분기부터 양산 출하를 시작했으며, 하반기에는 생산을 본격적으로 확대할 계획"이라고 밝혔다.\\n반도체 업계는 SK하이닉스의 실적 상승세가 하반기까지 이어질 가능성이 높다고 보고 있다. HBM과 서버용 D램, 기업용 솔리드스테이트드라이브(eSSD) 등 AI 데이터센터용 고사양 제품 공급이 수요 증가를 따라가지 못하고 있어서다. 메모리 업체들이 HBM 생산을 늘릴수록 범용 D램 생산 여력이 줄어드는 점도 D램 가격 상승을 뒷받침한다.\\n글로벌 투자은행(IB) 모건스탠리는 올해 3분기 메모리 반도체 가격이 전 분기보다 최소 25% 이상 상승할 것으로 예상했다. AI 서버 증설이 계속되는 반면 신규 생산설비가 공급 증가로 이어지는 데 시간이 필요한 만큼 공급 부족이 20 상승한 반도체주가 급락했다. 29일 오전 10시20분 기준 SK하이체 창신메모리테크놀로지(CXMT)가 상장과 동시에 본토 증시 1위에 올랐고, 국영 기업과 스타트업이 액침율 AI 수 있다는 이유에서다. 김영건 미래에셋증권 연구원은 "메모리 평균 가격(ASP)은 내년에도 상승할 전망이나, 상승의 폭은 올해보다 완화될 것이 불가피해 보인다"며 "이젠 높아진 수익성의 지속 가능성에 주목해야 할 시기"라고 분석했다.',
-                    paragraphStyle: {},
-                    textStyle: {},
-                    zIndex: 0,
-                    type: "paragraph",
-                  },
-                },
-                {
-                  id: "627zex7xh926",
-                  type: "box",
-                  left: 49.20255529554878,
-                  top: 30,
-                  width: 71.13077803778455,
-                  height: 52.52,
-                  position: "absolute",
-                  zIndex: 3,
-                  borderTopWidth: 0,
-                  borderBottomWidth: 0,
-                  borderLeftWidth: 0,
-                  borderRightWidth: 0,
-                  borderStyle: "solid",
-                  paddingTop: 0,
-                  paddingRight: 0,
-                  paddingBottom: 0,
-                  paddingLeft: 0,
-                  contentUid: "b5077a18-f4fa-42a4-9dd7-8a7cf45ac1f1",
-                  priority: 0,
-                  children: {
-                    id: "5zhipkn1u7lr",
-                    zIndex: 0,
-                    overlapPadding: {
-                      top: 4,
-                      right: 4,
-                      bottom: 4,
-                      left: 4,
-                    },
-                    x: -6.162552157578311,
-                    y: 0,
-                    width: 83.45588235294117,
-                    height: 50,
-                    dpi: 72,
-                    url: "test/g10506uf.png",
-                    originalWidth: 227,
-                    originalHeight: 136,
-                    objectFit: "cover",
-                    type: "image",
-                  },
-                },
-              ],
-            },
-            {
-              id: "3xmzp4v0k5wi",
-              type: "box",
-              left: 181,
-              top: 235,
-              width: 200,
-              height: 300,
-              position: "absolute",
-              zIndex: 91000,
-              borderTopWidth: 0,
-              borderBottomWidth: 0,
-              borderLeftWidth: 0,
-              borderRightWidth: 0,
-              borderStyle: "solid",
-              paddingTop: 0,
-              paddingRight: 0,
-              paddingBottom: 0,
-              paddingLeft: 0,
-              role: "ad",
-              priority: 0,
-              lock: true,
-            },
-          ],
-        };
-        const a = {
-          id: "74ihr3te7qfx",
-          width: 391,
-          height: 545,
-          paddingTop: 10,
-          paddingBottom: 10,
-          paddingLeft: 10,
-          paddingRight: 10,
-          columns: [
-            57.666666666666664, 57.666666666666664, 57.666666666666664,
-            57.666666666666664, 57.666666666666664, 57.666666666666664,
-          ],
-          gap: 5,
-          paragraphStyle: {
-            lineGap: 1.25,
-            textAlign: "justify",
-            verticalAlign: "top",
-          },
-          textStyle: {
-            color: "",
-            fontSize: 4,
-            fontStyle: "normal",
-            fontFamily: "중앙신문명조",
-            fontWeight: 400,
-            spaceRatio: 0.25,
-            widthRatio: 0.8,
-            letterSpacing: -0.1,
-          },
-          children: [
-            {
-              id: "1kul1wgdi34o",
-              type: "box",
-              left: 10,
-              top: 10,
-              width: 371,
-              height: 10,
-              position: "absolute",
-              zIndex: 91001,
-              borderTopWidth: 0,
-              borderBottomWidth: 0,
-              borderLeftWidth: 0,
-              borderRightWidth: 0,
-              borderStyle: "solid",
-              paddingTop: 0,
-              paddingRight: 0,
-              paddingBottom: 0,
-              paddingLeft: 0,
-              role: "header",
-              priority: 0,
-              lock: true,
-              children: [
-                {
-                  id: "6d5tex11wm0j",
-                  type: "box",
-                  left: 0,
-                  top: 2.964661434150437,
-                  width: 24.24,
-                  height: 7.025338565849563,
-                  position: "absolute",
-                  zIndex: 1,
-                  borderTopWidth: 0,
-                  borderBottomWidth: 0,
-                  borderLeftWidth: 0,
-                  borderRightWidth: 0,
-                  borderStyle: "solid",
-                  paddingTop: 0,
-                  paddingRight: 0,
-                  paddingBottom: 0,
-                  paddingLeft: 0,
-                  priority: 0,
-                  lock: true,
-                  children: {
-                    id: "2n52wslyzuuw",
-                    column: 1,
-                    content: "2면",
-                    gap: 0,
-                    paragraphStyle: {
-                      textAlign: "center",
-                      verticalAlign: "center",
-                      lineGap: 1,
-                    },
-                    textStyle: {
-                      fontSize: 6,
-                    },
-                    zIndex: 0,
-                    type: "paragraph",
-                  },
-                },
-              ],
-            },
-            {
-              id: "7cpukh49hgkq",
-              type: "box",
-              left: 0,
-              top: 5,
-              width: 3,
-              height: 37,
-              position: "static",
-              zIndex: 1,
-              borderTopWidth: 0,
-              borderBottomWidth: 0,
-              borderLeftWidth: 0,
-              borderRightWidth: 0,
-              borderStyle: "solid",
-              paddingTop: 0,
-              paddingRight: 0,
-              paddingBottom: 0,
-              paddingLeft: 0,
-              role: "group-article",
-              groupMember: "4337388f-5696-48b2-a473-81fc1d33e2de",
-              priority: 0,
-              children: [
-                {
-                  id: "71rzr2uiuitv",
-                  type: "box",
-                  left: 0,
-                  top: 0,
-                  width: 3,
-                  height: 4,
-                  position: "static",
-                  zIndex: 1,
-                  borderTopWidth: 0,
-                  borderBottomWidth: 0,
-                  borderLeftWidth: 0,
-                  borderRightWidth: 0,
-                  borderStyle: "solid",
-                  paddingTop: 0,
-                  paddingRight: 0,
-                  paddingBottom: 0,
-                  paddingLeft: 0,
-                  role: "title",
-                  contentUid: "4337388f-5696-48b2-a473-81fc1d33e2de",
-                  priority: 0,
-                  children: {
-                    id: "6fwa4a7hmxut",
-                    column: 1,
-                    content: "테스트 기사",
-                    gap: 0,
-                    paragraphStyle: {
-                      textAlign: "center",
-                      verticalAlign: "center",
-                    },
-                    textStyle: {
-                      fontSize: 14,
-                    },
-                    zIndex: 0,
-                    type: "paragraph",
-                  },
-                },
-                {
-                  id: "2pvjm5utiwb1",
-                  type: "box",
-                  left: 0,
-                  top: 4,
-                  width: 3,
-                  height: 33,
-                  position: "static",
-                  zIndex: 2,
-                  borderTopWidth: 0,
-                  borderBottomWidth: 0,
-                  borderLeftWidth: 0,
-                  borderRightWidth: 0,
-                  borderStyle: "solid",
-                  paddingTop: 0,
-                  paddingRight: 0,
-                  paddingBottom: 0,
-                  paddingLeft: 0,
-                  role: "body",
-                  contentUid: "4337388f-5696-48b2-a473-81fc1d33e2de",
-                  priority: 0,
-                  children: {
-                    id: "5zhhw6smj5eq",
-                    content:
-                      'SK하이닉스가 사상 최대 분기 실적을 내며 최근 확산한 인공지능(AI) 과열론 진화에 나섰다. 고대역폭메모리(HBM)를 비롯한 고사양 메모리 공급 부족이 이어지면서 올해 연간 영업이익은 300조원에 육박할 전망이다. 다만 중장기 실적을 좌우할 빅테크(대형 정보기술 기업)들의 AI 투자 지속가능성이 변수로 꼽힌다.\n◇HBM4 출하 본격화…메모리 공급 부족 2028년까지= 송현종 SK하이닉스 사장은 29일 2분기 실적발표 콘퍼런스콜에서 "주요 빅테크 고객들은 AI 서비스 사용량 증가와 컴퓨팅 용량 부족으로 인프라 투자를 확대하고 있고, AI 서비스에서 창출되는 매출과 수익 성장을 바탕으로 메모리 구매를 지속해서 확대하고 있다"며 "HBM4는 2분기부터 양산 출하를 시작했으며, 하반기에는 생산을 본격적으로 확대할 계획"이라고 밝혔다.\n반도체 업계는 SK하이닉스의 실적 상승세가 하반기까지 이어질 가능성이 높다고 보고 있다. HBM과 서버용 D램, 기업용 솔리드스테이트드라이브(eSSD) 등 AI 데이터센터용 고사양 제품 공급이 수요 증가를 따라가지 못하고 있어서다. 메모리 업체들이 HBM 생산을 늘릴수록 범용 D램 생산 여력이 줄어드는 점도 D램 가격 상승을 뒷받침한다.\n글로벌 투자은행(IB) 모건스탠리는 올해 3분기 메모리 반도체 가격이 전 분기보다 최소 25% 이상 상승할 것으로 예상했다. AI 서버 증설이 계속되는 반면 신규 생산설비가 공급 증가로 이어지는 데 시간이 필요한 만큼 공급 부족이 2028년까지 이어질 수 있다는 분석이다.\n주요 빅테크들이 장기공급계약(LTA)으로 AI 인프라에 필요한 메모리 물량을 선제 확보하면서 메모리 업황의 가시성도 높아졌다. SK그룹과 삼성전자 등 국내 기업들이 최근 미국 실리콘밸리에서 글로벌 빅테크들과 5년 단위의 대규모 AI 인프라 협력 구상을 발표한 것도 HBM과 서버용 메모리 수요 지속 기대를 키우고 있다.\n이에 하반기 실적은 HBM 출하량 증가와 범용 메모리 가격 상승이 함께 이끄는 구조가 될 전망이다. HBM과 eSSD 등 고부가가치 제품 비중이 높아지면서 매출 증가율을 웃도는 수익성 개선도 가능하다.\n증권가에서는 SK하이닉스의 올해 실적 전망치를 잇따라 상향했다. 현재 가격과 출하량 증가세가 유지되면 연간 영업이익이 300조원에 근접할 수 있다는 관측이다. 하나증권은 올해 영업이익을 294조원, 내년을 435조원으로 전망했다. KB증권도 지난 5월 올해와 내년 전망치를 각각 280조원, 454조원으로 높였다.\n◇실적보다 지속 가능성, 빅테크 투자·중국 추격에 촉각= 하지만 시장은 경계를 늦추지 않고 있다. 실적 발표를 하루 앞둔 28일 국내 증시에서 삼성전자와 SK하이닉스를 비롯한 반도체주가 급락했다. 29일 오전 10시20분 기준 SK하이닉스는 전 거래일보다 4.52% 내린 148만원에 거래됐다. AI 관련 기업들의 주가와 투자 규모가 실질적인 수익성을 넘어 빠르게 상승한 것 아니냐는 경계감이 커진 모습이다. 최근 뉴욕증권거래소에 상장된 SK하이닉스 미국주식예탁증서(ADR)가 국내 주식보다 16~51% 높은 가격에 거래되며 AI 투자 과열 사례로 지목되기도 했다.\n중국 반도체 업체들의 추격도 투자 심리에 영향을 미치고 있다. 중국 최대 메모리 업체 창신메모리테크놀로지(CXMT)가 상장과 동시에 본토 증시 1위에 올랐고, 국영 기업과 스타트업이 액침 심자외선(DUV) 노광장비 소량 양산에 돌입했다는 소식이 전해졌다.\n이날 콘퍼런스콜에서는 AI 인프라 투자 축소와 생산능력(캐파) 확대로 인한 공급 과잉 우려에 대한 질문이 쏟아졌다. SK하이닉스 관계자는 일부 빅테크의 데이터센터 임대 사업 검토나 고효율 AI 모델의 등장에 따른 투자 둔화 우려를 알고 있다며 "AI 투자의 축소 과정이라기보다는 그동안 대규모로 구축해 온 AI 인프라의 활용도를 높이고 수익화를 본격화하는 과정으로 보고 있다"고 답했다. 고효율 AI 모델로 AI 서비스 접근성이 높아지면 수요가 더 커질 것이라는 분석이다.\n공급 과잉 우려에 대해서도 "회사 캐파 확대가 탄력적으로 이뤄질 계획인 만큼 중장기 투자가 공급 과잉으로 곧바로 이어질 가능성은 제한적"이라며 "실제 장비 투자와 생산능력은 고객 수요의 가시성과 투자 효율성 등을 종합적으로 고려해 단계적으로 진행할 계획"이라고 밝혔다.\n미래에셋증권은 이날 목표주가를 420만원에서 280만원으로 33% 하향했다. 중국 CXMT 상장과 노광기 국산화로 레거시 제품에 대한 심리적 둔화가 동반될 수 있다는 이유에서다. 김영건 미래에셋증권 연구원은 "메모리 평균 가격(ASP)은 내년에도 상승할 전망이나, 상승의 폭은 올해보다 완화될 것이 불가피해 보인다"며 "이젠 높아진 수익성의 지속 가능성에 주목해야 할 시기"라고 분석했다.',
-                    paragraphStyle: {},
-                    textStyle: {},
-                    zIndex: 0,
-                    type: "paragraph",
-                  },
-                },
-                {
-                  id: "2y2z1sfqk21q",
-                  type: "box",
-                  left: 53.69669661661966,
-                  top: 60,
-                  width: 75.02,
-                  height: 51.31,
-                  position: "absolute",
-                  zIndex: 3,
-                  borderTopWidth: 0,
-                  borderBottomWidth: 0,
-                  borderLeftWidth: 0,
-                  borderRightWidth: 0,
-                  borderStyle: "solid",
-                  paddingTop: 0,
-                  paddingRight: 0,
-                  paddingBottom: 0,
-                  paddingLeft: 0,
-                  contentUid: "ae4ed592-5d69-4a61-8fe2-3d8ec6c9b38b",
-                  priority: 0,
-                  children: {
-                    id: "1t20hjqjsqrb",
-                    zIndex: 0,
-                    overlapPadding: {
-                      top: 5,
-                      right: 5,
-                      bottom: 5,
-                      left: 5,
-                    },
-                    x: -4.217941176470589,
-                    y: 0,
-                    width: 83.45588235294117,
-                    height: 50,
-                    dpi: 72,
-                    url: "test/g10506uf.png",
-                    originalWidth: 227,
-                    originalHeight: 136,
-                    objectFit: "cover",
-                    type: "image",
-                  },
-                },
-              ],
-            },
-            {
-              id: "2sm1m6ra3eor",
-              type: "box",
-              left: 10,
-              top: 235,
-              width: 200,
-              height: 300,
-              position: "absolute",
-              zIndex: 91000,
-              borderTopWidth: 0,
-              borderBottomWidth: 0,
-              borderLeftWidth: 0,
-              borderRightWidth: 0,
-              borderStyle: "solid",
-              paddingTop: 0,
-              paddingRight: 0,
-              paddingBottom: 0,
-              paddingLeft: 0,
-              role: "ad",
-              priority: 0,
-              lock: true,
-            },
-            {
-              id: "33jxazi3thxg",
-              type: "box",
-              left: 4,
-              top: 16,
-              width: 1,
-              height: 9,
-              position: "static",
-              zIndex: 2,
-              borderTopWidth: 0,
-              borderBottomWidth: 0,
-              borderLeftWidth: 0,
-              borderRightWidth: 0,
-              borderStyle: "solid",
-              paddingTop: 0,
-              paddingRight: 0,
-              paddingBottom: 0,
-              paddingLeft: 0,
-              priority: 0,
-            },
-            {
-              id: "40dhr6hkdtz0",
-              type: "box",
-              left: 4,
-              top: 31,
-              width: 1,
-              height: 10,
-              position: "static",
-              zIndex: 3,
-              borderTopWidth: 0,
-              borderBottomWidth: 0,
-              borderLeftWidth: 0,
-              borderRightWidth: 0,
-              borderStyle: "solid",
-              paddingTop: 0,
-              paddingRight: 0,
-              paddingBottom: 0,
-              paddingLeft: 0,
-              priority: 0,
-              children: {
-                id: "4ugli0v8k04v",
-                content: "",
-                paragraphStyle: {},
-                textStyle: {},
-                zIndex: 0,
-                type: "paragraph",
+                  "zIndex": 0,
+                  "overlapMode": "box",
+                  "type": "paragraph"
+                }
               },
-            },
-            {
-              id: "tbl-demo-001",
-              type: "box",
-              left: 3,
-              top: 20,
-              width: 2,
-              height: 25,
-              position: "static",
-              zIndex: 5,
-              borderTopWidth: 0.1,
-              borderRightWidth: 0.1,
-              borderBottomWidth: 0.1,
-              borderLeftWidth: 0.1,
-              borderColor: "black",
-              borderStyle: "solid",
-              paddingTop: 0,
-              paddingRight: 0,
-              paddingBottom: 0,
-              paddingLeft: 0,
-              priority: 0,
-              children: {
-                type: "table",
-                colWidths: [25, 35, 20, 20],
-                children: [
-                  {
-                    type: "tr",
-                    height: 5,
-                    children: [
-                      {
-                        type: "td",
-                        colspan: 4,
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        backgroundColor: "black",
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "항목 / 내용 / 비고",
-                              textStyle: { fontSize: 4, color: "white" },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                  {
-                    type: "tr",
-                    height: 5,
-                    children: [
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "대출한도",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "최대 1억원",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "신용등급",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "비고",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                  {
-                    type: "tr",
-                    height: 5,
-                    children: [
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "금리",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "연 4.5% 이내",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "6등급 이상",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "고정금리",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                  {
-                    type: "tr",
-                    height: 5,
-                    children: [
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "상환기간",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "최장 10년",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "7등급 이상",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "원리금균등",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                  {
-                    type: "tr",
-                    height: 5,
-                    children: [
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "중도상환수수료",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "면제",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "8등급 이상",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                      {
-                        type: "td",
-                        borderTop: { width: 0.1, color: "black" },
-                        borderRight: { width: 0.1, color: "black" },
-                        borderBottom: { width: 0.1, color: "black" },
-                        borderLeft: { width: 0.1, color: "black" },
-                        children: [
-                          {
-                            type: "box",
-                            left: 0,
-                            top: 0,
-                            width: 1,
-                            height: 5,
-                            position: "static",
-                            zIndex: 1,
-                            children: {
-                              type: "text",
-                              content: "3년 이내",
-                              textStyle: { fontSize: 4 },
-                              paragraphStyle: {
-                                textAlign: "center",
-                                verticalAlign: "center",
-                              },
-                            },
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                ],
+              {
+                "id": "2pvjm5utiwb1",
+                "type": "box",
+                "left": 0,
+                "top": 4,
+                "width": 3,
+                "height": 33,
+                "position": "static",
+                "zIndex": 2,
+                "borderTopWidth": 0,
+                "borderBottomWidth": 0,
+                "borderLeftWidth": 0,
+                "borderRightWidth": 0,
+                "borderStyle": "solid",
+                "paddingTop": 0,
+                "paddingRight": 0,
+                "paddingBottom": 0,
+                "paddingLeft": 0,
+                "role": "body",
+                "contentUid": "4337388f-5696-48b2-a473-81fc1d33e2de",
+                "priority": 0,
+                "children": {
+                  "id": "5zhhw6smj5eq",
+                  "content": "SK하이닉스가 사상 최대 분기 실적을 내며 최근 확산한 인공지능(AI) 과열론 진화에 나섰다. 고대역폭메모리(HBM)를 비롯한 고사양 메모리 공급 부족이 이어지면서 올해 연간 영업이익은 300조원 규모에 육박할 것으로 전망되고 있습니다. 그렇지 않습니까?? 나도 모르겠다.되고 있다. 다만 중장기 실적을 좌우할 빅테크(대형 정보기술 기업)들의 인공지능(AI) 투자의 지속가능성이 핵심 변수로 꼽히면서 시장의 관심도 집중되고 있다.\n◇HBM4 출하 본격화…메모리 공급 부족 2028년까지= 송현종 SK하이닉스 사장은 29일 2분기 실적발표 콘퍼런스콜에서 \"주요 빅테크 고객들은 AI 서비스 사용량 증가와 컴퓨팅 용량의 부족으로 인프라 투자를 확대하고 있고, AI 서비스에서 창출되는 매출과 수익의 성장을 바탕으로 메모리 구매를 지속해서 확대하고 있다\"며 \"HBM4의 경우 2분기부터 양산 출하를 시작했으며, 하반기에는 생산을 본격적으로 확대할 계획\"이라고 밝혔다.\n반도체 업계에서는 SK하이닉스의 실적 상승세가 적어도 하반기까지는 이어질 가능성이 높다고 보고 있다. HBM뿐 아니라 서버용 D램과 기업용 솔리드스테이트드라이브(eSSD) 등 AI 데이터센터에 들어가는 고사양 제품의 공급이 수요 증가 속도를 따라가지 못하고 있어서다. 메모리 업체들이 HBM 생산을 확대할수록 범용 D램 생산 여력이 줄어드는 점도 D램 가격 상승을 뒷받침하는 요인이다.\n글로벌 투자은행(IB) 모건스탠리는 올해 3분기 메모리 반도체 가격이 전 분기보다 최소 25% 이상 상승할 것으로 예상했다. AI 서버 증설이 계속되는 반면, 신규 생산설비가 실제 공급 증가로 이어지는 데에는 시간이 필요한 만큼 공급 부족이 2028년까지 이어질 수 있다는 분석이다.\n중장기 수요 전망도 긍정적이다. 주요 빅테크들이 장기공급계약(LTA)을 통해 AI 인프라 구축에 필요한 메모리 물량을 선제적으로 확보하려는 움직임을 보이면서 메모리 업황의 가시성이 높아졌다는 평가가 나온다. 특히 SK그룹과 삼성전자 등 국내 기업들이 최근 미국 실리콘밸리에서 글로벌 빅테크들과 5년 단위의 대규모 AI 인프라 협력 구상을 발표하면서 HBM과 서버용 메모리 수요가 당분간 이어질 것이라는 기대감도 커지고 있다.\n이에 따라 SK하이닉스의 하반기 실적은 HBM 출하량 증가와 범용 메모리 가격 상승이 동시에 이끄는 구조가 될 것으로 예상된다. HBM과 eSSD 등 고부가가치 제품 비중이 높아지면서 매출 증가율을 웃도는 수익성 개선도 가능할 전망이다. 일반 D램과 낸드 가격 상승세가 이어질 경우 HBM뿐 아니라 메모리 제품 전반으로 확산될 수 있다.\n증권가에서는 SK하이닉스의 올해 연간 실적 전망치를 잇따라 상향했다. 현재의 가격과 출하량 증가세가 유지될 경우 연간 영업이익이 300조원에 근접할 수 있다는 관측이다. 하나증권은 지난달 일반 D램 가격 상승과 HBM·eSSD 등 고부가가치 제품 비중 확대를 반영해 올해 영업이익을 294조원으로 전망했다. 내년 영업이익 전망치는 435조원까지 제시했다. KB증권도 지난 5월 올해, 내년 영업이익 전망치를 각각 280조원, 454조원으로 높였다.\n◇실적보다 지속 가능성, 빅테크 투자·중국 추격에 촉각= 하지만 시장은 여전히 경계를 늦추지 않고 있다. 실적 발표를 하루 앞둔 28일 국내 증시에서는 삼성전자와 SK하이닉스를 비롯한 반도체주가 급락했다. 이어 29일 오전 10시20분 기준으로 SK하이닉스는 전 거래일보다 4.52% 내린 148만원에 거래되고 있다. AI 관련 기업들의 주가와 투자 규모가 실질적인 수익성을 넘어 지나치게 빠르게 상승한 것 아니냐는 경계감이 다시 커지는 모습이다. 최근 미국 뉴욕증권거래소에 상장된 SK하이닉스 미국주식예탁증서(ADR)가 국내 주식보다 16~51% 높은 가격에 거래되면서 AI 투자 과열을 보여주는 사례로 지목되기도 했다.\n중국 반도체 업체들의 추격도 투자 심리에 영향을 미치고 있다. 중국 최대 메모리 업체인 창신메모리테크놀로지(CXMT)가 상장과 동시에 본토 증시 1위에 등극했고, 국영 기업과 스타트업이 액침 심자외선(DUV) 노광장비 소량 양산에 돌입했다는 소식이 전해지면서 중국 업체들이 예상보다 빠르게 성장할 가능성이 전망되고 있다.\n\n콘퍼런스콜에서도 AI 인프라 투자 축소, 생산능력(캐파) 확대로 인한 공급 과잉 우려에 대한 질문이 쏟아졌다. SK하이닉스 관계자는 최근 일부 빅테크의 데이터센터 임대 사업 검토나 고효율 AI 모델의 등장을 두고 AI 인프라 투자가 둔화하는 것이 아니냐는 우려가 있다는 점을 잘 알고 있다며 \"AI 투자의 축소 과정이라기보다는 그동안 대규모로 구축해 온 AI 인프라의 활용도를 높이고 수익화를 본격화하는 과정으로 보고 있다\"고 답했다. 고효율 AI 모델의 등장으로 AI 서비스의 접근성이 높아지면 수요가 더 커질 것이라는 분석이다.\n반도체 공급 과잉 우려에 대해서도 \"회사 캐파 확대가 탄력적으로 이뤄질 계획인 만큼 중장기 투자가 공급 과잉으로 곧바로 이어질 가능성은 제한적\"이라며 \"실제 장비 투자와 생산 연법은 고객 수요의 가시성과 투자 효율성 등을 종합적으로 고려해서 단계적으로 진행할 계획\"이라고 밝혔다.\n이에 미래에셋증권은 이날 목표주가를 420만원에서 280만원으로 33% 하향하기도 했다. 중국 CXMT 상장과 노광기 국산화 등으로 레거시 제품에 대한 심리적 둔화가 동반될 수 있다는 이유에서다. 김영건 미래에셋증권 연구원은 \"메모리 평균 가격(ASP)은 내년에도 상승할 전망이나, 상승의 폭이 올해보다는 완화될 것이 불가피해 보인다\"며 \"이젠 높아진 수익성의 지속 가능성에 주목해야 할 시기\"라고 분석했다.",
+                  "paragraphStyle": {},
+                  "textStyle": {},
+                  "zIndex": 0,
+                  "overlapMode": "box",
+                  "type": "paragraph"
+                }
               },
-            },
-          ],
-        };
-
-        await doc.render();
-
-        const btnRead = document.getElementById("btn-read");
-        const btnEdit = document.getElementById("btn-edit");
-        const btnLayout = document.getElementById("btn-layout");
-        const btnLayoutReparent = document.getElementById(
-          "btn-layout-reparent",
-        );
-        const btnInsert = document.getElementById("btn-insert");
-        const btnAiToggle = document.getElementById("btn-ai-toggle");
-        const btnAiParagraph = document.getElementById("btn-ai-paragraph");
-        const btnAiImage = document.getElementById("btn-ai-image");
-        const btnAiClear = document.getElementById("btn-ai-clear");
-        const insertType = document.getElementById("insert-type");
-        const insertPosition = document.getElementById("insert-position");
-        const hint = document.getElementById("hint");
-
-        let currentMode = "read";
-
-        function clearAllEditMode() {
-          em.textEditMode = false;
-          em.layoutEditMode = false;
-        }
-
-        function clearLayoutActiveButtons() {
-          btnLayout.classList.remove("active-layout");
-          btnLayoutReparent.classList.remove("active-layout-reparent");
-        }
-
-        function clearInsertMode() {
-          em.insertMode = null;
-          btnInsert.classList.remove("active-insert");
-          if (currentMode === "insert") {
-            currentMode = "read";
+              {
+                "id": "33jxmmw5dqpn",
+                "type": "box",
+                "left": 83.22703838896742,
+                "top": 26,
+                "width": 57.666666666666664,
+                "height": 54,
+                "position": "absolute",
+                "zIndex": 3,
+                "borderTopWidth": 0,
+                "borderBottomWidth": 0,
+                "borderLeftWidth": 0,
+                "borderRightWidth": 0,
+                "borderStyle": "solid",
+                "paddingTop": 0,
+                "paddingRight": 0,
+                "paddingBottom": 0,
+                "paddingLeft": 0,
+                "contentUid": "ae4ed592-5d69-4a61-8fe2-3d8ec6c9b38b",
+                "priority": 0,
+                "children": {
+                  "id": "55egn2jvzhku",
+                  "zIndex": 0,
+                  "overlapPadding": {
+                    "top": 5,
+                    "right": 5,
+                    "bottom": 5,
+                    "left": 5
+                  },
+                  "overlapMode": "path",
+                  "x": -12.894607843137255,
+                  "y": 0,
+                  "width": 83.45588235294117,
+                  "height": 50,
+                  "dpi": 72,
+                  url: "test/g10506uf.png",
+                  "originalWidth": 80.08055555555555,
+                  "originalHeight": 47.977777777777774,
+                  "objectFit": "cover",
+                  "type": "image"
+                }
+              }
+            ]
+          },
+          {
+            "id": "45uhamnr74y7",
+            "type": "box",
+            "left": 3,
+            "top": 16,
+            "width": 3,
+            "height": 30,
+            "position": "static",
+            "zIndex": 2,
+            "borderTopWidth": 0,
+            "borderBottomWidth": 0,
+            "borderLeftWidth": 0,
+            "borderRightWidth": 0,
+            "borderStyle": "solid",
+            "paddingTop": 0,
+            "paddingRight": 0,
+            "paddingBottom": 0,
+            "paddingLeft": 0,
+            "priority": 0,
+            "children": {
+              "type": "table",
+              "children": [
+                {
+                  "type": "tr",
+                  "height": 49.666666666666664,
+                  "children": [
+                    {
+                      "type": "td",
+                      "colspan": 1,
+                      "rowspan": 1,
+                      "children": [
+                        {
+                          "id": "36ag534bt0ru",
+                          "type": "box",
+                          "left": 0,
+                          "top": 0,
+                          "width": 1,
+                          "height": 1,
+                          "position": "static",
+                          "zIndex": 1,
+                          "borderTopWidth": 0,
+                          "borderBottomWidth": 0,
+                          "borderLeftWidth": 0,
+                          "borderRightWidth": 0,
+                          "borderStyle": "solid",
+                          "paddingTop": 0,
+                          "paddingRight": 0,
+                          "paddingBottom": 0,
+                          "paddingLeft": 0,
+                          "priority": 0,
+                          "children": {
+                            "id": "79zi5yfsz67j",
+                            "content": "",
+                            "paragraphStyle": {},
+                            "textStyle": {},
+                            "zIndex": 0,
+                            "overlapMode": "box",
+                            "type": "paragraph"
+                          }
+                        }
+                      ],
+                      "id": "5ltao9ogn2q0",
+                      "borderTopWidth": 0.1,
+                      "borderTopColor": "검정",
+                      "borderRightWidth": 0.1,
+                      "borderRightColor": "검정",
+                      "borderBottomWidth": 0.1,
+                      "borderBottomColor": "검정",
+                      "borderLeftWidth": 0.1,
+                      "borderLeftColor": "검정"
+                    },
+                    {
+                      "type": "td",
+                      "colspan": 1,
+                      "rowspan": 1,
+                      "children": [
+                        {
+                          "id": "48kxzz8mxamc",
+                          "type": "box",
+                          "left": 0,
+                          "top": 0,
+                          "width": 1,
+                          "height": 1,
+                          "position": "static",
+                          "zIndex": 1,
+                          "borderTopWidth": 0,
+                          "borderBottomWidth": 0,
+                          "borderLeftWidth": 0,
+                          "borderRightWidth": 0,
+                          "borderStyle": "solid",
+                          "paddingTop": 0,
+                          "paddingRight": 0,
+                          "paddingBottom": 0,
+                          "paddingLeft": 0,
+                          "priority": 0,
+                          "children": {
+                            "id": "5avfuvcy1lod",
+                            "content": "",
+                            "paragraphStyle": {},
+                            "textStyle": {},
+                            "zIndex": 0,
+                            "overlapMode": "box",
+                            "type": "paragraph"
+                          }
+                        }
+                      ],
+                      "id": "2c7ce8qnn7er",
+                      "borderTopWidth": 0.1,
+                      "borderTopColor": "검정",
+                      "borderRightWidth": 0.1,
+                      "borderRightColor": "검정",
+                      "borderBottomWidth": 0.1,
+                      "borderBottomColor": "검정",
+                      "borderLeftWidth": 0.1,
+                      "borderLeftColor": "검정"
+                    },
+                    {
+                      "type": "td",
+                      "colspan": 1,
+                      "rowspan": 1,
+                      "children": [
+                        {
+                          "id": "3s65rvrd0m1r",
+                          "type": "box",
+                          "left": 0,
+                          "top": 0,
+                          "width": 1,
+                          "height": 1,
+                          "position": "static",
+                          "zIndex": 1,
+                          "borderTopWidth": 0,
+                          "borderBottomWidth": 0,
+                          "borderLeftWidth": 0,
+                          "borderRightWidth": 0,
+                          "borderStyle": "solid",
+                          "paddingTop": 0,
+                          "paddingRight": 0,
+                          "paddingBottom": 0,
+                          "paddingLeft": 0,
+                          "priority": 0,
+                          "children": {
+                            "id": "74ikr9a1o5dr",
+                            "content": "",
+                            "paragraphStyle": {},
+                            "textStyle": {},
+                            "zIndex": 0,
+                            "overlapMode": "box",
+                            "type": "paragraph"
+                          }
+                        }
+                      ],
+                      "id": "29gvow5rzmru",
+                      "diagonals": [
+                        "tr-bl"
+                      ]
+                    }
+                  ],
+                  "id": "7i6wa06fx944"
+                },
+                {
+                  "type": "tr",
+                  "height": 49.666666666666664,
+                  "children": [
+                    {
+                      "type": "td",
+                      "colspan": 1,
+                      "rowspan": 1,
+                      "children": [
+                        {
+                          "id": "55eig676qscs",
+                          "type": "box",
+                          "left": 0,
+                          "top": 0,
+                          "width": 1,
+                          "height": 1,
+                          "position": "static",
+                          "zIndex": 1,
+                          "borderTopWidth": 0,
+                          "borderBottomWidth": 0,
+                          "borderLeftWidth": 0,
+                          "borderRightWidth": 0,
+                          "borderStyle": "solid",
+                          "paddingTop": 0,
+                          "paddingRight": 0,
+                          "paddingBottom": 0,
+                          "paddingLeft": 0,
+                          "priority": 0,
+                          "children": {
+                            "id": "3brdjsa343ge",
+                            "content": "",
+                            "paragraphStyle": {},
+                            "textStyle": {},
+                            "zIndex": 0,
+                            "overlapMode": "box",
+                            "type": "paragraph"
+                          }
+                        }
+                      ],
+                      "id": "176du01gvctm",
+                      "borderTopWidth": 0.1,
+                      "borderTopColor": "검정",
+                      "borderRightWidth": 0.1,
+                      "borderRightColor": "검정",
+                      "borderBottomWidth": 0.1,
+                      "borderBottomColor": "검정",
+                      "borderLeftWidth": 0.1,
+                      "borderLeftColor": "검정"
+                    },
+                    {
+                      "type": "td",
+                      "colspan": 1,
+                      "rowspan": 1,
+                      "children": [
+                        {
+                          "id": "5zhm70kuwu6n",
+                          "type": "box",
+                          "left": 0,
+                          "top": 0,
+                          "width": 1,
+                          "height": 1,
+                          "position": "static",
+                          "zIndex": 1,
+                          "borderTopWidth": 0,
+                          "borderBottomWidth": 0,
+                          "borderLeftWidth": 0,
+                          "borderRightWidth": 0,
+                          "borderStyle": "solid",
+                          "paddingTop": 0,
+                          "paddingRight": 0,
+                          "paddingBottom": 0,
+                          "paddingLeft": 0,
+                          "priority": 0,
+                          "children": {
+                            "id": "71s41wp60ya7",
+                            "content": "",
+                            "paragraphStyle": {},
+                            "textStyle": {},
+                            "zIndex": 0,
+                            "overlapMode": "box",
+                            "type": "paragraph"
+                          }
+                        }
+                      ],
+                      "id": "79zi5yfszcad",
+                      "borderTopWidth": 0.3,
+                      "borderTopColor": "검정",
+                      "borderRightWidth": 0.4,
+                      "borderRightColor": "검정",
+                      "borderBottomWidth": 0.1,
+                      "borderBottomColor": "검정",
+                      "borderLeftWidth": 0.1,
+                      "borderLeftColor": "검정"
+                    },
+                    {
+                      "type": "td",
+                      "colspan": 1,
+                      "rowspan": 1,
+                      "children": [
+                        {
+                          "id": "5gcd9kipcpw8",
+                          "type": "box",
+                          "left": 0,
+                          "top": 0,
+                          "width": 1,
+                          "height": 1,
+                          "position": "static",
+                          "zIndex": 1,
+                          "borderTopWidth": 0,
+                          "borderBottomWidth": 0,
+                          "borderLeftWidth": 0,
+                          "borderRightWidth": 0,
+                          "borderStyle": "solid",
+                          "paddingTop": 0,
+                          "paddingRight": 0,
+                          "paddingBottom": 0,
+                          "paddingLeft": 0,
+                          "priority": 0,
+                          "children": {
+                            "id": "5wr5hnzz98q5",
+                            "content": "",
+                            "paragraphStyle": {},
+                            "textStyle": {},
+                            "zIndex": 0,
+                            "overlapMode": "box",
+                            "type": "paragraph"
+                          }
+                        }
+                      ],
+                      "id": "1i48neczhfnh"
+                    }
+                  ],
+                  "id": "5dlwk7xtoxay"
+                },
+                {
+                  "type": "tr",
+                  "height": 49.666666666666664,
+                  "children": [
+                    {
+                      "type": "td",
+                      "colspan": 1,
+                      "rowspan": 1,
+                      "children": [
+                        {
+                          "id": "3brdjsa34e2q",
+                          "type": "box",
+                          "left": 0,
+                          "top": 0,
+                          "width": 1,
+                          "height": 1,
+                          "position": "static",
+                          "zIndex": 1,
+                          "borderTopWidth": 0,
+                          "borderBottomWidth": 0,
+                          "borderLeftWidth": 0,
+                          "borderRightWidth": 0,
+                          "borderStyle": "solid",
+                          "paddingTop": 0,
+                          "paddingRight": 0,
+                          "paddingBottom": 0,
+                          "paddingLeft": 0,
+                          "priority": 0,
+                          "children": {
+                            "id": "2n577n269dph",
+                            "content": "",
+                            "paragraphStyle": {},
+                            "textStyle": {},
+                            "zIndex": 0,
+                            "overlapMode": "box",
+                            "type": "paragraph"
+                          }
+                        }
+                      ],
+                      "id": "2y3211dov0d8",
+                      "diagonals": [
+                        "tl-br"
+                      ]
+                    },
+                    {
+                      "type": "td",
+                      "colspan": 1,
+                      "rowspan": 1,
+                      "children": [
+                        {
+                          "id": "2ho9sxweyf5m",
+                          "type": "box",
+                          "left": 0,
+                          "top": 0,
+                          "width": 1,
+                          "height": 1,
+                          "position": "static",
+                          "zIndex": 1,
+                          "borderTopWidth": 0,
+                          "borderBottomWidth": 0,
+                          "borderLeftWidth": 0,
+                          "borderRightWidth": 0,
+                          "borderStyle": "solid",
+                          "paddingTop": 0,
+                          "paddingRight": 0,
+                          "paddingBottom": 0,
+                          "paddingLeft": 0,
+                          "priority": 0,
+                          "children": {
+                            "id": "6wb6n7jeq7rf",
+                            "content": "",
+                            "paragraphStyle": {},
+                            "textStyle": {},
+                            "zIndex": 0,
+                            "overlapMode": "box",
+                            "type": "paragraph"
+                          }
+                        }
+                      ],
+                      "id": "36ag534bted3"
+                    },
+                    {
+                      "type": "td",
+                      "colspan": 1,
+                      "rowspan": 1,
+                      "children": [
+                        {
+                          "id": "40djvxhzza4m",
+                          "type": "box",
+                          "left": 0,
+                          "top": 0,
+                          "width": 1,
+                          "height": 1,
+                          "position": "static",
+                          "zIndex": 1,
+                          "borderTopWidth": 0,
+                          "borderBottomWidth": 0,
+                          "borderLeftWidth": 0,
+                          "borderRightWidth": 0,
+                          "borderStyle": "solid",
+                          "paddingTop": 0,
+                          "paddingRight": 0,
+                          "paddingBottom": 0,
+                          "paddingLeft": 0,
+                          "priority": 0,
+                          "children": {
+                            "id": "45uhamnracgp",
+                            "content": "",
+                            "paragraphStyle": {},
+                            "textStyle": {},
+                            "zIndex": 0,
+                            "overlapMode": "box",
+                            "type": "paragraph"
+                          }
+                        }
+                      ],
+                      "id": "4bbepbtil56y",
+                      "diagonals": [
+                        "tr-bl",
+                        "tl-br"
+                      ]
+                    }
+                  ],
+                  "id": "5zhm70kuwp6k"
+                }
+              ],
+              "id": "7fgfknlk92kc",
+              "colWidths": [
+                61.00000000000001,
+                61.00000000000001,
+                61.00000000000001
+              ]
+            }
+          },
+          {
+            "id": "1vsk6d9nfhj2",
+            "type": "box",
+            "left": 0,
+            "top": 71,
+            "width": 6,
+            "height": 34,
+            "position": "static",
+            "zIndex": 3,
+            "borderTopWidth": 0,
+            "borderBottomWidth": 0,
+            "borderLeftWidth": 0,
+            "borderRightWidth": 0,
+            "borderStyle": "solid",
+            "paddingTop": 0,
+            "paddingRight": 0,
+            "paddingBottom": 0,
+            "paddingLeft": 0,
+            "contentUid": "d15d6f4a-d006-46d0-b54d-c64232d81d5b",
+            "priority": 0,
+            "children": {
+              "id": "4340li35bkwy",
+              "zIndex": 0,
+              "overlapMode": "path",
+              "x": 0,
+              "y": -2.829999999999984,
+              "width": 371,
+              "height": 170.65999999999997,
+              "dpi": 72,
+              "url": "IMAGE/d15d6f4a-d006-46d0-b54d-c64232d81d5b",
+              "originalWidth": 370.4166666666667,
+              "originalHeight": 170.39166666666665,
+              "objectFit": "cover",
+              "type": "image"
+            }
           }
-        }
+        ]
+      }; const dummy = {
+        id: "6wb35rhayex3",
+        width: 391,
+        height: 545,
+        paddingTop: 10,
+        paddingBottom: 10,
+        paddingLeft: 10,
+        paddingRight: 10,
+        columns: [
+          57.666666666666664, 57.666666666666664, 57.666666666666664,
+          57.666666666666664, 57.666666666666664, 57.666666666666664,
+        ],
+        gap: 5,
+        paragraphStyle: {
+          lineGap: 1.25,
+          textAlign: "justify",
+          verticalAlign: "top",
+        },
+        textStyle: {
+          color: "",
+          fontSize: 4,
+          fontStyle: "normal",
+          fontFamily: "신문명조",
+          fontWeight: 400,
+          spaceRatio: 0.25,
+          widthRatio: 0.8,
+          letterSpacing: -0.1,
+        },
+        children: [
+          {
+            id: "433w6o6i26t4",
+            type: "box",
+            left: 10,
+            top: 10,
+            width: 371,
+            height: 30,
+            position: "absolute",
+            zIndex: 91001,
+            borderTopWidth: 0,
+            borderBottomWidth: 0,
+            borderLeftWidth: 0,
+            borderRightWidth: 0,
+            borderStyle: "solid",
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+            role: "header",
+            priority: 0,
+            lock: true,
+            children: [
+              {
+                id: "4rq2itlrm4yi",
+                type: "box",
+                left: 3,
+                top: 18.12,
+                width: 18.04,
+                height: 11.41,
+                position: "absolute",
+                zIndex: 1,
+                borderTopWidth: 0,
+                borderBottomWidth: 0,
+                borderLeftWidth: 0,
+                borderRightWidth: 0,
+                borderStyle: "solid",
+                paddingTop: 0,
+                paddingRight: 0,
+                paddingBottom: 0,
+                paddingLeft: 0,
+                priority: 0,
+                lock: true,
+                children: {
+                  id: "74igcnl0sups",
+                  column: 1,
+                  content: "1면",
+                  gap: 0,
+                  paragraphStyle: {
+                    textAlign: "center",
+                    verticalAlign: "center",
+                  },
+                  textStyle: {
+                    fontSize: 7,
+                  },
+                  zIndex: 0,
+                  type: "paragraph",
+                },
+              },
+            ],
+          },
+          {
+            id: "1nl1nqmfot02",
+            type: "box",
+            left: 0,
+            top: 7,
+            width: 3,
+            height: 29,
+            position: "static",
+            zIndex: 1,
+            borderTopWidth: 0,
+            borderBottomWidth: 0,
+            borderLeftWidth: 0,
+            borderRightWidth: 0,
+            borderStyle: "solid",
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+            role: "group-article",
+            groupMember: "166b1712-99ed-41d8-8d16-1c8d9f2b672a",
+            priority: 0,
+            children: [
+              {
+                id: "7i6rvnk5svdq",
+                type: "box",
+                left: 0,
+                top: 0,
+                width: 3,
+                height: 3,
+                position: "static",
+                zIndex: 1,
+                borderTopWidth: 0,
+                borderBottomWidth: 0,
+                borderLeftWidth: 0,
+                borderRightWidth: 0,
+                borderStyle: "solid",
+                paddingTop: 0,
+                paddingRight: 0,
+                paddingBottom: 0,
+                paddingLeft: 0,
+                role: "title",
+                contentUid: "166b1712-99ed-41d8-8d16-1c8d9f2b672a",
+                priority: 0,
+                children: {
+                  id: "3uwi2vpyjn61",
+                  column: 1,
+                  content: "미국은 아이슬란드와 함께 10위(180개국)를 차지",
+                  gap: 0,
+                  paragraphStyle: {
+                    lineGap: 1,
+                  },
+                  textStyle: {
+                    fontSize: 8,
+                  },
+                  zIndex: 0,
+                  type: "paragraph",
+                },
+              },
+              {
+                id: "w8em95cs5qy",
+                type: "box",
+                left: 0,
+                top: 3,
+                width: 3,
+                height: 26,
+                position: "static",
+                zIndex: 2,
+                borderTopWidth: 0,
+                borderBottomWidth: 0,
+                borderLeftWidth: 0,
+                borderRightWidth: 0,
+                borderStyle: "solid",
+                paddingTop: 0,
+                paddingRight: 0,
+                paddingBottom: 0,
+                paddingLeft: 0,
+                role: "body",
+                contentUid: "166b1712-99ed-41d8-8d16-1c8d9f2b672a",
+                priority: 0,
+                children: {
+                  id: "3uwi2vrn6rxx",
+                  content:
+                    '글로벌 시민권·거주 자문회사 헨리 앤드 파트너스가 21일(현지시간) 공개한 \'헨리여권지수 20주년 보고서\'에 따르면 한국은 전 세계 188개국을 비자 없이 또는 도착비자만으로 방문할 수 있어 일본, 아랍에미리트(UAE)와 함께 공동 2위를 차지했다. 1위는 192개국을 무비자로 방문할 수 있는 싱가포르다. 이 지수가 처음 개발된 2006년과 비교하면 한국의 무비자 입국 가능 국가는 73곳 늘었다. 일본은 60곳, UAE는 무려 153곳 증가했다.\n미국은 아이슬란드와 함께 10위(180개국)를 차지했다. 2006년 공동 1위였던 미국은 20년 만에 순위가 크게 하락했다. 헨리여권지수는 공동 순위를 하나의 순위로 집계하기 때문에 실제로는 미국보다 앞선 국가가 36개국에 달한다. 사실상 37번째 수준인 셈이다. 미국의 경우 상위권의 서방 선진국들과 달리 중국에 비자 없이 입국할 수 없다는 점 등이 순위 하락의 배경으로 꼽혔다.\n헨리앤드파트너스 회장이자 여권지수를 만든 크리스티안 켈린은 "20년간의 데이터를 보면 여권의 영향력은 한 국가가 보유한 지정학적 자산을 가장 잘 보여주는 지표 중 하나"라고 말했다. 그는 "가장 강력한 여권은 다른 나라들이 무역, 투자, 안보, 협력 파트너로 삼고 싶어 하는 국가들이 보유하고 있다"며 "결국 이동의 자유는 다른 국가들이 해당 국가와의 관계를 얼마나 가치 있게 평가하는지를 보여주는 척도"라고 설명했다.system-ui와 layout-ui의 각 화면에 있는 검색조건 콤보박스에 SK하이닉스가 사상 최대 분기 실적을 내며 최근 확산한 인공지능(AI) 과열론 진화에 나섰다. 고대역폭메모리(HBM)를 비롯한 고사양 메모리 공급 부족이 이어지면서 올해 연간 영업이익은 300조원에 육박할 전망이다. 다만 중장기 실적을 좌우할 빅테크(대형 정보기술 기업)들의 AI 투자 지속가능성이 변수로 꼽힌다.\\n◇HBM4 출하 본격화…메모리 공급 부족 2028년까지= 송현종 SK하이닉스 사장은 29일 2분기 실적발표 콘퍼런스콜에서 "주요 빅테크 고객들은 AI 서비스 사용량 증가와 컴퓨팅 용량 부족으로 인프라 투자를 확대하고 있고, AI 서비스에서 창출되는 매출과 수익 성장을 바탕으로 메모리 구매를 지속해서 확대하고 있다"며 "HBM4는 2분기부터 양산 출하를 시작했으며, 하반기에는 생산을 본격적으로 확대할 계획"이라고 밝혔다.\\n반도체 업계는 SK하이닉스의 실적 상승세가 하반기까지 이어질 가능성이 높다고 보고 있다. HBM과 서버용 D램, 기업용 솔리드스테이트드라이브(eSSD) 등 AI 데이터센터용 고사양 제품 공급이 수요 증가를 따라가지 못하고 있어서다. 메모리 업체들이 HBM 생산을 늘릴수록 범용 D램 생산 여력이 줄어드는 점도 D램 가격 상승을 뒷받침한다.\\n글로벌 투자은행(IB) 모건스탠리는 올해 3분기 메모리 반도체 가격이 전 분기보다 최소 25% 이상 상승할 것으로 예상했다. AI 서버 증설이 계속되는 반면 신규 생산설비가 공급 증가로 이어지는 데 시간이 필요한 만큼 공급 부족이 20 상승한 반도체주가 급락했다. 29일 오전 10시20분 기준 SK하이체 창신메모리테크놀로지(CXMT)가 상장과 동시에 본토 증시 1위에 올랐고, 국영 기업과 스타트업이 액침율 AI 수 있다는 이유에서다. 김영건 미래에셋증권 연구원은 "메모리 평균 가격(ASP)은 내년에도 상승할 전망이나, 상승의 폭은 올해보다 완화될 것이 불가피해 보인다"며 "이젠 높아진 수익성의 지속 가능성에 주목해야 할 시기"라고 분석했다.',
+                  paragraphStyle: {},
+                  textStyle: {},
+                  zIndex: 0,
+                  type: "paragraph",
+                },
+              },
+              {
+                id: "627zex7xh926",
+                type: "box",
+                left: 49.20255529554878,
+                top: 30,
+                width: 71.13077803778455,
+                height: 52.52,
+                position: "absolute",
+                zIndex: 3,
+                borderTopWidth: 0,
+                borderBottomWidth: 0,
+                borderLeftWidth: 0,
+                borderRightWidth: 0,
+                borderStyle: "solid",
+                paddingTop: 0,
+                paddingRight: 0,
+                paddingBottom: 0,
+                paddingLeft: 0,
+                contentUid: "b5077a18-f4fa-42a4-9dd7-8a7cf45ac1f1",
+                priority: 0,
+                children: {
+                  id: "5zhipkn1u7lr",
+                  zIndex: 0,
+                  overlapPadding: {
+                    top: 4,
+                    right: 4,
+                    bottom: 4,
+                    left: 4,
+                  },
+                  x: -6.162552157578311,
+                  y: 0,
+                  width: 83.45588235294117,
+                  height: 50,
+                  dpi: 72,
+                  url: "test/g10506uf.png",
+                  originalWidth: 227,
+                  originalHeight: 136,
+                  objectFit: "cover",
+                  type: "image",
+                },
+              },
+            ],
+          },
+          {
+            id: "3xmzp4v0k5wi",
+            type: "box",
+            left: 181,
+            top: 235,
+            width: 200,
+            height: 300,
+            position: "absolute",
+            zIndex: 91000,
+            borderTopWidth: 0,
+            borderBottomWidth: 0,
+            borderLeftWidth: 0,
+            borderRightWidth: 0,
+            borderStyle: "solid",
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+            role: "ad",
+            priority: 0,
+            lock: true,
+          },
+        ],
+      };
+      const a = {
+        id: "74ihr3te7qfx",
+        width: 391,
+        height: 545,
+        paddingTop: 10,
+        paddingBottom: 10,
+        paddingLeft: 10,
+        paddingRight: 10,
+        columns: [
+          57.666666666666664, 57.666666666666664, 57.666666666666664,
+          57.666666666666664, 57.666666666666664, 57.666666666666664,
+        ],
+        gap: 5,
+        paragraphStyle: {
+          lineGap: 1.25,
+          textAlign: "justify",
+          verticalAlign: "top",
+        },
+        textStyle: {
+          color: "",
+          fontSize: 4,
+          fontStyle: "normal",
+          fontFamily: "중앙신문명조",
+          fontWeight: 400,
+          spaceRatio: 0.25,
+          widthRatio: 0.8,
+          letterSpacing: -0.1,
+        },
+        children: [
+          {
+            id: "1kul1wgdi34o",
+            type: "box",
+            left: 10,
+            top: 10,
+            width: 371,
+            height: 10,
+            position: "absolute",
+            zIndex: 91001,
+            borderTopWidth: 0,
+            borderBottomWidth: 0,
+            borderLeftWidth: 0,
+            borderRightWidth: 0,
+            borderStyle: "solid",
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+            role: "header",
+            priority: 0,
+            lock: true,
+            children: [
+              {
+                id: "6d5tex11wm0j",
+                type: "box",
+                left: 0,
+                top: 2.964661434150437,
+                width: 24.24,
+                height: 7.025338565849563,
+                position: "absolute",
+                zIndex: 1,
+                borderTopWidth: 0,
+                borderBottomWidth: 0,
+                borderLeftWidth: 0,
+                borderRightWidth: 0,
+                borderStyle: "solid",
+                paddingTop: 0,
+                paddingRight: 0,
+                paddingBottom: 0,
+                paddingLeft: 0,
+                priority: 0,
+                lock: true,
+                children: {
+                  id: "2n52wslyzuuw",
+                  column: 1,
+                  content: "2면",
+                  gap: 0,
+                  paragraphStyle: {
+                    textAlign: "center",
+                    verticalAlign: "center",
+                    lineGap: 1,
+                  },
+                  textStyle: {
+                    fontSize: 6,
+                  },
+                  zIndex: 0,
+                  type: "paragraph",
+                },
+              },
+            ],
+          },
+          {
+            id: "7cpukh49hgkq",
+            type: "box",
+            left: 0,
+            top: 5,
+            width: 3,
+            height: 37,
+            position: "static",
+            zIndex: 1,
+            borderTopWidth: 0,
+            borderBottomWidth: 0,
+            borderLeftWidth: 0,
+            borderRightWidth: 0,
+            borderStyle: "solid",
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+            role: "group-article",
+            groupMember: "4337388f-5696-48b2-a473-81fc1d33e2de",
+            priority: 0,
+            children: [
+              {
+                id: "71rzr2uiuitv",
+                type: "box",
+                left: 0,
+                top: 0,
+                width: 3,
+                height: 4,
+                position: "static",
+                zIndex: 1,
+                borderTopWidth: 0,
+                borderBottomWidth: 0,
+                borderLeftWidth: 0,
+                borderRightWidth: 0,
+                borderStyle: "solid",
+                paddingTop: 0,
+                paddingRight: 0,
+                paddingBottom: 0,
+                paddingLeft: 0,
+                role: "title",
+                contentUid: "4337388f-5696-48b2-a473-81fc1d33e2de",
+                priority: 0,
+                children: {
+                  id: "6fwa4a7hmxut",
+                  column: 1,
+                  content: "테스트 기사",
+                  gap: 0,
+                  paragraphStyle: {
+                    textAlign: "center",
+                    verticalAlign: "center",
+                  },
+                  textStyle: {
+                    fontSize: 14,
+                  },
+                  zIndex: 0,
+                  type: "paragraph",
+                },
+              },
+              {
+                id: "2pvjm5utiwb1",
+                type: "box",
+                left: 0,
+                top: 4,
+                width: 3,
+                height: 33,
+                position: "static",
+                zIndex: 2,
+                borderTopWidth: 0,
+                borderBottomWidth: 0,
+                borderLeftWidth: 0,
+                borderRightWidth: 0,
+                borderStyle: "solid",
+                paddingTop: 0,
+                paddingRight: 0,
+                paddingBottom: 0,
+                paddingLeft: 0,
+                role: "body",
+                contentUid: "4337388f-5696-48b2-a473-81fc1d33e2de",
+                priority: 0,
+                children: {
+                  id: "5zhhw6smj5eq",
+                  content:
+                    'SK하이닉스가 사상 최대 분기 실적을 내며 최근 확산한 인공지능(AI) 과열론 진화에 나섰다. 고대역폭메모리(HBM)를 비롯한 고사양 메모리 공급 부족이 이어지면서 올해 연간 영업이익은 300조원에 육박할 전망이다. 다만 중장기 실적을 좌우할 빅테크(대형 정보기술 기업)들의 AI 투자 지속가능성이 변수로 꼽힌다.\n◇HBM4 출하 본격화…메모리 공급 부족 2028년까지= 송현종 SK하이닉스 사장은 29일 2분기 실적발표 콘퍼런스콜에서 "주요 빅테크 고객들은 AI 서비스 사용량 증가와 컴퓨팅 용량 부족으로 인프라 투자를 확대하고 있고, AI 서비스에서 창출되는 매출과 수익 성장을 바탕으로 메모리 구매를 지속해서 확대하고 있다"며 "HBM4는 2분기부터 양산 출하를 시작했으며, 하반기에는 생산을 본격적으로 확대할 계획"이라고 밝혔다.\n반도체 업계는 SK하이닉스의 실적 상승세가 하반기까지 이어질 가능성이 높다고 보고 있다. HBM과 서버용 D램, 기업용 솔리드스테이트드라이브(eSSD) 등 AI 데이터센터용 고사양 제품 공급이 수요 증가를 따라가지 못하고 있어서다. 메모리 업체들이 HBM 생산을 늘릴수록 범용 D램 생산 여력이 줄어드는 점도 D램 가격 상승을 뒷받침한다.\n글로벌 투자은행(IB) 모건스탠리는 올해 3분기 메모리 반도체 가격이 전 분기보다 최소 25% 이상 상승할 것으로 예상했다. AI 서버 증설이 계속되는 반면 신규 생산설비가 공급 증가로 이어지는 데 시간이 필요한 만큼 공급 부족이 2028년까지 이어질 수 있다는 분석이다.\n주요 빅테크들이 장기공급계약(LTA)으로 AI 인프라에 필요한 메모리 물량을 선제 확보하면서 메모리 업황의 가시성도 높아졌다. SK그룹과 삼성전자 등 국내 기업들이 최근 미국 실리콘밸리에서 글로벌 빅테크들과 5년 단위의 대규모 AI 인프라 협력 구상을 발표한 것도 HBM과 서버용 메모리 수요 지속 기대를 키우고 있다.\n이에 하반기 실적은 HBM 출하량 증가와 범용 메모리 가격 상승이 함께 이끄는 구조가 될 전망이다. HBM과 eSSD 등 고부가가치 제품 비중이 높아지면서 매출 증가율을 웃도는 수익성 개선도 가능하다.\n증권가에서는 SK하이닉스의 올해 실적 전망치를 잇따라 상향했다. 현재 가격과 출하량 증가세가 유지되면 연간 영업이익이 300조원에 근접할 수 있다는 관측이다. 하나증권은 올해 영업이익을 294조원, 내년을 435조원으로 전망했다. KB증권도 지난 5월 올해와 내년 전망치를 각각 280조원, 454조원으로 높였다.\n◇실적보다 지속 가능성, 빅테크 투자·중국 추격에 촉각= 하지만 시장은 경계를 늦추지 않고 있다. 실적 발표를 하루 앞둔 28일 국내 증시에서 삼성전자와 SK하이닉스를 비롯한 반도체주가 급락했다. 29일 오전 10시20분 기준 SK하이닉스는 전 거래일보다 4.52% 내린 148만원에 거래됐다. AI 관련 기업들의 주가와 투자 규모가 실질적인 수익성을 넘어 빠르게 상승한 것 아니냐는 경계감이 커진 모습이다. 최근 뉴욕증권거래소에 상장된 SK하이닉스 미국주식예탁증서(ADR)가 국내 주식보다 16~51% 높은 가격에 거래되며 AI 투자 과열 사례로 지목되기도 했다.\n중국 반도체 업체들의 추격도 투자 심리에 영향을 미치고 있다. 중국 최대 메모리 업체 창신메모리테크놀로지(CXMT)가 상장과 동시에 본토 증시 1위에 올랐고, 국영 기업과 스타트업이 액침 심자외선(DUV) 노광장비 소량 양산에 돌입했다는 소식이 전해졌다.\n이날 콘퍼런스콜에서는 AI 인프라 투자 축소와 생산능력(캐파) 확대로 인한 공급 과잉 우려에 대한 질문이 쏟아졌다. SK하이닉스 관계자는 일부 빅테크의 데이터센터 임대 사업 검토나 고효율 AI 모델의 등장에 따른 투자 둔화 우려를 알고 있다며 "AI 투자의 축소 과정이라기보다는 그동안 대규모로 구축해 온 AI 인프라의 활용도를 높이고 수익화를 본격화하는 과정으로 보고 있다"고 답했다. 고효율 AI 모델로 AI 서비스 접근성이 높아지면 수요가 더 커질 것이라는 분석이다.\n공급 과잉 우려에 대해서도 "회사 캐파 확대가 탄력적으로 이뤄질 계획인 만큼 중장기 투자가 공급 과잉으로 곧바로 이어질 가능성은 제한적"이라며 "실제 장비 투자와 생산능력은 고객 수요의 가시성과 투자 효율성 등을 종합적으로 고려해 단계적으로 진행할 계획"이라고 밝혔다.\n미래에셋증권은 이날 목표주가를 420만원에서 280만원으로 33% 하향했다. 중국 CXMT 상장과 노광기 국산화로 레거시 제품에 대한 심리적 둔화가 동반될 수 있다는 이유에서다. 김영건 미래에셋증권 연구원은 "메모리 평균 가격(ASP)은 내년에도 상승할 전망이나, 상승의 폭은 올해보다 완화될 것이 불가피해 보인다"며 "이젠 높아진 수익성의 지속 가능성에 주목해야 할 시기"라고 분석했다.',
+                  paragraphStyle: {},
+                  textStyle: {},
+                  zIndex: 0,
+                  type: "paragraph",
+                },
+              },
+              {
+                id: "2y2z1sfqk21q",
+                type: "box",
+                left: 53.69669661661966,
+                top: 60,
+                width: 75.02,
+                height: 51.31,
+                position: "absolute",
+                zIndex: 3,
+                borderTopWidth: 0,
+                borderBottomWidth: 0,
+                borderLeftWidth: 0,
+                borderRightWidth: 0,
+                borderStyle: "solid",
+                paddingTop: 0,
+                paddingRight: 0,
+                paddingBottom: 0,
+                paddingLeft: 0,
+                contentUid: "ae4ed592-5d69-4a61-8fe2-3d8ec6c9b38b",
+                priority: 0,
+                children: {
+                  id: "1t20hjqjsqrb",
+                  zIndex: 0,
+                  overlapPadding: {
+                    top: 5,
+                    right: 5,
+                    bottom: 5,
+                    left: 5,
+                  },
+                  x: -4.217941176470589,
+                  y: 0,
+                  width: 83.45588235294117,
+                  height: 50,
+                  dpi: 72,
+                  url: "test/g10506uf.png",
+                  originalWidth: 227,
+                  originalHeight: 136,
+                  objectFit: "cover",
+                  type: "image",
+                },
+              },
+            ],
+          },
+          {
+            id: "2sm1m6ra3eor",
+            type: "box",
+            left: 10,
+            top: 235,
+            width: 200,
+            height: 300,
+            position: "absolute",
+            zIndex: 91000,
+            borderTopWidth: 0,
+            borderBottomWidth: 0,
+            borderLeftWidth: 0,
+            borderRightWidth: 0,
+            borderStyle: "solid",
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+            role: "ad",
+            priority: 0,
+            lock: true,
+          },
+          {
+            id: "33jxazi3thxg",
+            type: "box",
+            left: 4,
+            top: 16,
+            width: 1,
+            height: 9,
+            position: "static",
+            zIndex: 2,
+            borderTopWidth: 0,
+            borderBottomWidth: 0,
+            borderLeftWidth: 0,
+            borderRightWidth: 0,
+            borderStyle: "solid",
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+            priority: 0,
+          },
+          {
+            id: "40dhr6hkdtz0",
+            type: "box",
+            left: 4,
+            top: 31,
+            width: 1,
+            height: 10,
+            position: "static",
+            zIndex: 3,
+            borderTopWidth: 0,
+            borderBottomWidth: 0,
+            borderLeftWidth: 0,
+            borderRightWidth: 0,
+            borderStyle: "solid",
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+            priority: 0,
+            children: {
+              id: "4ugli0v8k04v",
+              content: "",
+              paragraphStyle: {},
+              textStyle: {},
+              zIndex: 0,
+              type: "paragraph",
+            },
+          },
+          {
+            id: "tbl-demo-001",
+            type: "box",
+            left: 3,
+            top: 20,
+            width: 2,
+            height: 25,
+            position: "static",
+            zIndex: 5,
+            borderTopWidth: 0.1,
+            borderRightWidth: 0.1,
+            borderBottomWidth: 0.1,
+            borderLeftWidth: 0.1,
+            borderColor: "black",
+            borderStyle: "solid",
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+            priority: 0,
+            children: {
+              type: "table",
+              colWidths: [25, 35, 20, 20],
+              children: [
+                {
+                  type: "tr",
+                  height: 5,
+                  children: [
+                    {
+                      type: "td",
+                      colspan: 4,
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      backgroundColor: "black",
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "항목 / 내용 / 비고",
+                            textStyle: { fontSize: 4, color: "white" },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                  ],
+                },
+                {
+                  type: "tr",
+                  height: 5,
+                  children: [
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "대출한도",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "최대 1억원",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "신용등급",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "비고",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                  ],
+                },
+                {
+                  type: "tr",
+                  height: 5,
+                  children: [
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "금리",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "연 4.5% 이내",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "6등급 이상",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "고정금리",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                  ],
+                },
+                {
+                  type: "tr",
+                  height: 5,
+                  children: [
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "상환기간",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "최장 10년",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "7등급 이상",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "원리금균등",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                  ],
+                },
+                {
+                  type: "tr",
+                  height: 5,
+                  children: [
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "중도상환수수료",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "면제",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "8등급 이상",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      type: "td",
+                      borderTop: { width: 0.1, color: "black" },
+                      borderRight: { width: 0.1, color: "black" },
+                      borderBottom: { width: 0.1, color: "black" },
+                      borderLeft: { width: 0.1, color: "black" },
+                      children: [
+                        {
+                          type: "box",
+                          left: 0,
+                          top: 0,
+                          width: 1,
+                          height: 5,
+                          position: "static",
+                          zIndex: 1,
+                          children: {
+                            type: "text",
+                            content: "3년 이내",
+                            textStyle: { fontSize: 4 },
+                            paragraphStyle: {
+                              textAlign: "center",
+                              verticalAlign: "center",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      };
 
-        function setReadMode() {
-          clearInsertMode();
+      await doc.render();
+
+      const btnRead = document.getElementById("btn-read");
+      const btnEdit = document.getElementById("btn-edit");
+      const btnLayout = document.getElementById("btn-layout");
+      const btnLayoutReparent = document.getElementById(
+        "btn-layout-reparent",
+      );
+      const btnInsert = document.getElementById("btn-insert");
+      const btnAiToggle = document.getElementById("btn-ai-toggle");
+      const btnAiParagraph = document.getElementById("btn-ai-paragraph");
+      const btnAiImage = document.getElementById("btn-ai-image");
+      const btnAiClear = document.getElementById("btn-ai-clear");
+      const insertType = document.getElementById("insert-type");
+      const insertPosition = document.getElementById("insert-position");
+      const hint = document.getElementById("hint");
+
+      let currentMode = "read";
+
+      function clearAllEditMode() {
+        em.textEditMode = false;
+        em.layoutEditMode = false;
+      }
+
+      function clearLayoutActiveButtons() {
+        btnLayout.classList.remove("active-layout");
+        btnLayoutReparent.classList.remove("active-layout-reparent");
+      }
+
+      function clearInsertMode() {
+        em.insertMode = null;
+        btnInsert.classList.remove("active-insert");
+        if (currentMode === "insert") {
           currentMode = "read";
-          clearAllEditMode();
-          btnRead.classList.add("active");
-          btnEdit.classList.remove("active");
-          clearLayoutActiveButtons();
-          hint.textContent = "";
         }
+      }
 
-        function setTextEditMode() {
+      function setReadMode() {
+        clearInsertMode();
+        currentMode = "read";
+        clearAllEditMode();
+        btnRead.classList.add("active");
+        btnEdit.classList.remove("active");
+        clearLayoutActiveButtons();
+        hint.textContent = "";
+      }
+
+      function setTextEditMode() {
+        clearInsertMode();
+        currentMode = "text";
+        clearAllEditMode();
+        em.setEditableTextRoles(["none"]);
+        em.textEditMode = true;
+        btnRead.classList.remove("active");
+        btnEdit.classList.add("active");
+        clearLayoutActiveButtons();
+        hint.textContent = "단락을 클릭하여 텍스트를 편집할 수 있습니다.";
+      }
+
+      function setLayoutEditMode() {
+        clearInsertMode();
+        currentMode = "layout";
+        clearAllEditMode();
+        em.setEditableRoles(null);
+        em.layoutEditMode = true; // { type: 'move' }와 동일
+        btnRead.classList.remove("active");
+        btnEdit.classList.remove("active");
+        clearLayoutActiveButtons();
+        btnLayout.classList.add("active-layout");
+        hint.textContent =
+          "레이아웃 요소(box)를 드래그하여 이동할 수 있습니다. 클릭으로 선택, Ctrl+클릭으로 다중 선택.";
+      }
+
+      function setLayoutReparentMode() {
+        clearInsertMode();
+        currentMode = "layout-reparent";
+        clearAllEditMode();
+        em.setEditableRoles(null);
+        em.layoutEditMode = { type: "reparent" };
+        btnRead.classList.remove("active");
+        btnEdit.classList.remove("active");
+        clearLayoutActiveButtons();
+        btnLayoutReparent.classList.add("active-layout-reparent");
+        hint.textContent =
+          "reparent 모드: box를 드래그하여 다른 컨테이너로 옮기거나 빼낼 수 있습니다. mouseup 시 커서 위치의 컨테이너로 부모가 변경됩니다.";
+      }
+
+      function toggleInsertMode() {
+        const isInsert = currentMode === "insert";
+        if (isInsert) {
+          setReadMode();
+        } else {
           clearInsertMode();
-          currentMode = "text";
-          clearAllEditMode();
-          em.setEditableTextRoles(["none"]);
-          em.textEditMode = true;
-          btnRead.classList.remove("active");
-          btnEdit.classList.add("active");
-          clearLayoutActiveButtons();
-          hint.textContent = "단락을 클릭하여 텍스트를 편집할 수 있습니다.";
-        }
-
-        function setLayoutEditMode() {
-          clearInsertMode();
-          currentMode = "layout";
-          clearAllEditMode();
-          em.setEditableRoles(null);
-          em.layoutEditMode = true; // { type: 'move' }와 동일
-          btnRead.classList.remove("active");
-          btnEdit.classList.remove("active");
-          clearLayoutActiveButtons();
-          btnLayout.classList.add("active-layout");
-          hint.textContent =
-            "레이아웃 요소(box)를 드래그하여 이동할 수 있습니다. 클릭으로 선택, Ctrl+클릭으로 다중 선택.";
-        }
-
-        function setLayoutReparentMode() {
-          clearInsertMode();
-          currentMode = "layout-reparent";
-          clearAllEditMode();
-          em.setEditableRoles(null);
-          em.layoutEditMode = { type: "reparent" };
-          btnRead.classList.remove("active");
-          btnEdit.classList.remove("active");
-          clearLayoutActiveButtons();
-          btnLayoutReparent.classList.add("active-layout-reparent");
-          hint.textContent =
-            "reparent 모드: box를 드래그하여 다른 컨테이너로 옮기거나 빼낼 수 있습니다. mouseup 시 커서 위치의 컨테이너로 부모가 변경됩니다.";
-        }
-
-        function toggleInsertMode() {
-          const isInsert = currentMode === "insert";
-          if (isInsert) {
-            setReadMode();
-          } else {
-            clearInsertMode();
-            currentMode = "insert";
-            clearAllEditMode();
-            em.setEditableRoles(null);
-            em.layoutEditMode = true;
-            btnRead.classList.remove("active");
-            btnEdit.classList.remove("active");
-            clearLayoutActiveButtons();
-            btnLayout.classList.add("active-layout");
-            btnInsert.classList.add("active-insert");
-            em.insertMode = {
-              type: insertType.value,
-              position: insertPosition.value,
-            };
-            hint.textContent =
-              "삽입 모드: 마우스 드래그로 요소를 그려서 삽입하세요. ESC로 취소.";
-          }
-        }
-
-        btnRead.addEventListener("click", setReadMode);
-        btnEdit.addEventListener("click", setTextEditMode);
-        btnLayout.addEventListener("click", setLayoutEditMode);
-        btnLayoutReparent.addEventListener("click", setLayoutReparentMode);
-        btnInsert.addEventListener("click", toggleInsertMode);
-
-        insertType.addEventListener("change", () => {
-          if (currentMode === "insert") {
-            em.insertMode = {
-              type: insertType.value,
-              position: insertPosition.value,
-            };
-          }
-        });
-
-        insertPosition.addEventListener("change", () => {
-          if (currentMode === "insert") {
-            em.insertMode = {
-              type: insertType.value,
-              position: insertPosition.value,
-            };
-          }
-        });
-
-        // AI 처리 오버레이 토글
-        let aiActive = false;
-
-        function getAllParagraphs() {
-          return Array.from(doc.querySelectorAll("x-layout-paragraph"));
-        }
-
-        function getAllImages() {
-          return Array.from(doc.querySelectorAll("x-layout-image"));
-        }
-
-        function setAiOverlay(paragraphs, images, active) {
-          for (const p of paragraphs) p.aiProcessing = active;
-          for (const i of images) i.aiProcessing = active;
-        }
-
-        btnAiToggle.addEventListener("click", () => {
-          aiActive = !aiActive;
-          setAiOverlay(getAllParagraphs(), getAllImages(), aiActive);
-          btnAiToggle.classList.toggle("active-ai", aiActive);
-          btnAiParagraph.classList.remove("active-ai");
-          btnAiImage.classList.remove("active-ai");
-          hint.textContent = aiActive
-            ? "AI 처리 오버레이 표시 중. 버튼을 다시 누르면 해제됩니다."
-            : "";
-        });
-
-        btnAiParagraph.addEventListener("click", () => {
-          const wasParagraphOnly =
-            btnAiParagraph.classList.contains("active-ai");
-          setAiOverlay(getAllParagraphs(), [], !wasParagraphOnly);
-          btnAiParagraph.classList.toggle("active-ai", !wasParagraphOnly);
-          if (!wasParagraphOnly) {
-            aiActive = false;
-            btnAiToggle.classList.remove("active-ai");
-            btnAiImage.classList.remove("active-ai");
-            hint.textContent = "단락에만 AI 처리 오버레이 표시 중.";
-          } else {
-            hint.textContent = "";
-          }
-        });
-
-        btnAiImage.addEventListener("click", () => {
-          const wasImageOnly = btnAiImage.classList.contains("active-ai");
-          setAiOverlay([], getAllImages(), !wasImageOnly);
-          btnAiImage.classList.toggle("active-ai", !wasImageOnly);
-          if (!wasImageOnly) {
-            aiActive = false;
-            btnAiToggle.classList.remove("active-ai");
-            btnAiParagraph.classList.remove("active-ai");
-            hint.textContent = "이미지에만 AI 처리 오버레이 표시 중.";
-          } else {
-            hint.textContent = "";
-          }
-        });
-
-        btnAiClear.addEventListener("click", () => {
-          aiActive = false;
-          setAiOverlay(getAllParagraphs(), getAllImages(), false);
-          btnAiToggle.classList.remove("active-ai");
-          btnAiParagraph.classList.remove("active-ai");
-          btnAiImage.classList.remove("active-ai");
-          hint.textContent = "";
-        });
-
-        // EditManager 이벤트 수신 (문서 요소에서 per-document 인스턴스 획득)
-        const docEl = document.querySelector("x-layout-document");
-        const em = docEl?.editManager;
-        if (!em) return;
-
-        // 텍스트 편집 이벤트
-        const textEventTypes = [
-          "focusChange",
-          "textChange",
-          "styleChange",
-          "cursorMove",
-          "selectionStart",
-          "selectionEnd",
-        ];
-        for (const type of textEventTypes) {
-          em.addEventListener(type, (event) => {
-            const detail =
-              type === "focusChange"
-                ? `from: ${event.previousParagraph?.id ?? "(null)"}`
-                : `paragraph: ${event.paragraph.id}`;
-            console.log(`[EditManager] ${type} — ${detail}`);
-          });
-        }
-
-        // 레이아웃 선택 이벤트
-        em.addEventListener("layoutSelectionChange", (event) => {
-          console.log("[EditManager] layoutSelectionChange", {
-            selected: event.selectedLayouts?.map((e) => ({
-              id: e.id,
-              type: e.type,
-            })),
-            previous: event.previousLayouts?.map((e) => ({
-              id: e.id,
-              type: e.type,
-            })),
-          });
-          updateInfoPanel();
-        });
-
-        // 레이아웃 이동 이벤트
-        em.addEventListener("layoutMove", (event) => {
-          const reparentInfo = event.newContainer
-            ? ` (reparent: ${event.previousContainer?.id ?? "(null)"} → ${event.newContainer.id})`
-            : "";
-          if (event.canceled) {
-            console.log("[EditManager] layoutMove CANCELED", {
-              element: {
-                id: event.layoutElement?.id,
-                type: event.layoutElement?.type,
-              },
-              previousLeft: event.previousLeft,
-              previousTop: event.previousTop,
-              left: event.left,
-              top: event.top,
-              canceled: event.canceled,
-              newContainer: event.newContainer?.id,
-              previousContainer: event.previousContainer?.id,
-            });
-          } else {
-            console.log(`[EditManager] layoutMove${reparentInfo}`, {
-              element: {
-                id: event.layoutElement?.id,
-                type: event.layoutElement?.type,
-              },
-              previousLeft: event.previousLeft,
-              previousTop: event.previousTop,
-              left: event.left,
-              top: event.top,
-              canceled: event.canceled,
-              newContainer: event.newContainer?.id,
-              previousContainer: event.previousContainer?.id,
-            });
-          }
-          updateInfoPanel();
-        });
-
-        // 포커스 변경 시에도 패널 업데이트
-        em.addEventListener("focusChange", () => updateInfoPanel());
-        em.addEventListener("cursorMove", () => updateInfoPanel());
-
-        // 삽입 이벤트: 삽입 완료 후 레이아웃 편집 모드로 전환하고 삽입된 요소를 선택
-        em.addEventListener("insert", (event) => {
-          console.log("[EditManager] insert", {
-            type: event.type,
-            position: event.position,
-            element: event.element,
-            container: event.container,
-            left: event.left,
-            top: event.top,
-            width: event.width,
-            height: event.height,
-            zIndex: event.zIndex,
-          });
-
-          // 삽입 모드 해제
-          clearInsertMode();
-
-          // 레이아웃 편집 모드로 전환 (기존 편집 상태 해제 후 활성화)
+          currentMode = "insert";
           clearAllEditMode();
           em.setEditableRoles(null);
           em.layoutEditMode = true;
           btnRead.classList.remove("active");
           btnEdit.classList.remove("active");
+          clearLayoutActiveButtons();
           btnLayout.classList.add("active-layout");
-          currentMode = "layout";
-          hint.textContent =
-            "레이아웃 요소(box)를 클릭하여 선택하세요. Ctrl+클릭으로 다중 선택.";
-
-          // 삽입된 요소를 선택
-          if (event.element) {
-            em.selectLayout(event.element);
-          }
-
-          updateInfoPanel();
-        });
-
-        em.addEventListener("insertCancel", (event) => {
-          console.log("[EditManager] insertCancel");
-          clearInsertMode();
-          setReadMode();
-        });
-
-        // 정보 패널 업데이트
-        const elFocusedParagraph = document.getElementById("focused-paragraph");
-        const elCursorOffset = document.getElementById("cursor-offset");
-        const elSelectedLayouts = document.getElementById("selected-layouts");
-        const elSelectedLayoutIds = document.getElementById(
-          "selected-layout-ids",
-        );
-
-        function updateInfoPanel() {
-          // 포커스된 단락
-          const focusedP = em.focusedParagraph;
-          if (focusedP) {
-            elFocusedParagraph.textContent = focusedP.id || "(no id)";
-            elFocusedParagraph.classList.remove("empty");
-          } else {
-            elFocusedParagraph.textContent = "없음";
-            elFocusedParagraph.classList.add("empty");
-          }
-
-          // 커서 위치
-          const cursor = em.cursorOffset;
-          if (cursor !== null) {
-            elCursorOffset.textContent = String(cursor);
-            elCursorOffset.classList.remove("empty");
-          } else {
-            elCursorOffset.textContent = "없음";
-            elCursorOffset.classList.add("empty");
-          }
-
-          // 선택된 레이아웃
-          const layouts = em.selectedLayouts;
-          if (layouts.length > 0) {
-            elSelectedLayouts.innerHTML = layouts
-              .map(
-                (l) =>
-                  `<div class="layout-item"><span class="id">${l.id || "(no id)"}</span><span class="type">${l.type}</span></div>`,
-              )
-              .join("");
-            elSelectedLayouts.classList.remove("empty");
-          } else {
-            elSelectedLayouts.textContent = "없음";
-            elSelectedLayouts.classList.add("empty");
-          }
-
-          // 선택된 레이아웃 ID
-          const ids = em.selectedLayoutIds;
-          if (ids.length > 0) {
-            elSelectedLayoutIds.textContent = `[${ids.join(", ")}]`;
-            elSelectedLayoutIds.classList.remove("empty");
-          } else {
-            elSelectedLayoutIds.textContent = "없음";
-            elSelectedLayoutIds.classList.add("empty");
-          }
-        }
-
-        // 테이블 테스트 버튼
-        const btnTblInsertRowBelow = document.getElementById(
-          "btn-tbl-insert-row-below",
-        );
-        const btnTblInsertRowAbove = document.getElementById(
-          "btn-tbl-insert-row-above",
-        );
-        const btnTblInsertColRight = document.getElementById(
-          "btn-tbl-insert-col-right",
-        );
-        const btnTblInsertColLeft = document.getElementById(
-          "btn-tbl-insert-col-left",
-        );
-        const btnTblDeleteRow = document.getElementById("btn-tbl-delete-row");
-        const btnTblDeleteCol = document.getElementById("btn-tbl-delete-col");
-        const btnTblCheck = document.getElementById("btn-tbl-check");
-
-        function getTableAndKc() {
-          const table = doc.querySelector("x-layout-table");
-          if (!table) {
-            hint.textContent = "테이블이 없습니다.";
-            return null;
-          }
-          const kc = table.keyboardController;
-          if (!kc) {
-            hint.textContent = "keyboardController가 없습니다.";
-            return null;
-          }
-          if (!kc.selection) {
-            hint.textContent =
-              "셀을 먼저 선택하세요. (F5로 셀 블록 모드 진입 후 화살표로 선택)";
-            return null;
-          }
-          return { table, kc };
-        }
-
-        function runTableAction(label, fn) {
-          const ctx = getTableAndKc();
-          if (!ctx) return;
-          const { table, kc } = ctx;
-          const before = {
-            rows: table.gridResolution?.rowCount,
-            cols: table.gridResolution?.colWidths?.length,
+          btnInsert.classList.add("active-insert");
+          em.insertMode = {
+            type: insertType.value,
+            position: insertPosition.value,
           };
-          try {
-            fn(kc);
-            requestAnimationFrame(() => {
-              setTimeout(() => {
-                const after = {
-                  rows: table.gridResolution?.rowCount,
-                  cols: table.gridResolution?.colWidths?.length,
-                };
-                const trs = table.querySelectorAll("x-layout-tr");
-                const badCells = [];
-                for (let r = 0; r < trs.length; r++) {
-                  const tds = trs[r].querySelectorAll("x-layout-td");
-                  for (let c = 0; c < tds.length; c++) {
-                    const box = tds[c].items[0];
-                    const styleEl = box?.shadowRoot?.querySelector("style");
-                    const ruleCount = styleEl?.sheet?.cssRules?.length ?? 0;
-                    if (ruleCount === 0) {
-                      badCells.push(`r${r}c${c}`);
-                    }
-                  }
-                }
-                hint.textContent =
-                  `${label}: ${before.rows}x${before.cols} → ${after.rows}x${after.cols}` +
-                  (badCells.length > 0
-                    ? ` | 규칙 0개: ${badCells.join(", ")}`
-                    : " | 모든 셀 정상 ✅");
-              }, 100);
-            });
-          } catch (e) {
-            hint.textContent = `${label} 에러: ${e.message}`;
-          }
+          hint.textContent =
+            "삽입 모드: 마우스 드래그로 요소를 그려서 삽입하세요. ESC로 취소.";
         }
+      }
 
-        btnTblInsertRowBelow.addEventListener("click", () =>
-          runTableAction("행 아래 삽입", (kc) => kc.insertRowBelow()),
-        );
-        btnTblInsertRowAbove.addEventListener("click", () =>
-          runTableAction("행 위 삽입", (kc) => kc.insertRowAbove()),
-        );
-        btnTblInsertColRight.addEventListener("click", () =>
-          runTableAction("열 오른쪽 삽입", (kc) => kc.insertColRight()),
-        );
-        btnTblInsertColLeft.addEventListener("click", () =>
-          runTableAction("열 왼쪽 삽입", (kc) => kc.insertColLeft()),
-        );
-        btnTblDeleteRow.addEventListener("click", () =>
-          runTableAction("행 삭제", (kc) => kc.deleteRow()),
-        );
-        btnTblDeleteCol.addEventListener("click", () =>
-          runTableAction("열 삭제", (kc) => kc.deleteCol()),
-        );
+      btnRead.addEventListener("click", setReadMode);
+      btnEdit.addEventListener("click", setTextEditMode);
+      btnLayout.addEventListener("click", setLayoutEditMode);
+      btnLayoutReparent.addEventListener("click", setLayoutReparentMode);
+      btnInsert.addEventListener("click", toggleInsertMode);
 
-        btnTblCheck.addEventListener("click", () => {
-          const table = doc.querySelector("x-layout-table");
-          if (!table) {
-            hint.textContent = "테이블이 없습니다.";
-            return;
-          }
-          const trs = table.querySelectorAll("x-layout-tr");
-          const info = [];
-          for (let r = 0; r < trs.length; r++) {
-            const tds = trs[r].querySelectorAll("x-layout-td");
-            for (let c = 0; c < tds.length; c++) {
-              const box = tds[c].items[0];
-              const styleEl = box?.shadowRoot?.querySelector("style");
-              const ruleCount = styleEl?.sheet?.cssRules?.length ?? 0;
-              const hostRule = styleEl?.sheet?.cssRules?.[0];
-              const hostWidth = hostRule?.style?.width ?? "";
-              info.push(`r${r}c${c}:${ruleCount}규칙/${hostWidth}`);
-            }
-          }
-          hint.textContent = info.join(" | ");
+      insertType.addEventListener("change", () => {
+        if (currentMode === "insert") {
+          em.insertMode = {
+            type: insertType.value,
+            position: insertPosition.value,
+          };
+        }
+      });
+
+      insertPosition.addEventListener("change", () => {
+        if (currentMode === "insert") {
+          em.insertMode = {
+            type: insertType.value,
+            position: insertPosition.value,
+          };
+        }
+      });
+
+      // AI 처리 오버레이 토글
+      let aiActive = false;
+
+      function getAllParagraphs() {
+        return Array.from(doc.querySelectorAll("x-layout-paragraph"));
+      }
+
+      function getAllImages() {
+        return Array.from(doc.querySelectorAll("x-layout-image"));
+      }
+
+      function setAiOverlay(paragraphs, images, active) {
+        for (const p of paragraphs) p.aiProcessing = active;
+        for (const i of images) i.aiProcessing = active;
+      }
+
+      btnAiToggle.addEventListener("click", () => {
+        aiActive = !aiActive;
+        setAiOverlay(getAllParagraphs(), getAllImages(), aiActive);
+        btnAiToggle.classList.toggle("active-ai", aiActive);
+        btnAiParagraph.classList.remove("active-ai");
+        btnAiImage.classList.remove("active-ai");
+        hint.textContent = aiActive
+          ? "AI 처리 오버레이 표시 중. 버튼을 다시 누르면 해제됩니다."
+          : "";
+      });
+
+      btnAiParagraph.addEventListener("click", () => {
+        const wasParagraphOnly =
+          btnAiParagraph.classList.contains("active-ai");
+        setAiOverlay(getAllParagraphs(), [], !wasParagraphOnly);
+        btnAiParagraph.classList.toggle("active-ai", !wasParagraphOnly);
+        if (!wasParagraphOnly) {
+          aiActive = false;
+          btnAiToggle.classList.remove("active-ai");
+          btnAiImage.classList.remove("active-ai");
+          hint.textContent = "단락에만 AI 처리 오버레이 표시 중.";
+        } else {
+          hint.textContent = "";
+        }
+      });
+
+      btnAiImage.addEventListener("click", () => {
+        const wasImageOnly = btnAiImage.classList.contains("active-ai");
+        setAiOverlay([], getAllImages(), !wasImageOnly);
+        btnAiImage.classList.toggle("active-ai", !wasImageOnly);
+        if (!wasImageOnly) {
+          aiActive = false;
+          btnAiToggle.classList.remove("active-ai");
+          btnAiParagraph.classList.remove("active-ai");
+          hint.textContent = "이미지에만 AI 처리 오버레이 표시 중.";
+        } else {
+          hint.textContent = "";
+        }
+      });
+
+      btnAiClear.addEventListener("click", () => {
+        aiActive = false;
+        setAiOverlay(getAllParagraphs(), getAllImages(), false);
+        btnAiToggle.classList.remove("active-ai");
+        btnAiParagraph.classList.remove("active-ai");
+        btnAiImage.classList.remove("active-ai");
+        hint.textContent = "";
+      });
+
+      // EditManager 이벤트 수신 (문서 요소에서 per-document 인스턴스 획득)
+      const docEl = document.querySelector("x-layout-document");
+      const em = docEl?.editManager;
+      if (!em) return;
+
+      // 텍스트 편집 이벤트
+      const textEventTypes = [
+        "focusChange",
+        "textChange",
+        "styleChange",
+        "cursorMove",
+        "selectionStart",
+        "selectionEnd",
+      ];
+      for (const type of textEventTypes) {
+        em.addEventListener(type, (event) => {
+          const detail =
+            type === "focusChange"
+              ? `from: ${event.previousParagraph?.id ?? "(null)"}`
+              : `paragraph: ${event.paragraph.id}`;
+          console.log(`[EditManager] ${type} — ${detail}`);
+        });
+      }
+
+      // 레이아웃 선택 이벤트
+      em.addEventListener("layoutSelectionChange", (event) => {
+        console.log("[EditManager] layoutSelectionChange", {
+          selected: event.selectedLayouts?.map((e) => ({
+            id: e.id,
+            type: e.type,
+          })),
+          previous: event.previousLayouts?.map((e) => ({
+            id: e.id,
+            type: e.type,
+          })),
+        });
+        updateInfoPanel();
+      });
+
+      // 레이아웃 이동 이벤트
+      em.addEventListener("layoutMove", (event) => {
+        const reparentInfo = event.newContainer
+          ? ` (reparent: ${event.previousContainer?.id ?? "(null)"} → ${event.newContainer.id})`
+          : "";
+        if (event.canceled) {
+          console.log("[EditManager] layoutMove CANCELED", {
+            element: {
+              id: event.layoutElement?.id,
+              type: event.layoutElement?.type,
+            },
+            previousLeft: event.previousLeft,
+            previousTop: event.previousTop,
+            left: event.left,
+            top: event.top,
+            canceled: event.canceled,
+            newContainer: event.newContainer?.id,
+            previousContainer: event.previousContainer?.id,
+          });
+        } else {
+          console.log(`[EditManager] layoutMove${reparentInfo}`, {
+            element: {
+              id: event.layoutElement?.id,
+              type: event.layoutElement?.type,
+            },
+            previousLeft: event.previousLeft,
+            previousTop: event.previousTop,
+            left: event.left,
+            top: event.top,
+            canceled: event.canceled,
+            newContainer: event.newContainer?.id,
+            previousContainer: event.previousContainer?.id,
+          });
+        }
+        updateInfoPanel();
+      });
+
+      // 포커스 변경 시에도 패널 업데이트
+      em.addEventListener("focusChange", () => updateInfoPanel());
+      em.addEventListener("cursorMove", () => updateInfoPanel());
+
+      // 삽입 이벤트: 삽입 완료 후 레이아웃 편집 모드로 전환하고 삽입된 요소를 선택
+      em.addEventListener("insert", (event) => {
+        console.log("[EditManager] insert", {
+          type: event.type,
+          position: event.position,
+          element: event.element,
+          container: event.container,
+          left: event.left,
+          top: event.top,
+          width: event.width,
+          height: event.height,
+          zIndex: event.zIndex,
         });
 
-        // 배치 반전 버튼
-        const btnFlipH = document.getElementById("btn-flip-h");
-        const btnFlipV = document.getElementById("btn-flip-v");
-        const btnFlipBoth = document.getElementById("btn-flip-both");
-        const flipTarget = document.getElementById("flip-target");
+        // 삽입 모드 해제
+        clearInsertMode();
 
-        function refreshFlipTargetOptions() {
-          const boxes = doc.querySelectorAll("x-layout-box");
-          const currentVal = flipTarget.value;
-          flipTarget.innerHTML = '<option value="">문서 전체</option>';
-          boxes.forEach((box) => {
-            if (box.id) {
-              const opt = document.createElement("option");
-              opt.value = box.id;
-              opt.textContent = box.id;
-              flipTarget.appendChild(opt);
-            }
-          });
-          if (
-            currentVal &&
-            Array.from(flipTarget.options).some((o) => o.value === currentVal)
-          ) {
-            flipTarget.value = currentVal;
-          }
+        // 레이아웃 편집 모드로 전환 (기존 편집 상태 해제 후 활성화)
+        clearAllEditMode();
+        em.setEditableRoles(null);
+        em.layoutEditMode = true;
+        btnRead.classList.remove("active");
+        btnEdit.classList.remove("active");
+        btnLayout.classList.add("active-layout");
+        currentMode = "layout";
+        hint.textContent =
+          "레이아웃 요소(box)를 클릭하여 선택하세요. Ctrl+클릭으로 다중 선택.";
+
+        // 삽입된 요소를 선택
+        if (event.element) {
+          em.selectLayout(event.element);
         }
-
-        function doFlip(axis) {
-          const targetId = flipTarget.value || undefined;
-          try {
-            doc.flipLayout({ axis, targetId });
-            hint.textContent = `반전 완료: ${axis}${targetId ? ` (대상: ${targetId})` : " (문서 전체)"}`;
-            refreshFlipTargetOptions();
-          } catch (e) {
-            hint.textContent = `반전 실패: ${e.message}`;
-          }
-        }
-
-        btnFlipH.addEventListener("click", () => doFlip("horizontal"));
-        btnFlipV.addEventListener("click", () => doFlip("vertical"));
-        btnFlipBoth.addEventListener("click", () => doFlip("both"));
-
-        refreshFlipTargetOptions();
 
         updateInfoPanel();
-      })();
-    </script>
+      });
 
-    <div
-      id="table-log"
-      style="
+      em.addEventListener("insertCancel", (event) => {
+        console.log("[EditManager] insertCancel");
+        clearInsertMode();
+        setReadMode();
+      });
+
+      // 정보 패널 업데이트
+      const elFocusedParagraph = document.getElementById("focused-paragraph");
+      const elCursorOffset = document.getElementById("cursor-offset");
+      const elSelectedLayouts = document.getElementById("selected-layouts");
+      const elSelectedLayoutIds = document.getElementById(
+        "selected-layout-ids",
+      );
+
+      function updateInfoPanel() {
+        // 포커스된 단락
+        const focusedP = em.focusedParagraph;
+        if (focusedP) {
+          elFocusedParagraph.textContent = focusedP.id || "(no id)";
+          elFocusedParagraph.classList.remove("empty");
+        } else {
+          elFocusedParagraph.textContent = "없음";
+          elFocusedParagraph.classList.add("empty");
+        }
+
+        // 커서 위치
+        const cursor = em.cursorOffset;
+        if (cursor !== null) {
+          elCursorOffset.textContent = String(cursor);
+          elCursorOffset.classList.remove("empty");
+        } else {
+          elCursorOffset.textContent = "없음";
+          elCursorOffset.classList.add("empty");
+        }
+
+        // 선택된 레이아웃
+        const layouts = em.selectedLayouts;
+        if (layouts.length > 0) {
+          elSelectedLayouts.innerHTML = layouts
+            .map(
+              (l) =>
+                `<div class="layout-item"><span class="id">${l.id || "(no id)"}</span><span class="type">${l.type}</span></div>`,
+            )
+            .join("");
+          elSelectedLayouts.classList.remove("empty");
+        } else {
+          elSelectedLayouts.textContent = "없음";
+          elSelectedLayouts.classList.add("empty");
+        }
+
+        // 선택된 레이아웃 ID
+        const ids = em.selectedLayoutIds;
+        if (ids.length > 0) {
+          elSelectedLayoutIds.textContent = `[${ids.join(", ")}]`;
+          elSelectedLayoutIds.classList.remove("empty");
+        } else {
+          elSelectedLayoutIds.textContent = "없음";
+          elSelectedLayoutIds.classList.add("empty");
+        }
+      }
+
+      // 테이블 테스트 버튼
+      const btnTblInsertRowBelow = document.getElementById(
+        "btn-tbl-insert-row-below",
+      );
+      const btnTblInsertRowAbove = document.getElementById(
+        "btn-tbl-insert-row-above",
+      );
+      const btnTblInsertColRight = document.getElementById(
+        "btn-tbl-insert-col-right",
+      );
+      const btnTblInsertColLeft = document.getElementById(
+        "btn-tbl-insert-col-left",
+      );
+      const btnTblDeleteRow = document.getElementById("btn-tbl-delete-row");
+      const btnTblDeleteCol = document.getElementById("btn-tbl-delete-col");
+      const btnTblCheck = document.getElementById("btn-tbl-check");
+
+      function getTableAndKc() {
+        const table = doc.querySelector("x-layout-table");
+        if (!table) {
+          hint.textContent = "테이블이 없습니다.";
+          return null;
+        }
+        const kc = table.keyboardController;
+        if (!kc) {
+          hint.textContent = "keyboardController가 없습니다.";
+          return null;
+        }
+        if (!kc.selection) {
+          hint.textContent =
+            "셀을 먼저 선택하세요. (F5로 셀 블록 모드 진입 후 화살표로 선택)";
+          return null;
+        }
+        return { table, kc };
+      }
+
+      function runTableAction(label, fn) {
+        const ctx = getTableAndKc();
+        if (!ctx) return;
+        const { table, kc } = ctx;
+        const before = {
+          rows: table.gridResolution?.rowCount,
+          cols: table.gridResolution?.colWidths?.length,
+        };
+        try {
+          fn(kc);
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              const after = {
+                rows: table.gridResolution?.rowCount,
+                cols: table.gridResolution?.colWidths?.length,
+              };
+              const trs = table.querySelectorAll("x-layout-tr");
+              const badCells = [];
+              for (let r = 0; r < trs.length; r++) {
+                const tds = trs[r].querySelectorAll("x-layout-td");
+                for (let c = 0; c < tds.length; c++) {
+                  const box = tds[c].items[0];
+                  const styleEl = box?.shadowRoot?.querySelector("style");
+                  const ruleCount = styleEl?.sheet?.cssRules?.length ?? 0;
+                  if (ruleCount === 0) {
+                    badCells.push(`r${r}c${c}`);
+                  }
+                }
+              }
+              hint.textContent =
+                `${label}: ${before.rows}x${before.cols} → ${after.rows}x${after.cols}` +
+                (badCells.length > 0
+                  ? ` | 규칙 0개: ${badCells.join(", ")}`
+                  : " | 모든 셀 정상 ✅");
+            }, 100);
+          });
+        } catch (e) {
+          hint.textContent = `${label} 에러: ${e.message}`;
+        }
+      }
+
+      btnTblInsertRowBelow.addEventListener("click", () =>
+        runTableAction("행 아래 삽입", (kc) => kc.insertRowBelow()),
+      );
+      btnTblInsertRowAbove.addEventListener("click", () =>
+        runTableAction("행 위 삽입", (kc) => kc.insertRowAbove()),
+      );
+      btnTblInsertColRight.addEventListener("click", () =>
+        runTableAction("열 오른쪽 삽입", (kc) => kc.insertColRight()),
+      );
+      btnTblInsertColLeft.addEventListener("click", () =>
+        runTableAction("열 왼쪽 삽입", (kc) => kc.insertColLeft()),
+      );
+      btnTblDeleteRow.addEventListener("click", () =>
+        runTableAction("행 삭제", (kc) => kc.deleteRow()),
+      );
+      btnTblDeleteCol.addEventListener("click", () =>
+        runTableAction("열 삭제", (kc) => kc.deleteCol()),
+      );
+
+      btnTblCheck.addEventListener("click", () => {
+        const table = doc.querySelector("x-layout-table");
+        if (!table) {
+          hint.textContent = "테이블이 없습니다.";
+          return;
+        }
+        const trs = table.querySelectorAll("x-layout-tr");
+        const info = [];
+        for (let r = 0; r < trs.length; r++) {
+          const tds = trs[r].querySelectorAll("x-layout-td");
+          for (let c = 0; c < tds.length; c++) {
+            const box = tds[c].items[0];
+            const styleEl = box?.shadowRoot?.querySelector("style");
+            const ruleCount = styleEl?.sheet?.cssRules?.length ?? 0;
+            const hostRule = styleEl?.sheet?.cssRules?.[0];
+            const hostWidth = hostRule?.style?.width ?? "";
+            info.push(`r${r}c${c}:${ruleCount}규칙/${hostWidth}`);
+          }
+        }
+        hint.textContent = info.join(" | ");
+      });
+
+      // 배치 반전 버튼
+      const btnFlipH = document.getElementById("btn-flip-h");
+      const btnFlipV = document.getElementById("btn-flip-v");
+      const btnFlipBoth = document.getElementById("btn-flip-both");
+      const flipTarget = document.getElementById("flip-target");
+
+      function refreshFlipTargetOptions() {
+        const boxes = doc.querySelectorAll("x-layout-box");
+        const currentVal = flipTarget.value;
+        flipTarget.innerHTML = '<option value="">문서 전체</option>';
+        boxes.forEach((box) => {
+          if (box.id) {
+            const opt = document.createElement("option");
+            opt.value = box.id;
+            opt.textContent = box.id;
+            flipTarget.appendChild(opt);
+          }
+        });
+        if (
+          currentVal &&
+          Array.from(flipTarget.options).some((o) => o.value === currentVal)
+        ) {
+          flipTarget.value = currentVal;
+        }
+      }
+
+      function doFlip(axis) {
+        const targetId = flipTarget.value || undefined;
+        try {
+          doc.flipLayout({ axis, targetId });
+          hint.textContent = `반전 완료: ${axis}${targetId ? ` (대상: ${targetId})` : " (문서 전체)"}`;
+          refreshFlipTargetOptions();
+        } catch (e) {
+          hint.textContent = `반전 실패: ${e.message}`;
+        }
+      }
+
+      btnFlipH.addEventListener("click", () => doFlip("horizontal"));
+      btnFlipV.addEventListener("click", () => doFlip("vertical"));
+      btnFlipBoth.addEventListener("click", () => doFlip("both"));
+
+      refreshFlipTargetOptions();
+
+      updateInfoPanel();
+    })();
+  </script>
+
+  <div id="table-log" style="
         position: fixed;
         bottom: 0;
         right: 0;
@@ -1912,89 +2593,89 @@
         padding: 8px;
         z-index: 999999;
         border-radius: 8px 0 0 0;
-      "
-    ></div>
-    <script>
-      (function () {
-        const logEl = document.getElementById("table-log");
-        window._tableLog = function (msg) {
-          const time = new Date().toLocaleTimeString();
-          const line = document.createElement("div");
-          line.textContent = `[${time}] ${msg}`;
-          logEl.appendChild(line);
-          logEl.scrollTop = logEl.scrollHeight;
-          while (logEl.children.length > 50)
-            logEl.removeChild(logEl.firstChild);
-        };
-        window._tableLog("로그 패널 초기화됨");
+      "></div>
+  <script>
+    (function () {
+      const logEl = document.getElementById("table-log");
+      window._tableLog = function (msg) {
+        const time = new Date().toLocaleTimeString();
+        const line = document.createElement("div");
+        line.textContent = `[${time}] ${msg}`;
+        logEl.appendChild(line);
+        logEl.scrollTop = logEl.scrollHeight;
+        while (logEl.children.length > 50)
+          logEl.removeChild(logEl.firstChild);
+      };
+      window._tableLog("로그 패널 초기화됨");
 
-        document.addEventListener(
-          "keydown",
-          function (e) {
-            const doc = document.querySelector("x-layout-document");
-            if (!doc || !doc.editManager?.layoutEditMode) return;
-            const table = doc.querySelector("x-layout-table");
-            if (!table) return;
+      document.addEventListener(
+        "keydown",
+        function (e) {
+          const doc = document.querySelector("x-layout-document");
+          if (!doc || !doc.editManager?.layoutEditMode) return;
+          const table = doc.querySelector("x-layout-table");
+          if (!table) return;
 
-            const key = e.key;
-            const isTableKey =
+          const key = e.key;
+          const isTableKey =
+            [
+              "F5",
+              "F7",
+              "F8",
+              "ArrowLeft",
+              "ArrowRight",
+              "ArrowUp",
+              "ArrowDown",
+              "m",
+              "M",
+              "s",
+              "S",
+              "w",
+              "W",
+              "h",
+              "H",
+              "Insert",
+              "Delete",
+              "Escape",
+            ].includes(key) ||
+            (e.altKey &&
               [
-                "F5",
-                "F7",
-                "F8",
                 "ArrowLeft",
                 "ArrowRight",
                 "ArrowUp",
                 "ArrowDown",
-                "m",
-                "M",
-                "s",
-                "S",
-                "w",
-                "W",
-                "h",
-                "H",
                 "Insert",
                 "Delete",
-                "Escape",
-              ].includes(key) ||
-              (e.altKey &&
-                [
-                  "ArrowLeft",
-                  "ArrowRight",
-                  "ArrowUp",
-                  "ArrowDown",
-                  "Insert",
-                  "Delete",
-                ].includes(key));
-            if (!isTableKey) return;
+              ].includes(key));
+          if (!isTableKey) return;
 
-            const kc = table.keyboardController;
-            const sel = kc?.selection;
-            const selInfo = sel
-              ? `${sel.mode} anchor={${sel.anchor.row},${sel.anchor.col}} focus={${sel.focus.row},${sel.focus.col}} selectMode=${sel.selectMode || "cell"}`
+          const kc = table.keyboardController;
+          const sel = kc?.selection;
+          const selInfo = sel
+            ? `${sel.mode} anchor={${sel.anchor.row},${sel.anchor.col}} focus={${sel.focus.row},${sel.focus.col}} selectMode=${sel.selectMode || "cell"}`
+            : "null";
+
+          const mod =
+            (e.altKey ? "Alt+" : "") +
+            (e.ctrlKey ? "Ctrl+" : "") +
+            (e.shiftKey ? "Shift+" : "");
+          window._tableLog(`KEY: ${mod}${key} | SEL: ${selInfo}`);
+
+          setTimeout(function () {
+            const sel2 = kc?.selection;
+            const sel2Info = sel2
+              ? `${sel2.mode} anchor={${sel2.anchor.row},${sel2.anchor.col}} focus={${sel2.focus.row},${sel2.focus.col}}`
               : "null";
+            const circles = table.shadowRoot?.querySelectorAll("[data-cell]");
+            window._tableLog(
+              `  → SEL: ${sel2Info} | CIRCLES: ${circles?.length || 0}`,
+            );
+          }, 50);
+        },
+        true,
+      );
+    })();
+  </script>
+</body>
 
-            const mod =
-              (e.altKey ? "Alt+" : "") +
-              (e.ctrlKey ? "Ctrl+" : "") +
-              (e.shiftKey ? "Shift+" : "");
-            window._tableLog(`KEY: ${mod}${key} | SEL: ${selInfo}`);
-
-            setTimeout(function () {
-              const sel2 = kc?.selection;
-              const sel2Info = sel2
-                ? `${sel2.mode} anchor={${sel2.anchor.row},${sel2.anchor.col}} focus={${sel2.focus.row},${sel2.focus.col}}`
-                : "null";
-              const circles = table.shadowRoot?.querySelectorAll("[data-cell]");
-              window._tableLog(
-                `  → SEL: ${sel2Info} | CIRCLES: ${circles?.length || 0}`,
-              );
-            }, 50);
-          },
-          true,
-        );
-      })();
-    </script>
-  </body>
 </html>
