@@ -5,6 +5,12 @@ import { Z_INDEX_AI_PROCESSING } from "@/constants";
  */
 const OVERLAY_ID = "__ai_processing_overlay__";
 
+/**
+ * AI 오버레이 style 요소의 식별자.
+ * {@link removeAiProcessingOverlay}가 자신이 추가한 style 요소만 정확히 제거하도록 한다.
+ */
+const OVERLAY_STYLE_ID = "__ai_processing_overlay_style__";
+
 const OVERLAY_STYLE = `
 .__ai-overlay__ {
   position: absolute;
@@ -71,6 +77,7 @@ export function createAiProcessingOverlay(shadowRoot: ShadowRoot): void {
   if (shadowRoot.getElementById(OVERLAY_ID)) return;
 
   const styleEl = document.createElement("style");
+  styleEl.id = OVERLAY_STYLE_ID;
   shadowRoot.appendChild(styleEl);
   if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
   styleEl.textContent = OVERLAY_STYLE;
@@ -143,4 +150,10 @@ export function isAiProcessingActive(shadowRoot: ShadowRoot): boolean {
 export function removeAiProcessingOverlay(shadowRoot: ShadowRoot): void {
   const overlay = shadowRoot.getElementById(OVERLAY_ID);
   if (overlay) overlay.remove();
+  // 자신이 추가한 style 요소도 제거한다.
+  // 제거하지 않으면 disconnectedCallback → connectedCallback 사이클마다
+  // style 요소가 누적되고, paragraph의 _applyStyle()이 querySelector('style')로
+  // 잡는 첫 번째 style 요소가 AI overlay style이 되어 :host 규칙이 사라진다.
+  const styleEl = shadowRoot.getElementById(OVERLAY_STYLE_ID);
+  if (styleEl) styleEl.remove();
 }

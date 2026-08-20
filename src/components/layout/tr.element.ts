@@ -5,6 +5,8 @@ import { LayoutDocumentElement } from "./document.element";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutTableCellElement } from "./td.element";
 
+const HOST_STYLE_ID = '__layout_host_style__';
+
 function indexToColumnLabel(index: number): string {
   let label = '';
   let n = index;
@@ -172,7 +174,7 @@ export class LayoutTableRowElement extends HTMLElement {
   private _applyStyle(): void {
     if (!this.isConnected) return;
 
-    let styleEl = this._shadowRoot.querySelector('style');
+    let styleEl = this._shadowRoot.querySelector<HTMLStyleElement>(`style#${HOST_STYLE_ID}`);
     let needsInit = !styleEl
       || !styleEl.sheet
       || styleEl.sheet.cssRules.length === 0;
@@ -180,6 +182,7 @@ export class LayoutTableRowElement extends HTMLElement {
     if (needsInit) {
       if (styleEl) styleEl.remove();
       styleEl = document.createElement('style');
+      styleEl.id = HOST_STYLE_ID;
       this._shadowRoot.appendChild(styleEl);
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
       styleEl.sheet.insertRule(":host { display: block; position: absolute; }", 0);

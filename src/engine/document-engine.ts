@@ -11,13 +11,14 @@
  */
 
 import type { DocumentData, BoxData, ParagraphData, ImageData, TableData, InheritStyle } from "@/types";
-import type { AbsRect, FontLoaderEngine, ColorRegistryEngine, BoxEngineParent } from "./types";
+import type { AbsRect, FontLoaderEngine, ColorRegistryEngine, BoxEngineParent, GridCalculatorEngineOptions } from "./types";
 import type { PrintPostData } from "@/types";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
 import { BoxEngine } from "./box-engine";
 import { ImageEngine } from "./image-engine";
 import { ParagraphEngine } from "./paragraph-engine";
 import { TableEngine, TableCellEngine } from "./table-engine";
+import { valueEqual } from "@/utils/value-equal";
 
 let _engineIdCounter = 0;
 
@@ -363,18 +364,31 @@ export class DocumentEngine {
       for (const ce of childEngines) {
         if (ce instanceof ParagraphEngine) {
           const overlayEngines = be.overlayElements;
-          ce.data = {
-            ...ce.data,
+          // updateOverlayContext: _layoutCache를 보존하면서 overlay 문맥만 갱신.
+          // data setter + resetIncrementalState() 대신 사용하여,
+          // 입력 해시가 동일하면 layoutText()가 캐시 hit로 O(1) 스킵.
+          ce.updateOverlayContext(
             overlayEngines,
-            inheritStyle: {
+            be.absRect,
+            {
               ...inheritStyle,
               parentHeight: be.absHeight,
               parentWidth: be.absWidth,
             },
-          };
-          ce.resetIncrementalState();
-          ce.layoutStructure();
+          );
           ce.layoutText();
+        } else if (ce instanceof TableEngine) {
+          // 테이블 셀 내부 박스도 순회하여 paragraph overlay 갱신.
+          // TableEngine은 BoxEngine.childBoxEngines에 포함되지 않으므로
+          // 별도로 rowEngines → cellEngines → childBoxEngines로 진입.
+          for (const rowEngine of ce.rowEngines) {
+            for (const cellEngine of rowEngine.cellEngines) {
+              const cellBox = cellEngine.boxEngine;
+              if (cellBox) {
+                this._refreshParagraphOverlays([cellBox]);
+              }
+            }
+          }
         }
       }
       const childBoxes = be.childBoxEngines;
@@ -420,7 +434,7 @@ export class DocumentEngine {
     const gap = isStatic && parentGc
       ? parentGc.gaps.slice(boxData.left, boxData.left + boxData.width - 1)
       : [];
-    const gc = GridCalculatorEngine.create({
+    const gcOptions = {
       width: boxEngine.absWidth,
       height: boxEngine.absHeight,
       paddingTop: boxData.paddingTop,
@@ -432,8 +446,14 @@ export class DocumentEngine {
       paragraphStyle: this._data.paragraphStyle,
       textStyle: this._data.textStyle,
       isBox: true,
-    }, this._ppm);
-    boxEngine.gridCalculator = gc;
+    };
+
+    const existingGc = boxEngine.gridCalculator;
+    if (existingGc && this._gcParamsEqual(existingGc, gcOptions)) {
+      // 파라미터 동일 → GC 재사용, _calcColumnGridCoords 재실행 스킵
+    } else {
+      boxEngine.gridCalculator = GridCalculatorEngine.create(gcOptions, this._ppm);
+    }
 
     const children = boxData.children;
     if (!children) {
@@ -516,13 +536,11 @@ export class DocumentEngine {
       const pe = existingPara as ParagraphEngine;
       pe.data = engineData;
       pe.layoutStructure();
-      pe.layoutText();
       return pe;
     }
 
     const pe = ParagraphEngine.create(engineData);
     pe.layoutStructure();
-    pe.layoutText();
     return pe;
   }
 
@@ -601,6 +619,33 @@ export class DocumentEngine {
     }
 
     return te;
+  }
+
+  /**
+   * 기존 GridCalculatorEngine의 입력 파라미터와 새 옵션이 동일한지 비교한다.
+   * 동일하면 _calcColumnGridCoords 재실행을 스킵하여 GC 인스턴스를 재사용.
+   */
+  private _gcParamsEqual(
+    existing: GridCalculatorEngine,
+    opts: GridCalculatorEngineOptions,
+  ): boolean {
+    const g = existing as unknown as {
+      _width: number; _height: number;
+      _paddingTop: number; _paddingBottom: number; _paddingLeft: number; _paddingRight: number;
+      _inputColumns: number | number[]; _inputGap: number | number[];
+      _paragraphStyle: object; _textStyle: object; _isBox: boolean;
+    };
+    return g._width === opts.width
+      && g._height === opts.height
+      && g._paddingTop === (opts.paddingTop || 0)
+      && g._paddingBottom === (opts.paddingBottom || 0)
+      && g._paddingLeft === (opts.paddingLeft || 0)
+      && g._paddingRight === (opts.paddingRight || 0)
+      && valueEqual(g._inputColumns, opts.columns)
+      && valueEqual(g._inputGap, opts.gap)
+      && g._paragraphStyle === opts.paragraphStyle
+      && g._textStyle === opts.textStyle
+      && g._isBox === opts.isBox;
   }
 
   /**

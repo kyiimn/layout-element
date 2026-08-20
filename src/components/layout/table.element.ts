@@ -37,6 +37,7 @@ interface TableResizeState {
 }
 
 const HIT_WIDTH = 8;
+const HOST_STYLE_ID = '__layout_host_style__';
 
 /**
  * 테이블 요소. `<x-layout-table>` 커스텀 엘리먼트.
@@ -372,7 +373,7 @@ export class LayoutTableElement extends HTMLElement {
   private _applyStyle(): void {
     if (!this.isConnected) return;
 
-    let styleEl = this._shadowRoot.querySelector('style');
+    let styleEl = this._shadowRoot.querySelector<HTMLStyleElement>(`style#${HOST_STYLE_ID}`);
     let needsInit = !styleEl
       || !styleEl.sheet
       || styleEl.sheet.cssRules.length === 0;
@@ -380,6 +381,7 @@ export class LayoutTableElement extends HTMLElement {
     if (needsInit) {
       if (styleEl) styleEl.remove();
       styleEl = document.createElement('style');
+      styleEl.id = HOST_STYLE_ID;
       this._shadowRoot.appendChild(styleEl);
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
       styleEl.sheet.insertRule(":host { display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; }", 0);

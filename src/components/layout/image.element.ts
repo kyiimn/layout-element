@@ -62,7 +62,6 @@ export type URLLoader = (
 export class LayoutImageElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
   private _engine?: ImageEngine;
-  private _parentEngineRef: import("@/engine").BoxEngine | null = null;
 
   private _canvas?: HTMLCanvasElement;
   private _shadowRoot: ShadowRoot;
@@ -126,7 +125,6 @@ export class LayoutImageElement extends HTMLElement {
 
   connectedCallback() {
     if (!this.id) this.id = genUUID();
-    this._parentEngineRef = this.parentElement?.engine ?? null;
     this.layout();
     createAiProcessingOverlay(this._shadowRoot);
   }
@@ -137,13 +135,22 @@ export class LayoutImageElement extends HTMLElement {
       URL.revokeObjectURL(this._objectUrl);
       this._objectUrl = undefined;
     }
-    this._clearImageCache();
-    if (this._parentEngineRef && this._engine) {
-      const children = this._parentEngineRef.childEngines;
-      const idx = children.indexOf(this._engine);
-      if (idx >= 0) children.splice(idx, 1);
-    }
-    this._parentEngineRef = null;
+    // 이미지 캐시(_cachedImage, _cachedImageSrc, _cachedResolvedUrl)를 보존한다.
+    //
+    // 부모 box/document의 data setter reconcile 과정에서 appendChild가 같은
+    // 부모 내에서 요소를 재배치할 때 브라우저가 disconnectedCallback을
+    // 트리거한다. 이때 _clearImageCache()를 호출하면 캐시된 HTMLImageElement와
+    // resolved URL이 날아가서, 이어지는 connectedCallback → render()가
+    // 비동기 재로딩 경로(await _resolveUrl + await _loadImage)로 빠지고
+    // canvas가 빈 상태로 페인트되어 이미지 깜빡임이 발생한다.
+    //
+    // disconnectedCallback은 "DOM에서 분리됨"을 의미할 뿐 "요소가 파괴됨"이
+    // 아니므로, 이미지 캐시는 URL 변경(data/url setter)이나 명시적
+    // _clearImageCache() 호출 시에만 무효화한다.
+    //
+    // 엔진을 부모 childEngines에서 splice하지 않는다 — box.element.ts 참조.
+    // DocumentEngine._buildTree()가 전체 트리를 재구축하므로 불필요하며,
+    // 기존 엔진을 유지하는 편이 재사용 측면에서 더 효율적이다.
   }
 
   /**

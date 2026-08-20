@@ -45,7 +45,9 @@ export class LayoutParagraphElement extends HTMLElement {
   private _editableText: boolean = false;
   private _editController: TextEditController | null = null;
   private _editManagerRef: EditManager | null = null;
-  private _parentEngineRef: import("@/engine").BoxEngine | null = null;
+
+  private _savedCursorOffset: number | null = null;
+  private _savedSelection: import("@/types").SelectionRange | null = null;
 
   /** 성능 최적화: 구조 변경 여부 플래그. true면 다음 render()에서 전체 재생성을 수행한다. */
   private _perfStructureChanged: boolean = true;
@@ -74,11 +76,18 @@ export class LayoutParagraphElement extends HTMLElement {
   connectedCallback() {
     if (!this.id) this.id = genUUID();
     this._editManagerRef = this.editManager;
-    this._parentEngineRef = this.parentElement?.engine ?? null;
     this.layout();
     createAiProcessingOverlay(this._shadowRoot);
     if (this._editableText && !this._editController) {
       this._editController = this._editManagerRef ? new TextEditController(this, this._editManagerRef) : null;
+      if (this._editController && this._savedCursorOffset !== null) {
+        this._editController.setCursor({ textOffset: this._savedCursorOffset });
+        if (this._savedSelection) {
+          this._editController.setSelection(this._savedSelection);
+        }
+      }
+      this._savedCursorOffset = null;
+      this._savedSelection = null;
     }
   }
 
@@ -111,15 +120,16 @@ export class LayoutParagraphElement extends HTMLElement {
 
   disconnectedCallback() {
     removeAiProcessingOverlay(this._shadowRoot);
-    this._editController?.destroy();
-    this._editController = null;
-    this._editManagerRef = null;
-    if (this._parentEngineRef && this._model) {
-      const children = this._parentEngineRef.childEngines;
-      const idx = children.indexOf(this._model);
-      if (idx >= 0) children.splice(idx, 1);
+    if (this._editController) {
+      this._savedCursorOffset = this._editController.cursorOffset;
+      this._savedSelection = this._editController.selection;
+      this._editController.destroy();
+      this._editController = null;
     }
-    this._parentEngineRef = null;
+    this._editManagerRef = null;
+    // 엔진을 부모 childEngines에서 splice하지 않는다 — box.element.ts 참조.
+    // DocumentEngine._buildTree()가 전체 트리를 재구축하므로 불필요하며,
+    // 기존 엔진을 유지하는 편이 재사용 측면에서 더 효율적이다.
   }
 
   /**

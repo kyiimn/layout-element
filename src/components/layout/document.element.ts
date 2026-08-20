@@ -497,10 +497,11 @@ export class LayoutDocumentElement extends HTMLElement {
    * @returns 생성된 LayoutBoxElement
    */
   appendChildData(child: BoxData): LayoutBoxElement {
-    const currentData = this.data;
-    const newChildren = [...(currentData.children ?? []), child];
-    this.data = { ...currentData, children: newChildren };
-    return this.items[this.items.length - 1] as LayoutBoxElement;
+    const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
+    boxEl.data = child;
+    this.appendChild(boxEl);
+    boxEl.requestRerenderAffectedParagraphs();
+    return boxEl;
   }
 
   set data(data: DocumentData) {

@@ -12,6 +12,8 @@ import { LayoutTableCellElement } from "./td.element";
 import { BoxEngine, DocumentEngine, GridCalculatorEngine, ParagraphEngine, ImageEngine, TableEngine, TableCellEngine } from "@/engine";
 import type { BoxEngineParent } from "@/engine";
 
+const HOST_STYLE_ID = '__layout_host_style__';
+
 /**
  * 드래그/리사이즈 중 한 번이라도 오버랩된 단락 집합.
  * 매 rAF 프레임마다 누적되어 드래그 종료 시까지 모든 단락이 갱신된다.
@@ -101,9 +103,6 @@ export class LayoutBoxElement extends HTMLElement {
   /** `connectedCallback`에서 캐싱한 EditManager. `disconnectedCallback`에서 사용. */
   private _editManagerRef: EditManager | null = null;
 
-  /** `connectedCallback`에서 캐싱한 부모 엔진. `disconnectedCallback`에서 엔진 트리 정리용. */
-  private _parentEngineRef: BoxEngineParent | null = null;
-
   constructor() {
     super();
     this._shadowRoot = this.attachShadow({ mode: "open" });
@@ -112,7 +111,6 @@ export class LayoutBoxElement extends HTMLElement {
   connectedCallback() {
     if (!this.id) this.id = genUUID();
     this._editManagerRef = this.editManager;
-    this._parentEngineRef = this._findParentEngine();
     this._startChildObserver();
     this.addEventListener('mouseenter', this._onLayoutMouseEnter);
     this.addEventListener('mouseleave', this._onLayoutMouseLeave);
@@ -158,22 +156,14 @@ export class LayoutBoxElement extends HTMLElement {
     this.removeEventListener('mousedown', this._onPlaceGunMouseDown);
     this._editManagerRef?._unregisterLayout(this);
     this._editManagerRef = null;
-    if (this._parentEngineRef && this._engine) {
-      const docEl = this._findDocumentElement();
-      if (docEl?.engine) {
-        docEl.engine.removeChildEngine(this._engine, this._parentEngineRef);
-      } else {
-        if (this._parentEngineRef instanceof BoxEngine) {
-          const children = this._parentEngineRef.childEngines;
-          const idx = children.indexOf(this._engine);
-          if (idx >= 0) children.splice(idx, 1);
-        } else if (this._parentEngineRef instanceof DocumentEngine) {
-          const idx = this._parentEngineRef.childBoxEngines.indexOf(this._engine);
-          if (idx >= 0) this._parentEngineRef.childBoxEngines.splice(idx, 1);
-        }
-      }
-    }
-    this._parentEngineRef = null;
+    // 엔진을 부모 엔진 트리에서 제거하지 않는다.
+    //
+    // 부모 box/document의 data setter reconcile 중 appendChild가 같은
+    // 부모 내에서 요소를 재배치할 때 disconnectedCallback이 트리거된다.
+    // 여기서 엔진을 splice하면 _buildTree가 findBoxEngineById로 기존 엔진을
+    // 찾지 못해 새 엔진을 생성하게 되어, 엔진 인스턴스가 불필요하게 교체된다.
+    // DocumentEngine._buildTree()가 어차피 전체 트리를 재구축하므로,
+    // splice하지 않아도 최종 상태는 동일하며 기존 엔진 재사용으로 더 효율적이다.
   }
 
   static get observedAttributes() {
@@ -369,7 +359,7 @@ export class LayoutBoxElement extends HTMLElement {
   private _applyStyle() {
     if (!this.isConnected || !this.parentModel) return;
 
-    let styleEl = this._shadowRoot.querySelector('style');
+    let styleEl = this._shadowRoot.querySelector<HTMLStyleElement>(`style#${HOST_STYLE_ID}`);
     let needsInit = !styleEl
       || !styleEl.sheet
       || styleEl.sheet.cssRules.length === 0;
@@ -377,6 +367,7 @@ export class LayoutBoxElement extends HTMLElement {
     if (needsInit) {
       if (styleEl) styleEl.remove();
       styleEl = document.createElement('style');
+      styleEl.id = HOST_STYLE_ID;
       this._shadowRoot.appendChild(styleEl);
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
@@ -792,15 +783,8 @@ export class LayoutBoxElement extends HTMLElement {
     * 기존 단락들이 새 자식과 겹치는 영역을 회피하도록 재렌더링된다.
     */
   appendChildData(child: BoxData | ParagraphData | TextData | ImageData | TableData): LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | HTMLElement {
-    const currentData = this.data;
-    const currentChildren = currentData.children;
-    if (!currentChildren) {
-      this.data = { ...currentData, children: [child] as BoxData[] };
-    } else if (Array.isArray(currentChildren)) {
-      this.data = { ...currentData, children: [...currentChildren, child] as BoxData[] };
-    } else {
-      this.data = { ...currentData, children: [currentChildren, child] as BoxData[] };
-    }
+    this._appendChildData(child);
+    this.requestRerenderAffectedParagraphs();
     return this.items[this.items.length - 1] as LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | HTMLElement;
   }
 

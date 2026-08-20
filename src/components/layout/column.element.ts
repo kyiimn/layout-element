@@ -2,6 +2,8 @@ import { LayoutParagraphElement } from "./paragraph.element";
 import type { TextLineData, TextPartData } from "@/types/layout/text/text-line.type";
 import type { TextBlockStyle } from "@/types/style/text-block-style.type";
 
+const HOST_STYLE_ID = '__layout_host_style__';
+
 /**
  * 텍스트 컬럼 렌더링 요소. `<x-layout-column>` 커스텀 엘리먼트.
  *
@@ -262,7 +264,7 @@ export class LayoutColumnElement extends HTMLElement {
     if (!this.isConnected) return;
 
     // Preserve existing <style> element instead of innerHTML = ''
-    const existingStyleEl = this._shadowRoot.querySelector('style');
+    const existingStyleEl = this._shadowRoot.querySelector<HTMLStyleElement>(`style#${HOST_STYLE_ID}`);
 
     if (!this.model || this._index === undefined) {
       // Early return: remove line elements only, keep <style>
@@ -281,6 +283,7 @@ export class LayoutColumnElement extends HTMLElement {
     // Reuse or create <style> element
     const styleEl = existingStyleEl || document.createElement('style');
     if (!existingStyleEl) {
+      styleEl.id = HOST_STYLE_ID;
       this._shadowRoot.appendChild(styleEl);
     }
     // Update style rules only when colStyle actually changed

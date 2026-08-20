@@ -18,6 +18,8 @@ import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutTableElement } from "./table.element";
 import { LayoutTableRowElement } from "./tr.element";
 
+const HOST_STYLE_ID = '__layout_host_style__';
+
 /**
  * 테이블 셀 요소. `<x-layout-td>` 커스텀 엘리먼트.
  *
@@ -510,7 +512,7 @@ export class LayoutTableCellElement extends HTMLElement {
     const width = this._cellEngine?.width ?? this._width;
     const height = this._cellEngine?.height ?? this._height;
 
-    let styleEl = this._shadowRoot.querySelector('style');
+    let styleEl = this._shadowRoot.querySelector<HTMLStyleElement>(`style#${HOST_STYLE_ID}`);
     let needsInit = !styleEl
       || !styleEl.sheet
       || styleEl.sheet.cssRules.length === 0;
@@ -518,6 +520,7 @@ export class LayoutTableCellElement extends HTMLElement {
     if (needsInit) {
       if (styleEl) styleEl.remove();
       styleEl = document.createElement('style');
+      styleEl.id = HOST_STYLE_ID;
       this._shadowRoot.appendChild(styleEl);
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
