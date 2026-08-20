@@ -1877,8 +1877,11 @@ export function buildParagraphPrintPostData(
           const char = content[j];
           if (!char || char.length === 0) continue;
 
-          const charOffsetMm = charOffsets !== undefined && j < charOffsets.length
-            ? (charOffsets[j] ?? 0)
+          // charOffsets는 strip된(앞뒤 공백 제거) 기준 0부터 채워지므로
+          // raw 인덱스 j가 아닌 strip 기준 인덱스 k로 읽어야 한다.
+          const k = j - stripStart;
+          const charOffsetMm = charOffsets !== undefined && k < charOffsets.length
+            ? (charOffsets[k] ?? 0)
             : 0;
           const charXMm = colLeftMm + partLeftMm + charOffsetMm;
 
