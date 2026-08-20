@@ -743,16 +743,38 @@ export class LayoutTableCellElement extends HTMLElement {
     }
   }
 
+  /**
+   * 셀에 새로운 자식 박스 데이터를 추가한다.
+   *
+   * 실제 DOM 생성은 `_appendChildData`가 담당하고, 이 메서드는 내부 `_children` 배열을
+   * 갱신하고 영향받는 문단의 재렌더를 요청한다. `data` setter를 재진입하지 않으므로
+   * `set data` → `_appendChildData` → `appendChildData` → `set data` 무한 재귀가
+   * 발생하지 않는다 (`box.element.ts`와 동일한 패턴).
+   *
+   * @param child - 추가할 박스 데이터
+   * @returns 생성된 `LayoutBoxElement`
+   * @example
+   *   const newBox = td.appendChildData({ type: 'box', /* ... *\/ });
+   *   // newBox는 셀의 마지막 자식으로 렌더링된다
+   */
   appendChildData(child: BoxData): LayoutBoxElement {
-    const currentData = this.data;
-    const currentChildren = currentData.children ?? [];
-    const newChildren = [...currentChildren, child];
-    this.data = { ...currentData, children: newChildren };
+    this._appendChildData(child);
+    this._children.push(child);
     return this.items[this.items.length - 1] as LayoutBoxElement;
   }
 
+  /**
+   * 자식 박스 DOM 요소를 생성하여 셀에 직접 추가한다.
+   *
+   * `data` setter를 거치지 않고 DOM만 조작하므로 재귀가 발생하지 않는다.
+   * `data` setter의 자식 조정(reconcile) 루프와 `appendChildData` 양쪽에서 호출된다.
+   *
+   * @param child - 생성할 박스 데이터
+   */
   private _appendChildData(child: BoxData): void {
-    this.appendChildData(child);
+    const boxEl = document.createElement('x-layout-box');
+    boxEl.data = child;
+    this.appendChild(boxEl);
   }
 
   private _serializeChildren(): BoxData[] {
