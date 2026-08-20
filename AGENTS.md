@@ -4,9 +4,9 @@
 
 Newspaper layout engine implemented as Web Components (Custom Elements). Renders document layouts in the browser — multi-column text, character-by-character text wrapping with overlap avoidance around images, and proportional font width (장평) control — features CSS cannot properly handle.
 
-**Engine-first principle**: The engine tree (`DocumentEngine` → `BoxEngine` → `ParagraphEngine`/`ImageEngine`/`TableEngine`) is the single source of truth for all layout calculations. DOM elements consume engine results for display and WYSIWYG editing — they do not create or modify the engine tree. When editing occurs, the edited content is serialized into `DocumentData`/`BoxData`, the engine reprocesses it, and the result propagates to the DOM. See `RULES.md` Section 2.9 for details.
+**Engine-first principle**: The engine tree (`DocumentEngine` → `BoxEngine` → `ParagraphEngine`/`ImageEngine`/`TableEngine`) is the single source of truth for all layout calculations. DOM elements consume engine results for display and WYSIWYG editing — they do not create or modify the engine tree. When editing occurs, the edited content is serialized into `DocumentData`/`BoxData`, the engine reprocesses it, and the result propagates to the DOM.
 
-**Editing support is under development.** Cursor, selection, and IME composition are implemented in `TextEditController` and `TextEditCoordinateMapper`. Edit state (focus, events) is managed by per-document `EditManager` instances — each `LayoutDocumentElement` owns its own `EditManager`, created in its constructor (`new EditManager(this)`) and reset (not destroyed) in `disconnectedCallback` via `editManager.reset()`.
+**Editing support is under development.** Cursor, selection, and IME composition are implemented in `TextEditController` and `TextEditCoordinateMapper`. Edit state (focus, events) is managed by per-document `EditManager` instances.
 
 ## Commands
 
@@ -19,64 +19,39 @@ npm run preview          # Preview production build
 
 No test runner, linter, or formatter is configured.
 
-> **See also**: `RULES.md` for code modification rules, intentional design decisions, and common mistakes to avoid.
-
 ## Required Documentation Loading
 
 Before working on any feature, you **must** read the corresponding documentation file first. After completing changes, you **must** also update the documentation to reflect the results.
 
 | Feature Area | Required Reading | When to Load |
 |---|---|---|
-| Paragraph text rendering | `docs/TEXT_ENGINE.md` | Any request, modification, or work involving ParagraphEngine, text wrapping, column rendering, character layout, or overlap avoidance |
-| Font & color management | `docs/RESOURCE.md` | Any request, modification, or work involving FontLoader, ColorRegistry, CMYK/RGB conversion, CSS variable injection, or font registration |
-| Text editing mode | `docs/EDITING_TEXT.md` | Any request, modification, or work involving TextEditController, TextEditCoordinateMapper, EditManager text-mode API, cursor, selection, IME composition, or keyboard shortcuts |
-| Layout editing mode | `docs/EDITING_LAYOUT.md` | Any request, modification, or work involving layout editing, box positioning, interactive layout changes, drag/resize, or selection (LayoutEditController, LayoutSelectionController) |
-| Insert mode | `docs/EDITING_INSERT.md` | Any request, modification, or work involving InsertController, insert mode activation, drag-to-insert, target container selection, or element creation during insert |
-| EditManager events | `docs/EDITING_EVENTS.md` | Any request, modification, or work involving EditManager event types, payload fields, event dispatch, `addEventListener`/`removeEventListener`, `_dispatching` reentrancy guard, or `_suppressNextClick` click suppression |
-| Place Gun | `docs/EDITING_PLACE_GUN.md` | Any request, modification, or work involving Place Gun, PlaceGunItem, PlaceGunController, item loading/unloading, click-to-place, pause, or reorder |
-| Table editing | `docs/EDITING_TABLE.md` | Any request, modification, or work involving table element, cell block selection (F5/F7/F8), cell merge/split, table resize handles, TableKeyboardController, TableStructureEditor, TD/TR element behavior, or table keyboard shortcuts |
-| Rendering performance | `docs/PERFORMANCE.md` | Any request, modification, or work involving rendering optimization, LRU caching, char width cache, style cache, span skip condition, queueMicrotask batch rendering, incremental style sheet update, or performance-critical hot paths in ParagraphEngine or column rendering |
-| Vanilla JS API reference | `docs/API.md` | Any request, modification, or work involving Custom Element public API (properties, methods, events), paragraph/image element public properties, utility functions, or constants |
-| React component layer | `docs/REACT_COMPONENT.md` | Any request, modification, or work involving React wrapper components (`LayoutDocument`, `LayoutBox`, `LayoutParagraph`, `LayoutImage`, `LayoutTable`, `LayoutTableRow`, `LayoutTableCell`), their props, or hooks (`useEditManager`, `useLayoutElement`, `useEditableText`) |
-| Engine layer (Node.js) | `docs/ENGINE.md` | Any request, modification, or work involving `src/engine/` classes (`DocumentEngine`, `BoxEngine`, `ParagraphEngine`, `ImageEngine`, `TableEngine`, `GridCalculatorEngine`, `FontLoaderEngineImpl`, `ColorRegistryEngineImpl`), ppm injection, RGBA data, overlap detection, or Node.js compatibility |
-
-**Rule**: Load the doc → understand current state → implement changes → update the doc to reflect what changed.
-
-## Mandatory Documentation Updates
-
-When you make **any** of the following changes, you **must** update the corresponding `docs/` file(s) before completing the work:
-
-| Change Type | Examples | Must Update |
-|---|---|---|
-| **Feature added** | New property, method, event, mode, or capability | Relevant `docs/*.md` + `AGENTS.md` if architecture changed |
-| **Feature modified** | Behavior change, parameter/return type change, algorithm update | Relevant `docs/*.md` |
-| **Feature removed** | Deleted property, method, event, or capability | Relevant `docs/*.md` |
-| **Interface changed** | New/removed/renamed type, class, function signature, or export | Relevant `docs/*.md` + `AGENTS.md` if directory structure changed |
-| **Public API changed** | New/changed/removed `EditManager` API, `BoxData` field, `ParagraphData` field, custom element attribute/property | Relevant `docs/*.md` |
-
-**Rule**: If a user-visible behavior, API surface, or data shape changed, the docs **must** reflect it. "Should work the same" is not documentation — if the code changed, verify the docs still match.
+| Paragraph text rendering | `docs/TEXT_ENGINE.md` | ParagraphEngine, text wrapping, column rendering, character layout, overlap avoidance |
+| Font & color management | `docs/RESOURCE.md` | FontLoader, ColorRegistry, CMYK/RGB conversion, font registration |
+| Text editing mode | `docs/EDITING_TEXT.md` | TextEditController, TextEditCoordinateMapper, EditManager text-mode API, cursor, selection, IME composition, keyboard shortcuts |
+| Layout editing mode | `docs/EDITING_LAYOUT.md` | LayoutEditController, LayoutSelectionController, box positioning, drag/resize, selection |
+| Insert mode | `docs/EDITING_INSERT.md` | InsertController, insert mode activation, drag-to-insert, target container selection |
+| EditManager events | `docs/EDITING_EVENTS.md` | EditManager event types, payload fields, event dispatch, reentrancy guard |
+| Place Gun | `docs/EDITING_PLACE_GUN.md` | PlaceGunController, item loading/unloading, click-to-place, pause, reorder |
+| Table editing | `docs/EDITING_TABLE.md` | Table element, cell block selection, cell merge/split, table keyboard shortcuts, TableStructureEditor |
+| Rendering performance | `docs/PERFORMANCE.md` | LRU caching, char width cache, style cache, queueMicrotask batch rendering, incremental style sheet update, skeleton layout cache |
+| Vanilla JS API reference | `docs/API.md` | Custom Element public API (properties, methods, events), utility functions, constants |
+| React component layer | `docs/REACT_COMPONENT.md` | React wrapper components, props, hooks (`useEditManager`, `useLayoutElement`, `useEditableText`) |
+| Engine layer (Node.js) | `docs/ENGINE.md` | `src/engine/` classes, ppm injection, RGBA data, overlap detection, Node.js compatibility |
 
 ## Build Output
 
-- **IIFE bundle** (`dist/layout-element.iife.js`)
-  - Format: IIFE (`formats: ['iife']` in `vite.config.ts`)
-  - Global name: `LayoutElement`
-  - Entry: `src/index.ts`
-  - Does **not** contain React code
-- **React ESM bundle** (`dist/layout-element-react.mjs`)
-  - Format: ESM (`formats: ['es']` in `vite.config.react.ts`)
-  - Entry: `src/react/index.ts`
-  - Externalizes `react` and `react/jsx-runtime` (peer dependency)
-- **Types**: Generated via `vite-plugin-dts` with `insertTypesEntry` — produces a bundled `dist/layout-element.d.ts` (entry) and per-file `dist/**/*.d.ts`
-- **Path alias**: `@` → `./src/*` (both tsconfig.json and vite.config.ts)
+- **IIFE bundle** (`dist/layout-element.iife.js`): Format IIFE, global name `LayoutElement`, entry `src/index.ts`, no React code.
+- **React ESM bundle** (`dist/layout-element-react.mjs`): Format ESM, entry `src/react/index.ts`, externalizes `react` and `react/jsx-runtime` (peer dependency).
+- **Types**: `vite-plugin-dts` with `insertTypesEntry` — produces `dist/layout-element.d.ts` and per-file `dist/**/*.d.ts`.
+- **Path alias**: `@` → `./src/*`.
 
 ## Architecture
 
 ### Custom Element Tree
 
 ```
-<x-layout-document>          ← Root. Owns DocumentEngine (GridCalculatorEngine), coordinates rendering pipeline
-  <x-layout-guide-column>    ← Debug grid overlay (printPostData for post-processing)
+<x-layout-document>          ← Root. Owns DocumentEngine, coordinates rendering pipeline
+  <x-layout-guide-column>    ← Debug grid overlay
   <x-layout-box>             ← Positioned container (static=column-grid | absolute=mm coords)
     <x-layout-paragraph>     ← Multi-column text area with wrapping; owns TextEditController when editableText
       <x-layout-column>      ← Individual text column (rendered text lines)
@@ -87,91 +62,146 @@ When you make **any** of the following changes, you **must** update the correspo
           <x-layout-box>     ← Cell content (paragraph/image/nested-table wrapped in box)
 
 Edit mode elements (in shadow DOM of <x-layout-paragraph>):
-  <x-layout-cursor>         ← 1px width cursor element (in src/components/edit/)
-  <x-layout-selection>      ← Selection highlight element (in src/components/edit/)
+  <x-layout-cursor>         ← 1px width cursor element
+  <x-layout-selection>      ← Selection highlight element
 ```
 
 ### Rendering Pipeline (3 phases)
 
-1. **`layout()`** — synchronous. Calls `_layoutStructure()` (model data assignment), `_applyStyle()` (CSS styles), `_renderGuideColumns()` (document) / `_renderBorder()` (box/table) (structural DOM), `_propagateInheritStyle()` (child style propagation). Table additionally calls `_renderResizeHandles()` and optionally `_renderSelectionOverlay()`. Each element decomposes layout into these private sub-methods.
-2. **`render()`** — async. Delegates to element-specific rendering: `render()` in document/box sorts children by z-index and recurses; `render()` in paragraph calls ParagraphEngine for text wrapping + column DOM update; `render()` in image loads and crops canvas image.
-3. **`renderText()`** (on `<x-layout-column>`) — Diff-based character-by-character rendering inside `render()` via ParagraphEngine. Reuses existing spans by `data-source-offset` key.
+1. **`layout()`** — synchronous. `_layoutStructure()` (model data assignment), `_applyStyle()` (CSS styles), `_renderGuideColumns()` (document) / `_renderBorder()` (box/table), `_propagateInheritStyle()` (child style propagation). Table additionally calls `_renderResizeHandles()` and optionally `_renderSelectionOverlay()`.
+2. **`render()`** — async. `render()` in document/box sorts children by z-index descending and recurses; `render()` in paragraph calls ParagraphEngine for text wrapping + column DOM update; `render()` in image loads and crops canvas image.
+3. **`renderText()`** (on `<x-layout-column>`) — Diff-based character-by-character rendering via ParagraphEngine. Reuses existing spans by `data-source-offset` key.
 
 **Order matters.** `layout()` must complete before `render()`; image elements must render before adjacent text so overlap detection works.
 
 ### Key Domain Concepts
 
-- **All measurements are in mm** (millimeters). `LayoutDocumentElement.ppm` (pixels-per-mm, measured from a 100mm `<div>`) is injected into `DocumentEngine.ppm` and converts to screen pixels at runtime. Engine computations are mm-only — ppm is optional and only needed for browser display.
+- **All measurements are in mm** (millimeters). `LayoutDocumentElement.ppm` (pixels-per-mm, measured from a 100mm `<div>`) is injected into `DocumentEngine.ppm`. Engine computations are mm-only — ppm is optional and only needed for browser display.
 - **Column grid system**: `columns: number` = equal-width columns; `columns: number[]` = explicit per-column widths. Same for `gap`.
 - **`position: 'static'`** (default): `left` = column index (0-based), `width` = column span count, `height` = line count. **Not mm.**
 - **`position: 'absolute'`**: `left`/`top`/`width`/`height` are actual mm values.
-- **`BoxRole`** (`BoxData.role`): 박스의 의미적 역할. `<x-layout-box>`의 `role` 속성으로 설정되며, 렌더링 및 레이아웃 배치 시 참조된다. 가능한 값: `'group-article'` (기사 그룹 컨테이너), `'body'` (본문 영역), `'image'` (이미지 영역), `'title'` (제목 영역), `'caption'` (캡션 영역), `'group-image'` (이미지 그룹 컨테이너), `'header'` (면머리 그룹 컨테이너), `'ad'` (광고 이미지 영역), `'byline'` (기자정보 영역), `'none'` (역할 없음, 기본값).
+- **`BoxRole`** (`BoxData.role`): `'group-article'`, `'body'`, `'image'`, `'title'`, `'caption'`, `'group-image'`, `'header'`, `'ad'`, `'byline'`, `'none'` (default).
 - **InheritStyle cascade**: `TextStyle` + `ParagraphStyle` + parent dimensions flow downward. Children override individual fields.
-- **Text overflow**: dispatched as `render-error` CustomEvent with `{ type: 'text-overflow', overflow: number }`. 오버플로우 발생 시 `:host`에 하단 8px 빨간 inset shadow(`inset 0 -8px 0 0 #ff0000`)가 자동 적용된다.
-- **Render complete**: `LayoutParagraphElement.render()` 완료 후 항상 `render-complete` CustomEvent가 디스패치된다. 페이로드는 `RenderCompleteEventDetail` 타입(`{ type: 'paragraph', id, placed: { chars, lines }, overflow: { hasOverflow, chars, lines }, columnCount }`). `render-error`와 독립적으로 동작하며 기존 이벤트에 영향을 주지 않는다.
-- **Overlap padding**: `overlapPadding` on `ImageData` adds padding around opaque image pixels during overlap detection. Values in mm; `number` applies equally to all sides, `{ top?, right?, bottom?, left? }` allows asymmetric padding. Uses per-column ellipse detection: for each opaque pixel, normalized distance `(ndx² + ndy² ≤ 1)` determines if the pixel's padding zone reaches the text line. Transparent pixels are excluded. Each opaque column's blocking range is extended horizontally by `padLeft`/`padRight`.
-- **Overlap mode**: `overlapMode` on `ImageData` controls how text wraps around an image that floats above a paragraph (higher z-index). Three modes: `'path'` (default) — text follows the opaque pixel contour, flowing through transparent areas; `'box'` — image is treated as a solid box, text wraps around the box rect (transparent areas also block text), `overlapPadding` still applies; `'none'` — no overlap avoidance, text is written under the image and the image covers it. `'none'` images are excluded from `overlayElements` so `ParagraphEngine` does not treat them as overlap elements. `LayoutImageElement.overlapMode` setter triggers `requestRerenderAffectedParagraphs()` on change. **Paragraph overlap mode**: `ParagraphData.overlapMode` (`ParagraphOverlapMode = 'box' | 'none'`, default `'box'`) controls whether other paragraphs treat this paragraph's enclosing box as a text-avoidance target. `'none'` excludes the box from `overlayElements` so other paragraphs do not wrap around it. Used by layout-editor for byline boxes — when `role === 'byline'`, the inner paragraph's `overlapMode` is set to `'none'` to prevent body paragraphs from treating byline as an overlay (which would cause an infinite reflow loop). `LayoutParagraphElement.overlapMode` setter triggers `requestRerenderAffectedParagraphs()` on change.
-- **AI processing overlay**: `<x-layout-paragraph>`와 `<x-layout-image>`는 휘발성 `aiProcessing: boolean` property를 가진다. `true`로 설정하면 요소를 반투명 오버레이(`rgba(255,255,255,0.55)`)로 덮고 shimmer + spinner 애니메이션을 표시한다. 오버레이는 `pointer-events: auto`로 마우스 이벤트를 가로채 요소 조작을 차단한다. `data` getter에 포함되지 않으므로 저장/직렬화 시 자동 제외되는 휘발성 속성이다. `layout()`/`render()`를 트리거하지 않아 비용이 거의 없다. 오버레이 구현은 `src/utils/ai-processing-overlay.ts`의 헬퍼 함수들(`createAiProcessingOverlay`, `setAiProcessingActive`, `isAiProcessingActive`, `removeAiProcessingOverlay`)이 담당한다.
+- **Text overflow**: `render-error` CustomEvent with `{ type: 'text-overflow', overflow: number }`. `:host` gets `inset 0 -8px 0 0 #ff0000` when overflow.
+- **Render complete**: `render-complete` CustomEvent after every `LayoutParagraphElement.render()`. Payload: `RenderCompleteEventDetail`.
+- **Overlap padding**: `overlapPadding` on `ImageData` — mm values, `number` or `{ top?, right?, bottom?, left? }`. Ellipse-based detection: `ndx² + ndy² ≤ 1`.
+- **Overlap mode**: `overlapMode` on `ImageData` — `'path'` (default, pixel contour), `'box'` (solid box), `'none'` (no avoidance). Paragraph-level: `ParagraphData.overlapMode` — `'box'` (default), `'none'` (excludes box from overlay targets).
+- **AI processing overlay**: `<x-layout-paragraph>` and `<x-layout-image>` have volatile `aiProcessing: boolean` property. `true` → semi-transparent overlay with shimmer + spinner. Not included in `data` getter. Implemented in `src/utils/ai-processing-overlay.ts`.
 
 ### Managers (ColorRegistry and FontLoader are singletons; EditManager is per-document. All must init before rendering.)
 
-- **`ColorRegistry`**: Loads `color.json` → CMYK→RGB→hex conversion. `getCSSColor(name)` returns hex strings directly (no CSS variable injection). CMYK→RGB 변환은 표준 변환 공식 `r = round(255 * (1 - c/255) * (1 - k/255))`을 사용한다. **`'default'` 색상 이름 사용 금지**: `get('default')` / `getCSSColor('default')`는 `Error`를 throw한다. 외부 코드는 명시적인 색상 이름을 사용해야 하며, 등록되지 않은 이름에 대한 폴백만 `_defaultColor`(K100 검정, `{c:0,m:0,y:0,k:255}`)에 의존한다. `_defaultColor`는 생성자에서 K100 검정으로 초기화되며 `init()` 후에도 변경되지 않는다.
-- **`FontLoader`**: Loads `fonts.json` → registers `FontFace` objects. Fetches `fonts.json` via `_loadServer()` (or a custom loader registered via `registerLoader()`) and registers fonts using `base64Data` when present, falling back to `ttfFilename` — i.e., `base64Data` takes precedence. `registerLoader(loader)` / `resetLoader()` allow replacing the default `fetch('fonts.json')` with a custom async loader (e.g., API endpoint). `init()` uses `_computeFontsSignature()` to skip redundant re-initialization when the same `Font[]` is passed again. Uses `opentype.js` (peer dependency) to parse font files at runtime; `getParsedFont()` returns a parsed `opentype.Font` whose glyph `advanceWidth` is used by `ParagraphEngine._charWidthMm()` for character width measurement. `getFontFamily(fontName?)` returns the matching `FontFace.family` from registered fonts (dynamic lookup, not hardcoded).
-- **`EditManager`**: Per-document instance (`src/edit/edit-manager.ts`) created in `LayoutDocumentElement`'s constructor (not a singleton — each document owns its own). Tracks focused paragraph/controller, dispatches events (`focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`, `layoutSelectionChange`, `layoutMove`, `layoutResize`, `layoutAdd`, `layoutRemove`, `insert`, `insertCancel`, `modeChange`, `boxPropertyChange`, `contextMenu`, `placeGunChange`, `placeGunBefore`, `placeGunAfter`, `cellSelectionChange`). Provides `focusParagraph()` / `blurParagraph()` API for programmatic focus control. `TextEditController` instances register/unregister with it. **Selection rules**: Selection is always active (except in insert mode). No `selectableMode` toggle needed — `LayoutSelectionController` is always attached. Clicking inside the document on empty space (not on a box) clears all selection and blurs text focus; clicking outside the document (e.g., toolbar) does nothing. Clicking a non-paragraph box (e.g., image box) while text-editing a paragraph explicitly calls `blurParagraph()` before `event.stopPropagation()` + `selectLayout(box)`, because `stopPropagation()` blocks the textarea blur event from reaching `_onBlur`, which would leave `_focusedController` stale (visual cursor gone, input blocked, but `manager.focusedParagraph` still returning the old paragraph). **Mode switching**: Each mode setter deactivates other modes when activated — `layoutEditMode = true` (or `{ type: 'move' }`) switches `textEditMode = false` and `insertMode = null`; `layoutEditMode = { type: 'reparent' }` enables reparent mode; `textEditMode = true` switches `layoutEditMode = false` and `insertMode = null`; `insertMode = (non-null)` switches both `layoutEditMode = false` and `textEditMode = false`. **Selection preservation across mode switches**: Mode switches do NOT clear selection. Exiting layout edit mode preserves the current selection (the `editableLayout` setter no longer calls `_unregisterLayout`). **Text edit mode selection**: Entering text edit mode reduces multi-selection to single selection — if any selected box has `contentType === 'paragraph'`, the topmost such box remains selected; otherwise, the topmost selected element remains. The remaining paragraph receives focus via `focusParagraph()`. **Insert mode**: Entering insert mode clears all selection (including focused box via `clearLayoutSelection(false)`). **Focused box selection preservation**: When a paragraph receives text-edit focus, its parent `<x-layout-box>` is automatically selected via `_selectBoxForParagraph()`. This selection persists through blur (focus leaving the paragraph, but not moving to another paragraph) and mode switches. `clearLayoutSelection(preserveFocusedBox)` preserves the focused paragraph's parent box using `_lastFocusedBox` fallback when `_focusedController` is already null. Only `_unregister` (controller destruction) or `clearLayoutSelection(false)` (empty space click, insert mode) clears `_lastFocusedBox`. **Layout add/remove events**: `layoutAdd` dispatched when a layout element is added to the DOM (insert mode or reparent). `layoutRemove` dispatched when a layout element is removed from the DOM (reparent). Both include `source` field (`'insert'`, `'reparent'`, or `'programmatic'`); note that `'programmatic'` is defined in the type union but not currently dispatched by any code path. **Tab navigation**: `EditManager` exposes `navigateByTab(shiftKey: boolean): boolean` for programmatic Tab movement. `LayoutDocumentElement` handles the `Tab` key in `_onWindowKeyDown` at the `window` capture phase and calls `editManager.navigateByTab(shiftKey)` to move focus between editable paragraphs; `shift` reverses direction. The `Tab` event is intercepted before it reaches document-level handlers such as `_onTableKeyDown`.
+- **`ColorRegistry`**: Loads `color.json` → CMYK→RGB→hex. `getCSSColor(name)` returns hex. **`'default'` name is prohibited** — throws `Error`. Fallback: `_defaultColor` (K100 black).
+- **`FontLoader`**: Loads `fonts.json` → registers `FontFace` objects. `base64Data` takes precedence over `ttfFilename`. Uses `opentype.js` for char width measurement. `getFontFamily(fontName?)` returns dynamic `FontFace.family`.
+- **`EditManager`**: Per-document instance created in `LayoutDocumentElement` constructor. Dispatches events: `focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`, `layoutSelectionChange`, `layoutMove`, `layoutResize`, `layoutAdd`, `layoutRemove`, `insert`, `insertCancel`, `modeChange`, `boxPropertyChange`, `contextMenu`, `placeGunChange`, `placeGunBefore`, `placeGunAfter`, `cellSelectionChange`. Provides `focusParagraph()` / `blurParagraph()` API. `reset()` clears all edit state (not event listeners).
+
 ## Important Constraints
 
-- **Engine-first principle (엔진 우선 원칙)**: The engine tree (`DocumentEngine` → `BoxEngine` → `ParagraphEngine`/`ImageEngine`/`TableEngine`) is the single source of truth for all layout calculations. DOM elements consume engine results for display and WYSIWYG editing — they do not create or modify the engine tree to compensate for engine-side gaps. When editing occurs, the edited content is serialized into `DocumentData`/`BoxData`, the engine reprocesses it, and the result propagates to the DOM. DOM elements must never manually fill `engine.childEngines` from DOM children, nor bypass `DocumentEngine.layout()` to create engines independently. See `RULES.md` Section 2.9 for details.
-- **`_parentEngineRef` caching pattern**: `disconnectedCallback` fires after `this.parentElement` is already `null` per DOM spec. Elements that need to clean up their engine from the parent's engine tree must cache the parent engine reference in `connectedCallback` via `_parentEngineRef = this.parentElement?.engine ?? null`. In `disconnectedCallback`, use the cached `_parentEngineRef` to call `removeChildEngine()` or splice from `childEngines`. Applied to `LayoutBoxElement`, `LayoutParagraphElement`, `LayoutImageElement`.
-- **`ParagraphEngine.updateOverlayContext()`**: Lightweight overlay context update that preserves `_layoutCache`. Use this in `LayoutParagraphElement.render()` else branch (structure unchanged, overlay position only) instead of calling `_layoutStructure()` which triggers `data` setter → `resetIncrementalState()` → `_layoutCache = null`. The `data` setter always nukes the cache; `updateOverlayContext()` only resets `_overlayRectsMm` so the next `_detectOverlapWithCache` rebuilds overlay rects without discarding the cached layout result.
-- **No `new` on models**: `GridCalculatorEngine.create()` and `ParagraphEngine.create()` are the only way to instantiate. Constructors are `private`.
-- **Shadow DOM**: Every element uses `attachShadow({ mode: "open" })`. Styles are injected programmatically via `styleEl.sheet.insertRule()`, not in HTML templates.
-- **opentype.js font metrics for char width**: `_charWidthMm()` uses `opentype.js` font parsing (`FontLoader.getParsedFont()` → `glyph.advanceWidth / unitsPerEm * fontSize`) for character width measurement, not Canvas `measureText()`. A `minWidthMm = spaceRatio * fontSize` floor is applied. `genCharStyle()` sets `width`/`maxWidth` in **mm** (`${widthMm}mm`) and the inner span uses `scale: ${widthRatio * 0.88} 1` (the 0.88 correction factor compensates for the difference between advance width and visual glyph width) to implement 장평.
-- **Infinite loop guard**: `_layoutTextIntoColumns()` force-places characters wider than any available part width into the first part, preventing infinite loops.
-- **Cursor position in whitespace**: `getNearestOffsetFromPoint()` delegates to `getCharOffsetFromPoint()`, which filters spans by rounded `top`, picks the nearest center, and decides left/right of midpoint. No special trailing/leading whitespace bypass is implemented.
-- **ImageData coordinates depend on objectFit**: `x`, `y`, `width`, `height` in `ImageData` are now **optional**. Their meaning depends on `objectFit`:
-- **ImageData coordinates are mm-based**: `x`/`y`/`width`/`height` in `ImageData` are **mm-based display position and size** within the box. The browser loads a proxy image (not the actual full-resolution image) — the engine computes layout coordinates for visual display only, and actual image processing (crop, post-processing) is handled externally. `objectFit` controls how the proxy image is displayed: `cover`/`contain`/`fill` (default `cover`) compute crop region from `originalWidth`/`originalHeight`; `none` renders the entire image at the specified position/size. When `objectFit !== 'none'` and `originalWidth`/`originalHeight` are set, `_computeObjectFit` automatically computes the crop region.
-  `overlapPadding` values are always in mm and internally converted to screen pixels via `DocumentEngine.ppm`.
-- **Image Object URL lifecycle**: When `urlLoader` returns a `blob:` URL (or `url` itself is `blob:`), `LayoutImageElement` tracks it in `_objectUrl` and calls `URL.revokeObjectURL()` on re-render (when the new URL differs) and in `disconnectedCallback`. This prevents memory leaks from un-revoked Object URLs. External code should not revoke blob URLs passed to `LayoutImageElement` until after the element is disconnected.
-- **overlapPadding uses ellipse-based detection**: When `overlapPadding` is set on an image, `computeOverlapSizeMm()` uses per-column ellipse detection instead of simple rectangle intersection. Each opaque pixel's distance to the text line is normalized by the directional padding values (`ndx = dx/horizPad`, `ndy = dy/vertPad`), and pixels within the elliptical padding zone (`ndx² + ndy² ≤ 1`) are considered overlapping. This creates a naturally rounded padding zone around the image's opaque shape, not a rectangular bounding box. Transparent areas do not block text. Falls back to geometric expanded rectangle when canvas is unavailable.
-- **Custom URL loader for images**: `LayoutImageElement.urlLoader` is a static `URLLoader` member shared by all image instances. When set, `render()` passes `ImageData.url` through the loader to obtain the actual URL to load (sync or async). When unset, the original URL is used directly (default behavior). Returning `null`/`undefined` from the loader skips loading. Useful for CDN rewriting, signed-URL fetching, or returning inline `data:` URLs.
-- **`getFontFamily()` is dynamic**: Returns the matching `FontFace.family` from registered fonts via `this._fontFaces.find(f => f.name === fontName)?.fontFace.family`, falling back to the first registered font's family. Not hardcoded — actual return depends on loaded font data.
-- **No tests exist**: There is no test infrastructure. No `vitest`, no `jest`, no test files.
-- **ColorRegistry without stylesheet**: `ColorRegistry.init()` sets `_ready = true` even when no stylesheet is available (SSR, test environments). Color data is accessible via `colorMap` but CSS variables are not injected.
-- **Guide column printPostData**: `LayoutGuideColumnElement` has a `printPostData` getter that returns position/size data for post-processing, matching the pattern of other layout elements.
-- **EditManager per-document instance**: `LayoutDocumentElement.editManager` is an `EditManager` instance created in the `LayoutDocumentElement` constructor (not a singleton — each document owns its own). Each document owns its own edit state (scale, rootId, mode, focus, selection, Place Gun). `TextEditController` receives the EditManager in its constructor and auto-registers/auto-unregisters on construction/`destroy()`. Box and paragraph elements access their EditManager via the `editManager` getter (parent chain walk to `LayoutDocumentElement`). **`reset()` method**: `LayoutEditor` unmount 시 호출하여 잔류 편집 상태(선택, 포커스, 모드, 컨트롤러, 필터, Place Gun, scale)를 전체 초기화한다. 이벤트 리스너는 제거하지 않는다 (React `useEffect` cleanup이 담당). 종료 시 `modeChange` 이벤트 발생.
-- **Key-based span rendering**: `column.element.ts` `renderText()` uses `data-source-offset` as the reconciliation key for span diff rendering. Existing spans are reused when content unchanged; only changed spans are updated. `data-offset` (rendered offset) is retained for `EditCoordinateMapper` compatibility.
-- **`data-source-offset` vs `data-offset`**: `data-source-offset` = source string position (used as diff key). `data-offset` = rendered position (used by TextEditCoordinateMapper for click-to-cursor mapping). Both attributes coexist on every span.
-- **Optimistic spans are temporary**: `data-temporary="true"` spans are stripped at the start of every `renderText()` call and recreated by `TextEditController` as needed.
-- **Edited text flows through `model.textContent`**: When text is edited via `TextEditController`, only `model.textContent` is updated — `paragraph._sourceContent` remains the original setter value. Both `paragraph.data.content` getter and `_layoutStructure()` use `this._model?.textContent ?? this._sourceContent` to ensure the current rendered/edited text is always used, not the stale original. Without this, `layout()` triggered by a parent box move would overwrite `model.textContent` with the original empty string, erasing all user input.
-- **`paragraph.data` setter triggers `scheduleRender()`**: Setting `paragraph.data = {...}` directly calls `layout()` + sets `_perfStructureChanged = true` + calls `scheduleRender()`, ensuring the DOM is re-rendered. The `content` field (both `string` and `TextBlockData[]`) is propagated to `model.textContent` when the model already exists.
-- **`paragraph.content` setter supports `TextBlockData[]`**: The `content` setter accepts both `string` and `(string | TextBlockData)[]`. Both types are propagated to `model.textContent` (the `typeof value === 'string'` guard was removed). Setting `content` calls `markStructureChangedAndRender()` which routes through `scheduleRender()`.
-- **`ParagraphEngine.scale` 할당**: `LayoutParagraphElement.render()`가 `editManager.scale`을 읽어 `model.scale`에 할당한다. `ParagraphEngine.scale` setter는 현재 no-op이지만, future bridge stub으로 작동하며 setter가 구현되면 즉시 동작한다.
-- **TextEditContextAdapter** (`@deprecated`): `src/edit/text-edit-context-adapter.ts` bridges the browser EditContext API (Chromium 122+) with the layout engine. **Safari에서 EditContext API가 구현될 때까지 사용하지 않습니다.** `create()`는 항상 `null`을 반환하며, 모든 브라우저에서 textarea 기반 fallback 경로로 동작합니다. 크로스 브라우저 지원이 확보되면 이 어댑터를 활성화하고 `TextEditController`에 연결해야 합니다.
-- **Box child DOM mutation detection**: `<x-layout-box>` and `<x-layout-document>` both use a `MutationObserver` (`_childObserver`) with `{ childList: true }` to detect direct DOM additions/removals of children. When children are added or removed via DOM manipulation (not through the `data` setter), the observer triggers `layout()` + `render()` automatically, mirroring the behavior of the `data` setter. The `_rebuildingChildren` flag suppresses observer callbacks during `data` setter execution to avoid redundant layout passes. The `_pendingData` cache ensures the `data` getter returns the correct full data during setter execution (when intermediate child states may be inconsistent), preventing stale reads by external code.
-- **Diff-based `data` setter (ID-keyed child reconciliation)**: `LayoutDocumentElement` and `LayoutBoxElement` `data` setters no longer unconditionally remove + recreate all children. Instead, they reconcile by `id`:
-  0. Refresh own `GridCalculatorEngine` (`_layoutStructure()`) so `columnCoords` reflects the new `width`/`columns`/`gap`/`padding`. This must happen **before** any `appendChild`, because `appendChild` synchronously fires the child's `connectedCallback` → `layout()` → `relLeft`/`relTop` getters, which read `parentModel.columnCoords[this.left]`. Without this step, children read stale (or default `columns=1`) coordinates and crash on `undefined.x1`.
-  1. Build a `Map<id, element>` from existing children (`this.items`).
-  2. For each child in the new `data.children`:
-     - If `id` matches an existing element of the same tag type → reuse it: set `element.data = child` (in-place update, preserving image cache and avoiding flicker).
-     - Otherwise → create a new element via `appendChildData` / `document.createElement` + `.data = child`.
-  3. Reorder reused elements with `appendChild` to match the new children order.
-  4. Remove any existing elements whose `id` is not present in the new children set.
+### Engine-First Principle
 
-  This prevents image flicker during undo/redo and other full-document restores, because `LayoutImageElement` with the same `url` keeps its cached `HTMLImageElement` (`urlChanged === false` → `_clearImageCache()` skipped). Elements without an `id` are always recreated (no stable identity to match).
-- **`appendChildData`**: `LayoutBoxElement` and `LayoutDocumentElement` expose a public `appendChildData(data)` method that creates a new child element from data (`BoxData`/`ParagraphData`/`TextData`/`ImageData`), sets its `data` property (running the full initialization pipeline: `_layoutStructure` → `_applyStyle` → `_renderBorder` → `_propagateInheritStyle` → `render`), appends it, and returns the created element. Used by `LayoutEditController._tryReparent` to ensure new elements are fully initialized in the parent's `GridCalculatorEngine` context. (`InsertController._createElement` achieves the same initialization by setting `.data` before `appendChild` rather than calling `appendChildData` directly.)
-  - **`contentElement` getter**: `LayoutBoxElement.contentElement` recursively follows the same path as `contentType` to return the deepest non-box child (`LayoutImageElement` or `LayoutParagraphElement`). When `contentType === 'image'` but the actual image is nested inside child boxes (e.g., `headerBox → imageBox → image`), `items[0]` is a `LayoutBoxElement`, not the image. `computeOverlapSizeMm` uses `contentElement` to safely access `overlapPadding`, `canvas`, and the image's own mm coordinates (`absLeft`/`absTop`/`absWidth`/`absHeight`) for pixel mapping — using `items[0]` directly causes canvas to be `undefined`, falling back to geometric overlap with the full box rect and breaking text layout in all columns.
-- **Reparent mode**: `layoutEditMode = { type: 'reparent' }` enables free drag that can move boxes to different containers. During drag, boxes inside the parent use normal `left`/`top` updates (text reflow active); when dragged outside, `box.style.transform` is used to preserve rendering size. On mouseup, `_tryReparent` extracts `box.data`, converts coordinates to the new container's coordinate system, and clamps `left`/`top`/`width`/`height` to fit within the new container's editable area using `clampStaticToContainer` (static) or `clampAbsoluteToContainer` (absolute) — elements that are wider/taller than the container are shrunk to fit, and `left`/`top` are adjusted so the element stays fully inside. It sets `zIndex` to the new container's max + 1, removes the old box, and calls `newContainer.appendChildData()` to create a fully-initialized new box. The `reparent-target` DOM attribute (orange `#ff9800` 2px border) highlights the candidate container during drag. **Insert mode** and **Place Gun** also apply the same clamp logic when creating elements (`InsertController._createElement` and `PlaceGunController._injectElementPattern` use `clampStaticToContainer`/`clampAbsoluteToContainer` to ensure new elements fit within the target container). **Insert mode** reuses the same `reparent-target` attribute and CSS to highlight the candidate container during insert drag (`InsertController._updateInsertHighlight(previewRect)` calls `_findTargetContainer` on the snapped preview rect (not raw mouse coords); `_clearInsertHighlight` removes it on cleanup).
-- **z-index range constraint**: Layout element `zIndex` values must be in the range `0 ~ 90000`. The range `90001 ~ 99999` is reserved for special-purpose UI elements (edit handles, labels, overlays, table chrome) and must not be used for layout data. Values at or above `100000` are not used. Host element CSS `z-index` is set directly from `this.zIndex` (no offset). See `RULES.md` Section 8 for the reserved value table and `src/constants/defaults.ts` for the constants (`Z_INDEX_MAX_LAYOUT`, `Z_INDEX_RESIZE_HANDLE`, `Z_INDEX_TYPE_LABEL`, `Z_INDEX_INSERT_PREVIEW`, `Z_INDEX_AI_PROCESSING`, `Z_INDEX_TEXTAREA`, `Z_INDEX_MARQUEE_RECT`, `Z_INDEX_TABLE_BORDER`, `Z_INDEX_TABLE_DIAGONAL`, `Z_INDEX_TABLE_RESIZE`, `Z_INDEX_TABLE_SELECTION`). Note: `Z_INDEX_TEXTAREA = 9999` is intentionally below `90001` (textarea is an editing affordance, not layout data).
-- **Role-based z-index override**: When `BoxData.role` is `'ad'`, the `zIndex` getter returns `91000` (`Z_INDEX_ROLE_AD`); when `'header'`, it returns `91001` (`Z_INDEX_ROLE_HEADER`). The `_zIndex` internal field is preserved but the getter overrides it. **The `zIndex` setter and `data` setter's `zIndex` assignment are both blocked when `_role` is `'ad'` or `'header'`** — the fixed value cannot be changed. When the role is removed from `'ad'`/`'header'` (e.g., changed to `'none'`), `_zIndex` is restored to `max(siblings' non-override zIndex) + 1` (or `1` if no siblings), clamped to `Z_INDEX_MAX_LAYOUT`(90000). The `role` setter calls `layout()` + `requestRerenderAffectedParagraphs()` on change so the visual update is immediate. **New element creation (`InsertController._getNextZIndex`) and reparent (`LayoutEditController._tryReparent`) also exclude role-fixed z-index values (91000/91001) when computing `max(siblings' zIndex)` — these values are treated as 0 so that new elements get `max + 1` instead of being clamped to `Z_INDEX_MAX_LAYOUT`(90000).**
-- **Tab key interception order**: `LayoutDocumentElement._onWindowKeyDown` listens at the `window` capture phase for `Tab` and calls `editManager.navigateByTab(shiftKey)`. If `document.activeElement` is an `HTMLInputElement`, `HTMLTextAreaElement`, `HTMLButtonElement`, or `HTMLSelectElement`, the handler returns early so external input/textarea/button/select focus is preserved. Otherwise it calls `event.stopPropagation()` so the event never reaches document-level handlers, including `_onTableKeyDown`. This ensures editable paragraph Tab navigation runs before table keyboard shortcuts.
-- **LRU char width cache**: `ParagraphEngine._charWidthCache` (`LRU<string, number>`, capacity 5000) caches the raw `opentype.js` glyph `advanceWidth` result per `${char}|${fontName}|${fontSize}` key. The layout hot loop (`_layoutTextIntoColumns`) calls `_charWidthMm()` for every character on every reflow; without this cache, each call invokes `FontLoader.getParsedFont()` + `parsedFont.charToGlyph()`. With the cache, repeated characters across reflows return instantly. See `docs/PERFORMANCE.md` for details.
-- **LRU char outer style cache**: `ParagraphEngine._charOuterStyleCache` (`LRU<string, Partial<CSSStyleDeclaration>>`, capacity 5000) caches `genCharStyle()` results per `${char}|${widthRatio}|${letterSpacing}|${spaceRatio}` key. Previously used a plain `Map` with `size > 5000 → clear()` (full eviction, causing performance cliffs on large documents); now uses LRU eviction (only oldest entry removed on overflow). The key includes `letterSpacing` and `spaceRatio` to prevent stale cached styles when these values change. See `docs/PERFORMANCE.md` for details.
-- **Span style skip condition**: `LayoutColumnElement._skipSpanStyleIfUnchanged()` skips `_applySpanStyle()` entirely when a reused span's `data-offset`, `data-source-offset`, and inner `textContent` all match the current values. This avoids unnecessary `Object.assign(style, ...)` + `cssText = ''` + inner span `textContent` reassignment DOM writes on unchanged characters during diff-based `renderText()`. See `docs/PERFORMANCE.md` for details.
-- **queueMicrotask batch rendering**: `LayoutParagraphElement.scheduleRender()` coalesces multiple `render()` calls within a single event loop tick into one `render()` via `queueMicrotask`. All style setters (`textStyle`, `paragraphStyle`, `column`, `gap`), `markStructureChangedAndRender()`, and `TextEditController._debouncedRender()` route through `scheduleRender()` instead of calling `render()` directly. `flushRender()` cancels any pending `scheduleRender()` batch and runs `render()` immediately — used by `TextEditController` Enter/compositionend handlers that need synchronous cursor/selection update after `render()`. `LayoutBoxElement.scheduleRerenderAffectedParagraphs()` also uses `queueMicrotask` batching via `_rerenderScheduled` flag to coalesce per-setter AABB recalculation into a single microtask. See `docs/PERFORMANCE.md` for details.
-- **Incremental style sheet update**: `LayoutColumnElement.renderText()` only rebuilds the `:host` CSS rule in its `<style>` element when `genColumnStyle()` output actually changes (detected via `JSON.stringify(colStyle)` comparison against `_cachedColStyleKey`). Previously rebuilt the entire sheet (deleteRule + insertRule + Object.assign) on every `renderText()` call; now skips when the column style is unchanged. See `docs/PERFORMANCE.md` for details.
-- **Skeleton layout cache**: `ParagraphEngine._layoutCache` stores the result of `_layoutTextIntoColumns()` (`_columnContents` + `_overflow`) keyed by an input-parameter hash (`textContent`, `columnWidths`, `gaps`, `lineHeight`, `widthRatio`, `letterSpacing`, `spaceRatio`, `fontSize`, `parentHeight`, `paragraph.absLeft/absTop`, overlay element positions). When the hash is unchanged (e.g., box move without overlap changes), the entire text re-layout is skipped and the cached result is returned. `resetIncrementalState()` clears the cache. `LayoutImageElement.render()` calls `_notifyOverlapParagraphs()` after the first image load to invalidate the cache via `requestRerenderAffectedParagraphs()` → `markStructureChangedAndRender()` → `resetIncrementalState()`, ensuring overlap detection runs with the fully loaded canvas. See `docs/PERFORMANCE.md` for details.
-- **Box resize rules**: `_computeNewSize()` enforces minimum size (static: 1단×1라인, absolute: 5mm×5mm) and child-content-based blocking — when shrinking, the box width/height cannot go below the mm-based maximum `(left+width)`/`(top+height)` of child box elements (`_computeChildMinRightMm()`/`_computeChildMinBottomMm()`). Growing uses the same logic as before (parent editable area as max). **Multi-select resize**: `_applyMultiResize()` propagates the main box's per-frame delta (`box.left - prevLeft`, etc.) to all other selected boxes of the same position type (absolute↔absolute, static↔static), applying the same delta to each. The main box is excluded (already resized). Minimum size is enforced on each box independently.
-- **Container clamp on reparent/insert/placegun**: `clampStaticToContainer()` and `clampAbsoluteToContainer()` (`src/utils/static-grid-containment.ts`) ensure elements fit within the target container — static elements are clamped to `0 ~ columnCount` (columns) and `0 ~ containerLineCount` (lines), absolute elements to `0 ~ editableWidth` (mm) and `0 ~ editableHeight` (mm). Applied in `LayoutEditController._tryReparent()`, `PlaceGunController._injectElementPattern()`, and `InsertController._createElement()`.
+- The engine tree is the single source of truth for all layout calculations. DOM elements must never manually fill `engine.childEngines` from DOM children, nor bypass `DocumentEngine.layout()` to create engines independently.
+- When editing occurs: edited content → `DocumentData`/`BoxData` serialization → engine reprocess → result propagates to DOM.
+
+### `disconnectedCallback` — No Engine Splice
+
+- **`disconnectedCallback` must NOT splice the element's engine from the parent's `childEngines`/`childBoxEngines`.**
+- Reason: `data` setter's ID-keyed reconcile uses `appendChild` to reorder existing children. `appendChild` fires `disconnectedCallback` → `connectedCallback` within the same parent. Splicing the engine during this transient disconnect causes `_buildTree`'s `findBoxEngineById` to miss the existing engine and create a new one, losing engine state (rgbaData, _layoutCache, etc.).
+- `DocumentEngine._buildTree()` rebuilds the entire engine tree on every `layout()` call, so manual splice is redundant.
+- Applied to: `LayoutBoxElement`, `LayoutParagraphElement`, `LayoutImageElement`.
+
+### `disconnectedCallback` — Image Cache Preservation
+
+- **`LayoutImageElement.disconnectedCallback` must NOT call `_clearImageCache()`.**
+- During `data` setter reconcile, `appendChild` triggers `disconnectedCallback`. Clearing the cache forces async re-loading (`await _resolveUrl + await _loadImage`), causing image flicker.
+- Image cache is invalidated only on URL change (`data`/`url` setter) or explicit `_clearImageCache()` call.
+
+### `disconnectedCallback` — Cursor/Selection Preservation
+
+- **`LayoutParagraphElement.disconnectedCallback` saves cursor offset and selection** via `_savedCursorOffset` / `_savedSelection` before destroying `_editController`.
+- **`connectedCallback` restores them** when recreating `_editController`, then clears the saved values.
+- This prevents cursor jump during `data` setter reconcile.
+
+### `HOST_STYLE_ID` — Style Element Identification
+
+- All layout elements (`box`, `column`, `table`, `td`, `tr`, `paragraph`) use `HOST_STYLE_ID = '__layout_host_style__'` to identify their own `<style>` element in shadow DOM.
+- `_applyStyle()` queries `style#${HOST_STYLE_ID}` instead of bare `querySelector('style')`.
+- Reason: AI processing overlay adds its own `<style>` element (`OVERLAY_STYLE_ID`). Without ID-based query, `_applyStyle()` could pick up the AI overlay style and overwrite it, losing `:host` rules.
+- `removeAiProcessingOverlay()` also removes its own style element (`OVERLAY_STYLE_ID`) to prevent accumulation across disconnect/reconnect cycles.
+
+### `ParagraphEngine.updateOverlayContext()` — Cache-Preserving Overlay Update
+
+- `updateOverlayContext(overlayEngines, parentAbsRect, inheritStyle)` updates overlay context while preserving `_layoutCache`.
+- Use this instead of `data` setter (which calls `resetIncrementalState()` → `_layoutCache = null`) when only overlay positions changed.
+- `_computeLayoutInputHash()` includes overlay positions, so if positions are unchanged, `layoutText()` returns cached result in O(1).
+- Used in: `LayoutParagraphElement.render()` else branch, `DocumentEngine._refreshParagraphOverlays()`.
+
+### `DocumentEngine._refreshParagraphOverlays()` — Overlay Refresh
+
+- Called after `_buildTree()`. Updates all paragraph overlay contexts.
+- Uses `updateOverlayContext()` (not `data` setter) to preserve `_layoutCache`.
+- **Traverses `TableEngine` children**: `rowEngines` → `cellEngines` → `cellEngine.boxEngine` → recursive `_refreshParagraphOverlays([cellBox])`. TableEngine is not in `BoxEngine.childBoxEngines`, so explicit traversal is required.
+- **No `overlayEngines.length > 0` guard**: All paragraphs are refreshed, including those with zero overlays. This ensures paragraphs that previously had overlays but no longer do are updated (stale overlayEngines cleared).
+
+### `DocumentEngine._buildParagraphEngine()` — No `layoutText()`
+
+- `_buildParagraphEngine` does NOT call `layoutText()`. It only calls `layoutStructure()`.
+- `layoutText()` is executed once in `_refreshParagraphOverlays()`.
+- Reason: Previously `_buildParagraphEngine` called `layoutText()`, then `_refreshParagraphOverlays` called `data` setter → `resetIncrementalState()` → `_layoutCache = null`, discarding the first `layoutText()` result. Now there is a single `layoutText()` execution.
+
+### `DocumentEngine._buildBoxEngine()` — GC Reuse
+
+- `_buildBoxEngine` checks if the existing `GridCalculatorEngine` has the same parameters via `_gcParamsEqual()`. If equal, the GC instance is reused (skipping `_calcColumnGridCoords`).
+- Compared fields: `width`, `height`, `paddingTop/Right/Bottom/Left`, `columns`, `gap` (via `valueEqual`), `paragraphStyle` (reference equality), `textStyle` (reference equality), `isBox`.
+- `paragraphStyle`/`textStyle` are from `this._data` (DocumentData), so they are stable references within a single `layout()` call.
+
+### `appendChildData()` — Incremental Addition
+
+- `LayoutBoxElement.appendChildData(child)` and `LayoutDocumentElement.appendChildData(child)` use `_appendChildData(child)` + `requestRerenderAffectedParagraphs()` — NOT `this.data = {...}` round-trip.
+- The `data` setter round-trip reconciles ALL existing children (`.data = child` → each child's `layout()` + `render()`), causing O(N) redundant rendering for a single child addition.
+- Incremental path: O(1) — only the new child is created + rendered, then affected paragraphs re-render.
+- The `data` setter is still used for full-document restores (undo/redo, external data assignment) where ID-keyed reconciliation is needed.
+
+### Diff-based `data` Setter (ID-keyed child reconciliation)
+
+- `LayoutDocumentElement` and `LayoutBoxElement` `data` setters reconcile children by `id`:
+  0. Refresh own `GridCalculatorEngine` (`_layoutStructure()`) before any `appendChild` (children's `connectedCallback` reads `parentModel.columnCoords`).
+  1. Build `Map<id, element>` from existing children.
+  2. For each child: if `id` matches existing element of same tag type → reuse (`element.data = child`), else create new.
+  3. Reorder with `appendChild`.
+  4. Remove unused elements.
+- Elements without `id` are always recreated.
+
+### z-index Range Constraint
+
+- Layout element `zIndex`: `0 ~ 90000` (`Z_INDEX_MAX_LAYOUT`).
+- `90001 ~ 99999`: reserved for UI elements (edit handles, labels, overlays, table chrome). See `src/constants/defaults.ts`.
+- Role-based override: `role: 'ad'` → `91000` (`Z_INDEX_ROLE_AD`), `role: 'header'` → `91001` (`Z_INDEX_ROLE_HEADER`). Setter and `data` setter's zIndex assignment are blocked when role is `ad`/`header`.
+- `Z_INDEX_TEXTAREA = 9999` is intentionally below `90001` (editing affordance, not layout data).
+
+### Other Constraints
+
+- **No `new` on models**: `GridCalculatorEngine.create()` and `ParagraphEngine.create()` are the only way to instantiate. Constructors are `private`.
+- **Shadow DOM**: Every element uses `attachShadow({ mode: "open" })`. Styles injected via `styleEl.sheet.insertRule()`.
+- **opentype.js char width**: `_charWidthMm()` uses `glyph.advanceWidth / unitsPerEm * fontSize`. `minWidthMm = spaceRatio * fontSize` floor. `genCharStyle()` sets `width`/`maxWidth` in mm, inner span uses `scale: ${widthRatio * 0.88} 1` for 장평.
+- **Infinite loop guard**: `_layoutTextIntoColumns()` force-places characters wider than any part width into the first part.
+- **`getFontFamily()` is dynamic**: Returns matching `FontFace.family` from registered fonts, not hardcoded.
+- **No tests exist**: No test infrastructure. Verify with `npm run build` and `npm run dev`.
+- **`noUnusedLocals`/`noUnusedParameters`**: Enabled in tsconfig — dead imports/params cause build errors.
+- **TypeScript 7 RC**: `noEmit: true` — `tsc` is type-check only, Vite handles compilation.
+- **Key-based span rendering**: `renderText()` uses `data-source-offset` as diff key. `data-offset` (rendered position) coexists for `EditCoordinateMapper`.
+- **Optimistic spans**: `data-temporary="true"` spans stripped at start of every `renderText()`.
+- **Edited text flows through `model.textContent`**: `paragraph.data.content` getter and `_layoutStructure()` use `this._model?.textContent ?? this._sourceContent`.
+- **`paragraph.data` setter triggers `scheduleRender()`**: `layout()` + `_perfStructureChanged = true` + `scheduleRender()`.
+- **TextEditContextAdapter** (`@deprecated`): `create()` always returns `null`. Textarea-based fallback is used in all browsers.
+- **Box child DOM mutation detection**: `MutationObserver` (`_childObserver`) with `{ childList: true }`. `_rebuildingChildren` flag suppresses during `data` setter. `_pendingData` cache ensures correct `data` getter during setter execution.
+- **`contentElement` getter**: Recursively follows `contentType` path to return deepest non-box child. Used by `computeOverlapSizeMm` for safe `overlapPadding`/`canvas`/mm coordinate access in nested box structures.
+- **Reparent mode**: `layoutEditMode = { type: 'reparent' }`. `_tryReparent` extracts `box.data`, converts coordinates, clamps via `clampStaticToContainer`/`clampAbsoluteToContainer`, sets zIndex to new container's max + 1, calls `newContainer.appendChildData()`.
+- **Container clamp**: `clampStaticToContainer`/`clampAbsoluteToContainer` applied in reparent, insert, and placegun.
+- **Tab key interception**: `LayoutDocumentElement._onWindowKeyDown` at `window` capture phase calls `editManager.navigateByTab(shiftKey)`. Returns early if `activeElement` is input/textarea/button/select.
+- **LRU char width cache**: `ParagraphEngine._charWidthCache` (capacity 5000), key: `${char}|${fontName}|${fontSize}`.
+- **LRU char outer style cache**: `ParagraphEngine._charOuterStyleCache` (capacity 5000), key: `${char}|${widthRatio}|${letterSpacing}|${spaceRatio}`.
+- **Skeleton layout cache**: `ParagraphEngine._layoutCache` — input-parameter hash. `resetIncrementalState()` clears it. `updateOverlayContext()` preserves it.
+- **queueMicrotask batch rendering**: `scheduleRender()` coalesces multiple `render()` calls. `flushRender()` cancels and runs immediately.
+- **Box resize rules**: Minimum size (static: 1단×1라인, absolute: 5mm×5mm). Child-content-based blocking via `_computeChildMinRightMm()`/`_computeChildMinBottomMm()`. Multi-select resize propagates delta.
 
 ## Directory Structure
 
@@ -179,8 +209,8 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 src/
   components/     # Custom Elements (each file = one element + customElements.define)
     edit/
-      cursor.element.ts      # <x-layout-cursor> (1px width cursor element)
-      selection.element.ts   # <x-layout-selection> (selection highlight element)
+      cursor.element.ts      # <x-layout-cursor>
+      selection.element.ts   # <x-layout-selection>
       index.ts
     layout/
       box.element.ts
@@ -189,182 +219,75 @@ src/
       guide-column.element.ts
       image.element.ts
       paragraph.element.ts
-      table.element.ts          # <x-layout-table> (table container, border layer, resize handles)
-      tr.element.ts             # <x-layout-tr> (table row)
-      td.element.ts             # <x-layout-td> (table cell, box-equivalent)
+      table.element.ts
+      tr.element.ts
+      td.element.ts
       index.ts
     index.ts
   engine/                    # Node.js-compatible pure computation (no DOM/Canvas/FontFace)
-    types.ts                     # AbsRect, MmRect, OverlapResult, EngineResources, etc.
-    table-grid-resolver.ts       # resolveTableGrid, normalizeWidths (table grid placement + cell size normalization)
-    border-resolver.ts           # resolveTableBorders (table border-collapse edge resolution)
-    grid-calculator-engine.ts    # GridCalculatorEngine (ppm-injected, isBox flag — replaces GridCalculator)
-    image-engine.ts              # ImageEngine (rgbaData-based overlap — replaces canvas getImageData)
-    overlap-engine.ts            # computeOverlapSizeMm, checkOverlapMm, mergeOverlapParts (pure functions)
-    box-engine.ts                # BoxEngine (abs coords, overlayElements, findChildEngineById — replaces LayoutBoxElement getters)
-    table-engine.ts              # TableEngine, TableRowEngine, TableCellEngine (wraps resolveTableGrid, findCellEngineByLabel)
-    paragraph-engine.ts          # ParagraphEngine (refactored TextLayoutEngine + getCharRect/getOffsetFromPoint query API)
-    document-engine.ts           # DocumentEngine (root — ppm injection, resource management)
-    font-loader-engine.ts        # FontLoaderEngineImpl (opentype.js only, no FontFace)
-    color-registry-engine.ts     # ColorRegistryEngineImpl (CMYK→RGB, no fetch)
+    types.ts
+    table-grid-resolver.ts
+    border-resolver.ts
+    grid-calculator-engine.ts
+    image-engine.ts
+    overlap-engine.ts
+    box-engine.ts
+    table-engine.ts
+    paragraph-engine.ts
+    document-engine.ts
+    font-loader-engine.ts
+    color-registry-engine.ts
     index.ts
   edit/
-    text-edit-context-adapter.ts  # TextEditContextAdapter (Browser EditContext API adapter)
-    text-edit-controller.ts       # TextEditController (cursor, selection, IME composition)
-    text-edit-coordinate-mapper.ts # TextEditCoordinateMapper (click-to-offset mapping)
-    edit-manager.ts          # EditManager (per-document edit state)
-    layout-edit-controller.ts # LayoutEditController (drag/resize/select in edit mode)
-    layout-selection-controller.ts # LayoutSelectionController (click-to-select)
-    insert-controller.ts     # InsertController (drag-to-insert)
-    place-gun-controller.ts  # PlaceGunController (click-to-place from loaded items)
-    table-keyboard-controller.ts  # TableKeyboardController (F5/F7/F8 cell block, Alt+arrow resize, M/S/W/H structure)
-    table-structure-editor.ts     # TableStructureEditor (merge/split/insert/delete/equalize, external API)
+    text-edit-context-adapter.ts
+    text-edit-controller.ts
+    text-edit-coordinate-mapper.ts
+    edit-manager.ts
+    layout-edit-controller.ts
+    layout-selection-controller.ts
+    insert-controller.ts
+    place-gun-controller.ts
+    table-keyboard-controller.ts
+    table-structure-editor.ts
     index.ts
   resource/
-    color-registry.ts        # ColorRegistry (CMYK→RGB singleton)
-    font-loader.ts           # FontLoader (font loading singleton)
+    color-registry.ts
+    font-loader.ts
     index.ts
   types/
-    layout/                  # DocumentData, BoxData, ParagraphData, ImageData, GuideColumnData, TextData, RenderCompleteEventDetail
-      box.type.ts
-      document.type.ts
-      guide-column.type.ts
-      image.type.ts
-      paragraph.type.ts
-      table.type.ts            # TableData, TableRowData, TableCellData, CellBorderEdge
-      text.type.ts
-      render-complete-event.type.ts  # RenderCompleteEventDetail (render-complete event payload)
-      text/
-        text-block.type.ts
-        text-line.type.ts
-      index.ts
-    style/                   # TextStyle, ParagraphStyle, InheritStyle, TextBlockStyle, ColorStyle, FontStyle
-      color.type.ts            # CMYKColorSet, RGBColorSet, ColorStyle, color conversion types
-      font.type.ts
-      inherit-style.type.ts
-      paragraph-style.type.ts
-      text-block-style.type.ts
-      text-style.type.ts
-      index.ts
-    print/                   # PrintPostData (for post-processing data export)
-      color-map.type.ts        # ColorMap
-      post-data.type.ts      # PrintPostData, PrintPostBorderEdge, PrintPostDiagonal
-      index.ts
-    edit/                    # CursorPosition, SelectionRange, EditModel, InsertMode, LayoutEditType, PlaceGunItem, TableCellSelection
-      cursor.type.ts
-      selection.type.ts
-      insert.type.ts
-      layout.type.ts
-      place-gun.type.ts
-      table-selection.type.ts # TableCellSelection, CellBlockMode, CellCoord
-      index.ts
+    layout/                  # DocumentData, BoxData, ParagraphData, ImageData, etc.
+    style/                   # TextStyle, ParagraphStyle, InheritStyle, etc.
+    print/                   # PrintPostData
+    edit/                    # CursorPosition, SelectionRange, InsertMode, etc.
     index.ts
-  constants/                 # Constants: DEFAULT_FONT_SIZE, DEFAULT_PPM, z-index reservations, etc.
-    defaults.ts              # DEFAULT_*, Z_INDEX_* constants
-    line-break.ts            # LINE_START_FORBIDDEN / LINE_END_FORBIDDEN + isLineStartForbidden / isLineEndForbidden (한글 금칙문자)
-    index.ts
-  utils/                     # genUUID, ai-processing-overlay, objectFit, valueEqual, staticGridContains, clampStaticToContainer, clampAbsoluteToContainer
-    ai-processing-overlay.ts   # createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay
-    gen-uuid.ts
-    image-fit.ts               # computeObjectFit (objectFit 프리셋 → mm 좌표/크기 변환)
-    lru-cache.ts               # LRU<K,V> 제네릭 LRU 캐시 (LRU eviction, capacity 기반)
-    value-equal.ts             # valueEqual (number | number[] 깊은 동등성 비교)
-    static-grid-containment.ts # staticGridContains, clampStaticToContainer, clampAbsoluteToContainer (static/absolute 좌표계 컨테이너 영역 clamp)
-    flip-layout.ts             # flipLayoutData (배치 반전 — 좌우/상하/상하좌우, 재귀 트리 순회 + 좌표 변환)
-    random.ts                  # genRandom() helper (not exported by utils/index.ts)
-    index.ts
+  constants/                 # DEFAULT_*, Z_INDEX_* constants, line-break rules
+  utils/                     # genUUID, ai-processing-overlay, objectFit, valueEqual, LRU, containment clamp, flip-layout
   examples/                  # exampleData (demo content for dev)
-    example-data.ts
-    index.ts
   react/                     # React wrapper layer (separate ESM build)
-    components/              # React wrapper components for each Custom Element
-      layout-document.tsx
-      layout-box.tsx
-      layout-paragraph.tsx
-      layout-image.tsx
-      layout-guide-column.tsx
-      layout-table.tsx          # LayoutTable React wrapper
-      layout-table-row.tsx      # LayoutTableRow React wrapper
-      layout-table-cell.tsx     # LayoutTableCell React wrapper
-      logo.tsx                 # Logo (SVG mark component for dev/demo)
-      index.ts
-    hooks/                   # React hooks for editable text state and manager access
-      use-editable-text.ts
-      use-edit-manager.ts
-      use-layout-element.ts
-      index.ts
-    context.tsx              # React Context provider for layout options
-    index.ts                 # React entry point: re-exports vanilla library + React layer
-  globals.d.ts               # JSX intrinsic elements for React interop
-  opentype.d.ts              # Type declarations for opentype.js (peer dependency)
-  index.ts                   # Vanilla entry point: exports components, core, resource, types, constants, utils, examples
+    components/              # LayoutDocument, LayoutBox, LayoutParagraph, LayoutImage, LayoutTable, etc.
+    hooks/                   # useEditableText, useEditManager, useLayoutElement
+    context.tsx
+    index.ts
+  globals.d.ts
+  opentype.d.ts
+  index.ts                   # Vanilla entry point
 examples/
-  index.html                 # Dev demo page
-  color.json                 # CMYK color definitions (fetched at runtime)
-  fonts.json                 # Font metadata (fetched at runtime)
-  fonts/                     # TTF font files
-  test/                      # Test images
+  index.html
+  color.json
+  fonts.json
+  fonts/
+  test/
 ```
-
-## Dev Workflow Gotchas
-
-- **Managers must init**: `ColorRegistry.getInstance().init()` and `FontLoader.getInstance().init()` must be called and awaited before setting `document.data`. Without this, `getCSSColor()` and `getFontFamily()` throw. `ColorRegistry.init()` sets `_ready = true` even when no stylesheet is available (SSR, test environments) — color data is accessible via `colorMap` but CSS variables are not injected.
-- **`examples/color.json` and `examples/fonts.json`**: Served by Vite dev server. The fetch URLs are relative (`color.json`, `fonts.json`), so they must be co-located with the HTML page.
-- **TypeScript 7 RC**: `typescript: ^7.0.2` is configured. The `noEmit: true` setting means `tsc` is type-check only; actual compilation is handled by Vite.
-- **`noUnusedLocals` and `noUnusedParameters`** are enabled in tsconfig — dead imports or unused params will cause build errors.
-- **Cursor width is 1px**: The `<x-layout-cursor>` element has a fixed width of 1px and does not blink.
-- **Korean IME composition**: TextEditController handles IME composition via `compositionstart`, `compositionupdate`, and `compositionend` events. This is essential for Korean text input on Windows (TSF), macOS, and Linux (IBus).
-- **Mouse coordinate freshness**: `_onMouseMove` stores the latest `clientX`/`clientY` on every mousemove event and reads them from the `requestAnimationFrame` callback, ensuring drag selection follows the cursor accurately during fast movement.
-- **EditManager events**: Use `layoutDocEl.editManager.addEventListener(type, listener)` to subscribe to edit events. Types: `focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`, `layoutSelectionChange`, `layoutMove`, `layoutResize`, `layoutAdd`, `layoutRemove`, `insert`, `insertCancel`, `modeChange`, `boxPropertyChange`, `contextMenu`, `placeGunChange`, `placeGunBefore`, `placeGunAfter`, `cellSelectionChange`. The old `selectionChange` event was removed. **modeChange** is dispatched when `textEditMode`/`layoutEditMode`/`insertMode` changes; payload includes `previousMode` and `mode` (`EditModeState`). **contextMenu**: dispatched on `contextmenu` DOM event (right-click) inside the document. `LayoutSelectionController._onContextMenu` applies selection rules (already-selected box → preserve selection; unselected box → `selectLayoutExclusive` for atomic single selection; empty space → clear) then dispatches via `_dispatchContextMenu`. Payload `contextMenuDetail` includes `element` (`LayoutBoxElement` | `LayoutTableCellElement` | `LayoutDocumentElement` | `null`), `mouseX`/`mouseY` (clientX/clientY), and `selectedLayouts` (current selection after update). **placeGunBefore/placeGunAfter**: dispatched by `PlaceGunController.handleBoxMouseDown` — `placeGunBefore` fires before item consumption/injection, `placeGunAfter` fires after injection completes. Both include `item` (PlaceGunItem) and `box` (target HTMLElement); `placeGunAfter` also includes `success` (boolean). **Double-click mode switch**: Double-clicking a paragraph in any mode (except layout edit mode and insert mode) switches to text edit mode and focuses the paragraph at the click position. `LayoutSelectionController._onDblClick` handles this.
-- **Programmatic focus**: Use `layoutDocEl.editManager.focusParagraph(target, options?)` and `blurParagraph(target?)` instead of calling `paragraph.editableText` or `controller.focus()` directly.
-
-Keyboard shortcut documentation has been moved to `docs/EDITING_TEXT.md` Section 4.
 
 ## React Integration
 
-The library ships two separate builds:
-
-- **Vanilla**: `layout-element` (or `dist/layout-element.iife.js`) — Custom Elements only, no React code.
-- **React**: `layout-element/react` (or `dist/layout-element-react.mjs`) — React wrappers that render the same Custom Elements.
-
-### Directory structure
-
-`src/react/` is kept in a separate build. It re-exports everything from the vanilla entry point (`@/types`, `@/core`, `@/resource`, `@/constants`, `@/components`, `@/edit`) and adds React-specific wrappers:
-
-- `components/` — one wrapper component per Custom Element (`LayoutDocument`, `LayoutBox`, `LayoutParagraph`, `LayoutImage`, `LayoutGuideColumn`, `LayoutTable`, `LayoutTableRow`, `LayoutTableCell`), plus `Logo` (SVG mark for dev/demo).
-- `hooks/` — `useEditableText`, `useEditManager`, `useLayoutElement`.
-- `context.tsx` — React Context provider for layout options.
-
-### Build output
-
-`npm run build` runs two Vite builds sequentially:
-
-1. `vite build` — produces `dist/layout-element.iife.js` and `dist/layout-element.d.ts` from `src/index.ts`.
-2. `vite build --config vite.config.react.ts` — produces `dist/layout-element-react.mjs` from `src/react/index.ts`, externalizing `react` and `react/jsx-runtime`.
-
-The React build does **not** empty `dist/`, so the IIFE bundle and `.d.ts` from the first build are preserved.
-
-### Usage
+- **Vanilla**: `layout-element` (or `dist/layout-element.iife.js`) — Custom Elements only.
+- **React**: `layout-element/react` (or `dist/layout-element-react.mjs`) — React wrappers rendering the same Custom Elements.
+- `react` is a peer dependency (`>=19.0.0`). IIFE bundle does not contain React.
+- `src/react/` re-exports vanilla API + adds wrapper components, hooks, and context.
+- React build does **not** empty `dist/`, preserving IIFE bundle and `.d.ts`.
 
 ```ts
-// Vanilla (IIFE or ESM default)
 import { LayoutDocumentElement } from 'layout-element';
-
-// React wrappers
-import {
-  LayoutDocument,
-  LayoutBox,
-  LayoutParagraph,
-  LayoutImage,
-  useEditableText,
-} from 'layout-element/react';
+import { LayoutDocument, LayoutBox, LayoutParagraph, LayoutImage, useEditableText } from 'layout-element/react';
 ```
-
-```tsx
-<LayoutImage
-  data={imageData}
-  overlapPadding={{ top: 2, right: 5, bottom: 2, left: 5 }}
-/>
-```
-
-`react` is a peer dependency (`>=19.0.0`). The IIFE bundle does not bundle or reference React.
