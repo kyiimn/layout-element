@@ -380,6 +380,13 @@ export type {
   TextStyle,
   InheritStyle,
   TextLineData,
+  PrintPostData,
+  PrintPostDataChar,
+  PrintPostDataRect,
+  PrintPostBorderEdge,
+  PrintPostDiagonal,
+  TableCellData,
+  TableRowData,
 } from "@/types";
 
 export type { GridResolution } from "./table-grid-resolver";

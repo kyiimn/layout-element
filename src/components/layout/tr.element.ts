@@ -1,4 +1,4 @@
-import { TableRowData, TableCellData, InheritStyle, PrintPostData } from "@/types";
+import { TableRowData, TableCellData, InheritStyle } from "@/types";
 import { genUUID } from "@/utils";
 import { EditManager } from "@/edit/edit-manager";
 import { LayoutDocumentElement } from "./document.element";
@@ -290,14 +290,6 @@ export class LayoutTableRowElement extends HTMLElement {
     if (!this.parentElement) return [];
     const parent = this.parentElement as unknown as { overlayElements?: LayoutBoxElement[] };
     return parent.overlayElements ?? [];
-  }
-
-  get printPostData(): PrintPostData[] {
-    const data: PrintPostData[] = [];
-    for (const td of this.items) {
-      data.push(...td.printPostData);
-    }
-    return data;
   }
 }
 

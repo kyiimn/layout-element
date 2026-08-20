@@ -8,10 +8,12 @@
  */
 
 import { resolveTableGrid, type GridResolution } from "./table-grid-resolver";
-import type { TableData, PrintPostData } from "@/types";
+import { resolveTableBorders } from "./border-resolver";
+import type { TableData, TableCellData, PrintPostData, PrintPostBorderEdge, PrintPostDiagonal } from "@/types";
 import { BoxEngine } from "./box-engine";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
-import type { AbsRect } from "./types";
+import { DocumentEngine } from "./document-engine";
+import type { AbsRect, ColorRegistryEngine } from "./types";
 
 /**
  * 테이블 셀 레이아웃 엔진.
@@ -27,6 +29,7 @@ export class TableCellEngine {
   private _labels: string[] = [];
   private _boxEngine: BoxEngine | null = null;
   private _parentAbsRect?: AbsRect;
+  private _cellData?: TableCellData;
   _gridCalculator?: GridCalculatorEngine;
 
   /**
@@ -39,14 +42,16 @@ export class TableCellEngine {
    * @param height - 셀 높이 (mm)
    * @param cellLabel - 셀 라벨 (예: "A1")
    * @param labels - 셀이 커버하는 라벨 목록 (span 시 복수)
+   * @param cellData - 원본 TableCellData (배경/대각선/보더 등 렌더 속성 접근용)
    */
-  setCellMetrics(x: number, y: number, width: number, height: number, cellLabel: string, labels: string[]): void {
+  setCellMetrics(x: number, y: number, width: number, height: number, cellLabel: string, labels: string[], cellData?: TableCellData): void {
     this._x = x;
     this._y = y;
     this._width = width;
     this._height = height;
     this._cellLabel = cellLabel;
     this._labels = labels;
+    this._cellData = cellData;
   }
 
   /** 셀 X (mm) */
@@ -61,6 +66,8 @@ export class TableCellEngine {
   get cellLabel(): string { return this._cellLabel; }
   /** 셀 커버 라벨 목록 */
   get labels(): string[] { return this._labels; }
+  /** 원본 셀 데이터 (배경/대각선/보더 등 렌더 속성). span된 셀은 undefined. */
+  get cellData(): TableCellData | undefined { return this._cellData; }
 
   /** 셀 내용 박스 엔진 */
   get boxEngine(): BoxEngine | null { return this._boxEngine; }
@@ -229,6 +236,21 @@ export class TableEngine {
   }
 
   /**
+   * 문서 엔진에서 ColorRegistry를 조회한다.
+   * 부모 박스 엔진 체인을 따라 DocumentEngine까지 올라간다.
+   *
+   * @returns ColorRegistryEngine 또는 null (문서 엔진 미연결 시)
+   */
+  private _getColorRegistry(): ColorRegistryEngine | null {
+    let p = this._parentBox.parent;
+    while (p instanceof BoxEngine) {
+      p = p.parent;
+    }
+    if (p instanceof DocumentEngine) return p._colorRegistry;
+    return null;
+  }
+
+  /**
    * 셀 라벨로 셀 엔진을 찾는다.
    *
    * @param label - 셀 라벨 (예: "A1")
@@ -280,6 +302,7 @@ export class TableEngine {
           p.height,
           cellLabel,
           labels,
+          cellData,
         );
         cellEngine.parentAbsRect = parentAbsRect;
         cellEngine._gridCalculator = GridCalculatorEngine.create({
@@ -302,23 +325,95 @@ export class TableEngine {
   }
 
   /**
-   * 테이블의 printPostData를 생성한다.
+   * 테이블의 printPostData를 생성한다 (mm 단위).
    *
-   * 각 셀의 boxEngine이 가진 printPostData를 z-index 오름차순으로 수집하여 반환.
-   * 셀에 boxEngine이 없으면 빈 배열을 반환.
+   * DOM `table.element.ts` / `td.element.ts`의 printPostData와 동일한 구조:
+   * 1. `table` 타입 항목 (borderEdges 포함)
+   * 2. 각 셀별 `td` 타입 항목 (backgroundColor/backgroundOpacity/diagonals 포함)
+   *    + 셀 내부 boxEngine의 printPostData
    *
-   * @returns PrintPostData 배열 (z-index 오름차순, mm 단위)
+   * @returns PrintPostData 배열 (mm 단위)
    */
   get printPostData(): PrintPostData[] {
     const data: PrintPostData[] = [];
+    const colorRegistry = this._getColorRegistry();
+    const parentAbsRect = this._parentBox.absRect;
+
+    // 1. table 항목 + borderEdges
+    const borderEdges: PrintPostBorderEdge[] = [];
+    if (this._gridResolution) {
+      const borderResolution = resolveTableBorders(this._gridResolution);
+      for (const edge of borderResolution.edges) {
+        borderEdges.push({
+          direction: edge.direction,
+          x: parentAbsRect.absLeft + edge.x,
+          y: parentAbsRect.absTop + edge.y,
+          length: edge.length,
+          width: edge.width,
+          color: colorRegistry ? colorRegistry.get(edge.color) : { c: 0, m: 0, y: 0, k: 255 },
+          style: edge.style,
+        });
+      }
+    }
+
+    data.push({
+      data: this._data,
+      rect: {
+        x: parentAbsRect.absLeft,
+        y: parentAbsRect.absTop,
+        width: parentAbsRect.absWidth,
+        height: parentAbsRect.absHeight,
+      },
+      borderEdges: borderEdges.length > 0 ? borderEdges : undefined,
+    });
+
+    // 2. 각 셀별 td 항목 + 내부 box printPostData
     for (const rowEngine of this._rowEngines) {
       for (const cellEngine of rowEngine.cellEngines) {
+        const cellData = cellEngine.cellData;
+        const cellAbsRect = cellEngine.absRect;
+
+        const diagonals: PrintPostDiagonal[] = [];
+        if (cellData?.diagonals && cellData.diagonals.length > 0) {
+          const diagColor = colorRegistry
+            ? colorRegistry.get(cellData.diagonalColor ?? 'black')
+            : { c: 0, m: 0, y: 0, k: 255 };
+          const diagWidth = cellData.diagonalWidth ?? 0.1;
+          const x1 = cellAbsRect.absLeft;
+          const y1 = cellAbsRect.absTop;
+          const x2 = x1 + cellAbsRect.absWidth;
+          const y2 = y1 + cellAbsRect.absHeight;
+          for (const dir of cellData.diagonals) {
+            if (dir === 'tl-br') {
+              diagonals.push({ direction: 'tl-br', x1, y1, x2, y2, width: diagWidth, color: diagColor });
+            } else {
+              diagonals.push({ direction: 'tr-bl', x1: x2, y1, x2: x1, y2, width: diagWidth, color: diagColor });
+            }
+          }
+        }
+
+        data.push({
+          backgroundColor: cellData?.backgroundColor && colorRegistry
+            ? colorRegistry.get(cellData.backgroundColor)
+            : undefined,
+          backgroundOpacity: cellData?.backgroundOpacity,
+          data: cellData ?? { type: 'td', children: [] },
+          rect: {
+            x: cellAbsRect.absLeft,
+            y: cellAbsRect.absTop,
+            width: cellAbsRect.absWidth,
+            height: cellAbsRect.absHeight,
+          },
+          diagonals: diagonals.length > 0 ? diagonals : undefined,
+        });
+
         const boxEngine = cellEngine.boxEngine;
         if (boxEngine) {
           data.push(...boxEngine.printPostData);
         }
       }
     }
+
     return data;
   }
 

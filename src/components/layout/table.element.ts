@@ -3,8 +3,6 @@ import {
   TableRowData,
   CellBorderEdge,
   InheritStyle,
-  PrintPostData,
-  PrintPostBorderEdge,
 } from "@/types";
 import {
   GridResolution,
@@ -950,44 +948,6 @@ export class LayoutTableElement extends HTMLElement {
     if (!this.parentElement) return [];
     const parent = this.parentElement as unknown as { overlayElements?: LayoutBoxElement[] };
     return parent.overlayElements ?? [];
-  }
-
-  get printPostData(): PrintPostData[] {
-    const data: PrintPostData[] = [];
-    const ppm = this._getPpm();
-    const colorRegistry = ColorRegistry.getInstance();
-
-    const borderEdges: PrintPostBorderEdge[] = [];
-    if (this._borderResolution) {
-      for (const edge of this._borderResolution.edges) {
-        borderEdges.push({
-          direction: edge.direction,
-          x: (this.absLeft + edge.x) * ppm,
-          y: (this.absTop + edge.y) * ppm,
-          length: edge.length * ppm,
-          width: Math.ceil(edge.width * ppm),
-          color: colorRegistry.get(edge.color),
-          style: edge.style,
-        });
-      }
-    }
-
-    data.push({
-      data: this.data,
-      rect: {
-        x: this.absLeft * ppm,
-        y: this.absTop * ppm,
-        width: this.absWidth * ppm,
-        height: this.absHeight * ppm,
-      },
-      borderEdges: borderEdges.length > 0 ? borderEdges : undefined,
-    });
-
-    for (const tr of this.items) {
-      data.push(...tr.printPostData);
-    }
-
-    return data;
   }
 }
 

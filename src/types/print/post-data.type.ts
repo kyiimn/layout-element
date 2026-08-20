@@ -36,14 +36,20 @@ export type PrintPostDataChar = {
   /** CSS `font-family` 값 (예: `'Myoungjo'`) */
   fontFamily: string;
 
-  /** 폰트 크기 (px, 예: `'16px'`) */
-  fontSize: string;
+  /** 폰트 크기 (mm) */
+  fontSize: number;
 
-  /** 폰트 굵기 (예: `'normal'`, `'700'`) */
-  fontWeight: string;
+  /** 폰트 굵기 (예: `400`, `700`) */
+  fontWeight: number;
 
   /** 장평 비율. CSS `scale` 값에서 추출 (예: `0.9` = 90% 장평) */
   widthRatio: number;
+
+  /** 자간 (em 단위). `textStyle.letterSpacing` → `inheritStyle.letterSpacing` → `DEFAULT_LETTER_SPACING` */
+  letterSpacing: number;
+
+  /** 공백 너비 비율 (em 단위). `textStyle.spaceRatio` → `inheritStyle.spaceRatio` → `DEFAULT_SPACE_RATIO` */
+  spaceRatio: number;
 
   /**
    * 글자 색상 (CMYK).

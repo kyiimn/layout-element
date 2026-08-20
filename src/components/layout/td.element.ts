@@ -5,8 +5,6 @@ import {
   BoxData,
   BoxBorderStyle,
   InheritStyle,
-  PrintPostData,
-  PrintPostDiagonal,
 } from "@/types";
 import { Z_INDEX_TABLE_DIAGONAL } from "@/constants";
 import { genUUID } from "@/utils";
@@ -856,56 +854,6 @@ export class LayoutTableCellElement extends HTMLElement {
     return Array.from(this.children).filter(
       (c): c is LayoutBoxElement => c instanceof LayoutBoxElement,
     );
-  }
-
-  get printPostData(): PrintPostData[] {
-    const data: PrintPostData[] = [];
-    const ppm = this._getPpm();
-    const colorRegistry = ColorRegistry.getInstance();
-
-    const x = this.absLeft;
-    const y = this.absTop;
-    const width = this.absWidth;
-    const height = this.absHeight;
-
-    const diagonals: PrintPostDiagonal[] = [];
-    if (this._diagonals && this._diagonals.length > 0) {
-      const color = colorRegistry.get(this._diagonalColor ?? 'black');
-      const widthPx = Math.max(1, Math.ceil(this._diagonalWidth * ppm));
-      const x1 = x * ppm;
-      const y1 = y * ppm;
-      const x2 = x1 + width * ppm;
-      const y2 = y1 + height * ppm;
-      for (const dir of this._diagonals) {
-        if (dir === 'tl-br') {
-          diagonals.push({ direction: 'tl-br', x1, y1, x2, y2, width: widthPx, color });
-        } else {
-          diagonals.push({ direction: 'tr-bl', x1: x2, y1, x2: x1, y2, width: widthPx, color });
-        }
-      }
-    }
-
-    data.push({
-      backgroundColor: this._backgroundColor
-        ? colorRegistry.get(this._backgroundColor)
-        : undefined,
-      backgroundOpacity: this._backgroundOpacity,
-      data: this.data,
-      rect: {
-        x: x * ppm,
-        y: y * ppm,
-        width: width * ppm,
-        height: height * ppm,
-      },
-      diagonals: diagonals.length > 0 ? diagonals : undefined,
-    });
-
-    const sortedItems = [...this.items].sort((a, b) => a.zIndex - b.zIndex);
-    for (const item of sortedItems) {
-      data.push(...item.printPostData);
-    }
-
-    return data;
   }
 }
 

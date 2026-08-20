@@ -684,20 +684,14 @@ export class LayoutDocumentElement extends HTMLElement {
     });
   }
 
-  get printPostData() {
-    const data: PrintPostData[] = [];
-    // z-index 오름차순(낮은 것부터)으로 push한다.
-    // PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로,
-    // CSS z-index 동작(낮은 것이 먼저 그려지고 높은 것이 위에 덮임)과
-    // 일치하려면 낮은 z-index부터 배열에 들어가야 한다.
-    const sortedItems = [...this.items].sort((a, b) => a.zIndex - b.zIndex);
-    for (const item of sortedItems) {
-      data.push(...item.printPostData);
-    }
-    this.querySelectorAll('x-layout-guide-column').forEach((gc: any) => {
-      if (gc.printPostData) data.push(...gc.printPostData);
+  get printPostData(): PrintPostData[] {
+    const engineData = this._engine?.printPostData ?? [];
+    const guideData: PrintPostData[] = [];
+    this.querySelectorAll('x-layout-guide-column').forEach((gc) => {
+      const el = gc as unknown as { printPostData?: PrintPostData[] };
+      if (el.printPostData) guideData.push(...el.printPostData);
     });
-    return data;
+    return [...engineData, ...guideData];
   }
 
   get items() {

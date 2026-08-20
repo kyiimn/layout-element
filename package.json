@@ -16,6 +16,12 @@
       },
       "default": "./dist/layout-element.iife.js"
     },
+    "./engine": {
+      "import": {
+        "types": "./dist/engine/index.d.ts",
+        "default": "./dist/layout-element-engine.mjs"
+      }
+    },
     "./react": {
       "types": "./dist/react/index.d.ts",
       "import": {
@@ -27,8 +33,8 @@
   },
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build && vite build --config vite.config.react.ts",
-    "build:obfuscate": "vite build && vite build --config vite.config.react.ts && node scripts/obfuscate.mjs",
+    "build": "vite build && vite build --config vite.config.react.ts && vite build --config vite.config.engine.ts",
+    "build:obfuscate": "vite build && vite build --config vite.config.react.ts && vite build --config vite.config.engine.ts && node scripts/obfuscate.mjs",
     "preview": "vite preview",
     "verify:engine": "npx tsx scripts/verify-engine-node.mjs",
     "test": "npx playwright test",

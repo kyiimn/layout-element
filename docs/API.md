@@ -2968,8 +2968,8 @@ type PrintPostDataChar = {
   char: string;              // 글자
   rect: PrintPostDataRect;   // 글자별 위치·크기 (픽셀)
   fontFamily: string;        // CSS font-family
-  fontSize: string;           // 폰트 크기 (mm 또는 px)
-  fontWeight: string;        // CSS font-weight
+  fontSize: number;          // 폰트 크기 (mm)
+  fontWeight: number;        // 폰트 굵기 (예: 400, 700)
   widthRatio: number;        // 장평 비율 (CSS scale에서 추출)
   color: CMYKColor;           // CMYK 색상 (ColorRegistry에서 색상 명칭으로 조회)
 };

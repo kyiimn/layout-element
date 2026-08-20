@@ -1,6 +1,6 @@
 import { DEFAULT_BORDER_STYLE, Z_INDEX_RESIZE_HANDLE, Z_INDEX_TYPE_LABEL, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER, Z_INDEX_MAX_LAYOUT } from "@/constants";
 import { ColorRegistry } from "@/resource";
-import { InheritStyle, BoxData, ParagraphData, TextData, ImageData, TableData, ParagraphStyle, TextStyle, PrintPostData, BoxPosition, BoxBorderStyle, BoxRole } from "@/types";
+import { InheritStyle, BoxData, ParagraphData, TextData, ImageData, TableData, ParagraphStyle, TextStyle, BoxPosition, BoxBorderStyle, BoxRole } from "@/types";
 import { genUUID } from "@/utils";
 import { checkOverlapMm } from "@/engine";
 import { EditManager } from "@/edit/edit-manager";
@@ -1216,51 +1216,6 @@ export class LayoutBoxElement extends HTMLElement {
         return docEl?.querySelector('#' + CSS.escape(id)) as LayoutBoxElement | null;
       })
       .filter((el): el is LayoutBoxElement => el instanceof LayoutBoxElement);
-  }
-
-  get printPostData() {
-    const data: PrintPostData[] = [];
-    const ppm = this._getPpm();
-    const rect = this._engine?.absRect ?? {
-      absLeft: 0,
-      absTop: 0,
-      absWidth: 0,
-      absHeight: 0,
-    };
-
-    const colorRegistry = ColorRegistry.getInstance();
-
-    data.push({
-      color: this.borderColor ? colorRegistry.get(this.borderColor) : undefined,
-      backgroundColor: this.backgroundColor ? colorRegistry.get(this.backgroundColor) : undefined,
-      backgroundOpacity: this.backgroundOpacity,
-      data: {
-        ...this.data,
-        borderStyle: this.borderStyle || DEFAULT_BORDER_STYLE,
-      },
-      rect: {
-        x: rect.absLeft * ppm,
-        y: rect.absTop * ppm,
-        width: rect.absWidth * ppm,
-        height: rect.absHeight * ppm,
-      },
-    });
-
-    // z-index 오름차순(낮은 것부터)으로 push한다.
-    // PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로,
-    // CSS z-index 동작(낮은 것이 먼저 그려지고 높은 것이 위에 덮임)과
-    // 일치하려면 낮은 z-index부터 배열에 들어가야 한다.
-    const allChildren = Array.from(this.children).filter(
-      (c): c is HTMLElement & { printPostData: PrintPostData[]; zIndex: number } =>
-        c instanceof LayoutBoxElement || c instanceof LayoutTableElement
-        || c instanceof LayoutParagraphElement || c instanceof LayoutImageElement,
-    );
-    const sortedChildren = allChildren.sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
-    for (const child of sortedChildren) {
-      data.push(...child.printPostData);
-    }
-
-    return data;
   }
 
   get type() { return 'box' as const; }

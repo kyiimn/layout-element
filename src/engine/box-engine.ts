@@ -225,6 +225,20 @@ export class BoxEngine {
   }
 
   /**
+   * 콘텐츠 영역의 절대 사각형 (mm).
+   * padding을 제외한 영역으로, 자식 image/paragraph가 차지하는 실제 영역.
+   * `LayoutImageElement.absLeft/absTop/absWidth/absHeight`와 동일 공식.
+   */
+  get contentAbsRect(): AbsRect {
+    return {
+      absLeft: this.absLeft + this.paddingLeft,
+      absTop: this.absTop + this.paddingTop,
+      absWidth: this.absWidth - this.paddingLeft - this.paddingRight,
+      absHeight: this.absHeight - this.paddingTop - this.paddingBottom,
+    };
+  }
+
+  /**
    * 박스가 담고 있는 콘텐츠의 타입.
    * 자식이 1개이고 그 자식이 box면 재귀적으로 파고들어 식별.
    */
@@ -375,7 +389,7 @@ export class BoxEngine {
       else if (child instanceof ParagraphEngine) data.push(...child.printPostData);
       else if (child instanceof ImageEngine) {
         const imgData = child.data;
-        const imgAbsRect = this.absRect;
+        const imgAbsRect = this.contentAbsRect;
         data.push(...child.buildPrintPostData(imgAbsRect, {
           type: 'image',
           url: imgData.url,

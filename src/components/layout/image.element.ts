@@ -1,6 +1,5 @@
-import { InheritStyle, ImageData, ImageObjectFit, OverlapMode, PrintPostData } from "@/types";
+import { InheritStyle, ImageData, ImageObjectFit, OverlapMode } from "@/types";
 import { LayoutBoxElement } from "./box.element";
-import { LayoutDocumentElement } from "./document.element";
 import { genUUID, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay, computeObjectFit } from "@/utils";
 import { DEFAULT_IMAGE_DPI } from "@/constants";
 import { ImageEngine } from "@/engine";
@@ -800,53 +799,6 @@ export class LayoutImageElement extends HTMLElement {
 
   get overlayElements() {
     return this.parentElement.overlayElements;
-  }
-
-  get printPostData(): PrintPostData[] {
-    const docEl = this._findDocumentElement();
-    const ppm = docEl?.ppm ?? 3.78;
-    const engine = this._engine;
-    if (engine) {
-      const mmPostData = engine.buildPrintPostData(
-        {
-          absLeft: this.absLeft,
-          absTop: this.absTop,
-          absWidth: this.absWidth,
-          absHeight: this.absHeight,
-        },
-        this.data,
-      );
-      if (mmPostData.length > 0) {
-        const first = mmPostData[0];
-        return [{
-          data: first.data,
-          rect: {
-            x: first.rect.x * ppm,
-            y: first.rect.y * ppm,
-            width: first.rect.width * ppm,
-            height: first.rect.height * ppm,
-          },
-        }];
-      }
-    }
-    return [{
-      data: this.data,
-      rect: {
-        x: this.absLeft * ppm,
-        y: this.absTop * ppm,
-        width: this.absWidth * ppm,
-        height: this.absHeight * ppm,
-      },
-    }];
-  }
-
-  private _findDocumentElement(): LayoutDocumentElement | null {
-    let el: Element | null = this.parentElement;
-    while (el) {
-      if (el instanceof LayoutDocumentElement) return el;
-      el = el.parentElement;
-    }
-    return null;
   }
 }
 customElements.define("x-layout-image", LayoutImageElement);

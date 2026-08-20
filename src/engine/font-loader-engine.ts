@@ -128,6 +128,7 @@ export class FontLoaderEngineImpl implements FontLoaderEngine {
    *
    * @param fontName - 조회할 family 이름. 생략 시 첫 번째 폰트.
    * @returns Font.family 문자열
+   * @throws {Error} 초기화 전이거나 폰트가 없는 경우.
    */
   getFontFamily(fontName?: string): string {
     if (!this._ready || this._fonts.length === 0) {

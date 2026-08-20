@@ -2,7 +2,7 @@ import { TextEditController } from "@/edit/text-edit-controller";
 import { EditManager } from "@/edit/edit-manager";
 import { DEFAULT_LINE_GAP } from "@/constants";
 import { ColorRegistry, FontLoader } from "@/resource";
-import { InheritStyle, ParagraphData, ParagraphOverlapMode, ParagraphStyle, PrintPostData, PrintPostDataChar, RenderCompleteEventDetail, TextBlockData, TextStyle } from "@/types";
+import { InheritStyle, ParagraphData, ParagraphOverlapMode, ParagraphStyle, RenderCompleteEventDetail, TextBlockData, TextStyle } from "@/types";
 import { genUUID, valueEqual, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay } from "@/utils";
 import { checkOverlapMm } from "@/engine";
 import { LayoutBoxElement } from "./box.element";
@@ -865,61 +865,6 @@ export class LayoutParagraphElement extends HTMLElement {
     list.push(...overlay);
 
     return list;
-  }
-
-  get printPostData(): PrintPostData[] {
-    const docEl = this._findDocumentElement();
-    const ppm = docEl?.ppm ?? 3.78;
-    const model = this._model;
-
-    if (model === undefined) {
-      return [{
-        data: this.data,
-        rect: {
-          x: this.absLeft * ppm,
-          y: this.absTop * ppm,
-          width: (this._inheritStyle?.parentWidth ?? 0) * ppm,
-          height: (this._inheritStyle?.parentHeight ?? 0) * ppm,
-        },
-        chars: [],
-      }];
-    }
-
-    const enginePostData = model.printPostData;
-    if (enginePostData.length === 0) {
-      return [{
-        data: this.data,
-        rect: {
-          x: this.absLeft * ppm,
-          y: this.absTop * ppm,
-          width: (this._inheritStyle?.parentWidth ?? 0) * ppm,
-          height: (this._inheritStyle?.parentHeight ?? 0) * ppm,
-        },
-        chars: [],
-      }];
-    }
-
-    const first = enginePostData[0];
-    const chars: PrintPostDataChar[] = first.chars?.map((char) => ({
-      ...char,
-      rect: {
-        x: char.rect.x * ppm,
-        y: char.rect.y * ppm,
-        width: char.rect.width * ppm,
-        height: char.rect.height * ppm,
-      },
-    })) ?? [];
-
-    return [{
-      data: this.data,
-      rect: {
-        x: first.rect.x * ppm,
-        y: first.rect.y * ppm,
-        width: first.rect.width * ppm,
-        height: first.rect.height * ppm,
-      },
-      chars,
-    }];
   }
 
   get type() { return 'paragraph' as const; }

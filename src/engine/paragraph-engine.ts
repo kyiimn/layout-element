@@ -1811,12 +1811,17 @@ export function buildParagraphPrintPostData(
       colLeftMm += (columnWidths[i] ?? 0) + (gaps[i] ?? 0);
     }
 
+    const baseFontSizeMm = engine.fontSize;
+    const effectiveColumnHeightMm = parentHeightMm > 0
+      ? parentHeightMm + (lineHeightMm - baseFontSizeMm)
+      : 0;
+
     let visibleLineIndex = 0;
     for (let li = 0; li < col.length; li++) {
       const lineData = col[li];
       if (!lineData) continue;
 
-      if (parentHeightMm > 0 && visibleLineIndex * lineHeightMm >= parentHeightMm) break;
+      if (effectiveColumnHeightMm > 0 && visibleLineIndex * lineHeightMm >= effectiveColumnHeightMm) break;
 
       const { textBlockStyle } = lineData;
       const colorName = textBlockStyle?.color
@@ -1824,13 +1829,13 @@ export function buildParagraphPrintPostData(
         ?? inheritStyle?.color;
       const cmyk = colorName !== undefined
         ? colorRegistry.get(colorName)
-        : colorRegistry.get('default');
+        : { c: 0, m: 0, y: 0, k: 255 };
 
-      const lineGap = paragraphStyle?.lineGap ?? inheritStyle?.lineGap ?? 1;
+      const lineGap = paragraphStyle?.lineGap ?? inheritStyle?.lineGap ?? DEFAULT_LINE_GAP;
       const fontSizeMm = textBlockStyle?.fontSize
         ?? textStyle?.fontSize
         ?? inheritStyle?.fontSize
-        ?? 4;
+        ?? DEFAULT_FONT_SIZE;
       let effectiveLineHeightMm = lineHeightMm;
       if (textBlockStyle?.fontSize && lineHeightMm < fontSizeMm * lineGap) {
         effectiveLineHeightMm = Math.ceil((fontSizeMm * lineGap) / lineHeightMm) * lineHeightMm;
@@ -1860,17 +1865,20 @@ export function buildParagraphPrintPostData(
           const charHeightMm = effectiveLineHeightMm;
 
           const widthRatio = engine.widthRatio;
+          const letterSpacing = textStyle?.letterSpacing ?? inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
+          const spaceRatio = engine.spaceRatio;
 
-          const charFontFamily = textBlockStyle?.fontFamily
-            ? fontLoader.getFontFamily(textBlockStyle.fontFamily)
+          const charFontFamilyName = textBlockStyle?.fontFamily
+            ?? textStyle?.fontFamily
+            ?? inheritStyle?.fontFamily;
+          const charFontFamily = charFontFamilyName !== undefined
+            ? fontLoader.getFontFamily(charFontFamilyName)
             : fontLoader.getFontFamily();
-          const charFontSize = `${fontSizeMm}mm`;
-          const charFontWeight = String(
-            textBlockStyle?.fontWeight
+          const charFontSize = fontSizeMm;
+          const charFontWeight = textBlockStyle?.fontWeight
             ?? textStyle?.fontWeight
             ?? inheritStyle?.fontWeight
-            ?? 400
-          );
+            ?? 400;
 
           chars.push({
             char,
@@ -1884,6 +1892,8 @@ export function buildParagraphPrintPostData(
             fontSize: charFontSize,
             fontWeight: charFontWeight,
             widthRatio,
+            letterSpacing,
+            spaceRatio,
             color: cmyk,
           });
         }
