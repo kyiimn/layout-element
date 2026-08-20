@@ -1,6 +1,6 @@
 # layout-element Place Gun 상세 명세
 
-> **엔진 마이그레이션**: `GridCalculator` → `GridCalculatorEngine`, ppm 접근 방식 변경. 상세는 [ENGINE.md](./ENGINE.md) 참고.
+
 
 > 작성 기준: `src/edit/edit-manager.ts`, `src/edit/place-gun-controller.ts`, `src/types/edit/place-gun.type.ts`
 >

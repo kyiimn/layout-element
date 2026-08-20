@@ -1,6 +1,5 @@
 # ParagraphEngine 상세 명세
 
-> **엔진 마이그레이션**: `TextLayoutEngine` → `ParagraphEngine`, `GridCalculator` → `GridCalculatorEngine`. 상세는 [ENGINE.md](./ENGINE.md) 참고.
 
 > 작성 기준: `src/engine/paragraph-engine.ts` 및 관련 타입, 컴포넌트, 유틸리티 소스 코드
 >
@@ -1244,7 +1243,7 @@ overlay = overlay.filter(i => {
 
 ### 18.3 `LayoutColumnElement`
 
-> `LayoutVirtualColumnElement`는 mm 좌표계 마이그레이션으로 제거됨. 텍스트 래핑은 `_layoutTextIntoColumns()`에서 mm 좌표로 직접 수행하며, `isOverflow` 판정은 마지막 라인 높이 규칙을 반영하여 `(lineIndexInColumn + 1) * lineHeight > parentHeight + (lineHeight - fontSize) + 1e-6`로 계산한다 (`textBlockStyle.fontSize`가 기본과 다르면 `parentHeight`만 사용).
+텍스트 래핑은 `_layoutTextIntoColumns()`에서 mm 좌표로 직접 수행하며, `isOverflow` 판정은 마지막 라인 높이 규칙을 반영하여 `(lineIndexInColumn + 1) * lineHeight > parentHeight + (lineHeight - fontSize) + 1e-6`로 계산한다 (`textBlockStyle.fontSize`가 기본과 다르면 `parentHeight`만 사용).
 
 ---
 

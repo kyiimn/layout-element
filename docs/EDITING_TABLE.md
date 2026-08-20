@@ -1,6 +1,6 @@
 # layout-element 표(table) 편집 상세 명세
 
-> **엔진 마이그레이션**: `GridCalculator` → `GridCalculatorEngine`, ppm 접근 방식 변경. 상세는 [ENGINE.md](./ENGINE.md) 참고.
+
 
 > 작성 기준: `src/components/layout/table.element.ts`, `src/components/layout/tr.element.ts`, `src/components/layout/td.element.ts`, `src/edit/table-keyboard-controller.ts`, `src/edit/table-structure-editor.ts`, `src/edit/layout-selection-controller.ts`, `src/edit/layout-edit-controller.ts`, `src/components/layout/box.element.ts`, `src/components/layout/document.element.ts`, `src/engine/table-grid-resolver.ts`, `src/engine/border-resolver.ts`, `src/types/layout/table.type.ts`, `src/types/edit/table-selection.type.ts`, `src/constants/defaults.ts`
 >

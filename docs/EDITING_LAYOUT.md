@@ -1,6 +1,6 @@
 # layout-element 레이아웃 편집 모드 상세 명세
 
-> **엔진 마이그레이션**: `GridCalculator` → `GridCalculatorEngine`, `TextLayoutEngine` → `ParagraphEngine`. ppm 접근이 `GridCalculator.ppm`(static)에서 `LayoutDocumentElement.ppm`(instance)로 변경. 상세는 [ENGINE.md](./ENGINE.md) 참고.
+
 
 > 작성 기준: `src/edit/edit-manager.ts`, `src/edit/layout-edit-controller.ts`, `src/edit/layout-selection-controller.ts`, `src/components/layout/box.element.ts`, `src/react/hooks/use-edit-manager.ts`
 >

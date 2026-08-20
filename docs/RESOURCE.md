@@ -1,6 +1,6 @@
 # FontLoader & ColorRegistry 상세 명세
 
-> **엔진 마이그레이션**: `FontLoader`/`ColorRegistry` 싱글톤은 브라우저용으로 유지되며, Node.js용 `FontLoaderEngineImpl`/`ColorRegistryEngineImpl`이 추가됨. 상세는 [ENGINE.md](./ENGINE.md) 참고.
+
 
 > 작성 기준: `src/resource/font-loader.ts`, `src/resource/color-registry.ts`, `src/react/context.tsx`, `src/types/style/font.type.ts`, `src/types/print/color-map.type.ts`
 >

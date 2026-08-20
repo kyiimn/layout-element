@@ -2,8 +2,6 @@
 
 이 문서는 `layout-element`의 전체 소스에서 발견된 모든 성능 최적화 전략을 체계적으로 정리한다. 각 최적화는 소스의 특정 병목을 해결하기 위해 도입되었으며, 캐시 키, 용량, 제거 정책, 스킵 조건, 배치 동작을 포함한다.
 
-> **엔진 마이그레이션**: `TextLayoutEngine` → `ParagraphEngine`, `GridCalculator` → `GridCalculatorEngine`. 캐시 구조는 동일하나 엔진 클래스명 변경. 상세는 [ENGINE.md](./ENGINE.md) 참고.
-
 > **관련 파일**: `src/engine/paragraph-engine.ts`, `src/engine/grid-calculator-engine.ts`, `src/components/layout/*.ts`, `src/components/edit/*.ts`, `src/edit/*.ts`, `src/resource/*.ts`, `src/utils/*.ts`
 
 ---
@@ -329,9 +327,7 @@
 | 위치 | `LayoutParagraphElement._perfShouldFullRecreate()` (`paragraph.element.ts:310`) |
 | 조건 | `lineCountBefore === -1 \|\| lineCountBefore !== lineCountAfter \|\| overflowBefore !== overflowAfter` |
 
-`lineCountBefore === -1`(초기 렌더, `resetIncrementalState()` 직후)이거나 라인 수/오버플로우가 변경된 경우에만 `replaceChildren()` + 전체 컬럼 재생성. 변경이 없으면 기존 컬럼의 `renderText()`만 호출.
-
-> **`wasStructureDirty` 제거**: 이전에는 `_perfStructureChanged === true`이면 무조건 전체 재생성이 트리거되었다. 그러나 박스 이동 시 Skeleton 캐시가 히트하면 `columnContents`가 동일 → 라인 수/오버플로우 불변이므로 diff 렌더링으로 충분하다. `wasStructureDirty` 조건을 제거하여 diff 경로로 진입하도록 완화. 단, `resetIncrementalState()`가 `_previousLineCount = -1`로 설정하므로 구조 변경 후 첫 렌더는 여전히 `lineCountBefore === -1` 경로로 전체 재생성된다.
+`lineCountBefore === -1`(초기 렌더, `resetIncrementalState()` 직후)이거나 라인 수/오버플로우가 변경된 경우에만 `replaceChildren()` + 전체 컬럼 재생성. 변경이 없으면 기존 컬럼의 `renderText()`만 호출. 박스 이동 시 Skeleton 캐시가 히트하면 `columnContents`가 동일 → 라인 수/오버플로우 불변이므로 diff 렌더링으로 충분하다.
 
 ### 3.7 단락 오버플로우 shadow change-gating
 
@@ -401,6 +397,8 @@
 #### 캐시 무효화
 
 - `resetIncrementalState()` 호출 시 `_layoutCache = null` (구조 변경 시)
+- `data` setter 호출 시 → `resetIncrementalState()` → `_layoutCache = null`
+- **`updateOverlayContext()`는 `_layoutCache`를 보존** — overlay 위치만 변경 시 사용. `_overlayRectsMm`만 null로 리셋. `DocumentEngine._refreshParagraphOverlays()`와 `LayoutParagraphElement.render()` else 분기에서 사용.
 - 입력 매개변수 변경 시 자동으로 해시가 달라져 캐시 미스 → 전체 재배치
 - **이미지 로드 완료 시**: `LayoutImageElement.render()`의 캐시 미스(첫 로드) 경로 완료 후 `_notifyOverlapParagraphs()`가 부모 박스의 `requestRerenderAffectedParagraphs()`를 호출 → `markStructureChangedAndRender()` → `resetIncrementalState()` → 캐시 무효화 → 재배치. 최초 로딩 시 이미지 canvas가 비어 있는 상태에서 단락이 먼저 렌더링되어 오버랩 판정이 누락되는 문제를 해결.
 

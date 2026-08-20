@@ -1,6 +1,6 @@
 # layout-element 삽입 모드 (Insert Mode) 상세 명세
 
-> **엔진 마이그레이션**: `GridCalculator` → `GridCalculatorEngine`, ppm 접근 방식 변경. 상세는 [ENGINE.md](./ENGINE.md) 참고.
+
 
 > 작성 기준: `src/edit/insert-controller.ts`, `src/edit/edit-manager.ts`, `src/types/edit/insert.type.ts`
 >

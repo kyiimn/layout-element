@@ -975,13 +975,11 @@ class LayoutSelectionElement extends HTMLElement
 
 ## Core / Engine
 
-> **마이그레이션**: 기존 `GridCalculator`와 `TextLayoutEngine`은 제거되었습니다.
-> `GridCalculatorEngine`과 `ParagraphEngine`이 동일한 역할을 수행하며, DOM/Canvas/FontFace 의존성 없이
-> Node.js에서도 동작합니다. 상세 API는 [`ENGINE.md`](./ENGINE.md)를 참고하세요.
+> 상세 API는 [`ENGINE.md`](./ENGINE.md)를 참고하세요.
 
 ### `GridCalculatorEngine`
 
-문서/박스 단위의 컬럼 그리드 좌표를 계산하는 순수 엔진. 기존 `GridCalculator`를 대체.
+문서/박스 단위의 컬럼 그리드 좌표를 계산하는 순수 엔진.
 
 ```ts
 class GridCalculatorEngine {
@@ -1072,7 +1070,6 @@ console.log(grid.lineHeight);      // 4 × 1.2 = 4.8 (mm)
 ### `ParagraphEngine`
 
 다중 컬럼 텍스트 래핑, 오버랩 회피, 스타일 생성, 커서/오프셋 쿼리를 담당하는 순수 엔진.
-기존 `TextLayoutEngine`을 대체.
 
 ```ts
 class ParagraphEngine {
@@ -1391,8 +1388,6 @@ function computeOverlapSizeMm(lineRectMm: MmRect, overlay: OverlapInput): Overla
 // 인접 오버랩 파트 머지
 function mergeOverlapParts(parts: OverlapParts[]): OverlapParts[];
 ```
-
-> 기존 `getOverlapSizeMm()`는 제거되었습니다. `computeOverlapSizeMm()`을 사용하세요.
 
 ---
 
@@ -3139,10 +3134,6 @@ const mergeOverlapParts: (parts: OverlapParts[]) => OverlapParts[];
 ```
 
 ### `computeOverlapSizeMm(lineRectMm, overlay)`
-
-> **마이그레이션**: 기존 `getOverlapSizeMm(lineRectMm, overlayElement)`는 제거되었습니다.
-> `computeOverlapSizeMm(lineRectMm, overlay: OverlapInput)`을 사용하세요.
-> `src/engine/overlap-engine.ts`에서 내보내집니다.
 
 ```ts
 /**

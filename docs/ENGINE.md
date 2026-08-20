@@ -1,6 +1,6 @@
 # Engine Layer — Node.js 호환 순수 계산 엔진
 
-> 본 문서는 `src/engine/` 계층의 아키텍처, API 레퍼런스, 마이그레이션 가이드를 기술한다.
+> 본 문서는 `src/engine/` 계층의 아키텍처, API 레퍼런스, Node.js 사용 예시를 기술한다.
 
 ---
 
@@ -68,14 +68,13 @@ static create(
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
 | `layout()` | `(): void` | `DocumentData`로부터 전체 엔진 트리 재구축 |
-| `removeChildEngine` | `(engine, parentEngine): void` | 엔진 트리에서 특정 자식 엔진 제거 (DOM 요소 제거 시 엔진 트리 동기화용) |
 
 #### 내부 메커니즘
 
-- `_createGridCalculator()`: `GridCalculatorEngine` 생성 (`isBox: false`)
-- `_buildTree(data)`: 최상위 `BoxEngine` 자식들 생성, 각 박스는 재귀적으로 하위 엔진 구축
-- `_buildBoxEngine(boxData, parent)`: 박스별 `GridCalculatorEngine` 생성 (`isBox: true`), static 박스는 부모 그리드에서 컬럼/갭 슬라이스
-- `_buildParagraphEngine(paraData, parentBox)`: `parentBox.overlayElements`로 오버레이 계산
+- `_buildTree(data)`: 최상위 `BoxEngine` 자식들 생성, 각 박스는 재귀적으로 하위 엔진 구축. 기존 `childBoxEngines`에서 ID로 엔진 재사용.
+- `_buildBoxEngine(boxData, parent)`: 박스별 `GridCalculatorEngine` 생성 (`isBox: true`), static 박스는 부모 그리드에서 컬럼/갭 슬라이스. **GC 파라미터 동일 시 인스턴스 재사용** (`_gcParamsEqual`).
+- `_buildParagraphEngine(paraData, parentBox)`: `parentBox.overlayElements`로 오버레이 계산. `layoutStructure()`만 호출, **`layoutText()`는 호출하지 않음** — `_refreshParagraphOverlays`에서 단일 실행.
+- `_refreshParagraphOverlays(boxEngines)`: 모든 단락의 overlay 문맥을 `updateOverlayContext()`로 갱신 (`_layoutCache` 보존). `TableEngine` 내부 셀 박스도 순회.
 - `_buildInheritStyle()`: 문서 텍스트/단락 스타일 + 부모 dimensions/padding 머지
 - `printPostData`: 자식 박스를 z-index로 정렬 후 각 박스의 `printPostData` 위임. mm 단위 좌표를 후처리 시스템에 제공
 
@@ -115,7 +114,7 @@ const engine = DocumentEngine.create(
 
 ### 2.2 `GridCalculatorEngine`
 
-컬럼 그리드 좌표 계산. 기존 `GridCalculator`의 순수 버전.
+컬럼 그리드 좌표 계산 엔진.
 
 #### 팩토리
 
@@ -271,19 +270,17 @@ static create(data: ImageEngineData): ImageEngine
 
 #### 내부 메커니즘
 
-- `'path'` 모드: 픽셀 단위 투명도 판정
+- `computeOverlap()`: `overlap-engine.ts`의 `computeOverlapSizeMm()`에 위임
+- `'path'` 모드 + RGBA 데이터: 픽셀 단위 투명도 판정
 - `'box'` 모드: 박스 rect 기반 기하학적 판정
 - `overlapPadding` 설정 시 ellipse 기반 판정 (`ndx² + ndy² ≤ 1`)
-- `_findOpaqueColumnsEllipse()`: 패딩 정규화 거리로 타원형 패딩 영역
-- `_findOpaqueColumnsSimple()`: 패딩 없는 투명도 스캔
-- `_mergeOverlapParts()`: 인접 오버랩 범위 머지
 - `DEFAULT_IMAGE_DPI = 72`
 
 ---
 
 ### 2.5 `ParagraphEngine`
 
-텍스트 래핑 엔진. 기존 `TextLayoutEngine`의 순수 버전 + 엔진 쿼리 API.
+텍스트 래핑 엔진 + 엔진 쿼리 API.
 
 #### 타입
 
@@ -649,59 +646,7 @@ LayoutTableCellElement.engine: TableCellEngine | undefined
 
 ---
 
-## 6. 마이그레이션 가이드
-
-### 6.1 `GridCalculator` → `GridCalculatorEngine`
-
-| 기존 | 새 엔진 |
-|------|---------|
-| `GridCalculator.create({ element, ... })` | `GridCalculatorEngine.create({ ...opts, isBox }, ppm?)` |
-| `GridCalculator.ppm` (static, DOM 측정) | `engine.ppm` (인스턴스 필드, 외부 주입, 옵셔널) |
-| `instanceof LayoutBoxElement` 체크 | `opts.isBox: boolean` |
-
-### 6.2 `TextLayoutEngine` → `ParagraphEngine`
-
-| 기존 | 새 엔진 |
-|------|---------|
-| `TextLayoutEngine.create({ paragraphEl, rootNode, ... })` | `ParagraphEngine.create({ overlayEngines, parentAbsRect, resources, ... })` |
-| `paragraphEl.overlayElements` (DOM) | `data.overlayEngines: BoxEngine[]` |
-| `paragraphEl.absLeft/absTop` (DOM) | `data.parentAbsRect: AbsRect` |
-| `FontLoader.getInstance()` | `resources.fontLoader: FontLoaderEngine` |
-| `getOverlapSizeMm(lineRect, el)` | `computeOverlapSizeMm(lineRect, { absRect, overlapMode, image })` |
-
-### 6.3 `getOverlapSizeMm()` → `computeOverlapSizeMm()`
-
-| 기존 | 새 엔진 |
-|------|---------|
-| `getOverlapSizeMm(lineRect, overlayElement: LayoutBoxElement)` | `computeOverlapSizeMm(lineRect, overlay: OverlapInput)` |
-| `overlayElement.canvas.getContext('2d').getImageData()` | `image.rgbaData: Uint8Array` |
-| `overlayElement.absLeft/absTop/absWidth/absHeight` | `overlay.absRect: AbsRect` |
-
-> `getOverlapSizeMm`는 제거됨. `src/utils/check-overlap.ts` 파일 자체가 삭제됨. `checkOverlap`은 `engine/overlap-engine.ts`의 `checkOverlapMm`로, `mergeOverlapParts`는 `engine/overlap-engine.ts`의 동일 함수로 통합됨.
-
-### 6.4 ppm 접근 방식 변경
-
-| 기존 | 새 방식 |
-|------|---------|
-| `GridCalculator.ppm` (전역 static) | `layoutDocumentElement.ppm` (요소 인스턴스) |
-| `GridCalculator.ppm * manager.scale` | `manager.docEl.ppm * manager.scale` |
-| `GridCalculator.ppm` (엔진 내부) | `DocumentEngine.ppm` / `EngineResources.ppm` (옵셔널) |
-
-### 6.5 `TextEditCoordinateMapper`
-
-피처 플래그 `TextEditCoordinateMapper.useEngineCoordinateQueries`:
-
-- `false` (기본값): 기존 DOM `getBoundingClientRect()` 경로
-- `true`: `ParagraphEngine.getCharRect()` 엔진 쿼리 경로 (mm → ppm 변환)
-
-```ts
-// 전환
-TextEditCoordinateMapper.useEngineCoordinateQueries = true;
-```
-
----
-
-## 7. Node.js 사용 예시
+## 6. Node.js 사용 예시
 
 ```ts
 import { DocumentEngine, FontLoaderEngineImpl, ColorRegistryEngineImpl } from 'layout-element';
@@ -741,7 +686,7 @@ imageEngine.rgbaData = { data: new Uint8Array(png.data), width: png.width, heigh
 
 ---
 
-## 8. 검증
+## 7. 검증
 
 ```bash
 npm run verify:engine   # Node.js 호환성 테스트 (25개 assertion)
@@ -762,7 +707,7 @@ npm run build           # IIFE + React ESM 빌드
 
 ---
 
-## 9. 엔진보내기 (`src/index.ts`)
+## 8. 엔진보내기 (`src/index.ts`)
 
 vanilla 진입점에서 명시적 engine보내기:
 
@@ -776,7 +721,7 @@ vanilla 진입점에서 명시적 engine보내기:
 
 ---
 
-## 10. 디렉토리 구조
+## 9. 디렉토리 구조
 
 ```
 src/engine/
@@ -795,7 +740,7 @@ src/engine/
 
 ---
 
-## 11. 상수 (엔진이 사용하는 기본값)
+## 10. 상수 (엔진이 사용하는 기본값)
 
 `src/constants/defaults.ts`:
 
@@ -817,7 +762,7 @@ src/engine/
 
 ---
 
-## 12. 엔진 우선 원칙 (Engine-First Principle)
+## 11. 엔진 우선 원칙 (Engine-First Principle)
 
 `layout-element`의 핵심 아키텍처 규칙이다. 엔진 트리가 모든 레이아웃 계산의 유일한 진실 공급원이며, DOM 요소는 그 결과를 표시하고 WYSIWYG 편집에 사용할 뿐이다.
 
@@ -826,4 +771,4 @@ src/engine/
 - DOM 요소는 절대 엔진 트리를 만들거나 수정하지 않는다.
 - 편집이 발생하면 편집된 콘텐츠를 `DocumentData` / `BoxData`로 직렬화하고, 엔진이 이를 다시 처리한 뒤 결과를 DOM에 전파한다.
 - DOM 요소는 `engine.childEngines`를 DOM 자식으로부터 수동으로 채우는 등 엔진 트리를 우회해서는 안 된다.
-- 구체적인 구현 규칙은 `RULES.md` 섹션 2.9을 참조한다.
+- 구체적인 구현 규칙은 `RULES.md` 섹션 3을 참조한다.
