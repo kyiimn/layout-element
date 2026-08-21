@@ -16,9 +16,11 @@ import type { PrintPostData } from "@/types";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
 import { BoxEngine } from "./box-engine";
 import { ImageEngine } from "./image-engine";
+import type { RgbaData } from "./image-engine";
 import { ParagraphEngine } from "./paragraph-engine";
 import { TableEngine, TableCellEngine } from "./table-engine";
 import { valueEqual } from "@/utils/value-equal";
+import { isNodeJs, decodeBase64ImageToRgbaSync, prepareImageDecoder } from "./image-decoder";
 
 let _engineIdCounter = 0;
 
@@ -237,9 +239,37 @@ export class DocumentEngine {
   }
 
   /**
+   * Node.js ESM 환경에서 pngjs 이미지 디코더를 사전 로드한다.
+   *
+   * `layout()`이 동기 함수이므로, ESM 환경에서 `import("pngjs")`를
+   * 미리 실행해 두어야 `layout()` 호출 시 base64 data URI 이미지의
+   * rgbaData가 자동 주입된다.
+   *
+   * CommonJS / tsx 환경에서는 `require('pngjs')`로 동기 로드가 가능하므로
+   * 이 메서드를 호출하지 않아도 된다.
+   *
+   * 브라우저 환경에서는 no-op (아무 작업도 수행하지 않음).
+   *
+   * @returns 디코더 로드 성공 여부. true면 Node.js에서 base64 이미지 자동 디코딩 가능.
+   *
+   * @example
+   * // ESM 환경 (Node.js)
+   * const engine = DocumentEngine.create(docData, fontLoader, colorRegistry);
+   * await engine.prepareImageDecoder();
+   * engine.layout();  // base64 이미지 rgbaData 자동 주입 → path 모드 정상 동작
+   */
+  async prepareImageDecoder(): Promise<boolean> {
+    return prepareImageDecoder();
+  }
+
+  /**
    * 문서 레이아웃을 계산한다.
    * data setter에서 그리드가 갱신되므로, 여기서는 엔진 트리 전체를 재구축한다.
    * DOM 요소 없이 DocumentData만으로 전체 엔진 트리를 구축한다.
+   *
+   * Node.js 환경에서 base64 data URI 이미지가 포함된 경우,
+   * `overlapMode: 'path'`가 정상 동작하도록 rgbaData를 자동 주입한다.
+   * (브라우저는 `LayoutImageElement._feedRgbaToEngine()`이 canvas에서 RGBA 추출)
    */
   layout(): void {
     this._buildTree(this._data);
@@ -546,18 +576,37 @@ export class DocumentEngine {
 
   /**
    * ImageData로부터 ImageEngine을 구축한다.
-   * rgbaData는 이 시점에서 주입되지 않는다 — 외부에서 별도로 주입해야 한다.
+   *
+   * **rgbaData 자동 주입 (Node.js)**: Node.js 환경에서 `imgData.url`이
+   * base64 data URI(`data:image/...`)인 경우, pngjs로 동기 디코딩하여
+   * `ImageEngine.rgbaData`에 자동 주입한다. 이를 통해 `overlapMode: 'path'`가
+   * 정상 동작한다 (rgbaData 없으면 box 모드로 폴백).
+   *
+   * **브라우저**: 자동 주입을 수행하지 않는다. 브라우저에서는
+   * `LayoutImageElement._feedRgbaToEngine()`이 canvas `getImageData()`로
+   * RGBA를 추출하여 `ImageEngine.rgbaData`에 주입한다.
+   *
+   * **기존 rgbaData 보존**: 엔진 재사용 시 기존 rgbaData가 있으면 보존한다.
+   * 단, URL이 변경된 경우 새로 디코딩한다.
+   *
+   * @param imgData - 이미지 데이터
+   * @param parentBox - 부모 박스 엔진
+   * @param prevContentEngines - 이전 컨텐츠 엔진 배열 (재사용 대상)
+   * @returns 구축된 ImageEngine
    */
   private _buildImageEngine(
     imgData: ImageData,
     parentBox: BoxEngine,
     prevContentEngines: (ImageEngine | ParagraphEngine | TableEngine)[],
   ): ImageEngine {
+    const contentAbsRect = parentBox.contentAbsRect;
+
     const existing = parentBox.childEngines.find(e => e instanceof ImageEngine)
       ?? prevContentEngines.find(e => e instanceof ImageEngine);
     if (existing) {
       const imgEngine = existing as ImageEngine;
-      const preservedRgba = imgEngine.rgbaData;
+      const prevUrl = imgEngine.data.url;
+      const preservedRgba = (prevUrl === imgData.url) ? imgEngine.rgbaData : null;
       imgEngine.data = {
         url: imgData.url,
         x: imgData.x,
@@ -571,10 +620,15 @@ export class DocumentEngine {
         originalWidth: imgData.originalWidth,
         originalHeight: imgData.originalHeight,
       };
-      imgEngine.rgbaData = preservedRgba;
+      imgEngine.contentAbsRect = contentAbsRect;
+      if (preservedRgba) {
+        imgEngine.rgbaData = preservedRgba;
+      } else {
+        imgEngine.rgbaData = this._decodeRgbaIfNode(imgData.url);
+      }
       return imgEngine;
     }
-    return ImageEngine.create({
+    const newEngine = ImageEngine.create({
       url: imgData.url,
       x: imgData.x,
       y: imgData.y,
@@ -587,6 +641,26 @@ export class DocumentEngine {
       originalWidth: imgData.originalWidth,
       originalHeight: imgData.originalHeight,
     });
+    newEngine.contentAbsRect = contentAbsRect;
+    newEngine.rgbaData = this._decodeRgbaIfNode(imgData.url);
+    return newEngine;
+  }
+
+  /**
+   * Node.js 환경에서 base64 data URI 이미지를 디코딩하여 RgbaData를 반환한다.
+   *
+   * 브라우저 환경이거나 data URI가 아닌 경우 null을 반환한다.
+   * pngjs 모듈이 로드되지 않은 경우(ESM 환경에서 `prepareImageDecoder()` 미호출)에도
+   * null을 반환하며, 이때는 path 모드가 box로 폴백된다.
+   *
+   * @param url - 이미지 URL (data URI 또는 일반 URL)
+   * @returns 디코딩된 RgbaData 또는 null
+   * @internal
+   */
+  private _decodeRgbaIfNode(url: string): RgbaData | null {
+    if (!isNodeJs()) return null;
+    if (!url.startsWith('data:image/')) return null;
+    return decodeBase64ImageToRgbaSync(url);
   }
 
   private _buildTableEngine(

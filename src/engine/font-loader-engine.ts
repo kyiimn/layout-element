@@ -28,6 +28,26 @@ interface OpenTypeModule {
 let _opentype: OpenTypeModule | null = null;
 async function getOpenType(): Promise<OpenTypeModule> {
   if (_opentype) return _opentype;
+
+  // ESM/tsx 환경에서 import("opentype.js")가 실패할 수 있으므로
+  // module.createRequire를 먼저 시도
+  try {
+    const mod = await import("module");
+    if (typeof mod.createRequire === 'function') {
+      let reqUrl = '';
+      try { reqUrl = import.meta.url; } catch { reqUrl = ''; }
+      if (!reqUrl) {
+        const g = globalThis as { __filename?: string };
+        const proc = (process as { cwd?: () => string });
+        const cwd = typeof proc.cwd === 'function' ? proc.cwd() : '/';
+        reqUrl = g.__filename ?? ('file://' + cwd + '/');
+      }
+      const requireFn = mod.createRequire(reqUrl);
+      _opentype = requireFn('opentype.js') as unknown as OpenTypeModule;
+      return _opentype;
+    }
+  } catch { /* fallback below */ }
+
   const mod = await import("opentype.js");
   _opentype = mod as unknown as OpenTypeModule;
   return _opentype;
