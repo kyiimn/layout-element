@@ -233,6 +233,23 @@ export class EditManager {
   }
 
   /**
+   * `reset()` 후 컨트롤러 이벤트 리스너를 재등록한다.
+   *
+   * `reset()`이 `_selectionController.detach()`를 호출하여 리스너가 해제된 후,
+   * `layoutEditMode = false`는 no-op이므로 `_updateControllers()`가 호출되지 않아
+   * 리스너가 재등록되지 않는다. 이 메서드를 명시적으로 호출해야 한다.
+   */
+  reattachControllers(): void {
+    this._selectionController?.attach();
+    if (this._layoutEditController) {
+      this._layoutEditController.attach();
+    }
+    if (this._placeGunController) {
+      this._placeGunController.attach();
+    }
+  }
+
+  /**
    * 현재 편집 모드 상태 스냅샷을 반환한다.
    *
    * `modeChange` 이벤트의 payload 생성에 사용된다.
