@@ -74,7 +74,7 @@ export class LayoutImageElement extends HTMLElement {
   private _zIndex: number = 0;
   private _overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number };
   private _overlapMode: OverlapMode = 'path';
-  private _objectUrl?: string;
+
   private _originalWidth?: number;
   private _originalHeight?: number;
   private _objectFit: ImageObjectFit = 'cover';
@@ -130,10 +130,6 @@ export class LayoutImageElement extends HTMLElement {
 
   disconnectedCallback() {
     removeAiProcessingOverlay(this._shadowRoot);
-    if (this._objectUrl) {
-      URL.revokeObjectURL(this._objectUrl);
-      this._objectUrl = undefined;
-    }
     // 이미지 캐시(_cachedImage, _cachedImageSrc, _cachedResolvedUrl)를 보존한다.
     //
     // 부모 box/document의 data setter reconcile 과정에서 appendChild가 같은
@@ -150,6 +146,11 @@ export class LayoutImageElement extends HTMLElement {
     // 엔진을 부모 childEngines에서 splice하지 않는다 — box.element.ts 참조.
     // DocumentEngine._buildTree()가 전체 트리를 재구축하므로 불필요하며,
     // 기존 엔진을 유지하는 편이 재사용 측면에서 더 효율적이다.
+    //
+    // blob URL의 수명은 imageUrlCache(모듈 레벨)에서 관리한다.
+    // 요소가 DOM에서 분리되더라도 같은 세션 내에서 재사용될 수 있으므로
+    // revokeObjectURL을 호출하지 않는다. 전체 해제는 앱 수명 주기
+    // 종료 시 releaseLayoutImageCache()에서 수행한다.
   }
 
   /**
@@ -288,12 +289,6 @@ export class LayoutImageElement extends HTMLElement {
 
     // 캐시 미스: 로드 후 그리기
     this._clearImageCache();
-    if (this._objectUrl && this._objectUrl !== resolvedUrl) {
-      URL.revokeObjectURL(this._objectUrl);
-    }
-    if (resolvedUrl.startsWith('blob:')) {
-      this._objectUrl = resolvedUrl;
-    }
 
     const img = await this._loadImage(resolvedUrl);
     if (!img) {
