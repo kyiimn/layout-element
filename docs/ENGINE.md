@@ -566,6 +566,7 @@ static create(): ColorRegistryEngineImpl
 | `ColorRegistryEngine` | 인터페이스 |
 | `EngineResources` | `{ ppm, fontLoader, colorRegistry }` |
 | `RgbaData` | `{ data: Uint8Array; width: number; height: number }` |
+| `CursorPlacement` | `{ sourceOffset: number; atEndOfChar: boolean }` — 커서 배치 정보. 엔진에서 원본 정의, `@/edit` 계층이 소비 |
 
 ---
 
@@ -744,8 +745,20 @@ engine.layout();  // ImageEngine.rgbaData 자동 주입됨
 
 ```bash
 npm run verify:engine   # Node.js 호환성 테스트 (25개 assertion)
-npm run build           # IIFE + React ESM 빌드
+npm run build           # IIFE + React ESM + Engine ESM 빌드
 ```
+
+### 엔진 번들
+
+- `dist/layout-element-engine.mjs` (ESM): 엔진 진입점 `src/engine/index.ts`.
+- **`opentype.js`는 external**: 엔진 번들에서 제외되어 사용자가 peer dependency로 설치.
+  번들 크기 393KB → 74KB (81% 감소), 브라우저 의존 API 5건 → 0건.
+- **`pngjs`, `module`도 external**: Node.js 환경에서만 사용.
+
+### Node.js 요구사항
+
+- **Node.js >= 16**: `font-loader-engine.ts`가 `atob()` 전역을 사용 (Node.js 16+ 전역 제공).
+- `package.json`의 `engines.node` 필드에 명시.
 
 ### `verify:engine` 테스트 항목 (7개, 25개 assertion)
 
@@ -772,6 +785,10 @@ vanilla 진입점에서 명시적 engine보내기:
 `GridRect`, `AbsRect`, `EngineMmRect` (alias), `OverlapDirection`, `OverlapResult`, `OverlapInput`, `ImageEngineRef`, `BoxContentType`, `FontLoaderEngine`, `ParsedFont`, `ColorRegistryEngine`, `EngineResources`, `GridCalculatorEngineOptions`, `ImageEngineData`, `ImageLayoutResult`, `BoxLayoutResult`, `TableLayoutResult`, `ParagraphLayoutResult`, `DocumentLayoutResult`, `LayoutResult`, `EngineCursorPlacement` (alias), `RgbaData`, `ObjectFitRect`, `ObjectFitInput`
 
 > `MmRect`과 `CursorPlacement`은 `@/core`/`@/utils` 및 `@/edit`에 동일 이름이 있어 alias 처리됨.
+>
+> **`CursorPlacement` 원본 정의 위치**: `src/engine/types.ts` (엔진 계층).
+> `@/edit/text-edit-coordinate-mapper.ts`는 `@/engine/types`에서 `import type`하여 재export.
+> 엔진이 `@/edit` 계층에 타입 의존성을 갖지 않도록 분리됨.
 
 ---
 
@@ -779,7 +796,7 @@ vanilla 진입점에서 명시적 engine보내기:
 
 ```
 src/engine/
-  types.ts                    # 공유 타입 (AbsRect, MmRect, OverlapResult, EngineResources 등)
+  types.ts                    # 공유 타입 (AbsRect, MmRect, OverlapResult, EngineResources, CursorPlacement 등)
   grid-calculator-engine.ts   # 컬럼 그리드 계산 (ppm 옵셔널)
   image-engine.ts             # 이미지 오버랩 (RGBA 데이터 기반, object-fit displayRect 계산)
   image-decoder.ts            # Node.js base64 → RGBA 디코딩 (pngjs, module.createRequire)
@@ -788,8 +805,8 @@ src/engine/
   box-engine.ts               # 박스 좌표/오버랩 요소 계산
   table-engine.ts             # 테이블 그리드 해석 + TableCellEngine (BoxEngineParent 구현)
   paragraph-engine.ts         # 텍스트 래핑 + 엔진 쿼리 API + printPostData (mm)
-  document-engine.ts          # 문서 루트 (ppm/리소스 관리, 트리 자동 구축, base64 이미지 자동 디코딩)
-  font-loader-engine.ts       # opentype.js 전용 (FontFace 없음, module.createRequire 지원)
+  document-engine.ts          # 문서 루트 (ppm/리소스 관리, 트리 자동 구축, base64 이미지 자동 디코딩, CryptoUuid 로컬 인터페이스)
+  font-loader-engine.ts       # opentype.js 전용 (FontFace 없음, atob 전역 사용 — Node.js 16+ 필요, module.createRequire 지원)
   color-registry-engine.ts    # CMYK→RGB 변환 + get() (fetch 없음)
   index.ts                    # 진입점
 ```
