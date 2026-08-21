@@ -1,17 +1,10 @@
 import type { LayoutColumnElement } from "@/components/layout/column.element";
 import type { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import type { CursorPosition } from "@/types/edit/cursor.type";
+import type { CursorPlacement } from "@/engine/types";
 import { EditManager } from "./edit-manager";
 
-/**
- * 커서 배치 정보: 특정 source offset에 커서를 표시할 위치를 나타낸다.
- */
-export interface CursorPlacement {
-  /** 커서가 참조할 가시 문자의 source offset */
-  sourceOffset: number;
-  /** true면 커서를 문자의 우측 끝에 배치, false면 좌측에 배치 */
-  atEndOfChar: boolean;
-}
+export type { CursorPlacement };
 
 /**
  * `<x-layout-paragraph>` 내부의 텍스트 오프셋과 픽셀 좌표를 매핑한다.

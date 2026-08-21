@@ -36,9 +36,9 @@ import {
   PrintPostDataChar,
 } from "@/types";
 import type { BoxEngine } from "./box-engine";
-import type { CursorPlacement } from "@/edit/text-edit-coordinate-mapper";
 import {
   AbsRect,
+  CursorPlacement,
   CursorPosition,
   EngineResources,
   ImageEngineRef,
