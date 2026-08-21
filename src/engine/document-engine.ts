@@ -24,9 +24,18 @@ import { isNodeJs, decodeBase64ImageToRgbaSync, prepareImageDecoder } from "./im
 
 let _engineIdCounter = 0;
 
+/**
+ * `crypto.randomUUID()`를 사용할 수 있는 최소 인터페이스.
+ * `lib.dom.d.ts`의 `Crypto` 타입에 대한 의존성을 제거하여
+ * 엔진이 DOM lib 없이도 타입 체크가 가능하도록 한다.
+ */
+interface CryptoUuid {
+  randomUUID(): string;
+}
+
 function generateEngineId(): string {
   _engineIdCounter++;
-  const cryptoApi = (typeof globalThis !== 'undefined' && (globalThis as { crypto?: Crypto }).crypto);
+  const cryptoApi = (typeof globalThis !== 'undefined' && (globalThis as { crypto?: CryptoUuid }).crypto);
   if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
     return cryptoApi.randomUUID();
   }

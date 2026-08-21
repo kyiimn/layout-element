@@ -15,7 +15,7 @@ export default defineConfig({
       formats: ['es'],
     },
     rollupOptions: {
-      external: ['pngjs', 'module'],
+      external: ['pngjs', 'module', 'opentype.js'],
       output: {
         inlineDynamicImports: true,
       },

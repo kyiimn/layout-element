@@ -5,6 +5,9 @@
   "license": "UNLICENSED",
   "author": "",
   "type": "module",
+  "engines": {
+    "node": ">=16"
+  },
   "main": "./dist/layout-element.iife.js",
   "module": "./dist/layout-element-react.mjs",
   "types": "./dist/layout-element.d.ts",
