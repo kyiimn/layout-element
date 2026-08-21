@@ -305,7 +305,7 @@ export interface ImageEngineData {
   overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number };
   /** 오버랩 처리 모드 */
   overlapMode: OverlapMode;
-  /** object-fit 프리셋 (편집 UI 메타데이터) */
+  /** object-fit 프리셋 */
   objectFit: ImageObjectFit;
   /** 원본 이미지 너비 (mm) */
   originalWidth?: number;
