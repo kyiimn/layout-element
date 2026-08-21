@@ -47,6 +47,7 @@ import {
   ParagraphOverlapMode,
 } from "./types";
 import { computeOverlapSizeMm, mergeOverlapParts } from "./overlap-engine";
+import type { ImageEngine } from "./image-engine";
 
 /** 엔진 생성 옵션. */
 export interface ParagraphEngineData {
@@ -431,26 +432,30 @@ export class ParagraphEngine {
       }
 
       let mode: OverlapMode | ParagraphOverlapMode = "path";
-      let image: ImageEngineRef | null = null;
       let padding: number | { top?: number; right?: number; bottom?: number; left?: number } | undefined;
 
       const contentType = el.contentType;
+      let type: { direction: "NONE" | "COVERS" | "PART"; parts: OverlapParts[] };
+
       if (contentType === "image") {
-        const img = el.contentElement as ImageEngineRef | null;
+        const img = el.contentElement as ImageEngine | null;
         if (img) {
           mode = img.overlapMode;
-          image = img;
           padding = img.overlapPadding;
+          type = img.computeOverlap(lineRectMm);
+        } else {
+          type = { direction: 'NONE', parts: [] };
         }
+      } else {
+        type = computeOverlapSizeMm(lineRectMm, {
+          absRect: el.absRect,
+          overlapMode: mode,
+          overlapPadding: padding,
+          image: null,
+          contentType: contentType ?? 'paragraph',
+        });
       }
 
-      const type = computeOverlapSizeMm(lineRectMm, {
-        absRect: el.absRect,
-        overlapMode: mode,
-        overlapPadding: padding,
-        image,
-        contentType,
-      });
       if (type.direction === "COVERS") cover = true;
       if (type.direction === "PART") parts = parts.concat(type.parts);
     }
@@ -1865,11 +1870,18 @@ export function buildParagraphPrintPostData(
 
       const lineTopMm = absTopMm + alignOffsetMm + visibleLineIndex * lineHeightMm;
 
+      let partStartMm = 0;
       for (let pi = 0; pi < lineData.parts.length; pi++) {
         const part = lineData.parts[pi];
-        if (!part || part.content.length === 0) continue;
+        if (!part || part.content.length === 0) {
+          if (part) partStartMm += part.left + part.width;
+          continue;
+        }
 
-        const { content, charOffsets, left: partLeftMm } = part;
+        partStartMm += part.left;
+        const partAbsLeftMm = partStartMm;
+
+        const { content, charOffsets } = part;
 
         const { stripStart, stripEnd } = computeStripRange(part, lineData, pi);
 
@@ -1883,7 +1895,7 @@ export function buildParagraphPrintPostData(
           const charOffsetMm = charOffsets !== undefined && k < charOffsets.length
             ? (charOffsets[k] ?? 0)
             : 0;
-          const charXMm = colLeftMm + partLeftMm + charOffsetMm;
+          const charXMm = colLeftMm + partAbsLeftMm + charOffsetMm;
 
           const { swidth } = engine.getCharWidths(char, textBlockStyle);
           const charWidthMm = swidth;
@@ -1922,6 +1934,7 @@ export function buildParagraphPrintPostData(
             color: cmyk,
           });
         }
+        partStartMm += part.width;
       }
 
       visibleLineIndex++;
