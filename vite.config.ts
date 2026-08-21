@@ -16,6 +16,7 @@ export default defineConfig({
       formats: ['iife'],
     },
     rollupOptions: {
+      external: ['pngjs'],
       output: {
         globals: {},
       },

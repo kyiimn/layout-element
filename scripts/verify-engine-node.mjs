@@ -84,13 +84,13 @@ try {
   });
 
   imgEngine.rgbaData = { data: rgbaData, width: 4, height: 4 };
+  imgEngine.contentAbsRect = { absLeft: 0, absTop: 0, absWidth: 40, absHeight: 30 };
 
   const lineRect = {
     left: 0, right: 40, top: 0, bottom: 4.8, width: 40, height: 4.8,
   };
-  const imgRect = { absLeft: 0, absTop: 0, absWidth: 40, absHeight: 30 };
 
-  const result = imgEngine.computeOverlap(lineRect, imgRect);
+  const result = imgEngine.computeOverlap(lineRect);
   assert(result.direction === 'COVERS' || result.direction === 'PART', `overlap direction is COVERS or PART (got ${result.direction})`);
   assert(imgEngine.overlapMode === 'path', 'overlapMode === path');
 } catch (e) {

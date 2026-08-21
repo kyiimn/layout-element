@@ -85,10 +85,16 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **Text overflow**: `render-error` CustomEvent with `{ type: 'text-overflow', overflow: number }`. `:host` gets `inset 0 -8px 0 0 #ff0000` when overflow.
 - **Render complete**: `render-complete` CustomEvent after every `LayoutParagraphElement.render()`. Payload: `RenderCompleteEventDetail`.
 - **printPostData 단일화 (mm)**: 엔진 트리(`DocumentEngine.printPostData`)가 단일 소스. `LayoutDocumentElement.printPostData`는 엔진 트리를 위임한다. box/paragraph/image/table/td/tr 엘리먼트의 개별 `printPostData` getter는 제거되었다. 모든 rect/char 좌표는 **mm 단위 number**. ppm 곱셈은 외부 후처리 시스템이 수행한다. `<x-layout-guide-column>`은 DOM 전용이므로 `LayoutDocumentElement`에서 별도 수집.
-- **`BoxEngine.contentAbsRect`**: padding 제외한 콘텐츠 영역 절대 사각형 (mm). ImageEngine `buildPrintPostData`에 이미지 absRect로 전달 — 부모 box 전체 absRect가 아닌 이미지 영역.
+- **`BoxEngine.contentAbsRect`**: padding 제외한 콘텐츠 영역 절대 사각형 (mm). `ImageEngine.contentAbsRect`로 주입되어 object-fit 계산에 사용.
+- **`ImageEngine.displayRect`**: `contentAbsRect` + `objectFit` + `originalWidth/Height`로 계산한 이미지 실제 표시 영역 (절대 좌표, mm). 엔진이 단일 소스이며, 브라우저는 이 결과로 canvas에 표시.
+- **`ImageEngine.computeOverlap`**: `displayRect`를 기준으로 오버랩 판정. 시그니처는 `(lineRectMm: MmRect)` — imgRectMm 파라미터 제거, 내부적으로 `displayRect` 사용.
 - **`buildParagraphPrintPostData` verticalAlign 반영**: `paragraphStyle.verticalAlign`(top/center/bottom) 오프셋을 char rect.y에 반영. `center`면 `(columnHeight - contentHeight) / 2`, `bottom`이면 `columnHeight - contentHeight`를 lineTopMm에 더함. 화면 flex `justifyContent`와 동일 결과.
+- **`buildParagraphPrintPostData` part.left 누적 오프셋**: `part.left`는 이전 part 끝에서의 갭이므로, printPostData char x 좌표 계산 시 `partStartMm`에 갭과 width를 누적하여 절대 오프셋을 계산.
 - **Overlap padding**: `overlapPadding` on `ImageData` — mm values, `number` or `{ top?, right?, bottom?, left? }`. Ellipse-based detection: `ndx² + ndy² ≤ 1`.
 - **Overlap mode**: `overlapMode` on `ImageData` — `'path'` (default, pixel contour), `'box'` (solid box), `'none'` (no avoidance). Paragraph-level: `ParagraphData.overlapMode` — `'box'` (default), `'none'` (excludes box from overlay targets).
+- **Node.js base64 이미지 자동 디코딩**: `DocumentEngine._buildImageEngine()`에서 `ImageData.url`이 base64 data URI인 경우 pngjs로 자동 디코딩하여 `ImageEngine.rgbaData`에 주입. ESM 환경에서는 `await engine.prepareImageDecoder()` 사전 호출 필요.
+- **object-fit 엔진 우선**: `src/engine/object-fit-engine.ts`의 `computeObjectFit()`이 단일 소스. 브라우저의 `src/utils/image-fit.ts`는 하위 호환용으로 유지되나, `image.element.ts`는 엔진의 `computeObjectFit`을 사용.
+- **이미지 속성 변경 시 재렌더링**: `overlapPadding`, `overlapMode`, `objectFit`, `originalWidth`, `originalHeight` setter가 `_updateEngine()` + `requestRerenderAffectedParagraphs()`를 호출하여 엔진 데이터 갱신과 paragraph 재렌더링을 트리거.
 - **AI processing overlay**: `<x-layout-paragraph>` and `<x-layout-image>` have volatile `aiProcessing: boolean` property. `true` → semi-transparent overlay with shimmer + spinner. Not included in `data` getter. Implemented in `src/utils/ai-processing-overlay.ts`.
 
 ### Managers (ColorRegistry and FontLoader are singletons; EditManager is per-document. All must init before rendering.)
@@ -233,6 +239,8 @@ src/
     border-resolver.ts
     grid-calculator-engine.ts
     image-engine.ts
+    image-decoder.ts
+    object-fit-engine.ts
     overlap-engine.ts
     box-engine.ts
     table-engine.ts

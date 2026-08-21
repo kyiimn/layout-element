@@ -67,7 +67,8 @@ static create(
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `layout()` | `(): void` | `DocumentData`로부터 전체 엔진 트리 재구축 |
+| `layout()` | `(): void` | `DocumentData`로부터 전체 엔진 트리 재구축. Node.js에서 base64 data URI 이미지의 rgbaData를 자동 주입 |
+| `prepareImageDecoder()` | `(): Promise<boolean>` | Node.js ESM 환경에서 pngjs 사전 로드. `layout()` 전 호출 필요. 브라우저 no-op |
 
 #### 내부 메커니즘
 
@@ -232,8 +233,28 @@ static create(data: BoxData, parent: BoxEngineParent): BoxEngine
 
 이미지 오버랩 판정. RGBA 데이터 주입 방식:
 
-- **브라우저**: `canvas.getContext('2d').getImageData()` → `Uint8Array`
-- **Node.js**: `pngjs.decode(buffer)` → `Uint8Array`
+- **브라우저**: `LayoutImageElement._feedRgbaToEngine()`가 원본 이미지 픽셀을 임시 canvas에서 추출하여 `ImageEngine.rgbaData`에 주입
+- **Node.js**: `DocumentEngine._buildImageEngine()`에서 base64 data URI 자동 디코딩 (pngjs 사용)
+
+#### 엔진 우선 object-fit
+
+엔진이 object-fit 계산을 수행한다. `ImageEngine.contentAbsRect` (부모 box의 콘텐츠 영역)와
+`objectFit`/`originalWidth`/`originalHeight`로 `displayRect` (이미지 실제 표시 영역)를 계산한다.
+브라우저는 엔진의 `displayRect` 결과를 사용하여 canvas에 표시한다.
+
+`computeOverlap()`은 `displayRect`를 기준으로 오버랩을 판정한다.
+`overlapMode: 'path'`일 때 원본 RGBA를 `displayRect`에 매핑하여 픽셀 단위 판정을 수행한다.
+
+#### Node.js 자동 rgbaData 주입
+
+Node.js 환경에서 `ImageData.url`이 base64 data URI(`data:image/png;base64,...`)인 경우,
+`DocumentEngine.layout()` 호출 시 `ImageEngine.rgbaData`가 자동 주입된다.
+이를 통해 `overlapMode: 'path'`가 정상 동작한다 (rgbaData 없으면 box 모드로 폴백).
+
+**ESM / tsx ESM 환경**: `await engine.prepareImageDecoder()`를 `layout()` 호출 전에 실행해야 한다.
+`import("pngjs")`는 비동기이므로, 동기 `layout()` 안에서 pngjs를 사용하려면 사전 로드가 필요하다.
+
+**CommonJS 환경**: `globalThis.require('pngjs')`로 동기 로드되므로 `prepareImageDecoder()` 호출 불필요.
 
 #### 타입
 
@@ -252,7 +273,9 @@ static create(data: ImageEngineData): ImageEngine
 | 게터 | 타입 | 설명 |
 |------|------|------|
 | `data` | `ImageEngineData` | 이미지 데이터 |
-| `rgbaData` | `RgbaData \| null` | RGBA 픽셀 데이터 |
+| `rgbaData` | `RgbaData \| null` | RGBA 픽셀 데이터 (원본 이미지) |
+| `contentAbsRect` | `AbsRect \| null` | 부모 box 콘텐츠 영역 (object-fit 계산용) |
+| `displayRect` | `AbsRect` | object-fit으로 계산한 이미지 실제 표시 영역 (절대 좌표, mm) |
 | `overlapMode` | `OverlapMode` | `'path'` / `'box'` / `'none'` |
 | `overlapPadding` | `number \| { top?, right?, bottom?, left? } \| undefined` | 오버랩 패딩 (mm) |
 | `dpi` | `number` | DPI (기본 72) |
@@ -262,21 +285,23 @@ static create(data: ImageEngineData): ImageEngine
 | 세터 | 타입 | 설명 |
 |------|------|------|
 | `data` | `ImageEngineData` | 데이터 갱신 |
-| `rgbaData` | `RgbaData \| null` | RGBA 데이터 주입 |
+| `rgbaData` | `RgbaData \| null` | RGBA 데이터 주입 (원본 이미지 픽셀) |
+| `contentAbsRect` | `AbsRect \| null` | 부모 box 콘텐츠 영역 주입 (object-fit 계산용) |
 
 #### 퍼블릭 메서드
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `computeOverlap` | `(lineRectMm: MmRect, imgRectMm: AbsRect): OverlapResult` | 라인과 이미지의 오버랩 판정 |
+| `computeOverlap` | `(lineRectMm: MmRect): OverlapResult` | 라인과 이미지 `displayRect`의 오버랩 판정 |
 | `layout` | `(): { cropRectMm: AbsRect; displayRectMm: AbsRect }` | 크롭/디스플레이 영역 계산 |
 | `buildPrintPostData` | `(absRect: AbsRect, imageData: ImageData): PrintPostData[]` | 후처리 시스템용 printPostData 생성 (mm 단위) |
 
 #### 내부 메커니즘
 
-- `computeOverlap()`: `overlap-engine.ts`의 `computeOverlapSizeMm()`에 위임
-- `'path'` 모드 + RGBA 데이터: 픽셀 단위 투명도 판정
-- `'box'` 모드: 박스 rect 기반 기하학적 판정
+- `displayRect`: `contentAbsRect` + `objectFit` + `originalWidth/Height`로 `computeObjectFit()` 계산
+- `computeOverlap()`: `displayRect`를 `absRect`로 사용하여 `computeOverlapSizeMm()`에 위임
+- `'path'` 모드 + RGBA 데이터: `displayRect`에 매핑된 픽셀 단위 투명도 판정
+- `'box'` 모드: `displayRect` 기반 기하학적 판정
 - `overlapPadding` 설정 시 ellipse 기반 판정 (`ndx² + ndy² ≤ 1`)
 - `DEFAULT_IMAGE_DPI = 72`
 
@@ -632,7 +657,8 @@ DocumentEngine (root, owns ppm + resources)
 - **Reuse in place**: 좌표/크기/role/zIndex 등의 setter가 실행되면 `LayoutBoxElement`는 `BoxEngine.data`를 갱신하여 같은 엔진 인스턴스를 재사용. `_updateEngine()`은 새 엔진을 만들지 않고 기존 엔진의 `data`/`parent`만 갱신.
 - **Parent 구축**: `box.element.ts._findParentEngine()`이 부모 요소에서 `DocumentEngine`/`BoxEngine`/`TableCellEngine.boxEngine` 추출
 - **Overlay wiring**: `paragraph.element.ts`가 `overlayElements` 박스의 `BoxEngine`을 수집해 `ParagraphEngineData.overlayEngines`로 전달
-- **RGBA injection**: `image.element.ts._feedRgbaToEngine()`가 canvas `getImageData()`를 `ImageEngine.rgbaData`에 주입
+- **RGBA injection**: `image.element.ts._feedRgbaToEngine()`가 원본 이미지 픽셀을 임시 canvas에서 추출하여 `ImageEngine.rgbaData`에 주입. canvas 렌더링 결과가 아닌 원본 픽셀을 주입한다.
+- **object-fit**: 엔진의 `ImageEngine.displayRect`가 단일 소스. `image.element.ts._applyObjectFit()`는 엔진의 `displayRect`를 사용하여 `x/y/width/height`를 설정. 브라우저 canvas는 이 값으로 표시만 수행.
 
 ### `engine` 게터 (퍼블릭 API)
 
@@ -656,7 +682,6 @@ LayoutTableCellElement.engine: TableCellEngine | undefined
 ```ts
 import { DocumentEngine, FontLoaderEngineImpl, ColorRegistryEngineImpl } from 'layout-element';
 import { readFileSync } from 'fs';
-import { PNG } from 'pngjs';
 
 // 1. 리소스 초기화
 const fontLoader = FontLoaderEngineImpl.create();
@@ -674,19 +699,43 @@ const engine = DocumentEngine.create(
   // ppm 생략 — Node.js에서 불필요
 );
 
-// 3. 레이아웃 계산 (전체 엔진 트리 자동 구축)
+// 3. 이미지 디코더 사전 로드 (ESM / tsx ESM 환경에서 필수)
+//    CommonJS 환경에서는 생략 가능 (globalThis.require로 동기 로드)
+await engine.prepareImageDecoder();
+
+// 4. 레이아웃 계산 (전체 엔진 트리 자동 구축 + base64 이미지 rgbaData 자동 주입)
 engine.layout();
 const grid = engine.gridCalculator;
 console.log(grid.columnCoords);  // mm 단위 컬럼 좌표
 console.log(grid.lineHeight);    // 4.8
 
-// 4. printPostData (mm 단위). 후처리 시스템용 데이터 export
+// 5. printPostData (mm 단위). 후처리 시스템용 데이터 export
 console.log(engine.printPostData);
+```
 
-// 5. 이미지 오버랩 (pngjs 사용)
-const png = PNG.sync.read(readFileSync('photo.png'));
-// ImageEngine에 RGBA 주입
-imageEngine.rgbaData = { data: new Uint8Array(png.data), width: png.width, height: png.height };
+### base64 이미지 overlapMode: 'path' 자동 처리
+
+`ImageData.url`에 base64 data URI를 전달하면, `layout()` 호출 시
+`ImageEngine.rgbaData`가 자동 주입된다. 별도로 `imageEngine.rgbaData = ...`를
+호출할 필요가 없다.
+
+```ts
+const docData = {
+  // ...
+  children: [{
+    type: 'box',
+    // ...
+    children: {
+      type: 'image',
+      url: 'data:image/png;base64,iVBORw0KGgo...',  // base64 data URI
+      dpi: 72,
+      overlapMode: 'path',  // ← rgbaData 자동 주입으로 path 모드 정상 동작
+    }
+  }]
+};
+
+await engine.prepareImageDecoder();  // ESM 환경 필수
+engine.layout();  // ImageEngine.rgbaData 자동 주입됨
 ```
 
 ---
@@ -717,10 +766,10 @@ npm run build           # IIFE + React ESM 빌드
 vanilla 진입점에서 명시적 engine보내기:
 
 **값**:
-`GridCalculatorEngine`, `ImageEngine`, `checkOverlapMm`, `computeOverlapSizeMm`, `engineMergeOverlapParts` (alias), `BoxEngine`, `TableEngine`, `TableRowEngine`, `TableCellEngine`, `ParagraphEngine`, `DocumentEngine`, `FontLoaderEngineImpl`, `ColorRegistryEngineImpl`
+`GridCalculatorEngine`, `ImageEngine`, `checkOverlapMm`, `computeOverlapSizeMm`, `engineMergeOverlapParts` (alias), `BoxEngine`, `TableEngine`, `TableRowEngine`, `TableCellEngine`, `ParagraphEngine`, `DocumentEngine`, `FontLoaderEngineImpl`, `ColorRegistryEngineImpl`, `computeObjectFit`, `prepareImageDecoder`, `decodeBase64ImageToRgba`, `decodeBase64ImageToRgbaSync`, `isNodeJs`, `parseDataUri`
 
 **타입**:
-`GridRect`, `AbsRect`, `EngineMmRect` (alias), `OverlapDirection`, `OverlapResult`, `OverlapInput`, `ImageEngineRef`, `BoxContentType`, `FontLoaderEngine`, `ParsedFont`, `ColorRegistryEngine`, `EngineResources`, `GridCalculatorEngineOptions`, `ImageEngineData`, `ImageLayoutResult`, `BoxLayoutResult`, `TableLayoutResult`, `ParagraphLayoutResult`, `DocumentLayoutResult`, `LayoutResult`, `EngineCursorPlacement` (alias), `RgbaData`
+`GridRect`, `AbsRect`, `EngineMmRect` (alias), `OverlapDirection`, `OverlapResult`, `OverlapInput`, `ImageEngineRef`, `BoxContentType`, `FontLoaderEngine`, `ParsedFont`, `ColorRegistryEngine`, `EngineResources`, `GridCalculatorEngineOptions`, `ImageEngineData`, `ImageLayoutResult`, `BoxLayoutResult`, `TableLayoutResult`, `ParagraphLayoutResult`, `DocumentLayoutResult`, `LayoutResult`, `EngineCursorPlacement` (alias), `RgbaData`, `ObjectFitRect`, `ObjectFitInput`
 
 > `MmRect`과 `CursorPlacement`은 `@/core`/`@/utils` 및 `@/edit`에 동일 이름이 있어 alias 처리됨.
 
@@ -732,13 +781,15 @@ vanilla 진입점에서 명시적 engine보내기:
 src/engine/
   types.ts                    # 공유 타입 (AbsRect, MmRect, OverlapResult, EngineResources 등)
   grid-calculator-engine.ts   # 컬럼 그리드 계산 (ppm 옵셔널)
-  image-engine.ts             # 이미지 오버랩 (RGBA 데이터 기반)
+  image-engine.ts             # 이미지 오버랩 (RGBA 데이터 기반, object-fit displayRect 계산)
+  image-decoder.ts            # Node.js base64 → RGBA 디코딩 (pngjs, module.createRequire)
+  object-fit-engine.ts        # object-fit 순수 계산 (cover/contain/fill/none)
   overlap-engine.ts           # 순수 오버랩 판정 함수
   box-engine.ts               # 박스 좌표/오버랩 요소 계산
   table-engine.ts             # 테이블 그리드 해석 + TableCellEngine (BoxEngineParent 구현)
   paragraph-engine.ts         # 텍스트 래핑 + 엔진 쿼리 API + printPostData (mm)
-  document-engine.ts          # 문서 루트 (ppm/리소스 관리, 트리 자동 구축)
-  font-loader-engine.ts       # opentype.js 전용 (FontFace 없음)
+  document-engine.ts          # 문서 루트 (ppm/리소스 관리, 트리 자동 구축, base64 이미지 자동 디코딩)
+  font-loader-engine.ts       # opentype.js 전용 (FontFace 없음, module.createRequire 지원)
   color-registry-engine.ts    # CMYK→RGB 변환 + get() (fetch 없음)
   index.ts                    # 진입점
 ```
