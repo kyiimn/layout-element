@@ -81,6 +81,11 @@ export function computeOverlapSizeMm(lineRectMm: MmRect, overlay: OverlapInput):
     hasOverlapPadding = true;
   }
 
+  const overlapMode = overlay.overlapMode;
+  const image = overlay.image;
+  const isImage = overlay.contentType === 'image' && image !== null && image !== undefined;
+
+
   const effectiveR2 = hasOverlapPadding
     ? { left: r2.left - padLeft, right: r2.right + padRight, top: r2.top - padTop, bottom: r2.bottom + padBottom }
     : { left: r2.left, right: r2.right, top: r2.top, bottom: r2.bottom };
@@ -99,10 +104,6 @@ export function computeOverlapSizeMm(lineRectMm: MmRect, overlay: OverlapInput):
   const relStart = intersectionStart - r1.left;
   const relEnd = intersectionEnd - r1.left;
 
-  const overlapMode = overlay.overlapMode;
-  const image = overlay.image;
-  const isImage = overlay.contentType === 'image' && image !== null && image !== undefined;
-
   // 'path' 모드 + 이미지 + RGBA 데이터 → 픽셀 단위 판정
   if (overlapMode === 'path' && isImage && image.rgbaData) {
     return computePixelOverlap(
@@ -110,6 +111,7 @@ export function computeOverlapSizeMm(lineRectMm: MmRect, overlay: OverlapInput):
       padTop, padRight, padBottom, padLeft, hasOverlapPadding,
     );
   }
+
 
   // 'box' 모드 또는 이미지 아님 또는 RGBA 없음 → 기하학적 판정
   if (r2.left <= r1.left && r2.right >= r1.right) {
@@ -151,7 +153,6 @@ function computePixelOverlap(
     );
   }
 
-  // 패딩 없음 → 단순 opaque column
   return computeSimplePixelOverlap(r1, imgRectMm, rgba, scaleX, scaleY);
 }
 
@@ -169,6 +170,7 @@ function computeEllipseOverlap(
   padBottom: number,
   padLeft: number,
 ): OverlapResult {
+
   const sampleTopMm = Math.max(imgMmRect.top, r1.top - padBottom);
   const sampleBottomMm = Math.min(imgMmRect.bottom, r1.bottom + padTop);
 

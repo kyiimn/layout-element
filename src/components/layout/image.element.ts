@@ -1,8 +1,8 @@
 import { InheritStyle, ImageData, ImageObjectFit, OverlapMode } from "@/types";
 import { LayoutBoxElement } from "./box.element";
-import { genUUID, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay, computeObjectFit } from "@/utils";
+import { genUUID, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay } from "@/utils";
 import { DEFAULT_IMAGE_DPI } from "@/constants";
-import { ImageEngine } from "@/engine";
+import { ImageEngine, computeObjectFit as computeObjectFitEngine } from "@/engine";
 
 /**
  * URL 로더 함수 타입.
@@ -255,7 +255,7 @@ export class LayoutImageElement extends HTMLElement {
   async render() {
     if (!this.isConnected || !this.canvas) return;
 
-    const ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
+    const ctx = this.canvas.getContext('2d')!;
 
     if (!this.url) {
       this._cachedResolvedUrl = null;
@@ -281,7 +281,7 @@ export class LayoutImageElement extends HTMLElement {
     // 캐시 히트: 동기 drawImage (await 없음, 빈 프레임 없음)
     if (this._cachedImage && this._cachedImageSrc === resolvedUrl) {
       this._drawImage(ctx, this._cachedImage);
-      this._feedRgbaToEngine(ctx);
+      this._feedRgbaToEngine(this._cachedImage);
       this._notifyOverlapParagraphs();
       return;
     }
@@ -301,22 +301,27 @@ export class LayoutImageElement extends HTMLElement {
       return;
     }
     this._drawImage(ctx, img);
-    this._feedRgbaToEngine(ctx);
+    this._feedRgbaToEngine(img);
 
     this._notifyOverlapParagraphs();
   }
 
   /**
-   * canvas에서 RGBA 픽셀 데이터를 추출하여 ImageEngine에 주입한다.
-   * 브라우저 모드에서만 호출 — Node 환경에서는 pngjs 결과를 직접 주입.
+   * 원본 이미지에서 RGBA 픽셀 데이터를 추출하여 ImageEngine에 주입한다.
+   * object-fit 렌더링된 canvas가 아닌 원본 이미지 픽셀을 주입한다.
    */
-  private _feedRgbaToEngine(ctx: CanvasRenderingContext2D): void {
-    if (!this._engine || !this.canvas) return;
-    const w = this.canvas.width;
-    const h = this.canvas.height;
+  private _feedRgbaToEngine(img: HTMLImageElement): void {
+    if (!this._engine) return;
+    const w = img.naturalWidth;
+    const h = img.naturalHeight;
     if (w <= 0 || h <= 0) return;
     try {
-      const imageData = ctx.getImageData(0, 0, w, h);
+      const tmpCanvas = document.createElement('canvas');
+      tmpCanvas.width = w;
+      tmpCanvas.height = h;
+      const tmpCtx = tmpCanvas.getContext('2d')!;
+      tmpCtx.drawImage(img, 0, 0);
+      const imageData = tmpCtx.getImageData(0, 0, w, h);
       const rgbaData = {
         data: new Uint8Array(imageData.data.buffer),
         width: w,
@@ -476,13 +481,32 @@ export class LayoutImageElement extends HTMLElement {
    * @returns {void}
    */
   private _applyObjectFit(): void {
+    if (this._objectFit === 'none') {
+      this._x = 0;
+      this._y = 0;
+      this._width = this.absWidth;
+      this._height = this.absHeight;
+      return;
+    }
+
+    const engine = this._engine;
+    if (engine && engine.contentAbsRect) {
+      const displayRect = engine.displayRect;
+      const content = engine.contentAbsRect;
+      this._x = displayRect.absLeft - content.absLeft;
+      this._y = displayRect.absTop - content.absTop;
+      this._width = displayRect.absWidth;
+      this._height = displayRect.absHeight;
+      return;
+    }
+
     const origW = this._originalWidth ?? 0;
     const origH = this._originalHeight ?? 0;
     const boxW = this.absWidth;
     const boxH = this.absHeight;
     if (origW <= 0 || origH <= 0 || boxW <= 0 || boxH <= 0) return;
 
-    const rect = computeObjectFit({
+    const rect = computeObjectFitEngine({
       fit: this._objectFit,
       originalWidth: origW,
       originalHeight: origH,
@@ -563,6 +587,9 @@ export class LayoutImageElement extends HTMLElement {
     } else {
       this._engine.data = engineData;
     }
+    if (this._engine && parentBoxEngine) {
+      this._engine.contentAbsRect = parentBoxEngine.contentAbsRect;
+    }
   }
 
   set x(value: number | undefined) {
@@ -618,6 +645,7 @@ export class LayoutImageElement extends HTMLElement {
     if (this._overlapPadding === value) return;
     this._overlapPadding = value;
     this.layout();
+    this._updateEngine();
     this.render();
     this.parentElement?.requestRerenderAffectedParagraphs();
   }
@@ -640,6 +668,7 @@ export class LayoutImageElement extends HTMLElement {
     if (this._overlapMode === value) return;
     this._overlapMode = value;
     this.layout();
+    this._updateEngine();
     this.render();
     this.parentElement?.requestRerenderAffectedParagraphs();
   }
@@ -650,8 +679,10 @@ export class LayoutImageElement extends HTMLElement {
 
   set originalWidth(value: number | undefined) {
     this._originalWidth = value;
+    this._updateEngine();
     this._applyObjectFit();
     this.render();
+    this.parentElement?.requestRerenderAffectedParagraphs();
   }
 
   get originalWidth(): number | undefined {
@@ -660,8 +691,10 @@ export class LayoutImageElement extends HTMLElement {
 
   set originalHeight(value: number | undefined) {
     this._originalHeight = value;
+    this._updateEngine();
     this._applyObjectFit();
     this.render();
+    this.parentElement?.requestRerenderAffectedParagraphs();
   }
 
   get originalHeight(): number | undefined {
@@ -671,8 +704,10 @@ export class LayoutImageElement extends HTMLElement {
   set objectFit(value: ImageObjectFit) {
     if (this._objectFit === value) return;
     this._objectFit = value;
+    this._updateEngine();
     this._applyObjectFit();
     this.render();
+    this.parentElement?.requestRerenderAffectedParagraphs();
   }
 
   get objectFit(): ImageObjectFit {
@@ -761,8 +796,8 @@ export class LayoutImageElement extends HTMLElement {
   set inheritStyle(style: InheritStyle | undefined) {
     this._inheritStyle = style;
     this.layout();
-    this._applyObjectFit();
     this._updateEngine();
+    this._applyObjectFit();
     this.render();
   }
 
