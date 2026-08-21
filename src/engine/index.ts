@@ -13,6 +13,8 @@ export * from "./table-grid-resolver";
 export * from "./border-resolver";
 export * from "./grid-calculator-engine";
 export * from "./image-engine";
+export * from "./image-decoder";
+export * from "./object-fit-engine";
 export * from "./overlap-engine";
 export * from "./box-engine";
 export * from "./table-engine";
