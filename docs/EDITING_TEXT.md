@@ -259,7 +259,7 @@ flowchart LR
 6. `_mousemoveRafId`가 있으면 `cancelAnimationFrame`으로 취소.
 7. document에서 `visibilitychange` 리스너 제거.
 8. `_isFocused = false`로 설정.
-9. `_resetCompositionState()` 호출: `_isComposing = false` 및 조합 span 제거.
+9. `_resetCompositionState()` 호출: `_isComposing = false`, `_compositionData = ""` 초기화.
 10. `_optimisticSpan`이 있으면 DOM에서 제거하고 참조를 null로 초기화.
 11. `textarea`, `<x-layout-cursor>`, `<x-layout-selection>`을 각각 `parentNode.removeChild`로 제거.
 
@@ -303,7 +303,7 @@ flowchart LR
 4. `_syncTextareaSelection()` — textarea의 선택 영역을 `_cursorModel` 상태에 맞춘다.
 5. `_updateCursorPosition()` — 커서를 새 DOM 위치에 재배치. `getCursorPlacement(offset, preferLineEnd=true)`를 통해 커서 배치 정보(`sourceOffset`, `atEndOfChar`)를 얻는다. `_sourceToPlacement` 맵은 `_rebuildMappings()`에서 모든 source offset에 대해 채워진다 — 가시 문자는 `atEndOfChar: false`, trailing space는 `atEndOfChar: true` + 누적 스페이스 폭, `\n` 위치는 `atEndOfChar: true`, 매핑 구멍(빈 줄 등)은 역방향으로 가장 가까운 placement로 채워진다. 단, `\n` 바로 다음 위치(새 라인 시작)는 line rect 폴백으로 처리된다. `endOfBlock`에서 `textContent`에 실제 `\n`이 있을 때만 `sourceOffset++`를 수행하여 phantom offset을 방지한다. **phantom end placement**: trailing space 없이 끝나는 라인의 마지막 가시 문자 다음 offset(= 다음 라인 첫 글자 offset)은 `_lineEndPlacements`에 별도 저장되며, `preferLineEnd=true`로 조회 시 우선 반환되어 커서가 라인 끝 문자의 오른쪽에 배치된다. `crossRightState === 'crossed'`일 때는 `preferLineEnd=false`로 다음 라인 첫 글자의 왼쪽에 배치한다. `getCursorPlacement()`가 null을 반환하는 경우(빈 줄 시작, offset=0 등) line rect 또는 first column rect로 폴백한다. **height≈0 span(공백 문자) 처리**: `getCharRect(placement.sourceOffset)`의 `rect.height <= 1`이면 `useFallback=true`로 전환하여 `_resolveFallbackTop()`으로 커서 top을 결정한다. `_resolveFallbackTop`은 (1) 인접 가시 문자의 `rect.top`, (2) `getLineRect()`의 라인 div top, (3) span 자체 `rect.top`, (4) `getFirstColumnRect().top` 순서로 폴백한다. `rect.top - cursorHeight`를 사용하지 않는다 — 라인 끝 스페이스에서 위 라인으로 커서가 올라가는 버그를 방지.
 6. `_updateSelection()` — 선택 영역을 새 DOM 위치에 재배치.
-7. 조합 중이면 `_compositionSpan`을 새 DOM에 재부착. `getCursorPlacement(_compositionStartOffset)`로 위치를 찾고, 실패하면 첫 컬럼 첫 요소에 폴백한다.
+7. 조합 중이면 `_applyCompositionUnderline()`로 엔진 렌더링 결과의 조합 범위 span에 밑줄 적용. 조합이 종료된 직후면 `_clearCompositionUnderline()`로 밑줄 제거.
 8. `_wasFocused`가 true면 `textarea.focus({ preventScroll: true })`로 포커스 복원. `preventScroll: true`로 스크롤 컨테이너의 좌상단 점프를 방지한다.
 
 #### `setCursor()`
@@ -1242,104 +1242,98 @@ flowchart TD
 
 IME 입력은 `compositionstart` → `compositionupdate` (여러 번) → `compositionend` 또는 `compositioncancel`의 생명 주기를 가진다.
 
+**엔진 통합 방식**: 조합 중인 텍스트를 `model.textContent`에 즉시 반영하여 `ParagraphEngine`이 라인 넘침(overflow) 계산과 금칙어 규칙 적용에 조합 글자를 포함하도록 한다. 별도의 임시 조합 span을 사용하지 않고, `scheduleRender()`(microtask)로 엔진 재레이아웃을 즉시 트리거하여 글자 위치 변경(금칙어 규칙 등)을 지연 없이 DOM에 반영한다. 엔진이 렌더링한 결과의 조합 범위 span에 밑줄 스타일을 적용한다.
+
 ```mermaid
 sequenceDiagram
     participant User as 사용자
     participant TA as textarea
     participant EC as TextEditController
-    participant Span as 조합 span
     participant Model as ParagraphEngine
+    participant DOM as 렌더링된 span
 
     User->>TA: 한글 조합 시작
     TA->>EC: compositionstart
     EC->>Model: 선택 영역 삭제(있다면)
-    EC->>Span: 밑줄 span 생성
-    EC->>Span: 커서 위치에 삽입
+    EC->>Model: _compositionBeforeContent 캡처
+    EC->>Model: scheduleRender()
 
     loop 조합 중
         TA->>EC: compositionupdate
-        EC->>Span: innerText 갱신
-        EC->>Span: genCharStyle 적용 + 밑줄 유지
-        EC->>EC: 커서 위치 갱신
+        EC->>Model: textContent = before + data + after
+        EC->>Model: scheduleRender() (microtask 즉시)
+        EC->>DOM: renderText → 조합 글자 렌더링 (위치/금칙어 반영)
+        EC->>DOM: postRender → 조합 범위 span에 밑줄 적용
     end
 
     alt 정상 완료
         TA->>EC: compositionend
-        EC->>Model: textContent 갱신
-        EC->>EC: 조합 span 제거
-        EC->>Model: paragraph.render() 호출
+        EC->>Model: textContent = textarea.value
+        EC->>EC: _clearCompositionUnderline()
+        EC->>Model: paragraph.flushRender()
     else 취소
         TA->>EC: compositioncancel
-        EC->>EC: textarea.value를 조합 전 내용으로 복원
-        EC->>EC: 조합 span 제거
+        EC->>Model: textContent = _compositionBeforeContent
+        EC->>EC: _clearCompositionUnderline()
     end
 ```
 
 ### 6.1 `compositionstart` 내부 처리
 
-1. `_compositionSession`을 증가시키고 `_isComposing = true`로 설정.
+1. `_compositionSession`을 증가시키고 `_isComposing = true`로 설정. `_compositionData = ""` 초기화.
 2. 진행 중인 `_debounceTimer`가 있으면 취소하고 즉시 `paragraph.render()`를 호출.
-3. 기존 `_compositionSpan`이 있으면 `_removeCompositionSpan()`으로 제거.
-4. 활성 선택 영역이 있으면:
+3. 활성 선택 영역이 있으면:
    - `selection.normalized()`로 시작/끝을 구한다.
    - `_compositionStartOffset = normalized.start.textOffset`.
    - 모델에서 선택 영역을 삭제: `model.textContent = content.slice(0, start) + content.slice(end)`.
    - `textarea.value`를 갱신하고 선택 영역을 초기화.
-5. 활성 선택 영역이 없으면 `_compositionStartOffset = _cursorModel.offset`.
-6. `_compositionBeforeContent`를 선택 삭제 후의 `model.textContent`로 캡처. 이 값은 나중 `compositionend`에서 조합된 길이를 계산하는 기준이 된다.
-7. `_cursorModel.selection = null`, `_updateSelection()`.
-8. 만약 선택 영역을 삭제했다면 `paragraph.render()`를 호출.
-9. 조합 span 생성: `_createOptimisticSpan("", _compositionStartOffset)`.
-   - `minWidth: "0"`
-   - `textDecoration: "underline"`
-   - `textUnderlineOffset: "2px"`
-10. 조합 span을 DOM에 삽입:
-    - `renderedOffset(_compositionStartOffset)`으로 위치를 찾는다.
-    - 실패하면 `_compositionStartOffset - 1`의 `renderedOffset`으로 이전 문자 다음에 삽입.
-    - 둘 다 실패하고 `_compositionStartOffset === 0`이면 첫 컬럼의 첫 요소에 추가.
-11. `_positionCursorFromCompositionSpan()`으로 커서를 조합 span 오른쪽 끝에 배치. 실패하면 `_updateCursorPosition()` 폴백.
-    - `_positionCursorFromCompositionSpan()`은 `_updateCursorPosition()`의 낙관적 span 경로와 동일한 보정을 적용한다: `EditManager.scale`로 나누어 paragraph local 좌표로 변환하고, 시각적 right 대신 `visualWidth / widthRatio`로 복원한 레이아웃 right를 커서 left로 사용한다.
+4. 활성 선택 영역이 없으면 `_compositionStartOffset = _cursorModel.offset`.
+5. `_compositionBeforeContent`를 선택 삭제 후의 `model.textContent`로 캡처.
+6. `_cursorModel.selection = null`, `_updateSelection()`.
+7. `paragraph.scheduleRender()` 호출 (마이크로태스크 배치).
+8. `_updateCursorPosition()` 호출.
 
 ### 6.2 `compositionupdate` 내부 처리
 
 1. `_isComposing`이 false면 무시.
-2. `event.data`가 있고 `_compositionSpan`이 있으면:
-   - `this._compositionSpan.innerText = event.data`.
-   - `model.genCharStyle(event.data)`로 스타일을 얻어 `Object.assign`로 적용. 글자가 바뀌면 너비도 달라지므로 스타일을 다시 계산해야 한다.
-   - `genCharStyle`은 `textDecoration`을 포함하지 않으므로, 별도로 `underline`과 `textUnderlineOffset: "2px"`을 재적용.
+2. `model.textContent`에 조합 텍스트 반영:
+   - `newText = _compositionBeforeContent.slice(0, _compositionStartOffset) + event.data + _compositionBeforeContent.slice(_compositionStartOffset)`.
+   - `model.textContent = newText`.
+   - `_compositionData = event.data`.
    - `_cursorModel.offset = _compositionStartOffset + event.data.length`.
-3. `event.data`가 비어 있으면 `innerText = ""`로 초기화하고 offset을 `_compositionStartOffset`으로 되돌린다.
-4. `_positionCursorFromCompositionSpan()`으로 커서를 조합 span 끝에 배치.
+3. `paragraph.scheduleRender()` 호출 (microtask). 엔진이 조합 텍스트를 포함하여 라인 넘침과 금칙어 규칙을 재계산. microtask이므로 현재 실행 스택 종료 직후 즉시 렌더링됨.
+4. `_updateCursorPosition()` 호출.
+5. `_emitStyleChange()` 호출.
 
 ### 6.3 `compositionend` 내부 처리
 
-1. `_isComposing = false`.
+1. `_isComposing = false`. `_compositionData = ""`.
 2. `_debounceTimer`가 있으면 취소.
-3. `_removeCompositionSpan()`으로 조합 span 제거.
-4. `model.textContent = this._textarea.value`.
-5. `composedLength = after.length - _compositionBeforeContent.length`로 커서 offset 계산: `_cursorModel.offset = _compositionStartOffset + composedLength`.
-6. `paragraph.render()` 호출로 전체 재래핑.
+3. `model.textContent = this._textarea.value`.
+4. `composedLength = after.length - _compositionBeforeContent.length`로 커서 offset 계산: `_cursorModel.offset = _compositionStartOffset + composedLength`.
+5. `paragraph.flushRender()` 호출로 전체 재래핑.
+6. `_clearCompositionUnderline()` 호출로 밑줄 제거.
 7. `_updateCursorPosition()` 호출.
 
 ### 6.4 `compositioncancel` 내부 처리
 
-1. `_isComposing = false`.
-2. `_removeCompositionSpan()`으로 조합 span 제거.
-3. `model.textContent = _compositionBeforeContent`.
-4. `textarea.value = _compositionBeforeContent`.
-5. `_cursorModel.offset = _compositionStartOffset`.
-6. `textarea.setSelectionRange(_compositionStartOffset, _compositionStartOffset)`.
-7. `_debounceTimer`가 있으면 취소.
-8. `paragraph.render()` 호출.
+1. `_isComposing = false`. `_compositionData = ""`.
+2. `model.textContent = _compositionBeforeContent`.
+3. `textarea.value = _compositionBeforeContent`.
+4. `_cursorModel.offset = _compositionStartOffset`.
+5. `textarea.setSelectionRange(_compositionStartOffset, _compositionStartOffset)`.
+6. `_debounceTimer`가 있으면 취소.
+7. `paragraph.render()` 호출.
+8. `_clearCompositionUnderline()` 호출로 밑줄 제거.
 9. `_updateCursorPosition()` 호출.
-10. `_manager._notifyTextChange(this)` 호출 (조합 전 텍스트로 복원됨을 외부 UI에 통지).
-11. `_manager._notifyCursorMove(this)` 호출 (커서가 조합 시작 위치로 이동됨을 외부 UI에 통지).
+10. `_manager._notifyTextChange(this)` 호출.
+11. `_manager._notifyCursorMove(this)` 호출.
 
 ### 6.5 blur/visibilitychange 중 조합 처리
 
 조합 중에 포커스를 잃거나(`blur`) 탭을 전환(`visibilitychange`, `document.hidden`)하면 조합은 **취소되지 않고 완료**로 처리된다.
 
-- `_resetCompositionState()`로 조합 상태를 초기화.
+- `_resetCompositionState()`로 조합 상태를 초기화 (`_isComposing = false`, `_compositionData = ""`).
 - `model.textContent = textarea.value`.
 - `composedLength = after.length - _compositionBeforeContent.length`로 커서 offset 갱신.
 - `_debounceTimer`가 있으면 취소.
@@ -1356,15 +1350,17 @@ sequenceDiagram
 - `Escape`:
   - `event.preventDefault()`.
   - `_isComposing = false`.
-  - `_removeCompositionSpan()`.
   - 이 상태에서 `compositionend`나 `compositioncancel`이 추가로 발생할 수 있다.
 
 ### 6.7 조합 중 동작 요약
 
-- 커서 위치에 임시 `span`을 삽입한다. 이 span은 `text-decoration: underline` 스타일을 가진다.
-- `compositionupdate`가 발생할 때마다 span의 `innerText`를 갱신하고, `ParagraphEngine.genCharStyle()`로 글자 스타일을 적용한 뒤 밑줄을 다시 적용한다.
+- 조합 중인 텍스트를 `model.textContent`에 즉시 반영하여 엔진이 라인 넘침 계산과 금칙어 규칙 적용에 조합 글자를 포함하도록 한다.
+- `compositionupdate`가 발생할 때마다 `model.textContent`를 갱신하고 `paragraph.scheduleRender()` (microtask)로 엔진 재레이아웃을 즉시 트리거한다.
+- 별도의 임시 조합 span을 사용하지 않는다. 엔진이 조합 텍스트를 일반 텍스트로 렌더링하므로 글자 위치 변경(금칙어 규칙, 라인 넘침 등)이 DOM에 즉시 반영된다.
+- `postRender()`에서 조합 범위 `[_compositionStartOffset, start + _compositionData.length)`의 엔진 렌더링 span에 `text-decoration: underline` 스타일을 적용한다.
+- 조합 종료(`compositionend`/`compositioncancel`) 시 `_clearCompositionUnderline()`로 모든 span에서 밑줄을 제거한다.
 - 조합 중에 화살표 키를 누르면, 조합을 시각적으로 취소하고 `textarea` 커서를 조합 시작 위치로 되돌린다.
-- `Escape` 키를 누르면 조합 span을 제거하고 조합 상태를 해제한다. `model.textContent`는 조합 전 내용으로 복원된다.
+- `Escape` 키를 누르면 조합 상태를 해제한다. `model.textContent`는 조합 전 내용으로 복원된다.
 
 ---
 
