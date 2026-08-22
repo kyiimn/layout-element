@@ -997,7 +997,7 @@ class GridCalculatorEngine {
   get lineHeight: number;             // fontSize × lineGap
   get editableWidth: number;          // mm
   get editableHeight: number;         // mm (lineHeight의 정수 배로 내림)
-  get editableTextHeight: number;     // height - paddingTop - paddingBottom
+  get editableTextHeight: number;     // height - paddingTop - paddingBottom (마지막 라인 fontSize 규칙 반영)
   get contentHeight: number;          // mm
   get fontSize: number;               // 상속 또는 기본값 (4)
   get lineGap: number;                // 상속 또는 기본값 (1.25)
@@ -1184,7 +1184,7 @@ DOM을 만듭니다. **읽기 전용**으로 취급하세요.
 `columnContents`에서 컬럼 유효 높이를 초과하지 않는 라인의 part content 길이를 합산합니다.
 오버플로우로 숨겨진 라인의 문자는 제외됩니다.
 
-visible 판정 기준은 `effectiveColumnHeight = parentHeight`이며 (N 라인 = N × lineHeight),
+visible 판정 기준은 `effectiveColumnHeight = parentHeight + (lineHeight - fontSize)`이며,
 한 번 overflow가 발생하면 이후 라인은 모두 overflow로 처리합니다.
 
 > **참고**: `totalChars - visibleChars`와 `overflow`의 값이 다를 수 있습니다.

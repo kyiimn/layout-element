@@ -1976,7 +1976,7 @@ export class EditManager {
         const editableTextHeight = parentModel.editableTextHeight;
         const lineHeight = parentModel.lineHeight;
         const maxTop = Math.floor(
-          (editableTextHeight - lineHeight * box.height) / lineHeight,
+          (editableTextHeight - (lineHeight * box.height - (lineHeight - parentModel.fontSize))) / lineHeight,
         );
         const newLeft = Math.max(0, Math.min(columnCount - box.width, prevLeft + directionX));
         const newTop = Math.max(0, Math.min(maxTop, prevTop + directionY));

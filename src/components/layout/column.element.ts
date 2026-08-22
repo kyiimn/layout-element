@@ -315,7 +315,11 @@ export class LayoutColumnElement extends HTMLElement {
     let curSourceOffset = sourceOffset;
 
     const columnHeightMm = this.model.inheritStyle?.parentHeight ?? 0;
-    const effectiveColumnHeightMm = columnHeightMm;
+    const baseLineHeightMm = this.model.lineHeight;
+    const baseFontSizeMm = this.model.fontSize;
+    // 엔진(_createLineWithParts)의 overflow 판정과 동일 기준:
+    // effectiveColumnHeight = parentHeight + (lineHeight - fontSize)
+    const effectiveColumnHeightMm = columnHeightMm + (baseLineHeightMm - baseFontSizeMm);
     let accumulatedHeightMm = 0;
     let hasOverflowed = false;
 
@@ -333,7 +337,19 @@ export class LayoutColumnElement extends HTMLElement {
         this._shadowRoot.appendChild(lineEl);
       }
 
+      // 마지막 라인은 lineHeight가 아닌 fontSize만큼만 높이를 차지한다.
+      // BoxEngine.absHeight = lineHeight * height - (lineHeight - fontSize)
+      // 단, textBlockStyle.fontSize가 기본 fontSize와 다르면 genLineStyle이
+      // 계산한 블록 전용 높이를 유지한다 (해당 라인은 자체 높이를 가짐).
+      const isLastLineInColumn = i === lines.length - 1;
+      const lineFontSizeMm = textBlockStyle?.fontSize ?? baseFontSizeMm;
+      if (isLastLineInColumn && lineFontSizeMm === baseFontSizeMm && lineEl.style.height !== `${lineFontSizeMm}mm`) {
+        lineEl.style.height = `${lineFontSizeMm}mm`;
+      }
+
       const lineHeightMm = this._getLineHeightMm(lineEl);
+      // 한 번 overflow 발생 후 이후 라인이 마지막 라인 높이 규칙(fontSize)으로
+      // 다시 visible로 잘못 판정되는 것을 방지한다.
       const isOverflow = hasOverflowed
         || (effectiveColumnHeightMm > 0 && accumulatedHeightMm + lineHeightMm > effectiveColumnHeightMm + 1e-6);
       lineEl.style.display = isOverflow ? 'none' : '';

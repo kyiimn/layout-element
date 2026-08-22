@@ -486,8 +486,8 @@ export class LayoutParagraphElement extends HTMLElement {
     const lastColumnIdx = columnCount - 1;
 
     // 엔진의 visibleChars/hasOverflow 판정 기준과 동일하게
-    // effectiveColumnHeight = parentHeight (N 라인 = N × lineHeight)를 사용한다.
-    const effectiveColumnHeight = parentHeight;
+    // effectiveColumnHeight = parentHeight + (lineHeight - fontSize)를 사용한다.
+    const effectiveColumnHeight = parentHeight + (defaultLineHeight - model.fontSize);
 
     let placedLines = 0;
     let overflowLines = 0;

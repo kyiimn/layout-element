@@ -192,14 +192,15 @@ export class GridCalculatorEngine {
   /**
    * 텍스트가 배치될 수 있는 실제 높이 (mm).
    *
-   * 박스가 선언한 라인 수(N)에 해당하는 높이는 `N * lineHeight`이며
-   * (`BoxEngine.absHeight` 공식), `editableTextHeight`는 paragraph 자식이
+   * 박스가 선언한 라인 수(N)에 해당하는 높이는 `(N-1) * lineHeight + fontSize`
+   * 이며 (`BoxEngine.absHeight` 공식), `editableTextHeight`는 paragraph 자식이
    * N 라인을 모두 렌더링할 수 있도록 이와 정확히 일치해야 한다.
    *
-   * padding을 제외한 전체 높이를 그대로 반환한다.
-   * 부모가 N 라인(`height = N * lineHeight + padding`)인 경우
-   * `editableTextHeight = N * lineHeight`가 되어 자식 paragraph가 N 라인을
-   * 모두 렌더링할 수 있다.
+   * 이전에는 `editableHeight + (lineHeight - fontSize)`를 사용했으나,
+   * `editableHeight`가 `Math.floor(height / lineHeight) * lineHeight`로
+   * 내림되기 때문에 마지막 라인의 `fontSize` 분량이 누락되어 N 라인이 수용되지
+   * 않는 문제가 있었다. padding을 제외한 전체 높이를 그대로 반환하여
+   * 마지막 라인 높이 규칙을 정확히 반영한다.
    *
    * @returns 텍스트 배치 가능 높이 (mm). padding 제외.
    */

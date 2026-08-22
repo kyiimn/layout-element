@@ -1505,7 +1505,7 @@ export class LayoutBoxElement extends HTMLElement {
    * parentModel이 필요하다.
    */
   private _absoluteToStaticCoords(left: number, top: number, width: number, height: number): { left: number; top: number; width: number; height: number } {
-    const { columnCoords, lineHeight, editableWidth, editableHeight, columnCount } = this.parentModel!;
+    const { columnCoords, lineHeight, fontSize, editableWidth, editableHeight, columnCount } = this.parentModel!;
     const avgColWidth = editableWidth / columnCount;
     const editAreaLeft = columnCoords[0].x1;
     const editAreaTop = columnCoords[0].y1;
@@ -1513,7 +1513,7 @@ export class LayoutBoxElement extends HTMLElement {
     const nearestColumn = Math.round((left - editAreaLeft) / avgColWidth);
     const clampedColumn = Math.max(0, Math.min(columnCount - Math.round(width / avgColWidth), nearestColumn));
     const nearestLine = Math.round((top - editAreaTop) / lineHeight);
-    const maxTop = Math.floor((editableHeight - lineHeight * Math.round(height / lineHeight)) / lineHeight);
+    const maxTop = Math.floor((editableHeight - (lineHeight * Math.round(height / lineHeight) - (lineHeight - fontSize))) / lineHeight);
     const clampedLine = Math.max(0, Math.min(maxTop, nearestLine));
     const staticWidth = Math.max(1, Math.round(width / avgColWidth));
     const staticHeight = Math.max(1, Math.round(height / lineHeight));

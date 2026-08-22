@@ -303,9 +303,7 @@ export class BoxEngine {
 
   /**
    * 절대 높이 (mm).
-   * static: lineHeight × height.
-   * N 라인 박스는 N × lineHeight 크기로 표시된다 — 마지막 라인의 행간도
-   * 박스 높이에 포함하여 부모 박스 하단과 정확히 맞춰진다.
+   * static: lineHeight × height - (lineHeight - fontSize).
    * 부모 contentHeight로 클램프.
    * absolute: height 그대로.
    */
@@ -313,8 +311,8 @@ export class BoxEngine {
     if (this.position !== 'absolute') {
       const gc = this._parent.gridCalculator;
       if (!gc) return 0;
-      const { lineHeight, contentHeight } = gc;
-      let calcHeight = lineHeight * this.height;
+      const { fontSize, lineHeight, contentHeight } = gc;
+      let calcHeight = lineHeight * this.height - (lineHeight - fontSize);
       if (contentHeight) {
         const parentPadTop = this._parent.paddingTop;
         calcHeight = Math.min(calcHeight, contentHeight - (this.relTop - parentPadTop));

@@ -972,11 +972,11 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `columnContents` | `TextLineData[][]` | 컬럼별 줄 데이터. 컬럼 요소가 렌더링에 사용 |
 | `gaps` | `number[]` | 컬럼 간 간격(mm) 배열 |
 | `lineHeight` | `number` | 줄 높이(mm) |
-| `fontSize` | `number` | 폰트 크기(mm). `textStyle.fontSize` → `inheritStyle.fontSize` → `DEFAULT_FONT_SIZE` 순서 |
+| `fontSize` | `number` | 폰트 크기(mm). `textStyle.fontSize` → `inheritStyle.fontSize` → `DEFAULT_FONT_SIZE` 순서. 마지막 라인 높이 규칙에서 사용 |
 | `overflow` | `number` | 오버플로우된 문자 수 (마지막 컬럼에서만 집계) |
 | `hasOverflow` | `boolean` | 오버플로우 발생 여부 (`overflow > 0`) |
 | `totalChars` | `number` | 입력된 텍스트의 총 문자 수 (`\n` 제외) |
-| `visibleChars` | `number` | 컬럼 영역 내 visible 문자 수. 오버플로우 라인의 문자 제외. visible 판정은 `effectiveColumnHeight = parentHeight` 기준 (N 라인 = N × lineHeight) |
+| `visibleChars` | `number` | 컬럼 영역 내 visible 문자 수. 오버플로우 라인의 문자 제외. visible 판정은 `effectiveColumnHeight = parentHeight + (lineHeight - fontSize)` 기준 |
 | `widthRatio` | `number` | 장평 비율 |
 | `spaceRatio` | `number` | 공백 너비 비율 (em 단위). 기본값: 0.5 |
 | `indent` | `number` | 첫 줄 들여쓰기 비율 (fontSize 대비, 0.0~1.0). 기본값: 0 |
@@ -1233,14 +1233,15 @@ overlay = overlay.filter(i => {
 - 양 끝 공백 제거 (단, 텍스트 블록(`\n`으로 분리된 각 블록)의 맨 앞/맨 끝 공백은 유지 — `firstOfBlock`/`endOfBlock` 플래그로 제어)
 - **오버플로우 라인 DOM 노드 생략 처리**:
   - `renderText()`에서 각 라인의 누적 높이(mm)를 계산하여 컬럼의 유효 높이를 초과하는 라인을 감지한다
-  - 유효 컬럼 높이는 `parentHeight`이다. 이는 엔진(`_createLineWithParts`)의 overflow 판정 기준과 동일하며, N 라인 박스의 높이가 `N × lineHeight`임을 반영한다. `renderText`가 이 기준을 사용하지 않으면 엔진이 visible로 판정한 라인이 overflow로 잘못 숨겨지거나, 반대로 overflow 이후의 라인이 다시 visible로 잘못 판정되어 빈 라인이 표시되는 버그가 발생한다.
+  - 유효 컬럼 높이는 `parentHeight + (lineHeight - fontSize)`이다. 이는 엔진(`_createLineWithParts`)의 overflow 판정 기준과 동일하며, 마지막 라인이 `lineHeight`가 아닌 `fontSize`만큼만 높이를 차지한다는 규칙을 반영한다. `renderText`가 이 기준을 사용하지 않으면 엔진이 visible로 판정한 라인이 overflow로 잘못 숨겨지거나, 반대로 overflow 이후의 라인이 다시 visible로 잘못 판정되어 빈 라인이 표시되는 버그가 발생한다.
   - 라인 높이는 `_getLineHeightMm()` 헬퍼로 `lineEl.style.height`에서 추출 (폴백: `model.lineHeight`)
   - 초과한 라인에는 `lineEl.style.display = 'none'`을 적용하여 시각적으로 숨긴다
-  - 한 번 overflow가 발생하면 이후 모든 라인도 overflow로 처리한다(`hasOverflowed` 플래그).
+  - 한 번 overflow가 발생하면 이후 모든 라인도 overflow로 처리한다(`hasOverflowed` 플래그). 마지막 라인 높이 규칙으로 인해 `accumulatedHeightMm`가 유효 컬럼 높이에 근접한 상태에서 이후 라인이 다시 visible로 잘못 판정되는 것을 방지한다.
   - 오버플로우 라인은 part/span DOM 노드 생성을 완전히 생략한다. `lineEl`의 기존 자식이 있으면 모두 제거하고, 새 partEl/spanEl을 생성하지 않는다. `lineEl` 자체는 diff 렌더링의 인덱스 매칭을 위해 보존한다.
   - 이후 라인의 `data-source-offset` diff 키 정합성을 위해, `_computeSkippedLineOffsets()`로 오버플로우 라인의 part content 길이만큼 `renderedOffset`/`sourceOffset`을 advance시킨다. 정상 렌더링 경로와 동일한 `_stripSpaces`/선행·후행 공백/`endOfBlock`의 `\n` 처리를 미러링한다.
   - 유효 컬럼 높이가 0 이하이면(부모 높이 미설정) 오버플로우 판정을 생략한다
   - mm 기반 계산이므로 scale에 무관하게 동작한다
+  - **마지막 라인 높이 규칙**: 컬럼의 마지막 라인(`i === lines.length - 1`)은 `lineHeight`가 아닌 `fontSize`만큼만 높이를 차지한다. 이는 `BoxEngine.absHeight`의 `lineHeight * height - (lineHeight - fontSize)` 공식과 일치하며, N 라인 Box의 실제 높이는 `(N-1) * lineHeight + fontSize`이다. `renderText()`는 마지막 라인의 `lineEl.style.height`를 `fontSize` mm로 덮어쓰고, `_getLineHeightMm()`이 그 값을 반환하므로 누적 높이 계산에 반영된다. 단, `textBlockStyle.fontSize`가 기본 `fontSize`와 다른 라인은 자체 높이를 가지므로 이 규칙을 적용하지 않는다.
 - **key 기반 증분 렌더링** (commit cec32e4):
   - `data-source-offset` 속성을 key로 사용하여 기존 span 재사용
   - `data-offset` (rendered offset)은 `EditCoordinateMapper` 호환성을 위해 유지
@@ -1258,7 +1259,7 @@ overlay = overlay.filter(i => {
 
 ### 18.3 `LayoutColumnElement`
 
-텍스트 래핑은 `_layoutTextIntoColumns()`에서 mm 좌표로 직접 수행하며, `isOverflow` 판정은 `(lineIndexInColumn + 1) * lineHeight > parentHeight + 1e-6`로 계산한다 (N 라인 박스 높이 = N × lineHeight).
+텍스트 래핑은 `_layoutTextIntoColumns()`에서 mm 좌표로 직접 수행하며, `isOverflow` 판정은 마지막 라인 높이 규칙을 반영하여 `(lineIndexInColumn + 1) * lineHeight > parentHeight + (lineHeight - fontSize) + 1e-6`로 계산한다 (`textBlockStyle.fontSize`가 기본과 다르면 `parentHeight`만 사용).
 
 ---
 
