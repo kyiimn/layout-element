@@ -263,8 +263,23 @@ export class ImageEngine {
   }
 
   buildPrintPostData(absRect: AbsRect): PrintPostData[] {
+    const display = this.displayRect;
+    const x = display.absLeft - absRect.absLeft;
+    const y = display.absTop - absRect.absTop;
+    const width = display.absWidth;
+    const height = display.absHeight;
+
+    const base = this.extractData;
+    const data: ImageData = {
+      ...base,
+      x,
+      y,
+      width: width,
+      height: height,
+    };
+
     return [{
-      data: this.extractData,
+      data,
       rect: {
         x: absRect.absLeft,
         y: absRect.absTop,
