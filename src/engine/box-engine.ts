@@ -71,14 +71,27 @@ export class BoxEngine {
 
   /**
    * 박스 데이터를 설정한다.
-   * 좌표/크기/스타일 변경 시 호출.
+   *
+   * 기하 필드(`left`/`top`/`width`/`height`/`position`)가 변경된 경우에만
+   * `_generation`을 증가시켜 `absRect`/`overlayElements` 캐시를 무효화한다.
+   * 비기하 필드(border/padding/role/zIndex/backgroundColor 등)만 변경된 경우
+   * `_extractDataCache`만 무효화하고 `absRect` 캐시를 유지한다.
    *
    * @param d - 새 박스 데이터
    */
   set data(d: BoxData) {
+    const old = this._data;
+    const geomChanged =
+      old.left !== d.left ||
+      old.top !== d.top ||
+      old.width !== d.width ||
+      old.height !== d.height ||
+      (old.position ?? 'static') !== (d.position ?? 'static');
     this._data = d;
-    this._generation++;
     this._extractDataCache = null;
+    if (geomChanged) {
+      this._generation++;
+    }
   }
 
   /** 현재 박스 데이터 */
@@ -147,6 +160,7 @@ export class BoxEngine {
 
   /** 부모 엔진 참조를 갱신한다. */
   set parent(p: BoxEngineParent) {
+    if (this._parent === p) return;
     this._parent = p;
     this._generation++;
   }
@@ -444,6 +458,7 @@ export class BoxEngine {
    * @param engines - 자식 엔진 배열
    */
   set childEngines(engines: (BoxEngine | ImageEngine | ParagraphEngine | TableEngine)[]) {
+    if (this._childEngines === engines) return;
     this._childEngines = engines;
     this._generation++;
     this._extractDataCache = null;

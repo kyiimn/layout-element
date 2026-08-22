@@ -142,6 +142,9 @@ export class ParagraphEngine {
   /** Skeleton 캐시: 입력 매개변수 해시가 동일하면 _layoutTextIntoColumns() 결과를 재사용. */
   private _layoutCache: { hash: string; columnContents: TextLineData[][]; overflow: number } | null = null;
 
+  /** `_layoutCache` 존재 여부 (외부 스킵 판정용). */
+  get hasLayoutCache(): boolean { return this._layoutCache !== null; }
+
   /** 성능 캐시: effectiveParagraphStyle. _paragraphStyle/_inheritStyle 변경 시 무효화. */
   private _effectivePsCache: ParagraphStyle | null = null;
   private _effectivePsDirty: boolean = true;

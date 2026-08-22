@@ -105,15 +105,32 @@ export class DocumentEngine {
   }
 
   /**
-   * 문서 데이터를 설정하고 그리드를 재계산한다.
+   * 문서 데이터를 설정한다.
+   *
+   * 기하 필드(`width`/`height`/`columns`/`gap`/`padding*`)가 변경된 경우에만
+   * `_gridCalculator`를 재생성하고 `_generation`을 증가시켜
+   * 하위 `BoxEngine`의 `absRect` 캐시를 무효화한다.
+   * 비기하 필드(`paragraphStyle`/`textStyle` 등)만 변경된 경우
+   * 그리드 계산기와 generation을 유지하여 캐시 히트율을 높인다.
    *
    * @param d - 새 문서 데이터
    */
   set data(d: DocumentData) {
+    const old = this._data;
+    const geomChanged =
+      old.width !== d.width ||
+      old.height !== d.height ||
+      old.columns !== d.columns ||
+      old.gap !== d.gap ||
+      old.paddingTop !== d.paddingTop ||
+      old.paddingRight !== d.paddingRight ||
+      old.paddingBottom !== d.paddingBottom ||
+      old.paddingLeft !== d.paddingLeft;
     this._data = d;
-    this._gridCalculator = this._createGridCalculator();
-    this._childBoxEngines = [];
-    this._generation++;
+    if (geomChanged) {
+      this._gridCalculator = this._createGridCalculator();
+      this._generation++;
+    }
   }
 
   /** 현재 문서 데이터 */
@@ -445,6 +462,9 @@ export class DocumentEngine {
    * overlay가 0개인 paragraph도 갱신하여, 이전 렌더링에서 overlay가 있었지만
    * 현재 사라진 경우 stale overlayEngines가 남지 않도록 한다.
    *
+   * overlayEngines이 이전과 동일(참조 기반)하면 `updateOverlayContext`를 스킵하여
+   * 불필요한 `layoutText()` 호출을 줄인다.
+   *
    * @param boxEngines - 갱신할 박스 엔진 배열 (재귀 순회)
    */
   private _refreshParagraphOverlays(boxEngines: BoxEngine[]): void {
@@ -453,24 +473,26 @@ export class DocumentEngine {
       const childEngines = be.childEngines;
       for (const ce of childEngines) {
         if (ce instanceof ParagraphEngine) {
-          const overlayEngines = be.overlayElements;
-          // updateOverlayContext: _layoutCache를 보존하면서 overlay 문맥만 갱신.
-          // data setter + resetIncrementalState() 대신 사용하여,
-          // 입력 해시가 동일하면 layoutText()가 캐시 hit로 O(1) 스킵.
-          ce.updateOverlayContext(
-            overlayEngines,
-            be.absRect,
-            {
-              ...inheritStyle,
-              parentHeight: be.absHeight,
-              parentWidth: be.absWidth,
-            },
-          );
-          ce.layoutText();
+          const newOverlay = be.overlayElements;
+          const oldOverlay = ce.data.overlayEngines;
+          const overlayChanged =
+            newOverlay.length !== oldOverlay.length ||
+            newOverlay.some((e, i) => e !== oldOverlay[i]);
+          if (overlayChanged) {
+            ce.updateOverlayContext(
+              newOverlay,
+              be.absRect,
+              {
+                ...inheritStyle,
+                parentHeight: be.absHeight,
+                parentWidth: be.absWidth,
+              },
+            );
+            ce.layoutText();
+          } else if (!ce.hasLayoutCache) {
+            ce.layoutText();
+          }
         } else if (ce instanceof TableEngine) {
-          // 테이블 셀 내부 박스도 순회하여 paragraph overlay 갱신.
-          // TableEngine은 BoxEngine.childBoxEngines에 포함되지 않으므로
-          // 별도로 rowEngines → cellEngines → childBoxEngines로 진입.
           for (const rowEngine of ce.rowEngines) {
             for (const cellEngine of rowEngine.cellEngines) {
               const cellBox = cellEngine.boxEngine;
@@ -549,7 +571,7 @@ export class DocumentEngine {
 
     const children = boxData.children;
     if (!children) {
-      boxEngine.childEngines = [];
+      if (boxEngine.childEngines.length > 0) boxEngine.childEngines = [];
       return boxEngine;
     }
 
@@ -592,6 +614,11 @@ export class DocumentEngine {
 
   /**
    * ParagraphData로부터 ParagraphEngine을 구축한다.
+   *
+   * 기존 단락 엔진이 있을 때, 텍스트/컬럼/스타일/부모 기하가 불변이면
+   * `data` setter(전체 리셋, `_layoutCache = null`) 대신 `updateOverlayContext`
+   * (캐시 보존)를 사용하여 Skeleton 캐시 히트율을 높인다.
+   * 구조가 변경된 경우에만 `data` setter로 전체 재배치를 수행한다.
    */
   private _buildParagraphEngine(
     paraData: ParagraphData,
@@ -610,6 +637,49 @@ export class DocumentEngine {
 
     const overlayEngines = parentBox.overlayElements;
 
+    const newInheritStyle = {
+      ...inheritStyle,
+      parentHeight: parentBox.absHeight,
+      parentWidth: parentBox.absWidth,
+    };
+    const parentAbsRect = parentBox.absRect;
+
+    const existingPara = parentBox.childEngines.find(e => e instanceof ParagraphEngine);
+    if (existingPara) {
+      const pe = existingPara as ParagraphEngine;
+      const oldData = pe.data;
+
+      const structureUnchanged =
+        oldData.content === paraData.content &&
+        oldData.column === column &&
+        oldData.gap === gap &&
+        oldData.paragraphStyle === paraData.paragraphStyle &&
+        oldData.textStyle === paraData.textStyle &&
+        oldData.inheritStyle.parentWidth === newInheritStyle.parentWidth &&
+        oldData.inheritStyle.parentHeight === newInheritStyle.parentHeight;
+
+      if (structureUnchanged) {
+        pe.updateOverlayContext(overlayEngines, parentAbsRect, newInheritStyle);
+      } else {
+        pe.data = {
+          id: paraData.id,
+          zIndex: paraData.zIndex,
+          content: paraData.content,
+          column,
+          gap,
+          paragraphStyle: paraData.paragraphStyle ?? {},
+          textStyle: paraData.textStyle ?? {},
+          inheritStyle: newInheritStyle,
+          overlayEngines,
+          parentAbsRect,
+          resources: this.resources,
+        };
+        pe.layoutStructure();
+      }
+      return pe;
+    }
+
+    this._newEnginesCreated = true;
     const engineData = {
       id: paraData.id,
       zIndex: paraData.zIndex,
@@ -618,25 +688,11 @@ export class DocumentEngine {
       gap,
       paragraphStyle: paraData.paragraphStyle ?? {},
       textStyle: paraData.textStyle ?? {},
-      inheritStyle: {
-        ...inheritStyle,
-        parentHeight: parentBox.absHeight,
-        parentWidth: parentBox.absWidth,
-      },
+      inheritStyle: newInheritStyle,
       overlayEngines,
-      parentAbsRect: parentBox.absRect,
+      parentAbsRect,
       resources: this.resources,
     };
-
-    const existingPara = parentBox.childEngines.find(e => e instanceof ParagraphEngine);
-    if (existingPara) {
-      const pe = existingPara as ParagraphEngine;
-      pe.data = engineData;
-      pe.layoutStructure();
-      return pe;
-    }
-
-    this._newEnginesCreated = true;
     const pe = ParagraphEngine.create(engineData);
     pe.layoutStructure();
     return pe;

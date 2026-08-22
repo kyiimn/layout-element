@@ -157,36 +157,68 @@ export class LayoutParagraphElement extends HTMLElement {
       ? parentBoxEngine.overlayElements
       : [];
 
-    const engineData: ParagraphEngineData = {
-      id: this.id,
-      zIndex: this._zIndex,
-      content: this._model?.textContent ?? this._sourceContent,
-      column: this._column !== undefined ? this._column : this.parentModel.columnWidth,
-      gap: this._gap !== undefined ? this._gap : this.parentModel.gaps,
-      paragraphStyle: this._paragraphStyle,
-      textStyle: this._textStyle,
-      inheritStyle: {
-        ...this._inheritStyle,
-        parentHeight: this.absHeight,
-        parentWidth: this.absWidth,
-      },
-      overlayEngines: overlayBoxEngines,
-      parentAbsRect: {
-        absLeft: parentBox.absLeft,
-        absTop: parentBox.absTop,
-        absWidth: parentBox.absWidth,
-        absHeight: parentBox.absHeight,
-      },
-      resources,
+    const newInheritStyle = {
+      ...this._inheritStyle,
+      parentHeight: this.absHeight,
+      parentWidth: this.absWidth,
     };
+    const newParentAbsRect = {
+      absLeft: parentBox.absLeft,
+      absTop: parentBox.absTop,
+      absWidth: parentBox.absWidth,
+      absHeight: parentBox.absHeight,
+    };
+    const newContent = this._model?.textContent ?? this._sourceContent;
+    const newColumn = this._column !== undefined ? this._column : this.parentModel.columnWidth;
+    const newGap = this._gap !== undefined ? this._gap : this.parentModel.gaps;
 
     if (!this._model) {
+      const engineData: ParagraphEngineData = {
+        id: this.id,
+        zIndex: this._zIndex,
+        content: newContent,
+        column: newColumn,
+        gap: newGap,
+        paragraphStyle: this._paragraphStyle,
+        textStyle: this._textStyle,
+        inheritStyle: newInheritStyle,
+        overlayEngines: overlayBoxEngines,
+        parentAbsRect: newParentAbsRect,
+        resources,
+      };
       this._model = ParagraphEngine.create(engineData);
       if (parentBoxEngine) {
         parentBoxEngine.childEngines = [...parentBoxEngine.childEngines, this._model];
       }
     } else {
-      this._model.data = engineData;
+      const oldData = this._model.data;
+      const structureUnchanged =
+        oldData.content === newContent &&
+        oldData.column === newColumn &&
+        oldData.gap === newGap &&
+        oldData.paragraphStyle === this._paragraphStyle &&
+        oldData.textStyle === this._textStyle &&
+        oldData.inheritStyle.parentWidth === newInheritStyle.parentWidth &&
+        oldData.inheritStyle.parentHeight === newInheritStyle.parentHeight;
+
+      if (structureUnchanged) {
+        this._model.updateOverlayContext(overlayBoxEngines, newParentAbsRect, newInheritStyle);
+      } else {
+        const engineData: ParagraphEngineData = {
+          id: this.id,
+          zIndex: this._zIndex,
+          content: newContent,
+          column: newColumn,
+          gap: newGap,
+          paragraphStyle: this._paragraphStyle,
+          textStyle: this._textStyle,
+          inheritStyle: newInheritStyle,
+          overlayEngines: overlayBoxEngines,
+          parentAbsRect: newParentAbsRect,
+          resources,
+        };
+        this._model.data = engineData;
+      }
     }
 
     this._engine = this._model;
@@ -305,23 +337,29 @@ export class LayoutParagraphElement extends HTMLElement {
       const parentBox = this.parentElement;
       if (parentBox) {
         const parentBoxEngine = parentBox.engine;
-        const overlayBoxEngines: import("@/engine").BoxEngine[] = parentBoxEngine
+        const newOverlay: import("@/engine").BoxEngine[] = parentBoxEngine
           ? parentBoxEngine.overlayElements
           : [];
-        this._model.updateOverlayContext(
-          overlayBoxEngines,
-          {
-            absLeft: parentBox.absLeft,
-            absTop: parentBox.absTop,
-            absWidth: parentBox.absWidth,
-            absHeight: parentBox.absHeight,
-          },
-          {
-            ...this._inheritStyle!,
-            parentHeight: this.absHeight,
-            parentWidth: this.absWidth,
-          },
-        );
+        const oldOverlay = this._model.data.overlayEngines;
+        const overlayChanged =
+          newOverlay.length !== oldOverlay.length ||
+          newOverlay.some((e, i) => e !== oldOverlay[i]);
+        if (overlayChanged) {
+          this._model.updateOverlayContext(
+            newOverlay,
+            {
+              absLeft: parentBox.absLeft,
+              absTop: parentBox.absTop,
+              absWidth: parentBox.absWidth,
+              absHeight: parentBox.absHeight,
+            },
+            {
+              ...this._inheritStyle!,
+              parentHeight: this.absHeight,
+              parentWidth: this.absWidth,
+            },
+          );
+        }
       }
       this._model.layoutText();
     }
