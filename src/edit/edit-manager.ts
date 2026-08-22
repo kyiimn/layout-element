@@ -9,7 +9,7 @@ import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
 import { PlaceGunController } from "./place-gun-controller";
 import type { SelectionRange } from "@/types/edit";
-import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail, ContextMenuEventDetail, PlaceGunItem, PlaceGunChangeEventDetail, PlaceGunBeforeEventDetail, PlaceGunAfterEventDetail, TableCellSelectionChangeDetail } from "@/types/edit";
+import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail, ContextMenuEventDetail, PlaceGunItem, PlaceGunChangeEventDetail, PlaceGunBeforeEventDetail, PlaceGunAfterEventDetail, TableCellSelectionChangeDetail, TableCellSelection } from "@/types/edit";
 import type { BoxRole } from "@/types/layout";
 
 /** 레이아웃 편집 대상 요소 (box 및 TD) */
@@ -2743,6 +2743,23 @@ export class EditManager {
     if (this._insertMode !== null) return false;
 
     const isTextMode = this._textEditMode;
+
+    let clearedCellSelection = false;
+    for (const t of (this._docEl as HTMLElement).querySelectorAll('x-layout-table')) {
+      const kc = (t as unknown as { keyboardController?: { selection: TableCellSelection | null } }).keyboardController;
+      if (kc?.selection) {
+        kc.selection = null;
+        (t as unknown as { _renderSelectionOverlay: (sel: null) => void })._renderSelectionOverlay(null);
+        clearedCellSelection = true;
+      }
+    }
+    if (clearedCellSelection) {
+      this._dispatchCellSelectionChange({
+        selection: null,
+        selectedCells: [],
+        source: 'keyboard',
+      });
+    }
 
     if (isTextMode) {
       const current = this.focusedParagraph;
