@@ -1360,7 +1360,7 @@ export class LayoutEditController {
     const newLeftMm = startX + dxMm;
     const newTopMm = startY + dyMm;
 
-    const maxTop = Math.floor((editableTextHeight - (lineHeight * box.height - (lineHeight - parentModel.fontSize))) / lineHeight);
+    const maxTop = Math.floor((editableTextHeight - lineHeight * box.height) / lineHeight);
 
     if (!manager.snapEnabled) {
       // 스냅 비활성화: 컬럼/라인을 정수로 반올림하되 자유 배치

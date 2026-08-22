@@ -535,15 +535,9 @@ export class ParagraphEngine {
     const { cover, overlapParts } = this._detectOverlapWithCache(lineRectMm);
 
     const parentHeight = this._inheritStyle?.parentHeight ?? 0;
-    // 마지막 라인은 lineHeight가 아닌 fontSize만큼만 높이를 차지하므로,
-    // 컬럼 수용력은 parentHeight + (lineHeight - fontSize)와 같다.
-    // (BoxEngine.absHeight = lineHeight * height - (lineHeight - fontSize))
-    // 단, textBlockStyle.fontSize가 기본과 다르면 자체 높이를 가지므로
-    // 마지막 라인 규칙을 적용하지 않는다.
-    const blockFontSize = textBlockStyle?.fontSize;
-    const effectiveColumnHeight = (blockFontSize === undefined || blockFontSize === this.fontSize)
-      ? parentHeight + (this._lineHeight - this.fontSize)
-      : parentHeight;
+    // N 라인 박스의 높이는 N × lineHeight이므로 (`BoxEngine.absHeight` 공식),
+    // 컬럼 수용력도 parentHeight와 정확히 일치한다.
+    const effectiveColumnHeight = parentHeight;
     const isOverflow = (lineIndexInColumn + 1) * this._lineHeight > effectiveColumnHeight + 1e-6;
 
     if (cover) {
@@ -1572,10 +1566,6 @@ export class ParagraphEngine {
    * 현재 적용된 폰트 크기 (mm).
    * `textStyle.fontSize` → `inheritStyle.fontSize` → `DEFAULT_FONT_SIZE` 순서로 해결.
    *
-   * 마지막 라인은 `lineHeight`가 아닌 `fontSize`만큼만 높이를 차지하는 규칙
-   * (`BoxEngine.absHeight`의 `lineHeight * height - (lineHeight - fontSize)` 공식)과
-   * 일관되게 참조하기 위해 사용한다.
-   *
    * @returns 폰트 크기 (mm)
    */
   public get fontSize(): number {
@@ -1628,10 +1618,10 @@ export class ParagraphEngine {
    * 초과하지 않는(visible) 라인의 part content 길이를 합산한다.
    * 오버플로우로 `display: none` 처리된 라인의 문자는 제외된다.
    *
-   * visible 판정 기준은 `_createLineWithParts`의 `isOverflow`와 동일하게
-   * `effectiveColumnHeight = parentHeight + (lineHeight - fontSize)`를 사용한다.
-   * 단, 마지막 라인은 `lineHeight`가 아닌 `fontSize`만큼만 높이를 차지하는 규칙을 반영하며,
-   * 한 번 overflow가 발생하면 이후 라인은 모두 overflow로 처리한다.
+    * visible 판정 기준은 `_createLineWithParts`의 `isOverflow`와 동일하게
+    * `effectiveColumnHeight = parentHeight`를 사용한다.
+    * N 라인 박스의 높이는 N × lineHeight이므로 컬럼 수용력과 parentHeight가 일치한다.
+    * 한 번 overflow가 발생하면 이후 라인은 모두 overflow로 처리한다.
    *
    * @returns visible 문자 수
    * @example
@@ -1646,7 +1636,7 @@ export class ParagraphEngine {
       return this.totalChars;
     }
 
-    const effectiveColumnHeight = parentHeight + (this._lineHeight - this.fontSize);
+    const effectiveColumnHeight = parentHeight;
     const lineGap = this.effectiveParagraphStyle.lineGap!;
     let visible = 0;
 
