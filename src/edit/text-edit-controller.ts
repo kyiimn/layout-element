@@ -65,11 +65,12 @@ export class TextEditController {
   private _isComposing: boolean = false;
   private _compositionStartOffset: number = 0;
 
-  private _compositionSpan: HTMLSpanElement | null = null;
   private _compositionSession: number = 0;
   private _compositionBeforeContent: string = "";
-  // 조합 span의 현재 폭(mm) — 후속 span 밀어내기/되돌림에 사용
-  private _compositionSpanWidthMm: number = 0;
+  /** 조합 중인 텍스트 (마지막 compositionupdate의 event.data) */
+  private _compositionData: string = "";
+  /** postRender에서 조합 범위 span에 밑줄을 적용했는지 추적 */
+  private _compositionUnderlineApplied: boolean = false;
   private _debounceTimer: number | null = null;
   private _wasFocused: boolean = false;
   private _optimisticSpan: HTMLSpanElement | null = null;
@@ -316,73 +317,10 @@ export class TextEditController {
     this._updateCursorPosition();
     this._updateSelection();
 
-    if (this._isComposing && this._compositionSpan) {
-      // 밀어냄 되돌림 (postRender에서 재삽입 시 이전 밀어내기가 남아있을 수 있음)
-      this._shiftFollowingSpans(this._compositionSpan, -this._compositionSpanWidthMm);
-      this._compositionSpan.remove();
-      let reattached = false;
-      const placement = this._mapper.getCursorPlacement(this._compositionStartOffset);
-      if (placement) {
-        const span = this._mapper.getSpanByOffset(placement.sourceOffset);
-        if (span) {
-          // charOffsets 경로: 임시 span의 left 재계산
-          const leftMm = this._computeTempSpanLeft(span, placement.atEndOfChar);
-          if (leftMm !== undefined) {
-            this._compositionSpan.style.position = 'absolute';
-            this._compositionSpan.style.left = `${leftMm}mm`;
-            this._compositionSpan.style.top = '0';
-          }
-          if (placement.atEndOfChar) {
-            span.after(this._compositionSpan);
-          } else {
-            span.before(this._compositionSpan);
-          }
-          // 밀어내기 재적용
-          this._shiftFollowingSpans(this._compositionSpan, this._compositionSpanWidthMm);
-          reattached = true;
-        }
-      }
-
-      if (!reattached) {
-        const lineInfo = this._mapper.getLineInfoBySourceOffset(this._compositionStartOffset);
-        if (lineInfo) {
-          const columns = this._paragraph.querySelectorAll('x-layout-column');
-          const column = columns[lineInfo.columnIndex];
-          const columnShadow = column?.shadowRoot;
-          if (columnShadow) {
-            const lineDivs = Array.from(columnShadow.children).filter(
-              (child): child is HTMLDivElement => child.tagName === 'DIV',
-            );
-            const lineDiv = lineDivs[lineInfo.lineIndex];
-            if (lineDiv) {
-              const partDiv = lineDiv.querySelector('div');
-              if (partDiv instanceof HTMLElement) {
-                // 파트 끝 위치 계산
-                const lastSpan = this._findLastSpanInPart(partDiv);
-                const leftMm = this._computeTempSpanLeft(lastSpan, true);
-                if (leftMm !== undefined) {
-                  this._compositionSpan.style.position = 'absolute';
-                  this._compositionSpan.style.left = `${leftMm}mm`;
-                  this._compositionSpan.style.top = '0';
-                }
-                partDiv.appendChild(this._compositionSpan);
-                this._shiftFollowingSpans(this._compositionSpan, this._compositionSpanWidthMm);
-              } else {
-                this._compositionSpan.style.position = 'absolute';
-                this._compositionSpan.style.left = '0mm';
-                this._compositionSpan.style.top = '0';
-                lineDiv.appendChild(this._compositionSpan);
-                this._shiftFollowingSpans(this._compositionSpan, this._compositionSpanWidthMm);
-              }
-              reattached = true;
-            }
-          }
-        }
-      }
-
-      if (this._compositionSpan.parentNode) {
-        this._positionCursorFromCompositionSpan();
-      }
+    if (this._isComposing) {
+      this._applyCompositionUnderline();
+    } else if (this._compositionUnderlineApplied) {
+      this._clearCompositionUnderline();
     }
 
     if (this._wasFocused) {
@@ -1576,6 +1514,7 @@ export class TextEditController {
   private _onCompositionStart(): void {
     this._compositionSession++;
     this._isComposing = true;
+    this._compositionData = "";
 
     if (this._debounceTimer !== null) {
       cancelAnimationFrame(this._debounceTimer);
@@ -1583,15 +1522,12 @@ export class TextEditController {
       this._paragraph.scheduleRender();
     }
 
-    this._removeCompositionSpan();
-
     const model = this._paragraph.model;
 
     if (this._cursorModel.selection) {
       const normalized = this._cursorModel.selection.normalized();
       this._compositionStartOffset = normalized.start.textOffset;
 
-      // 조합 시작 시 선택 영역을 모델에서 삭제하여 일관성 유지
       if (model && typeof model.textContent === "string") {
         const content = model.textContent;
         model.textContent = content.slice(0, normalized.start.textOffset) + content.slice(normalized.end.textOffset);
@@ -1602,9 +1538,6 @@ export class TextEditController {
       this._compositionStartOffset = this._cursorModel.offset;
     }
 
-    // _compositionBeforeContent must be captured AFTER selection deletion
-    // so that composedLength = after.length - beforeContent.length
-    // correctly represents the composed text length
     if (model && typeof model.textContent === "string") {
       this._compositionBeforeContent = model.textContent;
     } else {
@@ -1613,135 +1546,37 @@ export class TextEditController {
     this._cursorModel.selection = null;
     this._updateSelection();
 
-    // 이전 입력의 debounced render가 아직 실행되지 않았을 수 있으므로
-    // 취소하고 즉시 render를 실행하여 mapper를 최신 상태로 만든다.
     if (this._debounceTimer !== null) {
       cancelAnimationFrame(this._debounceTimer);
       this._debounceTimer = null;
     }
     this._wasFocused = false;
     this._paragraph.scheduleRender();
-
-    // 조합 span을 커서 위치에 생성하여 조합 중인 글자를 시각적으로 표시
-    this._compositionSpan = this._createOptimisticSpan("", this._compositionStartOffset);
-    this._compositionSpan.style.minWidth = "0";
-    this._compositionSpan.style.textDecoration = "underline";
-    this._compositionSpan.style.textUnderlineOffset = "2px";
-
-    let spanInserted = false;
-    const placement = this._mapper.getCursorPlacement(this._compositionStartOffset);
-    if (placement) {
-      const span = this._mapper.getSpanByOffset(placement.sourceOffset);
-      if (span) {
-        const leftMm = this._computeTempSpanLeft(span, placement.atEndOfChar);
-        if (leftMm !== undefined) {
-          this._compositionSpan.style.position = 'absolute';
-          this._compositionSpan.style.left = `${leftMm}mm`;
-          this._compositionSpan.style.top = '0';
-        }
-        if (placement.atEndOfChar) {
-          span.after(this._compositionSpan);
-        } else {
-          span.before(this._compositionSpan);
-        }
-        spanInserted = true;
-      }
-    }
-
-    if (!spanInserted) {
-      const lineInfo = this._mapper.getLineInfoBySourceOffset(this._compositionStartOffset);
-      if (lineInfo) {
-        const columns = this._paragraph.querySelectorAll('x-layout-column');
-        const column = columns[lineInfo.columnIndex];
-        const columnShadow = column?.shadowRoot;
-        if (columnShadow) {
-          const lineDivs = Array.from(columnShadow.children).filter(
-            (child): child is HTMLDivElement => child.tagName === 'DIV',
-          );
-          const lineDiv = lineDivs[lineInfo.lineIndex];
-          if (lineDiv) {
-            const partDiv = lineDiv.querySelector('div');
-            if (partDiv instanceof HTMLElement) {
-              const lastSpan = this._findLastSpanInPart(partDiv);
-              const leftMm = this._computeTempSpanLeft(lastSpan, true);
-              // leftMm이 undefined여도 absolute 배치 — 기본 0
-              const finalLeft = leftMm ?? 0;
-              this._compositionSpan.style.position = 'absolute';
-              this._compositionSpan.style.left = `${finalLeft}mm`;
-              this._compositionSpan.style.top = '0';
-              partDiv.appendChild(this._compositionSpan);
-            } else {
-              this._compositionSpan.style.position = 'absolute';
-              this._compositionSpan.style.left = '0mm';
-              this._compositionSpan.style.top = '0';
-              lineDiv.appendChild(this._compositionSpan);
-            }
-            spanInserted = true;
-          }
-        }
-      }
-    }
-
-    if (!this._positionCursorFromCompositionSpan()) {
-      this._updateCursorPosition();
-    }
+    this._updateCursorPosition();
   }
 
   private _onCompositionUpdate(event: CompositionEvent): void {
     if (!this._isComposing) return;
 
-    if (event.data && this._compositionSpan) {
-      const model = this._paragraph.model;
-      if (model) {
-        // 이전 폭 되돌림 → 새 폭으로 밀어내기
-        const newWidthMm = this._computeTempSpanWidthMm(event.data);
-        this._shiftFollowingSpans(this._compositionSpan, -this._compositionSpanWidthMm);
-        this._compositionSpanWidthMm = newWidthMm;
-        this._shiftFollowingSpans(this._compositionSpan, newWidthMm);
-
-        const flatStyle = model.genCharStyleFlat(event.data[0] ?? ' ');
-        Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(this._compositionSpan.style, flatStyle);
-        this._compositionSpan.style.textDecoration = "underline";
-        this._compositionSpan.style.textUnderlineOffset = "2px";
-        this._compositionSpan.textContent = event.data;
-      }
-
-      this._cursorModel.offset = this._compositionStartOffset + event.data.length;
-    } else if (this._compositionSpan) {
-      // 조합 텍스트가 빈 경우 — 밀어냄 되돌림
-      this._shiftFollowingSpans(this._compositionSpan, -this._compositionSpanWidthMm);
-      this._compositionSpanWidthMm = 0;
-      this._compositionSpan.textContent = "";
-      this._cursorModel.offset = this._compositionStartOffset;
-    }
-    if (!this._positionCursorFromCompositionSpan()) {
-      this._updateCursorPosition();
+    const model = this._paragraph.model;
+    if (model && typeof model.textContent === "string") {
+      const before = this._compositionBeforeContent;
+      const start = this._compositionStartOffset;
+      const data = event.data ?? "";
+      const newText = before.slice(0, start) + data + before.slice(start);
+      model.textContent = newText;
+      this._compositionData = data;
+      this._cursorModel.offset = start + data.length;
+      this._paragraph.scheduleRender();
     }
 
+    this._updateCursorPosition();
     this._emitStyleChange();
   }
 
-  private _positionCursorFromCompositionSpan(): boolean {
-    if (!this._compositionSpan || !this._compositionSpan.parentNode) return false;
-    const spanRect = this._compositionSpan.getBoundingClientRect();
-    const paragraphRect = this._paragraph.getBoundingClientRect();
-    const scale = this._manager.scale;
-    const localLeft = (spanRect.left - paragraphRect.left) / scale;
-    const visualWidth = spanRect.width / scale;
-    const widthRatio = this._paragraph.model?.widthRatio ?? 1;
-    const layoutWidth = widthRatio > 0 ? visualWidth / widthRatio : visualWidth;
-    const layoutRight = localLeft + layoutWidth;
-    this._cursorEl.top = (spanRect.top - paragraphRect.top) / scale;
-    this._cursorEl.left = layoutRight;
-    this._cursorEl.height = spanRect.height / scale;
-    this._cursorEl.visible = true;
-    return true;
-  }
-
-
   private _onCompositionCancel(): void {
     this._isComposing = false;
-    this._removeCompositionSpan();
+    this._compositionData = "";
 
     const model = this._paragraph.model;
     if (model && typeof model.textContent === "string") {
@@ -1763,13 +1598,12 @@ export class TextEditController {
 
   private _onCompositionEnd(_event: CompositionEvent): void {
     this._isComposing = false;
+    this._compositionData = "";
 
     if (this._debounceTimer !== null) {
       cancelAnimationFrame(this._debounceTimer);
       this._debounceTimer = null;
     }
-
-    this._removeCompositionSpan();
 
     const model = this._paragraph.model;
     if (!model) return;
@@ -1785,6 +1619,7 @@ export class TextEditController {
     this._cursorModel.offset = startOffset + composedLength;
 
     this._paragraph.flushRender();
+    this._clearCompositionUnderline();
     this._updateCursorPosition();
     this._updateSelection();
     this._emitStyleChange();
@@ -1792,19 +1627,59 @@ export class TextEditController {
     this._manager._notifyCursorMove(this);
   }
 
-  private _removeCompositionSpan(): void {
-    if (this._compositionSpan && this._compositionSpan.parentNode) {
-      // 밀어낸 후속 span들을 원래 위치로 되돌림
-      this._shiftFollowingSpans(this._compositionSpan, -this._compositionSpanWidthMm);
-      this._compositionSpan.remove();
-    }
-    this._compositionSpan = null;
-    this._compositionSpanWidthMm = 0;
-  }
-
   private _resetCompositionState(): void {
     this._isComposing = false;
-    this._removeCompositionSpan();
+    this._compositionData = "";
+  }
+
+  /**
+   * 조합 범위 [_compositionStartOffset, start + _compositionData.length)의
+   * 엔진 렌더링 span에 밑줄 스타일을 적용한다.
+   *
+   * 조합 중인 텍스트가 model.textContent에 반영되어 엔진이 렌더링하므로,
+   * 별도의 임시 span 없이 렌더링된 span에 스타일만 적용한다.
+   */
+  private _applyCompositionUnderline(): void {
+    const start = this._compositionStartOffset;
+    const len = this._compositionData.length;
+    if (len === 0) return;
+
+    const columns = this._paragraph.querySelectorAll('x-layout-column');
+    for (const col of columns) {
+      if (!col.shadowRoot) continue;
+      const spans = col.shadowRoot.querySelectorAll<HTMLSpanElement>('span[data-source-offset]');
+      for (const span of spans) {
+        const offset = parseInt(span.dataset.sourceOffset!, 10);
+        if (offset >= start && offset < start + len) {
+          span.style.textDecoration = 'underline';
+          span.style.textUnderlineOffset = '2px';
+        }
+      }
+    }
+    this._compositionUnderlineApplied = true;
+  }
+
+  /**
+   * 조합 종료 후 모든 span에서 밑줄 스타일을 제거한다.
+   *
+   * renderText의 diff 기반 span 재사용으로 밑줄이 남아 있을 수 있으므로
+   * 명시적으로 제거해야 한다.
+   */
+  private _clearCompositionUnderline(): void {
+    const columns = this._paragraph.querySelectorAll('x-layout-column');
+    for (const col of columns) {
+      if (!col.shadowRoot) continue;
+      const spans = col.shadowRoot.querySelectorAll<HTMLSpanElement>('span[data-source-offset]');
+      for (const span of spans) {
+        if (span.style.textDecoration) {
+          span.style.textDecoration = '';
+        }
+        if (span.style.textUnderlineOffset) {
+          span.style.textUnderlineOffset = '';
+        }
+      }
+    }
+    this._compositionUnderlineApplied = false;
   }
 
   private _computeTextChange(
@@ -1946,15 +1821,6 @@ export class TextEditController {
       }
       sibling = sibling.nextElementSibling as HTMLSpanElement | null;
     }
-  }
-
-  /**
-   * 파트 내 마지막 비-임시 span을 반환한다.
-   * 폴백 경로에서 임시 span의 `left`를 파트 끝으로 설정할 때 사용.
-   */
-  private _findLastSpanInPart(partDiv: HTMLElement): HTMLSpanElement | null {
-    const spans = partDiv.querySelectorAll<HTMLSpanElement>(':scope > span[data-char-offset]:not([data-temporary])');
-    return spans.length > 0 ? spans[spans.length - 1] : null;
   }
 
   /**
