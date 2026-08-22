@@ -11,12 +11,51 @@ export interface RgbaData {
   height: number;
 }
 
+/**
+ * 행별 opaque 컬럼 bitmap을 빌드한다.
+ * 각 행은 `ceil(width/8)` 바이트의 Uint8Array — 비트 1 = 해당 컬럼이 불투명.
+ * rgbaData 설정 시 1회 호출되어 O(W×H) 스캔을 사전 수행.
+ * 이후 `computeSimplePixelOverlap`에서 라인 범위 행만 머지하여 O(H_line) lookups로 판정.
+ *
+ * @param rgba - 원본 RGBA 데이터
+ * @returns 행별 비트맵 배열
+ */
+function buildOpaqueRowBitmap(rgba: RgbaData): Uint8Array[] {
+  const { data, width, height } = rgba;
+  const bytesPerRow = Math.ceil(width / 8);
+  const result: Uint8Array[] = new Array(height);
+
+  for (let y = 0; y < height; y++) {
+    const row = new Uint8Array(bytesPerRow);
+    const rowOffset = y * width;
+    for (let x = 0; x < width; x++) {
+      const alphaIndex = (rowOffset + x) * 4 + 3;
+      if (data[alphaIndex] > 0) {
+        row[x >> 3] |= 1 << (x & 7);
+      }
+    }
+    result[y] = row;
+  }
+
+  return result;
+}
+
 export class ImageEngine {
   private _data: ImageEngineData;
   private _rgbaData: RgbaData | null = null;
   private _contentAbsRect: AbsRect | null = null;
   private _id: string | undefined;
   private _zIndex: number | undefined;
+
+  /** 성능 캐시: displayRect. contentAbsRect/data 변경 시 무효화. */
+  private _displayRectCache: AbsRect | null = null;
+  private _displayRectDirty: boolean = true;
+
+  /** 성능 캐시: 행별 opaque 컬럼 bitmap. rgbaData 설정 시 1회 빌드. computeSimplePixelOverlap에서 O(H_line) lookups로 사용. */
+  private _opaqueRowBitmap: Uint8Array[] | null = null;
+
+  /** 성능 캐시: extractData. data/id/zIndex 변경 시 무효화. */
+  private _extractDataCache: ImageData | null = null;
 
   static create(data: ImageEngineData): ImageEngine {
     return new this(data);
@@ -28,6 +67,8 @@ export class ImageEngine {
 
   set data(d: ImageEngineData) {
     this._data = d;
+    this._displayRectDirty = true;
+    this._extractDataCache = null;
   }
 
   get data(): ImageEngineData {
@@ -36,6 +77,7 @@ export class ImageEngine {
 
   set id(v: string | undefined) {
     this._id = v;
+    this._extractDataCache = null;
   }
 
   get id(): string | undefined {
@@ -44,6 +86,7 @@ export class ImageEngine {
 
   set zIndex(v: number | undefined) {
     this._zIndex = v;
+    this._extractDataCache = null;
   }
 
   get zIndex(): number | undefined {
@@ -52,6 +95,7 @@ export class ImageEngine {
 
   set contentAbsRect(rect: AbsRect | null) {
     this._contentAbsRect = rect;
+    this._displayRectDirty = true;
   }
 
   get contentAbsRect(): AbsRect | null {
@@ -60,10 +104,16 @@ export class ImageEngine {
 
   set rgbaData(input: RgbaData | null) {
     this._rgbaData = input;
+    this._opaqueRowBitmap = input ? buildOpaqueRowBitmap(input) : null;
   }
 
   get rgbaData(): RgbaData | null {
     return this._rgbaData;
+  }
+
+  /** 행별 opaque 컬럼 bitmap (rgbaData 설정 시 자동 빌드). */
+  get opaqueRowBitmap(): Uint8Array[] | null {
+    return this._opaqueRowBitmap;
   }
 
   get overlapMode(): OverlapMode {
@@ -74,39 +124,55 @@ export class ImageEngine {
     return this._data.overlapPadding;
   }
 
+  /**
+   * 이미지 실제 표시 영역 (절대 좌표, mm).
+   * contentAbsRect + objectFit + originalWidth/Height로 계산.
+   * 메모이제이션: contentAbsRect/data 변경 시 dirty 플래그로 무효화.
+   * @returns 표시 영역 AbsRect
+   */
   get displayRect(): AbsRect {
+    if (this._displayRectCache !== null && !this._displayRectDirty) {
+      return this._displayRectCache;
+    }
+
     const content = this._contentAbsRect;
+    let result: AbsRect;
+
     if (!content) {
-      return {
+      result = {
         absLeft: this.effectiveX,
         absTop: this.effectiveY,
         absWidth: this.effectiveWidth,
         absHeight: this.effectiveHeight,
       };
+    } else {
+      const objectFit = this.effectiveObjectFit;
+      const origW = this.effectiveOriginalWidth;
+      const origH = this.effectiveOriginalHeight;
+
+      if (objectFit === 'none' || origW <= 0 || origH <= 0) {
+        result = content;
+      } else {
+        const fit = computeObjectFit({
+          fit: objectFit,
+          originalWidth: origW,
+          originalHeight: origH,
+          boxWidth: content.absWidth,
+          boxHeight: content.absHeight,
+        });
+
+        result = {
+          absLeft: content.absLeft + fit.x,
+          absTop: content.absTop + fit.y,
+          absWidth: fit.width,
+          absHeight: fit.height,
+        };
+      }
     }
 
-    const objectFit = this.effectiveObjectFit;
-    const origW = this.effectiveOriginalWidth;
-    const origH = this.effectiveOriginalHeight;
-
-    if (objectFit === 'none' || origW <= 0 || origH <= 0) {
-      return content;
-    }
-
-    const fit = computeObjectFit({
-      fit: objectFit,
-      originalWidth: origW,
-      originalHeight: origH,
-      boxWidth: content.absWidth,
-      boxHeight: content.absHeight,
-    });
-
-    return {
-      absLeft: content.absLeft + fit.x,
-      absTop: content.absTop + fit.y,
-      absWidth: fit.width,
-      absHeight: fit.height,
-    };
+    this._displayRectCache = result;
+    this._displayRectDirty = false;
+    return result;
   }
 
   computeOverlap(lineRectMm: MmRect): OverlapResult {
@@ -121,6 +187,7 @@ export class ImageEngine {
         rgbaData: this._rgbaData,
         overlapMode,
         overlapPadding: this._data.overlapPadding,
+        opaqueRowBitmap: this._opaqueRowBitmap,
       } : null,
       contentType: 'image',
     });
@@ -171,8 +238,11 @@ export class ImageEngine {
   }
 
   get extractData(): ImageData {
+    if (this._extractDataCache !== null) {
+      return this._extractDataCache;
+    }
     const d = this._data;
-    return {
+    const result: ImageData = {
       type: 'image',
       id: this._id,
       url: d.url,
@@ -188,6 +258,8 @@ export class ImageEngine {
       originalHeight: this.effectiveOriginalHeight,
       objectFit: this.effectiveObjectFit,
     };
+    this._extractDataCache = result;
+    return result;
   }
 
   buildPrintPostData(absRect: AbsRect): PrintPostData[] {

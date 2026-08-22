@@ -135,8 +135,7 @@ function computePixelOverlap(
   padLeft: number,
   hasOverlapPadding: boolean,
 ): OverlapResult {
-  // 이미지의 자체 mm rect (박스 rect와 다를 수 있음 — 중첩 box 케이스)
-  const imgRectMm: MmRect = r2; // overlay.absRect이 이미지 자체 좌표
+  const imgRectMm: MmRect = r2;
 
   const rgba = image.rgbaData!;
   if (imgRectMm.width <= 0 || imgRectMm.height <= 0) {
@@ -151,6 +150,11 @@ function computePixelOverlap(
       scaleX, scaleY,
       padTop, padRight, padBottom, padLeft,
     );
+  }
+
+  const bitmap = image.opaqueRowBitmap;
+  if (bitmap) {
+    return computeSimplePixelOverlapFromBitmap(r1, imgRectMm, rgba, scaleX, scaleY, bitmap);
   }
 
   return computeSimplePixelOverlap(r1, imgRectMm, rgba, scaleX, scaleY);
@@ -288,7 +292,90 @@ function computeEllipseOverlap(
 }
 
 /**
- * 단순 픽셀 오버랩 판정 (패딩 없음).
+ * bitmap 기반 단순 픽셀 오버랩 판정 (패딩 없음).
+ * 사전 빌드된 행별 bitmap을 사용하여 O(H_line) lookups로 opaque 컬럼을 머지.
+ */
+function computeSimplePixelOverlapFromBitmap(
+  r1: MmRect,
+  imgMmRect: MmRect,
+  rgba: { data: Uint8Array; width: number; height: number },
+  scaleX: number,
+  scaleY: number,
+  bitmap: Uint8Array[],
+): OverlapResult {
+  const imgIntersectionStart = Math.max(r1.left, imgMmRect.left);
+  const imgIntersectionEnd = Math.min(r1.right, imgMmRect.right);
+  const imgRawOverlapWidth = imgIntersectionEnd - imgIntersectionStart;
+  if (imgRawOverlapWidth <= 0) {
+    return { direction: 'NONE', parts: [] };
+  }
+
+  const relativeX = imgIntersectionStart - imgMmRect.left;
+  const relativeY = Math.max(r1.top, imgMmRect.top) - imgMmRect.top;
+  const relativeHeight = Math.min(r1.bottom, imgMmRect.bottom) - Math.max(r1.top, imgMmRect.top);
+
+  const sx = Math.floor(relativeX * scaleX);
+  const sy = Math.floor(relativeY * scaleY);
+  const sw = Math.ceil(imgRawOverlapWidth * scaleX);
+  const sh = Math.ceil(relativeHeight * scaleY);
+
+  if (sw <= 0 || sh <= 0) {
+    return { direction: 'NONE', parts: [] };
+  }
+
+  const opaqueColumns = new Set<number>();
+  const endX = sx + sw;
+  for (let y = 0; y < sh; y++) {
+    const row = bitmap[sy + y];
+    if (!row) continue;
+    for (let x = sx; x < endX; x++) {
+      if (row[x >> 3] & (1 << (x & 7))) {
+        opaqueColumns.add(x);
+      }
+    }
+  }
+
+  if (opaqueColumns.size === 0) {
+    return { direction: 'NONE', parts: [] };
+  }
+
+  const isFullyCovering = opaqueColumns.size === sw
+    && imgIntersectionStart <= r1.left
+    && imgIntersectionEnd >= r1.right;
+  if (isFullyCovering) {
+    return { direction: 'COVERS', parts: [{ x1: 0, x2: r1.width }] };
+  }
+
+  const sortedCols = Array.from(opaqueColumns).sort((a, b) => a - b);
+  const mmPerColumn = imgRawOverlapWidth / sw;
+  const imgRelStart = imgIntersectionStart - r1.left;
+
+  const parts: OverlapParts[] = [];
+  let partStart = sortedCols[0];
+  let prevCol = sortedCols[0];
+
+  for (let i = 1; i < sortedCols.length; i++) {
+    if (sortedCols[i] === prevCol + 1) {
+      prevCol = sortedCols[i];
+    } else {
+      parts.push({
+        x1: imgRelStart + partStart * mmPerColumn,
+        x2: imgRelStart + (prevCol + 1) * mmPerColumn,
+      });
+      partStart = sortedCols[i];
+      prevCol = sortedCols[i];
+    }
+  }
+  parts.push({
+    x1: imgRelStart + partStart * mmPerColumn,
+    x2: imgRelStart + (prevCol + 1) * mmPerColumn,
+  });
+
+  return { direction: 'PART', parts };
+}
+
+/**
+ * 단순 픽셀 오버랩 판정 (패딩 없음, bitmap 없을 때 폴백).
  */
 function computeSimplePixelOverlap(
   r1: MmRect,

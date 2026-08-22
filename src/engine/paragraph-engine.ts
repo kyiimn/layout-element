@@ -142,6 +142,16 @@ export class ParagraphEngine {
   /** Skeleton 캐시: 입력 매개변수 해시가 동일하면 _layoutTextIntoColumns() 결과를 재사용. */
   private _layoutCache: { hash: string; columnContents: TextLineData[][]; overflow: number } | null = null;
 
+  /** 성능 캐시: effectiveParagraphStyle. _paragraphStyle/_inheritStyle 변경 시 무효화. */
+  private _effectivePsCache: ParagraphStyle | null = null;
+  private _effectivePsDirty: boolean = true;
+  /** 성능 캐시: effectiveTextStyle. _textStyle/_inheritStyle 변경 시 무효화. */
+  private _effectiveTsCache: TextStyle | null = null;
+  private _effectiveTsDirty: boolean = true;
+
+  /** 성능 캐시: extractData. data/overlapMode/id/zIndex 변경 시 무효화. */
+  private _extractDataCache: ParagraphData | null = null;
+
   /**
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
    *
@@ -997,6 +1007,9 @@ export class ParagraphEngine {
       inheritStyle,
     };
     this._inheritStyle = inheritStyle;
+    this._effectivePsDirty = true;
+    this._effectiveTsDirty = true;
+    this._extractDataCache = null;
     this._overlayRectsMm = null;
   }
 
@@ -1486,6 +1499,10 @@ export class ParagraphEngine {
     this._id = options.id;
     this._zIndex = options.zIndex;
 
+    this._effectivePsDirty = true;
+    this._effectiveTsDirty = true;
+    this._extractDataCache = null;
+
     this._gaps = (() => {
       const colCount = Array.isArray(options.column) ? options.column.length : options.column || 1;
       if (Array.isArray(options.gap)) return options.gap.slice(0, colCount - 1);
@@ -1726,16 +1743,37 @@ export class ParagraphEngine {
 
   /**
    * 내부 소비용: 상속값 + 주입값 + 기본값을 모두 병합한 문단 스타일.
+   * 메모이제이션: _paragraphStyle/_inheritStyle 변경 시 dirty 플래그로 무효화.
+   * @returns 병합된 ParagraphStyle
    */
   get effectiveParagraphStyle(): ParagraphStyle {
-    return { ...DEFAULT_PARAGRAPH_STYLE, ...this._inheritStyle, ...this._paragraphStyle };
+    if (this._effectivePsCache !== null && !this._effectivePsDirty) {
+      return this._effectivePsCache;
+    }
+    this._effectivePsCache = { ...DEFAULT_PARAGRAPH_STYLE, ...this._inheritStyle, ...this._paragraphStyle };
+    this._effectivePsDirty = false;
+    return this._effectivePsCache;
   }
 
+  /**
+   * 내부 소비용: 상속값 + 주입값 + 기본값을 모두 병합한 텍스트 스타일.
+   * 메모이제이션: _textStyle/_inheritStyle 변경 시 dirty 플래그로 무효화.
+   * @returns 병합된 TextStyle
+   */
   get effectiveTextStyle(): TextStyle {
-    return { ...DEFAULT_TEXT_STYLE, ...this._inheritStyle, ...this._textStyle };
+    if (this._effectiveTsCache !== null && !this._effectiveTsDirty) {
+      return this._effectiveTsCache;
+    }
+    this._effectiveTsCache = { ...DEFAULT_TEXT_STYLE, ...this._inheritStyle, ...this._textStyle };
+    this._effectiveTsDirty = false;
+    return this._effectiveTsCache;
   }
 
   get extractData(): ParagraphData {
+    if (this._extractDataCache !== null) {
+      return this._extractDataCache;
+    }
+
     const ps = this.effectiveParagraphStyle;
     const ts = this.effectiveTextStyle;
     const paragraphStyle: Record<string, unknown> = {};
@@ -1750,7 +1788,7 @@ export class ParagraphEngine {
         textStyle[key] = ts[key as keyof TextStyle];
       }
     }
-    return {
+    const result: ParagraphData = {
       type: 'paragraph',
       id: this._id,
       content: this._textContent,
@@ -1761,6 +1799,8 @@ export class ParagraphEngine {
       overlapMode: this._overlapMode ?? 'box',
       zIndex: this._zIndex ?? 0,
     };
+    this._extractDataCache = result;
+    return result;
   }
 
   /**

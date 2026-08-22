@@ -42,6 +42,17 @@ export class BoxEngine {
   private _childEngines: (BoxEngine | ImageEngine | ParagraphEngine | TableEngine)[] = [];
   private _gridCalculator: GridCalculatorEngine | null = null;
 
+  /** Generation counter — incremented on data/parent/gridCalculator change. */
+  private _generation: number = 0;
+
+  /** 성능 캐시: absRect. parent generation 및 자신의 generation mismatch 시 무효화. */
+  private _absRectCache: AbsRect | null = null;
+  private _absRectParentGen: number = -1;
+  private _absRectSelfGen: number = -1;
+
+  /** 성능 캐시: extractData. data/childEngines 변경 시 무효화. */
+  private _extractDataCache: BoxData | null = null;
+
   /**
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
    *
@@ -66,6 +77,8 @@ export class BoxEngine {
    */
   set data(d: BoxData) {
     this._data = d;
+    this._generation++;
+    this._extractDataCache = null;
   }
 
   /** 현재 박스 데이터 */
@@ -73,14 +86,24 @@ export class BoxEngine {
     return this._data;
   }
 
+  /** Generation counter (캐시 무효화 감지용) */
+  get generation(): number {
+    return this._generation;
+  }
+
   /**
    * 엔진이 현재 관리 중인 상태에서 BoxData를 추출한다.
    *
    * `children`은 원본이 아닌 자식 엔진의 `extractData`에서 동적으로 조립한다.
+   * 메모이제이션: children이 없는 경우에만 캐시 (자식 변경 추적 비용 회피).
    *
    * @returns 엔진 현재 상태 기반의 BoxData
    */
   get extractData(): BoxData {
+    if (this._childEngines.length === 0 && this._extractDataCache !== null) {
+      return this._extractDataCache;
+    }
+
     const children: BoxData[] | ParagraphData | ImageData | TableData | undefined = (() => {
       if (this._childEngines.length === 0) return undefined;
       const childData = this._childEngines.map(e => e.extractData);
@@ -90,7 +113,7 @@ export class BoxEngine {
       return childData as BoxData[];
     })();
 
-    return {
+    const result: BoxData = {
       ...this._data,
       position: this.position,
       zIndex: this.zIndex,
@@ -109,6 +132,12 @@ export class BoxEngine {
       lock: this._data.lock ?? false,
       children,
     };
+
+    if (this._childEngines.length === 0) {
+      this._extractDataCache = result;
+    }
+
+    return result;
   }
 
   /** 부모 엔진 참조 */
@@ -119,6 +148,7 @@ export class BoxEngine {
   /** 부모 엔진 참조를 갱신한다. */
   set parent(p: BoxEngineParent) {
     this._parent = p;
+    this._generation++;
   }
 
   /** 박스 position 모드 ('static' | 'absolute') */
@@ -252,14 +282,30 @@ export class BoxEngine {
     return this.height;
   }
 
-  /** 절대 사각형 (mm) */
+  /**
+   * 절대 사각형 (mm).
+   * 메모이제이션: 자신의 generation 및 부모의 generation이 변경되지 않으면 캐시 재사용.
+   * @returns 절대 사각형 AbsRect
+   */
   get absRect(): AbsRect {
-    return {
+    const parentGen = this._parent.generation;
+    if (this._absRectCache !== null
+      && this._absRectParentGen === parentGen
+      && this._absRectSelfGen === this._generation) {
+      return this._absRectCache;
+    }
+
+    const result: AbsRect = {
       absLeft: this.absLeft,
       absTop: this.absTop,
       absWidth: this.absWidth,
       absHeight: this.absHeight,
     };
+
+    this._absRectCache = result;
+    this._absRectParentGen = parentGen;
+    this._absRectSelfGen = this._generation;
+    return result;
   }
 
   /**
@@ -309,6 +355,7 @@ export class BoxEngine {
    * 이 박스보다 z-index가 높고 교차하는 형제 박스 엔진 목록.
    * 부모의 overlayElements(상위 전파) + 부모의 자식 박스 중 z-index 높고 교차하는 것.
    * overlapMode === 'none'인 이미지/단락 박스는 제외.
+   * @returns 오버레이 박스 엔진 배열
    */
   get overlayElements(): BoxEngine[] {
     const list: BoxEngine[] = [];
@@ -398,6 +445,8 @@ export class BoxEngine {
    */
   set childEngines(engines: (BoxEngine | ImageEngine | ParagraphEngine | TableEngine)[]) {
     this._childEngines = engines;
+    this._generation++;
+    this._extractDataCache = null;
   }
 
   /** 자식 엔진 목록 */
@@ -418,6 +467,7 @@ export class BoxEngine {
   /** 그리드 계산기를 설정한다. */
   set gridCalculator(calc: GridCalculatorEngine | null) {
     this._gridCalculator = calc;
+    this._generation++;
   }
 
   /** document 타입 여부 (항상 false) */

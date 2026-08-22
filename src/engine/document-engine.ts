@@ -67,6 +67,12 @@ export class DocumentEngine {
   private _gridCalculator: GridCalculatorEngine;
   private _childBoxEngines: BoxEngine[] = [];
 
+  /** Generation counter — incremented on data/ppm change. Used by child BoxEngine for cache invalidation. */
+  private _generation: number = 0;
+
+  /** layout() 호출 시 새 엔진이 생성/추가되었는지 여부. _syncEngineIdsToDom 스킵 판단용. */
+  private _newEnginesCreated: boolean = false;
+
   /**
    * 정적 팩토리 메서드.
    *
@@ -107,6 +113,7 @@ export class DocumentEngine {
     this._data = d;
     this._gridCalculator = this._createGridCalculator();
     this._childBoxEngines = [];
+    this._generation++;
   }
 
   /** 현재 문서 데이터 */
@@ -139,6 +146,12 @@ export class DocumentEngine {
 
   set ppm(v: number) {
     this._ppm = v;
+    this._generation++;
+  }
+
+  /** Generation counter (캐시 무효화 감지용) */
+  get generation(): number {
+    return this._generation;
   }
 
   /** 문서 너비 (mm) */
@@ -175,6 +188,7 @@ export class DocumentEngine {
    */
   set childBoxEngines(engines: BoxEngine[]) {
     this._childBoxEngines = engines;
+    this._generation++;
   }
 
   /** 문서는 절대 좌표가 (0, 0)에서 시작 */
@@ -312,8 +326,14 @@ export class DocumentEngine {
    * (브라우저는 `LayoutImageElement._feedRgbaToEngine()`이 canvas에서 RGBA 추출)
    */
   layout(): void {
+    this._newEnginesCreated = false;
     this._buildTree(this._data);
     this._syncIdsToData();
+  }
+
+  /** layout() 호출 시 새 엔진이 생성/추가되었는지 여부 (외부에서 _syncEngineIdsToDom 스킵 판단용). */
+  get newEnginesCreated(): boolean {
+    return this._newEnginesCreated;
   }
 
   /**
@@ -492,6 +512,8 @@ export class DocumentEngine {
       }
       existingBox.data = boxData;
       existingBox.parent = parent;
+    } else {
+      this._newEnginesCreated = true;
     }
     const boxEngine = existingBox ?? BoxEngine.create(boxData, parent);
 
@@ -614,6 +636,7 @@ export class DocumentEngine {
       return pe;
     }
 
+    this._newEnginesCreated = true;
     const pe = ParagraphEngine.create(engineData);
     pe.layoutStructure();
     return pe;
@@ -678,6 +701,7 @@ export class DocumentEngine {
       }
       return imgEngine;
     }
+    this._newEnginesCreated = true;
     const newEngine = ImageEngine.create({
       url: imgData.url,
       x: imgData.x,

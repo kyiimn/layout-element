@@ -308,7 +308,9 @@ export class LayoutDocumentElement extends HTMLElement {
 
     this._engine.layout();
 
-    this._syncEngineIdsToDom();
+    if (this._engine.newEnginesCreated) {
+      this._syncEngineIdsToDom();
+    }
 
     return this;
   }

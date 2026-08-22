@@ -129,6 +129,8 @@ export interface ImageEngineRef {
   overlapMode: OverlapMode;
   /** 오버랩 패딩 */
   overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number };
+  /** 행별 opaque 컬럼 bitmap (rgbaData 빌드 시 자동 생성). null이면 rgbaData에서 직접 스캔으로 폴백. */
+  opaqueRowBitmap?: Uint8Array[] | null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -147,6 +149,8 @@ export interface BoxEngineParent {
   childBoxEngines: BoxEngine[];
   findBoxEngineById(id: string): BoxEngine | undefined;
   paddingTop: number;
+  /** Generation counter — child BoxEngine uses this to detect parent changes for cache invalidation. */
+  readonly generation: number;
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -296,7 +296,8 @@ export class LayoutParagraphElement extends HTMLElement {
 
     if (this._perfStructureChanged) {
       this._layoutStructure();
-      this._model.resetIncrementalState();
+      // resetIncrementalState() is already called by ParagraphEngine.data setter
+      // inside _layoutStructure() above — no need to call it again here.
       this._model.layoutStructure();
       this._model.layoutText();
       this._perfStructureChanged = false;
@@ -931,7 +932,7 @@ export class LayoutParagraphElement extends HTMLElement {
    * 변경되어 재래핑이 트리거된다.
    */
   renderForDrag(): void {
-    this._layoutStructure();
+    this._perfStructureChanged = false;
     this.flushRender();
   }
 

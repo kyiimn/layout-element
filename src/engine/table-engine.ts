@@ -16,6 +16,7 @@ import { DocumentEngine } from "./document-engine";
 import type { ParagraphEngine } from "./paragraph-engine";
 import type { ImageEngine } from "./image-engine";
 import type { AbsRect, ColorRegistryEngine } from "./types";
+import { checkOverlapMm } from "./overlap-engine";
 
 /**
  * 테이블 셀 레이아웃 엔진.
@@ -25,6 +26,7 @@ import type { AbsRect, ColorRegistryEngine } from "./types";
 export class TableCellEngine {
   private _x: number = 0;
   private _y: number = 0;
+  private _rowY: number = 0;
   private _width: number = 0;
   private _height: number = 0;
   private _cellLabel: string = '';
@@ -33,6 +35,10 @@ export class TableCellEngine {
   private _parentAbsRect?: AbsRect;
   private _cellData?: TableCellData;
   _gridCalculator?: GridCalculatorEngine;
+  private _tableEngine: TableEngine | null = null;
+
+  /** Generation counter — incremented on setCellMetrics/parentAbsRect/boxEngine change. */
+  private _generation: number = 0;
 
   /**
    * 셀 메트릭을 설정한다.
@@ -46,14 +52,16 @@ export class TableCellEngine {
    * @param labels - 셀이 커버하는 라벨 목록 (span 시 복수)
    * @param cellData - 원본 TableCellData (배경/대각선/보더 등 렌더 속성 접근용)
    */
-  setCellMetrics(x: number, y: number, width: number, height: number, cellLabel: string, labels: string[], cellData?: TableCellData): void {
+  setCellMetrics(x: number, y: number, width: number, height: number, cellLabel: string, labels: string[], cellData?: TableCellData, rowY?: number): void {
     this._x = x;
     this._y = y;
+    this._rowY = rowY ?? 0;
     this._width = width;
     this._height = height;
     this._cellLabel = cellLabel;
     this._labels = labels;
     this._cellData = cellData;
+    this._generation++;
   }
 
   /** 셀 X (mm) */
@@ -73,13 +81,24 @@ export class TableCellEngine {
 
   /** 셀 내용 박스 엔진 */
   get boxEngine(): BoxEngine | null { return this._boxEngine; }
-  set boxEngine(engine: BoxEngine | null) { this._boxEngine = engine; }
+  set boxEngine(engine: BoxEngine | null) {
+    this._boxEngine = engine;
+    this._generation++;
+  }
 
   /**
    * 상위 테이블(또는 상위 박스)의 절대 사각형을 설정한다.
    * 셀 내부 박스 엔진이 누적된 페이지 절대 좌표를 계산할 수 있도록 한다.
    */
-  set parentAbsRect(rect: AbsRect | undefined) { this._parentAbsRect = rect; }
+  set parentAbsRect(rect: AbsRect | undefined) {
+    this._parentAbsRect = rect;
+    this._generation++;
+  }
+
+  /** Generation counter (캐시 무효화 감지용) */
+  get generation(): number {
+    return this._generation;
+  }
 
   /**
    * `BoxEngineParent` 인터페이스 구현.
@@ -92,7 +111,7 @@ export class TableCellEngine {
     const dy = this._parentAbsRect?.absTop ?? 0;
     return {
       absLeft: this._x + dx,
-      absTop: this._y + dy,
+      absTop: this._rowY + this._y + dy,
       absWidth: this._width,
       absHeight: this._height,
     };
@@ -113,9 +132,12 @@ export class TableCellEngine {
     return this._gridCalculator ?? null;
   }
 
-  /** 오버랩 요소 목록 (셀 자체는 오버랩 대상 아님, 빈 배열) */
+  /** 오버랩 요소 목록 — 테이블 박스의 overlayElements 중 셀과 공간적으로 겹치는 것을 전파 */
   get overlayElements(): BoxEngine[] {
-    return [];
+    if (!this._tableEngine) return [];
+    const parentBox = this._tableEngine.parentBox;
+    const cellRect = this.absRect;
+    return parentBox.overlayElements.filter(e => checkOverlapMm(e.absRect, cellRect));
   }
 
   /** 자식 박스 엔진 목록 (셀 내부 박스, 0개 또는 1개) */
@@ -370,8 +392,10 @@ export class TableEngine {
           cellLabel,
           labels,
           cellData,
+          trY,
         );
         cellEngine.parentAbsRect = parentAbsRect;
+        cellEngine._tableEngine = this;
         cellEngine._gridCalculator = GridCalculatorEngine.create({
           width: p.width,
           height: p.height,
