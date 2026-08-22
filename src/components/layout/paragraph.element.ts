@@ -392,7 +392,7 @@ export class LayoutParagraphElement extends HTMLElement {
 
       const columnContents = this._model.columnContents;
       for (let i = 0; i < columnContents.length; i++) {
-        const columnEl = document.createElement('x-layout-column');
+        const columnEl = document.createElement('x-layout-column') as LayoutColumnElement;
         columnEl.index = i;
 
         this.appendChild(columnEl);
@@ -404,7 +404,7 @@ export class LayoutParagraphElement extends HTMLElement {
       if (columnEls.length !== columnContents.length) {
         this.replaceChildren();
         for (let i = 0; i < columnContents.length; i++) {
-          const columnEl = document.createElement('x-layout-column');
+          const columnEl = document.createElement('x-layout-column') as LayoutColumnElement;
           columnEl.index = i;
           this.appendChild(columnEl);
         }
@@ -632,8 +632,8 @@ export class LayoutParagraphElement extends HTMLElement {
     this.markStructureChangedAndRender();
   }
 
-  get columnEl() {
-    return Array.from(this.querySelectorAll('x-layout-column'));
+  get columnEl(): LayoutColumnElement[] {
+    return Array.from(this.querySelectorAll('x-layout-column')) as LayoutColumnElement[];
   }
 
   /**

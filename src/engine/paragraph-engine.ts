@@ -1777,18 +1777,16 @@ export class ParagraphEngine {
       return this._extractDataCache;
     }
 
-    const ps = this.effectiveParagraphStyle;
-    const ts = this.effectiveTextStyle;
     const paragraphStyle: Record<string, unknown> = {};
-    const textStyle: Record<string, unknown> = {};
-    for (const key of Object.keys(DEFAULT_PARAGRAPH_STYLE)) {
-      if (ps[key as keyof ParagraphStyle] !== undefined) {
-        paragraphStyle[key] = ps[key as keyof ParagraphStyle];
+    for (const key of Object.keys(this._paragraphStyle)) {
+      if (this._paragraphStyle[key as keyof ParagraphStyle] !== undefined) {
+        paragraphStyle[key] = this._paragraphStyle[key as keyof ParagraphStyle];
       }
     }
-    for (const key of Object.keys(DEFAULT_TEXT_STYLE)) {
-      if (ts[key as keyof TextStyle] !== undefined) {
-        textStyle[key] = ts[key as keyof TextStyle];
+    const textStyle: Record<string, unknown> = {};
+    for (const key of Object.keys(this._textStyle)) {
+      if (this._textStyle[key as keyof TextStyle] !== undefined) {
+        textStyle[key] = this._textStyle[key as keyof TextStyle];
       }
     }
     const result: ParagraphData = {
