@@ -1505,7 +1505,7 @@ export class LayoutBoxElement extends HTMLElement {
    * parentModel이 필요하다.
    */
   private _absoluteToStaticCoords(left: number, top: number, width: number, height: number): { left: number; top: number; width: number; height: number } {
-    const { columnCoords, lineHeight, fontSize, editableWidth, editableHeight, columnCount } = this.parentModel!;
+    const { columnCoords, lineHeight, editableWidth, editableHeight, columnCount } = this.parentModel!;
     const avgColWidth = editableWidth / columnCount;
     const editAreaLeft = columnCoords[0].x1;
     const editAreaTop = columnCoords[0].y1;
@@ -1513,10 +1513,14 @@ export class LayoutBoxElement extends HTMLElement {
     const nearestColumn = Math.round((left - editAreaLeft) / avgColWidth);
     const clampedColumn = Math.max(0, Math.min(columnCount - Math.round(width / avgColWidth), nearestColumn));
     const nearestLine = Math.round((top - editAreaTop) / lineHeight);
-    const maxTop = Math.floor((editableHeight - (lineHeight * Math.round(height / lineHeight) - (lineHeight - fontSize))) / lineHeight);
+    const staticHeight = Math.max(1, Math.round(height / lineHeight));
+    // 박스 top의 최대 위치: 박스 bottom(top + staticHeight × lineHeight)이
+    // 부모 하단(floor(editableHeight / lineHeight) × lineHeight)에 닿도록 계산.
+    // absHeight 공식의 (lineHeight − fontSize) 보정은 무시하고 라인 기반으로 계산하여
+    // 부모 하단에 정확히 맞춘다.
+    const maxTop = Math.max(0, Math.floor(editableHeight / lineHeight) - staticHeight);
     const clampedLine = Math.max(0, Math.min(maxTop, nearestLine));
     const staticWidth = Math.max(1, Math.round(width / avgColWidth));
-    const staticHeight = Math.max(1, Math.round(height / lineHeight));
 
     return {
       left: clampedColumn,

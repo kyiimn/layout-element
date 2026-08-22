@@ -1360,7 +1360,7 @@ export class LayoutEditController {
     const newLeftMm = startX + dxMm;
     const newTopMm = startY + dyMm;
 
-    const maxTop = Math.floor((editableTextHeight - (lineHeight * box.height - (lineHeight - parentModel.fontSize))) / lineHeight);
+    const maxTop = Math.max(0, Math.floor(editableTextHeight / lineHeight) - box.height);
 
     if (!manager.snapEnabled) {
       // 스냅 비활성화: 컬럼/라인을 정수로 반올림하되 자유 배치
@@ -1794,7 +1794,11 @@ export class LayoutEditController {
     // 픽셀 단위 델타를 컬럼/라인 정수 단위로 변환 (스냅)
     const deltaCols = Math.round(deltaMmX / avgColWidth);
     const deltaLines = Math.round(deltaMmY / lineHeight);
-    const maxLines = Math.floor(editableTextHeight / lineHeight);
+    // 박스 최대 라인 수: absHeight 공식(lineHeight × height − (lineHeight − fontSize))이
+    // 마지막 라인 행간을 제외하므로, 부모 하단에 absHeight가 정확히 닿으려면
+    // floor(contentHeight / lineHeight) + 1 라인까지 허용해야 한다.
+    // absHeight getter의 contentHeight 클램핑이 초과분을 부모 하단으로 잘라낸다.
+    const maxLines = Math.floor(editableTextHeight / lineHeight) + 1;
 
     // static: mm 기준 하위 요소 최대 right/bottom을 컬럼/라인 수로 역변환
     const effectiveMinCols = Math.max(1, Math.ceil(childMinRightMm / avgColWidth));
