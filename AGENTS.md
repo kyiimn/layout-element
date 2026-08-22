@@ -105,6 +105,12 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 
 ## Important Constraints
 
+### Git Commits — Explicit Request Only
+
+- **Never commit unless the user explicitly requests it.** Even if previous commits were made in the same session, each commit requires its own explicit instruction.
+- Commits must only stage files relevant to the current change. Do not stage unrelated modified files (e.g., `examples/index.html`, `docs/` unless directly changed by the task).
+- Follow the repo's commit message style: `type: description` (e.g., `fix: ...`, `refactor: ...`, `feat: ...`).
+
 ### Engine-First Principle
 
 - The engine tree is the single source of truth for all layout calculations. DOM elements must never manually fill `engine.childEngines` from DOM children, nor bypass `DocumentEngine.layout()` to create engines independently.
