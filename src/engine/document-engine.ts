@@ -114,6 +114,24 @@ export class DocumentEngine {
     return this._data;
   }
 
+  /**
+   * 엔진이 현재 관리 중인 상태에서 DocumentData를 추출한다.
+   *
+   * `children`은 자식 박스 엔진의 `extractData`에서 동적으로 조립한다.
+   *
+   * @returns 엔진 현재 상태 기반의 DocumentData
+   */
+  get extractData(): DocumentData {
+    return {
+      ...this._data,
+      paddingTop: this.paddingTop,
+      paddingRight: this.paddingRight,
+      paddingBottom: this.paddingBottom,
+      paddingLeft: this.paddingLeft,
+      children: this._childBoxEngines.map(e => e.extractData),
+    };
+  }
+
   /** 주입된 pixels-per-mm */
   get ppm(): number {
     return this._ppm;
@@ -185,6 +203,19 @@ export class DocumentEngine {
    */
   findBoxEngineById(id: string): BoxEngine | undefined {
     return this._childBoxEngines.find(e => e.data != null && e.data.id === id);
+  }
+
+  /**
+   * 엔진 트리 전체에서 ID가 일치하는 엔진을 검색한다.
+   *
+   * BoxEngine, ParagraphEngine, ImageEngine, TableEngine 모두 검색 대상이다.
+   * 테이블 셀 내부 박스도 재귀적으로 순회한다.
+   *
+   * @param id - 검색할 엔진 ID
+   * @returns 일치하는 엔진 또는 undefined
+   */
+  findEngineById(id: string): BoxEngine | ParagraphEngine | ImageEngine | TableEngine | undefined {
+    return _findEngineByIdInBoxes(this._childBoxEngines, id);
   }
 
   /**
@@ -519,7 +550,7 @@ export class DocumentEngine {
       const content = children;
       if (content.type === 'paragraph' || content.type === 'text') {
         const paraData: ParagraphData = content.type === 'text'
-          ? { type: 'paragraph', content: content.content, paragraphStyle: content.paragraphStyle, textStyle: content.textStyle }
+          ? { type: 'paragraph', id: content.id, content: content.content, column: 1, gap: 0, paragraphStyle: content.paragraphStyle, textStyle: content.textStyle }
           : content;
         const pe = this._buildParagraphEngine(paraData, boxEngine, inheritStyle);
         childEngines.push(pe);
@@ -549,17 +580,22 @@ export class DocumentEngine {
     if (!gc) {
       throw new Error('parentBox.gridCalculator must be set before building ParagraphEngine');
     }
+    if (!paraData.id) {
+      paraData = { ...paraData, id: generateEngineId() };
+    }
     const column = paraData.column ?? gc.columnWidth;
     const gap = paraData.gap ?? gc.gaps;
 
     const overlayEngines = parentBox.overlayElements;
 
     const engineData = {
+      id: paraData.id,
+      zIndex: paraData.zIndex,
       content: paraData.content,
       column,
       gap,
-      paragraphStyle: { ...this._data.paragraphStyle, ...paraData.paragraphStyle },
-      textStyle: { ...this._data.textStyle, ...paraData.textStyle },
+      paragraphStyle: paraData.paragraphStyle ?? {},
+      textStyle: paraData.textStyle ?? {},
       inheritStyle: {
         ...inheritStyle,
         parentHeight: parentBox.absHeight,
@@ -608,6 +644,9 @@ export class DocumentEngine {
     parentBox: BoxEngine,
     prevContentEngines: (ImageEngine | ParagraphEngine | TableEngine)[],
   ): ImageEngine {
+    if (!imgData.id) {
+      imgData = { ...imgData, id: generateEngineId() };
+    }
     const contentAbsRect = parentBox.contentAbsRect;
 
     const existing = parentBox.childEngines.find(e => e instanceof ImageEngine)
@@ -629,6 +668,8 @@ export class DocumentEngine {
         originalWidth: imgData.originalWidth,
         originalHeight: imgData.originalHeight,
       };
+      imgEngine.id = imgData.id;
+      imgEngine.zIndex = imgData.zIndex;
       imgEngine.contentAbsRect = contentAbsRect;
       if (preservedRgba) {
         imgEngine.rgbaData = preservedRgba;
@@ -650,6 +691,8 @@ export class DocumentEngine {
       originalWidth: imgData.originalWidth,
       originalHeight: imgData.originalHeight,
     });
+    newEngine.id = imgData.id;
+    newEngine.zIndex = imgData.zIndex;
     newEngine.contentAbsRect = contentAbsRect;
     newEngine.rgbaData = this._decodeRgbaIfNode(imgData.url);
     return newEngine;
@@ -677,6 +720,9 @@ export class DocumentEngine {
     parentBox: BoxEngine,
     prevContentEnginesByBoxId: Map<string, (ImageEngine | ParagraphEngine | TableEngine)[]>,
   ): TableEngine {
+    if (!tableData.id) {
+      tableData = { ...tableData, id: generateEngineId() };
+    }
     const te = TableEngine.create(tableData, parentBox);
     te.layout();
 
@@ -754,4 +800,50 @@ export class DocumentEngine {
       paddingLeft: padLeft,
     };
   }
+}
+
+/**
+ * 박스 엔진 배열에서 ID가 일치하는 엔진을 재귀적으로 검색한다.
+ *
+ * BoxEngine 자신, 자식 컨텐츠 엔진(ParagraphEngine, ImageEngine, TableEngine),
+ * 그리고 중첩된 자식 박스와 테이블 셀 내부 박스까지 모두 순회한다.
+ *
+ * @param boxEngines - 검색 대상 박스 엔진 배열
+ * @param id - 검색할 엔진 ID
+ * @returns 일치하는 엔진 또는 undefined
+ */
+function _findEngineByIdInBoxes(
+  boxEngines: BoxEngine[],
+  id: string,
+): BoxEngine | ParagraphEngine | ImageEngine | TableEngine | undefined {
+  for (const be of boxEngines) {
+    if (be.data.id === id) return be;
+
+    for (const ce of be.childEngines) {
+      if (ce instanceof ParagraphEngine && ce.id === id) return ce;
+      if (ce instanceof ImageEngine && ce.id === id) return ce;
+      if (ce instanceof TableEngine && ce.data.id === id) return ce;
+    }
+
+    const childBoxes = be.childBoxEngines;
+    if (childBoxes.length > 0) {
+      const found = _findEngineByIdInBoxes(childBoxes, id);
+      if (found) return found;
+    }
+
+    for (const ce of be.childEngines) {
+      if (ce instanceof TableEngine) {
+        for (const rowEngine of ce.rowEngines) {
+          for (const cellEngine of rowEngine.cellEngines) {
+            const cellBox = cellEngine.boxEngine;
+            if (cellBox) {
+              const found = _findEngineByIdInBoxes([cellBox], id);
+              if (found) return found;
+            }
+          }
+        }
+      }
+    }
+  }
+  return undefined;
 }

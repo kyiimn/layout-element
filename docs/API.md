@@ -159,8 +159,8 @@ class LayoutDocumentElement extends HTMLElement
 
 | 이름 | 타입 | 단위 | 설명 |
 |---|---|---|---|
-| `data` | `DocumentData` | — | 한 번에 모든 필드 갱신. 자식 박스는 ID 기반 diff로 재구성 (같은 ID는 in-place 업데이트, 새 ID는 생성, 없는 ID는 제거). `data.id`가 전달되면 요소의 `id`에 반영. |
-| `id` | `string` | — | 요소 고유 식별자. `connectedCallback` 시점에 `id`가 없으면 `genUUID()`로 자동 할당. `data.id` setter로도 갱신 가능. |
+| `data` | `DocumentData` | — | 한 번에 모든 필드 갱신. 자식 박스는 ID 기반 diff로 재구성 (같은 ID는 in-place 업데이트, 새 ID는 생성, 없는 ID는 제거). `data.id`가 `undefined`이면 `data` setter에서 `genUUID()`로 자동 생성. `data` getter는 `engine.extractData`를 반환 (엔진 우선 원칙). |
+| `id` | `string` | — | 요소 고유 식별자. `data` setter에서 `data.id`가 `undefined`이면 `genUUID()`로 자동 할당. 엔진에서 생성된 id는 `_syncEngineIdsToDom()`을 통해 DOM에 write-back. |
 | `width` | `number` | mm | 문서 너비. |
 | `height` | `number` | mm | 문서 높이. |
 | `paddingTop` | `number` | mm | 상단 여백. |
@@ -446,10 +446,10 @@ paragraph.addEventListener('render-error', (e) => {
 
 #### `data` getter 동작
 
-- `content` 필드는 렌더링된 실제 텍스트를 반환한다.
-  - 모델이 생성된 후(렌더링 완료)에는 `model.textContent` 값을 사용한다.
-  - 편집 모드에서 텍스트가 수정된 경우, 수정된 내용이 `content`에 반영된다.
-  - 모델이 아직 없는 초기 상태에서는 setter로 전달된 원본 콘텐츠를 반환한다.
+- 엔진 우선 원칙: `engine.extractData`를 반환 (엔진이 없으면 `_rawData()`로 폴백).
+- `content` 필드는 엔진의 현재 `textContent`를 반환한다.
+  - 편집 모드에서 텍스트가 수정된 경우, 수정된 내용이 엔진에 반영되어 `extractData`에 포함된다.
+- `paragraphStyle`/`textStyle`은 엔진의 `effectiveParagraphStyle`/`effectiveTextStyle`에서 `ParagraphStyle`/`TextStyle` 키만 필터링하여 반환 (상속값 + 주입값 + 기본값 병합 결과).
 
 #### `data` setter 동작
 
@@ -2644,7 +2644,7 @@ class TableStructureEditor {
 
 ```ts
 type DocumentData = {
-  id?: string;                         // 고유 식별자 (선택). 미지정 시 connectedCallback에서 genUUID()로 자동 생성.
+  id?: string;                         // 고유 식별자 (선택). 미지정 시 data setter에서 genUUID()로 자동 생성.
   width: number;                       // mm (필수)
   height: number;                      // mm (필수)
   paddingTop?: number;                 // 기본 0

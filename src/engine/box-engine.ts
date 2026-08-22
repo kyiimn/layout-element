@@ -11,7 +11,7 @@
  * @file src/engine/box-engine.ts
  */
 
-import type { BoxData, BoxPosition, BoxRole } from "@/types";
+import type { BoxData, BoxPosition, BoxRole, ParagraphData, ImageData, TableData } from "@/types";
 import type { AbsRect, BoxContentType } from "./types";
 import type { PrintPostData } from "@/types";
 import type { GridCalculatorEngine } from "./grid-calculator-engine";
@@ -71,6 +71,44 @@ export class BoxEngine {
   /** 현재 박스 데이터 */
   get data(): BoxData {
     return this._data;
+  }
+
+  /**
+   * 엔진이 현재 관리 중인 상태에서 BoxData를 추출한다.
+   *
+   * `children`은 원본이 아닌 자식 엔진의 `extractData`에서 동적으로 조립한다.
+   *
+   * @returns 엔진 현재 상태 기반의 BoxData
+   */
+  get extractData(): BoxData {
+    const children: BoxData[] | ParagraphData | ImageData | TableData | undefined = (() => {
+      if (this._childEngines.length === 0) return undefined;
+      const childData = this._childEngines.map(e => e.extractData);
+      if (childData.length === 1 && childData[0].type !== 'box') {
+        return childData[0] as ParagraphData | ImageData | TableData;
+      }
+      return childData as BoxData[];
+    })();
+
+    return {
+      ...this._data,
+      position: this.position,
+      zIndex: this.zIndex,
+      role: this.role,
+      paddingTop: this.paddingTop,
+      paddingRight: this.paddingRight,
+      paddingBottom: this.paddingBottom,
+      paddingLeft: this.paddingLeft,
+      borderTopWidth: this._data.borderTopWidth ?? 0,
+      borderBottomWidth: this._data.borderBottomWidth ?? 0,
+      borderLeftWidth: this._data.borderLeftWidth ?? 0,
+      borderRightWidth: this._data.borderRightWidth ?? 0,
+      borderStyle: this._data.borderStyle ?? DEFAULT_BORDER_STYLE,
+      backgroundOpacity: this._data.backgroundOpacity ?? 1,
+      priority: this._data.priority ?? 0,
+      lock: this._data.lock ?? false,
+      children,
+    };
   }
 
   /** 부모 엔진 참조 */
@@ -139,7 +177,7 @@ export class BoxEngine {
       const coord = gc.columnCoords[this.left];
       return coord ? coord.x1 : 0;
     }
-    return (this._data.paddingLeft ?? 0) + this.left;
+    return this.paddingLeft + this.left;
   }
 
   /**
@@ -155,7 +193,7 @@ export class BoxEngine {
       const coord = columnCoords[this.left];
       return coord ? coord.y1 + (lineHeight * this.top) : 0;
     }
-    return (this._data.paddingTop ?? 0) + this.top;
+    return this.paddingTop + this.top;
   }
 
   /**
@@ -314,6 +352,45 @@ export class BoxEngine {
   }
 
   /**
+   * 이 박스의 자식 엔진 중 ID가 일치하는 엔진을 재귀적으로 검색한다.
+   *
+   * BoxEngine, ParagraphEngine, ImageEngine, TableEngine 모두 검색 대상이다.
+   * 테이블 셀 내부 박스도 재귀적으로 순회한다.
+   *
+   * @param id - 검색할 엔진 ID
+   * @returns 일치하는 엔진 또는 undefined
+   */
+  findEngineById(id: string): BoxEngine | ParagraphEngine | ImageEngine | TableEngine | undefined {
+    if (this._data.id === id) return this;
+
+    for (const ce of this._childEngines) {
+      if (ce instanceof ParagraphEngine && ce.id === id) return ce;
+      if (ce instanceof ImageEngine && ce.id === id) return ce;
+      if (ce instanceof TableEngine && ce.data.id === id) return ce;
+    }
+
+    for (const ce of this._childEngines) {
+      if (ce instanceof BoxEngine) {
+        const found = ce.findEngineById(id);
+        if (found) return found;
+      }
+      if (ce instanceof TableEngine) {
+        for (const rowEngine of ce.rowEngines) {
+          for (const cellEngine of rowEngine.cellEngines) {
+            const cellBox = cellEngine.boxEngine;
+            if (cellBox) {
+              const found = cellBox.findEngineById(id);
+              if (found) return found;
+            }
+          }
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
    * 자식 엔진 목록을 설정한다.
    * 엔진 트리를 구축할 때 호출.
    *
@@ -366,11 +443,8 @@ export class BoxEngine {
       backgroundColor: this._data.backgroundColor && colorRegistry
         ? colorRegistry.get(this._data.backgroundColor)
         : undefined,
-      backgroundOpacity: this._data.backgroundOpacity,
-      data: {
-        ...this._data,
-        borderStyle: this._data.borderStyle ?? DEFAULT_BORDER_STYLE,
-      },
+      backgroundOpacity: this._data.backgroundOpacity ?? 1,
+      data: this.extractData,
       rect: {
         x: rect.absLeft,
         y: rect.absTop,
@@ -388,20 +462,7 @@ export class BoxEngine {
       if (child instanceof BoxEngine) data.push(...child.printPostData);
       else if (child instanceof ParagraphEngine) data.push(...child.printPostData);
       else if (child instanceof ImageEngine) {
-        const imgData = child.data;
-        const imgAbsRect = this.contentAbsRect;
-        data.push(...child.buildPrintPostData(imgAbsRect, {
-          type: 'image',
-          url: imgData.url,
-          x: imgData.x, y: imgData.y,
-          width: imgData.width, height: imgData.height,
-          dpi: imgData.dpi,
-          overlapPadding: imgData.overlapPadding,
-          overlapMode: imgData.overlapMode,
-          objectFit: imgData.objectFit,
-          originalWidth: imgData.originalWidth,
-          originalHeight: imgData.originalHeight,
-        }));
+        data.push(...child.buildPrintPostData(this.contentAbsRect));
       }
       else if (child instanceof TableEngine) {
         data.push(...child.printPostData);

@@ -43,6 +43,7 @@ static create(
 | 게터 | 타입 | 설명 |
 |------|------|------|
 | `data` | `DocumentData` | 문서 데이터 |
+| `extractData` | `DocumentData` | 엔진 현재 상태에서 조립한 문서 데이터. `children`은 자식 박스 엔진의 `extractData`에서 동적 조립. padding은 getter 기본값 적용 |
 | `ppm` | `number` | pixels-per-mm (0 if not injected) |
 | `width` | `number` | 문서 너비 (mm) |
 | `height` | `number` | 문서 높이 (mm) |
@@ -69,6 +70,8 @@ static create(
 |--------|----------|------|
 | `layout()` | `(): void` | `DocumentData`로부터 전체 엔진 트리 재구축. Node.js에서 base64 data URI 이미지의 rgbaData를 자동 주입 |
 | `prepareImageDecoder()` | `(): Promise<boolean>` | Node.js ESM 환경에서 pngjs 사전 로드. `layout()` 전 호출 필요. 브라우저 no-op |
+| `findBoxEngineById(id)` | `(id: string): BoxEngine \| undefined` | 직계 박스 엔진 중 ID 검색 (`BoxEngineParent` 인터페이스 구현) |
+| `findEngineById(id)` | `(id: string): BoxEngine \| ParagraphEngine \| ImageEngine \| TableEngine \| undefined` | 엔진 트리 전체 재귀 검색. 모든 엔진 타입 포함. 테이블 셀 내부 박스도 순회 |
 
 #### 내부 메커니즘
 
@@ -180,6 +183,7 @@ static create(data: BoxData, parent: BoxEngineParent): BoxEngine
 | 게터 | 타입 | 설명 |
 |------|------|------|
 | `data` | `BoxData` | 박스 데이터 |
+| `extractData` | `BoxData` | 엔진 현재 상태에서 조립한 박스 데이터. 모든 필드에 getter 기본값 적용 (`position ?? 'static'`, `zIndex ?? 0`, `borderTopWidth ?? 0`, `borderStyle ?? DEFAULT_BORDER_STYLE`, `priority ?? 0`, `backgroundOpacity ?? 1`, `lock ?? false`). `children`은 자식 엔진의 `extractData`에서 동적 조립 |
 | `parent` | `BoxEngineParent` | 부모 엔진 참조 |
 | `position` | `BoxPosition` | `'static'` 또는 `'absolute'` |
 | `left` | `number` | static=컬럼 인덱스, absolute=mm |
@@ -225,7 +229,9 @@ static create(data: BoxData, parent: BoxEngineParent): BoxEngine
 - `contentType`/`contentElement`: 단일 중첩 박스를 재귀 통과
 - `absRect`: 박스 절대 사각형 (mm). padding 포함.
 - `contentAbsRect`: 콘텐츠 영역 절대 사각형 (mm). padding 제외. `LayoutImageElement.absLeft/absTop/absWidth/absHeight`와 동일 공식. ImageEngine `buildPrintPostData`에 전달.
-- `printPostData`: 자식을 z-index 정렬, 각 엔진 printPostData 위임, `DEFAULT_BORDER_STYLE` 폴백. mm 단위 좌표를 후처리 시스템에 제공. ImageEngine 자식에는 `this.contentAbsRect`를 전달 (이미지 영역, 부모 box 전체 영역 아님).
+- `printPostData`: 자식을 z-index 정렬, 각 엔진 printPostData 위임, `extractData` 사용. mm 단위 좌표를 후처리 시스템에 제공. ImageEngine 자식에는 `this.contentAbsRect`를 전달 (이미지 영역, 부모 box 전체 영역 아님).
+- `findBoxEngineById(id)`: 직계 자식 박스 엔진 중 ID 검색 (`BoxEngineParent` 인터페이스 구현).
+- `findEngineById(id)`: 자신 + 자식 엔진 + 중첩 박스 + 테이블 셀 내부 박스까지 재귀 검색. 모든 엔진 타입(BoxEngine, ParagraphEngine, ImageEngine, TableEngine) 포함.
 
 ---
 
@@ -273,12 +279,19 @@ static create(data: ImageEngineData): ImageEngine
 | 게터 | 타입 | 설명 |
 |------|------|------|
 | `data` | `ImageEngineData` | 이미지 데이터 |
+| `extractData` | `ImageData` | 엔진 현재 상태에서 조립한 이미지 데이터. 모든 필드에 기본값 적용 (`dpi ?? DEFAULT_IMAGE_DPI`, `overlapMode ?? 'path'`, `objectFit ?? 'cover'`, `x/y/width/height ?? 0`, `zIndex ?? 0`). `id`/`zIndex`는 엔진 필드에서 가져옴 |
+| `id` | `string \| undefined` | 이미지 고유 식별자 (엔진 필드에서 관리, `ImageEngineData`에 포함되지 않음) |
+| `zIndex` | `number \| undefined` | 렌더링 순서 (엔진 필드에서 관리) |
 | `rgbaData` | `RgbaData \| null` | RGBA 픽셀 데이터 (원본 이미지) |
 | `contentAbsRect` | `AbsRect \| null` | 부모 box 콘텐츠 영역 (object-fit 계산용) |
 | `displayRect` | `AbsRect` | object-fit으로 계산한 이미지 실제 표시 영역 (절대 좌표, mm) |
-| `overlapMode` | `OverlapMode` | `'path'` / `'box'` / `'none'` |
+| `overlapMode` | `OverlapMode` | `'path'` / `'box'` / `'none'` (effective getter, 기본값 `'path'`) |
 | `overlapPadding` | `number \| { top?, right?, bottom?, left? } \| undefined` | 오버랩 패딩 (mm) |
 | `dpi` | `number` | DPI (기본 72) |
+| `effectiveOverlapMode` | `OverlapMode` | 내부 소비용: `overlapMode ?? 'path'` |
+| `effectiveObjectFit` | `ImageObjectFit` | 내부 소비용: `objectFit ?? 'cover'` |
+| `effectiveX/Y/Width/Height` | `number` | 내부 소비용: `x/y/width/height ?? 0` |
+| `effectiveOriginalWidth/Height` | `number` | 내부 소비용: `originalWidth/Height ?? 0` |
 
 #### 퍼블릭 세터
 
@@ -294,7 +307,7 @@ static create(data: ImageEngineData): ImageEngine
 |--------|----------|------|
 | `computeOverlap` | `(lineRectMm: MmRect): OverlapResult` | 라인과 이미지 `displayRect`의 오버랩 판정 |
 | `layout` | `(): { cropRectMm: AbsRect; displayRectMm: AbsRect }` | 크롭/디스플레이 영역 계산 |
-| `buildPrintPostData` | `(absRect: AbsRect, imageData: ImageData): PrintPostData[]` | 후처리 시스템용 printPostData 생성 (mm 단위) |
+| `buildPrintPostData` | `(absRect: AbsRect): PrintPostData[]` | 후처리 시스템용 printPostData 생성 (mm 단위). `extractData`를 사용하여 ImageData 조립 |
 
 #### 내부 메커니즘
 
@@ -304,6 +317,7 @@ static create(data: ImageEngineData): ImageEngine
 - `'box'` 모드: `displayRect` 기반 기하학적 판정
 - `overlapPadding` 설정 시 ellipse 기반 판정 (`ndx² + ndy² ≤ 1`)
 - `DEFAULT_IMAGE_DPI = 72`
+- **`ImageEngineData`에서 `id`/`zIndex` 제거**: `id`/`zIndex`는 `ImageEngine._id`/`_zIndex` 필드에서 관리. `ImageEngineData`는 순수 계산용 타입이므로 메타데이터 제외. 엔진 생성 후 `id`/`zIndex` setter로 설정.
 
 ---
 
@@ -315,12 +329,14 @@ static create(data: ImageEngineData): ImageEngine
 
 ```ts
 interface ParagraphEngineData {
-  content: string
+  id?: string
+  zIndex?: number
+  content: string | (string | TextBlockData)[]
   column: number | number[]
   gap: number | number[]
-  paragraphStyle: ParagraphStyle
-  textStyle: TextStyle
-  inheritStyle: InheritStyle
+  paragraphStyle: ParagraphStyle  // 주입값만 (부모 스타일과 병합하지 않음)
+  textStyle: TextStyle            // 주입값만 (부모 스타일과 병합하지 않음)
+  inheritStyle: InheritStyle      // 부모에서 상속된 스타일 + 부모 치수
   overlayEngines: BoxEngine[]
   parentAbsRect: AbsRect
   resources: EngineResources
@@ -357,25 +373,31 @@ static create(data: ParagraphEngineData): ParagraphEngine
 | 게터 | 타입 | 설명 |
 |------|------|------|
 | `data` | `ParagraphEngineData` | 엔진 데이터 |
+| `extractData` | `ParagraphData` | 엔진 현재 상태에서 조립한 단락 데이터. `paragraphStyle`/`textStyle`은 `effectiveParagraphStyle`/`effectiveTextStyle`에서 `ParagraphStyle`/`TextStyle` 키만 필터링. `overlapMode ?? 'box'`, `zIndex ?? 0` |
+| `id` | `string \| undefined` | 단락 고유 식별자 (엔진 필드에서 관리) |
+| `zIndex` | `number \| undefined` | 렌더링 순서 (엔진 필드에서 관리) |
 | `inheritStyle` | `InheritStyle` | 상속 스타일 |
 | `textContent` | `string` | 현재 텍스트 (편집 반영) |
 | `contents` | `TextBlockData[]` | 텍스트 블록 배열 |
-| `textStyle` | `TextStyle` | 텍스트 스타일 |
-| `paragraphStyle` | `ParagraphStyle` | 단락 스타일 |
+| `textStyle` | `TextStyle` | 텍스트 스타일 (effective getter 반환: 주입값 → 상속값 → 기본값 병합) |
+| `paragraphStyle` | `ParagraphStyle` | 단락 스타일 (effective getter 반환: 주입값 → 상속값 → 기본값 병합) |
+| `effectiveParagraphStyle` | `ParagraphStyle` | 내부 소비용: `{ ...DEFAULT, ..._inheritStyle, ..._paragraphStyle }` |
+| `effectiveTextStyle` | `TextStyle` | 내부 소비용: `{ ...DEFAULT, ..._inheritStyle, ..._textStyle }` |
 | `columnCount` | `number` | 컬럼 수 |
 | `columnContents` | `TextLineData[][]` | 컬럼별 라인 데이터 |
 | `gaps` | `number[]` | 갭 배열 |
 | `lineHeight` | `number` | 라인 높이 |
 | `overflow` | `number` | 오버플로우 라인 수 |
-| `widthRatio` | `number` | 장평 비율 |
-| `spaceRatio` | `number` | 스페이스 비율 |
-| `indent` | `number` | 들여쓰기 |
+| `widthRatio` | `number` | 장평 비율 (effective getter) |
+| `spaceRatio` | `number` | 스페이스 비율 (effective getter) |
+| `indent` | `number` | 들여쓰기 (effective getter) |
+| `fontSize` | `number` | 폰트 크기 (effective getter) |
 | `columnWidths` | `number[]` | 컬럼 너비 배열 |
 | `previousLineCount` | `number` | 이전 렌더 라인 수 |
 | `previousOverflow` | `number` | 이전 오버플로우 |
 | `scale` | `number` | 스케일 (현재 no-op) |
 | `overlapMode` | `ParagraphOverlapMode` | 단락 오버랩 모드 |
-| `printPostData` | `PrintPostData[]` | 문자별 printPostData (mm 단위). 후처리 시스템용 데이터 export. `verticalAlign`(top/center/bottom) 오프셋을 char rect.y에 반영. `letterSpacing`/`spaceRatio` 필드 포함 |
+| `printPostData` | `PrintPostData[]` | 문자별 printPostData (mm 단위). 후처리 시스템용 데이터 export. `verticalAlign`(top/center/bottom) 오프셋을 char rect.y에 반영. `letterSpacing`/`spaceRatio` 필드 포함. 내부 소비는 `effectiveParagraphStyle`/`effectiveTextStyle` getter 사용 |
 
 #### 퍼블릭 세터
 
@@ -418,6 +440,7 @@ static create(data: TableData, parentBox: BoxEngine): TableEngine
 | 게터 | 타입 | 설명 |
 |------|------|------|
 | `data` | `TableData` | 테이블 데이터 |
+| `extractData` | `TableData` | 엔진 현재 상태에서 조립한 테이블 데이터. `children`은 `rowEngines` → `cellEngines` → `boxEngine.extractData`에서 동적 조립 |
 | `gridResolution` | `GridResolution \| null` | 그리드 배치 결과 |
 | `rowEngines` | `TableRowEngine[]` | 행 엔진 배열 |
 | `cellEngines` | `TableCellEngine[]` | 셀 엔진 배열 |
@@ -452,6 +475,9 @@ static create(data: TableData, parentBox: BoxEngine): TableEngine
 | `x`, `y`, `width`, `height` | `number` | 셀 좌표/크기 |
 | `cellLabel` | `string` | 셀 라벨 (예: `"A1"`). `TableEngine.layout()`에서 산출 |
 | `labels` | `string[]` | 셀이 커버하는 모든 라벨. span 셀의 경우 복수 |
+| `extractData` | `TableCellData` | 엔진 현재 상태에서 조립한 셀 데이터. 기본값 적용 (`colspan ?? 1`, `rowspan ?? 1`, `borderWidth ?? 0`, `borderStyle ?? 'solid'`, `padding ?? 0`). `children`은 `boxEngine.extractData`에서 조립 |
+| `findBoxEngineById` | `(id): BoxEngine \| undefined` | 셀 내부 박스 엔진 ID 검색 |
+| `findEngineById` | `(id): BoxEngine \| ParagraphEngine \| ImageEngine \| TableEngine \| undefined` | 셀 내부 박스에서 재귀 검색 |
 
 셀의 `gridCalculator`는 `columns: 1`인 단일 컬럼 그리드이며, `TableEngine.layout()`에서 셀 메트릭 계산 후 생성된다. 이를 통해 셀 내부 BoxEngine은 `BoxEngineParent.gridCalculator`를 통해 좌표를 계산한다. `parentAbsRect`가 주입되면 `absRect`는 페이지 기준 절대 좌표를 반환하므로, 셀 내부 박스의 `BoxEngine.absRect`도 누적된 페이지 절대 좌표가 된다.
 

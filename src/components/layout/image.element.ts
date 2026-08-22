@@ -123,7 +123,6 @@ export class LayoutImageElement extends HTMLElement {
   }
 
   connectedCallback() {
-    if (!this.id) this.id = genUUID();
     this.layout();
     createAiProcessingOverlay(this._shadowRoot);
   }
@@ -516,6 +515,7 @@ export class LayoutImageElement extends HTMLElement {
   }
 
   set data(data: ImageData) {
+    if (!data.id) data = { ...data, id: genUUID() };
     if (data.id !== undefined) this.id = data.id;
     if (data.zIndex !== undefined) this._zIndex = data.zIndex;
     if (data.overlapPadding !== undefined) this._overlapPadding = data.overlapPadding;
@@ -582,8 +582,12 @@ export class LayoutImageElement extends HTMLElement {
     } else {
       this._engine.data = engineData;
     }
-    if (this._engine && parentBoxEngine) {
-      this._engine.contentAbsRect = parentBoxEngine.contentAbsRect;
+    if (this._engine) {
+      this._engine.id = this.id;
+      this._engine.zIndex = this._zIndex;
+      if (parentBoxEngine) {
+        this._engine.contentAbsRect = parentBoxEngine.contentAbsRect;
+      }
     }
   }
 
@@ -751,6 +755,11 @@ export class LayoutImageElement extends HTMLElement {
   }
 
   get data() {
+    if (this._engine?.extractData) return this._engine.extractData;
+    return this._rawData();
+  }
+
+  _rawData(): ImageData {
     return {
       id: this.id,
       zIndex: this._zIndex,

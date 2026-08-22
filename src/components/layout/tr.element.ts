@@ -44,7 +44,6 @@ export class LayoutTableRowElement extends HTMLElement {
   }
 
   connectedCallback(): void {
-    if (!this.id) this.id = genUUID();
     this._startChildObserver();
     this.layout();
   }
@@ -72,6 +71,10 @@ export class LayoutTableRowElement extends HTMLElement {
   }
 
   get data(): TableRowData {
+    return this._rawData();
+  }
+
+  _rawData(): TableRowData {
     const result: TableRowData = {
       type: 'tr',
       height: this._height,
@@ -82,6 +85,7 @@ export class LayoutTableRowElement extends HTMLElement {
   }
 
   set data(data: TableRowData) {
+    if (!data.id) data = { ...data, id: genUUID() };
     this._rebuildingChildren = true;
     try {
       if (data.id !== undefined) this.id = data.id;
@@ -233,7 +237,7 @@ export class LayoutTableRowElement extends HTMLElement {
   }
 
   private _serializeChildren(): TableCellData[] {
-    return this.items.map((e) => e.data).filter((e): e is TableCellData => !!e);
+    return this.items.map((e) => e._rawData()).filter((e): e is TableCellData => !!e);
   }
 
   private _startChildObserver(): void {

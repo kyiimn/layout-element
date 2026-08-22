@@ -83,7 +83,6 @@ export class LayoutTableElement extends HTMLElement {
   }
 
   connectedCallback(): void {
-    if (!this.id) this.id = genUUID();
     this._startChildObserver();
     this.layout();
     const editManager = this.editManager;
@@ -154,6 +153,11 @@ export class LayoutTableElement extends HTMLElement {
   }
 
   get data(): TableData {
+    if (this._engine?.extractData) return this._engine.extractData;
+    return this._rawData();
+  }
+
+  _rawData(): TableData {
     const result: TableData = {
       type: 'table',
       children: this._serializeChildren(),
@@ -164,6 +168,7 @@ export class LayoutTableElement extends HTMLElement {
   }
 
   set data(data: TableData) {
+    if (!data.id) data = { ...data, id: genUUID() };
     this._rebuildingChildren = true;
     try {
       if (data.id !== undefined) this.id = data.id;
@@ -886,7 +891,7 @@ export class LayoutTableElement extends HTMLElement {
   }
 
   private _serializeChildren(): TableRowData[] {
-    return this.items.map((e) => e.data).filter((e): e is TableRowData => !!e);
+    return this.items.map((e) => e._rawData()).filter((e): e is TableRowData => !!e);
   }
 
   private _startChildObserver(): void {

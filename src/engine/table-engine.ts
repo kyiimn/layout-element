@@ -9,10 +9,12 @@
 
 import { resolveTableGrid, type GridResolution } from "./table-grid-resolver";
 import { resolveTableBorders } from "./border-resolver";
-import type { TableData, TableCellData, PrintPostData, PrintPostBorderEdge, PrintPostDiagonal } from "@/types";
+import type { TableData, TableRowData, TableCellData, BoxData, PrintPostData, PrintPostBorderEdge, PrintPostDiagonal } from "@/types";
 import { BoxEngine } from "./box-engine";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
 import { DocumentEngine } from "./document-engine";
+import type { ParagraphEngine } from "./paragraph-engine";
+import type { ImageEngine } from "./image-engine";
 import type { AbsRect, ColorRegistryEngine } from "./types";
 
 /**
@@ -124,6 +126,39 @@ export class TableCellEngine {
   findBoxEngineById(id: string): BoxEngine | undefined {
     return this._boxEngine?.data.id === id ? this._boxEngine : undefined;
   }
+
+  /**
+   * 셀 내부 박스에서 ID가 일치하는 엔진을 재귀적으로 검색한다.
+   *
+   * @param id - 검색할 엔진 ID
+   * @returns 일치하는 엔진 또는 undefined
+   */
+  findEngineById(id: string): BoxEngine | ParagraphEngine | ImageEngine | TableEngine | undefined {
+    return this._boxEngine?.findEngineById(id);
+  }
+
+  get extractData(): TableCellData {
+    const children: BoxData[] = this._boxEngine ? [this._boxEngine.extractData] : [];
+    const base = this._cellData ?? { type: 'td' as const, children: [] as BoxData[] };
+    return {
+      ...base,
+      colspan: base.colspan ?? 1,
+      rowspan: base.rowspan ?? 1,
+      borderTopWidth: base.borderTopWidth ?? 0,
+      borderTopStyle: base.borderTopStyle ?? 'solid',
+      borderRightWidth: base.borderRightWidth ?? 0,
+      borderRightStyle: base.borderRightStyle ?? 'solid',
+      borderBottomWidth: base.borderBottomWidth ?? 0,
+      borderBottomStyle: base.borderBottomStyle ?? 'solid',
+      borderLeftWidth: base.borderLeftWidth ?? 0,
+      borderLeftStyle: base.borderLeftStyle ?? 'solid',
+      paddingTop: base.paddingTop ?? 0,
+      paddingRight: base.paddingRight ?? 0,
+      paddingBottom: base.paddingBottom ?? 0,
+      paddingLeft: base.paddingLeft ?? 0,
+      children,
+    };
+  }
 }
 
 /**
@@ -213,6 +248,30 @@ export class TableEngine {
   /** 현재 테이블 데이터 */
   get data(): TableData {
     return this._data;
+  }
+
+  /**
+   * 엔진이 현재 관리 중인 상태에서 TableData를 추출한다.
+   *
+   * `children`은 행 엔진의 `extractData`에서 동적으로 조립한다.
+   *
+   * @returns 엔진 현재 상태 기반의 TableData
+   */
+  get extractData(): TableData {
+    const children: TableRowData[] = this._rowEngines.map((re, i) => {
+      const originalRow = this._data.children?.[i];
+      return {
+        type: 'tr' as const,
+        id: originalRow?.id,
+        height: re.height,
+        children: re.cellEngines.map(ce => ce.extractData),
+      };
+    });
+
+    return {
+      ...this._data,
+      children,
+    };
   }
 
   /** 그리드 해석 결과 */

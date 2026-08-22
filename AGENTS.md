@@ -4,7 +4,7 @@
 
 Newspaper layout engine implemented as Web Components (Custom Elements). Renders document layouts in the browser — multi-column text, character-by-character text wrapping with overlap avoidance around images, and proportional font width (장평) control — features CSS cannot properly handle.
 
-**Engine-first principle**: The engine tree (`DocumentEngine` → `BoxEngine` → `ParagraphEngine`/`ImageEngine`/`TableEngine`) is the single source of truth for all layout calculations. DOM elements consume engine results for display and WYSIWYG editing — they do not create or modify the engine tree. When editing occurs, the edited content is serialized into `DocumentData`/`BoxData`, the engine reprocesses it, and the result propagates to the DOM.
+**Engine-first principle**: The engine tree (`DocumentEngine` → `BoxEngine` → `ParagraphEngine`/`ImageEngine`/`TableEngine`) is the single source of truth for all layout calculations and data. DOM elements delegate `data` getter to `engine.extractData` — they do not independently assemble data from their own properties. When editing occurs, DOM properties are updated, `_layoutStructure()` collects data via `_rawData()` (bypassing `data` getter to avoid circular reference), the engine reprocesses it, and the result propagates back to the DOM through `extractData`.
 
 **Editing support is under development.** Cursor, selection, and IME composition are implemented in `TextEditController` and `TextEditCoordinateMapper`. Edit state (focus, events) is managed by per-document `EditManager` instances.
 
@@ -96,6 +96,11 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **object-fit 엔진 우선**: `src/engine/object-fit-engine.ts`의 `computeObjectFit()`이 단일 소스. 브라우저의 `src/utils/image-fit.ts`는 하위 호환용으로 유지되나, `image.element.ts`는 엔진의 `computeObjectFit`을 사용.
 - **이미지 속성 변경 시 재렌더링**: `overlapPadding`, `overlapMode`, `objectFit`, `originalWidth`, `originalHeight` setter가 `_updateEngine()` + `requestRerenderAffectedParagraphs()`를 호출하여 엔진 데이터 갱신과 paragraph 재렌더링을 트리거.
 - **AI processing overlay**: `<x-layout-paragraph>` and `<x-layout-image>` have volatile `aiProcessing: boolean` property. `true` → semi-transparent overlay with shimmer + spinner. Not included in `data` getter. Implemented in `src/utils/ai-processing-overlay.ts`.
+- **`extractData` — 엔진 데이터 추출**: 모든 엔진 타입이 `extractData` getter를 통해 현재 상태에서 데이터를 조립하여 반환. `children`은 원본이 아닌 자식 엔진의 `extractData`에서 동적으로 조립. 기본값은 effective getter에서 관리.
+- **`_rawData()` — DOM 프로퍼티 조립**: 모든 DOM 요소가 `_rawData()` 메서드를 가짐. 엔진에 의존하지 않고 DOM 프로퍼티에서 직접 데이터를 조립. `_layoutStructure()`와 `_serializeChildren()`에서 `data` getter 대신 `_rawData()`를 사용하여 순환 참조 방지.
+- **DOM `data` getter 위임**: `get data()`는 `engine.extractData`를 반환 (엔진이 없으면 `_rawData()` 폴백). DOM은 엔진이 주는 값만 사용.
+- **`effectiveParagraphStyle`/`effectiveTextStyle`**: 내부 소비용 getter. `{ ...DEFAULT, ..._inheritStyle, ..._paragraphStyle }` 순서로 병합 (주입값 → 상속값 → 기본값). `textStyle`/`paragraphStyle` getter도 이 effective getter를 반환.
+- **`ImageEngineData`에서 `id` 제거**: `id`/`zIndex`는 `ImageEngine._id`/`_zIndex` 필드에서 관리. `ImageEngineData`는 순수 계산용 타입이므로 메타데이터 제외.
 
 ### Managers (ColorRegistry and FontLoader are singletons; EditManager is per-document. All must init before rendering.)
 
@@ -113,8 +118,43 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 
 ### Engine-First Principle
 
-- The engine tree is the single source of truth for all layout calculations. DOM elements must never manually fill `engine.childEngines` from DOM children, nor bypass `DocumentEngine.layout()` to create engines independently.
-- When editing occurs: edited content → `DocumentData`/`BoxData` serialization → engine reprocess → result propagates to DOM.
+- The engine tree is the single source of truth for all layout calculations **and data extraction**. DOM elements delegate `data` getter to `engine.extractData` — they do not independently assemble data from their own properties.
+- When editing occurs: DOM property update → `_layoutStructure()` → `_rawData()` (not `data` getter, to avoid circular reference) → `engine.data` setter → `engine.layout()` → `extractData` returns updated data.
+- **`extractData` getter**: Every engine type (`DocumentEngine`, `BoxEngine`, `ParagraphEngine`, `ImageEngine`, `TableEngine`, `TableCellEngine`) has an `extractData` getter that assembles the current engine state into the corresponding data type (`DocumentData`, `BoxData`, etc.). Children are dynamically assembled from child engines' `extractData`, not from the original `_data.children`.
+- **`_rawData()` method**: Every DOM element has a `_rawData()` method that assembles data from DOM properties without engine dependency. Used by `_layoutStructure()` and `_serializeChildren()` to avoid circular reference when `data` getter delegates to `engine.extractData`.
+- **`data` getter delegation**: `get data()` returns `engine.extractData` if engine exists, otherwise falls back to `_rawData()`.
+- **Default values via effective getters**: Engine getters (`effectiveParagraphStyle`, `effectiveTextStyle`, `effectiveOverlapMode`, etc.) merge injected values → inherited values → default values. `extractData` uses these getters to ensure default values are always populated. DOM receives fully-defaulted data from the engine.
+- **`sourceParagraphStyle`/`sourceTextStyle` removed**: `_paragraphStyle`/`_textStyle` store injected values only (no merge with parent styles). `effectiveParagraphStyle`/`effectiveTextStyle` getters perform the merge: `{ ...DEFAULT, ..._inheritStyle, ..._paragraphStyle }`.
+
+### `extractData` — Engine Data Extraction
+
+- **`DocumentEngine.extractData`**: Returns `DocumentData` with `children` dynamically assembled from `childBoxEngines.map(e => e.extractData)`. Padding values use getter defaults (`?? 0`).
+- **`BoxEngine.extractData`**: Returns `BoxData` with all fields defaulted via getters (`position ?? 'static'`, `zIndex ?? 0`, `role ?? 'none'`, `borderTopWidth ?? 0`, `borderStyle ?? DEFAULT_BORDER_STYLE`, `priority ?? 0`, `backgroundOpacity ?? 1`, `lock ?? false`, etc.). `children` dynamically assembled from `childEngines.map(e => e.extractData)`.
+- **`ParagraphEngine.extractData`**: Returns `ParagraphData` with `paragraphStyle`/`textStyle` from `effectiveParagraphStyle`/`effectiveTextStyle` filtered to `ParagraphStyle`/`TextStyle` keys only (excludes `InheritStyle` keys like `parentWidth`, `parentHeight`). `overlapMode ?? 'box'`, `zIndex ?? 0`.
+- **`ImageEngine.extractData`**: Returns `ImageData` with all fields defaulted via effective getters (`dpi ?? DEFAULT_IMAGE_DPI`, `overlapMode ?? 'path'`, `objectFit ?? 'cover'`, `x/y/width/height ?? 0`, `zIndex ?? 0`).
+- **`TableEngine.extractData`**: Returns `TableData` with `children` assembled from `rowEngines` → `cellEngines` → `boxEngine.extractData`.
+- **`TableCellEngine.extractData`**: Returns `TableCellData` with defaults (`colspan ?? 1`, `rowspan ?? 1`, `borderWidth ?? 0`, `borderStyle ?? 'solid'`, `padding ?? 0`). `children` from `boxEngine.extractData`.
+
+### `findEngineById()` — Engine Tree Search
+
+- **`DocumentEngine.findEngineById(id)`**: Recursively searches the entire engine tree (BoxEngine, ParagraphEngine, ImageEngine, TableEngine). Traverses nested boxes and table cell boxes.
+- **`BoxEngine.findEngineById(id)`**: Searches self + child engines + nested child boxes + table cell boxes.
+- **`TableCellEngine.findEngineById(id)`**: Delegates to `boxEngine.findEngineById()`.
+- Existing `findBoxEngineById(id)` (BoxEngine-only search) is retained for `BoxEngineParent` interface compatibility.
+
+### ID Auto-Generation
+
+- **DOM `data` setter**: All DOM elements (`document`, `box`, `paragraph`, `image`, `table`, `tr`, `td`) auto-generate `id` via `genUUID()` in the `data` setter when `data.id` is `undefined`. This ensures id is assigned immediately upon data injection, before `engine.layout()`.
+- **`connectedCallback`**: `genUUID()` calls removed from all elements' `connectedCallback`. ID generation is now exclusively handled by `data` setter (for DOM) or engine (for Node.js standalone).
+- **Engine fallback**: `_buildBoxEngine`, `_buildParagraphEngine`, `_buildImageEngine`, `_buildTableEngine` still auto-generate `id` via `generateEngineId()` when `data.id` is `undefined`, for Node.js standalone usage without DOM.
+- **`_syncEngineIdsToDom()`**: After `engine.layout()`, engine-generated IDs are written back to DOM elements recursively (`_syncEngineIdsToDomRecursive`). This covers nested boxes, paragraphs, images, and tables.
+
+### `_syncEngineIdsToDom()` — Engine ID Write-Back
+
+- Called after `engine.layout()` in `document._layoutStructure()`.
+- Top-level boxes: `engineBoxes[i].data.id` → `domBoxes[i].id`.
+- Recursive: `_syncEngineIdsToDomRecursive(engineBox, domBox)` traverses child engines and matches by `localName` (not `instanceof`, to avoid circular import issues).
+- Matches `x-layout-box`, `x-layout-paragraph`, `x-layout-image`, `x-layout-table` by `localName` string comparison.
 
 ### `disconnectedCallback` — No Engine Splice
 
@@ -183,7 +223,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
   2. For each child: if `id` matches existing element of same tag type → reuse (`element.data = child`), else create new.
   3. Reorder with `appendChild`.
   4. Remove unused elements.
-- Elements without `id` are always recreated.
+- Elements without `id` in `data` get auto-generated via `genUUID()` in the `data` setter. All elements have `id` guaranteed after `data` setter.
 
 ### z-index Range Constraint
 

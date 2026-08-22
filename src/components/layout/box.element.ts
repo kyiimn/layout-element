@@ -109,7 +109,6 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   connectedCallback() {
-    if (!this.id) this.id = genUUID();
     this._editManagerRef = this.editManager;
     this._startChildObserver();
     this.addEventListener('mouseenter', this._onLayoutMouseEnter);
@@ -670,6 +669,7 @@ export class LayoutBoxElement extends HTMLElement {
   }
 
   set data(data: BoxData) {
+    if (!data.id) data = { ...data, id: genUUID() };
     this._rebuildingChildren = true;
     this._pendingData = data;
     try {
@@ -823,11 +823,11 @@ export class LayoutBoxElement extends HTMLElement {
    */
   private _serializeChildren(): BoxData[] | ParagraphData | TextData | ImageData | TableData | undefined {
     const allChildren = Array.from(this.children).filter(
-      (c): c is HTMLElement & { data: BoxData | ParagraphData | TextData | ImageData | TableData } =>
+      (c): c is HTMLElement & { _rawData: () => BoxData | ParagraphData | TextData | ImageData | TableData } =>
         c instanceof LayoutBoxElement || c instanceof LayoutTableElement
         || c instanceof LayoutParagraphElement || c instanceof LayoutImageElement,
     );
-    const items = allChildren.map(e => e.data).filter(e => !!e) as (BoxData | ParagraphData | TextData | ImageData | TableData)[];
+    const items = allChildren.map(e => e._rawData()).filter(e => !!e) as (BoxData | ParagraphData | TextData | ImageData | TableData)[];
     if (items.length === 0) return undefined;
     if (items.length === 1 && items[0].type !== 'box') return items[0];
     return items as BoxData[];
@@ -1005,6 +1005,11 @@ export class LayoutBoxElement extends HTMLElement {
     if (this._rebuildingChildren && this._pendingData) {
       return this._pendingData;
     }
+    if (this._engine?.extractData) return this._engine.extractData;
+    return this._rawData();
+  }
+
+  _rawData(): BoxData {
     return {
       id: this.id || undefined,
       type: this.type,

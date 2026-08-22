@@ -6,7 +6,7 @@ import { LayoutImageElement } from "./image.element";
 import type { LayoutTableElement } from "./table.element";
 import { genUUID, flipLayoutData, FlipLayoutOptions, BoxMetricsById } from "@/utils";
 import { EditManager } from "@/edit/edit-manager";
-import { DocumentEngine } from "@/engine";
+import { DocumentEngine, BoxEngine } from "@/engine";
 import type { FontLoaderEngine, ColorRegistryEngine, ParsedFont, GridCalculatorEngine } from "@/engine";
 import { FontLoader } from "@/resource/font-loader";
 import { ColorRegistry } from "@/resource/color-registry";
@@ -178,7 +178,6 @@ export class LayoutDocumentElement extends HTMLElement {
   }
 
   connectedCallback() {
-    if (!this.id) this.id = genUUID();
     this._measurePpm();
     this._startChildObserver();
     this.addEventListener('mousedown', this._onPlaceGunMouseDown);
@@ -298,7 +297,7 @@ export class LayoutDocumentElement extends HTMLElement {
       gap: this._gap,
       paragraphStyle: this._paragraphStyle,
       textStyle: this._textStyle,
-      children: this.items.map(e => e.data),
+      children: this.items.map(e => e._rawData()),
     };
     if (!this._engine) {
       this._engine = DocumentEngine.create(docData, fontLoader, colorRegistry, this._ppm);
@@ -328,6 +327,31 @@ export class LayoutDocumentElement extends HTMLElement {
       const engineId = engineBoxes[i].data.id;
       if (engineId && domBoxes[i].id !== engineId) {
         domBoxes[i].id = engineId;
+      }
+      this._syncEngineIdsToDomRecursive(engineBoxes[i], domBoxes[i]);
+    }
+  }
+
+  private _syncEngineIdsToDomRecursive(engineBox: BoxEngine, domBox: LayoutBoxElement): void {
+    const engineChildren = engineBox.childEngines;
+    const domChildren = Array.from(domBox.children).filter(
+      (c): c is HTMLElement => c.localName === 'x-layout-box' || c.localName === 'x-layout-paragraph'
+        || c.localName === 'x-layout-image' || c.localName === 'x-layout-table',
+    );
+    for (let i = 0; i < engineChildren.length && i < domChildren.length; i++) {
+      const engineChild = engineChildren[i];
+      const domChild = domChildren[i];
+      let engineId: string | undefined;
+      if ('id' in engineChild && engineChild.id !== undefined) {
+        engineId = engineChild.id;
+      } else if ('data' in engineChild && engineChild.data?.id !== undefined) {
+        engineId = engineChild.data.id;
+      }
+      if (engineId && domChild.id !== engineId) {
+        domChild.id = engineId;
+      }
+      if (engineChild instanceof BoxEngine && domChild instanceof LayoutBoxElement) {
+        this._syncEngineIdsToDomRecursive(engineChild, domChild);
       }
     }
   }
@@ -505,6 +529,7 @@ export class LayoutDocumentElement extends HTMLElement {
   }
 
   set data(data: DocumentData) {
+    if (!data.id) data = { ...data, id: genUUID() };
     this._rebuildingChildren = true;
     this._pendingData = data;
     try {
@@ -640,6 +665,11 @@ export class LayoutDocumentElement extends HTMLElement {
     if (this._rebuildingChildren && this._pendingData) {
       return this._pendingData;
     }
+    if (this._engine?.extractData) return this._engine.extractData;
+    return this._rawData();
+  }
+
+  _rawData() {
     return {
       id: this.id,
       width: this.width,
@@ -652,7 +682,7 @@ export class LayoutDocumentElement extends HTMLElement {
       gap: this.gap,
       paragraphStyle: this.paragraphStyle,
       textStyle: this.textStyle,
-      children: this.items.map(e => e.data),
+      children: this.items.map(e => e._rawData()),
     }
   }
 

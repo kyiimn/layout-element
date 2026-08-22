@@ -305,6 +305,9 @@ export interface GridCalculatorEngineOptions {
 /**
  * ImageEngine 옵션.
  * `ImageData`에서 렌더링에 불필요한 필드를 제외한 순수 계산용.
+ *
+ * `id`와 `zIndex`는 엔진 필드(`ImageEngine._id`/`_zIndex`)로 관리되며,
+ * 이 인터페이스에는 포함되지 않는다. 엔진 생성 후 `id`/`zIndex` setter로 설정한다.
  */
 export interface ImageEngineData {
   /** 이미지 URL (엔진은 로드하지 않음, 참조용) */

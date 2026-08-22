@@ -76,7 +76,6 @@ export class LayoutParagraphElement extends HTMLElement {
   }
 
   connectedCallback() {
-    if (!this.id) this.id = genUUID();
     this._editManagerRef = this.editManager;
     this.layout();
     createAiProcessingOverlay(this._shadowRoot);
@@ -159,11 +158,13 @@ export class LayoutParagraphElement extends HTMLElement {
       : [];
 
     const engineData: ParagraphEngineData = {
+      id: this.id,
+      zIndex: this._zIndex,
       content: this._model?.textContent ?? this._sourceContent,
       column: this._column !== undefined ? this._column : this.parentModel.columnWidth,
       gap: this._gap !== undefined ? this._gap : this.parentModel.gaps,
-      paragraphStyle: this.paragraphStyle,
-      textStyle: this.textStyle,
+      paragraphStyle: this._paragraphStyle,
+      textStyle: this._textStyle,
       inheritStyle: {
         ...this._inheritStyle,
         parentHeight: this.absHeight,
@@ -497,6 +498,7 @@ export class LayoutParagraphElement extends HTMLElement {
   }
 
   set data(data: ParagraphData) {
+    if (!data.id) data = { ...data, id: genUUID() };
     if (data.id !== undefined) this.id = data.id;
     if (data.column !== undefined) this._column = data.column;
     if (data.gap !== undefined) this._gap = data.gap;
@@ -520,15 +522,19 @@ export class LayoutParagraphElement extends HTMLElement {
   }
 
   /**
-   * 단락의 현재 데이터를 반환한다.
-   * `content`는 렌더링된 실제 텍스트를 기반으로 한다.
-   * 편집 모드에서 텍스트가 수정된 경우 `model.textContent`에서
-   * 현재 렌더링된 텍스트를 가져오며, 모델이 아직 생성되지 않은
-   * 초기 상태에서는 세터로 전달된 원본 콘텐츠를 반환한다.
-   *
-   * @returns 렌더링된 텍스트가 반영된 단락 데이터
+   * 엔진 우선: engine.extractData를 반환한다.
+   * 엔진이 없으면 _rawData()로 폴백한다.
    */
   get data() {
+    if (this._model?.extractData) return this._model.extractData;
+    return this._rawData();
+  }
+
+  /**
+   * DOM 프로퍼티에서 직접 데이터를 조립한다.
+   * 엔진에 의존하지 않는다. _layoutStructure()에서 자식 데이터를 수집할 때 사용한다.
+   */
+  _rawData(): ParagraphData {
     return {
       id: this.id,
       column: this._column,

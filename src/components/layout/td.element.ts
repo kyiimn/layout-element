@@ -78,7 +78,6 @@ export class LayoutTableCellElement extends HTMLElement {
   }
 
   connectedCallback(): void {
-    if (!this.id) this.id = genUUID();
     this._startChildObserver();
     this.layout();
   }
@@ -113,6 +112,11 @@ export class LayoutTableCellElement extends HTMLElement {
   }
 
   get data(): TableCellData {
+    if (this._cellEngine?.extractData) return this._cellEngine.extractData;
+    return this._rawData();
+  }
+
+  _rawData(): TableCellData {
     const result: TableCellData = {
       type: 'td',
       colspan: this._colspan,
@@ -145,6 +149,7 @@ export class LayoutTableCellElement extends HTMLElement {
   }
 
   set data(data: TableCellData) {
+    if (!data.id) data = { ...data, id: genUUID() };
     this._rebuildingChildren = true;
     try {
       if (data.id !== undefined) this.id = data.id;
@@ -776,7 +781,7 @@ export class LayoutTableCellElement extends HTMLElement {
   }
 
   private _serializeChildren(): BoxData[] {
-    return this.items.map((e) => e.data).filter((e): e is BoxData => !!e);
+    return this.items.map((e) => e._rawData()).filter((e): e is BoxData => !!e);
   }
 
   private _startChildObserver(): void {

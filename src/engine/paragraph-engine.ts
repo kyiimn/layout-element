@@ -12,6 +12,8 @@
 
 import {
   DEFAULT_FONT_SIZE,
+  DEFAULT_FONT_STYLE,
+  DEFAULT_FONT_WEIGHT,
   DEFAULT_INDENT,
   DEFAULT_LETTER_SPACING,
   DEFAULT_LINE_GAP,
@@ -49,25 +51,36 @@ import {
 import { computeOverlapSizeMm, mergeOverlapParts } from "./overlap-engine";
 import type { ImageEngine } from "./image-engine";
 
+const DEFAULT_PARAGRAPH_STYLE: Required<ParagraphStyle> = {
+  lineGap: DEFAULT_LINE_GAP,
+  verticalAlign: DEFAULT_VERTICAL_ALIGN,
+  textAlign: DEFAULT_TEXT_ALIGN,
+};
+
+const DEFAULT_TEXT_STYLE: Required<TextStyle> = {
+  color: '',
+  fontFamily: '',
+  fontWeight: DEFAULT_FONT_WEIGHT,
+  fontStyle: DEFAULT_FONT_STYLE,
+  fontSize: DEFAULT_FONT_SIZE,
+  letterSpacing: DEFAULT_LETTER_SPACING,
+  widthRatio: DEFAULT_WIDTH_RATIO,
+  spaceRatio: DEFAULT_SPACE_RATIO,
+  indent: DEFAULT_INDENT,
+};
+
 /** 엔진 생성 옵션. */
 export interface ParagraphEngineData {
-  /** 텍스트 콘텐츠 (문자열 또는 텍스트 블록 배열) */
+  id?: string;
+  zIndex?: number;
   content: string | (string | TextBlockData)[];
-  /** 컬럼 정의 (number=동일 폭 개수, number[]=명시적 폭 배열) */
   column: number | number[];
-  /** 컬럼 간격 (number=균일, number[]=개별 간격) */
   gap: number | number[];
-  /** 문단 스타일 (lineGap 등) */
   paragraphStyle: ParagraphStyle;
-  /** 텍스트 스타일 (fontSize, widthRatio 등) */
   textStyle: TextStyle;
-  /** 상속 스타일 + 부모 치수 */
   inheritStyle: InheritStyle;
-  /** 이 문단의 오버랩 요소 엔진 목록 */
   overlayEngines: BoxEngine[];
-  /** 부모 박스의 절대 사각형 — 문단의 absLeft/absTop 계산용 */
   parentAbsRect: AbsRect;
-  /** 엔진 리소스 번들 (ppm, 폰트, 색상) */
   resources: EngineResources;
 }
 
@@ -90,6 +103,8 @@ type FreeRegion = { start: number; end: number };
  * 2. `layoutStructure()` - 컬럼 폭/ppm 계산, `layoutText()` - 텍스트 래핑 수행
  */
 export class ParagraphEngine {
+  private _id: string | undefined;
+  private _zIndex: number | undefined;
   private _columnWidths: number[] = [];
   private _inheritStyle: InheritStyle = undefined!;
 
@@ -149,8 +164,8 @@ export class ParagraphEngine {
    * `data` 세터와 `inheritStyle` 세터에서 호출된다.
    */
   private _initLayoutMetrics(): void {
-    const fontSize = this.textStyle?.fontSize ?? this.inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
-    const lineGap = this.paragraphStyle?.lineGap ?? this.inheritStyle?.lineGap ?? DEFAULT_LINE_GAP;
+    const fontSize = this.effectiveTextStyle.fontSize!;
+    const lineGap = this.effectiveParagraphStyle.lineGap!;
 
     this._columnContents = [];
     this._overflow = 0;
@@ -204,7 +219,7 @@ export class ParagraphEngine {
    * @returns 문자 폭 (mm, 장평 미적용)
    */
   private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle): number {
-    const fontSize = textBlockStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
+    const fontSize = textBlockStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
     const minWidthMm = this.spaceRatio * fontSize;
 
     if (char === " ") {
@@ -312,7 +327,7 @@ export class ParagraphEngine {
    * `TextPartData.charOffsets`를 채운다.
    */
   private _computeCharOffsets(): void {
-    const defaultTextAlign = this.paragraphStyle?.textAlign ?? this.inheritStyle?.textAlign ?? DEFAULT_TEXT_ALIGN;
+    const defaultTextAlign = this.effectiveParagraphStyle.textAlign!;
 
     for (let c = 0; c < this._columnContents.length; c++) {
       const columnContent = this._columnContents[c];
@@ -530,12 +545,12 @@ export class ParagraphEngine {
 
     const freeRegions = this._computeFreeRegions(lineWidthMm, overlapParts);
 
-    const fontSize = textBlockStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
+    const fontSize = textBlockStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
     const indentMm = isFirstOfBlock ? fontSize * this.indent : 0;
     const adjustedFreeRegions =
       indentMm > 0 ? freeRegions.map((r, i) => (i === 0 ? { start: r.start + indentMm, end: r.end } : r)) : freeRegions;
 
-    const letterSpacingEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
+    const letterSpacingEm = this.effectiveTextStyle.letterSpacing!;
     const minCharWidthMm = this.widthRatio * fontSize + letterSpacingEm * fontSize;
     const usableRegions = adjustedFreeRegions.filter((r) => r.end - r.start >= minCharWidthMm);
 
@@ -686,8 +701,8 @@ export class ParagraphEngine {
           }
         }
 
-        const letterSpacingEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
-        const letterSpacingFontSize = block.textBlockStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
+        const letterSpacingEm = this.effectiveTextStyle.letterSpacing!;
+        const letterSpacingFontSize = block.textBlockStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
         const letterSpacingMm = letterSpacingEm * letterSpacingFontSize;
 
         for (; idxContentOfBlock < block.content.length; idxContentOfBlock++) {
@@ -930,9 +945,9 @@ export class ParagraphEngine {
       "g:" + this._gaps.join(","),
       "lh:" + this._lineHeight,
       "wr:" + this.widthRatio,
-      "ls:" + (this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING),
+      "ls:" + this.effectiveTextStyle.letterSpacing!,
       "sr:" + this.spaceRatio,
-      "fs:" + (this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE),
+      "fs:" + this.effectiveTextStyle.fontSize!,
       "ph:" + (this._inheritStyle?.parentHeight ?? 0),
     );
 
@@ -1002,7 +1017,7 @@ export class ParagraphEngine {
     const height = this._inheritStyle.parentHeight;
     const width = this._columnWidths[idx];
 
-    const verticalAlign = this.paragraphStyle?.verticalAlign || this.inheritStyle?.verticalAlign || DEFAULT_VERTICAL_ALIGN;
+    const verticalAlign = this.effectiveParagraphStyle.verticalAlign!;
 
     return {
       boxSizing: "border-box",
@@ -1033,7 +1048,7 @@ export class ParagraphEngine {
    * @returns 줄 CSS 스타일 객체
    */
   public genLineStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> {
-    const lineGap = this.paragraphStyle?.lineGap ?? this.inheritStyle?.lineGap ?? DEFAULT_LINE_GAP;
+    const lineGap = this.effectiveParagraphStyle.lineGap!;
 
     const blockStyle: Partial<CSSStyleDeclaration> = {};
     if (textBlockStyle) {
@@ -1067,7 +1082,7 @@ export class ParagraphEngine {
    * @returns 파트 CSS 스타일 객체
    */
   public genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> {
-    const textAlign = this.paragraphStyle?.textAlign || this.inheritStyle?.textAlign || DEFAULT_TEXT_ALIGN;
+    const textAlign = this.effectiveParagraphStyle.textAlign!;
 
     const fontLoader = this._resources.fontLoader;
     const colorRegistry = this._resources.colorRegistry;
@@ -1130,9 +1145,9 @@ export class ParagraphEngine {
    */
   public genCharStyle = (char: string, textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> => {
     const wr = this.widthRatio;
-    const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
+    const lsEm = this.effectiveTextStyle.letterSpacing!;
     const sr = this.spaceRatio;
-    const fs = textBlockStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
+    const fs = textBlockStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
     const cacheKey = `${char}|${wr}|${lsEm}|${sr}|${fs}`;
     const cached = this._charOuterStyleCache.get(cacheKey);
     if (cached) return cached;
@@ -1190,9 +1205,9 @@ export class ParagraphEngine {
    */
   public genCharStyleFlat = (char: string, textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> => {
     const wr = this.widthRatio;
-    const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
+    const lsEm = this.effectiveTextStyle.letterSpacing!;
     const sr = this.spaceRatio;
-    const fs = textBlockStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
+    const fs = textBlockStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
     const lsMm = lsEm * fs;
     let widthMm: number;
     if (char === " ") {
@@ -1221,8 +1236,8 @@ export class ParagraphEngine {
    */
   public getCharWidths = (char: string, textBlockStyle?: TextBlockStyle): { rawWidth: number; swidth: number; widthRatio: number } => {
     const wr = this.widthRatio;
-    const fontSize = textBlockStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
-    const lsEm = this._textStyle?.letterSpacing ?? this._inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
+    const fontSize = textBlockStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
+    const lsEm = this.effectiveTextStyle.letterSpacing!;
     const lsMm = lsEm * fontSize;
     let rawWidth: number;
     if (char === " ") {
@@ -1468,6 +1483,8 @@ export class ParagraphEngine {
     this._textContent = options.content;
     this._paragraphStyle = options.paragraphStyle;
     this._textStyle = options.textStyle;
+    this._id = options.id;
+    this._zIndex = options.zIndex;
 
     this._gaps = (() => {
       const colCount = Array.isArray(options.column) ? options.column.length : options.column || 1;
@@ -1504,12 +1521,11 @@ export class ParagraphEngine {
 
   /** 텍스트 스타일 */
   public get textStyle(): TextStyle {
-    return this._textStyle;
+    return this.effectiveTextStyle;
   }
 
-  /** 문단 스타일 */
   public get paragraphStyle(): ParagraphStyle {
-    return this._paragraphStyle;
+    return this.effectiveParagraphStyle;
   }
 
   /** 컬럼 수 */
@@ -1543,7 +1559,7 @@ export class ParagraphEngine {
    * @returns 폰트 크기 (mm)
    */
   public get fontSize(): number {
-    return this.textStyle?.fontSize ?? this.inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
+    return this.effectiveTextStyle.fontSize!;
   }
 
   /** 오버플로우된 문자 수 */
@@ -1611,7 +1627,7 @@ export class ParagraphEngine {
     }
 
     const effectiveColumnHeight = parentHeight + (this._lineHeight - this.fontSize);
-    const lineGap = this._paragraphStyle?.lineGap ?? this._inheritStyle?.lineGap ?? DEFAULT_LINE_GAP;
+    const lineGap = this.effectiveParagraphStyle.lineGap!;
     let visible = 0;
 
     for (let c = 0; c < this._columnContents.length; c++) {
@@ -1644,17 +1660,15 @@ export class ParagraphEngine {
 
   /** 장평 비율 */
   public get widthRatio(): number {
-    return this.textStyle?.widthRatio ?? this.inheritStyle?.widthRatio ?? DEFAULT_WIDTH_RATIO;
+    return this.effectiveTextStyle.widthRatio!;
   }
 
-  /** 공백 너비 비율 (em 단위) */
   public get spaceRatio(): number {
-    return this.textStyle?.spaceRatio ?? this.inheritStyle?.spaceRatio ?? DEFAULT_SPACE_RATIO;
+    return this.effectiveTextStyle.spaceRatio!;
   }
 
-  /** 첫 줄 들여쓰기 비율 (fontSize 대비) */
   public get indent(): number {
-    return this.textStyle?.indent ?? this.inheritStyle?.indent ?? DEFAULT_INDENT;
+    return this.effectiveTextStyle.indent!;
   }
 
   /** 컬럼 너비 배열 (mm) */
@@ -1694,6 +1708,61 @@ export class ParagraphEngine {
     this._overlapMode = v;
   }
 
+  set id(v: string | undefined) {
+    this._id = v;
+  }
+
+  get id(): string | undefined {
+    return this._id;
+  }
+
+  set zIndex(v: number | undefined) {
+    this._zIndex = v;
+  }
+
+  get zIndex(): number | undefined {
+    return this._zIndex;
+  }
+
+  /**
+   * 내부 소비용: 상속값 + 주입값 + 기본값을 모두 병합한 문단 스타일.
+   */
+  get effectiveParagraphStyle(): ParagraphStyle {
+    return { ...DEFAULT_PARAGRAPH_STYLE, ...this._inheritStyle, ...this._paragraphStyle };
+  }
+
+  get effectiveTextStyle(): TextStyle {
+    return { ...DEFAULT_TEXT_STYLE, ...this._inheritStyle, ...this._textStyle };
+  }
+
+  get extractData(): ParagraphData {
+    const ps = this.effectiveParagraphStyle;
+    const ts = this.effectiveTextStyle;
+    const paragraphStyle: Record<string, unknown> = {};
+    const textStyle: Record<string, unknown> = {};
+    for (const key of Object.keys(DEFAULT_PARAGRAPH_STYLE)) {
+      if (ps[key as keyof ParagraphStyle] !== undefined) {
+        paragraphStyle[key] = ps[key as keyof ParagraphStyle];
+      }
+    }
+    for (const key of Object.keys(DEFAULT_TEXT_STYLE)) {
+      if (ts[key as keyof TextStyle] !== undefined) {
+        textStyle[key] = ts[key as keyof TextStyle];
+      }
+    }
+    return {
+      type: 'paragraph',
+      id: this._id,
+      content: this._textContent,
+      column: this._data.column,
+      gap: this._data.gap,
+      paragraphStyle: Object.keys(paragraphStyle).length > 0 ? paragraphStyle as ParagraphStyle : undefined,
+      textStyle: Object.keys(textStyle).length > 0 ? textStyle as TextStyle : undefined,
+      overlapMode: this._overlapMode ?? 'box',
+      zIndex: this._zIndex ?? 0,
+    };
+  }
+
   /**
    * 이 문단의 printPostData를 생성한다.
    * columnContents를 순회하여 글자별 위치·폰트·색상을 픽셀 좌표로 변환한다.
@@ -1705,7 +1774,7 @@ export class ParagraphEngine {
     const parentAbsRect = this._data.parentAbsRect;
     return buildParagraphPrintPostData(
       this, cr, fl,
-      { type: 'paragraph', content: this._textContent, paragraphStyle: this._paragraphStyle, textStyle: this._textStyle, overlapMode: this._overlapMode },
+      this.extractData,
       parentAbsRect.absLeft, parentAbsRect.absTop,
       this._inheritStyle?.parentWidth ?? 0,
       this._inheritStyle?.parentHeight ?? 0,
@@ -1858,11 +1927,9 @@ export function buildParagraphPrintPostData(
         ? colorRegistry.get(colorName)
         : { c: 0, m: 0, y: 0, k: 255 };
 
-      const lineGap = paragraphStyle?.lineGap ?? inheritStyle?.lineGap ?? DEFAULT_LINE_GAP;
+      const lineGap = engine.effectiveParagraphStyle.lineGap!;
       const fontSizeMm = textBlockStyle?.fontSize
-        ?? textStyle?.fontSize
-        ?? inheritStyle?.fontSize
-        ?? DEFAULT_FONT_SIZE;
+        ?? engine.effectiveTextStyle.fontSize!;
       let effectiveLineHeightMm = lineHeightMm;
       if (textBlockStyle?.fontSize && lineHeightMm < fontSizeMm * lineGap) {
         effectiveLineHeightMm = Math.ceil((fontSizeMm * lineGap) / lineHeightMm) * lineHeightMm;
@@ -1902,7 +1969,7 @@ export function buildParagraphPrintPostData(
           const charHeightMm = effectiveLineHeightMm;
 
           const widthRatio = engine.widthRatio;
-          const letterSpacing = textStyle?.letterSpacing ?? inheritStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING;
+          const letterSpacing = engine.effectiveTextStyle.letterSpacing!;
           const spaceRatio = engine.spaceRatio;
 
           const charFontFamilyName = textBlockStyle?.fontFamily
