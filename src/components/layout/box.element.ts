@@ -428,7 +428,7 @@ export class LayoutBoxElement extends HTMLElement {
     const isStaticInTd = !!tdParent && this.position !== 'absolute';
 
     const styleHeight = isStaticInTd && this._model
-      ? `${this._model.editableHeight}mm`
+      ? `${this._model.contentHeight}mm`
       : `${this.absHeight}mm`;
     const styleWidth = isStaticInTd && this._model
       ? `${this._model.editableWidth}mm`

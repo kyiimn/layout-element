@@ -277,6 +277,14 @@ export class TableEngine {
       this._data.colWidths,
     );
 
+    // 기존 셀 엔진의 boxEngine 참조를 보존하기 위한 맵.
+    // layout()이 재호출될 때마다 새 TableCellEngine이 생성되므로,
+    // cellLabel을 키로 기존 boxEngine을 새 셀 엔진에 복원한다.
+    const prevBoxEngines = new Map<string, BoxEngine | null>();
+    for (const oldCell of this.cellEngines) {
+      prevBoxEngines.set(oldCell.cellLabel, oldCell.boxEngine);
+    }
+
     // 행 엔진 구축
     this._rowEngines = rows.map(() => new TableRowEngine());
 
@@ -318,6 +326,10 @@ export class TableEngine {
           textStyle: {},
           isBox: true,
         });
+        // 기존 boxEngine 참조 복원
+        if (prevBoxEngines.has(cellLabel)) {
+          cellEngine.boxEngine = prevBoxEngines.get(cellLabel) ?? null;
+        }
         return cellEngine;
       });
       this._rowEngines[r].cellEngines = cellEngines;

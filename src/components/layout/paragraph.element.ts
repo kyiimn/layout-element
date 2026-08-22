@@ -8,6 +8,8 @@ import { checkOverlapMm } from "@/engine";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutImageElement } from "./image.element";
 import { LayoutColumnElement } from "./column.element";
+
+const HOST_STYLE_ID = '__layout_host_style__';
 import { LayoutDocumentElement } from "./document.element";
 import { ParagraphEngine } from "@/engine";
 import type { ParagraphEngineData } from "@/engine";
@@ -217,7 +219,7 @@ export class LayoutParagraphElement extends HTMLElement {
     const colorRegistry = ColorRegistry.getInstance();
     const fontLoader = FontLoader.getInstance();
 
-    let styleEl = this._shadowRoot.querySelector('style');
+    let styleEl = this._shadowRoot.querySelector<HTMLStyleElement>(`style#${HOST_STYLE_ID}`);
     let needsInit = !styleEl
       || !styleEl.sheet
       || styleEl.sheet.cssRules.length === 0;
@@ -225,6 +227,7 @@ export class LayoutParagraphElement extends HTMLElement {
     if (needsInit) {
       if (styleEl) styleEl.remove();
       styleEl = document.createElement('style');
+      styleEl.id = HOST_STYLE_ID;
       this._shadowRoot.appendChild(styleEl);
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
