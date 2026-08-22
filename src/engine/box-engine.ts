@@ -54,6 +54,19 @@ export class BoxEngine {
   private _extractDataCache: BoxData | null = null;
 
   /**
+   * 성능 캐시: overlayElements.
+   * 자기 generation, 부모 generation, 형제 박스 generation 합계, 부모 overlayElements 배열 참조 기반 무효화.
+   * 형제 generation 합계는 O(N)이지만 overlayElements 자체가 O(N)이므로
+   * 캐시 히트 시 checkOverlapMm × 형제 수 + filter × 3회를 스킵하여 이득.
+   * 부모 overlayElements 배열 참조로 부모의 overlay 재계산(형제 추가 등)도 감지.
+   */
+  private _overlayElementsCache: BoxEngine[] | null = null;
+  private _overlaySelfGen: number = -1;
+  private _overlayParentGen: number = -1;
+  private _overlaySiblingGenSum: number = -1;
+  private _overlayParentOverlayRef: BoxEngine[] | null = null;
+
+  /**
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
    *
    * @param data - 박스 데이터
@@ -72,24 +85,27 @@ export class BoxEngine {
   /**
    * 박스 데이터를 설정한다.
    *
-   * 기하 필드(`left`/`top`/`width`/`height`/`position`)가 변경된 경우에만
-   * `_generation`을 증가시켜 `absRect`/`overlayElements` 캐시를 무효화한다.
-   * 비기하 필드(border/padding/role/zIndex/backgroundColor 등)만 변경된 경우
-   * `_extractDataCache`만 무효화하고 `absRect` 캐시를 유지한다.
+   * 기하 필드(`left`/`top`/`width`/`height`/`position`) 또는
+   * `zIndex`/`role`이 변경된 경우에만 `_generation`을 증가시켜
+   * `absRect`/`overlayElements` 캐시를 무효화한다.
+   * 그 외 필드(border/padding/backgroundColor 등)만 변경된 경우
+   * `_extractDataCache`만 무효화하고 캐시를 유지한다.
    *
    * @param d - 새 박스 데이터
    */
   set data(d: BoxData) {
     const old = this._data;
-    const geomChanged =
+    const cacheInvalidating =
       old.left !== d.left ||
       old.top !== d.top ||
       old.width !== d.width ||
       old.height !== d.height ||
-      (old.position ?? 'static') !== (d.position ?? 'static');
+      (old.position ?? 'static') !== (d.position ?? 'static') ||
+      old.zIndex !== d.zIndex ||
+      old.role !== d.role;
     this._data = d;
     this._extractDataCache = null;
-    if (geomChanged) {
+    if (cacheInvalidating) {
       this._generation++;
     }
   }
@@ -102,6 +118,16 @@ export class BoxEngine {
   /** Generation counter (캐시 무효화 감지용) */
   get generation(): number {
     return this._generation;
+  }
+
+  /**
+   * 형제 박스의 `overlayElements` 캐시를 무효화한다.
+   * 자식 엔진의 `overlapMode` 변경 시 호출 —
+   * `overlayElements`가 `overlapMode`에 의존하지만
+   * `overlapMode` 변경은 `data` setter를 거치지 않으므로 명시적 무효화가 필요.
+   */
+  _invalidateOverlayCache(): void {
+    this._generation++;
   }
 
   /**
@@ -369,15 +395,35 @@ export class BoxEngine {
    * 이 박스보다 z-index가 높고 교차하는 형제 박스 엔진 목록.
    * 부모의 overlayElements(상위 전파) + 부모의 자식 박스 중 z-index 높고 교차하는 것.
    * overlapMode === 'none'인 이미지/단락 박스는 제외.
+   *
+   * 메모이제이션: 자기 generation, 부모 generation, 형제 박스 generation 합계,
+   * 부모 overlayElements 배열 참조가 모두 불변이면 캐시된 결과를 반환.
+   * 형제 박스의 위치/zIndex 변경은 형제 generation 증가로 감지되며,
+   * 부모의 형제 추가 등은 부모 overlayElements 배열 참조 변경으로 감지된다.
    * @returns 오버레이 박스 엔진 배열
    */
   get overlayElements(): BoxEngine[] {
-    const list: BoxEngine[] = [];
-    if (!this._parent.isDocument) {
-      list.push(...this._parent.overlayElements.filter(e => checkOverlapMm(e.absRect, this.absRect)));
+    const parentGen = this._parent.generation;
+    const selfGen = this._generation;
+    const siblingBoxes = this._parent.childBoxEngines;
+    let siblingGenSum = 0;
+    for (const s of siblingBoxes) siblingGenSum += s._generation;
+
+    const parentOverlay = this._parent.isDocument ? null : this._parent.overlayElements;
+
+    if (this._overlayElementsCache !== null
+      && this._overlaySelfGen === selfGen
+      && this._overlayParentGen === parentGen
+      && this._overlaySiblingGenSum === siblingGenSum
+      && this._overlayParentOverlayRef === parentOverlay) {
+      return this._overlayElementsCache;
     }
 
-    const siblingBoxes = this._parent.childBoxEngines;
+    const list: BoxEngine[] = [];
+    if (parentOverlay) {
+      list.push(...parentOverlay.filter(e => checkOverlapMm(e.absRect, this.absRect)));
+    }
+
     const self = this;
     let overlay = siblingBoxes.filter(e => e !== self && e.zIndex > this.zIndex);
     overlay = overlay.filter(e => {
@@ -399,6 +445,12 @@ export class BoxEngine {
     overlay = overlay.filter(e => checkOverlapMm(e.absRect, this.absRect));
 
     list.push(...overlay);
+
+    this._overlayElementsCache = list;
+    this._overlaySelfGen = selfGen;
+    this._overlayParentGen = parentGen;
+    this._overlaySiblingGenSum = siblingGenSum;
+    this._overlayParentOverlayRef = parentOverlay;
     return list;
   }
 
