@@ -7,4 +7,8 @@ declare module 'opentype.js' {
     unitsPerEm: number;
   }
   export function parse(buffer: ArrayBuffer): Font;
+  const opentype: {
+    parse: typeof parse;
+  };
+  export default opentype;
 }

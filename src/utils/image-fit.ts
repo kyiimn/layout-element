@@ -34,7 +34,7 @@ export type ComputeObjectFitInput = {
  * // (160mm 너비를 80mm 박스에 중앙 정렬 → 좌우 40mm씩 크롭)
  * ```
  */
-export function computeObjectFit(input: ComputeObjectFitInput): ImageFitRect {
+export function computeObjectFitBrowser(input: ComputeObjectFitInput): ImageFitRect {
   const { fit, originalWidth, originalHeight, boxWidth, boxHeight } = input;
 
   if (originalWidth <= 0 || originalHeight <= 0 || boxWidth <= 0 || boxHeight <= 0) {

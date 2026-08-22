@@ -27,7 +27,7 @@ export default defineConfig({
   plugins: [
     dts({
       insertTypesEntry: false,
-      include: ['src/engine/**/*.ts'],
+      include: ['src/engine/**/*.ts', 'src/opentype.d.ts'],
       exclude: ['src/components/**', 'src/edit/**', 'src/resource/**', 'src/react/**', 'src/examples/**'],
     }),
   ],

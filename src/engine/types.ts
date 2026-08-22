@@ -314,6 +314,8 @@ export interface GridCalculatorEngineOptions {
  * 이 인터페이스에는 포함되지 않는다. 엔진 생성 후 `id`/`zIndex` setter로 설정한다.
  */
 export interface ImageEngineData {
+  /** 엔진 트리 내 식별자 (선택). DOM 동기화 시 사용. */
+  id?: string;
   /** 이미지 URL (엔진은 로드하지 않음, 참조용) */
   url: string;
   /** 박스 내 이미지 표시 시작 X (mm) */

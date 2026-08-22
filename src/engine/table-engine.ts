@@ -35,7 +35,8 @@ export class TableCellEngine {
   private _parentAbsRect?: AbsRect;
   private _cellData?: TableCellData;
   _gridCalculator?: GridCalculatorEngine;
-  private _tableEngine: TableEngine | null = null;
+  /** @internal TableEngine에서 쓰기 접근. 패키지 외부에서는 사용 금지. */
+  _tableEngine: TableEngine | null = null;
 
   /** Generation counter — incremented on setCellMetrics/parentAbsRect/boxEngine change. */
   private _generation: number = 0;

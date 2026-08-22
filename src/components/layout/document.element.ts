@@ -3,6 +3,7 @@ import { DocumentData, ParagraphStyle, PrintPostData, TextStyle, BoxData, Font, 
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
+import { LayoutGuideColumnElement } from "./guide-column.element";
 import type { LayoutTableElement } from "./table.element";
 import { genUUID, flipLayoutData, FlipLayoutOptions, BoxMetricsById } from "@/utils";
 import { EditManager } from "@/edit/edit-manager";
@@ -379,6 +380,7 @@ export class LayoutDocumentElement extends HTMLElement {
         {
           display: 'inline-flex',
           position: 'relative',
+          userSelect: 'none',
         }
       );
       rule.style.setProperty('height', 'fit-content', 'important');
@@ -712,7 +714,7 @@ export class LayoutDocumentElement extends HTMLElement {
 
     const guideEl = this._root.getElementsByTagName('x-layout-guide-column');
     Array.from(guideEl).forEach(e => {
-      e.visible = this._visibleGuide;
+      (e as LayoutGuideColumnElement).visible = this._visibleGuide;
     });
   }
 

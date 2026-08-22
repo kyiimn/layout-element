@@ -214,10 +214,22 @@ export class LayoutBoxElement extends HTMLElement {
       position: this._position,
       zIndex: this._zIndex,
       role: this._role,
+      backgroundColor: this._backgroundColor,
+      backgroundOpacity: this._backgroundOpacity,
+      borderTopWidth: this._borderTopWidth,
+      borderBottomWidth: this._borderBottomWidth,
+      borderLeftWidth: this._borderLeftWidth,
+      borderRightWidth: this._borderRightWidth,
+      borderStyle: this._borderStyle,
+      borderColor: this._borderColor,
       paddingTop: this._paddingTop,
       paddingRight: this._paddingRight,
       paddingBottom: this._paddingBottom,
       paddingLeft: this._paddingLeft,
+      contentUid: this._contentUid,
+      groupMember: this._groupMember,
+      priority: this._priority,
+      lock: this._lock || undefined,
     };
 
     const found = this.id ? parentEngine.findBoxEngineById(this.id) : undefined;
@@ -791,15 +803,15 @@ export class LayoutBoxElement extends HTMLElement {
   private _appendChildData(child: BoxData | ParagraphData | TextData | ImageData | TableData): void {
     if (child.type === 'box') {
       const boxEl = document.createElement('x-layout-box');
-      boxEl.data = child;
+      (boxEl as LayoutBoxElement).data = child;
       this.appendChild(boxEl);
     } else if (child.type === 'paragraph') {
       const paragraphEl = document.createElement('x-layout-paragraph');
-      paragraphEl.data = child;
+      (paragraphEl as LayoutParagraphElement).data = child;
       this.appendChild(paragraphEl);
     } else if (child.type === 'text') {
       const paragraphEl = document.createElement('x-layout-paragraph');
-      paragraphEl.data = {
+      (paragraphEl as LayoutParagraphElement).data = {
         ...child,
         type: 'paragraph',
         column: 1,
@@ -808,11 +820,11 @@ export class LayoutBoxElement extends HTMLElement {
       this.appendChild(paragraphEl);
     } else if (child.type === 'table') {
       const tableEl = document.createElement('x-layout-table');
-      (tableEl as unknown as { data: TableData }).data = child;
+      (tableEl as LayoutTableElement).data = child;
       this.appendChild(tableEl);
     } else if (child.type === 'image') {
       const imageEl = document.createElement('x-layout-image');
-      imageEl.data = child;
+      (imageEl as LayoutImageElement).data = child;
       this.appendChild(imageEl);
     }
   }

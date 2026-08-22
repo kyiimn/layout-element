@@ -775,7 +775,7 @@ export class LayoutTableCellElement extends HTMLElement {
    * @param child - 생성할 박스 데이터
    */
   private _appendChildData(child: BoxData): void {
-    const boxEl = document.createElement('x-layout-box');
+    const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
     boxEl.data = child;
     this.appendChild(boxEl);
   }

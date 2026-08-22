@@ -298,7 +298,7 @@ function computeEllipseOverlap(
 function computeSimplePixelOverlapFromBitmap(
   r1: MmRect,
   imgMmRect: MmRect,
-  rgba: { data: Uint8Array; width: number; height: number },
+  _rgba: { data: Uint8Array; width: number; height: number },
   scaleX: number,
   scaleY: number,
   bitmap: Uint8Array[],
