@@ -715,6 +715,8 @@ export class LayoutTableElement extends HTMLElement {
 
   private _onTableResizeKeyDown = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape' || !this._resizeState) return;
+    event.preventDefault();
+    event.stopPropagation();
     if (this._resizeState.rafId !== null) {
       cancelAnimationFrame(this._resizeState.rafId);
       this._resizeState.rafId = null;

@@ -743,10 +743,11 @@ export class TextEditController {
 
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       if (this._cursorModel.selection) {
         this._clearSelection();
       } else {
-        this._manager.textEditMode = false;
+        this._manager.blurParagraph();
       }
       return;
     }

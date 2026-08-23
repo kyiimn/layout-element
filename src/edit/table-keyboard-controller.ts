@@ -85,15 +85,9 @@ export class TableKeyboardController {
     const ctrl = event.ctrlKey;
     const shift = event.shiftKey;
 
-    if (key === 'Tab' && !alt && !ctrl) {
-      if (!this._editManager.textEditMode || !this._editManager.focusedParagraph) return false;
-      const handled = this.handleTab(shift);
-      if (handled) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-      return handled;
-    }
+    // Tab은 document.element._onWindowKeyDown (window capture)에서
+    // navigateByTab → handleTab 순서로 직접 처리하고 stopPropagation하므로
+    // 이 핸들러에는 도달하지 않는다. handleTab은 navigateByTab이 직접 호출.
 
     if (key === 'Escape') {
       if (this._selection) {
