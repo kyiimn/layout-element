@@ -48,75 +48,20 @@ export const LayoutDocument = forwardRef<LayoutDocumentElement, LayoutDocumentPr
 
     useEffect(() => {
       const element = innerRef.current;
-      if (!element || data === undefined) return;
-      element.data = data;
-    }, [innerRef, data]);
-
-    useEffect(() => {
-      const element = innerRef.current;
-      if (!element || width === undefined) return;
-      element.width = width;
-    }, [innerRef, width]);
-
-    useEffect(() => {
-      const element = innerRef.current;
-      if (!element || height === undefined) return;
-      element.height = height;
-    }, [innerRef, height]);
-
-    useEffect(() => {
-      const element = innerRef.current;
-      if (!element || paddingTop === undefined) return;
-      element.paddingTop = paddingTop;
-    }, [innerRef, paddingTop]);
-
-    useEffect(() => {
-      const element = innerRef.current;
-      if (!element || paddingRight === undefined) return;
-      element.paddingRight = paddingRight;
-    }, [innerRef, paddingRight]);
-
-    useEffect(() => {
-      const element = innerRef.current;
-      if (!element || paddingBottom === undefined) return;
-      element.paddingBottom = paddingBottom;
-    }, [innerRef, paddingBottom]);
-
-    useEffect(() => {
-      const element = innerRef.current;
-      if (!element || paddingLeft === undefined) return;
-      element.paddingLeft = paddingLeft;
-    }, [innerRef, paddingLeft]);
-
-    useEffect(() => {
-      const element = innerRef.current;
-      if (!element || columns === undefined) return;
-      element.columns = columns;
-    }, [innerRef, columns]);
-
-    useEffect(() => {
-      const element = innerRef.current;
-      if (!element || gap === undefined) return;
-      element.gap = gap;
-    }, [innerRef, gap]);
-
-    useEffect(() => {
-      const element = innerRef.current;
-      if (!element || paragraphStyle === undefined) return;
-      element.paragraphStyle = paragraphStyle;
-    }, [innerRef, paragraphStyle]);
-
-    useEffect(() => {
-      const element = innerRef.current;
-      if (!element || textStyle === undefined) return;
-      element.textStyle = textStyle;
-    }, [innerRef, textStyle]);
-
-    useEffect(() => {
-      const element = innerRef.current;
-      if (!element || visibleGuide === undefined) return;
-      element.visibleGuide = visibleGuide;
-    }, [innerRef, visibleGuide]);
+      if (!element) return;
+      if (data !== undefined) element.data = data;
+      if (width !== undefined) element.width = width;
+      if (height !== undefined) element.height = height;
+      if (paddingTop !== undefined) element.paddingTop = paddingTop;
+      if (paddingRight !== undefined) element.paddingRight = paddingRight;
+      if (paddingBottom !== undefined) element.paddingBottom = paddingBottom;
+      if (paddingLeft !== undefined) element.paddingLeft = paddingLeft;
+      if (columns !== undefined) element.columns = columns;
+      if (gap !== undefined) element.gap = gap;
+      if (paragraphStyle !== undefined) element.paragraphStyle = paragraphStyle;
+      if (textStyle !== undefined) element.textStyle = textStyle;
+      if (visibleGuide !== undefined) element.visibleGuide = visibleGuide;
+    }, [innerRef, data, width, height, paddingTop, paddingRight, paddingBottom, paddingLeft, columns, gap, paragraphStyle, textStyle, visibleGuide]);
 
     useEffect(() => {
       if (!onInnerSizeChange) return;

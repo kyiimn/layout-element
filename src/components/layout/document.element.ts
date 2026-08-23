@@ -102,6 +102,14 @@ export class LayoutDocumentElement extends HTMLElement {
   /** `_rebuildingChildren`이 true인 동안 getter가 반환할 캐시된 데이터. */
   private _pendingData: DocumentData | null = null;
 
+  /**
+   * `data` setter가 호출될 때마다 증가하는 변경 버전 카운터.
+   * React 레이어에서 `element.data` getter가 매번 새 객체를 반환하므로
+   * reference 비교가 불가능하여, JSON.stringify 전체 비교 대신
+   * 이 버전 번호로 변경 여부를 O(1)에 판별한다.
+   */
+  private _dataVersion = 0;
+
   private _childObserver: MutationObserver | null = null;
 
   private _visibleGuide: boolean;
@@ -133,6 +141,9 @@ export class LayoutDocumentElement extends HTMLElement {
    * @returns EditManager 인스턴스.
    */
   get editManager(): EditManager { return this._editManager; }
+
+  /** `data`가 마지막으로 변경된 버전 번호. O(1) 변경 감지용. */
+  get dataVersion(): number { return this._dataVersion; }
 
   /**
    * 이 문서 요소에 연결된 DocumentEngine 인스턴스를 반환한다.
@@ -534,6 +545,7 @@ export class LayoutDocumentElement extends HTMLElement {
 
   set data(data: DocumentData) {
     if (!data.id) data = { ...data, id: genUUID() };
+    this._dataVersion++;
     this._rebuildingChildren = true;
     this._pendingData = data;
     try {
