@@ -686,21 +686,24 @@ public genColumnStyle(idx: number): Partial<CSSStyleDeclaration>
 주요 계산:
 
 - `left`: 이전 컬럼들의 너비 + 간격 합
-- `width`, `minWidth`, `maxWidth`, `flex`: `columnWidths[idx]`
+- `width`, `minWidth`, `maxWidth`: `columnWidths[idx]`
 - `height`, `minHeight`, `maxHeight`: `inheritStyle.parentHeight`
-- `justifyContent`: `verticalAlign`에 따라 `center`, `flex-end`, `flex-start`. `buildParagraphPrintPostData`도 동일한 `verticalAlign` 오프셋을 char rect.y에 반영한다 — `center`면 `(columnHeight - contentHeight) / 2`, `bottom`이면 `columnHeight - contentHeight`를 lineTopMm에 더한다.
+- `display: 'block'`, `overflow: 'hidden'`: 라인 절대 위치 기반 컨테이너 (flexbox 정렬 미사용)
 
-### 11.2 `genLineStyle(textBlockStyle?)`
+> **엔진 우선 원칙 — verticalAlign 좌표 기반 전환**: 과거에는 `flexDirection: 'column'` + `justifyContent`로 브라우저 flexbox가 라인의 수직 정렬을 수행했다. 엔진 우선 원칙에 따라 이를 엔진 좌표 기반으로 전환했다. 엔진이 각 라인의 절대 y 좌표(`alignOffsetMm + lineIndex × lineHeight`)를 산출하고, `genLineStyle()`이 `position: absolute` + `top`으로 DOM에 전달한다. `buildParagraphPrintPostData`, `getCharRect`, `getOffsetFromPoint` 모두 동일한 `_computeAlignOffsetMm()` 헬퍼를 사용한다.
+
+### 11.2 `genLineStyle(textBlockStyle?, columnIndex?, lineIndex?)`
 
 줄(line) 요소의 스타일을 생성한다.
 
 ```ts
-public genLineStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration>
+public genLineStyle(textBlockStyle?: TextBlockStyle, columnIndex?: number, lineIndex?: number): Partial<CSSStyleDeclaration>
 ```
 
 - `display: 'flex'`, `flexDirection: 'row'`, `flexWrap: 'nowrap'`, `flexShrink: '0'`
 - `height`: `_lineHeight` mm
 - `fontSize` override가 줄 높이보다 크면 `alignItems: 'center'` 및 높이 조정
+- `columnIndex` + `lineIndex`가 전달되면 `position: 'absolute'` + `top: ${alignOffsetMm + lineIndex × lineHeight}mm` 적용. 엔진이 라인의 절대 y 좌표를 산출하고 DOM은 좌표에 라인을 배치한다. `buildParagraphPrintPostData`의 `lineTopMm` 계산과 동일하다.
 
 ### 11.3 `genPartStyle(textBlockStyle?)`
 

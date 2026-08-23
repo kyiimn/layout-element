@@ -80,15 +80,15 @@ export class LayoutColumnElement extends HTMLElement {
   }
 
   /** 줄(line) DOM 요소를 생성하고 `genLineStyle()`으로 스타일을 적용한다. */
-  private _createLineElement(lineData: TextLineData, textBlockStyle: TextBlockStyle | undefined): HTMLDivElement {
+  private _createLineElement(lineData: TextLineData, textBlockStyle: TextBlockStyle | undefined, lineIndex: number): HTMLDivElement {
     const lineEl = document.createElement('div');
-    this._applyLineStyle(lineEl, lineData, textBlockStyle);
+    this._applyLineStyle(lineEl, lineData, textBlockStyle, lineIndex);
     return lineEl;
   }
 
   /** 줄 요소에 `genLineStyle()` 결과를 적용하여 기존 스타일을 갱신한다. */
-  private _applyLineStyle(lineEl: HTMLDivElement, _lineData: TextLineData, textBlockStyle: TextBlockStyle | undefined): void {
-    const curLineStyle = this.model!.genLineStyle(textBlockStyle) || {};
+  private _applyLineStyle(lineEl: HTMLDivElement, _lineData: TextLineData, textBlockStyle: TextBlockStyle | undefined, lineIndex: number): void {
+    const curLineStyle = this.model!.genLineStyle(textBlockStyle, this._index, lineIndex) || {};
     lineEl.style.cssText = '';
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(lineEl.style, curLineStyle);
   }
@@ -331,9 +331,9 @@ export class LayoutColumnElement extends HTMLElement {
 
       const lineEl = i < existingLineEls.length
         ? existingLineEls[i]
-        : this._createLineElement(line, textBlockStyle);
+        : this._createLineElement(line, textBlockStyle, i);
       if (i < existingLineEls.length) {
-        this._applyLineStyle(lineEl, line, textBlockStyle);
+        this._applyLineStyle(lineEl, line, textBlockStyle, i);
       } else {
         this._shadowRoot.appendChild(lineEl);
       }

@@ -1024,27 +1024,23 @@ export class ParagraphEngine {
     this._overlayRectsMm = null;
   }
 
-  /** 컬럼 스타일 생성 (Flexbox 컨테이너) */
+  /** 컬럼 스타일 생성 (라인 절대 위치 기반 컨테이너) */
   public genColumnStyle(idx: number): Partial<CSSStyleDeclaration> {
     const left = this._columnWidths.slice(0, idx).reduce((a, b) => a + b, 0) + this._gaps.slice(0, idx).reduce((a, b) => a + b, 0);
     const height = this._inheritStyle.parentHeight;
     const width = this._columnWidths[idx];
 
-    const verticalAlign = this.effectiveParagraphStyle.verticalAlign!;
-
     return {
       boxSizing: "border-box",
-      display: "inline-flex",
-      flex: `0 0 ${width}mm`,
-      flexDirection: "column",
+      display: "block",
       height: `${height}mm`,
-      justifyContent: verticalAlign === "center" ? "center" : verticalAlign === "bottom" ? "flex-end" : "flex-start",
       left: `${left}mm`,
       lineHeight: `1em`,
       maxHeight: `${height}mm`,
       maxWidth: `${width}mm`,
       minHeight: `${height}mm`,
       minWidth: `${width}mm`,
+      overflow: "hidden",
       position: "absolute",
       top: "0",
       width: `${width}mm`,
@@ -1056,11 +1052,24 @@ export class ParagraphEngine {
    *
    * - `lineGap` → `height` 계산
    * - `textBlockStyle` → 폰트, 색상, 높이 오버라이드
+   * - `columnIndex` + `lineIndex` → `position: absolute` + `top` (verticalAlign offset + lineIndex × lineHeight)
+   *
+   * 엔진 우선 원칙: 엔진이 각 라인의 절대 y 좌표를 산출하고 DOM은 좌표에 라인을 배치한다.
+   * `top` = `alignOffsetMm + lineIndex × lineHeight` (mm)로,
+   * `buildParagraphPrintPostData`의 `lineTopMm` 계산과 동일하다.
    *
    * @param textBlockStyle - 블록 레벨 스타일 오버라이드
-   * @returns 줄 CSS 스타일 객체
+   * @param columnIndex - 컬럼 인덱스 (0-based). `top` 계산에 필요.
+   * @param lineIndex - 컬럼 내 라인 인덱스 (0-based). `top` 계산에 필요.
+   * @returns 줄 CSS 스타일 객체. `columnIndex`/`lineIndex` 생략 시 `position: absolute` 미적용 (레거시 호환).
+   * @example
+   * ```ts
+   * // 2번째 컬럼의 3번째 라인 스타일
+   * const style = engine.genLineStyle(textBlockStyle, 1, 2);
+   * // top = alignOffsetMm + 2 * lineHeight (mm)
+   * ```
    */
-  public genLineStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> {
+  public genLineStyle(textBlockStyle?: TextBlockStyle, columnIndex?: number, lineIndex?: number): Partial<CSSStyleDeclaration> {
     const lineGap = this.effectiveParagraphStyle.lineGap!;
 
     const blockStyle: Partial<CSSStyleDeclaration> = {};
@@ -1072,6 +1081,19 @@ export class ParagraphEngine {
       }
     }
 
+    const positionStyle: Partial<CSSStyleDeclaration> = {};
+    if (columnIndex !== undefined && lineIndex !== undefined) {
+      const baseFontSizeMm = this.fontSize;
+      const columnHeightMm = this._inheritStyle?.parentHeight ?? 0;
+      const effectiveColumnHeightMm = columnHeightMm > 0
+        ? columnHeightMm + (this._lineHeight - baseFontSizeMm)
+        : 0;
+      const column = this._columnContents[columnIndex] ?? [];
+      const alignOffsetMm = this._computeAlignOffsetMm(column, effectiveColumnHeightMm, baseFontSizeMm, columnHeightMm);
+      positionStyle.position = "absolute";
+      positionStyle.top = `${alignOffsetMm + lineIndex * this._lineHeight}mm`;
+    }
+
     return {
       display: "flex",
       flexDirection: "row",
@@ -1080,6 +1102,7 @@ export class ParagraphEngine {
       height: `${this._lineHeight}mm`,
       maxWidth: "100%",
       width: "100%",
+      ...positionStyle,
       ...blockStyle,
     };
   }
@@ -1263,7 +1286,65 @@ export class ParagraphEngine {
   };
 
   /**
+   * 컬럼 내 가시 라인 수를 세고 `verticalAlign`에 따른 y 오프셋(mm)을 계산한다.
+   *
+   * `buildParagraphPrintPostData`의 `alignOffsetMm` 계산 로직과 동일하다:
+   * - `visibleLineCount` = `effectiveColumnHeightMm` 내 표시 가능한 라인 수
+   * - `contentHeightMm` = `(visibleLineCount - 1) * lineHeight + fontSize` (마지막 라인은 lineHeight 대신 fontSize)
+   * - `center`: `(columnHeight - contentHeight) / 2`
+   * - `bottom`: `columnHeight - contentHeight`
+   * - `top` 또는 contentHeight >= columnHeight: 0
+   *
+   * 엔진 우선 원칙에 따라 화면 렌더링(getCharRect, genLineStyle)과
+   * printPostData(buildParagraphPrintPostData)가 동일한 오프셋을 사용한다.
+   *
+   * @param column - 해당 컬럼의 `TextLineData[]`
+   * @param effectiveColumnHeightMm - 표시 가능 영역 높이 (mm). `parentHeight + (lineHeight - fontSize)`.
+   * @param baseFontSizeMm - 기본 폰트 크기 (mm)
+   * @param columnHeightMm - 컬럼 전체 높이 (mm). `parentHeight`.
+   * @returns verticalAlign 오프셋 (mm). `top`이거나 콘텐츠가 꽉 차면 0.
+   * @example
+   * ```ts
+   * // center 정렬, 10줄 라인 영역에 3줄만 표시되는 경우
+   * const offset = engine._computeAlignOffsetMm(column, 40, 4, 40);
+   * // visibleLineCount=3, contentHeight=2*8+4=20, offset=(40-20)/2=10
+   * ```
+   */
+  public _computeAlignOffsetMm(
+    column: TextLineData[],
+    effectiveColumnHeightMm: number,
+    baseFontSizeMm: number,
+    columnHeightMm: number,
+  ): number {
+    if (columnHeightMm <= 0) return 0;
+
+    let visibleLineCount = 0;
+    for (let li = 0; li < column.length; li++) {
+      if (!column[li]) continue;
+      if (effectiveColumnHeightMm > 0 && visibleLineCount * this._lineHeight >= effectiveColumnHeightMm) break;
+      visibleLineCount++;
+    }
+
+    const contentHeightMm = visibleLineCount > 0
+      ? (visibleLineCount - 1) * this._lineHeight + baseFontSizeMm
+      : 0;
+
+    const verticalAlign = this.effectiveParagraphStyle.verticalAlign!;
+
+    if (verticalAlign === 'center' && columnHeightMm > contentHeightMm) {
+      return (columnHeightMm - contentHeightMm) / 2;
+    }
+    if (verticalAlign === 'bottom' && columnHeightMm > contentHeightMm) {
+      return columnHeightMm - contentHeightMm;
+    }
+    return 0;
+  }
+
+  /**
    * source offset에 해당하는 문자의 절대 mm 사각형을 반환한다.
+   *
+   * `verticalAlign`에 따른 `alignOffsetMm`이 `lineTopMm`에 반영된다.
+   * 이는 `buildParagraphPrintPostData`의 y 좌표 계산과 동일하다.
    *
    * `charOffsets`는 `_computeCharOffsets`에서 leading/trailing space를 strip한
    * 기준으로 산출되므로, raw content index를 stripped index로 변환하여
@@ -1276,6 +1357,12 @@ export class ParagraphEngine {
   public getCharRect(sourceOffset: number): MmRect | null {
     if (!this._columnContents) return null;
 
+    const baseFontSizeMm = this.fontSize;
+    const columnHeightMm = this._inheritStyle?.parentHeight ?? 0;
+    const effectiveColumnHeightMm = columnHeightMm > 0
+      ? columnHeightMm + (this._lineHeight - baseFontSizeMm)
+      : 0;
+
     let offset = 0;
     for (let c = 0; c < this._columnContents.length; c++) {
       const column = this._columnContents[c];
@@ -1283,9 +1370,11 @@ export class ParagraphEngine {
         this._columnWidths.slice(0, c).reduce((a, b) => a + b, 0) +
         this._gaps.slice(0, c).reduce((a, b) => a + b, 0);
 
+      const alignOffsetMm = this._computeAlignOffsetMm(column, effectiveColumnHeightMm, baseFontSizeMm, columnHeightMm);
+
       for (let li = 0; li < column.length; li++) {
         const line = column[li];
-        const lineTopMm = this._data.parentAbsRect.absTop + li * this._lineHeight;
+        const lineTopMm = this._data.parentAbsRect.absTop + alignOffsetMm + li * this._lineHeight;
 
         for (let p = 0; p < line.parts.length; p++) {
           const part = line.parts[p];
@@ -1374,9 +1463,16 @@ export class ParagraphEngine {
     const column = this._columnContents[columnIdx];
     if (!column) return null;
 
+    const baseFontSizeMm = this.fontSize;
+    const columnHeightMm = this._inheritStyle?.parentHeight ?? 0;
+    const effectiveColumnHeightMm = columnHeightMm > 0
+      ? columnHeightMm + (this._lineHeight - baseFontSizeMm)
+      : 0;
+    const alignOffsetMm = this._computeAlignOffsetMm(column, effectiveColumnHeightMm, baseFontSizeMm, columnHeightMm);
+
     let lineIdx = -1;
     for (let li = 0; li < column.length; li++) {
-      const yStart = li * this._lineHeight;
+      const yStart = alignOffsetMm + li * this._lineHeight;
       const yEnd = yStart + this._lineHeight;
       if (relY >= yStart && relY < yEnd) {
         lineIdx = li;
@@ -1916,7 +2012,6 @@ export function buildParagraphPrintPostData(
   const gaps = engine.gaps;
   const inheritStyle = engine.inheritStyle;
   const textStyle = engine.textStyle;
-  const paragraphStyle = engine.paragraphStyle;
 
   for (let colIdx = 0; colIdx < columnContents.length; colIdx++) {
     const col = columnContents[colIdx];
@@ -1932,27 +2027,8 @@ export function buildParagraphPrintPostData(
       ? parentHeightMm + (lineHeightMm - baseFontSizeMm)
       : 0;
 
-    const verticalAlign = paragraphStyle?.verticalAlign
-      ?? inheritStyle?.verticalAlign
-      ?? DEFAULT_VERTICAL_ALIGN;
-
-    let visibleLineCount = 0;
-    for (let li = 0; li < col.length; li++) {
-      const lineData = col[li];
-      if (!lineData) continue;
-      if (effectiveColumnHeightMm > 0 && visibleLineCount * lineHeightMm >= effectiveColumnHeightMm) break;
-      visibleLineCount++;
-    }
-
-    const contentHeightMm = visibleLineCount > 0
-      ? (visibleLineCount - 1) * lineHeightMm + baseFontSizeMm
-      : 0;
     const columnHeightMm = parentHeightMm;
-    const alignOffsetMm = (verticalAlign === 'center' && columnHeightMm > contentHeightMm)
-      ? (columnHeightMm - contentHeightMm) / 2
-      : (verticalAlign === 'bottom' && columnHeightMm > contentHeightMm)
-        ? (columnHeightMm - contentHeightMm)
-        : 0;
+    const alignOffsetMm = engine._computeAlignOffsetMm(col, effectiveColumnHeightMm, baseFontSizeMm, columnHeightMm);
 
     let visibleLineIndex = 0;
     for (let li = 0; li < col.length; li++) {
