@@ -291,7 +291,7 @@ export class LayoutColumnElement extends HTMLElement {
     }
     // Update style rules only when colStyle actually changed
     const colStyleKey = JSON.stringify(colStyle);
-    if (colStyleKey !== this._cachedColStyleKey && styleEl.sheet) {
+    if (styleEl.sheet && (colStyleKey !== this._cachedColStyleKey || styleEl.sheet?.cssRules.length < 1)) {
       this._cachedColStyleKey = colStyleKey;
       while (styleEl.sheet.cssRules.length > 0) {
         styleEl.sheet.deleteRule(0);
