@@ -289,12 +289,17 @@ export class BoxEngine {
    * 절대 높이 (mm).
    * static: lineHeight × height - (lineHeight - fontSize).
    * 부모 contentHeight로 클램프.
+   * 테이블 셀(TableCellEngine) 내부 static box는 셀 높이로 stretch —
+   * DOM(`box.element.ts` `_applyStyle`)이 `tdContentHeight`를 height로 사용하는 것과 일치.
    * absolute: height 그대로.
    */
   get absHeight(): number {
     if (this.position !== 'absolute') {
       const gc = this._parent.gridCalculator;
       if (!gc) return 0;
+      if ((this._parent as { isTableCellEngine?: boolean }).isTableCellEngine) {
+        return Math.max(0, gc.contentHeight);
+      }
       const { fontSize, lineHeight, contentHeight } = gc;
       let calcHeight = lineHeight * this.height - (lineHeight - fontSize);
       if (contentHeight) {

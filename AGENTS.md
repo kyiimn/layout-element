@@ -86,6 +86,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **Render complete**: `render-complete` CustomEvent after every `LayoutParagraphElement.render()`. Payload: `RenderCompleteEventDetail`.
 - **printPostData 단일화 (mm)**: 엔진 트리(`DocumentEngine.printPostData`)가 단일 소스. `LayoutDocumentElement.printPostData`는 엔진 트리를 위임한다. box/paragraph/image/table/td/tr 엘리먼트의 개별 `printPostData` getter는 제거되었다. 모든 rect/char 좌표는 **mm 단위 number**. ppm 곱셈은 외부 후처리 시스템이 수행한다. `<x-layout-guide-column>`은 DOM 전용이므로 `LayoutDocumentElement`에서 별도 수집.
 - **`BoxEngine.contentAbsRect`**: padding 제외한 콘텐츠 영역 절대 사각형 (mm). `ImageEngine.contentAbsRect`로 주입되어 object-fit 계산에 사용.
+- **`BoxEngine.absHeight` 테이블 셀 stretch**: 부모가 `TableCellEngine`인 static box는 `gc.contentHeight`(셀 높이 - 셀 패딩)를 반환. DOM `box.element.ts _applyStyle`가 `tdContentHeight`를 height로 사용하는 것과 일치. 일반 static box는 `lineHeight × height - (lineHeight - fontSize)` 공식 유지.
 - **`ImageEngine.displayRect`**: `contentAbsRect` + `objectFit` + `originalWidth/Height`로 계산한 이미지 실제 표시 영역 (절대 좌표, mm). 엔진이 단일 소스이며, 브라우저는 이 결과로 canvas에 표시.
 - **`ImageEngine.computeOverlap`**: `displayRect`를 기준으로 오버랩 판정. 시그니처는 `(lineRectMm: MmRect)` — imgRectMm 파라미터 제거, 내부적으로 `displayRect` 사용.
 - **`buildParagraphPrintPostData` verticalAlign 반영**: `paragraphStyle.verticalAlign`(top/center/bottom) 오프셋을 char rect.y에 반영. `center`면 `(columnHeight - contentHeight) / 2`, `bottom`이면 `columnHeight - contentHeight`를 lineTopMm에 더함. 화면 flex `justifyContent`와 동일 결과.
