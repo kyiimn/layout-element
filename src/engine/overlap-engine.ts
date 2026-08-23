@@ -347,8 +347,10 @@ function computeSimplePixelOverlapFromBitmap(
   }
 
   const sortedCols = Array.from(opaqueColumns).sort((a, b) => a - b);
-  const mmPerColumn = imgRawOverlapWidth / sw;
-  const imgRelStart = imgIntersectionStart - r1.left;
+  // mmPerColumn: 전체 이미지 기준 픽셀당 mm (scaleX의 역수)
+  const mmPerColumn = imgMmRect.width / _rgba.width;
+  // line 기준 상대 좌표로 변환: imgMmRect.left - r1.left + col * mmPerColumn
+  const imgRelStart = imgMmRect.left - r1.left;
 
   const parts: OverlapParts[] = [];
   let partStart = sortedCols[0];
@@ -426,8 +428,10 @@ function computeSimplePixelOverlap(
   }
 
   const sortedCols = Array.from(opaqueColumns).sort((a, b) => a - b);
-  const mmPerColumn = imgRawOverlapWidth / sw;
-  const imgRelStart = imgIntersectionStart - r1.left;
+  // mmPerColumn: 전체 이미지 기준 픽셀당 mm (scaleX의 역수)
+  const mmPerColumn = imgMmRect.width / rgba.width;
+  // line 기준 상대 좌표로 변환: imgMmRect.left - r1.left + col * mmPerColumn
+  const imgRelStart = imgMmRect.left - r1.left;
 
   const parts: OverlapParts[] = [];
   let partStart = sortedCols[0];
