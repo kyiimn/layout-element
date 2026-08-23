@@ -411,23 +411,27 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule('@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }', 26);
       styleEl.sheet.insertRule('@media screen { .type-label .parent-btn:hover { opacity: 1; } }', 27);
 
-      this._shadowRoot.appendChild(document.createElement('slot'));
+      if (!this._shadowRoot.querySelector('slot')) {
+        this._shadowRoot.appendChild(document.createElement('slot'));
+      }
 
-      this._labelEl = document.createElement('div');
-      this._labelEl.classList.add('type-label');
-      const labelSpan = document.createElement('span');
-      this._labelEl.appendChild(labelSpan);
-      const parentBtn = document.createElement('span');
-      parentBtn.classList.add('parent-btn');
-      parentBtn.textContent = '▲';
-      parentBtn.title = '상위 요소 선택';
-      this._labelEl.appendChild(parentBtn);
-      this._shadowRoot.appendChild(this._labelEl);
-      this._updateLabelText();
-      parentBtn.addEventListener('click', (e: MouseEvent) => {
-        e.stopPropagation();
-        this._selectParent();
-      });
+      if (!this._labelEl) {
+        this._labelEl = document.createElement('div');
+        this._labelEl.classList.add('type-label');
+        const labelSpan = document.createElement('span');
+        this._labelEl.appendChild(labelSpan);
+        const parentBtn = document.createElement('span');
+        parentBtn.classList.add('parent-btn');
+        parentBtn.textContent = '▲';
+        parentBtn.title = '상위 요소 선택';
+        this._labelEl.appendChild(parentBtn);
+        this._shadowRoot.appendChild(this._labelEl);
+        this._updateLabelText();
+        parentBtn.addEventListener('click', (e: MouseEvent) => {
+          e.stopPropagation();
+          this._selectParent();
+        });
+      }
     }
 
     this._ensureResizeHandles();

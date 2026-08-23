@@ -530,7 +530,9 @@ export class LayoutTableCellElement extends HTMLElement {
       styleEl.sheet.insertRule(":host {}", 0);
       styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { outline: #ff9800 solid 2px !important; outline-offset: -2px !important; } }", 1);
 
-      this._shadowRoot.appendChild(document.createElement('slot'));
+      if (!this._shadowRoot.querySelector('slot')) {
+        this._shadowRoot.appendChild(document.createElement('slot'));
+      }
     }
 
     const colorRegistry = ColorRegistry.getInstance();

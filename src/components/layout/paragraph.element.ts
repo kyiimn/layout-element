@@ -275,7 +275,9 @@ export class LayoutParagraphElement extends HTMLElement {
           overflow: "hidden",
         }
       );
-      this._shadowRoot.appendChild(document.createElement('slot'));
+      if (!this._shadowRoot.querySelector('slot')) {
+        this._shadowRoot.appendChild(document.createElement('slot'));
+      }
     }
     const hostRule = styleEl!.sheet!.cssRules[0] as CSSStyleRule;
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(

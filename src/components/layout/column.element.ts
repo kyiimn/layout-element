@@ -23,6 +23,7 @@ export class LayoutColumnElement extends HTMLElement {
   }
 
   connectedCallback() {
+    this._cachedColStyleKey = '';
     this.renderText();
   }
 
@@ -289,9 +290,9 @@ export class LayoutColumnElement extends HTMLElement {
       styleEl.id = HOST_STYLE_ID;
       this._shadowRoot.appendChild(styleEl);
     }
-    // Update style rules only when colStyle actually changed
     const colStyleKey = JSON.stringify(colStyle);
-    if (styleEl.sheet && (colStyleKey !== this._cachedColStyleKey || styleEl.sheet?.cssRules.length < 1)) {
+    const rulesInvalidated = styleEl.sheet && styleEl.sheet.cssRules.length === 0;
+    if (styleEl.sheet && (colStyleKey !== this._cachedColStyleKey || rulesInvalidated)) {
       this._cachedColStyleKey = colStyleKey;
       while (styleEl.sheet.cssRules.length > 0) {
         styleEl.sheet.deleteRule(0);

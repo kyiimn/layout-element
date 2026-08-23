@@ -389,7 +389,9 @@ export class LayoutTableElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
       styleEl.sheet.insertRule(":host { display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; }", 0);
 
-      this._shadowRoot.appendChild(document.createElement('slot'));
+      if (!this._shadowRoot.querySelector('slot')) {
+        this._shadowRoot.appendChild(document.createElement('slot'));
+      }
     }
   }
 

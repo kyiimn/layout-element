@@ -191,7 +191,9 @@ export class LayoutTableRowElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
       styleEl.sheet.insertRule(":host { display: block; position: absolute; }", 0);
 
-      this._shadowRoot.appendChild(document.createElement('slot'));
+      if (!this._shadowRoot.querySelector('slot')) {
+        this._shadowRoot.appendChild(document.createElement('slot'));
+      }
     }
 
     const hostRule = styleEl!.sheet!.cssRules[0] as CSSStyleRule;
