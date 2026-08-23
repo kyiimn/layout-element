@@ -897,7 +897,7 @@ flowchart TD
 | `Backspace` | 없음 | 커서 앞 문자를 삭제. 선택 영역이 있으면 선택 영역을 삭제 |
 | `Delete` | 없음 | 커서 뒤 문자를 삭제. 선택 영역이 있으면 선택 영역을 삭제 |
 | `Enter` | 없음 | 줄바꿈(`\n`) 삽입. 선택 영역이 있으면 선택 영역을 대체 |
-| `Escape` | 없음 | 활성 선택 영역이 있으면 `_clearSelection()`으로 선택 영역을 해제하고 `selectionEnd` 이벤트 발생. 선택 영역이 없으면 텍스트 편집 모드를 종료하고 일반 모드로 전환 (`EditManager.textEditMode = false`) |
+| `Escape` | 없음 | 활성 선택 영역이 있으면 `_clearSelection()`으로 선택 영역을 해제하고 `selectionEnd` 이벤트 발생. 선택 영역이 없으면 `blurParagraph()`로 포커스를 해제한다. `textEditMode`는 유지되며, `stopPropagation()`으로 외부 핸들러(`use-editor-keyboard`)로의 전파를 차단한다 |
 | `a` | `Ctrl` 또는 `Cmd` | 전체 선택 |
 | `c` | `Ctrl` 또는 `Cmd` | 선택 영역을 클립보드에 복사 |
 | `x` | `Ctrl` 또는 `Cmd` | 선택 영역을 잘라내기(클립보드 복사 + 삭제) |

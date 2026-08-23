@@ -82,6 +82,7 @@ export interface ParagraphEngineData {
   overlayEngines: BoxEngine[];
   parentAbsRect: AbsRect;
   resources: EngineResources;
+  parentBox?: BoxEngine;
 }
 
 type FreeRegion = { start: number; end: number };
@@ -151,9 +152,6 @@ export class ParagraphEngine {
   /** 성능 캐시: effectiveTextStyle. _textStyle/_inheritStyle 변경 시 무효화. */
   private _effectiveTsCache: TextStyle | null = null;
   private _effectiveTsDirty: boolean = true;
-
-  /** 성능 캐시: extractData. data/overlapMode/id/zIndex 변경 시 무효화. */
-  private _extractDataCache: ParagraphData | null = null;
 
   /**
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
@@ -1012,7 +1010,6 @@ export class ParagraphEngine {
     this._inheritStyle = inheritStyle;
     this._effectivePsDirty = true;
     this._effectiveTsDirty = true;
-    this._extractDataCache = null;
     this._overlayRectsMm = null;
   }
 
@@ -1504,17 +1501,22 @@ export class ParagraphEngine {
 
     this._effectivePsDirty = true;
     this._effectiveTsDirty = true;
-    this._extractDataCache = null;
+
+    const gc = options.parentBox?.gridCalculator;
+    const parentParent = options.parentBox?.parent as { isTableCellEngine?: boolean } | undefined;
+    const inTableCell = !!parentParent?.isTableCellEngine && !!gc;
+    const column = inTableCell ? gc.columnWidth : options.column;
+    const gap = inTableCell ? gc.gaps : options.gap;
 
     this._gaps = (() => {
-      const colCount = Array.isArray(options.column) ? options.column.length : options.column || 1;
-      if (Array.isArray(options.gap)) return options.gap.slice(0, colCount - 1);
-      return Array.from({ length: colCount - 1 }).map(() => options.gap as number);
+      const colCount = Array.isArray(column) ? column.length : column || 1;
+      if (Array.isArray(gap)) return gap.slice(0, colCount - 1);
+      return Array.from({ length: colCount - 1 }).map(() => gap as number);
     })();
 
     this._columnWidths = (() => {
-      if (Array.isArray(options.column)) return options.column;
-      const colCount = (options.column as number) || 1;
+      if (Array.isArray(column)) return column;
+      const colCount = (column as number) || 1;
       return Array.from<number>({ length: colCount }).map(
         () => (this.inheritStyle.parentWidth - this._gaps.reduce((a, b) => a + b, 0)) / colCount,
       );
@@ -1524,7 +1526,11 @@ export class ParagraphEngine {
     this.resetIncrementalState();
   }
 
-  /** 텍스트 콘텐츠를 설정한다. */
+  /**
+   * 텍스트 콘텐츠를 설정한다.
+   *
+   * @param value - 새 텍스트 콘텐츠.
+   */
   public set textContent(value: string | (string | TextBlockData)[]) {
     this._textContent = value;
   }
@@ -1773,10 +1779,6 @@ export class ParagraphEngine {
   }
 
   get extractData(): ParagraphData {
-    if (this._extractDataCache !== null) {
-      return this._extractDataCache;
-    }
-
     const paragraphStyle: Record<string, unknown> = {};
     for (const key of Object.keys(this._paragraphStyle)) {
       if (this._paragraphStyle[key as keyof ParagraphStyle] !== undefined) {
@@ -1789,19 +1791,18 @@ export class ParagraphEngine {
         textStyle[key] = this._textStyle[key as keyof TextStyle];
       }
     }
-    const result: ParagraphData = {
+    const content = this._textContent;
+    return {
       type: 'paragraph',
       id: this._id,
-      content: this._textContent,
-      column: this._data.column,
-      gap: this._data.gap,
+      content,
+      column: this._columnWidths,
+      gap: this._gaps,
       paragraphStyle: Object.keys(paragraphStyle).length > 0 ? paragraphStyle as ParagraphStyle : undefined,
       textStyle: Object.keys(textStyle).length > 0 ? textStyle as TextStyle : undefined,
       overlapMode: this._overlapMode ?? 'box',
       zIndex: this._zIndex ?? 0,
     };
-    this._extractDataCache = result;
-    return result;
   }
 
   /**

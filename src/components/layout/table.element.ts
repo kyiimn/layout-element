@@ -292,6 +292,8 @@ export class LayoutTableElement extends HTMLElement {
       this._engine = existing;
     }
 
+    this._rows = this._serializeChildren();
+
     const tableData: TableData = {
       type: 'table',
       id: this.id || undefined,
@@ -355,7 +357,7 @@ export class LayoutTableElement extends HTMLElement {
         if (!cellEngine) continue;
         const tdEl = tdEls[i];
         const cellLabel = cellEngine.cellLabel || `${rowLabel}${i + 1}`;
-        tdEl._setCellMetrics(cellEngine.x, cellEngine.y, cellEngine.width, cellEngine.height, cellLabel, cellEngine.labels);
+        tdEl._setCellMetrics(cellEngine.x, cellEngine.y, cellEngine.width, cellEngine.height, cellLabel, cellEngine.labels, cellEngine);
       }
     }
   }

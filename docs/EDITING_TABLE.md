@@ -343,7 +343,7 @@ focus:  { row: currentCell.row, col: maxCol }
 ### 5.3 ESC 취소
 
 `_onTableResizeKeyDown`:
-- ESC 키 시: 시작 시점의 colWidths/rowHeights로 복원 → `layout()` + `render()` → 리스너 제거
+- ESC 키 시: `preventDefault()` + `stopPropagation()` 호출 후 시작 시점의 colWidths/rowHeights로 복원 → `layout()` + `render()` → 리스너 제거. `stopPropagation`으로 외부 핸들러(`use-editor-keyboard`)로의 전파를 차단하여 모드 전환 부작용을 방지한다.
 
 ### 5.4 colspan/rowspan과 리사이즈
 
@@ -385,7 +385,7 @@ Tab/Shift+Tab은 `EditManager.navigateByTab(shiftKey)`가 먼저 처리한다. `
 - **Shift+Tab**: 첫 셀에서 Shift+Tab을 누르면 표 이전 영역(표 밖)으로 포커스를 이동한다.
 - 표 밖으로 빠져나갈 때는 브라우저 기본 포커스 이동 흐름을 따른다.
 
-`TableKeyboardController.handleTab(shiftKey)` 메서드는 호환성을 위해 그대로 유지되어 있다. 단, 현재 키 이벤트 흐름상 window capture에서 Tab이 차단되므로 실제 호출되지 않는다. 외부에서 직접 `handleTab`을 호출하면 이전처럼 동작할 수 있지만, 표 밖으로 빠져나가는 경계 동작은 `navigateByTab`에서 처리한다.
+`TableKeyboardController.handleTab(shiftKey)` 메서드는 `navigateByTab`이 직접 호출하므로 유지된다. `handleKeyDown` 내부의 Tab 분기는 window capture에서 Tab이 선점되어 도달 불가능하므로 제거되었다.
 
 ### 6.2 셀 블록 활성 시 동작 (모든 모드)
 

@@ -348,7 +348,7 @@ export class LayoutBoxElement extends HTMLElement {
     if (parent instanceof LayoutBoxElement) return parent.engine ?? null;
     const tdParent = this.parentElement;
     if (tdParent instanceof LayoutTableCellElement) {
-      return (tdParent as LayoutTableCellElement).engine?.boxEngine ?? null;
+      return (tdParent as LayoutTableCellElement).engine ?? null;
     }
     return null;
   }

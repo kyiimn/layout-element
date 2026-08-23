@@ -24,6 +24,8 @@ import { checkOverlapMm } from "./overlap-engine";
  * `BoxEngineParent` 인터페이스를 구현하여 자식 박스가 부모로 참조 가능.
  */
 export class TableCellEngine {
+  readonly isTableCellEngine = true;
+
   private _x: number = 0;
   private _y: number = 0;
   private _rowY: number = 0;

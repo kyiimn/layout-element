@@ -50,9 +50,6 @@ export class BoxEngine {
   private _absRectParentGen: number = -1;
   private _absRectSelfGen: number = -1;
 
-  /** 성능 캐시: extractData. data/childEngines 변경 시 무효화. */
-  private _extractDataCache: BoxData | null = null;
-
   /**
    * 성능 캐시: overlayElements.
    * 자기 generation, 부모 generation, 형제 박스 generation 합계, 부모 overlayElements 배열 참조 기반 무효화.
@@ -88,8 +85,6 @@ export class BoxEngine {
    * 기하 필드(`left`/`top`/`width`/`height`/`position`) 또는
    * `zIndex`/`role`이 변경된 경우에만 `_generation`을 증가시켜
    * `absRect`/`overlayElements` 캐시를 무효화한다.
-   * 그 외 필드(border/padding/backgroundColor 등)만 변경된 경우
-   * `_extractDataCache`만 무효화하고 캐시를 유지한다.
    *
    * @param d - 새 박스 데이터
    */
@@ -104,7 +99,6 @@ export class BoxEngine {
       old.zIndex !== d.zIndex ||
       old.role !== d.role;
     this._data = d;
-    this._extractDataCache = null;
     if (cacheInvalidating) {
       this._generation++;
     }
@@ -139,10 +133,6 @@ export class BoxEngine {
    * @returns 엔진 현재 상태 기반의 BoxData
    */
   get extractData(): BoxData {
-    if (this._childEngines.length === 0 && this._extractDataCache !== null) {
-      return this._extractDataCache;
-    }
-
     const children: BoxData[] | ParagraphData | ImageData | TableData | undefined = (() => {
       if (this._childEngines.length === 0) return undefined;
       const childData = this._childEngines.map(e => e.extractData);
@@ -152,7 +142,7 @@ export class BoxEngine {
       return childData as BoxData[];
     })();
 
-    const result: BoxData = {
+    return {
       ...this._data,
       position: this.position,
       zIndex: this.zIndex,
@@ -171,12 +161,6 @@ export class BoxEngine {
       lock: this._data.lock ?? false,
       children,
     };
-
-    if (this._childEngines.length === 0) {
-      this._extractDataCache = result;
-    }
-
-    return result;
   }
 
   /** 부모 엔진 참조 */
@@ -513,7 +497,6 @@ export class BoxEngine {
     if (this._childEngines === engines) return;
     this._childEngines = engines;
     this._generation++;
-    this._extractDataCache = null;
   }
 
   /** 자식 엔진 목록 */

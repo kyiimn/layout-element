@@ -387,13 +387,19 @@ export class LayoutTableCellElement extends HTMLElement {
     }
   }
 
-  _setCellMetrics(x: number, y: number, width: number, height: number, cellLabel: string = '', cellLabels: string[] = []): void {
-    const changed = this._cellEngine
+  _setCellMetrics(x: number, y: number, width: number, height: number, cellLabel: string = '', cellLabels: string[] = [], cellEngine?: TableCellEngine): void {
+    const engineChanged = !!cellEngine && this._cellEngine !== cellEngine;
+    const metricsChanged = this._cellEngine
       ? (this._cellEngine.x !== x || this._cellEngine.y !== y
         || this._cellEngine.width !== width || this._cellEngine.height !== height
         || this._cellEngine.cellLabel !== cellLabel)
       : true;
-    this._cellEngine?.setCellMetrics(x, y, width, height, cellLabel, cellLabels);
+    const changed = engineChanged || metricsChanged;
+    if (cellEngine) {
+      this._cellEngine = cellEngine;
+    } else {
+      this._cellEngine?.setCellMetrics(x, y, width, height, cellLabel, cellLabels);
+    }
     this._cellLabel = cellLabel;
     this._cellLabels = cellLabels;
     if (changed && this.isConnected) {

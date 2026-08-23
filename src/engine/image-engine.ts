@@ -54,9 +54,6 @@ export class ImageEngine {
   /** 성능 캐시: 행별 opaque 컬럼 bitmap. rgbaData 설정 시 1회 빌드. computeSimplePixelOverlap에서 O(H_line) lookups로 사용. */
   private _opaqueRowBitmap: Uint8Array[] | null = null;
 
-  /** 성능 캐시: extractData. data/id/zIndex 변경 시 무효화. */
-  private _extractDataCache: ImageData | null = null;
-
   static create(data: ImageEngineData): ImageEngine {
     return new this(data);
   }
@@ -68,7 +65,6 @@ export class ImageEngine {
   set data(d: ImageEngineData) {
     this._data = d;
     this._displayRectDirty = true;
-    this._extractDataCache = null;
   }
 
   get data(): ImageEngineData {
@@ -77,7 +73,6 @@ export class ImageEngine {
 
   set id(v: string | undefined) {
     this._id = v;
-    this._extractDataCache = null;
   }
 
   get id(): string | undefined {
@@ -86,7 +81,6 @@ export class ImageEngine {
 
   set zIndex(v: number | undefined) {
     this._zIndex = v;
-    this._extractDataCache = null;
   }
 
   get zIndex(): number | undefined {
@@ -238,11 +232,8 @@ export class ImageEngine {
   }
 
   get extractData(): ImageData {
-    if (this._extractDataCache !== null) {
-      return this._extractDataCache;
-    }
     const d = this._data;
-    const result: ImageData = {
+    return {
       type: 'image',
       id: this._id,
       url: d.url,
@@ -258,8 +249,6 @@ export class ImageEngine {
       originalHeight: this.effectiveOriginalHeight,
       objectFit: this.effectiveObjectFit,
     };
-    this._extractDataCache = result;
-    return result;
   }
 
   buildPrintPostData(absRect: AbsRect): PrintPostData[] {

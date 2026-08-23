@@ -452,6 +452,18 @@ export class DocumentEngine {
       if (childBoxes.length > 0) {
         this._collectPrevContentEngines(childBoxes, map);
       }
+      for (const ce of contentEngines) {
+        if (ce instanceof TableEngine) {
+          for (const rowEngine of ce.rowEngines) {
+            for (const cellEngine of rowEngine.cellEngines) {
+              const cellBox = cellEngine.boxEngine;
+              if (cellBox) {
+                this._collectPrevContentEngines([cellBox], map);
+              }
+            }
+          }
+        }
+      }
     }
   }
 
@@ -673,6 +685,7 @@ export class DocumentEngine {
           overlayEngines,
           parentAbsRect,
           resources: this.resources,
+          parentBox,
         };
         pe.layoutStructure();
       }
@@ -692,6 +705,7 @@ export class DocumentEngine {
       overlayEngines,
       parentAbsRect,
       resources: this.resources,
+      parentBox,
     };
     const pe = ParagraphEngine.create(engineData);
     pe.layoutStructure();
@@ -803,7 +817,11 @@ export class DocumentEngine {
     if (!tableData.id) {
       tableData = { ...tableData, id: generateEngineId() };
     }
-    const te = TableEngine.create(tableData, parentBox);
+    const existing = parentBox.childEngines.find(e => e instanceof TableEngine) as TableEngine | undefined;
+    const te = existing ?? TableEngine.create(tableData, parentBox);
+    if (existing) {
+      te.data = tableData;
+    }
     te.layout();
 
     const placements = te.gridResolution?.placements ?? [];
@@ -818,7 +836,10 @@ export class DocumentEngine {
       const cellEngine = rowEngine.cellEngines[placementIdx];
 
       const cellChildren = placement.cell.children;
-      if (!cellChildren || cellChildren.length === 0) continue;
+      if (!cellChildren || cellChildren.length === 0) {
+        cellEngine.boxEngine = null;
+        continue;
+      }
 
       const cellBoxData = cellChildren.length === 1
         ? cellChildren[0]

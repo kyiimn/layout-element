@@ -340,6 +340,7 @@ interface ParagraphEngineData {
   overlayEngines: BoxEngine[]
   parentAbsRect: AbsRect
   resources: EngineResources
+  parentBox?: BoxEngine           // 부모 박스 엔진. 테이블 셀 내부 column/gap 보정용
 }
 ```
 
@@ -373,7 +374,7 @@ static create(data: ParagraphEngineData): ParagraphEngine
 | 게터 | 타입 | 설명 |
 |------|------|------|
 | `data` | `ParagraphEngineData` | 엔진 데이터 |
-| `extractData` | `ParagraphData` | 엔진 현재 상태에서 조립한 단락 데이터. `paragraphStyle`/`textStyle`은 `effectiveParagraphStyle`/`effectiveTextStyle`에서 `ParagraphStyle`/`TextStyle` 키만 필터링. `overlapMode ?? 'box'`, `zIndex ?? 0` |
+| `extractData` | `ParagraphData` | 엔진 현재 상태에서 조립한 단락 데이터. `paragraphStyle`/`textStyle`은 `effectiveParagraphStyle`/`effectiveTextStyle`에서 `ParagraphStyle`/`TextStyle` 키만 필터링. `column`/`gap`은 보정된 `_columnWidths`/`_gaps`를 반환 (테이블 셀 내부에서는 부모 `gridCalculator` 기준, 그 외는 주입값). `overlapMode ?? 'box'`, `zIndex ?? 0` |
 | `id` | `string \| undefined` | 단락 고유 식별자 (엔진 필드에서 관리) |
 | `zIndex` | `number \| undefined` | 렌더링 순서 (엔진 필드에서 관리) |
 | `inheritStyle` | `InheritStyle` | 상속 스타일 |
@@ -412,6 +413,7 @@ static create(data: ParagraphEngineData): ParagraphEngine
 #### 내부 메커니즘
 
 - `_layoutTextIntoColumns()`: 문자 단위 래핑
+- **`data` setter column/gap 보정**: `parentBox`가 제공되고 `parentBox.parent`가 `TableCellEngine`(`isTableCellEngine === true`)인 경우, `parentBox.gridCalculator`의 `columnWidth`/`gaps`를 사용하여 column/gap을 보정한다. 테이블 셀 내부 paragraph는 명시적 `column`/`gap` 값과 무관하게 셀 크기에 맞춰진다. 보정된 값은 `_columnWidths`/`_gaps`에 저장되며 `extractData`에서 반환된다.
 - 스켈레톤 캐시: `_computeLayoutInputHash()`로 입력 해시 → 동일하면 재레이아웃 스킵
 - LRU 캐시 (capacity 5000):
   - 문자 폭: key `${char}|${fontName}|${fontSize}`
@@ -461,6 +463,8 @@ static create(data: TableData, parentBox: BoxEngine): TableEngine
 #### `TableCellEngine`
 
 `BoxEngineParent` 인터페이스 구현 — 중첩 박스가 셀을 부모로 인식.
+
+`readonly isTableCellEngine = true` 식별자를 가진다. `ParagraphEngine.data` setter가 `parentBox.parent`가 `TableCellEngine`인지 확인할 때 `instanceof` 대신 이 식별자를 사용한다 (순환 import 회피).
 
 | 멤버 | 타입 | 설명 |
 |------|------|------|
@@ -682,7 +686,7 @@ DocumentEngine (root, owns ppm + resources)
 - **Document builds the engine tree**: `LayoutDocumentElement._layoutStructure()`는 `DocumentEngine.layout()`을 호출하여 `DocumentData`로부터 전체 엔진 트리를 구축. 이후 자식 `LayoutBoxElement`는 같은 트리의 `BoxEngine` 인스턴스를 재사용.
 - **Box attaches to tree engine**: `LayoutBoxElement._layoutStructure()`는 부모 엔진(`DocumentEngine`/`BoxEngine`/`TableCellEngine.boxEngine`)에서 `findBoxEngineById(this.id)`로 미리 구축된 `BoxEngine`을 찾아 연결. `id`가 없거나 트리에 없는 경우(`appendChildData`로 새로 추가된 경우)에만 새 `BoxEngine`을 생성하고 부모 `childEngines`에 등록.
 - **Reuse in place**: 좌표/크기/role/zIndex 등의 setter가 실행되면 `LayoutBoxElement`는 `BoxEngine.data`를 갱신하여 같은 엔진 인스턴스를 재사용. `_updateEngine()`은 새 엔진을 만들지 않고 기존 엔진의 `data`/`parent`만 갱신.
-- **Parent 구축**: `box.element.ts._findParentEngine()`이 부모 요소에서 `DocumentEngine`/`BoxEngine`/`TableCellEngine.boxEngine` 추출
+- **Parent 구축**: `box.element.ts._findParentEngine()`이 부모 요소에서 `DocumentEngine`/`BoxEngine`/`TableCellEngine` 추출. 테이블 셀 내부 박스는 `TableCellEngine` 자체를 부모 엔진으로 받으며, `TableCellEngine.findBoxEngineById(id)`가 셀의 `boxEngine` 자체를 반환한다 (BoxEngine.findBoxEngineById는 자식만 검색하므로 셀 내부 박스를 찾지 못함).
 - **Overlay wiring**: `paragraph.element.ts`가 `overlayElements` 박스의 `BoxEngine`을 수집해 `ParagraphEngineData.overlayEngines`로 전달
 - **RGBA injection**: `image.element.ts._feedRgbaToEngine()`가 원본 이미지 픽셀을 임시 canvas에서 추출하여 `ImageEngine.rgbaData`에 주입. canvas 렌더링 결과가 아닌 원본 픽셀을 주입한다.
 - **object-fit**: 엔진의 `ImageEngine.displayRect`가 단일 소스. `image.element.ts._applyObjectFit()`는 엔진의 `displayRect`를 사용하여 `x/y/width/height`를 설정. 브라우저 canvas는 이 값으로 표시만 수행.
@@ -870,4 +874,5 @@ src/engine/
 - DOM 요소는 절대 엔진 트리를 만들거나 수정하지 않는다.
 - 편집이 발생하면 편집된 콘텐츠를 `DocumentData` / `BoxData`로 직렬화하고, 엔진이 이를 다시 처리한 뒤 결과를 DOM에 전파한다.
 - DOM 요소는 `engine.childEngines`를 DOM 자식으로부터 수동으로 채우는 등 엔진 트리를 우회해서는 안 된다.
+- **테이블 셀 내부 column/gap 보정은 엔진이 수행**: `ParagraphEngine.data` setter가 `parentBox.parent`가 `TableCellEngine`인지 확인하고, 맞으면 `parentBox.gridCalculator`의 `columnWidth`/`gaps`로 column/gap을 보정한다. DOM은 보정을 수행하지 않으며, 엔진에 `parentBox`를 전달하기만 한다.
 - 구체적인 구현 규칙은 `RULES.md` 섹션 3을 참조한다.

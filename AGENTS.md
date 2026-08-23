@@ -130,7 +130,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 
 - **`DocumentEngine.extractData`**: Returns `DocumentData` with `children` dynamically assembled from `childBoxEngines.map(e => e.extractData)`. Padding values use getter defaults (`?? 0`).
 - **`BoxEngine.extractData`**: Returns `BoxData` with all fields defaulted via getters (`position ?? 'static'`, `zIndex ?? 0`, `role ?? 'none'`, `borderTopWidth ?? 0`, `borderStyle ?? DEFAULT_BORDER_STYLE`, `priority ?? 0`, `backgroundOpacity ?? 1`, `lock ?? false`, etc.). `children` dynamically assembled from `childEngines.map(e => e.extractData)`.
-- **`ParagraphEngine.extractData`**: Returns `ParagraphData` with `paragraphStyle`/`textStyle` from `effectiveParagraphStyle`/`effectiveTextStyle` filtered to `ParagraphStyle`/`TextStyle` keys only (excludes `InheritStyle` keys like `parentWidth`, `parentHeight`). `overlapMode ?? 'box'`, `zIndex ?? 0`.
+- **`ParagraphEngine.extractData`**: Returns `ParagraphData` with `paragraphStyle`/`textStyle` from `effectiveParagraphStyle`/`effectiveTextStyle` filtered to `ParagraphStyle`/`TextStyle` keys only (excludes `InheritStyle` keys like `parentWidth`, `parentHeight`). `column`/`gap` are the adjusted `_columnWidths`/`_gaps` (in table cells, parent `gridCalculator` values; outside, injected values). `overlapMode ?? 'box'`, `zIndex ?? 0`.
 - **`ImageEngine.extractData`**: Returns `ImageData` with all fields defaulted via effective getters (`dpi ?? DEFAULT_IMAGE_DPI`, `overlapMode ?? 'path'`, `objectFit ?? 'cover'`, `x/y/width/height ?? 0`, `zIndex ?? 0`).
 - **`TableEngine.extractData`**: Returns `TableData` with `children` assembled from `rowEngines` → `cellEngines` → `boxEngine.extractData`.
 - **`TableCellEngine.extractData`**: Returns `TableCellData` with defaults (`colspan ?? 1`, `rowspan ?? 1`, `borderWidth ?? 0`, `borderStyle ?? 'solid'`, `padding ?? 0`). `children` from `boxEngine.extractData`.
@@ -140,6 +140,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **`DocumentEngine.findEngineById(id)`**: Recursively searches the entire engine tree (BoxEngine, ParagraphEngine, ImageEngine, TableEngine). Traverses nested boxes and table cell boxes.
 - **`BoxEngine.findEngineById(id)`**: Searches self + child engines + nested child boxes + table cell boxes.
 - **`TableCellEngine.findEngineById(id)`**: Delegates to `boxEngine.findEngineById()`.
+- **`TableCellEngine.findBoxEngineById(id)`**: Returns `this._boxEngine` if `this._boxEngine.data.id === id` (the cell's own boxEngine, not a child). `BoxEngine.findBoxEngineById` searches `childEngines` only, so it cannot find the cell's boxEngine itself — `LayoutBoxElement._findParentEngine()` returns the `TableCellEngine` (not its `boxEngine`) to ensure the correct lookup.
 - Existing `findBoxEngineById(id)` (BoxEngine-only search) is retained for `BoxEngineParent` interface compatibility.
 
 ### ID Auto-Generation
@@ -201,6 +202,14 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - `_buildParagraphEngine` does NOT call `layoutText()`. It only calls `layoutStructure()`.
 - `layoutText()` is executed once in `_refreshParagraphOverlays()`.
 - Reason: Previously `_buildParagraphEngine` called `layoutText()`, then `_refreshParagraphOverlays` called `data` setter → `resetIncrementalState()` → `_layoutCache = null`, discarding the first `layoutText()` result. Now there is a single `layoutText()` execution.
+
+### `ParagraphEngine.data` setter — Table Cell column/gap Adjustment (Engine-First)
+
+- The `data` setter checks `options.parentBox?.parent.isTableCellEngine` and, if true, uses `parentBox.gridCalculator.columnWidth`/`gaps` instead of `options.column`/`options.gap`.
+- This ensures table cell paragraphs use the cell's actual width (from `TableEngine.layout()`) regardless of any explicit `column`/`gap` stored in `ParagraphData`.
+- The adjustment happens entirely in the engine — DOM (`LayoutParagraphElement._layoutStructure`) passes `parentBox` via `ParagraphEngineData` and does not perform any cell-width adjustment itself.
+- `extractData` returns the adjusted `_columnWidths`/`_gaps`, so `document.data` round-trips preserve the cell-width-corrected values.
+- `TableCellEngine` exposes `readonly isTableCellEngine = true` as a duck-type identifier (used instead of `instanceof` to avoid a circular import between `paragraph-engine.ts` and `table-engine.ts`).
 
 ### `DocumentEngine._buildBoxEngine()` — GC Reuse
 

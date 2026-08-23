@@ -148,7 +148,8 @@ export class LayoutParagraphElement extends HTMLElement {
     if (!parentBox) return;
 
     const parentBoxEngine = parentBox.engine;
-    const existing = parentBoxEngine?.childEngines.find(e => e instanceof ParagraphEngine);
+    if (!parentBoxEngine) return;
+    const existing = parentBoxEngine.childEngines.find(e => e instanceof ParagraphEngine);
     if (existing && this._model !== existing) {
       this._model = existing;
     }
@@ -185,6 +186,7 @@ export class LayoutParagraphElement extends HTMLElement {
         overlayEngines: overlayBoxEngines,
         parentAbsRect: newParentAbsRect,
         resources,
+        parentBox: parentBoxEngine,
       };
       this._model = ParagraphEngine.create(engineData);
       if (parentBoxEngine) {
@@ -216,6 +218,7 @@ export class LayoutParagraphElement extends HTMLElement {
           overlayEngines: overlayBoxEngines,
           parentAbsRect: newParentAbsRect,
           resources,
+          parentBox: parentBoxEngine,
         };
         this._model.data = engineData;
       }
