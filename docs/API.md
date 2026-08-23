@@ -451,7 +451,7 @@ paragraph.addEventListener('render-error', (e) => {
 - 엔진 우선 원칙: `engine.extractData`를 반환 (엔진이 없으면 `_rawData()`로 폴백).
 - `content` 필드는 엔진의 현재 `textContent`를 반환한다.
   - 편집 모드에서 텍스트가 수정된 경우, 수정된 내용이 엔진에 반영되어 `extractData`에 포함된다.
-- `paragraphStyle`/`textStyle`은 엔진의 `effectiveParagraphStyle`/`effectiveTextStyle`에서 `ParagraphStyle`/`TextStyle` 키만 필터링하여 반환 (상속값 + 주입값 + 기본값 병합 결과).
+- `paragraphStyle`/`textStyle`은 엔진의 주입값 `_paragraphStyle`/`_textStyle`만 순회하여 반환 (상속값/기본값 제외). 빈 객체면 `undefined`. 매 호출마다 새 객체 생성.
 
 #### `data` setter 동작
 

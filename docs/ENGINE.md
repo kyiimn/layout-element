@@ -374,7 +374,7 @@ static create(data: ParagraphEngineData): ParagraphEngine
 | 게터 | 타입 | 설명 |
 |------|------|------|
 | `data` | `ParagraphEngineData` | 엔진 데이터 |
-| `extractData` | `ParagraphData` | 엔진 현재 상태에서 조립한 단락 데이터. `paragraphStyle`/`textStyle`은 `effectiveParagraphStyle`/`effectiveTextStyle`에서 `ParagraphStyle`/`TextStyle` 키만 필터링. `column`/`gap`은 보정된 `_columnWidths`/`_gaps`를 반환 (테이블 셀 내부에서는 부모 `gridCalculator` 기준, 그 외는 주입값). `overlapMode ?? 'box'`, `zIndex ?? 0` |
+| `extractData` | `ParagraphData` | 엔진 현재 상태에서 조립한 단락 데이터. `paragraphStyle`/`textStyle`은 `effectiveParagraphStyle`/`effectiveTextStyle`이 아닌 주입값 `_paragraphStyle`/`_textStyle`만 순회하여 조립 (상속값/기본값 제외, 빈 객체면 `undefined`). `column`/`gap`은 보정된 `_columnWidths`/`_gaps`를 반환 (테이블 셀 내부에서는 부모 `gridCalculator` 기준, 그 외는 주입값). `overlapMode ?? 'box'`, `zIndex ?? 0`. 캐시 없음 — 매 호출마다 새 `ParagraphData` 객체 생성 |
 | `id` | `string \| undefined` | 단락 고유 식별자 (엔진 필드에서 관리) |
 | `zIndex` | `number \| undefined` | 렌더링 순서 (엔진 필드에서 관리) |
 | `inheritStyle` | `InheritStyle` | 상속 스타일 |
