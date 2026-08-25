@@ -119,10 +119,43 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 
 ### Engine-First Principle
 
+> **CRITICAL — Read before any engine or DOM modification.**
+> Violating these rules breaks the architecture and causes data synchronization bugs.
+> See `RULES.md § 3` for enforcement details.
+
+#### Architecture Boundary
+
+The system has two layers:
+
+| Layer | Role | Knows about |
+|---|---|---|
+| **Engine** (`src/engine/`) | Pure computation — layout calculation, data extraction | Own data + child engines. **NOT DOM.** |
+| **DOM** (`src/components/`) | Rendering — displays engine results | Own engine + DOM children (for rendering only) |
+
+The engine layer is designed for future **canvas rendering** — it must remain DOM-free so it can render without DOM elements.
+
+#### Hard Rules
+
+1. **Engines MUST NOT reference DOM elements.** No `HTMLElement` parameters, no `localName`, no `items`, no `_rawData()` calls from within `src/engine/`. Engines receive **pure data** (`BoxData`, `TableRowData`, etc.) only.
+
+2. **Engines MUST NOT store `children` in `_data`.** `engine.layout(childrenData)` receives children as a **parameter** — a pure data array. `engine.data` setter receives only the element's own properties (no `children` field). This prevents stale `_data.children` synchronization bugs.
+
+3. **`engine.layout()` signature**: `layout(ctx, childrenData, resources?, docStyle?)` for `BoxEngine`; `layout(childrenData?)` for `DocumentEngine` and `TableEngine`. The `childrenData` parameter is the **only** source of child data during layout.
+
+4. **DOM elements pass children data to engine**: `engine.layout(this.items.map(e => e._rawData()))`. This is a **temporary** DOM-era pattern. When canvas rendering replaces DOM, the engine will read from its own child engine tree directly.
+
+5. **`extractData` assembles children from child engines**: `_childEngines.map(e => e.extractData)`, NOT from `_data.children`. This is the engine's single source for external data extraction.
+
+6. **DOM property setters update engine first**: `box.left = 50` → `this._left = 50` → `_syncEngineBoxData()` → `engine.data = { ..., left: 50 }` (no children) → `layout()`. The engine is always up-to-date before rendering.
+
+7. **`_rawData()` excludes `children`** for elements that have engines (`Box`, `Document`, `Table`). It returns only the element's own properties. Children are assembled by `extractData` or passed via `layout(childrenData)`.
+
+8. **Leaf elements** (`Paragraph`, `Image`) have no child engines. Their `_rawData()` may include content/properties but not children. Their engines are created by parent `BoxEngine` (which has the required context: `inheritStyle`, `parentAbsRect`, `resources`, `overlayEngines`).
+
 - The engine tree is the single source of truth for all layout calculations **and data extraction**. DOM elements delegate `data` getter to `engine.extractData` — they do not independently assemble data from their own properties.
-- When editing occurs: DOM property update → `_layoutStructure()` → `_rawData()` (not `data` getter, to avoid circular reference) → `engine.data` setter → `engine.layout()` → `extractData` returns updated data.
-- **`extractData` getter**: Every engine type (`DocumentEngine`, `BoxEngine`, `ParagraphEngine`, `ImageEngine`, `TableEngine`, `TableCellEngine`) has an `extractData` getter that assembles the current engine state into the corresponding data type (`DocumentData`, `BoxData`, etc.). Children are dynamically assembled from child engines' `extractData`, not from the original `_data.children`.
-- **`_rawData()` method**: Every DOM element has a `_rawData()` method that assembles data from DOM properties without engine dependency. Used by `_layoutStructure()` and `_serializeChildren()` to avoid circular reference when `data` getter delegates to `engine.extractData`.
+- When editing occurs: DOM property update → `_layoutStructure()` → `_rawData()` (not `data` getter, to avoid circular reference) → `engine.data` setter (own props only) → `engine.layout(childrenData)` → `extractData` returns updated data.
+- **`extractData` getter**: Every engine type (`DocumentEngine`, `BoxEngine`, `ParagraphEngine`, `ImageEngine`, `TableEngine`, `TableCellEngine`) has an `extractData` getter that assembles the current engine state into the corresponding data type (`DocumentData`, `BoxData`, etc.). Children are dynamically assembled from child engines' `extractData`, not from `_data.children`.
+- **`_rawData()` method**: Every DOM element has a `_rawData()` method that assembles data from DOM properties without engine dependency. For elements with child engines (`Box`, `Document`, `Table`), `_rawData()` excludes `children`. Used by `_layoutStructure()` to avoid circular reference when `data` getter delegates to `engine.extractData`.
 - **`data` getter delegation**: `get data()` returns `engine.extractData` if engine exists, otherwise falls back to `_rawData()`.
 - **Default values via effective getters**: Engine getters (`effectiveParagraphStyle`, `effectiveTextStyle`, `effectiveOverlapMode`, etc.) merge injected values → inherited values → default values. These getters are for **internal layout computation only** — they are NOT used by `extractData`. DOM receives data from the engine where `paragraphStyle`/`textStyle` contain injected values only (not merged with inherited/default).
 - **`sourceParagraphStyle`/`sourceTextStyle` removed**: `_paragraphStyle`/`_textStyle` store injected values only (no merge with parent styles). `effectiveParagraphStyle`/`effectiveTextStyle` getters perform the merge: `{ ...DEFAULT, ..._inheritStyle, ..._paragraphStyle }`.

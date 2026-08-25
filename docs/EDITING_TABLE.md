@@ -191,10 +191,10 @@ type TableCellData = {
 ### 3.1.1 rowHeights/colWidths write-back
 
 `LayoutTableElement._layoutStructure()`는 `resolveTableGrid()` 호출 후 산출된 `rowHeights`/`colWidths`를 원본 데이터에 write-back한다:
-- `this._rows[r].height = resolvedRowHeights[r]` — 이후 `layout()` 호출 시 리사이즈된 행 높이를 입력으로 사용
+- `trEl.height = resolvedRowHeights[r]` — 이후 `layout()` 호출 시 리사이즈된 행 높이를 입력으로 사용
 - `this._colWidths = [...resolvedColWidths]` — `undefined`/`number` 단일값일 때만 산출된 배열로 확정. `number[]`는 사용자 지정값이므로 보존
 
-이로 인해 삽입 시점의 임시값(`tr.height = 5`, `colWidths = undefined`)이 첫 layout에서 실제 mm값으로 고정되며, 부모 box 리사이즈 시 재정규화만 일어나고 값이 틀어지지 않는다. **리사이즈 핸들 드래그 중에는 write-back하지 않는다**(`_resizeState` 활성 시 skip) — 핸들러가 직접 `_colWidths`/`_rows.height`를 관리하므로.
+이로 인해 삽입 시점의 임시값(`tr.height = 5`, `colWidths = undefined`)이 첫 layout에서 실제 mm값으로 고정되며, 부모 box 리사이즈 시 재정규화만 일어나고 값이 틀어지지 않는다. **리사이즈 핸들 드래그 중에는 write-back하지 않는다**(`_resizeState` 활성 시 skip) — 핸들러가 직접 `_colWidths`/`trEl.height`를 관리하므로.
 
 ### 3.2 normalizeWidths
 
@@ -388,7 +388,7 @@ focus:  { row: currentCell.row, col: maxCol }
 `_applyRowResize(row, deltaMm)`:
 - `row-1`과 `row`의 높이를 deltaMm만큼 조정 (총합 유지)
 - `MIN_TABLE_ROW_HEIGHT(5mm)` 보장
-- `this._rows[row-1].height`와 `this._rows[row].height` 갱신 → `layout()` + `render()`
+- `trEl[row-1].height`와 `trEl[row].height` 갱신 → `layout()` + `render()`
 
 `_onTableResizeMouseUp`:
 - 리스너 제거

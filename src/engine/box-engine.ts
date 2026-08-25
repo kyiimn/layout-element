@@ -11,7 +11,7 @@
  * @file src/engine/box-engine.ts
  */
 
-import type { BoxData, BoxPosition, BoxRole, ParagraphData, ImageData, TableData, InheritStyle, ParagraphStyle, TextStyle } from "@/types";
+import type { BoxData, BoxPosition, BoxRole, ParagraphData, ImageData, TableData, InheritStyle, ParagraphStyle, TextStyle, TextData } from "@/types";
 import type { AbsRect, BoxContentType, EngineResources, GridCalculatorEngineOptions } from "./types";
 import type { PrintPostData } from "@/types";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
@@ -608,6 +608,7 @@ export class BoxEngine {
    */
   layout(
     ctx: BoxBuildContext,
+    childrenData: BoxData[] | ParagraphData | TextData | ImageData | TableData | undefined,
     resources?: EngineResources,
     docStyle?: { paragraphStyle: ParagraphStyle; textStyle: TextStyle },
   ): void {
@@ -648,8 +649,7 @@ export class BoxEngine {
       this._gridCalculator = GridCalculatorEngine.create(gcOptions, this._resources!.ppm);
     }
 
-    const children = boxData.children;
-    if (!children) {
+    if (!childrenData) {
       if (this._childEngines.length > 0) this._childEngines = [];
       return;
     }
@@ -664,13 +664,13 @@ export class BoxEngine {
 
     const childEngines: (BoxEngine | ImageEngine | ParagraphEngine | TableEngine)[] = [];
 
-    if (Array.isArray(children)) {
-      for (const childBoxData of children) {
+    if (Array.isArray(childrenData)) {
+      for (const childBoxData of childrenData) {
         const childBE = this._buildChildBoxEngine(childBoxData, ctx);
         childEngines.push(childBE);
       }
     } else {
-      const content = children;
+      const content = childrenData;
       if (content.type === 'paragraph' || content.type === 'text') {
         const paraData: ParagraphData = content.type === 'text'
           ? { type: 'paragraph', id: content.id, content: content.content, column: 1, gap: 0, paragraphStyle: content.paragraphStyle, textStyle: content.textStyle }
@@ -715,7 +715,7 @@ export class BoxEngine {
     }
     const childBoxEngine = existingBox ?? BoxEngine.create(childBoxData, this);
 
-    childBoxEngine.layout(ctx, this._resources!, this._docStyle!);
+    childBoxEngine.layout(ctx, childBoxData.children, this._resources!, this._docStyle!);
     return childBoxEngine;
   }
 
@@ -906,7 +906,7 @@ export class BoxEngine {
     if (existing) {
       te.data = tableData;
     }
-    te.layout();
+    te.layout(tableData.children);
 
     const placements = te.gridResolution?.placements ?? [];
     for (const placement of placements) {
@@ -956,7 +956,7 @@ export class BoxEngine {
     }
     const cellBoxEngine = existingBox ?? BoxEngine.create(cellBoxData, cellEngine);
 
-    cellBoxEngine.layout(ctx, this._resources!, this._docStyle!);
+    cellBoxEngine.layout(ctx, cellBoxData.children, this._resources!, this._docStyle!);
     return cellBoxEngine;
   }
 

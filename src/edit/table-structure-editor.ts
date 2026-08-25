@@ -30,7 +30,7 @@ export class TableStructureEditor {
     const spanCols = maxCol - minCol + 1;
 
     const currentData = this._tableEl.data;
-    const newRows = currentData.children.map(tr => ({
+    const newRows = (currentData.children ?? []).map(tr => ({
       ...tr,
       children: tr.children.map(td => ({ ...td, children: [...td.children] })),
     }));
@@ -83,7 +83,7 @@ export class TableStructureEditor {
 
   unmergeCell(cellCoord: CellCoord): void {
     const currentData = this._tableEl.data;
-    const newRows = currentData.children.map(tr => ({
+    const newRows = (currentData.children ?? []).map(tr => ({
       ...tr,
       children: tr.children.map(td => ({ ...td, children: [...td.children] })),
     }));
@@ -192,18 +192,18 @@ export class TableStructureEditor {
     const totalWidth = allWidths.reduce((a, b) => a + b, 0);
     const normalizedWidths = normalizeWidths(allWidths, totalWidth, MIN_TABLE_COL_WIDTH);
 
-    const newRows = currentData.children.map(tr => ({
+    const newRows = (currentData.children ?? []).map(tr => ({
       ...tr,
       children: tr.children.map(td => ({ ...td, children: [...td.children] })),
     }));
 
     const colspanCovered: boolean[][] = [];
-    for (const _tr of currentData.children) {
+    for (const _tr of (currentData.children ?? [])) {
       colspanCovered.push(new Array(grid.colCount).fill(false));
     }
-    for (let r = 0; r < currentData.children.length; r++) {
+    for (let r = 0; r < (currentData.children ?? []).length; r++) {
       let logicalCol = 0;
-      for (const td of currentData.children[r].children) {
+      for (const td of currentData.children?.[r]?.children ?? []) {
         const cs = td.colspan ?? 1;
         const rs = td.rowspan ?? 1;
         while (logicalCol < grid.colCount && colspanCovered[r][logicalCol]) logicalCol++;
@@ -289,17 +289,17 @@ export class TableStructureEditor {
     if (!grid) return;
     const currentData = this._tableEl.data;
     const focusRow = this._getFocusRow();
-    const sourceRow = currentData.children[focusRow];
+    const sourceRow = currentData.children?.[focusRow];
     const sourceHeight = sourceRow?.height ?? grid.rowHeights[focusRow] ?? MIN_TABLE_ROW_HEIGHT;
     const halfHeight = sourceHeight / 2;
 
     const rowspanCovered: boolean[][] = [];
-    for (let r = 0; r < currentData.children.length; r++) {
+    for (let r = 0; r < (currentData.children ?? []).length; r++) {
       rowspanCovered.push(new Array(grid.colCount).fill(false));
     }
-    for (let r = 0; r < currentData.children.length; r++) {
+    for (let r = 0; r < (currentData.children ?? []).length; r++) {
       let logicalCol = 0;
-      for (const td of currentData.children[r].children) {
+      for (const td of currentData.children?.[r]?.children ?? []) {
         const cs = td.colspan ?? 1;
         const rs = td.rowspan ?? 1;
         while (logicalCol < grid.colCount && rowspanCovered[r][logicalCol]) logicalCol++;
@@ -314,7 +314,7 @@ export class TableStructureEditor {
       }
     }
 
-    const newRows = currentData.children.map(tr => ({
+    const newRows = (currentData.children ?? []).map(tr => ({
       ...tr,
       children: tr.children.map(td => ({ ...td, children: [...td.children] })),
     }));
@@ -427,7 +427,7 @@ export class TableStructureEditor {
     if (!grid) return;
     if (grid.rowCount <= 1) return;
     const currentData = this._tableEl.data;
-    const newRows = currentData.children.map(tr => ({
+    const newRows = (currentData.children ?? []).map(tr => ({
       ...tr,
       children: tr.children.map(td => ({ ...td, children: [...td.children] })),
     }));
@@ -519,7 +519,7 @@ export class TableStructureEditor {
     if (!grid) return;
     if (grid.colCount <= 1) return;
     const currentData = this._tableEl.data;
-    const newRows = currentData.children.map(tr => ({
+    const newRows = (currentData.children ?? []).map(tr => ({
       ...tr,
       children: tr.children.map(td => ({ ...td, children: [...td.children] })),
     }));

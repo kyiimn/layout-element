@@ -42,7 +42,6 @@ export class LayoutBoxElement extends HTMLElement {
   private _top: number = 0;
   private _width: number = 0;
   private _height: number = 0;
-  private _children: BoxData[] | ParagraphData | TextData | ImageData | TableData | undefined = undefined;
   private _position: BoxPosition = "static";
   private _backgroundColor?: string;
   private _backgroundOpacity?: number;
@@ -226,7 +225,6 @@ export class LayoutBoxElement extends HTMLElement {
       groupMember: this._groupMember,
       priority: this._priority,
       lock: this._lock || undefined,
-      children: this._children,
     };
 
     const found = this.id ? parentEngine.findBoxEngineById(this.id) : undefined;
@@ -283,7 +281,7 @@ export class LayoutBoxElement extends HTMLElement {
       paragraphStyle: docEngine.data.paragraphStyle,
       textStyle: docEngine.data.textStyle,
     };
-    this._engine.layout(ctx, resources, docStyle);
+    this._engine.layout(ctx, this._readChildren(), resources, docStyle);
   }
 
   private _findDocElement(): LayoutDocumentElement | null {
@@ -767,7 +765,6 @@ export class LayoutBoxElement extends HTMLElement {
       this._top = data.top;
       this._width = data.width;
       this._height = data.height;
-      this._children = data.children;
 
       // 자식 reconcile 전에 부모 모델(columnCoords)을 새 데이터로 갱신해야
       // appendChild 중 자식 connectedCallback → layout → relLeft getter가
@@ -850,18 +847,7 @@ export class LayoutBoxElement extends HTMLElement {
     */
   appendChildData(child: BoxData | ParagraphData | TextData | ImageData | TableData): LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | HTMLElement {
     this._appendChildData(child);
-    const currentChildren = this._children;
-    if (currentChildren === undefined) {
-      if (child.type === 'box') {
-        this._children = [child] as BoxData[];
-      } else {
-        this._children = child;
-      }
-    } else if (Array.isArray(currentChildren)) {
-      this._children = [...currentChildren, child] as BoxData[];
-    } else {
-      this._children = [currentChildren, child] as BoxData[];
-    }
+    this.layout();
     this.requestRerenderAffectedParagraphs();
     return this.items[this.items.length - 1] as LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | HTMLElement;
   }
@@ -869,22 +855,18 @@ export class LayoutBoxElement extends HTMLElement {
   /**
    * 데이터 기반 자식 삭제.
    *
-   * `this._children`에서 해당 id를 제거하고 `data` setter를 거쳐 엔진 + DOM을 동기화한다.
+   * id로 자식 DOM 요소를 찾아 제거한 뒤 엔진을 재구축한다.
    * DOM 직접 `remove()` 대신 이 메서드를 사용해야 엔진 우선 원칙을 준수한다.
    *
    * @param id - 삭제할 자식 요소의 id
    */
   removeChildData(id: string): void {
-    const current = this._children;
-    if (current === undefined) return;
-    if (Array.isArray(current)) {
-      const filtered = current.filter(c => c.id !== id);
-      if (filtered.length === current.length) return;
-      this.data = { ...this._rawData(), children: filtered };
-    } else {
-      if (current.id !== id) return;
-      this.data = { ...this._rawData(), children: [] };
-    }
+    const child = this.items.find(e => e.id === id);
+    if (!child) return;
+    Element.prototype.remove.call(child);
+    this.layout();
+    this.render();
+    this.requestRerenderAffectedParagraphs();
   }
 
   private _appendChildData(child: BoxData | ParagraphData | TextData | ImageData | TableData): void {
@@ -1065,6 +1047,18 @@ export class LayoutBoxElement extends HTMLElement {
     this.layout();
   }
 
+  /**
+   * @returns 자식 데이터 (단일 객체, 배열, 또는 undefined)
+   */
+  private _readChildren(): BoxData[] | ParagraphData | TextData | ImageData | TableData | undefined {
+    const items = this.items;
+    if (items.length === 0) return undefined;
+    if (items.length === 1 && items[0].type !== 'box') {
+      return items[0]._rawData();
+    }
+    return items.map(e => e._rawData()) as BoxData[];
+  }
+
   private _syncEngineBoxData(): void {
     if (!this._engine) return;
     const boxData: BoxData = {
@@ -1083,21 +1077,6 @@ export class LayoutBoxElement extends HTMLElement {
       paddingLeft: this._paddingLeft,
     };
     this._engine.data = boxData;
-    this._updateParentChildren();
-  }
-
-  /**
-   * 부모의 `this._children`에서 이 요소에 해당하는 항목을 현재 상태로 갱신한다.
-   */
-  private _updateParentChildren(): void {
-    const parent = this.parentElement;
-    if (!parent || !this.id) return;
-    const parentChildren = (parent as unknown as { _children?: BoxData[] })._children;
-    if (!parentChildren || !Array.isArray(parentChildren)) return;
-    const idx = parentChildren.findIndex(c => c.id === this.id);
-    if (idx >= 0) {
-      parentChildren[idx] = this._rawData();
-    }
   }
 
   get data(): BoxData {
@@ -1135,7 +1114,6 @@ export class LayoutBoxElement extends HTMLElement {
       groupMember: this._groupMember,
       priority: this.priority,
       lock: this._lock || undefined,
-      children: this._children,
     };
   }
 

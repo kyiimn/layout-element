@@ -53,7 +53,6 @@ export class LayoutTableCellElement extends HTMLElement {
   private _paddingRight: number = 0;
   private _paddingBottom: number = 0;
   private _paddingLeft: number = 0;
-  private _children: BoxData[] = [];
 
   private _diagonalEls: HTMLDivElement[] = [];
   private _placeholderBorderEls: HTMLDivElement[] = [];
@@ -107,7 +106,7 @@ export class LayoutTableCellElement extends HTMLElement {
       type: 'td',
       colspan: this._colspan,
       rowspan: this._rowspan,
-      children: this._children,
+      children: this.items.map(e => e._rawData()),
     };
     if (this.id) result.id = this.id;
     if (this._backgroundColor) result.backgroundColor = this._backgroundColor;
@@ -138,7 +137,6 @@ export class LayoutTableCellElement extends HTMLElement {
       this._paddingRight = data.paddingRight ?? 0;
       this._paddingBottom = data.paddingBottom ?? 0;
       this._paddingLeft = data.paddingLeft ?? 0;
-      this._children = data.children ?? [];
 
       const existingChildren = this.items;
       const existingById = new Map<string, LayoutBoxElement>();
@@ -146,9 +144,10 @@ export class LayoutTableCellElement extends HTMLElement {
         if (child.id) existingById.set(child.id, child);
       }
 
+      const childrenData = data.children ?? [];
       const usedIds = new Set<string>();
-      for (let i = 0; i < this._children.length; i++) {
-        const childData = this._children[i];
+      for (let i = 0; i < childrenData.length; i++) {
+        const childData = childrenData[i];
         const childId = childData.id;
 
         if (childId && existingById.has(childId)) {
@@ -756,8 +755,9 @@ export class LayoutTableCellElement extends HTMLElement {
   /**
    * 셀에 새로운 자식 박스 데이터를 추가한다.
    *
-   * 실제 DOM 생성은 `_appendChildData`가 담당하고, 이 메서드는 내부 `_children` 배열을
-   * 갱신하고 영향받는 문단의 재렌더를 요청한다. `data` setter를 재진입하지 않으므로
+   * 실제 DOM 생성은 `_appendChildData`가 담당하고, 이 메서드는
+   * `layout()` + `render()`를 호출하여 엔진을 재구축한다.
+   * `data` setter를 재진입하지 않으므로
    * `set data` → `_appendChildData` → `appendChildData` → `set data` 무한 재귀가
    * 발생하지 않는다 (`box.element.ts`와 동일한 패턴).
    *
@@ -769,7 +769,8 @@ export class LayoutTableCellElement extends HTMLElement {
    */
   appendChildData(child: BoxData): LayoutBoxElement {
     this._appendChildData(child);
-    this._children.push(child);
+    this.layout();
+    void this.render();
     return this.items[this.items.length - 1] as LayoutBoxElement;
   }
 
@@ -779,9 +780,11 @@ export class LayoutTableCellElement extends HTMLElement {
    * @param id - 삭제할 box의 id
    */
   removeChildData(id: string): void {
-    const filtered = this._children.filter(c => c.id !== id);
-    if (filtered.length === this._children.length) return;
-    this.data = { ...this._rawData(), children: filtered };
+    const child = this.items.find(e => e.id === id);
+    if (!child) return;
+    Element.prototype.remove.call(child);
+    this.layout();
+    void this.render();
   }
 
   /**

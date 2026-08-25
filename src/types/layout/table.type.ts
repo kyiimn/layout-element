@@ -112,7 +112,7 @@ export type TableData = {
   borders?: TableBorders;
 
   /** 행 데이터 (자식). 기존 명명 규칙에 따라 `children` 사용 */
-  children: TableRowData[];
+  children?: TableRowData[];
 };
 
 /**

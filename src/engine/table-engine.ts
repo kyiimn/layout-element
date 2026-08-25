@@ -187,6 +187,7 @@ export class TableRowEngine {
   private _height: number = 0;
   private _rowIndex: number = 0;
   private _rowLabel: string = '';
+  private _id: string | undefined;
   private _cellEngines: TableCellEngine[] = [];
 
   /**
@@ -197,16 +198,21 @@ export class TableRowEngine {
    * @param contentWidth - 콘텐츠 너비 (mm)
    * @param rowIndex - 행 인덱스
    * @param rowLabel - 행 라벨 (예: "A")
+   * @param id - 행 ID
    */
-  setRowMetrics(y: number, height: number, _contentWidth: number, rowIndex: number, rowLabel: string = ''): void {
+  setRowMetrics(y: number, height: number, _contentWidth: number, rowIndex: number, rowLabel: string = '', id?: string): void {
     this._y = y;
     this._height = height;
     this._rowIndex = rowIndex;
     this._rowLabel = rowLabel;
+    this._id = id;
   }
 
   /** 행 라벨 */
   get rowLabel(): string { return this._rowLabel; }
+
+  /** 행 ID */
+  get id(): string | undefined { return this._id; }
 
   /** 행 Y (mm) */
   get y(): number { return this._y; }
@@ -277,11 +283,10 @@ export class TableEngine {
    * @returns 엔진 현재 상태 기반의 TableData
    */
   get extractData(): TableData {
-    const children: TableRowData[] = this._rowEngines.map((re, i) => {
-      const originalRow = this._data.children?.[i];
+    const children: TableRowData[] = this._rowEngines.map((re) => {
       return {
         type: 'tr' as const,
-        id: originalRow?.id,
+        id: re.id,
         height: re.height,
         children: re.cellEngines.map(ce => ce.extractData),
       };
@@ -349,12 +354,12 @@ export class TableEngine {
    * `resolveTableGrid()`를 호출하고 결과를 행/셀 엔진에 분배.
    * 보더 면 저장소를 그리드 크기에 맞춰 구축한다.
    */
-  layout(): void {
+  layout(rowsData?: TableRowData[]): void {
     const parentAbsRect = this._parentBox.absRect;
     const contentWidth = parentAbsRect.absWidth - this._parentBox.paddingLeft - this._parentBox.paddingRight;
     const contentHeight = parentAbsRect.absHeight - this._parentBox.paddingTop - this._parentBox.paddingBottom;
 
-    const rows = this._data.children ?? [];
+    const rows = rowsData ?? [];
     this._gridResolution = resolveTableGrid(
       rows,
       contentWidth,
@@ -382,7 +387,7 @@ export class TableEngine {
       const rowHeight = this._gridResolution.rowHeights[r];
       const y = this._gridResolution.rowHeights.slice(0, r).reduce((sum, h) => sum + h, 0);
       const rowLabel = TableEngine._indexToRowLabel(r);
-      this._rowEngines[r].setRowMetrics(y, rowHeight, contentWidth, r, rowLabel);
+      this._rowEngines[r].setRowMetrics(y, rowHeight, contentWidth, r, rowLabel, rows[r].id);
 
       // 셀 엔진 구축
       const rowPlacements = this._gridResolution.placements.filter(p => p.gridRow === r);

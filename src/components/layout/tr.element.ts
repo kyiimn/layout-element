@@ -32,7 +32,6 @@ export class LayoutTableRowElement extends HTMLElement {
   private _width: number = 0;
   private _rowIndex: number = 0;
 
-  private _cells: TableCellData[] = [];
   private _inheritStyle?: InheritStyle;
 
   constructor() {
@@ -73,7 +72,7 @@ export class LayoutTableRowElement extends HTMLElement {
     const result: TableRowData = {
       type: 'tr',
       height: this._height,
-      children: this._cells,
+      children: this.items.map(e => e._rawData()),
     };
     if (this.id) result.id = this.id;
     return result;
@@ -84,7 +83,6 @@ export class LayoutTableRowElement extends HTMLElement {
     if (data.id !== undefined) this.id = data.id;
       this._height = data.height;
       this.setAttribute('height', String(data.height));
-      this._cells = data.children ?? [];
 
       const existingChildren = this.items;
       const existingById = new Map<string, LayoutTableCellElement>();
@@ -92,9 +90,10 @@ export class LayoutTableRowElement extends HTMLElement {
         if (child.id) existingById.set(child.id, child);
       }
 
+      const cellsData = data.children ?? [];
       const usedIds = new Set<string>();
-      for (let i = 0; i < this._cells.length; i++) {
-        const cellData = this._cells[i];
+      for (let i = 0; i < cellsData.length; i++) {
+        const cellData = cellsData[i];
         const cellId = cellData.id;
 
         if (cellId && existingById.has(cellId)) {
@@ -219,7 +218,8 @@ export class LayoutTableRowElement extends HTMLElement {
     const tdEl = document.createElement('x-layout-td') as LayoutTableCellElement;
     tdEl.data = child;
     this.appendChild(tdEl);
-    this._cells = [...this._cells, child];
+    this.layout();
+    void this.render();
     return tdEl;
   }
 
@@ -229,18 +229,14 @@ export class LayoutTableRowElement extends HTMLElement {
    * @param id - 삭제할 셀의 id
    */
   removeChildData(id: string): void {
-    const filtered = this._cells.filter(c => c.id !== id);
-    if (filtered.length === this._cells.length) return;
-    this._cells = filtered;
-    this.data = { ...this._rawData(), children: filtered };
+    const child = this.items.find(e => e.id === id);
+    if (!child) return;
+    Element.prototype.remove.call(child);
+    this.layout();
+    void this.render();
     const parent = this.parentElement;
-    if (parent && 'rows' in parent) {
-      const tableParent = parent as unknown as { rows: TableRowData[]; data: unknown };
-      const rowIdx = tableParent.rows.findIndex(r => r.id === this.id);
-      if (rowIdx >= 0) {
-        tableParent.rows[rowIdx] = this._rawData();
-        (tableParent as unknown as { layout: () => void }).layout();
-      }
+    if (parent && 'layout' in parent) {
+      (parent as unknown as { layout: () => void }).layout();
     }
   }
 

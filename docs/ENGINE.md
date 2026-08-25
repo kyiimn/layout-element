@@ -68,14 +68,14 @@ static create(
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `layout()` | `(): void` | `DocumentData`로부터 전체 엔진 트리 재구축. Node.js에서 base64 data URI 이미지의 rgbaData를 자동 주입 |
+| `layout()` | `(childrenData?: BoxData[]): void` | `childrenData`로부터 전체 엔진 트리 재구축. `_data.children`을 읽지 않고 파라미터로 받은 데이터에서 자식 박스 엔진 구축. Node.js에서 base64 data URI 이미지의 rgbaData를 자동 주입 |
 | `prepareImageDecoder()` | `(): Promise<boolean>` | Node.js ESM 환경에서 pngjs 사전 로드. `layout()` 전 호출 필요. 브라우저 no-op |
 | `findBoxEngineById(id)` | `(id: string): BoxEngine \| undefined` | 직계 박스 엔진 중 ID 검색 (`BoxEngineParent` 인터페이스 구현) |
 | `findEngineById(id)` | `(id: string): BoxEngine \| ParagraphEngine \| ImageEngine \| TableEngine \| undefined` | 엔진 트리 전체 재귀 검색. 모든 엔진 타입 포함. 테이블 셀 내부 박스도 순회 |
 
 #### 내부 메커니즘
 
-- `_buildTree(data)`: 최상위 `BoxEngine` 자식들 생성, 각 박스는 재귀적으로 하위 엔진 구축. 기존 `childBoxEngines`에서 ID로 엔진 재사용.
+- `_buildTree(childrenData)`: 최상위 `BoxEngine` 자식들 생성, 각 박스는 재귀적으로 하위 엔진 구축. 기존 `childBoxEngines`에서 ID로 엔진 재사용. `childrenData` 파라미터에서 자식 박스 데이터를 읽음 (`_data.children` 사용 안 함).
 - `_buildBoxEngine(boxData, parent)`: 박스별 `GridCalculatorEngine` 생성 (`isBox: true`), static 박스는 부모 그리드에서 컬럼/갭 슬라이스. **GC 파라미터 동일 시 인스턴스 재사용** (`_gcParamsEqual`).
 - `_buildParagraphEngine(paraData, parentBox)`: `parentBox.overlayElements`로 오버레이 계산. `layoutStructure()`만 호출, **`layoutText()`는 호출하지 않음** — `_refreshParagraphOverlays`에서 단일 실행.
 - `_refreshParagraphOverlays(boxEngines)`: 모든 단락의 overlay 문맥을 `updateOverlayContext()`로 갱신 (`_layoutCache` 보존). `TableEngine` 내부 셀 박스도 순회.
@@ -99,7 +99,7 @@ const engine = DocumentEngine.create(
   colorRegistry,
   // ppm 생략 가능
 );
-engine.layout();
+engine.layout(documentData.children);
 console.log(engine.gridCalculator.columnCoords);  // mm 단위
 console.log(engine.printPostData);  // mm 단위. 후처리 시스템용 데이터 export
 ```
@@ -220,11 +220,18 @@ static create(data: BoxData, parent: BoxEngineParent): BoxEngine
 | `childEngines` | `(BoxEngine \| ImageEngine \| ParagraphEngine \| TableEngine)[]` | 자식 엔진 교체 |
 | `gridCalculator` | `GridCalculatorEngine \| null` | 그리드 계산기 교체 |
 
+#### 퍼블릭 메서드
+
+| 메서드 | 시그니처 | 설명 |
+|--------|----------|------|
+| `layout()` | `(ctx: BoxBuildContext, childrenData: BoxData[] \| ParagraphData \| TextData \| ImageData \| TableData \| undefined, resources?: EngineResources, docStyle?: { paragraphStyle, textStyle }): void` | `childrenData` 파라미터로 자식 엔진 트리 구축. `_data.children`을 읽지 않음. 자식 박스는 재귀 `layout()` 호출. |
+
 #### 내부 메커니즘
 
 - 부모 엔진을 참조로 저장 → 좌표 게터가 live 부모 상태를 읽음
 - static: `left` = 컬럼 인덱스, `width` = 컬럼 스팬, `height` = 라인 카운트
 - absolute: `left`/`top`/`width`/`height` = mm
+- **`layout(ctx, childrenData, ...)`**: `childrenData` 파라미터에서 자식 엔진을 구축. `_data.children`을 읽지 않음. 자식 박스는 `childBoxData.children`을 재귀 `layout()`에 전달.
 - `overlayElements`: 부모 오버레이 + 형제 박스(z-index 더 높고 공간 겹침, `overlapMode !== 'none'`) 머지
 - `contentType`/`contentElement`: 단일 중첩 박스를 재귀 통과
 - `absRect`: 박스 절대 사각형 (mm). padding 포함.
@@ -458,7 +465,7 @@ static create(data: TableData, parentBox: BoxEngine): TableEngine
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `layout` | `(): void` | 부모 박스 콘텐츠 너비/높이로 그리드 계산 |
+| `layout` | `(rowsData?: TableRowData[]): void` | `rowsData` 파라미터로 그리드 계산. `_data.children`을 읽지 않고 파라미터에서 행 데이터 수신. `setRowMetrics`에 행 ID 주입. |
 
 #### `TableCellEngine`
 
@@ -489,8 +496,9 @@ static create(data: TableData, parentBox: BoxEngine): TableEngine
 
 | 멤버 | 타입 | 설명 |
 |------|------|------|
-| `setRowMetrics` | `(y, height, _contentWidth, rowIndex, rowLabel): void` | 행 메트릭 설정 |
+| `setRowMetrics` | `(y, height, _contentWidth, rowIndex, rowLabel, id?): void` | 행 메트릭 설정. `id`는 TR 요소의 ID |
 | `y`, `height`, `rowIndex` | `number` | 행 좌표/높이/인덱스 |
+| `id` | `string \| undefined` | 행 ID. `extractData`에서 `originalRow?.id` 대신 사용 |
 | `rowLabel` | `string` | 행 라벨 (예: `"A"`). `TableEngine.layout()`에서 산출 |
 | `cellEngines` | `TableCellEngine[]` | 셀 엔진 getter/setter |
 
@@ -683,7 +691,7 @@ DocumentEngine (root, owns ppm + resources)
 
 ### 엔진 접근 패턴
 
-- **Document builds the engine tree**: `LayoutDocumentElement._layoutStructure()`는 `DocumentEngine.layout()`을 호출하여 `DocumentData`로부터 전체 엔진 트리를 구축. 이후 자식 `LayoutBoxElement`는 같은 트리의 `BoxEngine` 인스턴스를 재사용.
+- **Document builds the engine tree**: `LayoutDocumentElement._layoutStructure()`는 `DocumentEngine.layout(this.items.map(e => e._rawData()))`를 호출하여 자식 박스 데이터에서 전체 엔진 트리를 구축. `engine.data` setter는 자신의 속성만 설정 (children 제외), `layout()` 파라미터로 자식 데이터 전달.
 - **Box attaches to tree engine**: `LayoutBoxElement._layoutStructure()`는 부모 엔진(`DocumentEngine`/`BoxEngine`/`TableCellEngine.boxEngine`)에서 `findBoxEngineById(this.id)`로 미리 구축된 `BoxEngine`을 찾아 연결. `id`가 없거나 트리에 없는 경우(`appendChildData`로 새로 추가된 경우)에만 새 `BoxEngine`을 생성하고 부모 `childEngines`에 등록.
 - **Reuse in place**: 좌표/크기/role/zIndex 등의 setter가 실행되면 `LayoutBoxElement`는 `BoxEngine.data`를 갱신하여 같은 엔진 인스턴스를 재사용. `_updateEngine()`은 새 엔진을 만들지 않고 기존 엔진의 `data`/`parent`만 갱신.
 - **Parent 구축**: `box.element.ts._findParentEngine()`이 부모 요소에서 `DocumentEngine`/`BoxEngine`/`TableCellEngine` 추출. 테이블 셀 내부 박스는 `TableCellEngine` 자체를 부모 엔진으로 받으며, `TableCellEngine.findBoxEngineById(id)`가 셀의 `boxEngine` 자체를 반환한다 (BoxEngine.findBoxEngineById는 자식만 검색하므로 셀 내부 박스를 찾지 못함).

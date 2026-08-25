@@ -118,7 +118,6 @@ export class LayoutDocumentElement extends HTMLElement {
   private _paddingBottom: number = 0;
   private _paddingLeft: number = 0;
   private _paddingRight: number = 0;
-  private _children: BoxData[] = [];
 
   private _columns: number | number[] = 1;
   private _gap: number | number[] = 0;
@@ -306,7 +305,6 @@ export class LayoutDocumentElement extends HTMLElement {
       gap: this._gap,
       paragraphStyle: this._paragraphStyle,
       textStyle: this._textStyle,
-      children: this._children,
     };
     if (!this._engine) {
       this._engine = DocumentEngine.create(docData, fontLoader, colorRegistry, this._ppm);
@@ -315,7 +313,7 @@ export class LayoutDocumentElement extends HTMLElement {
       this._engine.ppm = this._ppm;
     }
 
-    this._engine.layout();
+    this._engine.layout(this.items.map(e => e._rawData()));
 
     if (this._engine.newEnginesCreated) {
       this._syncEngineIdsToDom();
@@ -536,7 +534,7 @@ export class LayoutDocumentElement extends HTMLElement {
     const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
     boxEl.data = child;
     this.appendChild(boxEl);
-    this._children = [...this._children, child];
+    this.layout();
     boxEl.requestRerenderAffectedParagraphs();
     return boxEl;
   }
@@ -544,16 +542,17 @@ export class LayoutDocumentElement extends HTMLElement {
   /**
    * 데이터 기반 자식 box 삭제.
    *
-   * `this._children`에서 해당 id를 제거하고 `data` setter를 거쳐 엔진 + DOM을 동기화한다.
+   * id로 자식 DOM 요소를 찾아 제거한 뒤 엔진을 재구축한다.
    * DOM 직접 `remove()` 대신 이 메서드를 사용해야 엔진 우선 원칙을 준수한다.
    *
    * @param id - 삭제할 box의 id
    */
   removeChildData(id: string): void {
-    const newChildren = this._children.filter(c => c.id !== id);
-    if (newChildren.length === this._children.length) return;
-    const current = this._rawData();
-    this.data = { ...current, children: newChildren };
+    const child = this.items.find(e => e.id === id);
+    if (!child) return;
+    Element.prototype.remove.call(child);
+    this.layout();
+    this.render();
   }
 
   set data(data: DocumentData) {
@@ -574,7 +573,6 @@ export class LayoutDocumentElement extends HTMLElement {
       this._gap = data.gap;
       this._paragraphStyle = data.paragraphStyle;
       this._textStyle = data.textStyle;
-      this._children = data.children || [];
 
       // 자식 reconcile 전에 부모 모델(columnCoords)을 새 데이터로 갱신해야
       // appendChild 중 자식 connectedCallback → layout → relLeft getter가
@@ -712,7 +710,6 @@ export class LayoutDocumentElement extends HTMLElement {
       gap: this.gap,
       paragraphStyle: this.paragraphStyle,
       textStyle: this.textStyle,
-      children: this._children,
     }
   }
 

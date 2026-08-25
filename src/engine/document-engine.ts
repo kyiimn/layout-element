@@ -342,9 +342,9 @@ export class DocumentEngine {
    * `overlapMode: 'path'`가 정상 동작하도록 rgbaData를 자동 주입한다.
    * (브라우저는 `LayoutImageElement._feedRgbaToEngine()`이 canvas에서 RGBA 추출)
    */
-  layout(): void {
+  layout(childrenData?: BoxData[]): void {
     this._newEnginesCreated = false;
-    this._buildTree(this._data);
+    this._buildTree(childrenData ?? []);
     this._syncIdsToData();
   }
 
@@ -417,14 +417,14 @@ export class DocumentEngine {
   }
 
   /**
-   * DocumentData로부터 전체 엔진 트리를 구축한다.
+   * 자식 박스 데이터로부터 전체 엔진 트리를 구축한다.
    *
    * 최상위 BoxEngine을 생성/재사용하고 각각의 `layout()`을 호출하여
    * 자식 엔진 트리를 재귀적으로 구축한다. BoxEngine.layout()이 자식 구축을 담당한다.
    *
-   * @param data - 문서 데이터
+   * @param childrenData - 최상위 박스 데이터 목록
    */
-  private _buildTree(data: DocumentData): void {
+  private _buildTree(childrenData: BoxData[]): void {
     const ctx: BoxBuildContext = {
       prevContentEnginesByBoxId: new Map(),
       newEnginesCreated: false,
@@ -438,7 +438,7 @@ export class DocumentEngine {
     const resources = this.resources;
 
     const boxEngines: BoxEngine[] = [];
-    for (let childData of data.children ?? []) {
+    for (let childData of childrenData) {
       if (!childData.id) {
         childData = { ...childData, id: generateEngineId() };
       }
@@ -454,7 +454,7 @@ export class DocumentEngine {
         ctx.newEnginesCreated = true;
       }
       const boxEngine = existingBox ?? BoxEngine.create(childData, this);
-      boxEngine.layout(ctx, resources, docStyle);
+      boxEngine.layout(ctx, childData.children, resources, docStyle);
       boxEngines.push(boxEngine);
     }
     this._childBoxEngines = boxEngines;

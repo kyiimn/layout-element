@@ -1226,6 +1226,7 @@ class BoxEngine {
   static create(data: BoxData, parent: BoxEngineParent): BoxEngine;
 
   get data: BoxData;
+  get extractData: BoxData;
   get parent: BoxEngineParent;
   get position: 'static' | 'absolute';
   get left: number;
@@ -1255,6 +1256,13 @@ class BoxEngine {
   set parent(p: BoxEngineParent): void;
   set childEngines(engines: (BoxEngine | ImageEngine | ParagraphEngine | TableEngine)[]): void;
   set gridCalculator(calc: GridCalculatorEngine | null): void;
+
+  layout(
+    ctx: BoxBuildContext,
+    childrenData: BoxData[] | ParagraphData | TextData | ImageData | TableData | undefined,
+    resources?: EngineResources,
+    docStyle?: { paragraphStyle: ParagraphStyle; textStyle: TextStyle },
+  ): void;
 }
 
 type BoxEngineParent = DocumentEngine | BoxEngine | TableCellEngine;
@@ -1276,6 +1284,7 @@ class DocumentEngine {
   ): DocumentEngine;
 
   get data: DocumentData;
+  get extractData: DocumentData;
   get ppm: number;
   get width: number;
   get height: number;
@@ -1292,11 +1301,11 @@ class DocumentEngine {
   set ppm(v: number): void;
   set childBoxEngines(engines: BoxEngine[]): void;
 
-  layout(): void;  // DocumentData로 전체 엔진 트리 자동 구축
+  layout(childrenData?: BoxData[]): void;  // childrenData로 전체 엔진 트리 자동 구축. _data.children 사용 안 함
 }
 ```
 
-> **ppm은 옵셔널** — Node.js에서 DOM 없이 연산할 때 생략 가능. `layout()` 하나로 전체 트리 구축.
+> **ppm은 옵셔널** — Node.js에서 DOM 없이 연산할 때 생략 가능. `layout(childrenData)`에 자식 박스 데이터 배열을 전달하면 전체 트리 구축.
 
 ---
 
@@ -1336,6 +1345,7 @@ class TableEngine {
   static create(data: TableData, parentBox: BoxEngine): TableEngine;
 
   get data: TableData;
+  get extractData: TableData;
   get gridResolution: GridResolution | null;
   get rowEngines: TableRowEngine[];
   get cellEngines: TableCellEngine[];
@@ -1343,7 +1353,7 @@ class TableEngine {
 
   set data(d: TableData): void;
 
-  layout(): void;
+  layout(rowsData?: TableRowData[]): void;
 }
 
 class TableCellEngine implements BoxEngineParent {
@@ -1359,8 +1369,9 @@ class TableCellEngine implements BoxEngineParent {
 
 class TableRowEngine {
   get y/height/rowIndex: number;
+  get id: string | undefined;
   get cellEngines: TableCellEngine[];
-  setRowMetrics(y, height, _contentWidth, rowIndex): void;
+  setRowMetrics(y, height, _contentWidth, rowIndex, rowLabel, id?): void;
 }
 ```
 

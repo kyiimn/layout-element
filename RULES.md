@@ -109,12 +109,47 @@
 
 ## 3. 엔진-DOM 동기화 규칙 (엔진 우선 원칙)
 
+> **CRITICAL — 본 섹션의 규칙 위반은 아키텍처를 파괴한다.**
+> 엔진은 향후 canvas 렌더링으로 전환되므로, DOM 의존성이 추가되면 전환이 불가능해진다.
+
+### 3.0 엔진/DOM 경계 — 절대 규칙 (위반 시 PR 반려)
+
+1. **엔진은 DOM을 참조하지 않는다.** `src/engine/` 내에서 `HTMLElement`, `localName`, `items`, `_rawData()`, `querySelector`, `getAttribute`, `style` 등 DOM API/요소를 사용하지 않는다. 엔진은 **순수 데이터**만 다룬다.
+
+2. **엔진은 `_data.children`을 저장하지 않는다.** `engine.layout(childrenData)`로 자식 데이터를 **파라미터**로 받는다. `engine.data` setter는 자신의 속성만 설정한다. `_data.children`을 읽어 자식 엔진을 구축하는 것은 금지.
+
+3. **DOM 요소는 `this._children`/`this._rows`/`this._cells`를 저장하지 않는다.** 자식 데이터가 필요할 때 `this.items.map(e => e._rawData())`로 그때그때 수집한다. 저장하면 부모-자식 간 동기화 문제가 발생한다.
+
+4. **`engine.layout()` 시그니처:**
+   - `BoxEngine.layout(ctx, childrenData, resources?, docStyle?)`
+   - `DocumentEngine.layout(childrenData?)`
+   - `TableEngine.layout(rowsData?)`
+   - `childrenData`는 순수 데이터 배열만 허용. DOM 요소 배열(`HTMLElement[]`) 전달 금지.
+
+5. **DOM → 엔진 데이터 전달 경로:**
+   ```
+   _layoutStructure()
+     → engine.data = { ...ownProps }  // children 제외
+     → engine.layout(this.items.map(e => e._rawData()))  // 자식 데이터만 파라미터로
+   ```
+   이 경로는 DOM 렌더링을 위한 **잠정적 중간 상태**다. canvas 전환 후 제거된다.
+
+6. **엔진 → 외부 데이터 추출:** `extractData`는 `_childEngines.map(e => e.extractData)`로 자식 엔진에서 조립. `_data.children`에서 읽지 않는다.
+
+7. **새 엔진 추가/수정 시 체크리스트:**
+   - [ ] `src/engine/` 내에서 DOM import/참조가 없는가?
+   - [ ] `engine.data` setter에 `children` 필드가 없는가?
+   - [ ] `engine.layout()`이 자식 데이터를 파라미터로 받는가?
+   - [ ] `extractData`가 자식 엔진에서 조립하는가?
+
 ### 3.1 엔진이 단일 소스 오브 트루스
 
 - 엔진 트리가 모든 레이아웃 계산의 단일 소스다. DOM은 엔진을 보완/대체하지 않는다.
 - DOM은 엔진 결과를 소비만 한다. 엔진을 생성/수정하지 않는다.
 - 편집 발생 시: 편집된 내용 → `DocumentData`/`BoxData` 직렬화 → 엔진 재처리 → 결과 DOM 전파.
 - DOM에서 엔진 `childEngines`을 수동으로 채우지 말 것.
+- **DOM 요소는 `this._children`/`this._rows`/`this._cells`를 저장하지 않는다.** 자식 데이터는 `this.items.map(e => e._rawData())`로 그때그때 수집. 저장 시 부모-자식 동기화 버그 발생.
+- **엔진은 `_data.children`을 저장하지 않는다.** `engine.layout(childrenData)` 파라미터로만 자식 데이터 수신.
 
 ### 3.2 `disconnectedCallback` — 엔진 splice 금지
 

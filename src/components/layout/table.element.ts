@@ -53,9 +53,8 @@ export class LayoutTableElement extends HTMLElement {
 
   private _colWidths?: number | number[];
   private _borders?: TableBorders;
-  private _rows: TableRowData[] = [];
 
-  get rows(): TableRowData[] { return this._rows; }
+  get rows(): TableRowData[] { return this.items.map(e => e.data); }
 
   private _inheritStyle?: InheritStyle;
 
@@ -153,7 +152,6 @@ export class LayoutTableElement extends HTMLElement {
   _rawData(): TableData {
     const result: TableData = {
       type: 'table',
-      children: this._rows,
     };
     if (this.id) result.id = this.id;
     if (this._colWidths !== undefined) result.colWidths = this._colWidths;
@@ -166,7 +164,6 @@ export class LayoutTableElement extends HTMLElement {
     if (data.id !== undefined) this.id = data.id;
       this._colWidths = data.colWidths;
       this._borders = data.borders;
-      this._rows = data.children ?? [];
 
       this._layoutStructure();
 
@@ -176,9 +173,10 @@ export class LayoutTableElement extends HTMLElement {
         if (child.id) existingById.set(child.id, child);
       }
 
+      const rowsData = data.children ?? [];
       const usedIds = new Set<string>();
-      for (let i = 0; i < this._rows.length; i++) {
-        const rowData = this._rows[i];
+      for (let i = 0; i < rowsData.length; i++) {
+        const rowData = rowsData[i];
         const rowId = rowData.id;
 
         if (rowId && existingById.has(rowId)) {
@@ -206,7 +204,7 @@ export class LayoutTableElement extends HTMLElement {
   set colWidths(value: number | number[] | undefined) {
     this._colWidths = value;
     if (this.isConnected) {
-      this._engine?.layout();
+      this._engine?.layout(this.items.map(e => e._rawData()));
       this.layout();
       void this.render();
     }
@@ -216,7 +214,7 @@ export class LayoutTableElement extends HTMLElement {
   set borders(value: TableBorders | undefined) {
     this._borders = value;
     if (this.isConnected) {
-      this._engine?.layout();
+      this._engine?.layout(this.items.map(e => e._rawData()));
       this.layout();
       void this.render();
     }
@@ -297,7 +295,6 @@ export class LayoutTableElement extends HTMLElement {
       id: this.id || undefined,
       colWidths: this._colWidths,
       borders: this._borders,
-      children: this._rows,
     };
 
     if (!this._engine) {
@@ -306,19 +303,23 @@ export class LayoutTableElement extends HTMLElement {
     } else {
       this._engine.data = tableData;
     }
-    this._engine.layout();
+    this._engine.layout(this.items.map(e => e._rawData()));
 
     this._gridResolution = this._engine.gridResolution ?? undefined;
     this._resolvedColWidths = this._gridResolution?.colWidths ?? [];
 
     // 계산된 rowHeights/colWidths를 원본 데이터에 write-back하여
     // 이후 layout(부모 box 리사이즈 등)에서 리사이즈된 값이 입력으로 사용되도록 한다.
-    // 리사이즈 핸들 드래그 중에는 핸들러가 직접 _colWidths/_rows.height를
+    // 리사이즈 핸들 드래그 중에는 핸들러가 직접 _colWidths/TR.height를
     // 관리하므로 write-back하지 않는다.
     if (this._gridResolution && !this._resizeState) {
       const resolvedRowHeights = this._gridResolution.rowHeights;
-      for (let r = 0; r < this._rows.length && r < resolvedRowHeights.length; r++) {
-        this._rows[r].height = resolvedRowHeights[r];
+      const trEls = this.items;
+      for (let r = 0; r < trEls.length && r < resolvedRowHeights.length; r++) {
+        const trEl = trEls[r];
+        if (trEl && trEl.height !== resolvedRowHeights[r]) {
+          trEl.height = resolvedRowHeights[r];
+        }
       }
       if (this._colWidths === undefined || typeof this._colWidths === 'number') {
         this._colWidths = [...this._gridResolution.colWidths];
@@ -617,13 +618,13 @@ export class LayoutTableElement extends HTMLElement {
   }
 
   /**
-   * TR/TD 요소에서 border/padding/diagonals 데이터를 직렬화하여 `_rows`를 갱신하고
+   * TR/TD 요소에서 border/padding/diagonals 데이터를 직렬화하여
    * border 레이어만 재렌더링한다. 자식 요소 재생성 없이 TD 속성 변경을
    * border store에 반영하기 위해 사용한다.
    */
   refreshBorder(): void {
     if (!this.isConnected) return;
-    this._engine?.layout();
+    this._engine?.layout(this.items.map(e => e._rawData()));
     this._layoutStructure();
     this._borders = this._engine?.borderStore?.toTableBorders();
     this._renderBorder();
@@ -814,9 +815,10 @@ export class LayoutTableElement extends HTMLElement {
     const newTop = Math.max(MIN_TABLE_ROW_HEIGHT, Math.min(oldTop + deltaMm, total - MIN_TABLE_ROW_HEIGHT));
     const newBottom = total - newTop;
     if (newTop === oldTop) return;
-    this._rows[topIdx].height = newTop;
-    this._rows[bottomIdx].height = newBottom;
-    this._engine?.layout();
+    const trEls = this.items;
+    if (trEls[topIdx]) trEls[topIdx].height = newTop;
+    if (trEls[bottomIdx]) trEls[bottomIdx].height = newBottom;
+    this._engine?.layout(this.items.map(e => e._rawData()));
     this.layout();
     void this.render();
     this._notifyTablePropertyChange();
@@ -850,10 +852,9 @@ export class LayoutTableElement extends HTMLElement {
     if (state.handle!.startsWith('v-')) {
       this._colWidths = state.startColWidths;
     } else if (state.handle!.startsWith('h-')) {
+      const trEls = this.items;
       for (let i = 0; i < state.startRowHeights.length; i++) {
-        const trEl = this.children[i] as LayoutTableRowElement | undefined;
-        if (trEl) trEl.height = state.startRowHeights[i];
-        this._rows[i].height = state.startRowHeights[i];
+        if (trEls[i]) trEls[i].height = state.startRowHeights[i];
       }
     }
     this.layout();
@@ -1009,7 +1010,8 @@ export class LayoutTableElement extends HTMLElement {
     const trEl = document.createElement('x-layout-tr') as LayoutTableRowElement;
     trEl.data = child;
     this.appendChild(trEl);
-    this._rows = [...this._rows, child];
+    this.layout();
+    requestAnimationFrame(() => { void this.render(); });
     return trEl;
   }
 
@@ -1017,9 +1019,11 @@ export class LayoutTableElement extends HTMLElement {
    * @param id - 삭제할 행의 id
    */
   removeChildData(id: string): void {
-    const filtered = this._rows.filter(r => r.id !== id);
-    if (filtered.length === this._rows.length) return;
-    this.data = { ...this._rawData(), children: filtered };
+    const child = this.items.find(e => e.id === id);
+    if (!child) return;
+    Element.prototype.remove.call(child);
+    this.layout();
+    requestAnimationFrame(() => { void this.render(); });
   }
 
   private _appendChildData(child: TableRowData): void {
