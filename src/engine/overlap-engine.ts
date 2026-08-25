@@ -141,12 +141,31 @@ function computePixelOverlap(
   if (imgRectMm.width <= 0 || imgRectMm.height <= 0) {
     return { direction: 'NONE', parts: [] };
   }
-  const scaleX = rgba.width / imgRectMm.width;
-  const scaleY = rgba.height / imgRectMm.height;
+
+  // image.displayRect가 제공되면 원본 표시 영역 기준으로 픽셀 스케일을 계산.
+  // r2 (imgRectMm)는 contentAbsRect로 클램프된 영역이므로,
+  // RGBA 픽셀 매핑은 원본 displayRect 기준이어야 정확한 픽셀을 샘플링.
+  const pixelRectMm: MmRect = image.displayRect
+    ? {
+        left: image.displayRect.absLeft,
+        right: image.displayRect.absLeft + image.displayRect.absWidth,
+        top: image.displayRect.absTop,
+        bottom: image.displayRect.absTop + image.displayRect.absHeight,
+        width: image.displayRect.absWidth,
+        height: image.displayRect.absHeight,
+      }
+    : imgRectMm;
+
+  if (pixelRectMm.width <= 0 || pixelRectMm.height <= 0) {
+    return { direction: 'NONE', parts: [] };
+  }
+
+  const scaleX = rgba.width / pixelRectMm.width;
+  const scaleY = rgba.height / pixelRectMm.height;
 
   if (hasOverlapPadding) {
     return computeEllipseOverlap(
-      r1, imgRectMm, rgba,
+      r1, imgRectMm, pixelRectMm, rgba,
       scaleX, scaleY,
       padTop, padRight, padBottom, padLeft,
     );
@@ -154,10 +173,10 @@ function computePixelOverlap(
 
   const bitmap = image.opaqueRowBitmap;
   if (bitmap) {
-    return computeSimplePixelOverlapFromBitmap(r1, imgRectMm, rgba, scaleX, scaleY, bitmap);
+    return computeSimplePixelOverlapFromBitmap(r1, imgRectMm, pixelRectMm, rgba, scaleX, scaleY, bitmap);
   }
 
-  return computeSimplePixelOverlap(r1, imgRectMm, rgba, scaleX, scaleY);
+  return computeSimplePixelOverlap(r1, imgRectMm, pixelRectMm, rgba, scaleX, scaleY);
 }
 
 /**
@@ -166,6 +185,7 @@ function computePixelOverlap(
 function computeEllipseOverlap(
   r1: MmRect,
   imgMmRect: MmRect,
+  pixelRectMm: MmRect,
   rgba: { data: Uint8Array; width: number; height: number },
   scaleX: number,
   scaleY: number,
@@ -182,7 +202,7 @@ function computeEllipseOverlap(
   let sh: number;
 
   if (sampleBottomMm > sampleTopMm) {
-    const relY = sampleTopMm - imgMmRect.top;
+    const relY = sampleTopMm - pixelRectMm.top;
     sy = Math.max(0, Math.floor(relY * scaleY));
     sh = Math.min(rgba.height - sy, Math.ceil((sampleBottomMm - sampleTopMm) * scaleY));
   } else if (r1.bottom <= imgMmRect.top) {
@@ -193,8 +213,12 @@ function computeEllipseOverlap(
     sy = rgba.height - sh;
   }
 
-  const sx = 0;
-  const sw = rgba.width;
+  // 픽셀 x 샘플링 범위: pixelRectMm(원본 표시 영역)에서 imgMmRect(클램프) 내 픽셀만.
+  // imgMmRect가 pixelRectMm 안쪽이므로, clamp된 영역의 픽셀 x 범위를 계산.
+  const pixStartX = Math.max(0, Math.floor((imgMmRect.left - pixelRectMm.left) * scaleX));
+  const pixEndX = Math.min(rgba.width, Math.ceil((imgMmRect.right - pixelRectMm.left) * scaleX));
+  const sx = pixStartX;
+  const sw = pixEndX - pixStartX;
 
   if (sw <= 0 || sh <= 0) {
     // 기하학적 fallback
@@ -221,7 +245,7 @@ function computeEllipseOverlap(
   const opaqueColumns = new Set<number>();
 
   for (let y = 0; y < sh; y++) {
-    const pixelMmY = (sy + y) / scaleY + imgMmRect.top;
+    const pixelMmY = (sy + y) / scaleY + pixelRectMm.top;
 
     let dy: number;
     if (pixelMmY < r1.top) {
@@ -240,7 +264,7 @@ function computeEllipseOverlap(
       const alphaIndex = ((y + sy) * rgba.width + (x + sx)) * 4 + 3;
       if (rgba.data[alphaIndex] === 0) continue;
 
-      const pixelMmX = (sx + x) / scaleX + imgMmRect.left;
+      const pixelMmX = (sx + x) / scaleX + pixelRectMm.left;
 
       let dx: number;
       if (pixelMmX < r1.left) {
@@ -267,15 +291,21 @@ function computeEllipseOverlap(
     return { direction: 'NONE', parts: [] };
   }
 
-  const mmPerColumn = imgMmRect.width / rgba.width;
+  // mmPerColumn은 원본 표시 영역 기준 (pixelRectMm).
+  const mmPerColumn = pixelRectMm.width / rgba.width;
   const paddedParts: { x1: number; x2: number }[] = [];
   for (const col of Array.from(opaqueColumns).sort((a, b) => a - b)) {
-    const colStart = imgMmRect.left - r1.left + col * mmPerColumn - padLeft;
-    const colEnd = imgMmRect.left - r1.left + (col + 1) * mmPerColumn + padRight;
-    if (colEnd > 0 && colStart < r1.width) {
+    const colStart = pixelRectMm.left - r1.left + col * mmPerColumn - padLeft;
+    const colEnd = pixelRectMm.left - r1.left + (col + 1) * mmPerColumn + padRight;
+    // 결과를 imgMmRect (클램프 영역)로 x축 클립 — 박스 밖 잘린 부분 제외.
+    const clipStart = imgMmRect.left - r1.left - padLeft;
+    const clipEnd = imgMmRect.right - r1.left + padRight;
+    const clampedStart = Math.max(colStart, clipStart);
+    const clampedEnd = Math.min(colEnd, clipEnd);
+    if (clampedEnd > 0 && clampedStart < r1.width) {
       paddedParts.push({
-        x1: Math.max(0, colStart),
-        x2: Math.min(r1.width, colEnd),
+        x1: Math.max(0, clampedStart),
+        x2: Math.min(r1.width, clampedEnd),
       });
     }
   }
@@ -298,6 +328,7 @@ function computeEllipseOverlap(
 function computeSimplePixelOverlapFromBitmap(
   r1: MmRect,
   imgMmRect: MmRect,
+  pixelRectMm: MmRect,
   _rgba: { data: Uint8Array; width: number; height: number },
   scaleX: number,
   scaleY: number,
@@ -310,8 +341,9 @@ function computeSimplePixelOverlapFromBitmap(
     return { direction: 'NONE', parts: [] };
   }
 
-  const relativeX = imgIntersectionStart - imgMmRect.left;
-  const relativeY = Math.max(r1.top, imgMmRect.top) - imgMmRect.top;
+  // imgMmRect는 pixelRectMm 안쪽(클램프)이므로, 픽셀 좌표는 pixelRectMm 기준.
+  const relativeX = imgIntersectionStart - pixelRectMm.left;
+  const relativeY = Math.max(r1.top, imgMmRect.top) - pixelRectMm.top;
   const relativeHeight = Math.min(r1.bottom, imgMmRect.bottom) - Math.max(r1.top, imgMmRect.top);
 
   const sx = Math.floor(relativeX * scaleX);
@@ -347,10 +379,8 @@ function computeSimplePixelOverlapFromBitmap(
   }
 
   const sortedCols = Array.from(opaqueColumns).sort((a, b) => a - b);
-  // mmPerColumn: 전체 이미지 기준 픽셀당 mm (scaleX의 역수)
-  const mmPerColumn = imgMmRect.width / _rgba.width;
-  // line 기준 상대 좌표로 변환: imgMmRect.left - r1.left + col * mmPerColumn
-  const imgRelStart = imgMmRect.left - r1.left;
+  const mmPerColumn = pixelRectMm.width / _rgba.width;
+  const imgRelStart = pixelRectMm.left - r1.left;
 
   const parts: OverlapParts[] = [];
   let partStart = sortedCols[0];
@@ -382,6 +412,7 @@ function computeSimplePixelOverlapFromBitmap(
 function computeSimplePixelOverlap(
   r1: MmRect,
   imgMmRect: MmRect,
+  pixelRectMm: MmRect,
   rgba: { data: Uint8Array; width: number; height: number },
   scaleX: number,
   scaleY: number,
@@ -393,8 +424,8 @@ function computeSimplePixelOverlap(
     return { direction: 'NONE', parts: [] };
   }
 
-  const relativeX = imgIntersectionStart - imgMmRect.left;
-  const relativeY = Math.max(r1.top, imgMmRect.top) - imgMmRect.top;
+  const relativeX = imgIntersectionStart - pixelRectMm.left;
+  const relativeY = Math.max(r1.top, imgMmRect.top) - pixelRectMm.top;
   const relativeHeight = Math.min(r1.bottom, imgMmRect.bottom) - Math.max(r1.top, imgMmRect.top);
 
   const sx = Math.floor(relativeX * scaleX);
@@ -428,10 +459,8 @@ function computeSimplePixelOverlap(
   }
 
   const sortedCols = Array.from(opaqueColumns).sort((a, b) => a - b);
-  // mmPerColumn: 전체 이미지 기준 픽셀당 mm (scaleX의 역수)
-  const mmPerColumn = imgMmRect.width / rgba.width;
-  // line 기준 상대 좌표로 변환: imgMmRect.left - r1.left + col * mmPerColumn
-  const imgRelStart = imgMmRect.left - r1.left;
+  const mmPerColumn = pixelRectMm.width / rgba.width;
+  const imgRelStart = pixelRectMm.left - r1.left;
 
   const parts: OverlapParts[] = [];
   let partStart = sortedCols[0];

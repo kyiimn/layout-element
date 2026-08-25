@@ -170,11 +170,30 @@ export class ImageEngine {
   }
 
   computeOverlap(lineRectMm: MmRect): OverlapResult {
-    const absRect: AbsRect = this.displayRect;
+    const displayRect: AbsRect = this.displayRect;
     const overlapMode = this.effectiveOverlapMode;
 
+    // displayRect를 contentAbsRect로 클램프하여 박스 밖 잘린 부분을 오버랩 판정에서 제외.
+    // cover 모드 등에서 displayRect가 contentAbsRect 밖으로 넘칠 때,
+    // 넘친 부분은 실제로 보이지 않으므로 오버랩 영역에서 제외되어야 한다.
+    const clip = this._contentAbsRect;
+    const clampedAbsRect: AbsRect = clip
+      ? {
+          absLeft: Math.max(displayRect.absLeft, clip.absLeft),
+          absTop: Math.max(displayRect.absTop, clip.absTop),
+          absWidth: Math.min(displayRect.absLeft + displayRect.absWidth, clip.absLeft + clip.absWidth) -
+            Math.max(displayRect.absLeft, clip.absLeft),
+          absHeight: Math.min(displayRect.absTop + displayRect.absHeight, clip.absTop + clip.absHeight) -
+            Math.max(displayRect.absTop, clip.absTop),
+        }
+      : displayRect;
+
+    if (clampedAbsRect.absWidth <= 0 || clampedAbsRect.absHeight <= 0) {
+      return { direction: 'NONE', parts: [] };
+    }
+
     return computeOverlapSizeMm(lineRectMm, {
-      absRect,
+      absRect: clampedAbsRect,
       overlapMode,
       overlapPadding: this._data.overlapPadding,
       image: this._rgbaData ? {
@@ -182,6 +201,7 @@ export class ImageEngine {
         overlapMode,
         overlapPadding: this._data.overlapPadding,
         opaqueRowBitmap: this._opaqueRowBitmap,
+        displayRect,
       } : null,
       contentType: 'image',
     });

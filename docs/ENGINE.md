@@ -312,17 +312,18 @@ static create(data: ImageEngineData): ImageEngine
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `computeOverlap` | `(lineRectMm: MmRect): OverlapResult` | 라인과 이미지 `displayRect`의 오버랩 판정 |
+| `computeOverlap` | `(lineRectMm: MmRect): OverlapResult` | 라인과 이미지 `displayRect`의 오버랩 판정. `displayRect`를 `contentAbsRect`로 클램프하여 박스 밖 잘린 부분 제외 |
 | `layout` | `(): { cropRectMm: AbsRect; displayRectMm: AbsRect }` | 크롭/디스플레이 영역 계산 |
 | `buildPrintPostData` | `(absRect: AbsRect): PrintPostData[]` | 후처리 시스템용 printPostData 생성 (mm 단위). `extractData`를 사용하여 ImageData 조립 |
 
 #### 내부 메커니즘
 
 - `displayRect`: `contentAbsRect` + `objectFit` + `originalWidth/Height`로 `computeObjectFit()` 계산
-- `computeOverlap()`: `displayRect`를 `absRect`로 사용하여 `computeOverlapSizeMm()`에 위임
-- `'path'` 모드 + RGBA 데이터: `displayRect`에 매핑된 픽셀 단위 투명도 판정
-- `'box'` 모드: `displayRect` 기반 기하학적 판정
-- `overlapPadding` 설정 시 ellipse 기반 판정 (`ndx² + ndy² ≤ 1`)
+- `computeOverlap()`: `displayRect`를 `contentAbsRect`로 클램프한 영역을 `absRect`로 사용하여 `computeOverlapSizeMm()`에 위임. 원본 `displayRect`는 `image.displayRect`로 전달하여 픽셀 매핑 기준으로 사용
+- **박스 밖 잘린 부분 제외 (클램핑)**: `cover` 모드 등에서 `displayRect`가 `contentAbsRect` 밖으로 넘칠 때, 넘친 부분은 실제로 보이지 않으므로 오버랩 영역에서 제외. `displayRect ∩ contentAbsRect`를 오버랩 판정 영역으로 사용
+- `'path'` 모드 + RGBA 데이터: `image.displayRect`(원본 표시 영역)에 매핑된 픽셀 단위 투명도 판정을 수행하되, 클램프된 영역 내 픽셀만 샘플링
+- `'box'` 모드: 클램프된 `displayRect` 기반 기하학적 판정
+- `overlapPadding` 설정 시 ellipse 기반 판정 (`ndx² + ndy² ≤ 1`). 결과를 클램프 영역으로 x축 클립
 - `DEFAULT_IMAGE_DPI = 72`
 - **`ImageEngineData`에서 `id`/`zIndex` 제거**: `id`/`zIndex`는 `ImageEngine._id`/`_zIndex` 필드에서 관리. `ImageEngineData`는 순수 계산용 타입이므로 메타데이터 제외. 엔진 생성 후 `id`/`zIndex` setter로 설정.
 
@@ -597,7 +598,7 @@ static create(): ColorRegistryEngineImpl
 | `OverlapDirection` | `"NONE" \| "COVERS" \| "PART"` |
 | `OverlapResult` | `{ direction, parts: OverlapParts[] }` |
 | `OverlapInput` | `{ absRect, overlapMode, overlapPadding?, image?, contentType }` |
-| `ImageEngineRef` | `{ rgbaData, overlapMode, overlapPadding? }` |
+| `ImageEngineRef` | `{ rgbaData, overlapMode, overlapPadding?, opaqueRowBitmap?, displayRect? }` |
 | `BoxContentType` | `"image" \| "paragraph" \| "table" \| null` |
 | `FontLoaderEngine` | 인터페이스 |
 | `ParsedFont` | 인터페이스 |

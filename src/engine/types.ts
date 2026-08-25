@@ -131,6 +131,14 @@ export interface ImageEngineRef {
   overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number };
   /** 행별 opaque 컬럼 bitmap (rgbaData 빌드 시 자동 생성). null이면 rgbaData에서 직접 스캔으로 폴백. */
   opaqueRowBitmap?: Uint8Array[] | null;
+  /**
+   * object-fit으로 계산된 이미지 실제 표시 영역 (절대 좌표, mm).
+   * `contentAbsRect` 밖으로 넘친 원본 표시 영역으로, RGBA 픽셀 매핑의 기준.
+   * `absRect` (OverlapInput)가 `contentAbsRect`로 클램프된 영역인 경우,
+   * 픽셀 함수는 이 `displayRect`로 scaleX/scaleY를 계산하여 정확한 픽셀을 샘플링한다.
+   * undefined면 `absRect`와 동일한 영역으로 간주 (기존 동작).
+   */
+  displayRect?: AbsRect | null;
 }
 
 // ─────────────────────────────────────────────────────────────
