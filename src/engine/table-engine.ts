@@ -10,7 +10,7 @@
 import { resolveTableGrid, type GridResolution } from "./table-grid-resolver";
 import { TableBorderStore } from "./border-store";
 import type { TableData, TableRowData, TableCellData, BoxData, PrintPostData, PrintPostBorderEdge, PrintPostDiagonal } from "@/types";
-import { BoxEngine } from "./box-engine";
+import { BoxEngine, type BoxBuildContext } from "./box-engine";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
 import { DocumentEngine } from "./document-engine";
 import type { ParagraphEngine } from "./paragraph-engine";
@@ -347,6 +347,46 @@ export class TableEngine {
    */
   findCellEngineByLabel(label: string): TableCellEngine | undefined {
     return this.cellEngines.find(e => e.cellLabel === label);
+  }
+
+  /**
+   * `layout()` 이후 셀 박스 엔진을 재구축한다.
+   *
+   * `TableElement._layoutStructure()`에서 `engine.layout()` 호출 후
+   * 호출되어야 한다. `TableStructureEditor`에 의한 셀 병합/해제, 행/열
+   * 삽입/삭제 등 구조 변경 후 `TableCellEngine.boxEngine`이 최신 상태를
+   * 반영하도록 보장한다.
+   *
+   * `_buildTableEngine`의 셀 박스 엔진 구축 로직과 동일하게,
+   * `gridResolution.placements`를 기반으로 각 셀의 `boxEngine`을 재구축한다.
+   *
+   * @param parentBox - 테이블을 포함하는 부모 박스 엔진 (셀 박스 엔진 빌드에 필요)
+   * @param ctx - 박스 빌드 컨텍스트 (새 엔진 생성 추적용)
+   */
+  buildCellBoxEngines(parentBox: BoxEngine, ctx: BoxBuildContext): void {
+    const placements = this._gridResolution?.placements ?? [];
+    for (const placement of placements) {
+      const rowEngine = this._rowEngines[placement.gridRow];
+      if (!rowEngine) continue;
+
+      const placementIdx = rowEngine.cellEngines.findIndex(
+        ce => ce.x === placement.x && ce.y === (placement.y - rowEngine.y),
+      );
+      if (placementIdx < 0) continue;
+      const cellEngine = rowEngine.cellEngines[placementIdx];
+
+      const cellChildren = placement.cell.children;
+      if (!cellChildren || cellChildren.length === 0) {
+        cellEngine.boxEngine = null;
+        continue;
+      }
+
+      const cellBoxData = cellChildren.length === 1
+        ? cellChildren[0]
+        : { type: 'box' as const, left: 0, top: 0, width: 1, height: 1, children: cellChildren };
+      const cellBoxEngine = parentBox.buildCellBoxEngine(cellBoxData, cellEngine, ctx);
+      cellEngine.boxEngine = cellBoxEngine;
+    }
   }
 
   /**

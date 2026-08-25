@@ -937,8 +937,17 @@ export class BoxEngine {
 
   /**
    * 테이블 셀 내부 박스 엔진을 구축하거나 재사용하고 layout()을 호출한다.
+   *
+   * `TableEngine.buildCellBoxEngines()`에서도 호출하여
+   * `TableElement._layoutStructure()`가 `engine.layout()` 후 셀 박스 엔진을
+   * 재구축할 수 있도록 공개 메서드로 제공한다.
+   *
+   * @param cellBoxData - 셀 내부 박스 데이터
+   * @param cellEngine - 셀 엔진
+   * @param ctx - 박스 빌드 컨텍스트
+   * @returns 구축 또는 재사용된 BoxEngine
    */
-  private _buildCellBoxEngine(
+  buildCellBoxEngine(
     cellBoxData: BoxData,
     cellEngine: TableCellEngine,
     ctx: BoxBuildContext,
@@ -959,6 +968,12 @@ export class BoxEngine {
     cellBoxEngine.layout(ctx, cellBoxData.children, this._resources!, this._docStyle!);
     return cellBoxEngine;
   }
+
+  /**
+   * `_buildCellBoxEngine`의 internal 별칭.
+   * 기존 호출 호환성을 위해 유지한다.
+   */
+  private _buildCellBoxEngine = this.buildCellBoxEngine;
 
   /**
    * 기존 GridCalculatorEngine의 입력 파라미터와 새 옵션이 동일한지 비교한다.

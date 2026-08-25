@@ -9,6 +9,7 @@ import {
   GridResolution,
   TableEngine,
   type BorderSegment,
+  type BoxBuildContext,
 } from "@/engine";
 import { ColorRegistry } from "@/resource";
 import { Z_INDEX_TABLE_BORDER, Z_INDEX_TABLE_RESIZE, Z_INDEX_TABLE_SELECTION, MIN_TABLE_COL_WIDTH, MIN_TABLE_ROW_HEIGHT } from "@/constants";
@@ -304,6 +305,16 @@ export class LayoutTableElement extends HTMLElement {
       this._engine.data = tableData;
     }
     this._engine.layout(this.items.map(e => e._rawData()));
+
+    // Engine-first: engine.layout()이 row/cell 엔진을 재구축한 후,
+    // 셀 내부 박스 엔진도 재구축하여 extractData가 항상 최신 상태를 반영하도록 한다.
+    // TableStructureEditor (merge/unmerge/insert/delete) 등의 구조 변경 후에도
+    // 이 호출을 통해 TableCellEngine.boxEngine이 올바른 BoxData와 연결된다.
+    const ctx: BoxBuildContext = {
+      prevContentEnginesByBoxId: new Map(),
+      newEnginesCreated: false,
+    };
+    this._engine.buildCellBoxEngines(parentBoxEngine, ctx);
 
     this._gridResolution = this._engine.gridResolution ?? undefined;
     this._resolvedColWidths = this._gridResolution?.colWidths ?? [];
