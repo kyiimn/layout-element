@@ -51,9 +51,6 @@ export class LayoutTableElement extends HTMLElement {
   private _borderLayerEl: HTMLDivElement | null = null;
   private _borderEdgeMap: Map<string, HTMLDivElement> = new Map();
 
-  private _childObserver: MutationObserver | null = null;
-  private _rebuildingChildren = false;
-
   private _colWidths?: number | number[];
   private _borders?: TableBorders;
   private _rows: TableRowData[] = [];
@@ -81,7 +78,6 @@ export class LayoutTableElement extends HTMLElement {
   }
 
   connectedCallback(): void {
-    this._startChildObserver();
     this.layout();
     const editManager = this.editManager;
     if (editManager) {
@@ -94,7 +90,6 @@ export class LayoutTableElement extends HTMLElement {
   }
 
   disconnectedCallback(): void {
-    this._stopChildObserver();
     const editManager = this.editManager;
     if (editManager) {
       editManager.removeEventListener('modeChange', this._onModeChange);
@@ -168,9 +163,7 @@ export class LayoutTableElement extends HTMLElement {
 
   set data(data: TableData) {
     if (!data.id) data = { ...data, id: genUUID() };
-    this._rebuildingChildren = true;
-    try {
-      if (data.id !== undefined) this.id = data.id;
+    if (data.id !== undefined) this.id = data.id;
       this._colWidths = data.colWidths;
       this._borders = data.borders;
       this._rows = data.children ?? [];
@@ -201,15 +194,12 @@ export class LayoutTableElement extends HTMLElement {
 
       for (const child of existingChildren) {
         if (child.id && !usedIds.has(child.id)) {
-          child.remove();
+          Element.prototype.remove.call(child);
         }
       }
 
       this.layout();
       requestAnimationFrame(() => { void this.render(); });
-    } finally {
-      this._rebuildingChildren = false;
-    }
   }
 
   get colWidths(): number | number[] | undefined { return this._colWidths; }
@@ -1019,26 +1009,23 @@ export class LayoutTableElement extends HTMLElement {
     const trEl = document.createElement('x-layout-tr') as LayoutTableRowElement;
     trEl.data = child;
     this.appendChild(trEl);
+    this._rows = [...this._rows, child];
     return trEl;
+  }
+
+  /**
+   * @param id - 삭제할 행의 id
+   */
+  removeChildData(id: string): void {
+    const filtered = this._rows.filter(r => r.id !== id);
+    if (filtered.length === this._rows.length) return;
+    this.data = { ...this._rawData(), children: filtered };
   }
 
   private _appendChildData(child: TableRowData): void {
     const trEl = document.createElement('x-layout-tr') as LayoutTableRowElement;
     trEl.data = child;
     this.appendChild(trEl);
-  }
-
-  private _startChildObserver(): void {
-    if (this._childObserver) return;
-    this._childObserver = new MutationObserver(() => {
-      if (this._rebuildingChildren) return;
-    });
-    this._childObserver.observe(this, { childList: true });
-  }
-
-  private _stopChildObserver(): void {
-    this._childObserver?.disconnect();
-    this._childObserver = null;
   }
 
   get editManager(): EditManager | null {

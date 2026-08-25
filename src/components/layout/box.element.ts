@@ -10,7 +10,7 @@ import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutTableElement } from "./table.element";
 import { LayoutTableCellElement } from "./td.element";
 import { BoxEngine, DocumentEngine, GridCalculatorEngine, ParagraphEngine, ImageEngine, TableEngine, TableCellEngine } from "@/engine";
-import type { BoxEngineParent } from "@/engine";
+import type { BoxEngineParent, BoxBuildContext } from "@/engine";
 
 const HOST_STYLE_ID = '__layout_host_style__';
 
@@ -86,9 +86,6 @@ export class LayoutBoxElement extends HTMLElement {
   /** 선택된 박스의 좌측상단에 표시되는 타입/role 라벨 요소. */
   private _labelEl: HTMLDivElement | null = null;
 
-  /** DOM 자식 변경(추가/제거)을 감지하여 layout + render를 자동 수행하는 MutationObserver. */
-  private _childObserver: MutationObserver | null = null;
-
   /** `data` 세터에서 자식을 재구축할 때 observer 중복 트리거를 방지하는 플래그. */
   private _rebuildingChildren = false;
 
@@ -111,7 +108,6 @@ export class LayoutBoxElement extends HTMLElement {
 
   connectedCallback() {
     this._editManagerRef = this.editManager;
-    this._startChildObserver();
     this.addEventListener('mouseenter', this._onLayoutMouseEnter);
     this.addEventListener('mouseleave', this._onLayoutMouseLeave);
     this.addEventListener('mousedown', this._onPlaceGunMouseDown);
@@ -150,7 +146,6 @@ export class LayoutBoxElement extends HTMLElement {
   get engine(): BoxEngine | undefined { return this._engine; }
 
   disconnectedCallback() {
-    this._stopChildObserver();
     this.removeEventListener('mouseenter', this._onLayoutMouseEnter);
     this.removeEventListener('mouseleave', this._onLayoutMouseLeave);
     this.removeEventListener('mousedown', this._onPlaceGunMouseDown);
@@ -243,6 +238,7 @@ export class LayoutBoxElement extends HTMLElement {
       if (this._model) {
         this._syncGridCalculatorData();
       }
+      this._rebuildChildEngines();
       return;
     }
 
@@ -255,6 +251,7 @@ export class LayoutBoxElement extends HTMLElement {
       }
       this._engine.gridCalculator = this._model;
       this._registerInParent(parentEngine);
+      this._rebuildChildEngines();
     } else {
       this._engine.data = boxData;
       this._engine.parent = parentEngine;
@@ -264,7 +261,38 @@ export class LayoutBoxElement extends HTMLElement {
       if (this._model) {
         this._syncGridCalculatorData();
       }
+      this._rebuildChildEngines();
     }
+  }
+
+  /**
+   * BoxEngine.layout()을 호출하여 자식 엔진 트리를 재구축한다.
+   * resources와 docStyle은 DocumentEngine에서 가져온다.
+   */
+  private _rebuildChildEngines(): void {
+    if (!this._engine) return;
+    const docEl = this._findDocElement();
+    if (!docEl?.engine) return;
+    const docEngine = docEl.engine;
+    const ctx: BoxBuildContext = {
+      prevContentEnginesByBoxId: new Map(),
+      newEnginesCreated: false,
+    };
+    const resources = docEngine.resources;
+    const docStyle = {
+      paragraphStyle: docEngine.data.paragraphStyle,
+      textStyle: docEngine.data.textStyle,
+    };
+    this._engine.layout(ctx, resources, docStyle);
+  }
+
+  private _findDocElement(): LayoutDocumentElement | null {
+    let el: Element | null = this.parentElement;
+    while (el) {
+      if (el instanceof LayoutDocumentElement) return el;
+      el = el.parentElement;
+    }
+    return null;
   }
 
   /**
@@ -686,6 +714,25 @@ export class LayoutBoxElement extends HTMLElement {
     return super.appendChild(node);
   }
 
+  /**
+   * DOM에서 제거될 때 부모의 removeChildData를 호출하여 엔진 데이터를 동기화한다.
+   *
+   * 편집 컨트롤러가 `box.remove()`를 직접 호출할 때, 데이터 기반 삭제 경로로 전환된다.
+   * `data` setter의 reconcile 과정에서 `_rebuildingChildren`이 true일 때는
+   * super.remove()를 직접 호출하여 무한 재귀를 방지한다.
+   */
+  remove(): void {
+    const parent = this.parentElement;
+    if (parent && 'removeChildData' in parent && this.id) {
+      const rebuilding = (parent as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren;
+      if (!rebuilding) {
+        (parent as unknown as { removeChildData: (id: string) => void }).removeChildData(this.id);
+        return;
+      }
+    }
+    super.remove();
+  }
+
   set data(data: BoxData) {
     if (!data.id) data = { ...data, id: genUUID() };
     this._rebuildingChildren = true;
@@ -762,7 +809,7 @@ export class LayoutBoxElement extends HTMLElement {
 
       for (const child of existingChildren) {
         if (child.id && !usedIds.has(child.id)) {
-          child.remove();
+          Element.prototype.remove.call(child);
         }
       }
 
@@ -817,6 +864,27 @@ export class LayoutBoxElement extends HTMLElement {
     }
     this.requestRerenderAffectedParagraphs();
     return this.items[this.items.length - 1] as LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | HTMLElement;
+  }
+
+  /**
+   * 데이터 기반 자식 삭제.
+   *
+   * `this._children`에서 해당 id를 제거하고 `data` setter를 거쳐 엔진 + DOM을 동기화한다.
+   * DOM 직접 `remove()` 대신 이 메서드를 사용해야 엔진 우선 원칙을 준수한다.
+   *
+   * @param id - 삭제할 자식 요소의 id
+   */
+  removeChildData(id: string): void {
+    const current = this._children;
+    if (current === undefined) return;
+    if (Array.isArray(current)) {
+      const filtered = current.filter(c => c.id !== id);
+      if (filtered.length === current.length) return;
+      this.data = { ...this._rawData(), children: filtered };
+    } else {
+      if (current.id !== id) return;
+      this.data = { ...this._rawData(), children: [] };
+    }
   }
 
   private _appendChildData(child: BoxData | ParagraphData | TextData | ImageData | TableData): void {
@@ -999,7 +1067,7 @@ export class LayoutBoxElement extends HTMLElement {
 
   private _syncEngineBoxData(): void {
     if (!this._engine) return;
-    this._engine.data = {
+    const boxData: BoxData = {
       type: 'box',
       id: this.id || undefined,
       left: this._left,
@@ -1014,6 +1082,22 @@ export class LayoutBoxElement extends HTMLElement {
       paddingBottom: this._paddingBottom,
       paddingLeft: this._paddingLeft,
     };
+    this._engine.data = boxData;
+    this._updateParentChildren();
+  }
+
+  /**
+   * 부모의 `this._children`에서 이 요소에 해당하는 항목을 현재 상태로 갱신한다.
+   */
+  private _updateParentChildren(): void {
+    const parent = this.parentElement;
+    if (!parent || !this.id) return;
+    const parentChildren = (parent as unknown as { _children?: BoxData[] })._children;
+    if (!parentChildren || !Array.isArray(parentChildren)) return;
+    const idx = parentChildren.findIndex(c => c.id === this.id);
+    if (idx >= 0) {
+      parentChildren[idx] = this._rawData();
+    }
   }
 
   get data(): BoxData {
@@ -1724,39 +1808,5 @@ export class LayoutBoxElement extends HTMLElement {
     }
   }
 
-  /**
-   * MutationObserver를 시작하여 직접 DOM 조작에 의한 자식 추가/제거를 감지한다.
-   * `data` 세터를 통한 자식 재구축 시에는 `_rebuildingChildren` 플래그로 무시한다.
-   */
-  private _startChildObserver(): void {
-    if (this._childObserver) return;
-    this._childObserver = new MutationObserver(() => {
-      if (this._rebuildingChildren) return;
-      const allChildren = Array.from(this.children).filter(
-        (c): c is HTMLElement & { _rawData: () => BoxData | ParagraphData | TextData | ImageData | TableData } =>
-          c instanceof LayoutBoxElement || c instanceof LayoutTableElement
-          || c instanceof LayoutParagraphElement || c instanceof LayoutImageElement,
-      );
-      const items = allChildren.map(e => e._rawData()).filter(e => !!e) as (BoxData | ParagraphData | TextData | ImageData | TableData)[];
-      if (items.length === 0) {
-        this._children = undefined;
-      } else if (items.length === 1 && items[0].type !== 'box') {
-        this._children = items[0];
-      } else {
-        this._children = items as BoxData[];
-      }
-      this.layout();
-      this.render();
-    });
-    this._childObserver.observe(this, { childList: true });
-  }
-
-  /** MutationObserver 연결을 해제한다. */
-  private _stopChildObserver(): void {
-    if (this._childObserver) {
-      this._childObserver.disconnect();
-      this._childObserver = null;
-    }
-  }
 }
 customElements.define('x-layout-box', LayoutBoxElement);

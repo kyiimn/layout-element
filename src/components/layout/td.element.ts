@@ -60,21 +60,16 @@ export class LayoutTableCellElement extends HTMLElement {
 
   private _inheritStyle?: InheritStyle;
 
-  private _childObserver: MutationObserver | null = null;
-  private _rebuildingChildren = false;
-
   constructor() {
     super();
     this._shadowRoot = this.attachShadow({ mode: "open" });
   }
 
   connectedCallback(): void {
-    this._startChildObserver();
     this.layout();
   }
 
   disconnectedCallback(): void {
-    this._stopChildObserver();
   }
 
   static get observedAttributes(): readonly string[] {
@@ -129,9 +124,7 @@ export class LayoutTableCellElement extends HTMLElement {
 
   set data(data: TableCellData) {
     if (!data.id) data = { ...data, id: genUUID() };
-    this._rebuildingChildren = true;
-    try {
-      if (data.id !== undefined) this.id = data.id;
+    if (data.id !== undefined) this.id = data.id;
       this._colspan = data.colspan ?? 1;
       this._rowspan = data.rowspan ?? 1;
       this.setAttribute('colspan', String(this._colspan));
@@ -173,15 +166,12 @@ export class LayoutTableCellElement extends HTMLElement {
 
       for (const child of existingChildren) {
         if (child.id && !usedIds.has(child.id)) {
-          child.remove();
+          Element.prototype.remove.call(child);
         }
       }
 
       this.layout();
       void this.render();
-    } finally {
-      this._rebuildingChildren = false;
-    }
   }
 
   get colspan(): number { return this._colspan; }
@@ -784,6 +774,29 @@ export class LayoutTableCellElement extends HTMLElement {
   }
 
   /**
+   * 데이터 기반 자식 box 삭제.
+   *
+   * @param id - 삭제할 box의 id
+   */
+  removeChildData(id: string): void {
+    const filtered = this._children.filter(c => c.id !== id);
+    if (filtered.length === this._children.length) return;
+    this.data = { ...this._rawData(), children: filtered };
+  }
+
+  /**
+   * DOM에서 제거될 때 부모 TR의 data를 재설정하여 엔진을 갱신한다.
+   */
+  remove(): void {
+    const parent = this.parentElement;
+    if (parent && 'removeChildData' in parent && this.id) {
+      (parent as unknown as { removeChildData: (id: string) => void }).removeChildData(this.id);
+    } else {
+      super.remove();
+    }
+  }
+
+  /**
    * 자식 박스 DOM 요소를 생성하여 셀에 직접 추가한다.
    *
    * `data` setter를 거치지 않고 DOM만 조작하므로 재귀가 발생하지 않는다.
@@ -795,22 +808,6 @@ export class LayoutTableCellElement extends HTMLElement {
     const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
     boxEl.data = child;
     this.appendChild(boxEl);
-  }
-
-  private _startChildObserver(): void {
-    if (this._childObserver) return;
-    this._childObserver = new MutationObserver(() => {
-      if (this._rebuildingChildren) return;
-      this._children = this.items.map(e => e._rawData()).filter((e): e is BoxData => !!e);
-      this.layout();
-      void this.render();
-    });
-    this._childObserver.observe(this, { childList: true });
-  }
-
-  private _stopChildObserver(): void {
-    this._childObserver?.disconnect();
-    this._childObserver = null;
   }
 
   get editManager(): EditManager | null {

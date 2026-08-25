@@ -2280,7 +2280,7 @@ export class LayoutEditController {
     // 기존 box 제거
     const previousContainer = box.parentElement;
 
-    // layoutRemove 이벤트: box.remove() 이전에 발생해야 리스너가 DOM 분리 전 컨텍스트에 접근 가능
+    // layoutRemove 이벤트: box 제거 이전에 발생해야 리스너가 DOM 분리 전 컨텍스트에 접근 가능
     if (previousContainer) {
       manager._dispatchLayoutRemove({
         element: box,
@@ -2289,7 +2289,11 @@ export class LayoutEditController {
       });
     }
 
-    box.remove();
+    if (previousContainer && 'removeChildData' in previousContainer && box.id) {
+      (previousContainer as unknown as { removeChildData: (id: string) => void }).removeChildData(box.id);
+    } else {
+      box.remove();
+    }
 
     // 새 컨테이너에 데이터 주입하여 새 box 생성
     const newBox = newContainer.appendChildData(boxData) as LayoutBoxElement;

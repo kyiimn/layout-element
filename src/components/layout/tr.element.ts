@@ -35,21 +35,16 @@ export class LayoutTableRowElement extends HTMLElement {
   private _cells: TableCellData[] = [];
   private _inheritStyle?: InheritStyle;
 
-  private _childObserver: MutationObserver | null = null;
-  private _rebuildingChildren = false;
-
   constructor() {
     super();
     this._shadowRoot = this.attachShadow({ mode: "open" });
   }
 
   connectedCallback(): void {
-    this._startChildObserver();
     this.layout();
   }
 
   disconnectedCallback(): void {
-    this._stopChildObserver();
   }
 
   static get observedAttributes(): readonly string[] {
@@ -86,9 +81,7 @@ export class LayoutTableRowElement extends HTMLElement {
 
   set data(data: TableRowData) {
     if (!data.id) data = { ...data, id: genUUID() };
-    this._rebuildingChildren = true;
-    try {
-      if (data.id !== undefined) this.id = data.id;
+    if (data.id !== undefined) this.id = data.id;
       this._height = data.height;
       this.setAttribute('height', String(data.height));
       this._cells = data.children ?? [];
@@ -119,15 +112,12 @@ export class LayoutTableRowElement extends HTMLElement {
 
       for (const child of existingChildren) {
         if (child.id && !usedIds.has(child.id)) {
-          child.remove();
+          Element.prototype.remove.call(child);
         }
       }
 
       this.layout();
       void this.render();
-    } finally {
-      this._rebuildingChildren = false;
-    }
   }
 
   get height(): number { return this._height; }
@@ -233,26 +223,43 @@ export class LayoutTableRowElement extends HTMLElement {
     return tdEl;
   }
 
+  /**
+   * 데이터 기반 자식 셀 삭제.
+   *
+   * @param id - 삭제할 셀의 id
+   */
+  removeChildData(id: string): void {
+    const filtered = this._cells.filter(c => c.id !== id);
+    if (filtered.length === this._cells.length) return;
+    this._cells = filtered;
+    this.data = { ...this._rawData(), children: filtered };
+    const parent = this.parentElement;
+    if (parent && 'rows' in parent) {
+      const tableParent = parent as unknown as { rows: TableRowData[]; data: unknown };
+      const rowIdx = tableParent.rows.findIndex(r => r.id === this.id);
+      if (rowIdx >= 0) {
+        tableParent.rows[rowIdx] = this._rawData();
+        (tableParent as unknown as { layout: () => void }).layout();
+      }
+    }
+  }
+
+  /**
+   * DOM에서 제거될 때 부모 table의 data를 재설정하여 엔진을 갱신한다.
+   */
+  remove(): void {
+    const parent = this.parentElement;
+    if (parent && 'removeChildData' in parent && this.id) {
+      (parent as unknown as { removeChildData: (id: string) => void }).removeChildData(this.id);
+    } else {
+      super.remove();
+    }
+  }
+
   private _appendChildData(child: TableCellData): void {
     const tdEl = document.createElement('x-layout-td') as LayoutTableCellElement;
     tdEl.data = child;
     this.appendChild(tdEl);
-  }
-
-  private _startChildObserver(): void {
-    if (this._childObserver) return;
-    this._childObserver = new MutationObserver(() => {
-      if (this._rebuildingChildren) return;
-      this._cells = this.items.map(e => e._rawData()).filter((e): e is TableCellData => !!e);
-      this.layout();
-      void this.render();
-    });
-    this._childObserver.observe(this, { childList: true });
-  }
-
-  private _stopChildObserver(): void {
-    this._childObserver?.disconnect();
-    this._childObserver = null;
   }
 
   get editManager(): EditManager | null {

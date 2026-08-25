@@ -110,8 +110,6 @@ export class LayoutDocumentElement extends HTMLElement {
    */
   private _dataVersion = 0;
 
-  private _childObserver: MutationObserver | null = null;
-
   private _visibleGuide: boolean;
 
   private _width: number = 0;
@@ -192,7 +190,6 @@ export class LayoutDocumentElement extends HTMLElement {
 
   connectedCallback() {
     this._measurePpm();
-    this._startChildObserver();
     this.addEventListener('mousedown', this._onPlaceGunMouseDown);
     window.addEventListener('keydown', this._onWindowKeyDown, true);
     this.layout();
@@ -200,7 +197,6 @@ export class LayoutDocumentElement extends HTMLElement {
   }
 
   disconnectedCallback() {
-    this._stopChildObserver();
     this.removeEventListener('mousedown', this._onPlaceGunMouseDown);
     window.removeEventListener('keydown', this._onWindowKeyDown, true);
     this._editManager.reset();
@@ -545,6 +541,21 @@ export class LayoutDocumentElement extends HTMLElement {
     return boxEl;
   }
 
+  /**
+   * 데이터 기반 자식 box 삭제.
+   *
+   * `this._children`에서 해당 id를 제거하고 `data` setter를 거쳐 엔진 + DOM을 동기화한다.
+   * DOM 직접 `remove()` 대신 이 메서드를 사용해야 엔진 우선 원칙을 준수한다.
+   *
+   * @param id - 삭제할 box의 id
+   */
+  removeChildData(id: string): void {
+    const newChildren = this._children.filter(c => c.id !== id);
+    if (newChildren.length === this._children.length) return;
+    const current = this._rawData();
+    this.data = { ...current, children: newChildren };
+  }
+
   set data(data: DocumentData) {
     if (!data.id) data = { ...data, id: genUUID() };
     this._dataVersion++;
@@ -598,7 +609,7 @@ export class LayoutDocumentElement extends HTMLElement {
 
       for (const box of existingBoxes) {
         if (box.id && !usedIds.has(box.id)) {
-          box.remove();
+          Element.prototype.remove.call(box);
         }
       }
 
@@ -807,27 +818,6 @@ export class LayoutDocumentElement extends HTMLElement {
     }
     return metrics;
   }
-
-  /**
-   * MutationObserver를 시작하여 직접 DOM 조작에 의한 자식 추가/제거를 감지한다.
-   * `data` 세터를 통한 자식 재구축 시에는 `_rebuildingChildren` 플래그로 무시한다.
-   */
-  private _startChildObserver(): void {
-    if (this._childObserver) return;
-    this._childObserver = new MutationObserver(() => {
-      if (this._rebuildingChildren) return;
-      this._children = this.items.map(e => e._rawData());
-      this.layout();
-      this.render();
-    });
-    this._childObserver.observe(this, { childList: true });
-  }
-
-  private _stopChildObserver(): void {
-    if (this._childObserver) {
-      this._childObserver.disconnect();
-      this._childObserver = null;
-    }
-  }
 }
+
 customElements.define('x-layout-document', LayoutDocumentElement);

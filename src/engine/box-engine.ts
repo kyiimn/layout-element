@@ -11,17 +11,20 @@
  * @file src/engine/box-engine.ts
  */
 
-import type { BoxData, BoxPosition, BoxRole, ParagraphData, ImageData, TableData } from "@/types";
-import type { AbsRect, BoxContentType } from "./types";
+import type { BoxData, BoxPosition, BoxRole, ParagraphData, ImageData, TableData, InheritStyle, ParagraphStyle, TextStyle } from "@/types";
+import type { AbsRect, BoxContentType, EngineResources, GridCalculatorEngineOptions } from "./types";
 import type { PrintPostData } from "@/types";
-import type { GridCalculatorEngine } from "./grid-calculator-engine";
+import { GridCalculatorEngine } from "./grid-calculator-engine";
 import { ImageEngine } from "./image-engine";
+import type { RgbaData } from "./image-engine";
 import { ParagraphEngine } from "./paragraph-engine";
-import { TableEngine } from "./table-engine";
+import { TableEngine, TableCellEngine } from "./table-engine";
 import { checkOverlapMm } from "./overlap-engine";
 import type { BoxEngineParent } from "./types";
-import { DocumentEngine } from "./document-engine";
+import { DocumentEngine, generateEngineId } from "./document-engine";
 import { DEFAULT_BORDER_STYLE } from "@/constants";
+import { valueEqual } from "@/utils/value-equal";
+import { isNodeJs, decodeBase64ImageToRgbaSync } from "./image-decoder";
 
 /**
  * 박스 레이아웃과 좌표를 계산하는 순수 엔진.
@@ -41,6 +44,12 @@ export class BoxEngine {
   private _parent: BoxEngineParent;
   private _childEngines: (BoxEngine | ImageEngine | ParagraphEngine | TableEngine)[] = [];
   private _gridCalculator: GridCalculatorEngine | null = null;
+
+  /** 엔진 트리 구축 시 필요한 리소스. layout() 호출 시 주입된다. */
+  private _resources: EngineResources | null = null;
+
+  /** 문서 기본 스타일 (GC 옵션 및 inheritStyle 계산용). layout() 호출 시 주입된다. */
+  private _docStyle: { paragraphStyle: ParagraphStyle; textStyle: TextStyle } | null = null;
 
   /** Generation counter — incremented on data/parent/gridCalculator change. */
   private _generation: number = 0;
@@ -585,4 +594,428 @@ export class BoxEngine {
     if (p instanceof DocumentEngine) return p;
     return null;
   }
+
+  /**
+   * 이 박스의 자식 엔진 트리를 `this._data.children`로부터 재구축한다.
+   *
+   * DocumentEngine._buildTree()가 최상위 박스에 대해 호출하며,
+   * 내부적으로 재귀적으로 자식 박스의 layout()을 호출한다.
+   * 기존 content 엔진(ParagraphEngine, ImageEngine, TableEngine)은 id 매칭으로 보존한다.
+   *
+   * @param ctx - 트리 구축 컨텍스트 (prevContentEnginesByBoxId, newEnginesCreated)
+   * @param resources - 엔진 리소스 (ppm, fontLoader, colorRegistry)
+   * @param docStyle - 문서 기본 스타일 (paragraphStyle, textStyle)
+   */
+  layout(
+    ctx: BoxBuildContext,
+    resources?: EngineResources,
+    docStyle?: { paragraphStyle: ParagraphStyle; textStyle: TextStyle },
+  ): void {
+    if (resources) this._resources = resources;
+    if (docStyle) this._docStyle = docStyle;
+    if (!this._resources || !this._docStyle) return;
+
+    const boxData = this._data;
+    const parent = this._parent;
+
+    const inheritStyle = this._buildInheritStyle(parent);
+    const parentGc = parent.gridCalculator;
+    const isStatic = boxData.position !== 'absolute';
+    const columns = isStatic && parentGc
+      ? parentGc.columnWidth.slice(boxData.left, boxData.left + boxData.width)
+      : [boxData.width];
+    const gap = isStatic && parentGc
+      ? parentGc.gaps.slice(boxData.left, boxData.left + boxData.width - 1)
+      : [];
+    const gcOptions: GridCalculatorEngineOptions = {
+      width: this.absWidth,
+      height: this.absHeight,
+      paddingTop: boxData.paddingTop,
+      paddingBottom: boxData.paddingBottom,
+      paddingLeft: boxData.paddingLeft,
+      paddingRight: boxData.paddingRight,
+      columns,
+      gap,
+      paragraphStyle: this._docStyle!.paragraphStyle,
+      textStyle: this._docStyle!.textStyle,
+      isBox: true,
+    };
+
+    const existingGc = this._gridCalculator;
+    if (existingGc && this._gcParamsEqual(existingGc, gcOptions)) {
+      // 파라미터 동일 → GC 재사용, _calcColumnGridCoords 재실행 스킵
+    } else {
+      this._gridCalculator = GridCalculatorEngine.create(gcOptions, this._resources!.ppm);
+    }
+
+    const children = boxData.children;
+    if (!children) {
+      if (this._childEngines.length > 0) this._childEngines = [];
+      return;
+    }
+
+    const prevContentEngines = this._childEngines.filter(
+      e => !(e instanceof BoxEngine),
+    ) as (ImageEngine | ParagraphEngine | TableEngine)[];
+    if (prevContentEngines.length === 0 && boxData.id) {
+      const fromMap = ctx.prevContentEnginesByBoxId.get(boxData.id);
+      if (fromMap) prevContentEngines.push(...fromMap);
+    }
+
+    const childEngines: (BoxEngine | ImageEngine | ParagraphEngine | TableEngine)[] = [];
+
+    if (Array.isArray(children)) {
+      for (const childBoxData of children) {
+        const childBE = this._buildChildBoxEngine(childBoxData, ctx);
+        childEngines.push(childBE);
+      }
+    } else {
+      const content = children;
+      if (content.type === 'paragraph' || content.type === 'text') {
+        const paraData: ParagraphData = content.type === 'text'
+          ? { type: 'paragraph', id: content.id, content: content.content, column: 1, gap: 0, paragraphStyle: content.paragraphStyle, textStyle: content.textStyle }
+          : content;
+        const pe = this._buildParagraphEngine(paraData, inheritStyle, ctx);
+        childEngines.push(pe);
+      } else if (content.type === 'image') {
+        const ie = this._buildImageEngine(content, prevContentEngines, ctx);
+        childEngines.push(ie);
+      } else if (content.type === 'table') {
+        const te = this._buildTableEngine(content, ctx);
+        childEngines.push(te);
+      }
+    }
+
+    this._childEngines = childEngines;
+    this._generation++;
+  }
+
+  /**
+   * 자식 BoxData로부터 BoxEngine을 구축하거나 재사용하고 layout()을 재귀 호출한다.
+   * reparent(동일 id 박스가 다른 컨테이너로 이동) 시 기존 부모에서 제거한다.
+   */
+  private _buildChildBoxEngine(
+    childBoxData: BoxData,
+    ctx: BoxBuildContext,
+  ): BoxEngine {
+    if (!childBoxData.id) {
+      childBoxData = { ...childBoxData, id: generateEngineId() };
+    }
+
+    const existingBox = this.findBoxEngineById(childBoxData.id ?? '');
+    if (existingBox) {
+      const oldParent = existingBox.parent;
+      if (oldParent !== this) {
+        this._removeBoxFromParent(existingBox, oldParent);
+      }
+      existingBox.data = childBoxData;
+      existingBox.parent = this;
+    } else {
+      ctx.newEnginesCreated = true;
+    }
+    const childBoxEngine = existingBox ?? BoxEngine.create(childBoxData, this);
+
+    childBoxEngine.layout(ctx, this._resources!, this._docStyle!);
+    return childBoxEngine;
+  }
+
+  /**
+   * 기존 부모 엔진에서 박스 엔진 참조를 제거한다 (reparent 시).
+   */
+  private _removeBoxFromParent(box: BoxEngine, oldParent: BoxEngineParent): void {
+    if (oldParent instanceof BoxEngine) {
+      const children = oldParent.childEngines;
+      const idx = children.indexOf(box);
+      if (idx >= 0) children.splice(idx, 1);
+    } else if (oldParent instanceof DocumentEngine) {
+      const idx = oldParent.childBoxEngines.indexOf(box);
+      if (idx >= 0) oldParent.childBoxEngines.splice(idx, 1);
+    } else if (oldParent instanceof TableCellEngine) {
+      if (oldParent.boxEngine === box) oldParent.boxEngine = null;
+    }
+  }
+
+  /**
+   * ParagraphData로부터 ParagraphEngine을 구축한다.
+   * 기존 단락 엔진이 있을 때, 텍스트/컬럼/스타일/부모 기하가 불변이면
+   * `data` setter(전체 리셋) 대신 `updateOverlayContext`(캐시 보존)를 사용한다.
+   */
+  private _buildParagraphEngine(
+    paraData: ParagraphData,
+    inheritStyle: InheritStyle,
+    ctx: BoxBuildContext,
+  ): ParagraphEngine {
+    if (!paraData.id) {
+      paraData = { ...paraData, id: generateEngineId() };
+    }
+    const gc = this._gridCalculator;
+    if (!gc) {
+      throw new Error('BoxEngine.gridCalculator must be set before building ParagraphEngine');
+    }
+    const column = paraData.column ?? gc.columnWidth;
+    const gap = paraData.gap ?? gc.gaps;
+
+    const overlayEngines = this.overlayElements;
+
+    const newInheritStyle = {
+      ...inheritStyle,
+      parentHeight: this.absHeight,
+      parentWidth: this.absWidth,
+    };
+    const parentAbsRect = this.absRect;
+    const resources = this._resources!;
+
+    const existingPara = this._childEngines.find(e => e instanceof ParagraphEngine);
+    if (existingPara) {
+      const pe = existingPara as ParagraphEngine;
+      const oldData = pe.data;
+
+      const structureUnchanged =
+        oldData.content === paraData.content &&
+        oldData.column === column &&
+        oldData.gap === gap &&
+        oldData.paragraphStyle === paraData.paragraphStyle &&
+        oldData.textStyle === paraData.textStyle &&
+        oldData.inheritStyle.parentWidth === newInheritStyle.parentWidth &&
+        oldData.inheritStyle.parentHeight === newInheritStyle.parentHeight;
+
+      if (structureUnchanged) {
+        pe.updateOverlayContext(overlayEngines, parentAbsRect, newInheritStyle);
+      } else {
+        pe.data = {
+          id: paraData.id,
+          zIndex: paraData.zIndex,
+          content: paraData.content,
+          column,
+          gap,
+          paragraphStyle: paraData.paragraphStyle ?? {},
+          textStyle: paraData.textStyle ?? {},
+          inheritStyle: newInheritStyle,
+          overlayEngines,
+          parentAbsRect,
+          resources,
+          parentBox: this,
+        };
+        pe.layoutStructure();
+      }
+      return pe;
+    }
+
+    ctx.newEnginesCreated = true;
+    const engineData = {
+      id: paraData.id,
+      zIndex: paraData.zIndex,
+      content: paraData.content,
+      column,
+      gap,
+      paragraphStyle: paraData.paragraphStyle ?? {},
+      textStyle: paraData.textStyle ?? {},
+      inheritStyle: newInheritStyle,
+      overlayEngines,
+      parentAbsRect,
+      resources,
+      parentBox: this,
+    };
+    const pe = ParagraphEngine.create(engineData);
+    pe.layoutStructure();
+    return pe;
+  }
+
+  /**
+   * ImageData로부터 ImageEngine을 구축한다.
+   * 기존 rgbaData는 URL이 동일할 때 보존하고, Node.js 환경에서 base64 data URI를 자동 디코딩한다.
+   */
+  private _buildImageEngine(
+    imgData: ImageData,
+    prevContentEngines: (ImageEngine | ParagraphEngine | TableEngine)[],
+    ctx: BoxBuildContext,
+  ): ImageEngine {
+    if (!imgData.id) {
+      imgData = { ...imgData, id: generateEngineId() };
+    }
+    const contentAbsRect = this.contentAbsRect;
+
+    const existing = this._childEngines.find(e => e instanceof ImageEngine)
+      ?? prevContentEngines.find(e => e instanceof ImageEngine);
+    if (existing) {
+      const imgEngine = existing as ImageEngine;
+      const prevUrl = imgEngine.data.url;
+      const preservedRgba = (prevUrl === imgData.url) ? imgEngine.rgbaData : null;
+      imgEngine.data = {
+        url: imgData.url,
+        x: imgData.x,
+        y: imgData.y,
+        width: imgData.width,
+        height: imgData.height,
+        dpi: imgData.dpi,
+        overlapPadding: imgData.overlapPadding,
+        overlapMode: imgData.overlapMode ?? 'path',
+        objectFit: imgData.objectFit ?? 'cover',
+        originalWidth: imgData.originalWidth,
+        originalHeight: imgData.originalHeight,
+      };
+      imgEngine.id = imgData.id;
+      imgEngine.zIndex = imgData.zIndex;
+      imgEngine.contentAbsRect = contentAbsRect;
+      if (preservedRgba) {
+        imgEngine.rgbaData = preservedRgba;
+      } else {
+        imgEngine.rgbaData = this._decodeRgbaIfNode(imgData.url);
+      }
+      return imgEngine;
+    }
+    ctx.newEnginesCreated = true;
+    const newEngine = ImageEngine.create({
+      url: imgData.url,
+      x: imgData.x,
+      y: imgData.y,
+      width: imgData.width,
+      height: imgData.height,
+      dpi: imgData.dpi,
+      overlapPadding: imgData.overlapPadding,
+      overlapMode: imgData.overlapMode ?? 'path',
+      objectFit: imgData.objectFit ?? 'cover',
+      originalWidth: imgData.originalWidth,
+      originalHeight: imgData.originalHeight,
+    });
+    newEngine.id = imgData.id;
+    newEngine.zIndex = imgData.zIndex;
+    newEngine.contentAbsRect = contentAbsRect;
+    newEngine.rgbaData = this._decodeRgbaIfNode(imgData.url);
+    return newEngine;
+  }
+
+  private _decodeRgbaIfNode(url: string): RgbaData | null {
+    if (!isNodeJs()) return null;
+    if (!url.startsWith('data:image/')) return null;
+    return decodeBase64ImageToRgbaSync(url);
+  }
+
+  /**
+   * TableData로부터 TableEngine을 구축하고 셀 내부 박스 엔진을 재귀 구축한다.
+   */
+  private _buildTableEngine(
+    tableData: TableData,
+    ctx: BoxBuildContext,
+  ): TableEngine {
+    if (!tableData.id) {
+      tableData = { ...tableData, id: generateEngineId() };
+    }
+    const existing = this._childEngines.find(e => e instanceof TableEngine) as TableEngine | undefined;
+    const te = existing ?? TableEngine.create(tableData, this);
+    if (existing) {
+      te.data = tableData;
+    }
+    te.layout();
+
+    const placements = te.gridResolution?.placements ?? [];
+    for (const placement of placements) {
+      const rowEngine = te.rowEngines[placement.gridRow];
+      if (!rowEngine) continue;
+
+      const placementIdx = rowEngine.cellEngines.findIndex(
+        ce => ce.x === placement.x && ce.y === (placement.y - rowEngine.y),
+      );
+      if (placementIdx < 0) continue;
+      const cellEngine = rowEngine.cellEngines[placementIdx];
+
+      const cellChildren = placement.cell.children;
+      if (!cellChildren || cellChildren.length === 0) {
+        cellEngine.boxEngine = null;
+        continue;
+      }
+
+      const cellBoxData = cellChildren.length === 1
+        ? cellChildren[0]
+        : { type: 'box' as const, left: 0, top: 0, width: 1, height: 1, children: cellChildren };
+      const cellBoxEngine = this._buildCellBoxEngine(cellBoxData, cellEngine, ctx);
+      cellEngine.boxEngine = cellBoxEngine;
+    }
+
+    return te;
+  }
+
+  /**
+   * 테이블 셀 내부 박스 엔진을 구축하거나 재사용하고 layout()을 호출한다.
+   */
+  private _buildCellBoxEngine(
+    cellBoxData: BoxData,
+    cellEngine: TableCellEngine,
+    ctx: BoxBuildContext,
+  ): BoxEngine {
+    if (!cellBoxData.id) {
+      cellBoxData = { ...cellBoxData, id: generateEngineId() };
+    }
+
+    const existingBox = cellEngine.findBoxEngineById(cellBoxData.id ?? '');
+    if (existingBox) {
+      existingBox.data = cellBoxData;
+      existingBox.parent = cellEngine;
+    } else {
+      ctx.newEnginesCreated = true;
+    }
+    const cellBoxEngine = existingBox ?? BoxEngine.create(cellBoxData, cellEngine);
+
+    cellBoxEngine.layout(ctx, this._resources!, this._docStyle!);
+    return cellBoxEngine;
+  }
+
+  /**
+   * 기존 GridCalculatorEngine의 입력 파라미터와 새 옵션이 동일한지 비교한다.
+   * 동일하면 _calcColumnGridCoords 재실행을 스킵하여 GC 인스턴스를 재사용.
+   */
+  private _gcParamsEqual(
+    existing: GridCalculatorEngine,
+    opts: GridCalculatorEngineOptions,
+  ): boolean {
+    const g = existing as unknown as {
+      _width: number; _height: number;
+      _paddingTop: number; _paddingBottom: number; _paddingLeft: number; _paddingRight: number;
+      _inputColumns: number | number[]; _inputGap: number | number[];
+      _paragraphStyle: object; _textStyle: object; _isBox: boolean;
+    };
+    return g._width === opts.width
+      && g._height === opts.height
+      && g._paddingTop === (opts.paddingTop || 0)
+      && g._paddingBottom === (opts.paddingBottom || 0)
+      && g._paddingLeft === (opts.paddingLeft || 0)
+      && g._paddingRight === (opts.paddingRight || 0)
+      && valueEqual(g._inputColumns, opts.columns)
+      && valueEqual(g._inputGap, opts.gap)
+      && g._paragraphStyle === opts.paragraphStyle
+      && g._textStyle === opts.textStyle
+      && g._isBox === opts.isBox;
+  }
+
+  /**
+   * 부모로부터 상속 스타일을 구성한다.
+   */
+  private _buildInheritStyle(parent: BoxEngineParent): InheritStyle {
+    const gc = parent.gridCalculator;
+    const padTop = (parent as { paddingTop?: number }).paddingTop ?? 0;
+    const padRight = (parent as { paddingRight?: number }).paddingRight ?? 0;
+    const padBottom = (parent as { paddingBottom?: number }).paddingBottom ?? 0;
+    const padLeft = (parent as { paddingLeft?: number }).paddingLeft ?? 0;
+    const docStyle = this._docStyle;
+    return {
+      ...(docStyle?.textStyle ?? {}),
+      ...(docStyle?.paragraphStyle ?? {}),
+      parentWidth: gc ? gc.editableWidth : 0,
+      parentHeight: gc ? gc.editableHeight : 0,
+      paddingTop: padTop,
+      paddingRight: padRight,
+      paddingBottom: padBottom,
+      paddingLeft: padLeft,
+    };
+  }
+}
+
+/**
+ * BoxEngine.layout() 트리 구축 중 공유되는 컨텍스트.
+ * - prevContentEnginesByBoxId: 이전 트리의 content 엔진을 id로 보존하여 rgbaData 등 유지
+ * - newEnginesCreated: 새 엔진이 생성되었는지 여부 (DocumentEngine._syncEngineIdsToDom 스킵 판단)
+ */
+export interface BoxBuildContext {
+  prevContentEnginesByBoxId: Map<string, (ImageEngine | ParagraphEngine | TableEngine)[]>;
+  newEnginesCreated: boolean;
 }
