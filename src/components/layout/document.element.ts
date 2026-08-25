@@ -120,6 +120,7 @@ export class LayoutDocumentElement extends HTMLElement {
   private _paddingBottom: number = 0;
   private _paddingLeft: number = 0;
   private _paddingRight: number = 0;
+  private _children: BoxData[] = [];
 
   private _columns: number | number[] = 1;
   private _gap: number | number[] = 0;
@@ -309,7 +310,7 @@ export class LayoutDocumentElement extends HTMLElement {
       gap: this._gap,
       paragraphStyle: this._paragraphStyle,
       textStyle: this._textStyle,
-      children: this.items.map(e => e._rawData()),
+      children: this._children,
     };
     if (!this._engine) {
       this._engine = DocumentEngine.create(docData, fontLoader, colorRegistry, this._ppm);
@@ -539,6 +540,7 @@ export class LayoutDocumentElement extends HTMLElement {
     const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
     boxEl.data = child;
     this.appendChild(boxEl);
+    this._children = [...this._children, child];
     boxEl.requestRerenderAffectedParagraphs();
     return boxEl;
   }
@@ -561,6 +563,7 @@ export class LayoutDocumentElement extends HTMLElement {
       this._gap = data.gap;
       this._paragraphStyle = data.paragraphStyle;
       this._textStyle = data.textStyle;
+      this._children = data.children || [];
 
       // 자식 reconcile 전에 부모 모델(columnCoords)을 새 데이터로 갱신해야
       // appendChild 중 자식 connectedCallback → layout → relLeft getter가
@@ -698,7 +701,7 @@ export class LayoutDocumentElement extends HTMLElement {
       gap: this.gap,
       paragraphStyle: this.paragraphStyle,
       textStyle: this.textStyle,
-      children: this.items.map(e => e._rawData()),
+      children: this._children,
     }
   }
 
@@ -811,18 +814,9 @@ export class LayoutDocumentElement extends HTMLElement {
    */
   private _startChildObserver(): void {
     if (this._childObserver) return;
-    this._childObserver = new MutationObserver((mutations) => {
+    this._childObserver = new MutationObserver(() => {
       if (this._rebuildingChildren) return;
-
-      let hasChildListChange = false;
-      for (const mutation of mutations) {
-        if (mutation.type === 'childList') {
-          hasChildListChange = true;
-          break;
-        }
-      }
-      if (!hasChildListChange) return;
-
+      this._children = this.items.map(e => e._rawData());
       this.layout();
       this.render();
     });
