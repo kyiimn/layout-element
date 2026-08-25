@@ -458,6 +458,7 @@ export class TableEngine {
           width: seg.width,
           color: colorRegistry ? colorRegistry.get(seg.color) : { c: 0, m: 0, y: 0, k: 255 },
           style: seg.style,
+          lineIndex: seg.lineIndex,
         });
       }
     }
@@ -471,6 +472,8 @@ export class TableEngine {
         height: parentAbsRect.absHeight,
       },
       borderEdges: borderEdges.length > 0 ? borderEdges : undefined,
+      tableRowCount: this._gridResolution?.rowCount,
+      tableColCount: this._gridResolution?.colCount,
     });
 
     // 2. 각 셀별 td 항목 + 내부 box printPostData

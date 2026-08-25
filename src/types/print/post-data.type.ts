@@ -113,9 +113,20 @@ export type PrintPostData<T = BoxData | ImageData | ParagraphData | TableData | 
   /**
    * 테이블 보더 엣지 정보.
    * `data.type === 'table'`인 경우에만 사용.
-   * resolveTableBorders()로 해석된 엣지들의 절대 픽셀 좌표 + 색상/두께/스타일.
+   * `TableBorderStore.toSegments()`로 해석된 엣지들의 절대 mm 좌표 + 색상/두께/스타일.
    */
   borderEdges?: PrintPostBorderEdge[];
+
+  /**
+   * 테이블 보더 렌더링에 필요한 그리드 크기.
+   * `data.type === 'table'`인 경우에만 사용.
+   * `borderEdges`의 `lineIndex`와 함께 외곽/내부 보더 정렬을 계산할 때 필요하다.
+   * - 수평 엣지: `lineIndex === 0` → 외곽 상단, `lineIndex === tableRowCount` → 외곽 하단, 그 외 내부
+   * - 수직 엣지: `lineIndex === 0` → 외곽 좌측, `lineIndex === tableColCount` → 외곽 우측, 그 외 내부
+   */
+  tableRowCount?: number;
+  /** {@link tableRowCount} 참조. */
+  tableColCount?: number;
 
   /**
    * 셀 대각선 정보.
@@ -126,6 +137,11 @@ export type PrintPostData<T = BoxData | ImageData | ParagraphData | TableData | 
 
 /**
  * 인쇄용 보더 엣지 정보 (절대 픽셀 좌표).
+ *
+ * `TableBorderStore.toSegments()` 결과를 절대 좌표로 변환한 것이다.
+ * `x`/`y`는 보더 면의 시작 좌표(셀 경계)이며, 보더 두께에 따른 정렬(외곽/내부)은
+ * 렌더링 시점에 `lineIndex`와 부모 `PrintPostData`의 `tableRowCount`/`tableColCount`로
+ * 계산해야 한다 (EDITING_TABLE.md 9.4 규칙).
  */
 export type PrintPostBorderEdge = {
   /** 엣지 방향 */
@@ -148,6 +164,14 @@ export type PrintPostBorderEdge = {
 
   /** 보더 스타일 */
   style: 'solid' | 'dotted' | 'dashed';
+
+  /**
+   * 그리드 라인 인덱스.
+   * 수평 엣지: 0~rowCount (0=외곽 상단, rowCount=외곽 하단).
+   * 수직 엣지: 0~colCount (0=외곽 좌측, colCount=외곽 우측).
+   * 외곽 판정은 부모 `PrintPostData`의 `tableRowCount`/`tableColCount`와 함께 수행.
+   */
+  lineIndex: number;
 };
 
 /**
