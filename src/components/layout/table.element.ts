@@ -1,6 +1,7 @@
 import {
   TableData,
   TableRowData,
+  TableBorders,
   BorderFace,
   InheritStyle,
 } from "@/types";
@@ -54,6 +55,7 @@ export class LayoutTableElement extends HTMLElement {
   private _rebuildingChildren = false;
 
   private _colWidths?: number | number[];
+  private _borders?: TableBorders;
   private _rows: TableRowData[] = [];
 
   get rows(): TableRowData[] { return this._rows; }
@@ -160,8 +162,7 @@ export class LayoutTableElement extends HTMLElement {
     };
     if (this.id) result.id = this.id;
     if (this._colWidths !== undefined) result.colWidths = this._colWidths;
-    const borders = this._engine?.borderStore?.toTableBorders();
-    if (borders) result.borders = borders;
+    if (this._borders) result.borders = this._borders;
     return result;
   }
 
@@ -171,6 +172,7 @@ export class LayoutTableElement extends HTMLElement {
     try {
       if (data.id !== undefined) this.id = data.id;
       this._colWidths = data.colWidths;
+      this._borders = data.borders;
       this._rows = data.children ?? [];
 
       this._layoutStructure();
@@ -213,6 +215,16 @@ export class LayoutTableElement extends HTMLElement {
   get colWidths(): number | number[] | undefined { return this._colWidths; }
   set colWidths(value: number | number[] | undefined) {
     this._colWidths = value;
+    if (this.isConnected) {
+      this._engine?.layout();
+      this.layout();
+      void this.render();
+    }
+  }
+
+  get borders(): TableBorders | undefined { return this._borders; }
+  set borders(value: TableBorders | undefined) {
+    this._borders = value;
     if (this.isConnected) {
       this._engine?.layout();
       this.layout();
@@ -296,7 +308,7 @@ export class LayoutTableElement extends HTMLElement {
       type: 'table',
       id: this.id || undefined,
       colWidths: this._colWidths,
-      borders: this._engine?.borderStore?.toTableBorders(),
+      borders: this._borders,
       children: this._rows,
     };
 
@@ -532,6 +544,7 @@ export class LayoutTableElement extends HTMLElement {
     }
 
     if (this.isConnected) {
+      this._borders = store.toTableBorders();
       this._renderBorder();
     }
   }
@@ -625,6 +638,7 @@ export class LayoutTableElement extends HTMLElement {
     this._rows = this._serializeChildren();
     this._engine?.layout();
     this._layoutStructure();
+    this._borders = this._engine?.borderStore?.toTableBorders();
     this._renderBorder();
   }
 
