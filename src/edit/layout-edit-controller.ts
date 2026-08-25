@@ -452,7 +452,11 @@ export class LayoutEditController {
             };
             (tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })._renderSelectionOverlay(kc.selection);
             const box = tdEl.items[0];
-            if (box) this._manager.selectLayout(box);
+            if (box) {
+              this._manager.selectLayout(box);
+            } else {
+              this._manager.selectLayout(tdEl);
+            }
             event.preventDefault();
             event.stopPropagation();
             return;
@@ -2574,6 +2578,10 @@ export class LayoutEditController {
     const path = event.composedPath();
     for (const el of path) {
       if (el instanceof LayoutTableCellElement) {
+        const innerBox = el.items[0];
+        if (innerBox && this._isBoxEditable(innerBox)) {
+          return innerBox;
+        }
         const parentBox = el.closest('x-layout-box') as LayoutBoxElement | null;
         if (parentBox && this._isBoxEditable(parentBox)) {
           return parentBox;

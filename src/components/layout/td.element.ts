@@ -7,7 +7,7 @@ import {
   BorderFace,
   InheritStyle,
 } from "@/types";
-import { Z_INDEX_TABLE_DIAGONAL } from "@/constants";
+import { Z_INDEX_TABLE_DIAGONAL, Z_INDEX_TYPE_LABEL } from "@/constants";
 import { genUUID } from "@/utils";
 import { EditManager } from "@/edit/edit-manager";
 import { LayoutBoxElement } from "./box.element";
@@ -56,6 +56,7 @@ export class LayoutTableCellElement extends HTMLElement {
 
   private _diagonalEls: HTMLDivElement[] = [];
   private _placeholderBorderEls: HTMLDivElement[] = [];
+  private _labelEl: HTMLDivElement | null = null;
 
   private _inheritStyle?: InheritStyle;
 
@@ -65,10 +66,14 @@ export class LayoutTableCellElement extends HTMLElement {
   }
 
   connectedCallback(): void {
+    this.addEventListener('mouseenter', this._onLayoutMouseEnter);
+    this.addEventListener('mouseleave', this._onLayoutMouseLeave);
     this.layout();
   }
 
   disconnectedCallback(): void {
+    this.removeEventListener('mouseenter', this._onLayoutMouseEnter);
+    this.removeEventListener('mouseleave', this._onLayoutMouseLeave);
   }
 
   static get observedAttributes(): readonly string[] {
@@ -411,6 +416,7 @@ export class LayoutTableCellElement extends HTMLElement {
     for (const box of this.items) {
       box.layout();
     }
+    this._updateLabelText();
   }
 
   async render(): Promise<void> {
@@ -528,10 +534,35 @@ export class LayoutTableCellElement extends HTMLElement {
       if (!styleEl.sheet) throw new Error("stylesheet is not initialized");
 
       styleEl.sheet.insertRule(":host {}", 0);
-      styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { outline: #ff9800 solid 2px !important; outline-offset: -2px !important; } }", 1);
+      styleEl.sheet.insertRule("@media screen { :host([hovered]) { outline: #4a90d9 solid 1px !important; outline-offset: -1px !important; } }", 1);
+      styleEl.sheet.insertRule("@media screen { :host([selected]) { outline: red solid 1px !important; outline-offset: -1px !important; } }", 2);
+      styleEl.sheet.insertRule("@media screen { :host([reparent-target]) { outline: #ff9800 solid 2px !important; outline-offset: -2px !important; } }", 3);
+      styleEl.sheet.insertRule(`@media screen { .type-label { position: absolute; top: 0; left: 0; padding: 0px 0px 0px 6px; color: #fff; font-family: "Wanted Sans Variable"; font-size: 12px; line-height: 1.3; pointer-events: none; user-select: none; z-index: ${Z_INDEX_TYPE_LABEL}; display: none; white-space: nowrap; } }`, 4);
+      styleEl.sheet.insertRule("@media screen { :host([selected]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 0, 0, 0.85); } }", 5);
+      styleEl.sheet.insertRule("@media screen { :host([hovered]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); } }", 6);
+      styleEl.sheet.insertRule("@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }", 7);
+      styleEl.sheet.insertRule("@media screen { .type-label .parent-btn:hover { opacity: 1; } }", 8);
 
       if (!this._shadowRoot.querySelector('slot')) {
         this._shadowRoot.appendChild(document.createElement('slot'));
+      }
+
+      if (!this._labelEl) {
+        this._labelEl = document.createElement('div');
+        this._labelEl.classList.add('type-label');
+        const labelSpan = document.createElement('span');
+        this._labelEl.appendChild(labelSpan);
+        const parentBtn = document.createElement('span');
+        parentBtn.classList.add('parent-btn');
+        parentBtn.textContent = '▲';
+        parentBtn.title = '상위 요소 선택';
+        this._labelEl.appendChild(parentBtn);
+        this._shadowRoot.appendChild(this._labelEl);
+        this._updateLabelText();
+        parentBtn.addEventListener('click', (e: MouseEvent) => {
+          e.stopPropagation();
+          this._selectParent();
+        });
       }
     }
 
@@ -768,10 +799,19 @@ export class LayoutTableCellElement extends HTMLElement {
    *   // newBox는 셀의 마지막 자식으로 렌더링된다
    */
   appendChildData(child: BoxData): LayoutBoxElement {
+    const wasEmpty = this.items.length === 0;
     this._appendChildData(child);
     this.layout();
     void this.render();
-    return this.items[this.items.length - 1] as LayoutBoxElement;
+    const newBox = this.items[this.items.length - 1] as LayoutBoxElement;
+    if (wasEmpty) {
+      const manager = this.editManager;
+      if (manager && manager.selectedLayouts.includes(this)) {
+        manager.clearLayoutSelection(false);
+        manager.selectLayout(newBox);
+      }
+    }
+    return newBox;
   }
 
   /**
@@ -874,6 +914,61 @@ export class LayoutTableCellElement extends HTMLElement {
       (c): c is LayoutBoxElement => c instanceof LayoutBoxElement,
     );
   }
+
+  private _selectParent(): void {
+    const manager = this.editManager;
+    if (!manager) return;
+    let parent: HTMLElement | null = this.parentElement;
+    while (parent && !(parent instanceof LayoutBoxElement)) {
+      parent = parent.parentElement;
+    }
+    if (!parent || !(parent instanceof LayoutBoxElement)) return;
+    manager.clearLayoutSelection(false);
+    manager.selectLayout(parent);
+    this._onLayoutMouseEnter();
+  }
+
+  private _updateLabelText(): void {
+    if (!this._labelEl) return;
+    const isEmpty = this.items.length === 0;
+    const text = isEmpty ? '빈 셀' : '';
+    const span = this._labelEl.firstElementChild as HTMLSpanElement | null;
+    if (span && span.textContent !== text) {
+      span.textContent = text;
+    }
+    this._labelEl.style.display = isEmpty ? '' : 'none';
+  }
+
+  private _onLayoutMouseEnter = (): void => {
+    const manager = this.editManager;
+    if (!manager) return;
+    if (manager._isDraggingLayout() || manager._isResizingLayout()) return;
+    if (manager._isInsertDragging()) return;
+    let ancestor: Element | null = this.parentElement;
+    while (ancestor) {
+      if (ancestor.hasAttribute('hovered')) {
+        ancestor.removeAttribute('hovered');
+      }
+      ancestor = ancestor.parentElement;
+    }
+    if (this.hasAttribute('selected')) return;
+    this.setAttribute('hovered', '');
+  };
+
+  private _onLayoutMouseLeave = (event: MouseEvent): void => {
+    this.removeAttribute('hovered');
+    const manager = this.editManager;
+    if (!manager) return;
+    if (manager._isDraggingLayout() || manager._isResizingLayout()) return;
+    if (manager._isInsertDragging()) return;
+    const related = event.relatedTarget as Element | null;
+    if (!related) return;
+    let target: Element | null = related;
+    while (target) {
+      if (target === this) return;
+      target = target.parentElement;
+    }
+  };
 }
 
 customElements.define('x-layout-td', LayoutTableCellElement);

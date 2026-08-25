@@ -161,11 +161,35 @@ export class LayoutSelectionController {
           // 처리하도록 이벤트 전파를 막지 않고 return한다.
           if (manager.layoutEditType === 'reparent') {
             const box = tdElForDrag.items[0];
-            if (box) manager.selectLayout(box);
+            if (box) {
+              manager.selectLayout(box);
+            } else {
+              // 빈 TD: TD 자체를 선택한다 (테두리 등 속성 주입 대상).
+              manager.selectLayout(tdElForDrag);
+            }
             return;
           }
           const box = tdElForDrag.items[0];
-          if (box) manager.selectLayout(box);
+          if (box) {
+            manager.selectLayout(box);
+          } else {
+            // 빈 TD: TD 자체를 선택하고 single 셀 블록을 설정한다.
+            // box가 없으므로 셀 블록 overlay가 유일한 시각적 피드백이다.
+            manager.selectLayout(tdElForDrag);
+            kc.selection = {
+              mode: 'single',
+              anchor: { ...coord },
+              focus: { ...coord },
+              selectMode: 'cell',
+            };
+            (tableEl as unknown as { _renderSelectionOverlay: (sel: TableCellSelection | null) => void })
+              ._renderSelectionOverlay(kc.selection);
+            this._manager._dispatchCellSelectionChange({
+              selection: kc.selection,
+              selectedCells: [tdElForDrag],
+              source: 'keyboard',
+            });
+          }
           this._cellDrag = { tableEl, anchor: { ...coord }, moved: false, startX: event.clientX, startY: event.clientY };
           window.addEventListener('pointermove', this._onCellDragMove, true);
           window.addEventListener('pointerup', this._onCellDragUp, true);
@@ -279,8 +303,8 @@ export class LayoutSelectionController {
       selectedCells,
       source: 'keyboard',
     });
-    const boxes = selectedCells.map(c => c.items[0]).filter(Boolean);
-    if (boxes.length > 0) this._manager.selectLayout(boxes);
+    const layouts = selectedCells.map(c => c.items[0] ?? c);
+    if (layouts.length > 0) this._manager.selectLayout(layouts);
   };
 
   private _onCellDragUp = (_event: PointerEvent): void => {
@@ -575,9 +599,15 @@ export class LayoutSelectionController {
     for (const el of path) {
       if (el instanceof LayoutTableCellElement) {
         const manager = this._manager;
-        if (manager.isBoxSelectable(el)) {
+        if (!manager.isBoxSelectable(el)) continue;
+        const box = el.items[0];
+        if (box && manager.isBoxSelectable(box)) {
+          return box;
+        }
+        if (!box) {
           return el;
         }
+        continue;
       }
       if (el instanceof LayoutBoxElement) {
         const manager = this._manager;

@@ -435,6 +435,8 @@ export class TableKeyboardController {
             this._editManager.focusParagraph(para);
           }
         }
+      } else {
+        this._editManager.selectLayout(cell);
       }
     }
   }
@@ -650,9 +652,9 @@ export class TableKeyboardController {
       return;
     }
     if (selection.mode === 'range' || selection.mode === 'all') {
-      const boxes = selectedCells.map(c => c.items[0]).filter(Boolean);
-      if (boxes.length > 0) {
-        this._editManager.selectLayout(boxes);
+      const layouts = selectedCells.map(c => c.items[0] ?? c);
+      if (layouts.length > 0) {
+        this._editManager.selectLayout(layouts);
       }
     } else {
       const cell = this._getCellAt(selection.focus);
@@ -660,6 +662,8 @@ export class TableKeyboardController {
         const box = cell.items[0];
         if (box) {
           this._editManager.selectLayout(box);
+        } else {
+          this._editManager.selectLayout(cell);
         }
       }
     }

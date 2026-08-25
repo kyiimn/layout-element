@@ -296,19 +296,19 @@ focus:  { row: currentCell.row, col: maxCol }
 `handleEscape()`:
 1. `selection.focus` 셀의 TD를 찾는다
 2. `_updateSelection(null)`로 셀 블록 해제
-3. TD 내부 첫 번째 box를 `selectLayout(box)`로 선택
+3. TD 내부 첫 번째 box를 `selectLayout(box)`로 선택. **빈 TD (box 없음)는 TD 자체를 `selectLayout(cell)`로 선택.**
 4. `editManager.textEditMode`가 true일 때만 box 내부 첫 번째 paragraph를 `focusParagraph(para)`로 포커스
 
 `textEditMode`가 false이면 paragraph 포커스를 설정하지 않는다 — 셀 블록 종료 후 레이아웃 편집 모드에서는 box 선택만 유지한다.
 
-### 4.7 셀 클릭 — 셀 블록 미설정
+### 4.7 셀 클릭 — 셀 블록 미설정 (box 있는 TD) / 셀 블록 설정 (빈 TD)
 
 **모든 모드에서 동작** (레이아웃 편집 모드, 읽기 모드, 텍스트 편집 모드 포함; 삽입 모드, Place Gun, spacePressed 제외). 셀을 단순 클릭(드래그 없음)하면:
 - `LayoutSelectionController._onMouseDown`에서 클릭된 TD의 `cellLabel`을 좌표로 변환
 - 같은 문서(`EditManager.docEl` 하위) 내 모든 테이블의 기존 셀 블록을 해제(`kc.selection = null` + overlay 클리어). EditManager는 per-document 인스턴스이므로 다른 문서의 테이블은 간섭하지 않는다.
-- 클릭된 TD의 첫 번째 box를 `selectLayout(box)`로 선택
+- **box가 있는 TD**: 첫 번째 box를 `selectLayout(box)`로 선택. **셀 블록은 설정하지 않음** — 단일 클릭으로는 셀 블록이 활성화되지 않는다.
+- **빈 TD (자식 box 없음)**: TD 자체를 `selectLayout(tdEl)`로 선택 + `single` 모드 셀 블록 설정(`anchor = focus = 클릭한 좌표`). 빈 TD는 box가 없으므로 셀 블록 overlay가 유일한 시각적 피드백이며, TD 자체 선택으로 테두리 등 속성 주입 대상이 된다.
 - `event.preventDefault()` + `event.stopImmediatePropagation()`으로 다른 핸들러 실행 차단
-- **셀 블록은 설정하지 않음** — 단일 클릭으로는 셀 블록이 활성화되지 않는다
 
 비편집 모드에서도 셀 드래그가 동작한다 — 모든 모드(읽기, 레이아웃 편집, 텍스트 편집)에서 셀 드래그로 range 선택이 가능하다. 삽입 모드, Place Gun 활성, spacePressed 상태는 상위에서 차단된다.
 
@@ -318,16 +318,16 @@ focus:  { row: currentCell.row, col: maxCol }
 
 **모든 모드에서 동작** (레이아웃 편집 모드, 읽기 모드, 텍스트 편집 모드 포함; 삽입 모드, Place Gun, spacePressed 제외). table 내부 TD에서 마우스 드래그를 시작하면:
 - 같은 문서(`EditManager.docEl` 하위) 내 모든 테이블의 기존 셀 블록을 해제(자신 포함). EditManager는 per-document 인스턴스이므로 다른 문서의 테이블은 간섭하지 않는다.
-- 클릭된 TD의 첫 번째 box를 `selectLayout(box)`로 선택
+- 클릭된 TD의 첫 번째 box를 `selectLayout(box)`로 선택 (빈 TD면 TD 자체를 `selectLayout(tdEl)`로 선택)
 - `_cellDrag` 상태 시작 (tableEl, anchor, startX/Y, moved=false)
-- **mousedown에서는 셀 블록을 설정하지 않음** — 깜빡임 방지
+- **mousedown에서는 셀 블록을 설정하지 않음** — 깜빡임 방지 (빈 TD는 예외: single 셀 블록 설정)
 - `pointermove` 리스너 등록
 - 드래그 중(3px 이상 이동): `elementsFromPoint`로 마우스 아래 TD를 찾아 focus 좌표 갱신
   - **anchor 셀과 동일한 셀 위에서는 셀 블록을 표시하지 않음** — 마우스가 다른 셀로 넘어간 순간부터 `range` 셀 블록 설정
   - 다시 anchor 셀로 돌아가면 셀 블록 해제
   - range 영역 확장 + overlay 갱신
-  - 선택된 모든 셀의 box를 `selectLayout(boxes)` 배열로 EditManager selection에 동기화
-- 드래그 없음(단일 클릭): 셀 블록 설정 안 함 (4.7 참조)
+  - 선택된 모든 셀의 box를 `selectLayout(layouts)` 배열로 EditManager selection에 동기화. 빈 TD는 TD 자체를 배열에 포함한다 (`c.items[0] ?? c`).
+- 드래그 없음(단일 클릭): box 있는 TD는 셀 블록 설정 안 함 (4.7 참조). 빈 TD는 single 셀 블록 설정.
 - `pointerup` 시 리스너 제거 + `_cellDrag` 해제
 
 ### 4.9 테이블 외부 클릭 — 셀 블록 해제
@@ -341,9 +341,9 @@ focus:  { row: currentCell.row, col: maxCol }
 
 `_updateSelection`과 `_onCellDragMove`에서 range/all 모드일 때:
 - `_getSelectedCells()`로 선택된 모든 셀의 TD를 수집
-- 각 TD의 첫 번째 box를 배열로 수집
-- `selectLayout(boxes)` 배열 호출로 모든 box를 EditManager selection에 반영
-- single 모드는 focus 셀의 box만 `selectLayout(box)`로 선택
+- 각 TD의 첫 번째 box를 배열로 수집. **빈 TD (box 없음)는 TD 자체를 배열에 포함** (`c.items[0] ?? c`).
+- `selectLayout(layouts)` 배열 호출로 모든 요소를 EditManager selection에 반영
+- single 모드는 focus 셀의 box만 `selectLayout(box)`로 선택. 빈 TD는 TD 자체를 `selectLayout(cell)`로 선택.
 
 ---
 
@@ -742,6 +742,19 @@ TD 내부 static box는 `[td-static]` 속성이 설정된다:
 
 TD 내부 `position: 'absolute'` box는 `[td-static]` 속성이 설정되지 않으므로 resize handle과 type-label이 정상 표시된다. absolute box는 TD 내부에서 자유롭게 위치/크기를 조정할 수 있다.
 
+### 10.3a 빈 TD 선택 — TD 자체 선택
+
+빈 TD (자식 box가 없는 TD)를 클릭하면 TD 자체가 `selectLayout`의 선택 대상이 된다. `LayoutElement = LayoutBoxElement | LayoutTableCellElement` 타입이 TD를 포함하므로, `selectLayout(tdEl)`로 TD를 직접 선택할 수 있다.
+
+- **단일 클릭**: TD 자체 선택 + `single` 모드 셀 블록 설정. box가 없으므로 셀 블록 overlay + TD `[selected]` 테두리가 시각적 피드백.
+- **드래그 range**: range에 포함된 빈 TD는 TD 자체가 `selectLayout` 배열에 포함됨 (`c.items[0] ?? c`).
+- **ESC 종료**: 셀 블록 종료 후 빈 TD는 TD 자체가 선택 상태로 유지됨.
+- **시각적 피드백**: TD의 `_applyStyle`이 `:host([hovered])` / `:host([selected])` CSS 룰을 삽입 (`!important`로 우선순위 보장). hover=파란 테두리, selected=빨간 테두리. TD에 `mouseenter`/`mouseleave` 이벤트를 등록하여 `hovered` 속성 토글. `_renderPlaceholderBorder`는 `selected`/`hovered` 상태에서 placeholder 점선을 숨김.
+- **type-label**: 빈 TD에 "빈 셀" 라벨 표시. `▲` parent-btn(상위 요소 선택) 포함. box가 있는 TD는 라벨 숨김 (내부 box가 자체 라벨을 가짐).
+- **속성 주입**: 테두리, 배경색, padding 등 TD 속성은 `selectedLayouts`에 포함된 TD 요소에 직접 주입된다.
+- **하위 box가 있는 TD**: TD 자체가 선택되지 않음. `_findSelectableBoxFromEvent`와 `_findEditableBoxFromEvent`는 하위 box가 있는 TD를 만나면 TD가 아닌 내부 box를 반환.
+- **요소 추가 시 selection 이동**: 빈 TD가 선택된 상태에서 `appendChildData`로 box가 추가되면, TD 선택을 해제하고 새 box를 선택 (`clearLayoutSelection` + `selectLayout(newBox)`).
+
 ### 10.4 상위 요소 선택 화살표 (_selectParent)
 
 TD 내부 box의 type-label에 있는 parent-btn(상위 선택 화살표)을 클릭하면:
@@ -749,12 +762,17 @@ TD 내부 box의 type-label에 있는 parent-btn(상위 선택 화살표)을 클
 - 체인: box → TD → TR → table → table parent box
 - 찾은 box를 `selectLayout()`으로 선택
 
+빈 TD의 type-label에 있는 parent-btn도 동일하게 동작한다:
+- 체인: TD → TR → table → table parent box
+- `clearLayoutSelection(false)` + `selectLayout(parent)` + hover 복원
+
 ### 10.5 appendChildData
 
 `td.appendChildData(child)`:
 - `_layoutStructure()`를 먼저 호출하여 TD의 `GridCalculatorEngine` columnCoords를 갱신한다
 - 새 box를 생성하고 `box.data = child`를 설정 (전체 초기화 파이프라인 실행)
 - box를 TD에 appendChild
+- **빈 TD에서 요소 추가 시 selection 이동**: 추가 전 빈 TD였고 TD가 `selectedLayouts`에 포함되어 있으면, `clearLayoutSelection(false)` + `selectLayout(newBox)`로 selection을 새 box로 이동
 
 ### 10.6 TD에 요소 삽입/배치/재부모 룰
 
