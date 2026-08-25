@@ -158,7 +158,7 @@ export class LayoutTableElement extends HTMLElement {
   _rawData(): TableData {
     const result: TableData = {
       type: 'table',
-      children: this._serializeChildren(),
+      children: this._rows.length > 0 ? this._rows : this._serializeChildren(),
     };
     if (this.id) result.id = this.id;
     if (this._colWidths !== undefined) result.colWidths = this._colWidths;
@@ -300,10 +300,6 @@ export class LayoutTableElement extends HTMLElement {
     const existing = parentBoxEngine.childEngines.find(e => e instanceof TableEngine);
     if (existing) {
       this._engine = existing;
-    }
-
-    if (!this._rebuildingChildren) {
-      this._rows = this._serializeChildren();
     }
 
     const tableData: TableData = {
@@ -637,7 +633,6 @@ export class LayoutTableElement extends HTMLElement {
    */
   refreshBorder(): void {
     if (!this.isConnected) return;
-    this._rows = this._serializeChildren();
     this._engine?.layout();
     this._layoutStructure();
     this._borders = this._engine?.borderStore?.toTableBorders();
@@ -1041,6 +1036,7 @@ export class LayoutTableElement extends HTMLElement {
     if (this._childObserver) return;
     this._childObserver = new MutationObserver(() => {
       if (this._rebuildingChildren) return;
+      this._rows = this._serializeChildren();
       this.layout();
       void this.render();
     });
