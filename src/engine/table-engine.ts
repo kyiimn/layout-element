@@ -493,10 +493,56 @@ export class TableEngine {
             ? colorRegistry.get(cellData.diagonalColor ?? 'black')
             : { c: 0, m: 0, y: 0, k: 255 };
           const diagWidth = cellData.diagonalWidth ?? 0.1;
-          const x1 = cellAbsRect.absLeft;
-          const y1 = cellAbsRect.absTop;
-          const x2 = x1 + cellAbsRect.absWidth;
-          const y2 = y1 + cellAbsRect.absHeight;
+
+          // 대각선 끝점을 보더 안쪽 가장자리로 보정한다 (EDITING_TABLE.md 9.4 정렬 규칙).
+          // 셀 경계(absLeft/absTop/absRight/absBottom)에서 보더 두께만큼 안쪽으로 당긴다.
+          // 외곽 면은 전체 두께, 내부 면은 절반만큼 당긴다.
+          const grid = this._gridResolution;
+          const store = this._borderStore;
+          const placement = grid?.placements.find(p => p.x === cellEngine.x && p.y === cellEngine.y);
+          const gr = placement?.gridRow ?? 0;
+          const gc = placement?.gridCol ?? 0;
+          const spanR = placement?.spanRows ?? 1;
+          const spanC = placement?.spanCols ?? 1;
+          const rowCount = grid?.rowCount ?? 0;
+          const colCount = grid?.colCount ?? 0;
+
+          const maxHWidth = (line: number, fromCol: number, toCol: number): number => {
+            if (!store) return 0;
+            let max = 0;
+            for (let c = fromCol; c <= toCol; c++) {
+              const w = store.getHFace(line, c).width;
+              if (w > max) max = w;
+            }
+            return max;
+          };
+          const maxVWidth = (fromRow: number, toRow: number, line: number): number => {
+            if (!store) return 0;
+            let max = 0;
+            for (let r = fromRow; r <= toRow; r++) {
+              const w = store.getVFace(r, line).width;
+              if (w > max) max = w;
+            }
+            return max;
+          };
+
+          // 상단: line=gr. 외곽(gr===0)이면 전체 두께, 내부면 절반.
+          const topW = maxHWidth(gr, gc, gc + spanC - 1);
+          const topInset = gr === 0 ? topW : topW / 2;
+          // 하단: line=gr+spanR. 외곽(gr+spanR===rowCount)이면 전체, 내부면 절반.
+          const bottomW = maxHWidth(gr + spanR, gc, gc + spanC - 1);
+          const bottomInset = gr + spanR === rowCount ? bottomW : bottomW / 2;
+          // 좌측: line=gc. 외곽(gc===0)이면 전체, 내부면 절반.
+          const leftW = maxVWidth(gr, gr + spanR - 1, gc);
+          const leftInset = gc === 0 ? leftW : leftW / 2;
+          // 우측: line=gc+spanC. 외곽(gc+spanC===colCount)이면 전체, 내부면 절반.
+          const rightW = maxVWidth(gr, gr + spanR - 1, gc + spanC);
+          const rightInset = gc + spanC === colCount ? rightW : rightW / 2;
+
+          const x1 = cellAbsRect.absLeft + leftInset;
+          const y1 = cellAbsRect.absTop + topInset;
+          const x2 = cellAbsRect.absLeft + cellAbsRect.absWidth - rightInset;
+          const y2 = cellAbsRect.absTop + cellAbsRect.absHeight - bottomInset;
           for (const dir of cellData.diagonals) {
             if (dir === 'tl-br') {
               diagonals.push({ direction: 'tl-br', x1, y1, x2, y2, width: diagWidth, color: diagColor });
