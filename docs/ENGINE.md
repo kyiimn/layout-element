@@ -468,6 +468,7 @@ static create(data: TableData, parentBox: BoxEngine): TableEngine
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
 | `layout` | `(rowsData?: TableRowData[]): void` | `rowsData` 파라미터로 그리드 계산. `_data.children`을 읽지 않고 파라미터에서 행 데이터 수신. `setRowMetrics`에 행 ID 주입. |
+| `buildCellBoxEngines` | `(parentBox: BoxEngine, ctx: BoxBuildContext): void` | `layout()` 후 셀 내부 박스 엔진을 재구축. `gridResolution.placements`를 기반으로 각 셀의 `boxEngine`을 재생성/재사용. `TableStructureEditor`의 merge/split/insert/delete 등 구조 변경 후 `TableCellEngine.boxEngine`이 null이 되는 것을 방지. `prevBoxEnginesByBoxId`로 ID 기반 엔진 재사용을 시도하고, 실패하면 새 `BoxEngine`을 생성. `newEnginesCreated` 플래그를 `ctx`에 반영. |
 
 #### `TableCellEngine`
 

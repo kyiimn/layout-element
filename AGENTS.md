@@ -247,6 +247,15 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 - `extractData` returns the adjusted `_columnWidths`/`_gaps`, so `document.data` round-trips preserve the cell-width-corrected values.
 - `TableCellEngine` exposes `readonly isTableCellEngine = true` as a duck-type identifier (used instead of `instanceof` to avoid a circular import between `paragraph-engine.ts` and `table-engine.ts`).
 
+### `TableEngine.buildCellBoxEngines()` — Post-Layout Cell Box Engine Rebuild
+
+- `TableEngine.layout()` rebuilds `_rowEngines` and `TableCellEngine` instances but does **not** rebuild cell box engines (`TableCellEngine.boxEngine`). Cell box engines are only created inside `BoxEngine._buildTableEngine()`, which is called during the parent `BoxEngine.layout()`.
+- After table structure edits (merge/split/insert/delete via `TableStructureEditor`), `TableElement._layoutStructure()` calls `engine.layout()` but the parent `BoxEngine.layout()` is never called, so `boxEngine` stays `null` for cells where `prevBoxEngines` label-based restoration fails.
+- `TableCellEngine.extractData` returns `this._boxEngine ? [this._boxEngine.extractData] : []` — when `boxEngine` is null, `children` is an empty array, losing cell content data.
+- `TableEngine.buildCellBoxEngines(parentBox, ctx)` iterates `gridResolution.placements`, finds matching `TableCellEngine`, and calls `parentBox.buildCellBoxEngine(cellData, cellEngine, ctx)` for each cell to rebuild its `boxEngine`. It reuses existing box engines by ID (`prevBoxEnginesByBoxId`) and creates new ones when needed.
+- `BoxEngine.buildCellBoxEngine(data, cellEngine, ctx)` is the public alias of `_buildCellBoxEngine`, exposing cell box engine construction for `TableEngine` to call after its own `layout()`.
+- `TableElement._layoutStructure()` calls `this._engine.buildCellBoxEngines(parentBoxEngine, ctx)` immediately after `this._engine.layout(...)` with a fresh `BoxBuildContext`, ensuring `extractData` always returns complete cell content after structure edits.
+
 ### `DocumentEngine._buildBoxEngine()` — GC Reuse
 
 - `_buildBoxEngine` checks if the existing `GridCalculatorEngine` has the same parameters via `_gcParamsEqual()`. If equal, the GC instance is reused (skipping `_calcColumnGridCoords`).

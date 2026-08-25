@@ -618,6 +618,12 @@ tableEl.structureEditor.deleteCol();
 
 `_applyNewData(newData)`: 기존 TR을 모두 제거한 후 `table.data = newData`를 설정. 이 방식은 ID 기반 reconciliation으로 인한 box shadow DOM 손상을 방지한다.
 
+`data` setter → `_layoutStructure()` → `TableEngine.layout()` 흐름에서 `layout()`은 `_rowEngines`와 `TableCellEngine`을 재구축하지만, **셀 내부 박스 엔진(`TableCellEngine.boxEngine`)은 재구축하지 않는다.** 셀 박스 엔진은 부모 `BoxEngine._buildTableEngine()`에서만 생성되기 때문이다.
+
+구조 편집(merge/split/insert/delete) 후 `syncDocumentDataFromElement()`가 `document.data` getter를 통해 `extractData`를 호출하면, `TableCellEngine.extractData`가 `this._boxEngine ? [this._boxEngine.extractData] : []`를 반환하므로, `boxEngine`이 null인 셀은 `children`이 빈 배열이 되어 셀 내용 데이터가 손실된다.
+
+이를 방지하기 위해 `TableElement._layoutStructure()`에서 `engine.layout()` 호출 직후 `engine.buildCellBoxEngines(parentBoxEngine, ctx)`를 호출하여 셀 박스 엔진을 재구축한다. `buildCellBoxEngines`는 `gridResolution.placements`를 기반으로 각 셀의 `boxEngine`을 ID 기반 재사용 또는 새로 생성한다.
+
 ---
 
 ## 8. Selection Overlay
