@@ -42,6 +42,7 @@ export class LayoutBoxElement extends HTMLElement {
   private _top: number = 0;
   private _width: number = 0;
   private _height: number = 0;
+  private _children: BoxData[] | ParagraphData | TextData | ImageData | TableData | undefined = undefined;
   private _position: BoxPosition = "static";
   private _backgroundColor?: string;
   private _backgroundOpacity?: number;
@@ -230,6 +231,7 @@ export class LayoutBoxElement extends HTMLElement {
       groupMember: this._groupMember,
       priority: this._priority,
       lock: this._lock || undefined,
+      children: this._children,
     };
 
     const found = this.id ? parentEngine.findBoxEngineById(this.id) : undefined;
@@ -718,6 +720,7 @@ export class LayoutBoxElement extends HTMLElement {
       this._top = data.top;
       this._width = data.width;
       this._height = data.height;
+      this._children = data.children;
 
       // 자식 reconcile 전에 부모 모델(columnCoords)을 새 데이터로 갱신해야
       // appendChild 중 자식 connectedCallback → layout → relLeft getter가
@@ -800,6 +803,18 @@ export class LayoutBoxElement extends HTMLElement {
     */
   appendChildData(child: BoxData | ParagraphData | TextData | ImageData | TableData): LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | HTMLElement {
     this._appendChildData(child);
+    const currentChildren = this._children;
+    if (currentChildren === undefined) {
+      if (child.type === 'box') {
+        this._children = [child] as BoxData[];
+      } else {
+        this._children = child;
+      }
+    } else if (Array.isArray(currentChildren)) {
+      this._children = [...currentChildren, child] as BoxData[];
+    } else {
+      this._children = [currentChildren, child] as BoxData[];
+    }
     this.requestRerenderAffectedParagraphs();
     return this.items[this.items.length - 1] as LayoutBoxElement | LayoutParagraphElement | LayoutImageElement | HTMLElement;
   }
@@ -831,22 +846,6 @@ export class LayoutBoxElement extends HTMLElement {
       (imageEl as LayoutImageElement).data = child;
       this.appendChild(imageEl);
     }
-  }
-
-  /**
-   * 자식 요소들을 `BoxData[] | ParagraphData | TextData | ImageData` 형태로 직렬화한다.
-   * 자식이 1개이고 box가 아닌 경우 단일 객체를 반환하고, 그 외에는 배열을 반환한다.
-   */
-  private _serializeChildren(): BoxData[] | ParagraphData | TextData | ImageData | TableData | undefined {
-    const allChildren = Array.from(this.children).filter(
-      (c): c is HTMLElement & { _rawData: () => BoxData | ParagraphData | TextData | ImageData | TableData } =>
-        c instanceof LayoutBoxElement || c instanceof LayoutTableElement
-        || c instanceof LayoutParagraphElement || c instanceof LayoutImageElement,
-    );
-    const items = allChildren.map(e => e._rawData()).filter(e => !!e) as (BoxData | ParagraphData | TextData | ImageData | TableData)[];
-    if (items.length === 0) return undefined;
-    if (items.length === 1 && items[0].type !== 'box') return items[0];
-    return items as BoxData[];
   }
 
   set left(value: number) {
@@ -1052,7 +1051,7 @@ export class LayoutBoxElement extends HTMLElement {
       groupMember: this._groupMember,
       priority: this.priority,
       lock: this._lock || undefined,
-      children: this._serializeChildren(),
+      children: this._children,
     };
   }
 
@@ -1731,18 +1730,21 @@ export class LayoutBoxElement extends HTMLElement {
    */
   private _startChildObserver(): void {
     if (this._childObserver) return;
-    this._childObserver = new MutationObserver((mutations) => {
+    this._childObserver = new MutationObserver(() => {
       if (this._rebuildingChildren) return;
-
-      let hasChildListChange = false;
-      for (const mutation of mutations) {
-        if (mutation.type === 'childList') {
-          hasChildListChange = true;
-          break;
-        }
+      const allChildren = Array.from(this.children).filter(
+        (c): c is HTMLElement & { _rawData: () => BoxData | ParagraphData | TextData | ImageData | TableData } =>
+          c instanceof LayoutBoxElement || c instanceof LayoutTableElement
+          || c instanceof LayoutParagraphElement || c instanceof LayoutImageElement,
+      );
+      const items = allChildren.map(e => e._rawData()).filter(e => !!e) as (BoxData | ParagraphData | TextData | ImageData | TableData)[];
+      if (items.length === 0) {
+        this._children = undefined;
+      } else if (items.length === 1 && items[0].type !== 'box') {
+        this._children = items[0];
+      } else {
+        this._children = items as BoxData[];
       }
-      if (!hasChildListChange) return;
-
       this.layout();
       this.render();
     });
