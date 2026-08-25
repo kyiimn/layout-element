@@ -10,7 +10,7 @@
 
 export * from "./types";
 export * from "./table-grid-resolver";
-export * from "./border-resolver";
+export * from "./border-store";
 export * from "./grid-calculator-engine";
 export * from "./image-engine";
 export * from "./image-decoder";
