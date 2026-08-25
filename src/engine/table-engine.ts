@@ -8,7 +8,7 @@
  */
 
 import { resolveTableGrid, type GridResolution } from "./table-grid-resolver";
-import { resolveTableBorders } from "./border-resolver";
+import { TableBorderStore } from "./border-store";
 import type { TableData, TableRowData, TableCellData, BoxData, PrintPostData, PrintPostBorderEdge, PrintPostDiagonal } from "@/types";
 import { BoxEngine } from "./box-engine";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
@@ -169,14 +169,6 @@ export class TableCellEngine {
       ...base,
       colspan: base.colspan ?? 1,
       rowspan: base.rowspan ?? 1,
-      borderTopWidth: base.borderTopWidth ?? 0,
-      borderTopStyle: base.borderTopStyle ?? 'solid',
-      borderRightWidth: base.borderRightWidth ?? 0,
-      borderRightStyle: base.borderRightStyle ?? 'solid',
-      borderBottomWidth: base.borderBottomWidth ?? 0,
-      borderBottomStyle: base.borderBottomStyle ?? 'solid',
-      borderLeftWidth: base.borderLeftWidth ?? 0,
-      borderLeftStyle: base.borderLeftStyle ?? 'solid',
       paddingTop: base.paddingTop ?? 0,
       paddingRight: base.paddingRight ?? 0,
       paddingBottom: base.paddingBottom ?? 0,
@@ -248,6 +240,7 @@ export class TableEngine {
   private _parentBox: BoxEngine;
   private _gridResolution: GridResolution | null = null;
   private _rowEngines: TableRowEngine[] = [];
+  private _borderStore: TableBorderStore | null = null;
 
   /**
    * 정적 팩토리 메서드.
@@ -279,6 +272,7 @@ export class TableEngine {
    * 엔진이 현재 관리 중인 상태에서 TableData를 추출한다.
    *
    * `children`은 행 엔진의 `extractData`에서 동적으로 조립한다.
+   * `borders`는 `borderStore`의 현재 상태를 반환한다.
    *
    * @returns 엔진 현재 상태 기반의 TableData
    */
@@ -295,6 +289,7 @@ export class TableEngine {
 
     return {
       ...this._data,
+      borders: this._borderStore?.toTableBorders() ?? this._data.borders,
       children,
     };
   }
@@ -317,6 +312,11 @@ export class TableEngine {
   /** 부모 박스 엔진 */
   get parentBox(): BoxEngine {
     return this._parentBox;
+  }
+
+  /** 보더 면 저장소 (단일 진실 소스) */
+  get borderStore(): TableBorderStore | null {
+    return this._borderStore;
   }
 
   /**
@@ -347,6 +347,7 @@ export class TableEngine {
   /**
    * 테이블 그리드를 해석하고 셀 배치를 계산한다.
    * `resolveTableGrid()`를 호출하고 결과를 행/셀 엔진에 분배.
+   * 보더 면 저장소를 그리드 크기에 맞춰 구축한다.
    */
   layout(): void {
     const parentAbsRect = this._parentBox.absRect;
@@ -360,6 +361,10 @@ export class TableEngine {
       contentHeight,
       this._data.colWidths,
     );
+
+    const rowCount = this._gridResolution.rowCount;
+    const colCount = this._gridResolution.colCount;
+    this._borderStore = TableBorderStore.create(rowCount, colCount, this._data.borders);
 
     // 기존 셀 엔진의 boxEngine 참조를 보존하기 위한 맵.
     // layout()이 재호출될 때마다 새 TableCellEngine이 생성되므로,
@@ -439,17 +444,20 @@ export class TableEngine {
 
     // 1. table 항목 + borderEdges
     const borderEdges: PrintPostBorderEdge[] = [];
-    if (this._gridResolution) {
-      const borderResolution = resolveTableBorders(this._gridResolution);
-      for (const edge of borderResolution.edges) {
+    if (this._gridResolution && this._borderStore) {
+      const segments = this._borderStore.toSegments(
+        this._gridResolution.rowHeights,
+        this._gridResolution.colWidths,
+      );
+      for (const seg of segments) {
         borderEdges.push({
-          direction: edge.direction,
-          x: parentAbsRect.absLeft + edge.x,
-          y: parentAbsRect.absTop + edge.y,
-          length: edge.length,
-          width: edge.width,
-          color: colorRegistry ? colorRegistry.get(edge.color) : { c: 0, m: 0, y: 0, k: 255 },
-          style: edge.style,
+          direction: seg.direction,
+          x: parentAbsRect.absLeft + seg.x,
+          y: parentAbsRect.absTop + seg.y,
+          length: seg.length,
+          width: seg.width,
+          color: colorRegistry ? colorRegistry.get(seg.color) : { c: 0, m: 0, y: 0, k: 255 },
+          style: seg.style,
         });
       }
     }
