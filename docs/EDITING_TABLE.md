@@ -709,7 +709,9 @@ Selection overlay는 다음 시점에 갱신된다:
 
 ### 9.5 후처리 데이터 export
 
-보더 면의 좌표/크기는 `TableEngine.printPostData`를 통해 `PrintPostBorderEdge[]`로 수집된다. `borderStore.toSegments()`가 mm 기준 좌표/두께/색상/스타일을 생성하고, `printPostData`가 절대 좌표로 변환하여 후처리 시스템에 전달. 엔진 트리가 단일 소스다.
+보더 면의 좌표/크기는 `TableEngine.printPostData`를 통해 `PrintPostBorderEdge[]`로 수집된다. `borderStore.toSegments()`가 mm 기준 좌표/두께/색상/스타일/`lineIndex`를 생성하고, `printPostData`가 절대 좌표로 변환하여 후처리 시스템에 전달. 엔진 트리가 단일 소스다.
+
+각 `PrintPostBorderEdge`는 `lineIndex` 필드를 포함한다. 후처리 렌더링 시스템(pdf-gen 등)은 `PrintPostData`의 `tableRowCount`/`tableColCount`와 함께 `lineIndex`를 사용하여 외곽/내부 보더 정렬(9.4 규칙)을 재현한다. `x`/`y`는 보더 면의 시작 좌표(셀 경계)이며, 두께에 따른 오프셋은 렌더링 시점에 계산한다.
 
 ---
 
