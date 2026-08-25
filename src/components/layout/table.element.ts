@@ -158,7 +158,7 @@ export class LayoutTableElement extends HTMLElement {
   _rawData(): TableData {
     const result: TableData = {
       type: 'table',
-      children: this._rows.length > 0 ? this._rows : this._serializeChildren(),
+      children: this._rows,
     };
     if (this.id) result.id = this.id;
     if (this._colWidths !== undefined) result.colWidths = this._colWidths;
@@ -1028,17 +1028,10 @@ export class LayoutTableElement extends HTMLElement {
     this.appendChild(trEl);
   }
 
-  private _serializeChildren(): TableRowData[] {
-    return this.items.map((e) => e._rawData()).filter((e): e is TableRowData => !!e);
-  }
-
   private _startChildObserver(): void {
     if (this._childObserver) return;
     this._childObserver = new MutationObserver(() => {
       if (this._rebuildingChildren) return;
-      this._rows = this._serializeChildren();
-      this.layout();
-      void this.render();
     });
     this._childObserver.observe(this, { childList: true });
   }
