@@ -9,14 +9,15 @@ import type { LayoutTableCellElement } from "@/components/layout/td.element";
  * absolute 모드와 달리 static 모드는 좌표계가 "컬럼 인덱스"와 "라인 수"이므로,
  * 픽셀 단위의 4꼭짓점 containment가 아닌 그리드 범위 containment로 검증해야 한다.
  *
- * 컨테이너의 그리드는 `model.columnCount`(컬럼 수)와 `model.editableHeight / model.lineHeight`
- * (라인 수)로 정의된다. 요소의 `left + width`(컬럼 인덱스 + 스팬)가 컨테이너의
- * 컬럼 수를 초과하거나, `top + height`(라인 인덱스 + 라인 수)가 컨테이너의
- * 라인 수를 초과하면 컨테이너 밖으로 벗어나므로 `false`를 반환한다.
+ * 컨테이너의 그리드는 `model.columnCount`(컬럼 수)와 라인 수로 정의된다.
+ * 요소의 `left + width`(컬럼 인덱스 + 스팬)가 컨테이너의 컬럼 수를 초과하거나,
+ * `top + height`(라인 인덱스 + 라인 수)가 컨테이너의 라인 수를 초과하면
+ * 컨테이너 밖으로 벗어나므로 `false`를 반환한다.
  *
- * `editableHeight`는 마지막 줄의 `lineHeight`를 제외한 높이다. 마지막 줄은 그 아래에
- * 위치하지만 `lineHeight`만큼의 공간이 없으므로 높이가 `lineHeight`보다 짧다.
- * 따라서 라인 수는 `Math.floor(editableHeight / lineHeight) + 1`로 계산한다.
+ * static box 렌더링 원칙: 박스 높이 N라인 = (N-1)*lineHeight + fontSize.
+ * 마지막 라인의 line gap(= lineHeight - fontSize)은 렌더링에서 제외된다.
+ * 컨테이너가 수용할 수 있는 최대 라인 인덱스 + 1 (= 라인 수)은:
+ *   floor((editableTextHeight - fontSize) / lineHeight) + 1
  *
  * @param container - 삽입 대상 컨테이너 (LayoutDocumentElement 또는 LayoutBoxElement)
  * @param elementLeft - 요소의 static left (컬럼 인덱스, 0부터)
@@ -31,9 +32,9 @@ import type { LayoutTableCellElement } from "@/components/layout/td.element";
  * staticGridContains(box, 2, 5, 3, 10); // false
  * // 4컬럼 box에 left=1, width=3 → 컬럼 1,2,3 (인덱스 3 이내) → true
  * staticGridContains(box, 1, 5, 3, 10); // true
- * // editableHeight=180, lineHeight=5 → 36줄 + 1(마지막 줄) = 37줄
- * // top=22, height=15 → bottom=37 ≤ 37 → true
- * staticGridContains(box, 0, 22, 3, 15); // true
+ * // editableTextHeight=180, fontSize=4, lineHeight=5 → (180-4)/5=35.2 → 36줄
+ * // top=22, height=15 → bottom=37 > 36 → false
+ * staticGridContains(box, 0, 22, 3, 15); // false
  * ```
  */
 export function staticGridContains(
@@ -46,10 +47,10 @@ export function staticGridContains(
   const model = container.model;
   if (!model) return false;
 
-  const { columnCount, lineHeight, editableHeight } = model;
+  const { columnCount, lineHeight, editableTextHeight, fontSize } = model;
 
   const containerLineCount = lineHeight > 0
-    ? Math.floor(Math.round((editableHeight / lineHeight) * 1e6) / 1e6) + 1
+    ? Math.floor(Math.round(((editableTextHeight - fontSize) / lineHeight) * 1e6) / 1e6) + 1
     : 0;
 
   if (elementLeft < 0) return false;
@@ -70,6 +71,9 @@ export function staticGridContains(
  * - `width`는 `1 ~ columnCount` 범위로 clamp.
  * - `top`는 `0 ~ containerLineCount - height` 범위로 clamp.
  * - `height`는 `1 ~ containerLineCount` 범위로 clamp.
+ *
+ * `containerLineCount`는 static box 렌더링 원칙((N-1)*lineHeight + fontSize)에
+ * 따라 `floor((editableTextHeight - fontSize) / lineHeight) + 1`로 계산한다.
  *
  * @param container - 삽입 대상 컨테이너
  * @param left - 요소의 static left (컬럼 인덱스)
@@ -96,9 +100,9 @@ export function clampStaticToContainer(
   const model = container.model;
   if (!model) return { left: 0, top: 0, width: 1, height: 1 };
 
-  const { columnCount, lineHeight, editableHeight } = model;
+  const { columnCount, lineHeight, editableTextHeight, fontSize } = model;
   const containerLineCount = lineHeight > 0
-    ? Math.floor(Math.round((editableHeight / lineHeight) * 1e6) / 1e6) + 1
+    ? Math.floor(Math.round(((editableTextHeight - fontSize) / lineHeight) * 1e6) / 1e6) + 1
     : 1;
 
   const clampedWidth = Math.max(1, Math.min(width, columnCount));

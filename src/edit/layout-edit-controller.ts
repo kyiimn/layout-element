@@ -1339,7 +1339,7 @@ export class LayoutEditController {
       return { left: sLeft, top: sTop };
     }
 
-    const { columnCoords, lineHeight, columnCount } = parentModel;
+    const { columnCoords, lineHeight, columnCount, fontSize } = parentModel;
     const editableTextHeight = parentModel.editableTextHeight;
     const startX = columnCoords[sLeft].x1;
     const startY = columnCoords[sLeft].y1 + lineHeight * sTop;
@@ -1360,7 +1360,12 @@ export class LayoutEditController {
     const newLeftMm = startX + dxMm;
     const newTopMm = startY + dyMm;
 
-    const maxTop = Math.max(0, Math.floor(editableTextHeight / lineHeight) - box.height);
+    // static box 렌더링 원칙: 박스 높이 N라인 = (N-1)*lineHeight + fontSize.
+    // 즉, 마지막 라인의 line gap(= lineHeight - fontSize)은 렌더링에서 제외된다.
+    // 드래그 클램핑도 이 원칙을 따라야 한다:
+    //   (top + height - 1) * lineHeight + fontSize ≤ editableTextHeight
+    //   top ≤ (editableTextHeight - fontSize) / lineHeight - height + 1
+    const maxTop = Math.max(0, Math.floor((editableTextHeight - fontSize) / lineHeight) - box.height + 1);
 
     if (!manager.snapEnabled) {
       // 스냅 비활성화: 컬럼/라인을 정수로 반올림하되 자유 배치
@@ -1784,7 +1789,7 @@ export class LayoutEditController {
     const parentModel = box.parentModel;
     if (!parentModel) return { left: sLeft, top: sTop, width: sWidth, height: sHeight };
 
-    const { columnCount, lineHeight } = parentModel;
+    const { columnCount, lineHeight, fontSize } = parentModel;
     const editableTextHeight = parentModel.editableTextHeight;
     const avgColWidth = parentModel.editableWidth / parentModel.columnCount;
     const manager = this._manager;
@@ -1794,11 +1799,11 @@ export class LayoutEditController {
     // 픽셀 단위 델타를 컬럼/라인 정수 단위로 변환 (스냅)
     const deltaCols = Math.round(deltaMmX / avgColWidth);
     const deltaLines = Math.round(deltaMmY / lineHeight);
-    // 박스 최대 라인 수: absHeight 공식(lineHeight × height − (lineHeight − fontSize))이
-    // 마지막 라인 행간을 제외하므로, 부모 하단에 absHeight가 정확히 닿으려면
-    // floor(contentHeight / lineHeight) + 1 라인까지 허용해야 한다.
-    // absHeight getter의 contentHeight 클램핑이 초과분을 부모 하단으로 잘라낸다.
-    const maxLines = Math.floor(editableTextHeight / lineHeight) + 1;
+    // static box 렌더링 원칙: (N-1)*lineHeight + fontSize.
+    // 박스 렌더링 하단이 editableTextHeight를 넘지 않도록:
+    //   (height - 1) * lineHeight + fontSize ≤ editableTextHeight
+    //   height ≤ (editableTextHeight - fontSize) / lineHeight + 1
+    const maxLines = Math.floor((editableTextHeight - fontSize) / lineHeight) + 1;
 
     // static: mm 기준 하위 요소 최대 right/bottom을 컬럼/라인 수로 역변환
     const effectiveMinCols = Math.max(1, Math.ceil(childMinRightMm / avgColWidth));
