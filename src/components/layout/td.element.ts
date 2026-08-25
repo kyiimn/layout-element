@@ -112,7 +112,7 @@ export class LayoutTableCellElement extends HTMLElement {
       type: 'td',
       colspan: this._colspan,
       rowspan: this._rowspan,
-      children: this._serializeChildren(),
+      children: this._children,
     };
     if (this.id) result.id = this.id;
     if (this._backgroundColor) result.backgroundColor = this._backgroundColor;
@@ -797,14 +797,11 @@ export class LayoutTableCellElement extends HTMLElement {
     this.appendChild(boxEl);
   }
 
-  private _serializeChildren(): BoxData[] {
-    return this.items.map((e) => e._rawData()).filter((e): e is BoxData => !!e);
-  }
-
   private _startChildObserver(): void {
     if (this._childObserver) return;
     this._childObserver = new MutationObserver(() => {
       if (this._rebuildingChildren) return;
+      this._children = this.items.map(e => e._rawData()).filter((e): e is BoxData => !!e);
       this.layout();
       void this.render();
     });

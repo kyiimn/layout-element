@@ -78,7 +78,7 @@ export class LayoutTableRowElement extends HTMLElement {
     const result: TableRowData = {
       type: 'tr',
       height: this._height,
-      children: this._serializeChildren(),
+      children: this._cells,
     };
     if (this.id) result.id = this.id;
     return result;
@@ -229,6 +229,7 @@ export class LayoutTableRowElement extends HTMLElement {
     const tdEl = document.createElement('x-layout-td') as LayoutTableCellElement;
     tdEl.data = child;
     this.appendChild(tdEl);
+    this._cells = [...this._cells, child];
     return tdEl;
   }
 
@@ -238,14 +239,11 @@ export class LayoutTableRowElement extends HTMLElement {
     this.appendChild(tdEl);
   }
 
-  private _serializeChildren(): TableCellData[] {
-    return this.items.map((e) => e._rawData()).filter((e): e is TableCellData => !!e);
-  }
-
   private _startChildObserver(): void {
     if (this._childObserver) return;
     this._childObserver = new MutationObserver(() => {
       if (this._rebuildingChildren) return;
+      this._cells = this.items.map(e => e._rawData()).filter((e): e is TableCellData => !!e);
       this.layout();
       void this.render();
     });
