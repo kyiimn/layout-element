@@ -1,15 +1,13 @@
 import {
   TableData,
   TableRowData,
-  CellBorderEdge,
+  BorderFace,
   InheritStyle,
 } from "@/types";
 import {
   GridResolution,
-  BorderResolution,
-  ResolvedBorderEdge,
-  resolveTableBorders,
   TableEngine,
+  type BorderSegment,
 } from "@/engine";
 import { ColorRegistry } from "@/resource";
 import { Z_INDEX_TABLE_BORDER, Z_INDEX_TABLE_RESIZE, Z_INDEX_TABLE_SELECTION, MIN_TABLE_COL_WIDTH, MIN_TABLE_ROW_HEIGHT } from "@/constants";
@@ -20,6 +18,7 @@ import { TableStructureEditor } from "@/edit/table-structure-editor";
 import { LayoutDocumentElement } from "./document.element";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutTableRowElement } from "./tr.element";
+import { TableCellEngine } from "@/engine";
 
 interface TableResizeState {
   isResizing: boolean;
@@ -62,9 +61,6 @@ export class LayoutTableElement extends HTMLElement {
   private _inheritStyle?: InheritStyle;
 
   private _gridResolution?: GridResolution;
-  private _borderResolution?: BorderResolution;
-
-  private _borderOverrides: Map<string, CellBorderEdge> = new Map();
 
   private _resolvedColWidths: number[] = [];
 
@@ -164,6 +160,8 @@ export class LayoutTableElement extends HTMLElement {
     };
     if (this.id) result.id = this.id;
     if (this._colWidths !== undefined) result.colWidths = this._colWidths;
+    const borders = this._engine?.borderStore?.toTableBorders();
+    if (borders) result.borders = borders;
     return result;
   }
 
@@ -298,6 +296,7 @@ export class LayoutTableElement extends HTMLElement {
       type: 'table',
       id: this.id || undefined,
       colWidths: this._colWidths,
+      borders: this._engine?.borderStore?.toTableBorders(),
       children: this._rows,
     };
 
@@ -400,8 +399,8 @@ export class LayoutTableElement extends HTMLElement {
   private _renderBorder(): void {
     if (!this.isConnected) return;
 
-    this._borderResolution = this._resolveBorders();
-    if (!this._borderResolution) return;
+    const segments = this._resolveBorderSegments();
+    if (!segments) return;
 
     if (!this._borderLayerEl) {
       const layer = document.createElement('div');
@@ -417,46 +416,72 @@ export class LayoutTableElement extends HTMLElement {
       this._borderLayerEl = layer;
     }
 
-    this._renderBorderLayer(this._borderResolution.edges);
+    this._renderBorderLayer(segments);
   }
 
-  private _renderBorderLayer(edges: ResolvedBorderEdge[]): void {
+  private _renderBorderLayer(segments: BorderSegment[]): void {
     const ppm = this._getPpm();
     const colorRegistry = ColorRegistry.getInstance();
     const layer = this._borderLayerEl!;
     const newKeys = new Set<string>();
+    const rowCount = this._gridResolution?.rowCount ?? 0;
+    const colCount = this._gridResolution?.colCount ?? 0;
 
-    for (const edge of edges) {
-      newKeys.add(edge.key);
+    for (const seg of segments) {
+      newKeys.add(seg.key);
 
-      let div = this._borderEdgeMap.get(edge.key);
+      let div = this._borderEdgeMap.get(seg.key);
       if (!div || !div.isConnected) {
         div = document.createElement('div');
         div.style.position = 'absolute';
         div.style.pointerEvents = 'none';
         layer.appendChild(div);
-        this._borderEdgeMap.set(edge.key, div);
+        this._borderEdgeMap.set(seg.key, div);
       }
 
-      const cssColor = colorRegistry.getCSSColor(edge.color);
-      const widthPx = Math.ceil(edge.width * ppm);
-      const lengthPx = edge.length * ppm;
+      const cssColor = colorRegistry.getCSSColor(seg.color);
+      const widthPx = Math.ceil(seg.width * ppm);
+      const halfWidthPx = widthPx / 2;
+      const lengthPx = seg.length * ppm;
+      const borderStyleStr = `${widthPx}px ${seg.style} ${cssColor}`;
 
-      if (edge.direction === 'horizontal') {
-        div.style.left = `${edge.x * ppm}px`;
-        div.style.top = `${edge.y * ppm}px`;
+      if (seg.direction === 'horizontal') {
+        const isOuter = seg.lineIndex === 0 || seg.lineIndex === rowCount;
+        let topPx: number;
+        if (isOuter) {
+          if (seg.lineIndex === 0) {
+            topPx = seg.y * ppm;
+          } else {
+            topPx = seg.y * ppm - widthPx;
+          }
+        } else {
+          topPx = seg.y * ppm - halfWidthPx;
+        }
+        div.style.left = `${seg.x * ppm}px`;
+        div.style.top = `${topPx}px`;
         div.style.width = `${lengthPx}px`;
         div.style.height = '0';
-        div.style.borderTop = `${widthPx}px ${edge.style} ${cssColor}`;
+        div.style.borderTop = borderStyleStr;
         div.style.borderBottom = 'none';
         div.style.borderLeft = 'none';
         div.style.borderRight = 'none';
       } else {
-        div.style.left = `${edge.x * ppm}px`;
-        div.style.top = `${edge.y * ppm}px`;
+        const isOuter = seg.lineIndex === 0 || seg.lineIndex === colCount;
+        let leftPx: number;
+        if (isOuter) {
+          if (seg.lineIndex === 0) {
+            leftPx = seg.x * ppm;
+          } else {
+            leftPx = seg.x * ppm - widthPx;
+          }
+        } else {
+          leftPx = seg.x * ppm - halfWidthPx;
+        }
+        div.style.left = `${leftPx}px`;
+        div.style.top = `${seg.y * ppm}px`;
         div.style.width = '0';
         div.style.height = `${lengthPx}px`;
-        div.style.borderLeft = `${widthPx}px ${edge.style} ${cssColor}`;
+        div.style.borderLeft = borderStyleStr;
         div.style.borderTop = 'none';
         div.style.borderBottom = 'none';
         div.style.borderRight = 'none';
@@ -471,23 +496,119 @@ export class LayoutTableElement extends HTMLElement {
     }
   }
 
-  private _resolveBorders(): BorderResolution | undefined {
-    if (!this._gridResolution) return undefined;
-    return resolveTableBorders(this._gridResolution, this._borderOverrides);
+  private _resolveBorderSegments(): BorderSegment[] | undefined {
+    if (!this._gridResolution || !this._engine?.borderStore) return undefined;
+    return this._engine.borderStore.toSegments(
+      this._gridResolution.rowHeights,
+      this._gridResolution.colWidths,
+    );
   }
 
-  setBorderOverride(key: string, edge: CellBorderEdge): void {
-    this._borderOverrides.set(key, edge);
+  /**
+   * 셀의 특정 방향 보더 면에 값을 기록한다.
+   * 셀이 덮는 모든 면 세그먼트에 last-write-wins로 기록한다.
+   *
+   * @param cellEngine - 셀 엔진
+   * @param side - 보더 방향
+   * @param face - 기록할 면 값
+   */
+  setCellBorder(cellEngine: TableCellEngine, side: 'top' | 'right' | 'bottom' | 'left', face: BorderFace): void {
+    const store = this._engine?.borderStore;
+    if (!store) return;
+    const gridRow = cellEngine.cellLabel ? this._findCellGridRow(cellEngine) : -1;
+    const gridCol = cellEngine.cellLabel ? this._findCellGridCol(cellEngine) : -1;
+    if (gridRow < 0 || gridCol < 0) return;
+    const spanCols = this._findCellSpanCols(cellEngine);
+    const spanRows = this._findCellSpanRows(cellEngine);
+
+    if (side === 'top') {
+      store.setHFaceSpan(gridRow, gridCol, gridCol + spanCols - 1, face);
+    } else if (side === 'bottom') {
+      store.setHFaceSpan(gridRow + spanRows, gridCol, gridCol + spanCols - 1, face);
+    } else if (side === 'left') {
+      store.setVFaceSpan(gridRow, gridRow + spanRows - 1, gridCol, face);
+    } else {
+      store.setVFaceSpan(gridRow, gridRow + spanRows - 1, gridCol + spanCols, face);
+    }
+
     if (this.isConnected) {
       this._renderBorder();
     }
   }
 
-  clearBorderOverride(key: string): void {
-    this._borderOverrides.delete(key);
-    if (this.isConnected) {
-      this._renderBorder();
+  /**
+   * 셀의 특정 방향 보더 면을 조회한다.
+   * 병합 셀처럼 여러 면을 덮는 경우, 모두 같으면 그 값, 섞여 있으면 `undefined`.
+   *
+   * @param cellEngine - 셀 엔진
+   * @param side - 보더 방향
+   * @returns 면 값, 또는 `undefined` (섞인 경우)
+   */
+  getCellBorder(cellEngine: TableCellEngine, side: 'top' | 'right' | 'bottom' | 'left'): BorderFace | undefined {
+    const store = this._engine?.borderStore;
+    if (!store) return undefined;
+    const gridRow = this._findCellGridRow(cellEngine);
+    const gridCol = this._findCellGridCol(cellEngine);
+    if (gridRow < 0 || gridCol < 0) return undefined;
+    const spanCols = this._findCellSpanCols(cellEngine);
+    const spanRows = this._findCellSpanRows(cellEngine);
+
+    if (side === 'top') {
+      return store.getHFaceSpan(gridRow, gridCol, gridCol + spanCols - 1);
+    } else if (side === 'bottom') {
+      return store.getHFaceSpan(gridRow + spanRows, gridCol, gridCol + spanCols - 1);
+    } else if (side === 'left') {
+      return store.getVFaceSpan(gridRow, gridRow + spanRows - 1, gridCol);
+    } else {
+      return store.getVFaceSpan(gridRow, gridRow + spanRows - 1, gridCol + spanCols);
     }
+  }
+
+  /**
+   * 셀의 특정 방향 보더 면을 기본값(0)으로 리셋한다.
+   *
+   * @param cellEngine - 셀 엔진
+   * @param side - 보더 방향
+   */
+  resetCellBorder(cellEngine: TableCellEngine, side: 'top' | 'right' | 'bottom' | 'left'): void {
+    const defaultFace: BorderFace = { width: 0, color: 'black', style: 'solid' };
+    this.setCellBorder(cellEngine, side, defaultFace);
+  }
+
+  private _findCellGridRow(cellEngine: TableCellEngine): number {
+    const grid = this._gridResolution;
+    if (!grid) return -1;
+    for (const p of grid.placements) {
+      if (p.cell === cellEngine.cellData) return p.gridRow;
+    }
+    return -1;
+  }
+
+  private _findCellGridCol(cellEngine: TableCellEngine): number {
+    const grid = this._gridResolution;
+    if (!grid) return -1;
+    for (const p of grid.placements) {
+      if (p.cell === cellEngine.cellData) return p.gridCol;
+    }
+    return -1;
+  }
+
+  private _findCellSpanCols(cellEngine: TableCellEngine): number {
+    const grid = this._gridResolution;
+    if (!grid) return 1;
+    for (const p of grid.placements) {
+      if (p.cell === cellEngine.cellData) return p.spanCols;
+    }
+    return 1;
+  }
+
+  private _findCellSpanRows(cellEngine: TableCellEngine): number {
+    const grid = this._gridResolution;
+    if (!grid) return 1;
+    for (const p of grid.placements) {
+      if (p.cell === cellEngine.cellData) return p.spanRows;
+    }
+    return 1;
   }
 
   notifyTablePropertyChange(): void {
@@ -497,7 +618,7 @@ export class LayoutTableElement extends HTMLElement {
   /**
    * TR/TD 요소에서 border/padding/diagonals 데이터를 직렬화하여 `_rows`를 갱신하고
    * border 레이어만 재렌더링한다. 자식 요소 재생성 없이 TD 속성 변경을
-   * border resolver에 반영하기 위해 사용한다.
+   * border store에 반영하기 위해 사용한다.
    */
   refreshBorder(): void {
     if (!this.isConnected) return;
