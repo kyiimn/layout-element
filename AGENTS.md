@@ -133,8 +133,9 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **`BoxEngine.extractData`**: Returns `BoxData` with all fields defaulted via getters (`position ?? 'static'`, `zIndex ?? 0`, `role ?? 'none'`, `borderTopWidth ?? 0`, `borderStyle ?? DEFAULT_BORDER_STYLE`, `priority ?? 0`, `backgroundOpacity ?? 1`, `lock ?? false`, etc.). `children` dynamically assembled from `childEngines.map(e => e.extractData)`.
 - **`ParagraphEngine.extractData`**: Returns `ParagraphData` assembled from the engine's actual internal state — **not** the merged `effectiveParagraphStyle`/`effectiveTextStyle`. `paragraphStyle`/`textStyle` iterate over the injected `_paragraphStyle`/`_textStyle` objects only (주입값 only, excludes inherited and default values), returning `undefined` when the injected object is empty. `column`/`gap` are the adjusted `_columnWidths`/`_gaps` (in table cells, parent `gridCalculator` values; outside, injected values). `overlapMode ?? 'box'`, `zIndex ?? 0`. No caching — a fresh `ParagraphData` object is built on every access.
 - **`ImageEngine.extractData`**: Returns `ImageData` with all fields defaulted via effective getters (`dpi ?? DEFAULT_IMAGE_DPI`, `overlapMode ?? 'path'`, `objectFit ?? 'cover'`, `x/y/width/height ?? 0`, `zIndex ?? 0`).
-- **`TableEngine.extractData`**: Returns `TableData` with `children` assembled from `rowEngines` → `cellEngines` → `boxEngine.extractData`.
-- **`TableCellEngine.extractData`**: Returns `TableCellData` with defaults (`colspan ?? 1`, `rowspan ?? 1`, `borderWidth ?? 0`, `borderStyle ?? 'solid'`, `padding ?? 0`). `children` from `boxEngine.extractData`.
+- **`TableEngine.extractData`**: Returns `TableData` with `children` assembled from `rowEngines` → `cellEngines` → `boxEngine.extractData`. `borders` from `borderStore.toTableBorders()`.
+- **`TableCellEngine.extractData`**: Returns `TableCellData` with defaults (`colspan ?? 1`, `rowspan ?? 1`, `padding ?? 0`). `children` from `boxEngine.extractData`. Border fields removed — borders are managed by `TableBorderStore` on the parent `TableEngine`.
+- **`TableBorderStore` — 테이블 면 기반 보더 관리**: 테이블 보더는 셀이 아닌 테이블이 면(face) 단위로 관리. `TableBorderStore`가 `hFaces[line][col]` (수평, `(rowCount+1) × colCount`) / `vFaces[row][line]` (수직, `rowCount × (colCount+1)`) 배열을 보유. 셀의 border getter/setter는 부모 테이블 스토어에 위임. `setCellBorder(cellEngine, side, face)` / `getCellBorder(cellEngine, side)` / `resetCellBorder(cellEngine, side)`. Last-write-wins. 병합 셀 getter는 여러 면 조회 시 값이 섞여 있으면 `undefined`. 보더 위치: 내부는 셀 경계 중심(`y/x - width/2`), 외곽 상단/좌측은 안쪽으로만(`y/x`), 외곽 하단/우측은 안쪽으로만(`y/x - width`). `BorderSegment.lineIndex`로 외곽 판정.
 
 ### `findEngineById()` — Engine Tree Search
 
@@ -296,7 +297,7 @@ src/
   engine/                    # Node.js-compatible pure computation (no DOM/Canvas/FontFace)
     types.ts
     table-grid-resolver.ts
-    border-resolver.ts
+    border-store.ts
     grid-calculator-engine.ts
     image-engine.ts
     image-decoder.ts

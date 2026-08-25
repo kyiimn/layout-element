@@ -229,6 +229,8 @@
         <button id="btn-tbl-insert-col-left">📋 열 왼쪽에 삽입</button>
         <button id="btn-tbl-delete-row">📋 행 삭제</button>
         <button id="btn-tbl-delete-col">📋 열 삭제</button>
+        <button id="btn-tbl-merge">🔀 셀 병합</button>
+        <button id="btn-tbl-unmerge">🔀 병합 해제</button>
         <button id="btn-tbl-check">🔍 스타일 규칙 검사</button>
       </div>
       <div
@@ -2280,6 +2282,8 @@
         );
         const btnTblDeleteRow = document.getElementById("btn-tbl-delete-row");
         const btnTblDeleteCol = document.getElementById("btn-tbl-delete-col");
+        const btnTblMerge = document.getElementById("btn-tbl-merge");
+        const btnTblUnmerge = document.getElementById("btn-tbl-unmerge");
         const btnTblCheck = document.getElementById("btn-tbl-check");
 
         function getTableAndKc() {
@@ -2360,6 +2364,48 @@
         btnTblDeleteCol.addEventListener("click", () =>
           runTableAction("열 삭제", (kc) => kc.deleteCol()),
         );
+
+        btnTblMerge.addEventListener("click", () => {
+          const ctx = getTableAndKc();
+          if (!ctx) return;
+          const { table, kc } = ctx;
+          const se = table.structureEditor;
+          if (!se) {
+            hint.textContent = "structureEditor가 없습니다.";
+            return;
+          }
+          if (!kc.selection || kc.selection.mode === "single") {
+            hint.textContent = "병합하려면 F5로 셀 블록 선택 후 화살표로 2개 이상 셀을 선택하세요.";
+            return;
+          }
+          try {
+            se.mergeCells(kc.selection);
+            hint.textContent = "셀 병합 완료";
+          } catch (e) {
+            hint.textContent = `병합 에러: ${e.message}`;
+          }
+        });
+
+        btnTblUnmerge.addEventListener("click", () => {
+          const ctx = getTableAndKc();
+          if (!ctx) return;
+          const { table, kc } = ctx;
+          const se = table.structureEditor;
+          if (!se) {
+            hint.textContent = "structureEditor가 없습니다.";
+            return;
+          }
+          if (!kc.selection) {
+            hint.textContent = "병합 해제할 셀을 선택하세요. (F5로 셀 블록 모드 진입 후 선택)";
+            return;
+          }
+          try {
+            se.unmergeCell(kc.selection.focus);
+            hint.textContent = "병합 해제 완료";
+          } catch (e) {
+            hint.textContent = `병합 해제 에러: ${e.message}`;
+          }
+        });
 
         btnTblCheck.addEventListener("click", () => {
           const table = doc.querySelector("x-layout-table");

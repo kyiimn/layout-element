@@ -2,7 +2,7 @@
 
 
 
-> 작성 기준: `src/components/layout/table.element.ts`, `src/components/layout/tr.element.ts`, `src/components/layout/td.element.ts`, `src/edit/table-keyboard-controller.ts`, `src/edit/table-structure-editor.ts`, `src/edit/layout-selection-controller.ts`, `src/edit/layout-edit-controller.ts`, `src/components/layout/box.element.ts`, `src/components/layout/document.element.ts`, `src/engine/table-grid-resolver.ts`, `src/engine/border-resolver.ts`, `src/types/layout/table.type.ts`, `src/types/edit/table-selection.type.ts`, `src/constants/defaults.ts`
+> 작성 기준: `src/components/layout/table.element.ts`, `src/components/layout/tr.element.ts`, `src/components/layout/td.element.ts`, `src/edit/table-keyboard-controller.ts`, `src/edit/table-structure-editor.ts`, `src/edit/layout-selection-controller.ts`, `src/edit/layout-edit-controller.ts`, `src/components/layout/box.element.ts`, `src/components/layout/document.element.ts`, `src/engine/table-grid-resolver.ts`, `src/engine/border-store.ts`, `src/types/layout/table.type.ts`, `src/types/edit/table-selection.type.ts`, `src/constants/defaults.ts`
 >
 > 본 문서는 `layout-element` 라이브러리의 표(table) 요소 렌더링, 셀 블록 선택, 마우스 리사이즈, 키보드 단축키, 구조 편집(병합/삽입/삭제), 이벤트 충돌 처리, 구현 제약사항을 상세히 기술한다.
 >
@@ -15,7 +15,7 @@
 
 ## 1. 개요 (Overview)
 
-표(table)는 신문 레이아웃에서 데이터를 행렬 형태로 배치하는 요소이다. CSS grid로는 처리할 수 없는 mm 단위 정밀 좌표, colspan/rowspan 병합, border-collapse, 후처리(post-processing) 데이터 export를 지원한다.
+표(table)는 신문 레이아웃에서 데이터를 행렬 형태로 배치하는 요소이다. CSS grid로는 처리할 수 없는 mm 단위 정밀 좌표, colspan/rowspan 병합, 테이블 면(face) 기반 보더 관리, 후처리(post-processing) 데이터 export를 지원한다.
 
 표는 독립된 레이아웃 요소가 아니라 `<x-layout-box>`의 content type이다. box가 표의 위치/크기/배경/외곽 테두리를 정의하고, `<x-layout-table>`은 box 내부 영역을 행×열 그리드로 분할하여 셀을 배치한다.
 
@@ -23,9 +23,9 @@
 
 ```
 <x-layout-box contentType="table">
-  <x-layout-table>               ← 그리드 컨테이너, border 렌더링, resize handle, selection overlay
+    <x-layout-table>               ← 그리드 컨테이너, border 면 렌더링, resize handle, selection overlay
     <x-layout-tr>                ← 행. height(mm)
-      <x-layout-td>              ← 셀. colspan/rowspan, border 선언, padding, 배경색, 대각선
+      <x-layout-td>              ← 셀. colspan/rowspan, padding, 배경색, 대각선 (border는 부모 테이블이 관리)
         <x-layout-box>           ← 셀 내용 컨테이너 (static box, cell 크기에 자동 맞춤)
           <x-layout-paragraph>   ← 단락 (텍스트)
           <x-layout-image>       ← 이미지
@@ -37,7 +37,7 @@
 ```
 box.layout() → table.layout() → _layoutStructure() (GridResolution 갱신)
                              → _applyStyle() (:host CSS)
-                             → _renderBorder() (border-collapse 레이어)
+                             → _renderBorder() (테이블 면 기반 보더 레이어)
                              → _renderResizeHandles() (편집 모드에서만)
                              → _renderSelectionOverlay() (selection 있을 때)
                              → _propagateInheritStyle() → tr.layout() → td.layout() → box.layout()
@@ -74,7 +74,67 @@ type TableRowData = {
 };
 ```
 
-### 2.3 TableCellData
+### 2.3 TableData / TableBorders / BorderFace / TableCellData
+
+테이블 보더는 셀이 아닌 **테이블이 면(face) 단위로 관리**한다. `TableCellData`는 보더 필드를 가지지 않는다.
+
+#### BorderFace
+
+단일 보더 면의 값. 기본값은 `{ width: 0, color: 'black', style: 'solid' }` (그리지 않음).
+
+```typescript
+type BorderFace = {
+  width: number;        // mm. 0 = 그리지 않음
+  color: string;       // ColorRegistry CMYK 색상 이름
+  style: BoxBorderStyle; // 'solid' | 'dotted' | 'dashed'
+};
+```
+
+#### TableBorders
+
+테이블 전체 보더 면 집합. 그리드 위에 존재하는 독립적인 면들이다.
+
+```typescript
+type TableBorders = {
+  h: BorderFace[][];  // 수평 면. hFaces[line][col]. line: 0~rowCount, col: 0~colCount-1
+                       // 배열 크기: (rowCount + 1) × colCount
+  v: BorderFace[][];  // 수직 면. vFaces[row][line]. row: 0~rowCount-1, line: 0~colCount
+                       // 배열 크기: rowCount × (colCount + 1)
+};
+```
+
+3×3 테이블 예시:
+```
+     col0      col1      col2
+   ┌─────────┬─────────┬─────────┐
+h0 │ h[0][0] │ h[0][1] │ h[0][2] │  ← 최상단 (3개)
+   ├─────────┼─────────┼─────────┤
+h1 │ h[1][0] │ h[1][1] │ h[1][2] │  ← 1-2행 사이
+   ├─────────┼─────────┼─────────┤
+h2 │ h[2][0] │ h[2][1] │ h[2][2] │  ← 2-3행 사이
+   ├─────────┼─────────┼─────────┤
+h3 │ h[3][0] │ h[3][1] │ h[3][2] │  ← 최하단
+   └─────────┴─────────┴─────────┘
+   v[0][0]   v[0][1]   v[0][2]   v[0][3]  ← 1행 (4개)
+   v[1][0]   v[1][1]   v[1][2]   v[1][3]  ← 2행
+   v[2][0]   v[2][1]   v[2][2]   v[2][3]  ← 3행
+```
+
+#### TableData
+
+```typescript
+type TableData = {
+  type: 'table';
+  id?: string;
+  colWidths?: number | number[];  // mm
+  borders?: TableBorders;        // 테이블 전체 보더 면. 생략 시 모든 면이 기본값(그리지 않음)
+  children: TableRowData[];
+};
+```
+
+#### TableCellData
+
+셀 자체는 보더를 보유하지 않는다. 셀의 border getter/setter는 부모 테이블의 면 저장소에 대한 프록시 역할만 한다.
 
 ```typescript
 type TableCellData = {
@@ -82,21 +142,11 @@ type TableCellData = {
   id?: string;
   colspan?: number;        // 기본 1
   rowspan?: number;        // 기본 1
-  borderTopWidth?: number;       // mm
-  borderTopColor?: string;        // ColorRegistry CMYK 색상 이름
-  borderTopStyle?: BoxBorderStyle; // 'solid' | 'dotted' | 'dashed', 기본 'solid'
-  borderBottomWidth?: number;
-  borderBottomColor?: string;
-  borderBottomStyle?: BoxBorderStyle;
-  borderLeftWidth?: number;
-  borderLeftColor?: string;
-  borderLeftStyle?: BoxBorderStyle;
-  borderRightWidth?: number;
-  borderRightColor?: string;
-  borderRightStyle?: BoxBorderStyle;
   backgroundColor?: string;     // ColorRegistry CMYK 색상 이름
   backgroundOpacity?: number;   // 0~1, 기본 1
   diagonals?: Array<'tl-br' | 'tr-bl'>;
+  diagonalWidth?: number;       // mm, 기본 0.1
+  diagonalColor?: string;       // 기본 'black'
   paddingTop?: number;          // mm
   paddingRight?: number;        // mm
   paddingBottom?: number;        // mm
@@ -105,17 +155,22 @@ type TableCellData = {
 };
 ```
 
-### 2.4 CellBorderEdge
+### 2.4 셀 보더 → 면 매핑 규칙
 
-`CellBorderEdge`는 `border-resolver`의 override 메커니즘(`resolveTableBorders`의 `overrides` 파라미터, `LayoutTableElement.setBorderOverride`)에서 키 → 엣지 매핑을 위해 사용되는 타입이다. `TableCellData` 본체에서는 방향별 개별 속성(`borderTopWidth`/`borderTopColor`/...)으로 풀어서 선언하므로 `CellBorderEdge`를 직접 사용하지 않는다.
+셀 `(gridRow=r, gridCol=c, spanCols=w, spanRows=h)`의 보더는 테이블 면에 매핑된다:
 
-```typescript
-type CellBorderEdge = {
-  width: number;           // mm
-  color: string;           // ColorRegistry CMYK 이름
-  style?: BoxBorderStyle;  // 'solid' | 'dashed' | ..., 기본 'solid'
-};
-```
+| 셀 보더     | 매핑되는 면                           | 세그먼트 수 |
+| ----------- | -------------------------------------- | ---------- |
+| borderTop   | `hFaces[r][c..c+w-1]`                   | w개        |
+| borderBottom | `hFaces[r+h][c..c+w-1]`                 | w개        |
+| borderLeft  | `vFaces[c][r..r+h-1]`                   | h개        |
+| borderRight | `vFaces[c+w][r..r+h-1]`                 | h개        |
+
+**Last-write-wins**: `layout()` 시 셀 데이터를 순회하며 면에 기록. 나중에 기록된 셀의 값이 우선.
+
+**병합 셀 getter**: 여러 세그먼트를 조회할 때, 모두 같으면 그 값, 하나라도 다르면 `undefined`를 반환.
+
+**구멍(hole)**: 명시적으로 `width: 0`을 설정하면 구멍이 된다. `undefined`(미설정) 상태에서는 다른 셀의 설정이 유지되지만, 명시적 `0`은 last-write-wins로 다른 값을 덮어쓴다.
 
 ---
 
@@ -464,7 +519,7 @@ Tab/Shift+Tab은 `EditManager.navigateByTab(shiftKey)`가 먼저 처리한다. `
 
 **삽입 규칙**:
 - 새 행의 높이: 현재 행의 높이를 1/2로 분할 — 기존 행은 절반, 새 행은 절반
-- 새 행의 셀: 현재 행의 셀 구조(border, 배경색, padding, colspan)를 복제
+- 새 행의 셀: 현재 행의 셀 구조(배경색, padding, colspan)를 복제. 보더는 테이블 면에서 관리되므로 셀 복제에 포함되지 않음
 - `rowspanCovered` 맵을 사용하여 각 셀의 논리 위치 추적
 - **최소 높이 보장**: 분할 후 절반이 `MIN_TABLE_ROW_HEIGHT`(5mm) 미만이면 `normalizeWidths`가 다른 행에서 균등하게 차감하여 보장. 테이블 전체 크기로 최소 높이를 보장할 수 없으면 비례 축소
 - **병합된 셀 처리**:
@@ -490,7 +545,7 @@ tableEl.structureEditor.insertRowAbove();
 
 **삽입 규칙**:
 - 새 열의 너비: 현재 열의 너비를 1/2로 분할 — 기존 열은 절반, 새 열은 절반
-- 새 열의 셀: 현재 열의 셀 구조(border, 배경색, padding)를 복제
+- 새 열의 셀: 현재 열의 셀 구조(배경색, padding)를 복제. 보더는 테이블 면에서 관리
 - `colspanCovered` 맵을 사용하여 각 셀의 논리 위치 추적
 - **최소 너비 보장**: 분할 후 절반이 `MIN_TABLE_COL_WIDTH`(5mm) 미만이면 `normalizeWidths`가 다른 열에서 균등하게 차감하여 보장. 테이블 전체 크기로 최소 너비를 보장할 수 없으면 비례 축소
 - **병합된 셀 처리**:
@@ -600,28 +655,61 @@ Selection overlay는 다음 시점에 갱신된다:
 
 ---
 
-## 9. Border 렌더링 (border-collapse)
+## 9. Border 렌더링 (테이블 면 기반)
 
-### 9.1 resolveTableBorders
+### 9.1 TableBorderStore — 단일 진실 소스
 
-`src/engine/border-resolver.ts`의 `resolveTableBorders(edges)`는 인접 셀의 border 선언을 바탕으로 border-collapse 규칙으로 단일 border 라인을 결정한다.
+`src/engine/border-store.ts`의 `TableBorderStore`가 테이블 보더 면(face)의 단일 진실 소스다. 셀과 별개로 그리드 위에 존재하는 독립적인 면들을 관리한다.
 
-- 각 셀은 방향별로 `borderTopWidth`/`borderTopColor`/`borderTopStyle`, `borderRightWidth`/..., `borderBottomWidth`/..., `borderLeftWidth`/... 의 개별 속성을 선언한다
-- 인접한 두 셀의 border는 동일 엣지를 공유 (A의 우측 보더 ↔ B의 좌측 보더)
-- border-collapse: 더 두꺼운 border가 우선, 같으면 첫 번째 셀의 border 사용
-- `border-resolver` 내부의 `getCellBorderEdge()` 도우미가 `TableCellData`의 개별 필드에서 `CellBorderEdge` 구조를 조립하여 처리한다
+- `TableBorderStore.create(rowCount, colCount, borders?)`: 스토어 생성. `borders`가 제공되면 기존 값을 복사하고, 크기가 맞지 않으면 기본값(`{0, 'black', 'solid'}`)으로 채움
+- `setHFace(line, col, face)` / `setHFaceSpan(line, fromCol, toCol, face)`: 수평 면 기록 (last-write-wins)
+- `getHFace(line, col)` / `getHFaceSpan(line, fromCol, toCol)`: 수평 면 조회. span 조회 시 모두 같으면 그 값, 섞여 있으면 `undefined`
+- `setVFace(row, line, face)` / `setVFaceSpan(fromRow, toRow, line, face)`: 수직 면 기록
+- `getVFace(row, line)` / `getVFaceSpan(fromRow, toRow, line)`: 수직 면 조회
+- `toSegments(rowHeights, colWidths)`: `width > 0`인 면만 렌더링용 선분(`BorderSegment[]`)으로 변환
+- `toTableBorders()`: 현재 면 상태를 `TableBorders` 객체로 직렬화
 
-### 9.2 Border 레이어
+`TableEngine.layout()`이 호출될 때마다 스토어가 그리드 크기에 맞춰重建된다. `TableEngine.borderStore` getter로 접근.
 
-`_renderBorder()`는 shadow DOM에 `_borderLayerEl`을 생성:
+### 9.2 셀 보더 API — LayoutTableElement
+
+`LayoutTableElement`가 셀의 보더 getter/setter에 대한 프록시 API를 제공한다. TD 요소의 12개 border getter/setter는 이 API에 위임한다.
+
+- `setCellBorder(cellEngine, side, face)`: 셀이 덮는 모든 면 세그먼트에 `face`를 기록 (last-write-wins)
+- `getCellBorder(cellEngine, side)`: 셀이 덮는 면 세그먼트를 조회. 모두 같으면 `BorderFace`, 섞여 있으면 `undefined`
+- `resetCellBorder(cellEngine, side)`: 기본값(`{0, 'black', 'solid'}`)으로 리셋
+
+`side`는 `'top' | 'right' | 'bottom' | 'left'`. 셀의 `gridRow`/`gridCol`/`spanCols`/`spanRows`로 면 범위를 계산.
+
+### 9.3 Border 레이어 렌더링
+
+`_renderBorder()`는 `borderStore.toSegments()` 결과를 shadow DOM의 `_borderLayerEl`에 렌더링:
+
 - `pointerEvents: none`
 - `zIndex: Z_INDEX_TABLE_BORDER = 99990`
-- 각 border edge를 div 요소로 렌더링 (mm → px 변환)
-- `borderWidth = 0`인 edge는 렌더링하지 않음
+- 각 선분을 div 요소로 렌더링 (mm → px 변환)
+- `width = 0`인 면은 렌더링하지 않음
+- 키(`h-{line}-{col}` / `v-{row}-{line}`) 기반 diff 렌더링으로 기존 div 재사용
 
-### 9.3 후처리 데이터 export
+### 9.4 보더 위치 규칙 — 외곽 vs 내부
 
-border 레이어의 좌표/크기는 `printPostData`로 수집되어 외부 후처리(post-processing) 시스템에서 사용된다. `_renderBorder()`로 생성된 DOM border 레이어는 시각적 피드백용이며, 후처리 시스템은 `TableEngine.printPostData` 엔진 트리를 통해 엔진이 계산한 mm 기준 좌표와 크기, border 두께/색상/스타일, 대각선 정보, 배경색 정보 등을 받는다. 엘리먼트의 개별 `printPostData` getter는 제거되었고, 엔진 트리가 단일 소스다.
+보더 두께가 커져도 한쪽으로 치우치지 않도록 3가지 케이스로 위치를 계산:
+
+| 보더 위치      | 조건                            | 오프셋                     | 의미                              |
+| -------------- | ------------------------------- | -------------------------- | --------------------------------- |
+| **외곽 상단/좌측** | `lineIndex === 0`                 | `top/left = y/x`            | 테이블 영역 안쪽(하단/우측)으로만 |
+| **외곽 하단/우측** | `lineIndex === rowCount/colCount` | `top/left = y/x - width`    | 테이블 영역 안쪽(상단/좌측)으로만 |
+| **내부**           | 그 외                           | `top/left = y/x - width/2`  | 셀 경계 중심으로 양분             |
+
+- **내부 보더**: 셀과 셀 사이의 경계선 중심에 위치. 두께를 양분하여 양쪽 셀에 균등하게 표시
+- **외곽 상단/좌측**: 테이블 영역을 넘어가지 않도록 안쪽으로만 그림
+- **외곽 하단/우측**: 테이블 영역을 넘어가지 않도록 안쪽(상단/좌측)으로만 그림
+
+`BorderSegment.lineIndex`로 외곽 여부를 판정.
+
+### 9.5 후처리 데이터 export
+
+보더 면의 좌표/크기는 `TableEngine.printPostData`를 통해 `PrintPostBorderEdge[]`로 수집된다. `borderStore.toSegments()`가 mm 기준 좌표/두께/색상/스타일을 생성하고, `printPostData`가 절대 좌표로 변환하여 후처리 시스템에 전달. 엔진 트리가 단일 소스다.
 
 ---
 
@@ -804,7 +892,7 @@ document 내 여러 표가 있을 때:
 
 ### 12.7 printPostData
 
-table, TR, TD 엘리먼트의 개별 `printPostData` getter는 제거되었다. 엔진 트리(`TableEngine.printPostData`)가 단일 소스다. border 레이어의 좌표/크기, 대각선 정보, 배경색 정보를 mm 단위로 후처리(post-processing)용으로 수집한다. `LayoutDocumentElement.printPostData` → `DocumentEngine.printPostData` → `BoxEngine.printPostData` → `TableEngine.printPostData` 경로로 호출된다.
+table, TR, TD 엘리먼트의 개별 `printPostData` getter는 제거되었다. 엔진 트리(`TableEngine.printPostData`)가 단일 소스다. `TableBorderStore.toSegments()`가 생성한 보더 선분의 좌표/크기, 대각선 정보, 배경색 정보를 mm 단위로 후처리(post-processing)용으로 수집한다. `LayoutDocumentElement.printPostData` → `DocumentEngine.printPostData` → `BoxEngine.printPostData` → `TableEngine.printPostData` 경로로 호출된다.
 
 ### 12.8 F5 브라우저 새로고침 충돌
 
@@ -869,6 +957,11 @@ class LayoutTableElement extends HTMLElement {
   // Selection overlay
   _renderSelectionOverlay(selection: TableCellSelection | null): void;
   _clearSelectionOverlay(): void;
+
+  // 보더 면 API (셀 보더 getter/setter가 위임)
+  setCellBorder(cellEngine: TableCellEngine, side: 'top'|'right'|'bottom'|'left', face: BorderFace): void;
+  getCellBorder(cellEngine: TableCellEngine, side: 'top'|'right'|'bottom'|'left'): BorderFace | undefined;
+  resetCellBorder(cellEngine: TableCellEngine, side: 'top'|'right'|'bottom'|'left'): void;
 
   // 구조 변경 알림
   notifyTablePropertyChange(): void;
@@ -961,6 +1054,10 @@ class LayoutTableCellElement extends HTMLElement {
   get cellLabel(): string;
   get cellLabels(): string[];
 
+  get borderTopWidth(): number | undefined;
+  set borderTopWidth(value: number | undefined);
+  // 보더 getter/setter — 부모 테이블 면 저장소에 위임
+  // 병합 셀에서 여러 면을 덮는 경우, 값이 섞여 있으면 getter가 undefined 반환
   get borderTopWidth(): number | undefined;
   set borderTopWidth(value: number | undefined);
   get borderTopColor(): string | undefined;
