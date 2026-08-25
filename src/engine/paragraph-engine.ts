@@ -507,6 +507,7 @@ export class ParagraphEngine {
     lineIndexInColumn: number,
     isFirstInColumn: boolean,
     isFirstOfBlock: boolean,
+    alignOffsetMm: number,
   ): {
     cover: boolean;
     overflow: boolean;
@@ -517,7 +518,7 @@ export class ParagraphEngine {
       this._columnWidths.slice(0, columnIndex).reduce((a, b) => a + b, 0) +
       this._gaps.slice(0, columnIndex).reduce((a, b) => a + b, 0);
     const lineLeftMm = this._data.parentAbsRect.absLeft + columnLeftMm;
-    const lineTopMm = this._data.parentAbsRect.absTop + lineIndexInColumn * this._lineHeight;
+    const lineTopMm = this._data.parentAbsRect.absTop + alignOffsetMm + lineIndexInColumn * this._lineHeight;
     const lineWidthMm = this._columnWidths[columnIndex];
     const lineHeightMm = this._lineHeight;
 
@@ -640,6 +641,57 @@ export class ParagraphEngine {
     this._overlayRectsMm = null;
     this._parseContents();
 
+    const columnHeightMm = this._inheritStyle?.parentHeight ?? 0;
+    const baseFontSizeMm = this.fontSize;
+    const effectiveColumnHeightMm = columnHeightMm > 0
+      ? columnHeightMm + (this._lineHeight - baseFontSizeMm)
+      : 0;
+
+    // Pass 1: alignOffsetMm=0 으로 레이아웃 수행하여 라인 수 결정.
+    this._layoutColumnsPass(new Array(this.columnCount).fill(0));
+
+    // verticalAlign center/bottom: Pass 1 결과로 alignOffsetMm 계산 후 재수행.
+    // 라인 수가 안정될 때까지 반복 (최대 3회).
+    const verticalAlign = this.effectiveParagraphStyle.verticalAlign!;
+    if (verticalAlign === 'center' || verticalAlign === 'bottom') {
+      for (let iter = 0; iter < 3; iter++) {
+        const alignOffsetsMm = this._columnContents.map(column =>
+          this._computeAlignOffsetMm(column, effectiveColumnHeightMm, baseFontSizeMm, columnHeightMm),
+        );
+        if (alignOffsetsMm.every(o => o === 0)) break;
+
+        const prevLineCounts = this._columnContents.map(c => c.length);
+        this._layoutColumnsPass(alignOffsetsMm);
+        const newLineCounts = this._columnContents.map(c => c.length);
+        if (prevLineCounts.every((n, i) => n === newLineCounts[i])) break;
+      }
+    }
+
+    this._applyLineBreakRules();
+    this._computeCharOffsets();
+
+    this._previousLineCount = this._columnContents.reduce((sum, col) => sum + col.length, 0);
+    this._previousOverflow = this._overflow;
+
+    this._layoutCache = {
+      hash: inputHash,
+      columnContents: this._columnContents,
+      overflow: this._overflow,
+    };
+  }
+
+  /**
+   * 컬럼별 레이아웃 패스를 수행한다.
+   * `_layoutTextIntoColumns`의 핵심 루프를 추출한 것으로,
+   * `alignOffsetsMm` 파라미터로 각 컬럼의 verticalAlign 오프셋을 받는다.
+   *
+   * @param alignOffsetsMm - 컬럼별 alignOffsetMm 배열 (top 정렬이면 모두 0)
+   */
+  private _layoutColumnsPass(alignOffsetsMm: number[]): void {
+    this._columnContents = [];
+    this._overflow = 0;
+    this._overlayRectsMm = null;
+
     let beforeIdxBlock = 0;
     let beforeIdxContentOfBlock = 0;
 
@@ -653,6 +705,7 @@ export class ParagraphEngine {
 
       let idxBlock = beforeIdxBlock;
       let idxContentOfBlock = beforeIdxContentOfBlock;
+      const alignOffsetMm = alignOffsetsMm[curColumn] ?? 0;
 
       for (; idxBlock < this.contents.length; idxBlock++) {
         const block = this.contents[idxBlock];
@@ -668,6 +721,7 @@ export class ParagraphEngine {
               columnContent.length,
               isFirstInColumn,
               idxContentOfBlock === 0,
+              alignOffsetMm,
             );
             isColumnOverflow = result.overflow;
 
@@ -780,7 +834,7 @@ export class ParagraphEngine {
           }
 
           while (true) {
-            const result = this._createLineWithParts(block.textBlockStyle, curColumn, columnContent.length, false, false);
+            const result = this._createLineWithParts(block.textBlockStyle, curColumn, columnContent.length, false, false, alignOffsetMm);
             isColumnOverflow = result.overflow;
 
             if (result.cover) {
@@ -887,18 +941,6 @@ export class ParagraphEngine {
 
       this._columnContents.push(columnContent);
     }
-
-    this._applyLineBreakRules();
-    this._computeCharOffsets();
-
-    this._previousLineCount = this._columnContents.reduce((sum, col) => sum + col.length, 0);
-    this._previousOverflow = this._overflow;
-
-    this._layoutCache = {
-      hash: inputHash,
-      columnContents: this._columnContents,
-      overflow: this._overflow,
-    };
   }
 
   /**

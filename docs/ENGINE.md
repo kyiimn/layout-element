@@ -428,7 +428,8 @@ static create(data: ParagraphEngineData): ParagraphEngine
   - 문자 외부 스타일: key `${char}|${widthRatio}|${letterSpacing}|${spaceRatio}|${fontSize}`
 - 한글 금칙문자 규칙: `_applyLineBreakRules()` (`LINE_START_FORBIDDEN` / `LINE_END_FORBIDDEN`)
 - `_detectOverlapWithCache()`: 렌더 사이클별 오버레이 rect 캐싱
-- `_createLineWithParts()`: 오버랩 파트에서 자유 영역 계산, `minCharWidthMm = widthRatio * fontSize + letterSpacing`
+- `_createLineWithParts()`: 오버랩 파트에서 자유 영역 계산, `minCharWidthMm = widthRatio * fontSize + letterSpacing`. `lineTopMm`에 `alignOffsetMm` 포함
+- **verticalAlign 오버랩 판정 (2-pass)**: `verticalAlign: 'center'`/`'bottom'`인 경우, Pass 1(alignOffset=0)로 라인 수를 결정한 후 `_computeAlignOffsetMm()`로 오프셋을 계산하고 Pass 2로 오버랩 판정을 재수행. 라인 수가 안정될 때까지 최대 3회 반복. `verticalAlign: 'top'`이면 단일 pass.
 - 커서/오프셋 쿼리: `getCharRect`, `getOffsetFromPoint`, `getCursorPlacement`
 - `buildParagraphPrintPostData()`: 문자별 print data 생성. mm 단위 좌표를 후처리 시스템에 제공
 - `data` setter 호출 시 `resetIncrementalState()` 자동 실행
