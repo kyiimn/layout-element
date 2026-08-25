@@ -302,7 +302,9 @@ export class LayoutTableElement extends HTMLElement {
       this._engine = existing;
     }
 
-    this._rows = this._serializeChildren();
+    if (!this._rebuildingChildren) {
+      this._rows = this._serializeChildren();
+    }
 
     const tableData: TableData = {
       type: 'table',
