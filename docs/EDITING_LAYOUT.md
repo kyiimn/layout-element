@@ -1276,7 +1276,7 @@ newLeft = 컬럼 탐색: newLeftMm에 가장 가까운 컬럼의 x1을 찾아 �
 newLeft = clamp(newLeft, 0, columnCount - width)  ← 컬럼 스냅 + 범위 제한
     │
     ▼
-maxTop = floor((editableTextHeight - absHeight) / lineHeight)
+maxTop = floor((editableTextHeight - fontSize) / lineHeight) - height + 1
 newTop = clamp(round((newTopMm - columnCoords[newLeft].y1) / lineHeight),
                0, maxTop)                          ← 라인 스냅 + 범위 제한
     │
@@ -1291,8 +1291,8 @@ return { left: newLeft, top: newTop }
 - **라인 스냅**: 박스의 위쪽 가장자리가 `lineHeight` 단위로 스냅된다.
 - **범위 제한**: 박스가 `columnCount - width` 이상의 컬럼, `maxTop` 이상의 라인으로 이동하지 못한다.
 - **문서 영역 밖 변환**: 클램핑 전의 mm 위치가 편집 영역 밖이면 absolute 위치로 자동 변환된다.
-- **`maxTop` 계산**: `editableTextHeight`와 box의 `absHeight`를 사용하여, 박스의 하단이 편집 영역 하단(`editableTextHeight`)을 넘지 않도록 제한한다.
-- `columnCoords`, `lineHeight`, `columnCount`, `editableTextHeight`는 부모의 `GridCalculatorEngine`(=`parentModel`)에서 가져온다.
+- **`maxTop` 계산 (static box 렌더링 높이 원칙)**: static box 렌더링 높이 N라인 = `(N-1) * lineHeight + fontSize` (마지막 라인 line gap 제외). 박스의 렌더링 하단이 `editableTextHeight`를 넘지 않도록: `(top + height - 1) * lineHeight + fontSize ≤ editableTextHeight` → `maxTop = floor((editableTextHeight - fontSize) / lineHeight) - height + 1`. `fontSize`를 누락하면 박스가 부모 하단까지 내려가지 않는 버그가 재발한다. (`RULES.md § 1.8` 참조)
+- `columnCoords`, `lineHeight`, `columnCount`, `editableTextHeight`, `fontSize`는 부모의 `GridCalculatorEngine`(=`parentModel`)에서 가져온다.
 - `parentModel`이 없으면 (예: 박스가 DOM에 연결되지 않은 경우) 시작 위치를 그대로 반환한다.
 
 #### 4.3.2 absolute 모드 (mm 좌표)
@@ -2061,7 +2061,7 @@ private _onKeyDown = (event: KeyboardEvent): void => {
 - **이동 임계값**: mousedown 후 3px 이하의 이동은 클릭으로 간주하며, 드래그로 인식되지 않는다.
 - **`BoxDragState.dragMoved` / `BoxResizeState.moved` 플래그**: 드래그/리사이즈 후 `click` 이벤트가 발생하면 빈 영역 클릭으로 처리되어 선택이 해제되는 것을 방지하기 위해, `LayoutEditController`는 실제 이동이 있었을 때(`dragMoved` 또는 `moved`가 `true`) `EditManager._suppressLayoutClick()`를 호출하여 후속 `click` 이벤트를 억제한다. 이 메서드는 window capture phase에 일회성 click 리스너를 등록하여 `LayoutSelectionController._onClick`보다 먼저 click을 소비한다. click이 발생하지 않으면 200ms 타임아웃으로 자동 제거된다.
 - **`parentModel` 필수**: `LayoutEditController._computeNewPosition`에서 `position: 'static'` 모드는 `parentModel`(부모의 `GridCalculatorEngine`)이 필요하다. 없으면 시작 위치를 그대로 반환한다.
-- **`maxTop` 계산**: static 모드에서 박스의 하단이 편집 영역 하단을 넘지 않도록 `editableTextHeight`와 `absHeight`를 사용하여 `maxTop`을 계산한다. `editableHeight`만 사용하면 마지막 줄의 leading 공간이 무시되어 박스가 하단에 딱 붙지 않는다.
+- **`maxTop` 계산 (static box 렌더링 높이 원칙)**: static box 렌더링 높이 N라인 = `(N-1) * lineHeight + fontSize` (마지막 라인 line gap 제외). 박스 렌더링 하단이 `editableTextHeight`를 넘지 않도록 `maxTop = floor((editableTextHeight - fontSize) / lineHeight) - height + 1`로 계산한다. `fontSize`를 누락하면 박스가 부모 하단까지 내려가지 않는 버그가 재발한다. (`RULES.md § 1.8` 참조)
 - **문서 영역 밖 드래그**: 문서 직계 자식 박스(`this.parentElement?.type === 'document'`)만 위치 변환 대상이다. 다른 박스 안에 중첩된 박스는 이 동작의 대상이 아니다.
 - **absolute → static 변환 시 크기 근사**: 절대 위치에서 static으로 복귀할 때 `width = round(absWidth / avgColWidth)`, `height = round(absHeight / lineHeight)`로 근사 변환한다. 정밀한 값이 아닐 수 있으므로 사용자가 조정해야 할 수 있다.
 
@@ -2438,10 +2438,10 @@ left handle:
   top unchanged
 
 bottom handle:
-  maxLines = floor(editableTextHeight / lineHeight)
-  maxHeightForBox = maxLines - startTop
-  height = clamp(startHeight + deltaLines, 1, maxHeightForBox)
-  left, top unchanged
+   maxLines = floor((editableTextHeight - fontSize) / lineHeight) + 1
+   maxHeightForBox = maxLines - startTop
+   height = clamp(startHeight + deltaLines, 1, maxHeightForBox)
+   left, top unchanged
 
 top handle:
   maxHeight = startTop + startHeight

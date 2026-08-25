@@ -48,6 +48,52 @@
 - `updateOverlayContext()`는 `_overlayRectsMm`만 null로 리셋하고 `_layoutCache`를 보존한다.
 - `_computeLayoutInputHash()`가 overlay 위치를 포함하므로, 위치가 동일하면 `layoutText()`가 캐시 hit로 O(1) 스킵.
 
+### 1.8 static box 렌더링 높이 원칙 — 마지막 라인 line gap 제외
+
+> **CRITICAL — 이 원칙은 드래그 클램핑, 리사이즈, containment 검사, 좌표 변환 등
+> static box의 높이가 관여하는 모든 계산에서 일관되게 적용되어야 한다.
+> 위반 시 "박스가 부모 하단까지 내려가지 않는" 버그가 반복적으로 재발한다.**
+
+**원칙**: static box의 렌더링 높이 N라인 = `(N-1) * lineHeight + fontSize`.
+마지막 라인의 line gap(= `lineHeight - fontSize`)은 렌더링에서 제외된다.
+
+이는 `BoxEngine.absHeight`의 공식(`lineHeight * height - (lineHeight - fontSize)`)과 동일하며,
+`ParagraphEngine._computeAlignOffsetMm`의 `contentHeightMm = (visibleLineCount - 1) * lineHeight + fontSize`와도 일치한다.
+
+**파생 공식** — 박스의 렌더링 하단(top 기준)이 부모의 `editableTextHeight`를 넘지 않아야 할 때:
+
+```
+(top + height - 1) * lineHeight + fontSize ≤ editableTextHeight
+
+maxTop      = floor((editableTextHeight - fontSize) / lineHeight) - height + 1
+maxLines    = floor((editableTextHeight - fontSize) / lineHeight) + 1
+maxHeight   = floor((editableTextHeight - fontSize) / lineHeight) - top + 1
+```
+
+**절대 금지** — 다음 공식들은 `fontSize`를 무시하여 마지막 라인의 line gap만큼
+클램핑이 너무 일찍 걸리거나 containment가 너무 빡빡하게 잡힌다:
+
+```
+// WRONG — fontSize 누락
+maxTop      = floor(editableTextHeight / lineHeight) - height
+maxLines    = floor(editableTextHeight / lineHeight) + 1
+containerLineCount = floor(editableHeight / lineHeight) + 1
+```
+
+**적용 대상** (모두 `parentModel.fontSize`와 `editableTextHeight`를 사용):
+
+| 위치 | 계산 | 올바른 공식 |
+|---|---|---|
+| `layout-edit-controller.ts` `_computeNewPosition` | `maxTop` (드래그 이동) | `floor((editableTextHeight - fontSize) / lineHeight) - height + 1` |
+| `layout-edit-controller.ts` `_computeNewSize` | `maxLines` (리사이즈) | `floor((editableTextHeight - fontSize) / lineHeight) + 1` |
+| `static-grid-containment.ts` `clampStaticToContainer` | `containerLineCount` | `floor((editableTextHeight - fontSize) / lineHeight) + 1` |
+| `static-grid-containment.ts` `staticGridContains` | `containerLineCount` | `floor((editableTextHeight - fontSize) / lineHeight) + 1` |
+
+**새 코드 작성 시 체크리스트**:
+- [ ] static box 높이 계산에 `fontSize`가 포함되어 있는가?
+- [ ] `editableTextHeight`를 사용하고 있는가? (`editableHeight`가 아님 — 전자는 padding 제외 전체 높이, 후자는 lineHeight 배수로 버림된 값)
+- [ ] 드래그/리사이즈/containment/삽입/재배치(reparent) 중 하나라도 static 좌표를 다룬다면 위 표의 공식을 적용했는가?
+
 ---
 
 ## 2. 편집 컨트롤러 규칙
