@@ -474,8 +474,13 @@ export class DocumentEngine {
    * `flipLayoutData` 순수 함수로 데이터를 변환한다.
    * `data` + `childrenData` 갱신은 호출자의 책임이다.
    *
+   * `targetId` 모드에서 lock 박스가 target과 일치해도 반전하지 않으며,
+   * lock 박스 하위 트리에서 targetId를 검색하지도 않는다
+   * (원본 `flipBoxIfTarget` 동작 보존).
+   *
    * @param options - 반전 옵션 (`axis`, `targetId`)
    * @returns 반전된 `DocumentData`
+   * @throws {Error} `targetId`가 지정되었으나 트리에서 해당 id를 가진 박스를 찾지 못한 경우 (lock 박스 하위도 미발견 처리)
    */
   flipLayout(options: FlipLayoutOptions): DocumentData {
     if (this._dirty) throw createDirtyError('DocumentEngine');
@@ -490,6 +495,9 @@ export class DocumentEngine {
     } else {
       let found = false;
       for (const be of this._childBoxEngines) {
+        // lock 박스는 targetId와 일치해도 반전하지 않으며,
+        // 하위 트리에서 targetId를 검색하지도 않는다 (원본 flipBoxIfTarget 동작).
+        if (be.data.lock) continue;
         if (be.data.id === targetId) {
           const childContainer = this._boxContainerMetrics(be, metricsById);
           for (const ce of be.childEngines) {
@@ -527,6 +535,9 @@ export class DocumentEngine {
   ): boolean {
     for (const ce of be.childEngines) {
       if (ce instanceof BoxEngine) {
+        // lock 박스는 targetId와 일치해도 반전하지 않으며,
+        // 하위 트리에서 targetId를 검색하지도 않는다 (원본 flipBoxIfTarget 동작).
+        if (ce.data.lock) continue;
         if (ce.data.id === targetId) {
           const childContainer = this._boxContainerMetrics(ce, metricsById);
           for (const subCe of ce.childEngines) {
