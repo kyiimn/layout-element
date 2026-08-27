@@ -281,7 +281,8 @@ export class LayoutBoxElement extends HTMLElement {
       paragraphStyle: docEngine.data.paragraphStyle,
       textStyle: docEngine.data.textStyle,
     };
-    this._engine.layout(ctx, this._readChildren(), resources, docStyle);
+    this._engine.childrenData = this._readChildren();
+    this._engine.layout(ctx, undefined, resources, docStyle);
   }
 
   private _findDocElement(): LayoutDocumentElement | null {
@@ -1083,7 +1084,7 @@ export class LayoutBoxElement extends HTMLElement {
     if (this._rebuildingChildren && this._pendingData) {
       return this._pendingData;
     }
-    if (this._engine?.extractData) return this._engine.extractData;
+    if (this._engine) return this._engine.extractData;
     return this._rawData();
   }
 

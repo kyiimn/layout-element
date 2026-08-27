@@ -588,6 +588,7 @@ export class LayoutImageElement extends HTMLElement {
       if (parentBoxEngine) {
         this._engine.contentAbsRect = parentBoxEngine.contentAbsRect;
       }
+      this._engine.layout();
     }
   }
 

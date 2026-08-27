@@ -570,7 +570,7 @@ export class LayoutParagraphElement extends HTMLElement {
    * 엔진이 없으면 _rawData()로 폴백한다.
    */
   get data() {
-    if (this._model?.extractData) return this._model.extractData;
+    if (this._model) return this._model.extractData;
     return this._rawData();
   }
 

@@ -1,11 +1,12 @@
 import { Z_INDEX_TYPE_LABEL } from "@/constants";
-import { DocumentData, ParagraphStyle, PrintPostData, TextStyle, BoxData, Font, CMYKColorSet } from "@/types";
+import { DocumentData, ParagraphStyle, TextStyle, BoxData, Font, CMYKColorSet } from "@/types";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
 import { LayoutGuideColumnElement } from "./guide-column.element";
 import type { LayoutTableElement } from "./table.element";
-import { genUUID, flipLayoutData, FlipLayoutOptions, BoxMetricsById } from "@/utils";
+import { genUUID } from "@/utils";
+import type { FlipLayoutOptions } from "@/engine";
 import { EditManager } from "@/edit/edit-manager";
 import { DocumentEngine, BoxEngine } from "@/engine";
 import type { FontLoaderEngine, ColorRegistryEngine, ParsedFont, GridCalculatorEngine } from "@/engine";
@@ -313,7 +314,8 @@ export class LayoutDocumentElement extends HTMLElement {
       this._engine.ppm = this._ppm;
     }
 
-    this._engine.layout(this.items.map(e => e._rawData()));
+    this._engine.childrenData = this.items.map(e => e._rawData());
+    this._engine.layout();
 
     if (this._engine.newEnginesCreated) {
       this._syncEngineIdsToDom();
@@ -741,16 +743,6 @@ export class LayoutDocumentElement extends HTMLElement {
     });
   }
 
-  get printPostData(): PrintPostData[] {
-    const engineData = this._engine?.printPostData ?? [];
-    const guideData: PrintPostData[] = [];
-    this.querySelectorAll('x-layout-guide-column').forEach((gc) => {
-      const el = gc as unknown as { printPostData?: PrintPostData[] };
-      if (el.printPostData) guideData.push(...el.printPostData);
-    });
-    return [...engineData, ...guideData];
-  }
-
   get items() {
     return Array.from(this.querySelectorAll<LayoutBoxElement>(":scope > x-layout-box"));
   }
@@ -786,34 +778,10 @@ export class LayoutDocumentElement extends HTMLElement {
     this.editManager.blurParagraph();
     this.editManager.clearLayoutSelection(false);
 
-    const metricsById = this._collectBoxMetrics();
-    const flipped = flipLayoutData(this.data, options, metricsById);
-    this.data = flipped;
-  }
-
-  /**
-   * 문서 내 모든 박스의 실제 mm 크기(absWidth/absHeight)를 수집한다.
-   *
-   * static 박스의 `width`/`height`는 컬럼 span 수 / 라인 수이지 mm가 아니므로,
-   * `flipLayoutData`가 absolute 자식 반전 시 부모 박스의 mm 내부 영역을 알기 위해
-   * DOM에서 계산된 `absWidth`/`absHeight`를 수집하여 전달한다.
-   *
-   * @returns 박스 id → { absWidth, absHeight } map
-   *
-   * @internal
-   */
-  private _collectBoxMetrics(): BoxMetricsById {
-    const metrics: BoxMetricsById = new Map();
-    const boxes = this.querySelectorAll<LayoutBoxElement>('x-layout-box');
-    for (const box of boxes) {
-      if (box.id) {
-        metrics.set(box.id, {
-          absWidth: box.absWidth,
-          absHeight: box.absHeight,
-        });
-      }
+    if (this._engine) {
+      const flipped = this._engine.flipLayout(options);
+      this.data = flipped;
     }
-    return metrics;
   }
 }
 

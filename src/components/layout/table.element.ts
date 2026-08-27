@@ -146,7 +146,7 @@ export class LayoutTableElement extends HTMLElement {
   }
 
   get data(): TableData {
-    if (this._engine?.extractData) return this._engine.extractData;
+    if (this._engine) return this._engine.extractData;
     return this._rawData();
   }
 
@@ -205,7 +205,7 @@ export class LayoutTableElement extends HTMLElement {
   set colWidths(value: number | number[] | undefined) {
     this._colWidths = value;
     if (this.isConnected) {
-      this._engine?.layout(this.items.map(e => e._rawData()));
+      if (this._engine) { this._engine.childrenData = this.items.map(e => e._rawData()); this._engine.layout(); }
       this.layout();
       void this.render();
     }
@@ -215,7 +215,7 @@ export class LayoutTableElement extends HTMLElement {
   set borders(value: TableBorders | undefined) {
     this._borders = value;
     if (this.isConnected) {
-      this._engine?.layout(this.items.map(e => e._rawData()));
+      if (this._engine) { this._engine.childrenData = this.items.map(e => e._rawData()); this._engine.layout(); }
       this.layout();
       void this.render();
     }
@@ -304,7 +304,8 @@ export class LayoutTableElement extends HTMLElement {
     } else {
       this._engine.data = tableData;
     }
-    this._engine.layout(this.items.map(e => e._rawData()));
+    this._engine.childrenData = this.items.map(e => e._rawData());
+    this._engine.layout();
 
     // Engine-first: engine.layout()이 row/cell 엔진을 재구축한 후,
     // 셀 내부 박스 엔진도 재구축하여 extractData가 항상 최신 상태를 반영하도록 한다.
@@ -635,7 +636,7 @@ export class LayoutTableElement extends HTMLElement {
    */
   refreshBorder(): void {
     if (!this.isConnected) return;
-    this._engine?.layout(this.items.map(e => e._rawData()));
+    if (this._engine) { this._engine.childrenData = this.items.map(e => e._rawData()); this._engine.layout(); }
     this._layoutStructure();
     this._borders = this._engine?.borderStore?.toTableBorders();
     this._renderBorder();
@@ -829,7 +830,7 @@ export class LayoutTableElement extends HTMLElement {
     const trEls = this.items;
     if (trEls[topIdx]) trEls[topIdx].height = newTop;
     if (trEls[bottomIdx]) trEls[bottomIdx].height = newBottom;
-    this._engine?.layout(this.items.map(e => e._rawData()));
+    if (this._engine) { this._engine.childrenData = this.items.map(e => e._rawData()); this._engine.layout(); }
     this.layout();
     void this.render();
     this._notifyTablePropertyChange();

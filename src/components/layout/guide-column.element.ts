@@ -1,7 +1,6 @@
 import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/constants";
 import type { GridRect } from "@/engine";
 import { GuideColumnData } from "@/types/layout";
-import { PrintPostData, PrintPostDataRect } from "@/types/print";
 
 /**
  * 컬럼 가이드 표시 요소. `<x-layout-guide-column>` 커스텀 엘리먼트.
@@ -173,31 +172,6 @@ export class LayoutGuideColumnElement extends HTMLElement {
       fontSize: this._fontSize,
       lineHeight: this._lineHeight,
     };
-  }
-
-  get printPostData(): PrintPostData<GuideColumnData>[] {
-    const ppm = this._getPpm();
-    return [{
-      data: this.data,
-      rect: {
-        x: this._left * ppm,
-        y: this._top * ppm,
-        width: this._width * ppm,
-        height: this._height * ppm,
-      } as PrintPostDataRect,
-    }];
-  }
-
-  private _getPpm(): number {
-    let el: Element | null = this.parentElement;
-    while (el) {
-      if (el instanceof (customElements.get('x-layout-document') as typeof HTMLElement)) {
-        const docEl = el as unknown as { ppm?: number };
-        return docEl.ppm ?? 3.78;
-      }
-      el = el.parentElement;
-    }
-    return 3.78;
   }
 }
 customElements.define('x-layout-guide-column', LayoutGuideColumnElement);
