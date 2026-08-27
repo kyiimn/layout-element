@@ -2,6 +2,7 @@ import { DEFAULT_IMAGE_DPI } from "@/constants";
 import type { OverlapMode, ImageObjectFit } from "@/types";
 import type { ImageData, PrintPostData } from "@/types";
 import type { ImageEngineData, MmRect, OverlapResult, AbsRect } from "./types";
+import { createDirtyError } from "./types";
 import { computeOverlapSizeMm } from "./overlap-engine";
 import { computeObjectFit } from "./object-fit-engine";
 
@@ -54,6 +55,8 @@ export class ImageEngine {
   /** 성능 캐시: 행별 opaque 컬럼 bitmap. rgbaData 설정 시 1회 빌드. computeSimplePixelOverlap에서 O(H_line) lookups로 사용. */
   private _opaqueRowBitmap: Uint8Array[] | null = null;
 
+  private _dirty: boolean = false;
+
   static create(data: ImageEngineData): ImageEngine {
     return new this(data);
   }
@@ -81,6 +84,7 @@ export class ImageEngine {
 
   set zIndex(v: number | undefined) {
     this._zIndex = v;
+    this._dirty = true;
   }
 
   get zIndex(): number | undefined {
@@ -90,6 +94,7 @@ export class ImageEngine {
   set contentAbsRect(rect: AbsRect | null) {
     this._contentAbsRect = rect;
     this._displayRectDirty = true;
+    this._dirty = true;
   }
 
   get contentAbsRect(): AbsRect | null {
@@ -209,6 +214,7 @@ export class ImageEngine {
 
   layout(): { cropRectMm: AbsRect; displayRectMm: AbsRect } {
     const rect = this.displayRect;
+    this._dirty = false;
     return {
       cropRectMm: rect,
       displayRectMm: rect,
@@ -251,7 +257,88 @@ export class ImageEngine {
     return this._data.originalHeight ?? 0;
   }
 
+  // ── 개별 setter (dirty 표시만, layout() 호출 시 원자 반영) ──
+
+  set x(value: number | undefined) {
+    if (this._data.x === value) return;
+    this._data = { ...this._data, x: value };
+    this._displayRectDirty = true;
+    this._dirty = true;
+  }
+
+  set y(value: number | undefined) {
+    if (this._data.y === value) return;
+    this._data = { ...this._data, y: value };
+    this._displayRectDirty = true;
+    this._dirty = true;
+  }
+
+  set width(value: number | undefined) {
+    if (this._data.width === value) return;
+    this._data = { ...this._data, width: value };
+    this._displayRectDirty = true;
+    this._dirty = true;
+  }
+
+  set height(value: number | undefined) {
+    if (this._data.height === value) return;
+    this._data = { ...this._data, height: value };
+    this._displayRectDirty = true;
+    this._dirty = true;
+  }
+
+  set dpi(value: number) {
+    if ((this._data.dpi ?? DEFAULT_IMAGE_DPI) === value) return;
+    this._data = { ...this._data, dpi: value };
+    this._dirty = true;
+  }
+
+  set url(value: string) {
+    if (this._data.url === value) return;
+    this._data = { ...this._data, url: value };
+    this._dirty = true;
+  }
+
+  set overlapMode(value: OverlapMode) {
+    if ((this._data.overlapMode ?? 'path') === value) return;
+    this._data = { ...this._data, overlapMode: value };
+    this._dirty = true;
+  }
+
+  set overlapPadding(value: number | { top?: number; right?: number; bottom?: number; left?: number } | undefined) {
+    if (this._data.overlapPadding === value) return;
+    this._data = { ...this._data, overlapPadding: value };
+    this._dirty = true;
+  }
+
+  set objectFit(value: ImageObjectFit) {
+    if ((this._data.objectFit ?? 'cover') === value) return;
+    this._data = { ...this._data, objectFit: value };
+    this._displayRectDirty = true;
+    this._dirty = true;
+  }
+
+  set originalWidth(value: number | undefined) {
+    if (this._data.originalWidth === value) return;
+    this._data = { ...this._data, originalWidth: value };
+    this._displayRectDirty = true;
+    this._dirty = true;
+  }
+
+  set originalHeight(value: number | undefined) {
+    if (this._data.originalHeight === value) return;
+    this._data = { ...this._data, originalHeight: value };
+    this._displayRectDirty = true;
+    this._dirty = true;
+  }
+
+  /** 개별 setter로 인해 커밋되지 않은 변경이 있는지 여부. */
+  get dirty(): boolean {
+    return this._dirty;
+  }
+
   get extractData(): ImageData {
+    if (this._dirty) throw createDirtyError('ImageEngine');
     const d = this._data;
     return {
       type: 'image',

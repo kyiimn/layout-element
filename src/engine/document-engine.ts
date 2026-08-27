@@ -10,9 +10,11 @@
  * @file src/engine/document-engine.ts
  */
 
-import type { DocumentData, BoxData, InheritStyle } from "@/types";
+import type { DocumentData, BoxData, BoxRole, InheritStyle, ParagraphStyle, TextStyle } from "@/types";
 import type { AbsRect, FontLoaderEngine, ColorRegistryEngine, BoxEngineParent } from "./types";
 import type { PrintPostData } from "@/types";
+import { createDirtyError, removeBoxDataFromChildren } from "./types";
+import type { FlipLayoutOptions, BoxMetricsById } from "./types";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
 import { BoxEngine, type BoxBuildContext } from "./box-engine";
 import { ImageEngine } from "./image-engine";
@@ -66,12 +68,15 @@ export class DocumentEngine {
   /** @internal */ _colorRegistry: ColorRegistryEngine;
   private _gridCalculator: GridCalculatorEngine;
   private _childBoxEngines: BoxEngine[] = [];
+  private _childrenData: BoxData[] = [];
 
   /** Generation counter — incremented on data/ppm change. Used by child BoxEngine for cache invalidation. */
   private _generation: number = 0;
 
   /** layout() 호출 시 새 엔진이 생성/추가되었는지 여부. _syncEngineIdsToDom 스킵 판단용. */
   private _newEnginesCreated: boolean = false;
+
+  private _dirty: boolean = false;
 
   /**
    * 정적 팩토리 메서드.
@@ -146,6 +151,7 @@ export class DocumentEngine {
    * @returns 엔진 현재 상태 기반의 DocumentData
    */
   get extractData(): DocumentData {
+    if (this._dirty) throw createDirtyError('DocumentEngine');
     return {
       ...this._data,
       paddingTop: this.paddingTop,
@@ -186,6 +192,93 @@ export class DocumentEngine {
   get paddingRight(): number { return this._data.paddingRight ?? 0; }
   get paddingBottom(): number { return this._data.paddingBottom ?? 0; }
   get paddingLeft(): number { return this._data.paddingLeft ?? 0; }
+
+  get columns(): number | number[] { return this._data.columns; }
+  get gap(): number | number[] { return this._data.gap; }
+  get paragraphStyle(): ParagraphStyle { return this._data.paragraphStyle; }
+  get textStyle(): TextStyle { return this._data.textStyle; }
+
+  // ── 개별 setter (dirty 표시만, layout() 호출 시 원자 반영) ──
+
+  set width(value: number) {
+    if (this._data.width === value) return;
+    this._data = { ...this._data, width: value };
+    this._gridCalculator = this._createGridCalculator();
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set height(value: number) {
+    if (this._data.height === value) return;
+    this._data = { ...this._data, height: value };
+    this._gridCalculator = this._createGridCalculator();
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set paddingTop(value: number) {
+    if ((this._data.paddingTop ?? 0) === value) return;
+    this._data = { ...this._data, paddingTop: value };
+    this._gridCalculator = this._createGridCalculator();
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set paddingRight(value: number) {
+    if ((this._data.paddingRight ?? 0) === value) return;
+    this._data = { ...this._data, paddingRight: value };
+    this._gridCalculator = this._createGridCalculator();
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set paddingBottom(value: number) {
+    if ((this._data.paddingBottom ?? 0) === value) return;
+    this._data = { ...this._data, paddingBottom: value };
+    this._gridCalculator = this._createGridCalculator();
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set paddingLeft(value: number) {
+    if ((this._data.paddingLeft ?? 0) === value) return;
+    this._data = { ...this._data, paddingLeft: value };
+    this._gridCalculator = this._createGridCalculator();
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set columns(value: number | number[]) {
+    if (this._data.columns === value) return;
+    this._data = { ...this._data, columns: value };
+    this._gridCalculator = this._createGridCalculator();
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set gap(value: number | number[]) {
+    if (this._data.gap === value) return;
+    this._data = { ...this._data, gap: value };
+    this._gridCalculator = this._createGridCalculator();
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set paragraphStyle(value: ParagraphStyle) {
+    if (this._data.paragraphStyle === value) return;
+    this._data = { ...this._data, paragraphStyle: value };
+    this._dirty = true;
+  }
+
+  set textStyle(value: TextStyle) {
+    if (this._data.textStyle === value) return;
+    this._data = { ...this._data, textStyle: value };
+    this._dirty = true;
+  }
+
+  get dirty(): boolean {
+    return this._dirty;
+  }
 
   /** 그리드 계산기 */
   get gridCalculator(): GridCalculatorEngine {
@@ -250,6 +343,16 @@ export class DocumentEngine {
   }
 
   /**
+   * 역할(`role`)으로 박스 엔진을 검색한다. 트리 전체를 재귀 순회하며 일치하는 모든 박스를 반환한다.
+   *
+   * @param role - 검색할 박스 역할 (예: `'body'`, `'title'`, `'image'`)
+   * @returns 일치하는 박스 엔진 배열 (빈 배열일 수 있음)
+   */
+  findBoxEnginesByRole(role: BoxRole): BoxEngine[] {
+    return _findBoxEnginesByRoleInBoxes(this._childBoxEngines, role);
+  }
+
+  /**
    * 엔진 트리에서 특정 자식 엔진을 제거한다.
    *
    * 엔진 우선 원칙: DOM 요소 제거 시 엔진 트리 동기화는 엔진이 담당한다.
@@ -272,6 +375,254 @@ export class DocumentEngine {
         if (idx >= 0) children.splice(idx, 1);
       }
     }
+  }
+
+  /** 외부 엔진(BoxEngine)에서 reparent 시 _childrenData에서 박스 데이터를 제거하기 위한 internal API. */
+  _removeBoxDataFromChildren(boxId: string): void {
+    const [, updated] = removeBoxDataFromChildren(this._childrenData, boxId);
+    this._childrenData = updated as BoxData[];
+  }
+
+  /**
+   * 박스 엔진을 자식으로 추가한다.
+   *
+   * 다른 부모 엔진에 속해 있던 박스인 경우, 기존 부모에서 제거한 후 이 엔진의 자식으로 이동한다 (reparent).
+   * 추가 후 `_dirty = true`를 표시하며, `layout()` 호출 시점에 트리에 반영된다.
+   *
+   * @param boxEngine - 추가할 박스 엔진
+   */
+  appendChildBoxEngine(boxEngine: BoxEngine): void {
+    const oldParent = boxEngine.parent;
+    if (oldParent !== this) {
+      this._removeBoxFromParent(boxEngine, oldParent);
+      boxEngine.parent = this;
+    }
+    this._childBoxEngines = [...this._childBoxEngines, boxEngine];
+    this._childrenData = [...this._childrenData, boxEngine.data];
+    this._generation++;
+    this._dirty = true;
+  }
+
+  /**
+   * 박스 엔진을 자식에서 제거한다.
+   *
+   * 제거 후 `_dirty = true`를 표시하며, `layout()` 호출 시점에 트리에 반영된다.
+   *
+   * @param boxEngine - 제거할 박스 엔진
+   */
+  removeChildBoxEngine(boxEngine: BoxEngine): void {
+    const idx = this._childBoxEngines.indexOf(boxEngine);
+    if (idx < 0) return;
+    this._childBoxEngines = this._childBoxEngines.filter((_, i) => i !== idx);
+    if (boxEngine.data.id) {
+      const [, updated] = removeBoxDataFromChildren(this._childrenData, boxEngine.data.id);
+      this._childrenData = updated as BoxData[];
+    }
+    this._generation++;
+    this._dirty = true;
+  }
+
+  /**
+   * 박스 엔진을 다른 부모 엔진으로 이동시킨다 (reparent).
+   *
+   * 현재 부모에서 제거하고, 새 부모의 자식으로 추가한다.
+   * 박스의 `parent` 참조를 새 부모로 갱신하고, 새 부모의 `_generation`을 증가시킨다.
+   * 양쪽 부모 모두 `_dirty = true`를 표시한다.
+   *
+   * @param boxEngine - 이동할 박스 엔진
+   * @param newParent - 새 부모 엔진 (DocumentEngine | BoxEngine | TableCellEngine)
+   */
+  reparentBoxEngine(boxEngine: BoxEngine, newParent: BoxEngineParent): void {
+    const oldParent = boxEngine.parent;
+    if (oldParent === newParent) return;
+    const boxData = boxEngine.data;
+
+    // _childrenData에서 oldParent 쪽 제거
+    if (oldParent instanceof DocumentEngine) {
+      if (boxData.id) {
+        const [, updated] = removeBoxDataFromChildren(oldParent._childrenData, boxData.id);
+        oldParent._childrenData = updated as BoxData[];
+      }
+    } else if (oldParent instanceof BoxEngine) {
+      oldParent._removeBoxDataFromChildren(boxData.id ?? '');
+    }
+
+    // 엔진 트리 수정
+    this._removeBoxFromParent(boxEngine, oldParent);
+    boxEngine.parent = newParent;
+
+    // _childrenData에 newParent 쪽 추가 + 엔진 트리 추가
+    if (newParent instanceof DocumentEngine) {
+      newParent._childBoxEngines = [...newParent._childBoxEngines, boxEngine];
+      newParent._childrenData = [...newParent._childrenData, boxData];
+      newParent._generation++;
+      newParent._dirty = true;
+    } else if (newParent instanceof BoxEngine) {
+      newParent._appendChildBoxData(boxData);
+      newParent._markDirty();
+    } else if (newParent instanceof TableCellEngine) {
+      newParent.boxEngine = boxEngine;
+    }
+    this._generation++;
+    this._dirty = true;
+  }
+
+  /**
+   * 문서 또는 특정 박스의 하위 요소들을 좌우/상하 반전한다.
+   *
+   * 엔진 트리에서 각 박스의 `absWidth`/`absHeight`를 수집한 후,
+   * `flipLayoutData` 순수 함수로 데이터를 변환한다.
+   * `data` + `childrenData` 갱신은 호출자의 책임이다.
+   *
+   * @param options - 반전 옵션 (`axis`, `targetId`)
+   * @returns 반전된 `DocumentData`
+   */
+  flipLayout(options: FlipLayoutOptions): DocumentData {
+    if (this._dirty) throw createDirtyError('DocumentEngine');
+    const { axis, targetId } = options;
+    const metricsById = this._collectBoxMetrics();
+    const container = this._documentContainerMetrics();
+
+    if (targetId === undefined) {
+      for (const be of this._childBoxEngines) {
+        be.flipLayout(axis, container, metricsById);
+      }
+    } else {
+      let found = false;
+      for (const be of this._childBoxEngines) {
+        if (be.data.id === targetId) {
+          const childContainer = this._boxContainerMetrics(be, metricsById);
+          for (const ce of be.childEngines) {
+            if (ce instanceof BoxEngine) {
+              ce.flipLayout(axis, childContainer, metricsById);
+            } else if (ce instanceof ParagraphEngine) {
+              ce.flipLayout(axis);
+            }
+          }
+          found = true;
+          break;
+        }
+        // 중첩 박스에서 targetId 찾기 (재귀)
+        if (this._flipLayoutInNested(be, targetId, axis, metricsById)) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        throw new Error(`flipLayout: targetId "${targetId}"를 가진 박스를 찾을 수 없습니다.`);
+      }
+    }
+
+    return {
+      ...this._data,
+      children: this._childBoxEngines.map((be) => ({ ...be.data })),
+    };
+  }
+
+  private _flipLayoutInNested(
+    be: BoxEngine,
+    targetId: string,
+    axis: 'horizontal' | 'vertical' | 'both',
+    metricsById: BoxMetricsById,
+  ): boolean {
+    for (const ce of be.childEngines) {
+      if (ce instanceof BoxEngine) {
+        if (ce.data.id === targetId) {
+          const childContainer = this._boxContainerMetrics(ce, metricsById);
+          for (const subCe of ce.childEngines) {
+            if (subCe instanceof BoxEngine) {
+              subCe.flipLayout(axis, childContainer, metricsById);
+            } else if (subCe instanceof ParagraphEngine) {
+              subCe.flipLayout(axis);
+            }
+          }
+          return true;
+        }
+        if (this._flipLayoutInNested(ce, targetId, axis, metricsById)) {
+          return true;
+        }
+      }
+      if (ce instanceof TableEngine) {
+        for (const row of ce.rowEngines) {
+          for (const cell of row.cellEngines) {
+            if (cell.boxEngine && this._flipLayoutInNested(cell.boxEngine, targetId, axis, metricsById)) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  private _documentContainerMetrics() {
+    const columns =
+      typeof this._data.columns === 'number' ? this._data.columns : this._data.columns.length;
+    const innerWidth = this._data.width - (this._data.paddingLeft ?? 0) - (this._data.paddingRight ?? 0);
+    const innerHeight = this._data.height - (this._data.paddingTop ?? 0) - (this._data.paddingBottom ?? 0);
+    const fontSize = this._data.textStyle?.fontSize ?? 4;
+    const lineGap = this._data.paragraphStyle?.lineGap ?? 1.25;
+    const lineHeight = fontSize * lineGap;
+    const heightLines = innerHeight / lineHeight;
+    return {
+      columns,
+      heightLines,
+      innerWidth,
+      innerHeight,
+      width: this._data.width,
+      height: this._data.height,
+      isDocument: true,
+    };
+  }
+
+  private _boxContainerMetrics(be: BoxEngine, metricsById: BoxMetricsById) {
+    const injected = be.data.id ? metricsById.get(be.data.id) : undefined;
+    const absWidth = injected?.absWidth ?? be.absWidth;
+    const absHeight = injected?.absHeight ?? be.absHeight;
+    return {
+      columns: be.data.width,
+      heightLines: be.data.height,
+      innerWidth: absWidth - (be.data.paddingLeft ?? 0) - (be.data.paddingRight ?? 0),
+      innerHeight: absHeight - (be.data.paddingTop ?? 0) - (be.data.paddingBottom ?? 0),
+      width: absWidth,
+      height: absHeight,
+      isDocument: false,
+    };
+  }
+
+  /**
+   * 엔진 트리에서 모든 박스의 실제 mm 크기(`absWidth`/`absHeight`)를 수집한다.
+   * static 박스의 `width`/`height`는 컬럼 span/라인 수이지 mm가 아니므로,
+   * `flipLayoutData`가 absolute 자식 반전 시 부모의 mm 영역을 알기 위해 필요하다.
+   *
+   * @returns 박스 id → { absWidth, absHeight } map
+   */
+  private _collectBoxMetrics(): BoxMetricsById {
+    const metrics: BoxMetricsById = new Map();
+    const collect = (boxes: BoxEngine[]) => {
+      for (const be of boxes) {
+        if (be.data.id) {
+          metrics.set(be.data.id, {
+            absWidth: be.absWidth,
+            absHeight: be.absHeight,
+          });
+        }
+        for (const ce of be.childEngines) {
+          if (ce instanceof BoxEngine) {
+            collect([ce]);
+          }
+          if (ce instanceof TableEngine) {
+            for (const row of ce.rowEngines) {
+              for (const cell of row.cellEngines) {
+                if (cell.boxEngine) collect([cell.boxEngine]);
+              }
+            }
+          }
+        }
+      }
+    };
+    collect(this._childBoxEngines);
+    return metrics;
   }
 
   /**
@@ -334,18 +685,46 @@ export class DocumentEngine {
   }
 
   /**
+   * 자식 박스 데이터를 설정한다.
+   *
+   * `data` setter는 문서 자체 속성(width/height/padding/columns/gap/style)만 담당하고,
+   * 자식 박스 데이터는 이 setter가 담당한다. `_data.children`을 읽지 않아
+   * "no children in `_data`" 원칙을 유지한다.
+   *
+   * 설정 시 `_dirty = true`를 표시하며, `layout()` 호출 시점에 트리가 구축된다.
+   *
+   * @param data - 최상위 박스 데이터 배열
+   */
+  set childrenData(data: BoxData[]) {
+    this._childrenData = data;
+    this._dirty = true;
+  }
+
+  /** 설정된 자식 박스 데이터. */
+  get childrenData(): BoxData[] {
+    return this._childrenData;
+  }
+
+  /**
    * 문서 레이아웃을 계산한다.
-   * data setter에서 그리드가 갱신되므로, 여기서는 엔진 트리 전체를 재구축한다.
-   * DOM 요소 없이 DocumentData만으로 전체 엔진 트리를 구축한다.
+   *
+   * `childrenData` setter로 주입된 자식 박스 데이터에서 엔진 트리 전체를 재구축한다.
+   * `data` setter에서 그리드가 갱신되므로, 여기서는 트리 구축만 수행한다.
    *
    * Node.js 환경에서 base64 data URI 이미지가 포함된 경우,
    * `overlapMode: 'path'`가 정상 동작하도록 rgbaData를 자동 주입한다.
    * (브라우저는 `LayoutImageElement._feedRgbaToEngine()`이 canvas에서 RGBA 추출)
+   *
+   * @param childrenData - (deprecated) 자식 박스 데이터. 전달 시 `childrenData` setter를 호출. 생략 시 기존 `childrenData` 사용.
    */
   layout(childrenData?: BoxData[]): void {
+    if (childrenData !== undefined) {
+      this._childrenData = childrenData;
+    }
     this._newEnginesCreated = false;
-    this._buildTree(childrenData ?? []);
+    this._buildTree(this._childrenData);
     this._syncIdsToData();
+    this._dirty = false;
   }
 
   /** layout() 호출 시 새 엔진이 생성/추가되었는지 여부 (외부에서 _syncEngineIdsToDom 스킵 판단용). */
@@ -384,6 +763,7 @@ export class DocumentEngine {
    * @returns PrintPostData 배열 (z-index 오름차순)
    */
   get printPostData(): PrintPostData[] {
+    if (this._dirty) throw createDirtyError('DocumentEngine');
     const data: PrintPostData[] = [];
     const sorted = [...this._childBoxEngines].sort((a, b) => a.zIndex - b.zIndex);
     for (const boxEngine of sorted) {
@@ -454,7 +834,8 @@ export class DocumentEngine {
         ctx.newEnginesCreated = true;
       }
       const boxEngine = existingBox ?? BoxEngine.create(childData, this);
-      boxEngine.layout(ctx, childData.children, resources, docStyle);
+      boxEngine.childrenData = childData.children;
+      boxEngine.layout(ctx, undefined, resources, docStyle);
       boxEngines.push(boxEngine);
     }
     this._childBoxEngines = boxEngines;
@@ -620,4 +1001,40 @@ function _findEngineByIdInBoxes(
     }
   }
   return undefined;
+}
+
+/**
+ * 박스 엔진 트리에서 특정 역할(`role`)을 가진 모든 박스 엔진을 수집한다.
+ *
+ * @param boxEngines - 검색 대상 박스 엔진 배열
+ * @param role - 검색할 박스 역할
+ * @returns 일치하는 박스 엔진 배열
+ */
+function _findBoxEnginesByRoleInBoxes(
+  boxEngines: BoxEngine[],
+  role: BoxRole,
+): BoxEngine[] {
+  const results: BoxEngine[] = [];
+  for (const be of boxEngines) {
+    if (be.role === role) results.push(be);
+
+    const childBoxes = be.childBoxEngines;
+    if (childBoxes.length > 0) {
+      results.push(..._findBoxEnginesByRoleInBoxes(childBoxes, role));
+    }
+
+    for (const ce of be.childEngines) {
+      if (ce instanceof TableEngine) {
+        for (const rowEngine of ce.rowEngines) {
+          for (const cellEngine of rowEngine.cellEngines) {
+            const cellBox = cellEngine.boxEngine;
+            if (cellBox) {
+              results.push(..._findBoxEnginesByRoleInBoxes([cellBox], role));
+            }
+          }
+        }
+      }
+    }
+  }
+  return results;
 }

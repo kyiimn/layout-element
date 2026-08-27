@@ -47,6 +47,8 @@ import {
   MmRect,
   OverlapMode,
   ParagraphOverlapMode,
+  createDirtyError,
+  createNoParentError,
 } from "./types";
 import { computeOverlapSizeMm, mergeOverlapParts } from "./overlap-engine";
 import type { ImageEngine } from "./image-engine";
@@ -153,6 +155,8 @@ export class ParagraphEngine {
   private _effectiveTsCache: TextStyle | null = null;
   private _effectiveTsDirty: boolean = true;
 
+  private _dirty: boolean = false;
+
   /**
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
    *
@@ -161,6 +165,31 @@ export class ParagraphEngine {
    */
   public static create(data: ParagraphEngineData): ParagraphEngine {
     return new this(data);
+  }
+
+  /**
+   * 부모 없이 단락 엔진을 생성한다 (고아 엔진).
+   *
+   * `content`와 `resources`만으로 생성하며, 부모 관련 필드(parentBox, parentAbsRect, inheritStyle)는 더미 값으로 초기화된다.
+   * `appendChildContentEngine()`으로 부모 박스에 연결 후 `data` setter로 실제 데이터를 주입해야 한다.
+   *
+   * @param content - 텍스트 콘텐츠
+   * @param resources - 엔진 리소스 (fontLoader, colorRegistry)
+   * @returns 부모가 없는 ParagraphEngine 인스턴스
+   */
+  public static createOrphan(content: string | (string | TextBlockData)[], resources: EngineResources): ParagraphEngine {
+    const orphanData: ParagraphEngineData = {
+      content,
+      column: 1,
+      gap: 0,
+      paragraphStyle: {},
+      textStyle: {},
+      inheritStyle: { parentWidth: 0, parentHeight: 0 },
+      overlayEngines: [],
+      parentAbsRect: { absLeft: 0, absTop: 0, absWidth: 0, absHeight: 0 },
+      resources,
+    };
+    return new this(orphanData);
   }
 
   private constructor(data: ParagraphEngineData) {
@@ -1022,7 +1051,11 @@ export class ParagraphEngine {
    * 내부적으로 `_layoutTextIntoColumns()`를 호출한다.
    */
   public layoutText(): void {
+    if (!this._data.parentBox) {
+      throw createNoParentError('ParagraphEngine', 'appendChildContentEngine');
+    }
     this._layoutTextIntoColumns();
+    this._dirty = false;
   }
 
   /**
@@ -1640,6 +1673,17 @@ export class ParagraphEngine {
     this._effectivePsDirty = true;
     this._effectiveTsDirty = true;
 
+    this._applyColumnGapFromData();
+    this._initLayoutMetrics();
+    this.resetIncrementalState();
+  }
+
+  /**
+   * `data` 또는 개별 column/gap/parentBox setter가 호출한 후
+   * 테이블 셀 보정을 포함한 column/gap 파생 상태(`_gaps`, `_columnWidths`)를 재계산한다.
+   */
+  private _applyColumnGapFromData(): void {
+    const options = this._data;
     const gc = options.parentBox?.gridCalculator;
     const parentParent = options.parentBox?.parent as { isTableCellEngine?: boolean } | undefined;
     const inTableCell = !!parentParent?.isTableCellEngine && !!gc;
@@ -1659,9 +1703,6 @@ export class ParagraphEngine {
         () => (this.inheritStyle.parentWidth - this._gaps.reduce((a, b) => a + b, 0)) / colCount,
       );
     })();
-
-    this._initLayoutMetrics();
-    this.resetIncrementalState();
   }
 
   /**
@@ -1671,6 +1712,7 @@ export class ParagraphEngine {
    */
   public set textContent(value: string | (string | TextBlockData)[]) {
     this._textContent = value;
+    this._dirty = true;
   }
 
   /** 현재 텍스트 콘텐츠 */
@@ -1688,8 +1730,22 @@ export class ParagraphEngine {
     return this.effectiveTextStyle;
   }
 
+  public set textStyle(value: TextStyle) {
+    if (this._textStyle === value) return;
+    this._textStyle = value;
+    this._effectiveTsDirty = true;
+    this._dirty = true;
+  }
+
   public get paragraphStyle(): ParagraphStyle {
     return this.effectiveParagraphStyle;
+  }
+
+  public set paragraphStyle(value: ParagraphStyle) {
+    if (this._paragraphStyle === value) return;
+    this._paragraphStyle = value;
+    this._effectivePsDirty = true;
+    this._dirty = true;
   }
 
   /** 컬럼 수 */
@@ -1840,6 +1896,58 @@ export class ParagraphEngine {
     return this._columnWidths;
   }
 
+  /** 컬럼 정의 (number=동일 너비 N개, number[]=명시적 너비). layout() 시 _columnWidths/_gaps 재계산. */
+  public get column(): number | number[] {
+    return this._data.column;
+  }
+
+  public set column(value: number | number[]) {
+    if (this._data.column === value) return;
+    this._data = { ...this._data, column: value };
+    this._applyColumnGapFromData();
+    this._initLayoutMetrics();
+    this._dirty = true;
+  }
+
+  /** 컬럼 간격 정의. layout() 시 _gaps 재계산. */
+  public get gap(): number | number[] {
+    return this._data.gap;
+  }
+
+  public set gap(value: number | number[]) {
+    if (this._data.gap === value) return;
+    this._data = { ...this._data, gap: value };
+    this._applyColumnGapFromData();
+    this._initLayoutMetrics();
+    this._dirty = true;
+  }
+
+  /**
+   * 단락의 단 설정(column/gap)을 좌우 반전한다.
+   *
+   * `horizontal`/`both` 축일 때 `column`/`gap`이 `number[]`인 경우 배열을 역순으로 만든다.
+   * `number` (균등)인 경우 대칭이므로 그대로 유지한다.
+   * `vertical` 축은 단락에 영향을 주지 않는다.
+   *
+   * @param axis - 반전 축
+   */
+  public flipLayout(axis: 'horizontal' | 'vertical' | 'both'): void {
+    if (axis !== 'horizontal' && axis !== 'both') return;
+    if (Array.isArray(this._data.column)) {
+      this._data = { ...this._data, column: [...this._data.column].reverse() };
+    }
+    if (Array.isArray(this._data.gap)) {
+      this._data = { ...this._data, gap: [...this._data.gap].reverse() };
+    }
+    this._applyColumnGapFromData();
+    this._initLayoutMetrics();
+  }
+
+  /** 개별 setter로 인해 커밋되지 않은 변경이 있는지 여부. */
+  public get dirty(): boolean {
+    return this._dirty;
+  }
+
   /** 이전 레이아웃의 전체 줄 수 */
   public get previousLineCount(): number {
     return this._previousLineCount;
@@ -1917,6 +2025,7 @@ export class ParagraphEngine {
   }
 
   get extractData(): ParagraphData {
+    if (this._dirty) throw createDirtyError('ParagraphEngine');
     const paragraphStyle: Record<string, unknown> = {};
     for (const key of Object.keys(this._paragraphStyle)) {
       if (this._paragraphStyle[key as keyof ParagraphStyle] !== undefined) {
@@ -1949,6 +2058,7 @@ export class ParagraphEngine {
    * DOM 의존성 없이 엔진 데이터만으로 생성한다.
    */
   get printPostData(): PrintPostData[] {
+    if (this._dirty) throw createDirtyError('ParagraphEngine');
     const cr = this._resources.colorRegistry;
     const fl = this._resources.fontLoader;
     const parentAbsRect = this._data.parentAbsRect;

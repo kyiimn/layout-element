@@ -21,6 +21,11 @@ import type {
   ParagraphStyle,
   TextStyle,
   TextLineData,
+  BoxData,
+  ParagraphData,
+  ImageData,
+  TableData,
+  TextData,
 } from "@/types";
 import type { GridResolution } from "./table-grid-resolver";
 import type { BoxEngine } from "./box-engine";
@@ -402,6 +407,55 @@ export type LayoutResult =
   | ParagraphLayoutResult;
 
 // ─────────────────────────────────────────────────────────────
+// Dirty Guard — 개별 setter로 pending 변경이 있을 때 extractData/printPostData 조회를 차단
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 엔진에 커밋되지 않은 개별 setter 변경이 있을 때 발생하는 에러.
+ *
+ * 개별 프로퍼티 setter(`left`, `width`, `paddingTop` 등)는 `_dirty` 플래그를 true로 설정하고
+ * 즉시 렌더링/재계산을 수행하지 않는다. `layout()` 호출 시점에 모든 dirty 변경이
+ * 원자적으로 반영된 후 `_dirty`가 false로 해제된다.
+ *
+ * dirty 상태에서 `extractData` / `printPostData` 조회 시 이 에러가 발생하여
+ * 부분 갱신된 데이터가 외부로 전파되는 것을 차단한다.
+ *
+ * @example
+ * ```ts
+ * boxEngine.left = 100;      // _dirty = true
+ * boxEngine.width = 50;       // _dirty = true
+ * boxEngine.extractData;      // ❌ throws DirtyPendingError
+ * boxEngine.layout(ctx, ...); // 커밋 — _dirty = false
+ * boxEngine.extractData;      // ✅ 정상
+ * ```
+ *
+ * @param engineName - 엔진 클래스명 (예: "BoxEngine")
+ * @returns 발생시킬 Error 인스턴스
+ */
+export const createDirtyError = (engineName: string): Error => {
+  return new Error(
+    `${engineName} has pending changes from individual setters. ` +
+    `Call layout() before reading extractData or printPostData.`,
+  );
+};
+
+/**
+ * 고아 엔진(부모 없이 생성된 엔진)에서 `layout()` 호출 시 발생하는 에러.
+ *
+ * `createOrphan()`으로 부모 없이 생성된 엔진은 `appendChildBoxEngine()` 등으로
+ * 부모에 연결하기 전에 `layout()`을 호출하면 이 에러가 발생한다.
+ *
+ * @param engineName - 엔진 클래스명
+ * @param attachMethod - 부모에 연결하기 위해 호출해야 할 메서드명
+ * @returns 발생시킬 Error 인스턴스
+ */
+export const createNoParentError = (engineName: string, attachMethod: string): Error => {
+  return new Error(
+    `${engineName} has no parent. Call ${attachMethod}() to attach to a parent before layout().`,
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
 // 로컬에서 import한 타입을 엔진 파일들이 ./types에서 import할 수 있도록 재내보내기.
 export type {
   OverlapParts,
@@ -425,3 +479,49 @@ export type {
 } from "@/types";
 
 export type { GridResolution } from "./table-grid-resolver";
+
+// ── Flip Layout Types ──
+
+export type FlipAxis = 'horizontal' | 'vertical' | 'both';
+
+export type FlipLayoutOptions = {
+  axis: FlipAxis;
+  targetId?: string;
+};
+
+export type BoxMetricsById = Map<string, { absWidth: number; absHeight: number }>;
+
+// ─────────────────────────────────────────────────────────────
+// Children Data 동기화 헬퍼 — reparent/append/remove 시 _childrenData 갱신
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * `BoxData.children`에서 특정 ID를 가진 박스 데이터를 재귀 탐색하여 제거한다.
+ *
+ * @param children - 탐색 대상 자식 데이터 (BoxData[] 또는 단일 컨텐츠)
+ * @param boxId - 제거할 박스의 ID
+ * @returns [제거된 BoxData | null, 갱신된 children]
+ */
+export const removeBoxDataFromChildren = (
+  children: BoxData[] | ParagraphData | ImageData | TableData | TextData | undefined,
+  boxId: string,
+): [BoxData | null, BoxData[] | ParagraphData | ImageData | TableData | TextData | undefined] => {
+  if (!children || !Array.isArray(children)) return [null, children];
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    if (child.type === 'box' && child.id === boxId) {
+      const removed = child;
+      const remaining = children.filter((_, idx) => idx !== i);
+      return [removed, remaining];
+    }
+    if (child.type === 'box' && child.children && Array.isArray(child.children)) {
+      const [removed, updatedSubChildren] = removeBoxDataFromChildren(child.children, boxId);
+      if (removed) {
+        const updated = [...children];
+        updated[i] = { ...child, children: updatedSubChildren };
+        return [removed, updated];
+      }
+    }
+  }
+  return [null, children];
+};

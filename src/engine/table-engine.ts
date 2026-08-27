@@ -9,13 +9,14 @@
 
 import { resolveTableGrid, type GridResolution } from "./table-grid-resolver";
 import { TableBorderStore } from "./border-store";
-import type { TableData, TableRowData, TableCellData, BoxData, PrintPostData, PrintPostBorderEdge, PrintPostDiagonal } from "@/types";
+import type { TableData, TableRowData, TableCellData, BoxData, PrintPostData, PrintPostBorderEdge, PrintPostDiagonal, TableBorders } from "@/types";
 import { BoxEngine, type BoxBuildContext } from "./box-engine";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
 import { DocumentEngine } from "./document-engine";
 import type { ParagraphEngine } from "./paragraph-engine";
 import type { ImageEngine } from "./image-engine";
 import type { AbsRect, ColorRegistryEngine } from "./types";
+import { createDirtyError, createNoParentError } from "./types";
 import { checkOverlapMm } from "./overlap-engine";
 
 /**
@@ -42,6 +43,8 @@ export class TableCellEngine {
 
   /** Generation counter — incremented on setCellMetrics/parentAbsRect/boxEngine change. */
   private _generation: number = 0;
+
+  private _dirty: boolean = false;
 
   /**
    * 셀 메트릭을 설정한다.
@@ -82,11 +85,107 @@ export class TableCellEngine {
   /** 원본 셀 데이터 (배경/대각선/보더 등 렌더 속성). span된 셀은 undefined. */
   get cellData(): TableCellData | undefined { return this._cellData; }
 
+  set cellData(value: TableCellData | undefined) {
+    this._cellData = value;
+    this._dirty = true;
+  }
+
+  get colspan(): number { return this._cellData?.colspan ?? 1; }
+  set colspan(value: number) {
+    if ((this._cellData?.colspan ?? 1) === value) return;
+    this._cellData = { ...(this._cellData ?? { type: 'td' as const, children: [] as BoxData[] }), colspan: value };
+    this._dirty = true;
+  }
+
+  get rowspan(): number { return this._cellData?.rowspan ?? 1; }
+  set rowspan(value: number) {
+    if ((this._cellData?.rowspan ?? 1) === value) return;
+    this._cellData = { ...(this._cellData ?? { type: 'td' as const, children: [] as BoxData[] }), rowspan: value };
+    this._dirty = true;
+  }
+
+  get cellPaddingTop(): number { return this._cellData?.paddingTop ?? 0; }
+  set cellPaddingTop(value: number) {
+    if ((this._cellData?.paddingTop ?? 0) === value) return;
+    this._cellData = { ...(this._cellData ?? { type: 'td' as const, children: [] as BoxData[] }), paddingTop: value };
+    this._dirty = true;
+  }
+
+  get cellPaddingRight(): number { return this._cellData?.paddingRight ?? 0; }
+  set cellPaddingRight(value: number) {
+    if ((this._cellData?.paddingRight ?? 0) === value) return;
+    this._cellData = { ...(this._cellData ?? { type: 'td' as const, children: [] as BoxData[] }), paddingRight: value };
+    this._dirty = true;
+  }
+
+  get cellPaddingBottom(): number { return this._cellData?.paddingBottom ?? 0; }
+  set cellPaddingBottom(value: number) {
+    if ((this._cellData?.paddingBottom ?? 0) === value) return;
+    this._cellData = { ...(this._cellData ?? { type: 'td' as const, children: [] as BoxData[] }), paddingBottom: value };
+    this._dirty = true;
+  }
+
+  get cellPaddingLeft(): number { return this._cellData?.paddingLeft ?? 0; }
+  set cellPaddingLeft(value: number) {
+    if ((this._cellData?.paddingLeft ?? 0) === value) return;
+    this._cellData = { ...(this._cellData ?? { type: 'td' as const, children: [] as BoxData[] }), paddingLeft: value };
+    this._dirty = true;
+  }
+
+  get cellBackgroundColor(): string | undefined { return this._cellData?.backgroundColor; }
+  set cellBackgroundColor(value: string | undefined) {
+    if (this._cellData?.backgroundColor === value) return;
+    this._cellData = { ...(this._cellData ?? { type: 'td' as const, children: [] as BoxData[] }), backgroundColor: value };
+    this._dirty = true;
+  }
+
+  get cellBackgroundOpacity(): number | undefined { return this._cellData?.backgroundOpacity; }
+  set cellBackgroundOpacity(value: number | undefined) {
+    if (this._cellData?.backgroundOpacity === value) return;
+    this._cellData = { ...(this._cellData ?? { type: 'td' as const, children: [] as BoxData[] }), backgroundOpacity: value };
+    this._dirty = true;
+  }
+
+  get dirty(): boolean {
+    return this._dirty;
+  }
+
+  /** TableEngine.layout() 완료 후 셀의 dirty를 해제하기 위한 internal API. */
+  _markClean(): void {
+    this._dirty = false;
+  }
+
   /** 셀 내용 박스 엔진 */
   get boxEngine(): BoxEngine | null { return this._boxEngine; }
   set boxEngine(engine: BoxEngine | null) {
+    if (engine !== null && engine.parent !== this) {
+      const oldParent = engine.parent;
+      const boxData = engine.data;
+      if (oldParent instanceof BoxEngine) {
+        const children = oldParent.childEngines;
+        const idx = children.indexOf(engine);
+        if (idx >= 0) children.splice(idx, 1);
+        if (boxData.id) oldParent._removeBoxDataFromChildren(boxData.id);
+      } else if (oldParent instanceof DocumentEngine) {
+        const idx = oldParent.childBoxEngines.indexOf(engine);
+        if (idx >= 0) oldParent.childBoxEngines.splice(idx, 1);
+        if (boxData.id) oldParent._removeBoxDataFromChildren(boxData.id);
+      } else if (oldParent instanceof TableCellEngine) {
+        if (oldParent._boxEngine === engine) oldParent._boxEngine = null;
+      }
+      engine.parent = this;
+    }
     this._boxEngine = engine;
     this._generation++;
+    this._dirty = true;
+  }
+
+  /**
+   * 박스 엔진을 셀의 자식으로 추가한다. 기존 boxEngine이 있으면 교체한다.
+   * 다른 부모에 속해 있던 박스인 경우 reparent된다.
+   */
+  appendChildBoxEngine(boxEngine: BoxEngine): void {
+    this.boxEngine = boxEngine;
   }
 
   /**
@@ -163,6 +262,7 @@ export class TableCellEngine {
   }
 
   get extractData(): TableCellData {
+    if (this._dirty) throw createDirtyError('TableCellEngine');
     const children: BoxData[] = this._boxEngine ? [this._boxEngine.extractData] : [];
     const base = this._cellData ?? { type: 'td' as const, children: [] as BoxData[] };
     return {
@@ -247,6 +347,9 @@ export class TableEngine {
   private _gridResolution: GridResolution | null = null;
   private _rowEngines: TableRowEngine[] = [];
   private _borderStore: TableBorderStore | null = null;
+  private _rowsData: TableRowData[] = [];
+
+  private _dirty: boolean = false;
 
   /**
    * 정적 팩토리 메서드.
@@ -257,6 +360,18 @@ export class TableEngine {
    */
   static create(data: TableData, parentBox: BoxEngine): TableEngine {
     return new this(data, parentBox);
+  }
+
+  /**
+   * 부모 없이 테이블 엔진을 생성한다 (고아 엔진).
+   *
+   * `appendChildContentEngine()`으로 부모 박스에 연결하기 전에 `layout()`을 호출하면 예외가 발생한다.
+   *
+   * @param data - 테이블 데이터
+   * @returns 부모가 없는 TableEngine 인스턴스
+   */
+  static createOrphan(data: TableData): TableEngine {
+    return new this(data, null as unknown as BoxEngine);
   }
 
   private constructor(data: TableData, parentBox: BoxEngine) {
@@ -274,6 +389,16 @@ export class TableEngine {
     return this._data;
   }
 
+  /** 행 데이터를 설정한다. `data` setter는 테이블 자체 속성(colWidths/borders)만 담당하고, 행 데이터는 이 setter가 담당한다. */
+  set childrenData(data: TableRowData[]) {
+    this._rowsData = data;
+    this._dirty = true;
+  }
+
+  get childrenData(): TableRowData[] {
+    return this._rowsData;
+  }
+
   /**
    * 엔진이 현재 관리 중인 상태에서 TableData를 추출한다.
    *
@@ -283,6 +408,7 @@ export class TableEngine {
    * @returns 엔진 현재 상태 기반의 TableData
    */
   get extractData(): TableData {
+    if (this._dirty) throw createDirtyError('TableEngine');
     const children: TableRowData[] = this._rowEngines.map((re) => {
       return {
         type: 'tr' as const,
@@ -322,6 +448,30 @@ export class TableEngine {
   /** 보더 면 저장소 (단일 진실 소스) */
   get borderStore(): TableBorderStore | null {
     return this._borderStore;
+  }
+
+  get colWidths(): number | number[] | undefined {
+    return this._data.colWidths;
+  }
+
+  set colWidths(value: number | number[] | undefined) {
+    if (this._data.colWidths === value) return;
+    this._data = { ...this._data, colWidths: value };
+    this._dirty = true;
+  }
+
+  get borders(): TableBorders | undefined {
+    return this._data.borders;
+  }
+
+  set borders(value: TableBorders | undefined) {
+    if (this._data.borders === value) return;
+    this._data = { ...this._data, borders: value };
+    this._dirty = true;
+  }
+
+  get dirty(): boolean {
+    return this._dirty;
   }
 
   /**
@@ -387,6 +537,11 @@ export class TableEngine {
       const cellBoxEngine = parentBox.buildCellBoxEngine(cellBoxData, cellEngine, ctx);
       cellEngine.boxEngine = cellBoxEngine;
     }
+    for (const row of this._rowEngines) {
+      for (const cell of row.cellEngines) {
+        cell._markClean();
+      }
+    }
   }
 
   /**
@@ -395,11 +550,17 @@ export class TableEngine {
    * 보더 면 저장소를 그리드 크기에 맞춰 구축한다.
    */
   layout(rowsData?: TableRowData[]): void {
+    if (!this._parentBox) {
+      throw createNoParentError('TableEngine', 'appendChildContentEngine');
+    }
+    if (rowsData !== undefined) {
+      this._rowsData = rowsData;
+    }
     const parentAbsRect = this._parentBox.absRect;
     const contentWidth = parentAbsRect.absWidth - this._parentBox.paddingLeft - this._parentBox.paddingRight;
     const contentHeight = parentAbsRect.absHeight - this._parentBox.paddingTop - this._parentBox.paddingBottom;
 
-    const rows = rowsData ?? [];
+    const rows = this._rowsData;
     this._gridResolution = resolveTableGrid(
       rows,
       contentWidth,
@@ -470,6 +631,12 @@ export class TableEngine {
       });
       this._rowEngines[r].cellEngines = cellEngines;
     }
+    for (const row of this._rowEngines) {
+      for (const cell of row.cellEngines) {
+        cell._markClean();
+      }
+    }
+    this._dirty = false;
   }
 
   /**
@@ -483,6 +650,7 @@ export class TableEngine {
    * @returns PrintPostData 배열 (mm 단위)
    */
   get printPostData(): PrintPostData[] {
+    if (this._dirty) throw createDirtyError('TableEngine');
     const data: PrintPostData[] = [];
     const colorRegistry = this._getColorRegistry();
     const parentAbsRect = this._parentBox.absRect;

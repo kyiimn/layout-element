@@ -11,9 +11,10 @@
  * @file src/engine/box-engine.ts
  */
 
-import type { BoxData, BoxPosition, BoxRole, ParagraphData, ImageData, TableData, InheritStyle, ParagraphStyle, TextStyle, TextData } from "@/types";
+import type { BoxData, BoxPosition, BoxRole, BoxBorderStyle, ParagraphData, ImageData, TableData, InheritStyle, ParagraphStyle, TextStyle, TextData } from "@/types";
 import type { AbsRect, BoxContentType, EngineResources, GridCalculatorEngineOptions } from "./types";
 import type { PrintPostData } from "@/types";
+import { createDirtyError, createNoParentError, removeBoxDataFromChildren } from "./types";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
 import { ImageEngine } from "./image-engine";
 import type { RgbaData } from "./image-engine";
@@ -51,8 +52,17 @@ export class BoxEngine {
   /** 문서 기본 스타일 (GC 옵션 및 inheritStyle 계산용). layout() 호출 시 주입된다. */
   private _docStyle: { paragraphStyle: ParagraphStyle; textStyle: TextStyle } | null = null;
 
+  private _childrenData: BoxData[] | ParagraphData | TextData | ImageData | TableData | undefined;
+
   /** Generation counter — incremented on data/parent/gridCalculator change. */
   private _generation: number = 0;
+
+  /**
+   * 개별 setter로 pending 변경이 있는지 추적.
+   * `true`면 `extractData`/`printPostData` 조회 시 예외 발생.
+   * `data` 세터(전체 교체) 또는 `layout()` 호출 시 `false`로 해제.
+   */
+  private _dirty: boolean = false;
 
   /** 성능 캐시: absRect. parent generation 및 자신의 generation mismatch 시 무효화. */
   private _absRectCache: AbsRect | null = null;
@@ -81,6 +91,19 @@ export class BoxEngine {
    */
   static create(data: BoxData, parent: BoxEngineParent): BoxEngine {
     return new this(data, parent);
+  }
+
+  /**
+   * 부모 없이 박스 엔진을 생성한다 (고아 엔진).
+   *
+   * `appendChildBoxEngine()`으로 부모에 연결하기 전에 `layout()`을 호출하면 예외가 발생한다.
+   * 부모 연결 후 `layout()` 호출 시 좌표 계산이 수행된다.
+   *
+   * @param data - 박스 데이터
+   * @returns 부모가 없는 BoxEngine 인스턴스
+   */
+  static createOrphan(data: BoxData): BoxEngine {
+    return new this(data, null as unknown as BoxEngineParent);
   }
 
   private constructor(data: BoxData, parent: BoxEngineParent) {
@@ -142,6 +165,7 @@ export class BoxEngine {
    * @returns 엔진 현재 상태 기반의 BoxData
    */
   get extractData(): BoxData {
+    if (this._dirty) throw createDirtyError('BoxEngine');
     const children: BoxData[] | ParagraphData | ImageData | TableData | undefined = (() => {
       if (this._childEngines.length === 0) return undefined;
       const childData = this._childEngines.map(e => e.extractData);
@@ -150,6 +174,8 @@ export class BoxEngine {
       }
       return childData as BoxData[];
     })();
+
+    const groupMember = this.groupMember;
 
     return {
       ...this._data,
@@ -168,6 +194,7 @@ export class BoxEngine {
       backgroundOpacity: this._data.backgroundOpacity ?? 1,
       priority: this._data.priority ?? 0,
       lock: this._data.lock ?? false,
+      ...(groupMember.length > 0 ? { groupMember: groupMember.join(',') } : {}),
       children,
     };
   }
@@ -227,6 +254,203 @@ export class BoxEngine {
   get paddingRight(): number { return this._data.paddingRight ?? 0; }
   get paddingBottom(): number { return this._data.paddingBottom ?? 0; }
   get paddingLeft(): number { return this._data.paddingLeft ?? 0; }
+
+  // ── 개별 setter (dirty 표시만, layout() 호출 시 원자 반영) ──
+
+  set position(value: BoxPosition) {
+    if ((this._data.position ?? 'static') === value) return;
+    this._data = { ...this._data, position: value };
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set left(value: number) {
+    if (this._data.left === value) return;
+    this._data = { ...this._data, left: value };
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set top(value: number) {
+    if (this._data.top === value) return;
+    this._data = { ...this._data, top: value };
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set width(value: number) {
+    if (this._data.width === value) return;
+    this._data = { ...this._data, width: value };
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set height(value: number) {
+    if (this._data.height === value) return;
+    this._data = { ...this._data, height: value };
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set zIndex(value: number) {
+    if (this._data.zIndex === value) return;
+    this._data = { ...this._data, zIndex: value };
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set role(value: BoxRole) {
+    if (this._data.role === value) return;
+    this._data = { ...this._data, role: value };
+    this._generation++;
+    this._dirty = true;
+  }
+
+  set paddingTop(value: number) {
+    if ((this._data.paddingTop ?? 0) === value) return;
+    this._data = { ...this._data, paddingTop: value };
+    this._dirty = true;
+  }
+
+  set paddingRight(value: number) {
+    if ((this._data.paddingRight ?? 0) === value) return;
+    this._data = { ...this._data, paddingRight: value };
+    this._dirty = true;
+  }
+
+  set paddingBottom(value: number) {
+    if ((this._data.paddingBottom ?? 0) === value) return;
+    this._data = { ...this._data, paddingBottom: value };
+    this._dirty = true;
+  }
+
+  set paddingLeft(value: number) {
+    if ((this._data.paddingLeft ?? 0) === value) return;
+    this._data = { ...this._data, paddingLeft: value };
+    this._dirty = true;
+  }
+
+  set borderTopWidth(value: number) {
+    if ((this._data.borderTopWidth ?? 0) === value) return;
+    this._data = { ...this._data, borderTopWidth: value };
+    this._dirty = true;
+  }
+
+  set borderRightWidth(value: number) {
+    if ((this._data.borderRightWidth ?? 0) === value) return;
+    this._data = { ...this._data, borderRightWidth: value };
+    this._dirty = true;
+  }
+
+  set borderBottomWidth(value: number) {
+    if ((this._data.borderBottomWidth ?? 0) === value) return;
+    this._data = { ...this._data, borderBottomWidth: value };
+    this._dirty = true;
+  }
+
+  set borderLeftWidth(value: number) {
+    if ((this._data.borderLeftWidth ?? 0) === value) return;
+    this._data = { ...this._data, borderLeftWidth: value };
+    this._dirty = true;
+  }
+
+  set borderStyle(value: BoxBorderStyle) {
+    if ((this._data.borderStyle ?? DEFAULT_BORDER_STYLE) === value) return;
+    this._data = { ...this._data, borderStyle: value };
+    this._dirty = true;
+  }
+
+  set borderColor(value: string | undefined) {
+    if (this._data.borderColor === value) return;
+    this._data = { ...this._data, borderColor: value };
+    this._dirty = true;
+  }
+
+  set backgroundColor(value: string | undefined) {
+    if (this._data.backgroundColor === value) return;
+    this._data = { ...this._data, backgroundColor: value };
+    this._dirty = true;
+  }
+
+  set backgroundOpacity(value: number | undefined) {
+    if (this._data.backgroundOpacity === value) return;
+    this._data = { ...this._data, backgroundOpacity: value };
+    this._dirty = true;
+  }
+
+  set priority(value: number) {
+    if ((this._data.priority ?? 0) === value) return;
+    this._data = { ...this._data, priority: value };
+    this._dirty = true;
+  }
+
+  set lock(value: boolean) {
+    if ((this._data.lock ?? false) === value) return;
+    this._data = { ...this._data, lock: value };
+    this._dirty = true;
+  }
+
+  set contentUid(value: string | undefined) {
+    if (this._data.contentUid === value) return;
+    this._data = { ...this._data, contentUid: value };
+    this._dirty = true;
+  }
+
+  get contentUid(): string | undefined {
+    return this._data.contentUid;
+  }
+
+  /**
+   * 이 박스와 하위 박스들의 `contentUid` 및 `groupMember`를 합산한 그룹 멤버 목록.
+   *
+   * 읽기 전용 getter — setter가 없으므로 직접 설정 불가.
+   * `extractData`에서 이 값을 쉼표 구분 string으로 변환하여 `BoxData.groupMember`에 반영한다.
+   *
+   * @returns 고유한 contentUid/groupMember 문자열 배열 (중복 제거)
+   */
+  get groupMember(): string[] {
+    const members = new Set<string>();
+    if (this._data.contentUid) members.add(this._data.contentUid);
+    if (this._data.groupMember) {
+      for (const m of this._data.groupMember.split(',').filter(s => s.length > 0)) {
+        members.add(m);
+      }
+    }
+    for (const child of this._childEngines) {
+      if (child instanceof BoxEngine) {
+        for (const m of child.groupMember) {
+          members.add(m);
+        }
+      }
+    }
+    return [...members];
+  }
+
+  /** 개별 setter로 인해 커밋되지 않은 변경이 있는지 여부. */
+  get dirty(): boolean {
+    return this._dirty;
+  }
+
+  /** 외부 엔진(DocumentEngine)에서 reparent 시 dirty를 표시하기 위한 public API. */
+  _markDirty(): void {
+    this._dirty = true;
+    this._generation++;
+  }
+
+  /** 외부 엔진(DocumentEngine)에서 reparent 시 _childrenData에서 박스 데이터를 제거하기 위한 internal API. */
+  _removeBoxDataFromChildren(boxId: string): void {
+    const [, updated] = removeBoxDataFromChildren(this._childrenData, boxId);
+    this._childrenData = updated;
+  }
+
+  /** 외부 엔진(DocumentEngine)에서 reparent 시 _childrenData에 박스 데이터를 추가하기 위한 internal API. */
+  _appendChildBoxData(boxData: BoxData): void {
+    if (Array.isArray(this._childrenData)) {
+      this._childrenData = [...this._childrenData, boxData];
+    } else if (this._childrenData === undefined || this._childrenData === null) {
+      this._childrenData = [boxData];
+    }
+  }
 
   /**
    * 부모 기준 상대 X 좌표 (mm).
@@ -502,6 +726,35 @@ export class BoxEngine {
   }
 
   /**
+   * 이 박스와 하위 트리에서 특정 역할(`role`)을 가진 모든 박스 엔진을 검색한다.
+   *
+   * @param role - 검색할 박스 역할
+   * @returns 일치하는 박스 엔진 배열
+   */
+  findBoxEnginesByRole(role: BoxRole): BoxEngine[] {
+    const results: BoxEngine[] = [];
+    if (this.role === role) results.push(this);
+
+    for (const ce of this._childEngines) {
+      if (ce instanceof BoxEngine) {
+        results.push(...ce.findBoxEnginesByRole(role));
+      }
+      if (ce instanceof TableEngine) {
+        for (const rowEngine of ce.rowEngines) {
+          for (const cellEngine of rowEngine.cellEngines) {
+            const cellBox = cellEngine.boxEngine;
+            if (cellBox) {
+              results.push(...cellBox.findBoxEnginesByRole(role));
+            }
+          }
+        }
+      }
+    }
+
+    return results;
+  }
+
+  /**
    * 자식 엔진 목록을 설정한다.
    * 엔진 트리를 구축할 때 호출.
    *
@@ -544,6 +797,7 @@ export class BoxEngine {
    * z-index 오름차순으로 자식을 정렬하여 반환한다.
    */
   get printPostData(): PrintPostData[] {
+    if (this._dirty) throw createDirtyError('BoxEngine');
     const data: PrintPostData[] = [];
 
     const doc = this._findDocumentEngine();
@@ -596,22 +850,46 @@ export class BoxEngine {
   }
 
   /**
-   * 이 박스의 자식 엔진 트리를 `this._data.children`로부터 재구축한다.
+   * 자식 데이터를 설정한다.
+   *
+   * `data` setter는 박스 자체 속성만 담당하고, 자식 데이터는 이 setter가 담당한다.
+   * `_data.children`을 읽지 않아 "no children in `_data`" 원칙을 유지한다.
+   *
+   * @param data - 자식 박스 배열, 또는 단일 컨텐츠(paragraph/image/table)
+   */
+  set childrenData(data: BoxData[] | ParagraphData | TextData | ImageData | TableData | undefined) {
+    this._childrenData = data;
+    this._dirty = true;
+  }
+
+  get childrenData(): BoxData[] | ParagraphData | TextData | ImageData | TableData | undefined {
+    return this._childrenData;
+  }
+
+  /**
+   * 이 박스의 자식 엔진 트리를 `childrenData` setter로 주입된 데이터에서 재구축한다.
    *
    * DocumentEngine._buildTree()가 최상위 박스에 대해 호출하며,
    * 내부적으로 재귀적으로 자식 박스의 layout()을 호출한다.
    * 기존 content 엔진(ParagraphEngine, ImageEngine, TableEngine)은 id 매칭으로 보존한다.
    *
    * @param ctx - 트리 구축 컨텍스트 (prevContentEnginesByBoxId, newEnginesCreated)
+   * @param childrenData - (deprecated) 자식 데이터. 전달 시 `childrenData` setter 호출. 생략 시 기존 값 사용.
    * @param resources - 엔진 리소스 (ppm, fontLoader, colorRegistry)
    * @param docStyle - 문서 기본 스타일 (paragraphStyle, textStyle)
    */
   layout(
     ctx: BoxBuildContext,
-    childrenData: BoxData[] | ParagraphData | TextData | ImageData | TableData | undefined,
+    childrenData?: BoxData[] | ParagraphData | TextData | ImageData | TableData | undefined,
     resources?: EngineResources,
     docStyle?: { paragraphStyle: ParagraphStyle; textStyle: TextStyle },
   ): void {
+    if (this._parent === null || this._parent === undefined) {
+      throw createNoParentError('BoxEngine', 'appendChildBoxEngine');
+    }
+    if (childrenData !== undefined) {
+      this._childrenData = childrenData;
+    }
     if (resources) this._resources = resources;
     if (docStyle) this._docStyle = docStyle;
     if (!this._resources || !this._docStyle) return;
@@ -649,8 +927,9 @@ export class BoxEngine {
       this._gridCalculator = GridCalculatorEngine.create(gcOptions, this._resources!.ppm);
     }
 
-    if (!childrenData) {
+    if (!this._childrenData) {
       if (this._childEngines.length > 0) this._childEngines = [];
+      this._dirty = false;
       return;
     }
 
@@ -664,13 +943,13 @@ export class BoxEngine {
 
     const childEngines: (BoxEngine | ImageEngine | ParagraphEngine | TableEngine)[] = [];
 
-    if (Array.isArray(childrenData)) {
-      for (const childBoxData of childrenData) {
+    if (Array.isArray(this._childrenData)) {
+      for (const childBoxData of this._childrenData) {
         const childBE = this._buildChildBoxEngine(childBoxData, ctx);
         childEngines.push(childBE);
       }
     } else {
-      const content = childrenData;
+      const content = this._childrenData;
       if (content.type === 'paragraph' || content.type === 'text') {
         const paraData: ParagraphData = content.type === 'text'
           ? { type: 'paragraph', id: content.id, content: content.content, column: 1, gap: 0, paragraphStyle: content.paragraphStyle, textStyle: content.textStyle }
@@ -688,6 +967,7 @@ export class BoxEngine {
 
     this._childEngines = childEngines;
     this._generation++;
+    this._dirty = false;
   }
 
   /**
@@ -715,7 +995,8 @@ export class BoxEngine {
     }
     const childBoxEngine = existingBox ?? BoxEngine.create(childBoxData, this);
 
-    childBoxEngine.layout(ctx, childBoxData.children, this._resources!, this._docStyle!);
+    childBoxEngine.childrenData = childBoxData.children;
+    childBoxEngine.layout(ctx, undefined, this._resources!, this._docStyle!);
     return childBoxEngine;
   }
 
@@ -733,6 +1014,182 @@ export class BoxEngine {
     } else if (oldParent instanceof TableCellEngine) {
       if (oldParent.boxEngine === box) oldParent.boxEngine = null;
     }
+  }
+
+  /**
+   * 자식 박스 엔진을 추가한다. 다른 부모에 속해 있던 박스인 경우 reparent된다.
+   */
+  appendChildBoxEngine(boxEngine: BoxEngine): void {
+    const oldParent = boxEngine.parent;
+    if (oldParent !== this) {
+      this._removeBoxFromParent(boxEngine, oldParent);
+      boxEngine.parent = this;
+    }
+    this._childEngines = [...this._childEngines, boxEngine];
+    this._appendChildBoxData(boxEngine.data);
+    this._generation++;
+    this._dirty = true;
+  }
+
+  /**
+   * 자식 박스 엔진을 제거한다.
+   */
+  removeChildBoxEngine(boxEngine: BoxEngine): void {
+    const idx = this._childEngines.indexOf(boxEngine);
+    if (idx < 0) return;
+    this._childEngines = this._childEngines.filter((_, i) => i !== idx);
+    if (boxEngine.data.id) {
+      this._removeBoxDataFromChildren(boxEngine.data.id);
+    }
+    this._generation++;
+    this._dirty = true;
+  }
+
+  /**
+   * 컨텐츠 엔진(ParagraphEngine | ImageEngine | TableEngine)을 자식으로 추가한다.
+   * 박스는 단일 컨텐츠 또는 다중 자식 박스만 가질 수 있다. 컨텐츠 엔진이 이미 자식에 있으면 교체한다.
+   */
+  appendChildContentEngine(engine: ParagraphEngine | ImageEngine | TableEngine): void {
+    const existingContent = this._childEngines.find(e => !(e instanceof BoxEngine));
+    if (existingContent) {
+      this._childEngines = this._childEngines.map(e => e === existingContent ? engine : e);
+    } else {
+      this._childEngines = [...this._childEngines, engine];
+    }
+    this._generation++;
+    this._dirty = true;
+  }
+
+  /**
+   * 컨텐츠 엔진을 자식에서 제거한다.
+   */
+  removeChildContentEngine(engine: ParagraphEngine | ImageEngine | TableEngine): void {
+    const idx = this._childEngines.indexOf(engine);
+    if (idx < 0) return;
+    this._childEngines = this._childEngines.filter((_, i) => i !== idx);
+    this._generation++;
+    this._dirty = true;
+  }
+
+  /**
+   * 박스 엔진을 다른 부모로 이동시킨다 (reparent).
+   */
+  reparentBoxEngine(boxEngine: BoxEngine, newParent: BoxEngineParent): void {
+    const oldParent = boxEngine.parent;
+    if (oldParent === newParent) return;
+    const boxData = boxEngine.data;
+
+    // oldParent의 _childrenData에서 제거
+    if (oldParent instanceof DocumentEngine) {
+      if (boxData.id) oldParent._removeBoxDataFromChildren(boxData.id);
+    } else if (oldParent instanceof BoxEngine) {
+      oldParent._removeBoxDataFromChildren(boxData.id ?? '');
+    }
+
+    // 엔진 트리 수정
+    this._removeBoxFromParent(boxEngine, oldParent);
+    boxEngine.parent = newParent;
+
+    // newParent에 추가 (엔진 트리 + _childrenData)
+    if (newParent instanceof DocumentEngine) {
+      newParent.appendChildBoxEngine(boxEngine);
+    } else if (newParent instanceof BoxEngine) {
+      newParent.appendChildBoxEngine(boxEngine);
+    } else if (newParent instanceof TableCellEngine) {
+      newParent.boxEngine = boxEngine;
+    }
+    this._generation++;
+    this._dirty = true;
+  }
+
+  /**
+   * 이 박스와 하위 요소들을 좌우/상하 반전한다.
+   *
+   * - `static` 박스: `left`는 컬럼 인덱스, `width`는 컬럼 span.
+   *   - 좌우: `left = columnCount - left - width`
+   *   - 상하: `top = totalLines - top - height`
+   * - `absolute` 박스: `left`/`top`/`width`/`height` 모두 mm.
+   *   - 부모가 document: `left = containerWidth - left - width`
+   *   - 부모가 box: `left = innerWidth - left - width`
+   *
+   * 보더/패딩 방향도 함께 교환한다. 자식도 재귀적으로 반전한다.
+   *
+   * @param axis - 반전 축
+   * @param container - 부모 컨테이너 메트릭 (컬럼 수, 내부 mm 크기 등)
+   * @param metricsById - 각 박스 id별 mm 크기 map
+   */
+  flipLayout(
+    axis: 'horizontal' | 'vertical' | 'both',
+    container: {
+      columns: number;
+      heightLines: number;
+      innerWidth: number;
+      innerHeight: number;
+      width: number;
+      height: number;
+      isDocument: boolean;
+    },
+    metricsById: Map<string, { absWidth: number; absHeight: number }>,
+  ): void {
+    if (this._data.lock) return;
+
+    if (this._data.position === 'absolute') {
+      const refWidth = container.isDocument ? container.width : container.innerWidth;
+      const refHeight = container.isDocument ? container.height : container.innerHeight;
+      if (axis === 'horizontal' || axis === 'both') {
+        this._data = { ...this._data, left: refWidth - this._data.left - this._data.width };
+      }
+      if (axis === 'vertical' || axis === 'both') {
+        this._data = { ...this._data, top: refHeight - this._data.top - this._data.height };
+      }
+    } else {
+      if (axis === 'horizontal' || axis === 'both') {
+        this._data = { ...this._data, left: container.columns - this._data.left - this._data.width };
+      }
+      if (axis === 'vertical' || axis === 'both') {
+        this._data = { ...this._data, top: container.heightLines - this._data.top - this._data.height };
+      }
+    }
+
+    // 보더/패딩 방향 교환
+    if (axis === 'horizontal' || axis === 'both') {
+      const tmpB = this._data.borderLeftWidth;
+      this._data = { ...this._data, borderLeftWidth: this._data.borderRightWidth, borderRightWidth: tmpB };
+      const tmpP = this._data.paddingLeft;
+      this._data = { ...this._data, paddingLeft: this._data.paddingRight, paddingRight: tmpP };
+    }
+    if (axis === 'vertical' || axis === 'both') {
+      const tmpB = this._data.borderTopWidth;
+      this._data = { ...this._data, borderTopWidth: this._data.borderBottomWidth, borderBottomWidth: tmpB };
+      const tmpP = this._data.paddingTop;
+      this._data = { ...this._data, paddingTop: this._data.paddingBottom, paddingBottom: tmpP };
+    }
+
+    // 자식 재귀 반전
+    const injected = this._data.id ? metricsById.get(this._data.id) : undefined;
+    const childContainer = {
+      columns: this._data.position === 'absolute' ? this._data.width : this._data.width,
+      heightLines: this._data.height,
+      innerWidth: this._data.position === 'absolute'
+        ? this._data.width - (this._data.paddingLeft ?? 0) - (this._data.paddingRight ?? 0)
+        : (injected?.absWidth ?? this._data.width) - (this._data.paddingLeft ?? 0) - (this._data.paddingRight ?? 0),
+      innerHeight: this._data.position === 'absolute'
+        ? this._data.height - (this._data.paddingTop ?? 0) - (this._data.paddingBottom ?? 0)
+        : (injected?.absHeight ?? this._data.height) - (this._data.paddingTop ?? 0) - (this._data.paddingBottom ?? 0),
+      width: this._data.position === 'absolute' ? this._data.width : (injected?.absWidth ?? this._data.width),
+      height: this._data.position === 'absolute' ? this._data.height : (injected?.absHeight ?? this._data.height),
+      isDocument: false,
+    };
+
+    for (const child of this._childEngines) {
+      if (child instanceof BoxEngine) {
+        child.flipLayout(axis, childContainer, metricsById);
+      } else if (child instanceof ParagraphEngine) {
+        child.flipLayout(axis);
+      }
+    }
+
+    this._generation++;
   }
 
   /**
@@ -906,7 +1363,8 @@ export class BoxEngine {
     if (existing) {
       te.data = tableData;
     }
-    te.layout(tableData.children);
+    te.childrenData = tableData.children ?? [];
+    te.layout();
 
     const placements = te.gridResolution?.placements ?? [];
     for (const placement of placements) {
@@ -965,7 +1423,8 @@ export class BoxEngine {
     }
     const cellBoxEngine = existingBox ?? BoxEngine.create(cellBoxData, cellEngine);
 
-    cellBoxEngine.layout(ctx, cellBoxData.children, this._resources!, this._docStyle!);
+    cellBoxEngine.childrenData = cellBoxData.children;
+    cellBoxEngine.layout(ctx, undefined, this._resources!, this._docStyle!);
     return cellBoxEngine;
   }
 
