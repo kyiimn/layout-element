@@ -990,12 +990,10 @@ export class EditManager {
    * @returns lock된 box가 하나라도 있으면 `true`
    */
   private _isBoxOrAncestorLocked(box: LayoutElement): boolean {
-    let current: LayoutElement | null = box;
+    let current: Element | null = box;
     while (current) {
       if (current instanceof LayoutBoxElement && current.lock) return true;
-      current = current.parentElement instanceof LayoutBoxElement || current.parentElement instanceof LayoutTableCellElement
-        ? (current.parentElement as LayoutElement)
-        : null;
+      current = current.parentElement;
     }
     return false;
   }

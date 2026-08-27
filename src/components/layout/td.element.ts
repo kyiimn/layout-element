@@ -80,6 +80,15 @@ export class LayoutTableCellElement extends HTMLElement {
     return ['colspan', 'rowspan', 'selected', 'hovered', 'reparent-target'];
   }
 
+  get locked(): boolean {
+    let el: Element | null = this.parentElement;
+    while (el) {
+      if (el instanceof LayoutBoxElement && el.lock) return true;
+      el = el.parentElement;
+    }
+    return false;
+  }
+
   attributeChangedCallback(
     name: string,
     _oldVal: string | null,
@@ -940,6 +949,7 @@ export class LayoutTableCellElement extends HTMLElement {
   }
 
   private _onLayoutMouseEnter = (): void => {
+    if (this.locked) return;
     const manager = this.editManager;
     if (!manager) return;
     if (manager._isDraggingLayout() || manager._isResizingLayout()) return;

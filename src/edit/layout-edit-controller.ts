@@ -440,6 +440,7 @@ export class LayoutEditController {
           event.stopPropagation();
           return;
         }
+        if (tdEl.locked) return;
         if (tdEl.cellLabel) {
           const kcInternal = kc as unknown as { _labelToCoord: (label: string) => CellCoord | null };
           const coord = kcInternal._labelToCoord ? kcInternal._labelToCoord(tdEl.cellLabel) : null;

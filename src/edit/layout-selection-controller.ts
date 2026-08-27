@@ -140,6 +140,7 @@ export class LayoutSelectionController {
 
       const tdElForDrag = path.find((el) => el instanceof LayoutTableCellElement) as LayoutTableCellElement | undefined;
       if (tdElForDrag && tdElForDrag.cellLabel && kc) {
+        if (tdElForDrag.locked) return;
         const kcInternal = kc as unknown as { _labelToCoord: (label: string) => CellCoord | null };
         const coord = kcInternal._labelToCoord ? kcInternal._labelToCoord(tdElForDrag.cellLabel) : null;
         if (coord) {
