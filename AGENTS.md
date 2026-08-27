@@ -84,7 +84,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **InheritStyle cascade**: `TextStyle` + `ParagraphStyle` + parent dimensions flow downward. Children override individual fields.
 - **Text overflow**: `render-error` CustomEvent with `{ type: 'text-overflow', overflow: number }`. `:host` gets `inset 0 -8px 0 0 #ff0000` when overflow.
 - **Render complete**: `render-complete` CustomEvent after every `LayoutParagraphElement.render()`. Payload: `RenderCompleteEventDetail`.
-- **printPostData 단일화 (mm)**: 엔진 트리(`DocumentEngine.printPostData`)가 단일 소스. `LayoutDocumentElement.printPostData`는 엔진 트리를 위임한다. box/paragraph/image/table/td/tr 엘리먼트의 개별 `printPostData` getter는 제거되었다. 모든 rect/char 좌표는 **mm 단위 number**. ppm 곱셈은 외부 후처리 시스템이 수행한다. `<x-layout-guide-column>`은 DOM 전용이므로 `LayoutDocumentElement`에서 별도 수집.
+- **printPostData 엔진 전용 API**: 엔진 트리(`DocumentEngine.printPostData`)가 단일 소스. DOM 요소의 `printPostData` getter는 제거되었다. `printPostData`는 엔진 전용 API로, DOM에서 호출하지 않는다. 모든 rect/char 좌표는 **mm 단위 number**. ppm 곱셈은 외부 후처리 시스템이 수행한다.
 - **`BoxEngine.contentAbsRect`**: padding 제외한 콘텐츠 영역 절대 사각형 (mm). `ImageEngine.contentAbsRect`로 주입되어 object-fit 계산에 사용.
 - **`BoxEngine.absHeight` 테이블 셀 stretch**: 부모가 `TableCellEngine`인 static box는 `gc.contentHeight`(셀 높이 - 셀 패딩)를 반환. DOM `box.element.ts _applyStyle`가 `tdContentHeight`를 height로 사용하는 것과 일치. 일반 static box는 `lineHeight × height - (lineHeight - fontSize)` 공식 유지.
 - **`ImageEngine.displayRect`**: `contentAbsRect` + `objectFit` + `originalWidth/Height`로 계산한 이미지 실제 표시 영역 (절대 좌표, mm). 엔진이 단일 소스이며, 브라우저는 이 결과로 canvas에 표시.
@@ -95,7 +95,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **Overlap padding**: `overlapPadding` on `ImageData` — mm values, `number` or `{ top?, right?, bottom?, left? }`. Ellipse-based detection: `ndx² + ndy² ≤ 1`.
 - **Overlap mode**: `overlapMode` on `ImageData` — `'path'` (default, pixel contour), `'box'` (solid box), `'none'` (no avoidance). Paragraph-level: `ParagraphData.overlapMode` — `'box'` (default), `'none'` (excludes box from overlay targets).
 - **Node.js base64 이미지 자동 디코딩**: `DocumentEngine._buildImageEngine()`에서 `ImageData.url`이 base64 data URI인 경우 pngjs로 자동 디코딩하여 `ImageEngine.rgbaData`에 주입. ESM 환경에서는 `await engine.prepareImageDecoder()` 사전 호출 필요.
-- **object-fit 엔진 우선**: `src/engine/object-fit-engine.ts`의 `computeObjectFit()`이 단일 소스. 브라우저의 `src/utils/image-fit.ts`는 하위 호환용으로 유지되나, `image.element.ts`는 엔진의 `computeObjectFit`을 사용.
+- **object-fit 엔진 우선**: `src/engine/object-fit-engine.ts`의 `computeObjectFit()`이 단일 소스. `image.element.ts`는 엔진의 `computeObjectFit`을 사용. `src/utils/image-fit.ts`는 제거되었다.
 - **이미지 속성 변경 시 재렌더링**: `overlapPadding`, `overlapMode`, `objectFit`, `originalWidth`, `originalHeight` setter가 `_updateEngine()` + `requestRerenderAffectedParagraphs()`를 호출하여 엔진 데이터 갱신과 paragraph 재렌더링을 트리거.
 - **AI processing overlay**: `<x-layout-paragraph>` and `<x-layout-image>` have volatile `aiProcessing: boolean` property. `true` → semi-transparent overlay with shimmer + spinner. Not included in `data` getter. Implemented in `src/utils/ai-processing-overlay.ts`.
 - **`extractData` — 엔진 데이터 추출**: 모든 엔진 타입이 `extractData` getter를 통해 현재 상태에서 데이터를 조립하여 반환. `children`은 원본이 아닌 자식 엔진의 `extractData`에서 동적으로 조립. ParagraphEngine은 주입된 스타일만 반환 (effective getter 사용 안 함).
@@ -376,7 +376,7 @@ src/
     edit/                    # CursorPosition, SelectionRange, InsertMode, etc.
     index.ts
   constants/                 # DEFAULT_*, Z_INDEX_* constants, line-break rules
-  utils/                     # genUUID, ai-processing-overlay, objectFit, valueEqual, LRU, containment clamp, flip-layout
+  utils/                     # genUUID, ai-processing-overlay, valueEqual, LRU, containment clamp
   examples/                  # exampleData (demo content for dev)
   react/                     # React wrapper layer (separate ESM build)
     components/              # LayoutDocument, LayoutBox, LayoutParagraph, LayoutImage, LayoutTable, etc.

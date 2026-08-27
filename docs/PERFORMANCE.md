@@ -60,7 +60,7 @@
   - [6.2 타원 기반 픽셀 컬링](#62-타원-기반-픽셀-컬링)
   - [6.3 GridCalculatorEngine editableHeight 정수 절사](#63-gridcalculatorengine-editableheight-정수-절사)
   - [6.4 staticGridContainment 조기 거부](#64-staticgridcontainment-조기-거부)
-  - [6.5 flip-layout metricsById Map](#65-flip-layout-metricsbyid-map)
+  - [6.5 flipLayout metricsById Map](#65-fliplayout-metricsbyid-map)
   - [6.6 테이블 seen Set 중복 셀 제거](#66-테이블-seen-set-중복-셀-제거)
   - [6.7 테이블 removeSet 배치 제거](#67-테이블-removeset-배치-제거)
 - [7. 렌더링 핫 경로 전체 흐름](#7-렌더링-핫-경로-전체-흐름)
@@ -449,9 +449,9 @@ flexbox 폴백 경로(`charOffsets === undefined`, 외부에서 임의로 `TextP
 | 스타일 속성 | outer `width`/`textAlign` + inner `scale` | `scale`/`transformOrigin`/`position`/`left` 통합 |
 | 편집 모드 | 미사용 (charOffsets 활성화) | 임시 span 동적 offset 계산 |
 
-#### `printPostData` 엔진 트리 단일화
+#### `printPostData` 엔진 전용 API
 
-`buildParagraphPrintPostData()`가 엔진의 `columnContents`/`charOffsets`에서 직접 char 데이터를 생성한다. DOM span에서 추출하던 이전 방식(inner span 존재 여부 분기)은 제거되었다. 엘리먼트의 개별 `printPostData` getter도 제거되고, `LayoutDocumentElement.printPostData` → `DocumentEngine.printPostData` 엔진 트리가 단일 소스다 (mm 단위).
+`buildParagraphPrintPostData()`가 엔진의 `columnContents`/`charOffsets`에서 직접 char 데이터를 생성한다. DOM span에서 추출하던 이전 방식(inner span 존재 여부 분기)은 제거되었다. `printPostData`는 엔진 전용 API로, DOM 요소에서는 제거되었으며 `DocumentEngine.printPostData` 엔진 트리가 단일 소스다 (mm 단위).
 
 ---
 
@@ -693,13 +693,13 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 음수 left/top, 무효 width/height, 컬럼/라인 초과 등 부적절한 static 삽입 위치를 즉시 `false` 반환. 전체 검증을 수행하기 전에 빠르게 거부.
 
-### 6.5 flip-layout metricsById Map
+### 6.5 flipLayout metricsById Map
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `flip-layout.ts:45, 254` |
+| 위치 | `document-engine.ts: _collectBoxMetrics()` |
 
-박스 mm 메트릭을 `metricsById` Map으로 미리 주입하여 레이아웃 플립 중 재계산을 방지. `box.lock === true`인 서브트리는 변경 없이 원본 반환.
+박스 mm 메트릭을 `metricsById` Map으로 미리 수집하여 레이아웃 플립 중 재계산을 방지. `DocumentEngine.flipLayout()`이 `_collectBoxMetrics()`로 엔진 트리에서 `absWidth`/`absHeight`를 수집한 후 `BoxEngine.flipLayout()`에 전달. `box.lock === true`인 서브트리는 변경 없이 원본 반환.
 
 ### 6.6 테이블 seen Set 중복 셀 제거
 

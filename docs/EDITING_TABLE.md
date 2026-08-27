@@ -920,7 +920,7 @@ document 내 여러 표가 있을 때:
 
 ### 12.7 printPostData
 
-table, TR, TD 엘리먼트의 개별 `printPostData` getter는 제거되었다. 엔진 트리(`TableEngine.printPostData`)가 단일 소스다. `TableBorderStore.toSegments()`가 생성한 보더 선분의 좌표/크기, 대각선 정보, 배경색 정보를 mm 단위로 후처리(post-processing)용으로 수집한다. `LayoutDocumentElement.printPostData` → `DocumentEngine.printPostData` → `BoxEngine.printPostData` → `TableEngine.printPostData` 경로로 호출된다.
+DOM 요소의 `printPostData` getter는 제거되었다. `printPostData`는 엔진 전용 API로, `DocumentEngine.printPostData` → `BoxEngine.printPostData` → `TableEngine.printPostData` 경로로 엔진 트리에서 호출된다. `TableBorderStore.toSegments()`가 생성한 보더 선분의 좌표/크기, 대각선 정보, 배경색 정보를 mm 단위로 후처리(post-processing)용으로 수집한다.
 
 ### 12.8 F5 브라우저 새로고침 충돌
 

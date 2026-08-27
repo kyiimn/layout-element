@@ -58,7 +58,6 @@
    - [Edit](#edit-types)
 7. [Constants](#constants)
 8. [Utilities](#utilities)
-   - [`flipLayoutData`](#fliplayoutdata)
 9. [Examples](#examples)
 10. [이벤트 레퍼런스](#이벤트-레퍼런스)
 
@@ -153,7 +152,7 @@ class LayoutDocumentElement extends HTMLElement
 | `layout()` | `(): this \| null` | DOM 트리/스타일/가이드 컬럼을 재구성. `connectedCallback`에서 자동 호출. |
 | `render()` | `(): Promise<this \| null>` | 자식 박스를 z-index 역순으로 비동기 렌더링. `layout()` 완료 후 호출. |
 | `appendChild<T>(node)` | `(node: T): T` | 박스/단락/이미지 자식에 `InheritStyle` 자동 전파. |
-| `flipLayout(options)` | `(options: FlipLayoutOptions): void` | 문서 또는 지정된 박스의 **하위 요소** 배치를 좌우/상하/상하좌우 반전. `targetId` 지정 시 해당 박스가 root, 생략 시 문서가 root. root 자체(위치/보더/패딩)는 유지되고 하위만 반전. 반전 전 편집 상태(포커스, 선택)를 해제한 후 `data` setter 적용. |
+| `flipLayout(options)` | `(options: FlipLayoutOptions): void` | 문서 또는 지정된 박스의 **하위 요소** 배치를 좌우/상하/상하좌우 반전. 엔진의 `DocumentEngine.flipLayout()`을 호출하여 엔진 트리에서 직접 반전을 수행하고, 반환된 `DocumentData`를 `data` setter에 적용. `targetId` 지정 시 해당 박스가 root, 생략 시 문서가 root. 반전 전 편집 상태(포커스, 선택)를 해제. |
 
 #### 데이터 프로퍼티 (setter / getter)
 
@@ -192,7 +191,6 @@ class LayoutDocumentElement extends HTMLElement
 | 이름 | 타입 | 설명 |
 |---|---|---|
 | `visibleGuide` (set) | `boolean` | 가이드 컬럼의 표시 여부 토글. |
-| `printPostData` (get) | `PrintPostData[]` | 후처리 시스템용 위치/데이터 배열 (mm 단위). `DocumentEngine.printPostData` 엔진 트리 결과를 그대로 반환하며, 자식 요소를 z-index **오름차순**(낮은 것부터)으로 재귀 수집한다. PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로, CSS z-index 동작(낮은 것이 먼저 그려지고 높은 것이 위에 덮임)과 일치함. `<x-layout-guide-column>` 요소의 printPostData는 DOM 전용이므로 별도로 추가 수집한다. |
 
 #### 예제
 
@@ -212,8 +210,8 @@ const box = document.createElement('x-layout-box') as LayoutBoxElement;
   };
 doc.appendChild(box);
 
-// 4. 후처리 데이터 수집
-const postData = doc.printPostData;
+// 4. 후처리 데이터 수집 (엔진에서)
+const postData = doc.engine?.printPostData;
 
 // 5. 배치 반전
 doc.flipLayout({ axis: 'horizontal' });                           // 문서의 하위 박스들을 좌우 반전
@@ -903,7 +901,6 @@ class LayoutGuideColumnElement extends HTMLElement
 | `lineHeight` | `number` | mm | 라인 간격. |
 | `visible` | `boolean` | — | 표시 여부. |
 | `data` (get) | `GuideColumnData` | — | 데이터 직렬화. |
-| `printPostData` (get) | `PrintPostData[]` | 후처리 데이터 export. |
 
 #### 예제
 
@@ -3224,84 +3221,6 @@ const genUUID: () => string;
 const genRandom: (min?: number, max?: number) => number;
 ```
 
-### `flipLayoutData(data, options, metricsById)`
-
-```ts
-/**
- * 문서 레이아웃 데이터의 배치를 좌우/상하/상하좌우 반전한다.
- * 순수 함수: 입력 데이터 트리를 변환하여 새 트리를 반환한다. 원본은 변경하지 않는다.
- *
- * targetId 지정 시 해당 id를 가진 박스가 root가 되며, root 박스의 하위 요소들만 반전한다.
- * root 박스 자체(위치/보더/패딩)는 유지된다.
- * targetId 생략 시 문서가 root이며, 문서의 하위 박스들만 반전한다.
- *
- * 반전 범위 (root의 하위 요소):
- * - Box 위치/크기 (position static/absolute 분기)
- *   - absolute + document 부모: left = containerWidth - left - width (padding 포함)
- *   - absolute + box 부모: left = innerWidth - left - width (padding 제외)
- * - Paragraph 단 설정 (column/gap 배열 역순, 좌우 반전 시)
- * - Box 보더/패딩 방향 교환 (T↔B, L↔R)
- * - 하위 Box 트리 재귀 반전
- *
- * 반전 제외 (leaf 컨텐츠):
- * - Image 내부 설정 (x/y/width/height/크롭/objectFit)
- * - Table 셀 배치/순서/병합/보더 방향
- * - Text content (LTR 유지, 거울 모드 아님)
- *
- * metricsById: static 박스의 width/height는 컬럼 span 수 / 라인 수이지 mm가 아니다.
- * 따라서 absolute 자식 반전 시 부모 박스의 mm 내부 영역을 알기 위해
- * 각 박스 id별 실제 mm 크기를 외부에서 주입해야 한다.
- * LayoutDocumentElement.flipLayout()이 DOM에서 수집하여 전달한다.
- *
- * @param data - 원본 문서 데이터
- * @param options - 반전 옵션
- * @param options.axis - 반전 축 ('horizontal' | 'vertical' | 'both')
- * @param options.targetId - 반전 root 박스 id. 생략 시 문서가 root.
- * @param metricsById - 각 박스 id별 mm 크기 map. static 박스의 absolute 자식 반전에 필요.
- * @returns 반전된 새 문서 데이터
- * @throws {Error} targetId가 지정되었으나 해당 id를 가진 박스를 찾지 못한 경우
- *
- * @example
- * // 문서의 하위 박스들을 좌우 반전
- * const flipped = flipLayoutData(doc, { axis: 'horizontal' }, metricsById);
- * documentEl.data = flipped;
- *
- * // 특정 박스의 하위 요소들만 상하 반전
- * const flipped = flipLayoutData(doc, { axis: 'vertical', targetId: 'box-42' }, metricsById);
- * documentEl.data = flipped;
- *
- * // 180도 회전 (상하+좌우)
- * const flipped = flipLayoutData(doc, { axis: 'both' }, metricsById);
- * documentEl.data = flipped;
- */
-function flipLayoutData(
-  data: DocumentData,
-  options: FlipLayoutOptions,
-  metricsById: BoxMetricsById,
-): DocumentData;
-```
-
-#### `FlipAxis`
-
-```ts
-type FlipAxis = 'horizontal' | 'vertical' | 'both';
-```
-
-#### `FlipLayoutOptions`
-
-```ts
-type FlipLayoutOptions = {
-  axis: FlipAxis;
-  targetId?: string;
-};
-```
-
-#### `BoxMetricsById`
-
-```ts
-type BoxMetricsById = Map<string, { absWidth: number; absHeight: number }>;
-```
-
 ### AI Processing Overlay 헬퍼
 
 `<x-layout-paragraph>`와 `<x-layout-image>`의 AI 처리 중 오버레이를 관리하는 4개 함수.
@@ -3424,21 +3343,20 @@ doc.data = exampleData;
 
 ## 후처리 데이터 export 가이드
 
-`printPostData` getter는 엔진 트리(`DocumentEngine.printPostData`)에서 계산된 **mm 단위** 좌표를 그대로 반환합니다. 외부 후처리 시스템(PDF 생성 등)으로 데이터를 전달할 때 사용합니다.
+`printPostData`는 엔진 전용 API입니다. `DocumentEngine.printPostData`에서 계산된 **mm 단위** 좌표를 반환합니다. 외부 후처리 시스템(PDF 생성 등)이 엔진에서 직접 호출합니다. DOM에서는 `printPostData`를 호출하지 않습니다.
 
-1. **엔진 트리 단일화**: `LayoutDocumentElement.printPostData`는 `DocumentEngine.printPostData` 엔진 트리 결과를 위임한다. box/paragraph/image/table/td/tr 엘리먼트의 개별 `printPostData` getter는 제거되었으며, 엔진 트리(`DocumentEngine → BoxEngine → ParagraphEngine/TableEngine/ImageEngine`)가 단일 소스다.
+1. **엔진 전용 API**: `printPostData`는 `DocumentEngine`의 getter로, DOM 요소에서는 제거되었다.
 2. **mm 단위**: 모든 rect/char 좌표는 mm 단위 number. 화면 표시용 ppm 변환은 외부에서 수행한다.
 3. **DOM 독립**: DOM `getBoundingClientRect()`에 의존하지 않는다.
 4. **z-index 오름차순**: 자식 요소를 z-index **오름차순**(낮은 것부터)으로 재귀 수집한다.
-   PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로, CSS z-index 동작과
-   일치한다.
-5. **guide-column**: `<x-layout-guide-column>`은 DOM 전용 요소(엔진 트리에 없음)이므로 `LayoutDocumentElement.printPostData`에서 별도로 수집한다.
+   PDF 콘텐츠 스트림은 나중에 추가된 것이 위에 렌더링되므로, CSS z-index 동작과 일치한다.
 
 ```ts
-const doc = document.querySelector('x-layout-document')!;
-
-// 렌더링 완료 후 데이터 수집
-const postData = doc.printPostData;
+// Headless 환경에서 엔진 직접 사용
+const engine = DocumentEngine.create(documentData, fontLoader, colorRegistry);
+engine.childrenData = documentData.children ?? [];
+engine.layout();
+const postData = engine.printPostData;
 // → 외부 후처리 시스템에 전달
 ```
 

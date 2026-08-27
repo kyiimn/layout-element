@@ -48,30 +48,50 @@ static create(
 | `width` | `number` | 문서 너비 (mm) |
 | `height` | `number` | 문서 높이 (mm) |
 | `paddingTop/Right/Bottom/Left` | `number` | 패딩 (mm) |
+| `columns` | `number \| number[]` | 컬럼 그리드 정의 |
+| `gap` | `number \| number[]` | 컬럼 간격 |
+| `paragraphStyle` | `ParagraphStyle` | 문서 기본 단락 스타일 |
+| `textStyle` | `TextStyle` | 문서 기본 텍스트 스타일 |
+| `childrenData` | `BoxData[]` | 설정된 자식 박스 데이터 |
 | `gridCalculator` | `GridCalculatorEngine` | 문서 레벨 그리드 계산기 |
 | `childBoxEngines` | `BoxEngine[]` | 최상위 박스 엔진 배열 |
 | `absRect` | `AbsRect` | `{ absLeft: 0, absTop: 0, absWidth: width, absHeight: height }` |
 | `isDocument` | `true` | 루트 식별 |
 | `overlayElements` | `[]` | 루트는 오버레이 없음 |
 | `resources` | `{ ppm, fontLoader, colorRegistry }` | 하위 엔진에 전파되는 리소스 번들 |
+| `generation` | `number` | 캐시 무효화 감지용 카운터 |
+| `dirty` | `boolean` | 커밋되지 않은 변경 여부 |
 | `printPostData` | `PrintPostData[]` | z-index 정렬된 자식 printPostData (mm 단위). 후처리 시스템용 데이터 export |
 
 #### 퍼블릭 세터
 
 | 세터 | 타입 | 설명 |
 |------|------|------|
-| `data` | `DocumentData` | 데이터 갱신 시 트리 재구축 필요 |
+| `data` | `DocumentData` | 데이터 갱신. `_dirty = true` (전체 교체 후에도 `layout()` 호출 필요) |
 | `ppm` | `number` | ppm 업데이트 (줌 레벨 변경) |
 | `childBoxEngines` | `BoxEngine[]` | 자식 박스 엔진 교체 |
+| `childrenData` | `BoxData[]` | 자식 박스 데이터 설정. `_dirty = true` |
+| `width` | `number` | 문서 너비. GC 재생성, `_dirty = true` |
+| `height` | `number` | 문서 높이. GC 재생성, `_dirty = true` |
+| `paddingTop/Right/Bottom/Left` | `number` | 패딩. GC 재생성, `_dirty = true` |
+| `columns` | `number \| number[]` | 컬럼 그리드 정의. GC 재생성, `_dirty = true` |
+| `gap` | `number \| number[]` | 컬럼 간격. GC 재생성, `_dirty = true` |
+| `paragraphStyle` | `ParagraphStyle` | 문서 기본 단락 스타일. `_dirty = true` |
+| `textStyle` | `TextStyle` | 문서 기본 텍스트 스타일. `_dirty = true` |
 
 #### 퍼블릭 메서드
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `layout()` | `(childrenData?: BoxData[]): void` | `childrenData`로부터 전체 엔진 트리 재구축. `_data.children`을 읽지 않고 파라미터로 받은 데이터에서 자식 박스 엔진 구축. Node.js에서 base64 data URI 이미지의 rgbaData를 자동 주입 |
+| `layout()` | `(childrenData?: BoxData[]): void` | `childrenData` setter로 주입된 데이터에서 전체 엔진 트리 재구축. 파라미터 전달 시 `childrenData` setter 호출(deprecated). `_data.children`을 읽지 않음. Node.js에서 base64 data URI 이미지의 rgbaData를 자동 주입 |
+| `childrenData` (setter) | `BoxData[]` | 자식 박스 데이터 설정. `data` setter는 문서 자체 속성만 담당, 자식 데이터는 이 setter가 담당. 설정 시 `_dirty = true` |
 | `prepareImageDecoder()` | `(): Promise<boolean>` | Node.js ESM 환경에서 pngjs 사전 로드. `layout()` 전 호출 필요. 브라우저 no-op |
 | `findBoxEngineById(id)` | `(id: string): BoxEngine \| undefined` | 직계 박스 엔진 중 ID 검색 (`BoxEngineParent` 인터페이스 구현) |
 | `findEngineById(id)` | `(id: string): BoxEngine \| ParagraphEngine \| ImageEngine \| TableEngine \| undefined` | 엔진 트리 전체 재귀 검색. 모든 엔진 타입 포함. 테이블 셀 내부 박스도 순회 |
+| `appendChildBoxEngine(box)` | `(box: BoxEngine): void` | 박스 엔진을 자식으로 추가. 다른 부모에 속해 있던 박스인 경우 기존 부모에서 제거 후 이동 (reparent). `_dirty = true` |
+| `removeChildBoxEngine(box)` | `(box: BoxEngine): void` | 박스 엔진을 자식에서 제거. `_dirty = true` |
+| `reparentBoxEngine(box, newParent)` | `(box: BoxEngine, newParent: BoxEngineParent): void` | 박스 엔진을 다른 부모로 이동. 양쪽 부모 모두 `_dirty = true` |
+| `findBoxEnginesByRole(role)` | `(role: BoxRole): BoxEngine[]` | 역할(`role`)으로 트리 전체에서 박스 엔진 검색. 다수 반환 |
 
 #### 내부 메커니즘
 
@@ -99,7 +119,8 @@ const engine = DocumentEngine.create(
   colorRegistry,
   // ppm 생략 가능
 );
-engine.layout(documentData.children);
+engine.childrenData = documentData.children ?? [];
+engine.layout();
 console.log(engine.gridCalculator.columnCoords);  // mm 단위
 console.log(engine.printPostData);  // mm 단위. 후처리 시스템용 데이터 export
 ```
@@ -176,7 +197,10 @@ type BoxEngineParent = DocumentEngine | BoxEngine | TableCellEngine
 
 ```ts
 static create(data: BoxData, parent: BoxEngineParent): BoxEngine
+static createOrphan(data: BoxData): BoxEngine  // 부모 없이 생성. appendChildBoxEngine()로 연결 후 layout() 호출.
 ```
+
+> **고아 엔진**: `createOrphan`으로 부모 없이 생성된 엔진은 `appendChildBoxEngine()`으로 부모에 연결하기 전에 `layout()`을 호출하면 `createNoParentError` 예외가 발생한다.
 
 #### 퍼블릭 게터
 
@@ -192,6 +216,8 @@ static create(data: BoxData, parent: BoxEngineParent): BoxEngine
 | `height` | `number` | static=라인 카운트, absolute=mm |
 | `zIndex` | `number` | role override: `'ad'`→91000, `'header'`→91001 |
 | `role` | `BoxRole` | 박스 역할 |
+| `contentUid` | `string \| undefined` | 박스 콘텐츠 UID (setter + getter) |
+| `groupMember` | `string[]` | 읽기 전용. 이 박스의 `contentUid` + 하위 박스들의 `groupMember`/`contentUid` 합산 (중복 제거). setter 없음. `extractData`에서 쉼표 구분 string으로 변환 |
 | `paddingTop/Right/Bottom/Left` | `number` | 패딩 (mm) |
 | `relLeft` | `number` | 부모 기준 상대 좌측 (mm) |
 | `relTop` | `number` | 부모 기준 상대 상단 (mm) |
@@ -210,21 +236,50 @@ static create(data: BoxData, parent: BoxEngineParent): BoxEngine
 | `printPostData` | `PrintPostData[]` | z-index 정렬된 자식 printPostData (mm 단위). 후처리 시스템용 데이터 export |
 | `absRect` | `AbsRect` | 박스 절대 사각형 (mm). padding 포함 |
 | `contentAbsRect` | `AbsRect` | 콘텐츠 영역 절대 사각형 (mm). padding 제외. ImageEngine absRect 전달용 |
+| `childrenData` | `BoxData[] \| ParagraphData \| TextData \| ImageData \| TableData \| undefined` | 설정된 자식 데이터 |
+| `generation` | `number` | 캐시 무효화 감지용 카운터 |
+| `dirty` | `boolean` | 커밋되지 않은 변경 여부 |
 
 #### 퍼블릭 세터
 
 | 세터 | 타입 | 설명 |
 |------|------|------|
-| `data` | `BoxData` | 데이터 갱신 |
+| `data` | `BoxData` | 데이터 갱신. `_dirty = true` |
 | `parent` | `BoxEngineParent` | 부모 엔진 교체 (reparent/flip 시) |
 | `childEngines` | `(BoxEngine \| ImageEngine \| ParagraphEngine \| TableEngine)[]` | 자식 엔진 교체 |
 | `gridCalculator` | `GridCalculatorEngine \| null` | 그리드 계산기 교체 |
+| `childrenData` | `BoxData[] \| ParagraphData \| TextData \| ImageData \| TableData \| undefined` | 자식 데이터 설정. `_dirty = true` |
+| `position` | `BoxPosition` | 배치 모드. `_generation++`, `_dirty = true` |
+| `left` | `number` | static=컬럼 인덱스, absolute=mm. `_generation++`, `_dirty = true` |
+| `top` | `number` | mm. `_generation++`, `_dirty = true` |
+| `width` | `number` | static=컬럼 span, absolute=mm. `_generation++`, `_dirty = true` |
+| `height` | `number` | static=라인 수, absolute=mm. `_generation++`, `_dirty = true` |
+| `zIndex` | `number` | 렌더링 순서. `_generation++`, `_dirty = true` |
+| `role` | `BoxRole` | 박스 역할. `_generation++`, `_dirty = true` |
+| `paddingTop/Right/Bottom/Left` | `number` | 패딩 (mm). `_dirty = true` |
+| `borderTop/Right/Bottom/LeftWidth` | `number` | 테두리 두께. `_dirty = true` |
+| `borderStyle` | `BoxBorderStyle` | 테두리 스타일. `_dirty = true` |
+| `borderColor` | `string \| undefined` | 테두리 색상. `_dirty = true` |
+| `backgroundColor` | `string \| undefined` | 배경색. `_dirty = true` |
+| `backgroundOpacity` | `number \| undefined` | 배경 투명도. `_dirty = true` |
+| `priority` | `number` | 정렬 우선순위. `_dirty = true` |
+| `lock` | `boolean` | 편집 잠금. `_dirty = true` |
+| `contentUid` | `string \| undefined` | 콘텐츠 UID. `_dirty = true` |
+
+> **`groupMember` setter 없음**: 하위 요소 집계값이므로 직접 설정 불가. getter만 제공.
 
 #### 퍼블릭 메서드
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `layout()` | `(ctx: BoxBuildContext, childrenData: BoxData[] \| ParagraphData \| TextData \| ImageData \| TableData \| undefined, resources?: EngineResources, docStyle?: { paragraphStyle, textStyle }): void` | `childrenData` 파라미터로 자식 엔진 트리 구축. `_data.children`을 읽지 않음. 자식 박스는 재귀 `layout()` 호출. |
+| `layout()` | `(ctx: BoxBuildContext, childrenData?: ..., resources?: EngineResources, docStyle?: { paragraphStyle, textStyle }): void` | `childrenData` setter로 주입된 데이터에서 자식 엔진 트리 구축. 파라미터 전달 시 setter 호출(deprecated). `_data.children`을 읽지 않음. 자식 박스는 재귀 `layout()` 호출. |
+| `childrenData` (setter) | `BoxData[] \| ParagraphData \| TextData \| ImageData \| TableData \| undefined` | 자식 데이터 설정. `data` setter는 박스 자체 속성만 담당. 설정 시 `_dirty = true` |
+| `appendChildBoxEngine(box)` | `(box: BoxEngine): void` | 자식 박스 엔진 추가. 다른 부모에 속해 있던 박스인 경우 reparent. `_dirty = true` |
+| `removeChildBoxEngine(box)` | `(box: BoxEngine): void` | 자식 박스 엔진 제거. `_dirty = true` |
+| `appendChildContentEngine(engine)` | `(engine: ParagraphEngine \| ImageEngine \| TableEngine): void` | 컨텐츠 엔진 추가/교체. 박스는 단일 컨텐츠 또는 다중 자식 박스. `_dirty = true` |
+| `removeChildContentEngine(engine)` | `(engine: ParagraphEngine \| ImageEngine \| TableEngine): void` | 컨텐츠 엔진 제거. `_dirty = true` |
+| `reparentBoxEngine(box, newParent)` | `(box: BoxEngine, newParent: BoxEngineParent): void` | 박스 엔진을 다른 부모로 이동. 양쪽 부모 모두 `_dirty = true` |
+| `findBoxEnginesByRole(role)` | `(role: BoxRole): BoxEngine[]` | 이 박스와 하위 트리에서 역할(`role`)으로 박스 엔진 검색. 다수 반환 |
 
 #### 내부 메커니즘
 
@@ -239,6 +294,7 @@ static create(data: BoxData, parent: BoxEngineParent): BoxEngine
 - `printPostData`: 자식을 z-index 정렬, 각 엔진 printPostData 위임, `extractData` 사용. mm 단위 좌표를 후처리 시스템에 제공. ImageEngine 자식에는 `this.contentAbsRect`를 전달 (이미지 영역, 부모 box 전체 영역 아님).
 - `findBoxEngineById(id)`: 직계 자식 박스 엔진 중 ID 검색 (`BoxEngineParent` 인터페이스 구현).
 - `findEngineById(id)`: 자신 + 자식 엔진 + 중첩 박스 + 테이블 셀 내부 박스까지 재귀 검색. 모든 엔진 타입(BoxEngine, ParagraphEngine, ImageEngine, TableEngine) 포함.
+- `findBoxEnginesByRole(role)`: 자신 + 하위 트리에서 역할이 일치하는 모든 박스 엔진 수집. 테이블 셀 내부 박스도 순회.
 
 ---
 
@@ -299,14 +355,28 @@ static create(data: ImageEngineData): ImageEngine
 | `effectiveObjectFit` | `ImageObjectFit` | 내부 소비용: `objectFit ?? 'cover'` |
 | `effectiveX/Y/Width/Height` | `number` | 내부 소비용: `x/y/width/height ?? 0` |
 | `effectiveOriginalWidth/Height` | `number` | 내부 소비용: `originalWidth/Height ?? 0` |
+| `dirty` | `boolean` | 커밋되지 않은 변경 여부 |
 
 #### 퍼블릭 세터
 
 | 세터 | 타입 | 설명 |
 |------|------|------|
-| `data` | `ImageEngineData` | 데이터 갱신 |
+| `data` | `ImageEngineData` | 데이터 갱신. `_displayRectDirty = true` |
+| `id` | `string \| undefined` | 이미지 고유 식별자 |
+| `zIndex` | `number \| undefined` | 렌더링 순서. `_dirty = true` |
 | `rgbaData` | `RgbaData \| null` | RGBA 데이터 주입 (원본 이미지 픽셀) |
-| `contentAbsRect` | `AbsRect \| null` | 부모 box 콘텐츠 영역 주입 (object-fit 계산용) |
+| `contentAbsRect` | `AbsRect \| null` | 부모 box 콘텐츠 영역 주입 (object-fit 계산용). `_displayRectDirty = true`, `_dirty = true` |
+| `x` | `number \| undefined` | 이미지 표시 시작 X. `_displayRectDirty = true`, `_dirty = true` |
+| `y` | `number \| undefined` | 이미지 표시 시작 Y. `_displayRectDirty = true`, `_dirty = true` |
+| `width` | `number \| undefined` | 이미지 표시 너비. `_displayRectDirty = true`, `_dirty = true` |
+| `height` | `number \| undefined` | 이미지 표시 높이. `_displayRectDirty = true`, `_dirty = true` |
+| `dpi` | `number` | DPI. `_dirty = true` |
+| `url` | `string` | 이미지 URL. `_dirty = true` |
+| `overlapMode` | `OverlapMode` | 오버랩 모드. `_dirty = true` |
+| `overlapPadding` | `number \| { top?, right?, bottom?, left? } \| undefined` | 오버랩 패딩. `_dirty = true` |
+| `objectFit` | `ImageObjectFit` | object-fit. `_displayRectDirty = true`, `_dirty = true` |
+| `originalWidth` | `number \| undefined` | 원본 너비. `_displayRectDirty = true`, `_dirty = true` |
+| `originalHeight` | `number \| undefined` | 원본 높이. `_displayRectDirty = true`, `_dirty = true` |
 
 #### 퍼블릭 메서드
 
@@ -356,6 +426,7 @@ interface ParagraphEngineData {
 
 ```ts
 static create(data: ParagraphEngineData): ParagraphEngine
+static createOrphan(content: string | (string | TextBlockData)[], resources: EngineResources): ParagraphEngine  // 부모 없이 생성. appendChildContentEngine()로 연결 후 data setter 주입.
 ```
 
 #### 퍼블릭 메서드
@@ -407,6 +478,9 @@ static create(data: ParagraphEngineData): ParagraphEngine
 | `scale` | `number` | 스케일 (현재 no-op) |
 | `overlapMode` | `ParagraphOverlapMode` | 단락 오버랩 모드 |
 | `printPostData` | `PrintPostData[]` | 문자별 printPostData (mm 단위). 후처리 시스템용 데이터 export. `verticalAlign`(top/center/bottom) 오프셋을 char rect.y에 반영. `letterSpacing`/`spaceRatio` 필드 포함. 내부 소비는 `effectiveParagraphStyle`/`effectiveTextStyle` getter 사용 |
+| `column` | `number \| number[]` | 컬럼 정의 |
+| `gap` | `number \| number[]` | 컬럼 간격 정의 |
+| `dirty` | `boolean` | 커밋되지 않은 변경 여부 |
 
 #### 퍼블릭 세터
 
@@ -414,9 +488,13 @@ static create(data: ParagraphEngineData): ParagraphEngine
 |------|------|------|
 | `data` | `ParagraphEngineData` | 데이터 갱신 (캐시 초기화) |
 | `inheritStyle` | `InheritStyle` | 상속 스타일 |
-| `textContent` | `string` | 텍스트 갱신 (편집) |
+| `textContent` | `string \| (string \| TextBlockData)[]` | 텍스트 갱신 (편집). `_dirty = true` |
 | `overlapMode` | `ParagraphOverlapMode` | 오버랩 모드 |
 | `scale` | `number` | 스케일 (no-op) |
+| `textStyle` | `TextStyle` | 텍스트 스타일. `_effectiveTsDirty = true`, `_dirty = true` |
+| `paragraphStyle` | `ParagraphStyle` | 단락 스타일. `_effectivePsDirty = true`, `_dirty = true` |
+| `column` | `number \| number[]` | 컬럼 정의. `_applyColumnGapFromData()`, `_initLayoutMetrics()`, `_dirty = true` |
+| `gap` | `number \| number[]` | 컬럼 간격 정의. `_applyColumnGapFromData()`, `_initLayoutMetrics()`, `_dirty = true` |
 
 #### 내부 메커니즘
 
@@ -444,6 +522,8 @@ static create(data: ParagraphEngineData): ParagraphEngine
 
 ```ts
 static create(data: TableData, parentBox: BoxEngine): TableEngine
+static createOrphan(data: TableData): TableEngine  // 부모 없이 생성. appendChildContentEngine()로 연결 후 layout() 호출.
+```
 ```
 
 #### 퍼블릭 게터
@@ -456,18 +536,27 @@ static create(data: TableData, parentBox: BoxEngine): TableEngine
 | `rowEngines` | `TableRowEngine[]` | 행 엔진 배열 |
 | `cellEngines` | `TableCellEngine[]` | 셀 엔진 배열 |
 | `parentBox` | `BoxEngine` | 부모 박스 엔진 |
+| `borderStore` | `TableBorderStore \| null` | 보더 면 저장소 |
+| `colWidths` | `number \| number[] \| undefined` | 컬럼별 너비 |
+| `borders` | `TableBorders \| undefined` | 테이블 전체 보더 면 집합 |
+| `childrenData` | `TableRowData[]` | 설정된 행 데이터 |
+| `dirty` | `boolean` | 커밋되지 않은 변경 여부 |
 
 #### 퍼블릭 세터
 
 | 세터 | 타입 | 설명 |
 |------|------|------|
-| `data` | `TableData` | 데이터 갱신 |
+| `data` | `TableData` | 데이터 갱신. `_dirty = true` |
+| `childrenData` | `TableRowData[]` | 행 데이터 설정. `_dirty = true` |
+| `colWidths` | `number \| number[] \| undefined` | 컬럼별 너비. `_dirty = true` |
+| `borders` | `TableBorders \| undefined` | 테이블 전체 보더 면 집합. `_dirty = true` |
 
 #### 퍼블릭 메서드
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `layout` | `(rowsData?: TableRowData[]): void` | `rowsData` 파라미터로 그리드 계산. `_data.children`을 읽지 않고 파라미터에서 행 데이터 수신. `setRowMetrics`에 행 ID 주입. |
+| `layout` | `(rowsData?: TableRowData[]): void` | `childrenData` setter로 주입된 행 데이터에서 그리드 계산. 파라미터 전달 시 setter 호출(deprecated). `_data.children`을 읽지 않음. `setRowMetrics`에 행 ID 주입. |
+| `childrenData` (setter) | `TableRowData[]` | 행 데이터 설정. `data` setter는 테이블 자체 속성(colWidths/borders)만 담당. 설정 시 `_dirty = true` |
 | `buildCellBoxEngines` | `(parentBox: BoxEngine, ctx: BoxBuildContext): void` | `layout()` 후 셀 내부 박스 엔진을 재구축. `gridResolution.placements`를 기반으로 각 셀의 `boxEngine`을 재생성/재사용. `TableStructureEditor`의 merge/split/insert/delete 등 구조 변경 후 `TableCellEngine.boxEngine`이 null이 되는 것을 방지. `prevBoxEnginesByBoxId`로 ID 기반 엔진 재사용을 시도하고, 실패하면 새 `BoxEngine`을 생성. `newEnginesCreated` 플래그를 `ctx`에 반영. |
 
 #### `TableCellEngine`
@@ -483,7 +572,8 @@ static create(data: TableData, parentBox: BoxEngine): TableEngine
 | `gridCalculator` | `GridCalculatorEngine \| null` | 셀 단일 컬럼 그리드 계산기 |
 | `overlayElements` | `[]` | 셀은 오버레이 없음 |
 | `childBoxEngines` | `BoxEngine[]` | 셀 내부 박스 엔진 |
-| `boxEngine` | `BoxEngine \| null` | 셀 내부 박스 엔진 getter/setter |
+| `boxEngine` | `BoxEngine \| null` | 셀 내부 박스 엔진 getter/setter. setter는 reparent 수행 (기존 부모에서 제거 후 셀로 이동). `_dirty = true` |
+| `appendChildBoxEngine(box)` | `(box: BoxEngine): void` | 박스 엔진을 셀 자식으로 추가. 기존 boxEngine이 있으면 교체. reparent 수행 |
 | `parentAbsRect` | setter | `TableEngine.layout()`에서 상위 박스의 절대 rect를 주입 |
 | `setCellMetrics` | `(x, y, width, height, cellLabel, labels): void` | 셀 메트릭 설정 |
 | `x`, `y`, `width`, `height` | `number` | 셀 좌표/크기 |
@@ -492,6 +582,13 @@ static create(data: TableData, parentBox: BoxEngine): TableEngine
 | `extractData` | `TableCellData` | 엔진 현재 상태에서 조립한 셀 데이터. 기본값 적용 (`colspan ?? 1`, `rowspan ?? 1`, `borderWidth ?? 0`, `borderStyle ?? 'solid'`, `padding ?? 0`). `children`은 `boxEngine.extractData`에서 조립 |
 | `findBoxEngineById` | `(id): BoxEngine \| undefined` | 셀 내부 박스 엔진 ID 검색 |
 | `findEngineById` | `(id): BoxEngine \| ParagraphEngine \| ImageEngine \| TableEngine \| undefined` | 셀 내부 박스에서 재귀 검색 |
+| `cellData` | `TableCellData \| undefined` | 원본 셀 데이터. getter + setter. setter: `_dirty = true` |
+| `colspan` | `number` | 셀 colspan. getter + setter. setter: `_dirty = true` |
+| `rowspan` | `number` | 셀 rowspan. getter + setter. setter: `_dirty = true` |
+| `cellPaddingTop/Right/Bottom/Left` | `number` | 셀 패딩. getter + setter. setter: `_dirty = true` |
+| `cellBackgroundColor` | `string \| undefined` | 셀 배경색. getter + setter. setter: `_dirty = true` |
+| `cellBackgroundOpacity` | `number \| undefined` | 셀 배경 투명도. getter + setter. setter: `_dirty = true` |
+| `dirty` | `boolean` | 커밋되지 않은 변경 여부 |
 
 셀의 `gridCalculator`는 `columns: 1`인 단일 컬럼 그리드이며, `TableEngine.layout()`에서 셀 메트릭 계산 후 생성된다. 이를 통해 셀 내부 BoxEngine은 `BoxEngineParent.gridCalculator`를 통해 좌표를 계산한다. `parentAbsRect`가 주입되면 `absRect`는 페이지 기준 절대 좌표를 반환하므로, 셀 내부 박스의 `BoxEngine.absRect`도 누적된 페이지 절대 좌표가 된다.
 
@@ -648,8 +745,7 @@ DocumentEngine (root, owns ppm + resources)
 ### printPostData 단일화 (mm)
 
 - 엔진 트리(`DocumentEngine.printPostData`)가 단일 소스. 모든 rect/char 좌표는 **mm 단위**.
-- `LayoutDocumentElement.printPostData`는 `DocumentEngine.printPostData` 엔진 트리 결과를 위임한다. box/paragraph/image/table/td/tr 엘리먼트의 개별 `printPostData` getter는 제거되었다.
-- `<x-layout-guide-column>`은 DOM 전용 요소(엔진 트리에 없음)이므로 `LayoutDocumentElement.printPostData`에서 별도 수집한다.
+- DOM 요소의 `printPostData` getter는 제거되었다. `printPostData`는 엔진 전용 API로, DOM에서 호출하지 않는다.
 - ppm 곱셈은 외부 후처리 시스템이 수행한다. 엔진은 mm만 다룬다.
 
 ---
@@ -734,8 +830,9 @@ const colorRegistry = ColorRegistryEngineImpl.create();
 colorRegistry.init({ black: { c: 0, m: 0, y: 0, k: 255 } });
 
 // 2. 문서 엔진 생성 (ppm 생략 가능 — 엔진 연산은 mm 단위)
+const documentData = { width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' }, children: [...] };
 const engine = DocumentEngine.create(
-  { width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' }, children: [...] },
+  documentData,
   fontLoader,
   colorRegistry,
   // ppm 생략 — Node.js에서 불필요
@@ -745,7 +842,8 @@ const engine = DocumentEngine.create(
 //    CommonJS 환경에서는 생략 가능 (globalThis.require로 동기 로드)
 await engine.prepareImageDecoder();
 
-// 4. 레이아웃 계산 (전체 엔진 트리 자동 구축 + base64 이미지 rgbaData 자동 주입)
+// 4. 레이아웃 계산 (childrenData 주입 + layout 호출 → 전체 엔진 트리 구축 + base64 이미지 rgbaData 자동 주입)
+engine.childrenData = documentData.children ?? [];
 engine.layout();
 const grid = engine.gridCalculator;
 console.log(grid.columnCoords);  // mm 단위 컬럼 좌표
@@ -777,6 +875,7 @@ const docData = {
 };
 
 await engine.prepareImageDecoder();  // ESM 환경 필수
+engine.childrenData = docData.children ?? [];
 engine.layout();  // ImageEngine.rgbaData 자동 주입됨
 ```
 
@@ -837,16 +936,16 @@ vanilla 진입점에서 명시적 engine보내기:
 
 ```
 src/engine/
-  types.ts                    # 공유 타입 (AbsRect, MmRect, OverlapResult, EngineResources, CursorPlacement 등)
+  types.ts                    # 공유 타입 (AbsRect, MmRect, OverlapResult, EngineResources, CursorPlacement, FlipLayoutOptions, BoxMetricsById, createDirtyError, createNoParentError, removeBoxDataFromChildren 등)
   grid-calculator-engine.ts   # 컬럼 그리드 계산 (ppm 옵셔널)
   image-engine.ts             # 이미지 오버랩 (RGBA 데이터 기반, object-fit displayRect 계산)
   image-decoder.ts            # Node.js base64 → RGBA 디코딩 (pngjs, module.createRequire)
   object-fit-engine.ts        # object-fit 순수 계산 (cover/contain/fill/none)
   overlap-engine.ts           # 순수 오버랩 판정 함수
-  box-engine.ts               # 박스 좌표/오버랩 요소 계산
+  box-engine.ts               # 박스 좌표/오버랩 요소 계산 + flipLayout
   table-engine.ts             # 테이블 그리드 해석 + TableCellEngine (BoxEngineParent 구현)
-  paragraph-engine.ts         # 텍스트 래핑 + 엔진 쿼리 API + printPostData (mm)
-  document-engine.ts          # 문서 루트 (ppm/리소스 관리, 트리 자동 구축, base64 이미지 자동 디코딩, CryptoUuid 로컬 인터페이스)
+  paragraph-engine.ts         # 텍스트 래핑 + 엔진 쿼리 API + printPostData (mm) + flipLayout
+  document-engine.ts          # 문서 루트 (ppm/리소스 관리, 트리 자동 구축, base64 이미지 자동 디코딩, flipLayout, _collectBoxMetrics)
   font-loader-engine.ts       # opentype.js 전용 (FontFace 없음, atob 전역 사용 — Node.js 16+ 필요, module.createRequire 지원)
   color-registry-engine.ts    # CMYK→RGB 변환 + get() (fetch 없음)
   index.ts                    # 진입점
@@ -887,3 +986,101 @@ src/engine/
 - DOM 요소는 `engine.childEngines`를 DOM 자식으로부터 수동으로 채우는 등 엔진 트리를 우회해서는 안 된다.
 - **테이블 셀 내부 column/gap 보정은 엔진이 수행**: `ParagraphEngine.data` setter가 `parentBox.parent`가 `TableCellEngine`인지 확인하고, 맞으면 `parentBox.gridCalculator`의 `columnWidth`/`gaps`로 column/gap을 보정한다. DOM은 보정을 수행하지 않으며, 엔진에 `parentBox`를 전달하기만 한다.
 - 구체적인 구현 규칙은 `RULES.md` 섹션 3을 참조한다.
+
+---
+
+## 12. 개별 프로퍼티 Setter (Dirty Flag + 지연 렌더링)
+
+### 개요
+
+모든 엔진 클래스는 개별 프로퍼티 setter를 제공한다. 개별 setter는 **즉시 렌더링/재계산을 수행하지 않고** `_dirty` 플래그만 `true`로 설정한다. `layout()`(또는 `layoutText()`) 호출 시점에 모든 dirty 변경이 원자적으로 반영된 후 `_dirty`가 `false`로 해제된다.
+
+이 패턴은 InDesign Server의 lazy evaluation 모델과 동일하며, 부분 상태 렌더링, 트리 전파 폭발, 캐시 무효화 분산 문제를 회피한다.
+
+### 동작 규칙
+
+1. **개별 setter / `data` setter**: `_data` 갱신 + `_dirty = true`. 렌더링/재계산 비용 0.
+2. **`layout()` / `layoutText()` / `setCellMetrics()`**: 커밋 — 트리 재구축 후 `_dirty = false`.
+3. **`extractData` / `printPostData`**: `_dirty === true` 시 `createDirtyError()` 예외 발생.
+4. **`dirty` getter**: 현재 dirty 상태 조회 (디버깅/검증용).
+
+> **주의**: `data` setter도 `_dirty = true`를 설정합니다. `data` setter 호출 후에도 `layout()`을 명시적으로 호출해야 `extractData`/`printPostData` 조회가 가능합니다. 이 규칙은 `data` 통째 교체와 개별 setter 모두에 동일하게 적용되어, 부분 상태 렌더링 위험을 원천 차단합니다.
+
+### 사용 패턴
+
+```ts
+// Headless (pdf-gen) — data + childrenData setter 경로
+engine.data = newDocumentData;            // dirty = true (문서 자체 속성)
+engine.childrenData = documentData.children; // dirty = true (자식 박스 데이터)
+engine.layout();                           // 커밋 — dirty = false, 트리 구축 + 계산
+engine.printPostData;                      // ✅ 정상
+
+// Headless — 개별 setter 경로
+engine.left = 100;                         // dirty = true
+engine.width = 50;                         // dirty = true
+engine.layout(ctx, ...);                   // 커밋 — dirty = false
+engine.printPostData;                      // ✅ 정상
+
+// 잘못된 패턴 (예외 발생)
+engine.data = newDocumentData;             // dirty = true
+engine.printPostData;                      // ❌ throw: "DocumentEngine has pending..."
+
+engine.childrenData = children;            // dirty = true
+engine.printPostData;                      // ❌ throw: "DocumentEngine has pending..."
+```
+
+### 엔진별 개별 setter 목록
+
+| 엔진 | 개별 setter | 커밋 메서드 |
+|------|------------|-----------|
+| `DocumentEngine` | `width`, `height`, `paddingTop/Right/Bottom/Left`, `columns`, `gap`, `paragraphStyle`, `textStyle`, `childrenData` | `layout()` |
+| `BoxEngine` | `left`, `top`, `width`, `height`, `position`, `zIndex`, `role`, `paddingTop/Right/Bottom/Left`, `borderTop/Right/Bottom/LeftWidth`, `borderStyle`, `borderColor`, `backgroundColor`, `backgroundOpacity`, `priority`, `lock`, `contentUid`, `childrenData` | `layout()` |
+| `ParagraphEngine` | `textContent`, `paragraphStyle`, `textStyle`, `column`, `gap` | `layoutText()` |
+| `ImageEngine` | `x`, `y`, `width`, `height`, `dpi`, `url`, `overlapMode`, `overlapPadding`, `objectFit`, `originalWidth`, `originalHeight`, `zIndex`, `rgbaData`, `contentAbsRect` | `layout()` |
+| `TableEngine` | `colWidths`, `borders`, `childrenData` | `layout()` |
+| `TableCellEngine` | `cellData`, `colspan`, `rowspan`, `cellPaddingTop/Right/Bottom/Left`, `cellBackgroundColor`, `cellBackgroundOpacity` | `setCellMetrics()` |
+
+### `createDirtyError(engineName)`
+
+`src/engine/types.ts`에서 export하는 헬퍼 함수. dirty 상태에서 `extractData`/`printPostData` 조회 시 발생시킬 에러를 생성한다.
+
+```ts
+import { createDirtyError } from "./types";
+// createDirtyError('BoxEngine') → Error("BoxEngine has pending changes from individual setters. Call layout() before reading extractData or printPostData.")
+```
+
+### `createNoParentError(engineName, attachMethod)`
+
+`src/engine/types.ts`에서 export하는 헬퍼 함수. 고아 엔진(`createOrphan`으로 생성)에서 부모 연결 없이 `layout()` 호출 시 발생시킬 에러를 생성한다.
+
+```ts
+import { createNoParentError } from "./types";
+// createNoParentError('BoxEngine', 'appendChildBoxEngine') → Error("BoxEngine has no parent. Call appendChildBoxEngine() to attach to a parent before layout().")
+```
+
+### 고아 엔진 생성 (Orphan Engine)
+
+`createOrphan` 팩토리로 부모 없이 엔진을 생성한 후, `appendChildBoxEngine()` / `appendChildContentEngine()`으로 부모에 연결하는 패턴. DOM의 `createElement` → `appendChild` 흐름과 동일하다.
+
+```ts
+// 고아 생성 → 부모 연결 → 커밋
+const box = BoxEngine.createOrphan(boxData);
+documentEngine.appendChildBoxEngine(box);  // 부모 연결, dirty = true
+documentEngine.layout();                   // 커밋 — 좌표 계산
+
+// 부모 없이 layout() 호출 (예외 발생)
+const box = BoxEngine.createOrphan(boxData);
+box.layout(ctx, ...);  // ❌ throw: "BoxEngine has no parent. Call appendChildBoxEngine()..."
+```
+
+### 설계 근거
+
+- **원자성**: `data` setter(전체 교체)와 개별 setter 모두 dirty만 표시 — `layout()` 호출 시점에 모든 프로퍼티가 동시 반영된 상태에서 계산. 부분 상태 렌더링 위험 원천 차단.
+- **전파 제어**: `layout()`이 트리 전체를 1회에 재구축 — 개별 즉시 렌더링의 N회 전파 회피.
+- **캐시 일관성**: `layout()` 진입 시 `resetIncrementalState` 단일 호출 — 무효화 분산 회피.
+- **DOM 분업 유지**: DOM 개별 세터(`box.left = 50`) → `scheduleRender` → `layout()` 자동 트리거. Headless는 `layout()` 명시적 호출.
+- **`data` setter 동일 취급**: `data` 통째 교체 후에도 `layout()` 명시 호출 필요 — 개별 setter와 동일한 커밋 경로를 가져 일관성 확보.
+
+### 잔존 주의점 (Headless 환경)
+
+Headless(`pdf-gen` 등)에서는 `layout()` 명시적 호출이 필요하다. DOM 환경과 달리 자동 `layout()` 트리거가 없으므로, `layout()` 누락 시 `printPostData` 조회에서 예외 발생. 이 예외는 부분 갱신된 데이터가 인쇄 후처리로 전파되는 것을 차단하는 안전망이다.
