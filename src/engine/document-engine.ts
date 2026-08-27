@@ -513,10 +513,10 @@ export class DocumentEngine {
       }
     }
 
-    return {
-      ...this._data,
-      children: this._childBoxEngines.map((be) => ({ ...be.data })),
-    };
+    // extractData를 사용해 자식 박스 트리 전체(중첩 포함)의 데이터를 조립한다.
+    // `be.data`(raw _data)를 사용하면 엔진 우선 원칙에 따라 _data에 children이 없으므로
+    // flip 결과에서 모든 하위 요소가 사라지는 버그가 발생한다.
+    return this.extractData;
   }
 
   private _flipLayoutInNested(
