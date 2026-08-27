@@ -1319,6 +1319,7 @@ export class BoxEngine {
       } else {
         imgEngine.rgbaData = this._decodeRgbaIfNode(imgData.url);
       }
+      imgEngine.layout();
       return imgEngine;
     }
     ctx.newEnginesCreated = true;
@@ -1339,6 +1340,7 @@ export class BoxEngine {
     newEngine.zIndex = imgData.zIndex;
     newEngine.contentAbsRect = contentAbsRect;
     newEngine.rgbaData = this._decodeRgbaIfNode(imgData.url);
+    newEngine.layout();
     return newEngine;
   }
 
@@ -1388,6 +1390,11 @@ export class BoxEngine {
         : { type: 'box' as const, left: 0, top: 0, width: 1, height: 1, children: cellChildren };
       const cellBoxEngine = this._buildCellBoxEngine(cellBoxData, cellEngine, ctx);
       cellEngine.boxEngine = cellBoxEngine;
+    }
+    for (const row of te.rowEngines) {
+      for (const cell of row.cellEngines) {
+        cell._markClean();
+      }
     }
 
     return te;
