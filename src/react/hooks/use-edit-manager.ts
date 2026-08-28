@@ -7,6 +7,7 @@ import {
 } from '@/edit/edit-manager';
 import { LayoutParagraphElement } from '@/components/layout/paragraph.element';
 import type { TextEditController, CurrentStyle } from '@/edit/text-edit-controller';
+import type { TextInlineStyle } from '@/types/style';
 import type { SelectionRange } from '@/types/edit';
 
 export interface UseEditManagerOptions {
@@ -36,6 +37,11 @@ export interface UseEditManagerReturn {
   blurParagraph: (target?: LayoutParagraphElement | string) => boolean;
   selectLayout: (target: LayoutElement | string | (LayoutElement | string)[]) => boolean;
   clearLayoutSelection: () => void;
+  applyInlineStyle: (style: Partial<TextInlineStyle>) => void;
+  toggleInlineStyle: <K extends keyof TextInlineStyle>(
+    field: K,
+    value: NonNullable<TextInlineStyle[K]>,
+  ) => void;
 }
 
 const EVENT_TYPES: Array<{ key: keyof UseEditManagerOptions; type: EditManagerEventType }> = [
@@ -119,6 +125,17 @@ export function useEditManager(
     [manager],
   );
 
+  const applyInlineStyle = useCallback(
+    (style: Partial<TextInlineStyle>): void => manager.applyInlineStyle(style),
+    [manager],
+  );
+
+  const toggleInlineStyle = useCallback(
+    <K extends keyof TextInlineStyle>(field: K, value: NonNullable<TextInlineStyle[K]>): void =>
+      manager.toggleInlineStyle(field, value),
+    [manager],
+  );
+
   return {
     focusedParagraph,
     focusedController,
@@ -131,5 +148,7 @@ export function useEditManager(
     blurParagraph,
     selectLayout,
     clearLayoutSelection,
+    applyInlineStyle,
+    toggleInlineStyle,
   };
 }

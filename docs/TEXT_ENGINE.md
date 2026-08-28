@@ -1271,6 +1271,10 @@ overlay = overlay.filter(i => {
 
 텍스트 래핑은 `_layoutTextIntoColumns()`에서 mm 좌표로 직접 수행하며, `isOverflow` 판정은 마지막 라인 높이 규칙을 반영하여 `(lineIndexInColumn + 1) * lineHeight > parentHeight + (lineHeight - fontSize) + 1e-6`로 계산한다.
 
+### 18.4 편집기와의 런 데이터 연계 (RunMap)
+
+텍스트 편집기(`TextEditController`)는 인라인 런 단락(`textContent`가 `(string | TextInlineData)[]`)을 편집할 때 내부 `RunMap`(`src/edit/run-map.ts`)으로 평문 오프셋 ↔ 런 매핑을 관리한다. 모든 텍스트 변경(입력/삭제/조합/스타일 적용)은 런 맵 갱신 후 `plainToInline(textarea.value, runMap)`으로 `textContent`를 재구성하며, 결과적으로 엔진은 항상 런 구조가 보존된 `TextInlineData[]`를 입력받는다. 편집 데이터 구조의 상세는 `EDITING_TEXT.md` § 6A 참조.
+
 ---
 
 ## 19. 주의사항 및 제약

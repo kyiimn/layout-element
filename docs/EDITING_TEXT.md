@@ -124,7 +124,7 @@ sequenceDiagram
 
 ### 1.6 제약 사항
 
-- **평문 텍스트만 지원**한다. 굵게, 기울임, 색상 변경 등 서식 있는 텍스트 편집은 지원하지 않는다.
+- **서식 있는 텍스트 편집 지원**한다. 굵게(`Ctrl+B`), 기울임(`Ctrl+I`), 글자 크기/색상/폰트 변경은 `EditManager.applyInlineStyle()` / `toggleInlineStyle()`로 편집하며, 내부적으로 `RunMap`(`src/edit/run-map.ts`)이 평문 오프셋 ↔ 인라인 런 매핑을 관리한다. IME 조합(한글 입력)도 인라인 런 단락에서 동작한다.
 - **단일 단락 편집**만 가능하다. 단락을 넘어가는 선택이나 여러 단락 동시 편집은 지원하지 않는다.
 
 ---
@@ -282,7 +282,9 @@ flowchart LR
 |-----|------|------|
 | `cursorOffset` | `number` get | 현재 커서 위치를 소스 텍스트 오프셋(0-based, `\n` 포함)으로 반환한다. |
 | `selection` | `SelectionRange \| null` get | 현재 선택 영역을 반환한다. 선택이 없으면 `null`이다. |
-| `currentStyle` | `CurrentStyle` get | 현재 커서 위치에서 유효한 `TextStyle`과 `ParagraphStyle`을 반환한다. 단락 수준 스타일 + 상속 스타일을 병합하고, 커서가 위치한 런의 `TextInlineStyle`로 오버라이드한 결과이다. |
+| `currentStyle` | `CurrentStyle` get | 현재 커서 위치에서 유효한 `TextStyle`과 `ParagraphStyle`을 반환한다. 단락 수준 스타일 + 상속 스타일을 병합하고, 커서가 위치한 인라인 런의 `TextInlineStyle`(`getStyleAtOffset(runMap, offset)`)로 오버라이드한 결과이다. |
+| `applyInlineStyle(style)` | `void` | 현재 선택 영역에 인라인 스타일(`Partial<TextInlineStyle>`)을 적용한다. 선택 영역이 없으면 무시. `runMap`을 갱신하고 `plainToInline`으로 `model.textContent`를 재구성한 뒤 재렌더링한다. |
+| `toggleInlineStyle(field, value)` | `void` | 현재 선택 영역의 인라인 스타일 필드를 토글한다. 선택 영역 전체가 이미 해당 값이면 제거(기본 복귀), 아니면 적용한다. `Ctrl+B`(fontWeight 700), `Ctrl+I`(fontStyle italic) 단축키가 이 메서드를 호출한다. |
 | `focus()` | `void` | 숨겨진 `textarea`에 포커스를 주어 커서를 표시한다. |
 | `blur()` | `void` | 숨겨진 `textarea`에서 포커스를 해제하여 커서를 숨긴다. |
 | `setCursor(position: CursorPosition)` | `void` | 프로그래밍 방식으로 커서 위치를 설정한다. |
@@ -329,7 +331,7 @@ controller.focus();
 커서 위치에서 유효한 `TextStyle`과 `ParagraphStyle`을 반환한다. 내부 동작:
 
 1. `model.inheritStyle`과 `model.textStyle`/`model.paragraphStyle`을 필드별로 `??` 병합하여 기본 스타일을 구성한다.
-2. 런 스타일 조회 헬퍼로 커서가 속한 런의 `TextInlineStyle`을 찾는다. `model.contents` 배열에서 각 런의 시작/끝 오프셋을 누적 계산한다.
+2. 런 스타일 조회로 커서가 속한 런의 `TextInlineStyle`을 찾는다. 컨트롤러가 보유한 `runMap`(`src/edit/run-map.ts`)에서 `getStyleAtOffset(runMap, cursorOffset)`으로 조회한다.
 3. `TextInlineStyle`의 정의된 필드만 기본 스타일 위에 오버라이드한다.
 
 ```ts
@@ -357,7 +359,7 @@ const { textStyle, paragraphStyle } = controller.currentStyle;
 |-----|------|------|
 | `rebuild()` | `void` | 렌더링된 DOM을 기준으로 오프셋 매핑을 다시 구축한다. `postRender()`가 호출한다. |
 | `getCursorPlacement(sourceOffset, preferLineEnd?)` | `CursorPlacement \| null` | 주어진 소스 오프셋에 커서를 표시할 위치를 반환한다. 가시 문자와 중간 스페이스(단어 사이)는 `{ sourceOffset, atEndOfChar: false }`로 설정되어 커서가 문자/스페이스 앞(왼쪽)에 배치된다. 라인 마지막 trailing space와 endOfBlock은 이전 가시 문자를 `atEndOfChar: true`로 참조하여 커서가 스페이스 뒤(이전 가시 문자의 오른쪽)에 배치된다. 생략된 leading space와 `\n` 다음 위치는 null을 반환하여 line rect 폴백으로 처리된다. `preferLineEnd=true`면 `_lineEndPlacements`를 우선 조회하여 라인 끝 문자의 오른쪽에 배치한다 (trailing space 없이 끝나는 라인에서 다음 라인 첫 글자 offset과 충돌할 때 사용). |
-| `getCharOffsetFromPoint(x, y)` | `CursorPosition \| null` | 뷰포트 좌표(x, y) 위치의 문자에 해당하는 소스 오프셋을 반환한다. y 범위에 있는 컬럼들 중 x에 가장 가까운 컬럼을 찾고, 해당 컬럼에서 y에 가장 가까운 라인 div를 찾은 후, 그 라인의 span들 중 x에 가장 가까운 span을 선택한다. 빈 라인(span이 없는 경우)이면 라인 시작 오프셋을 반환한다. |
+| `getCharOffsetFromPoint(x, y)` | `CursorPosition \| null` | 뷰포트 좌표(x, y) 위치의 문자에 해당하는 소스 오프셋을 반환한다. y 범위에 있는 컬럼들 중 x에 가장 가까운 컬럼을 찾고, 해당 컬럼에서 y에 가장 가까운 라인 div를 찾은 후, 그 라인의 span들 중 x에 가장 가까운 span을 선택한다. **라인 소속 판별은 DOM 조상 귀속**(span → part div → line div, `_getLineDivOfSpan`)을 사용한다 — 하단 앵커(bottom anchor) 때문에 큰 폰트 span의 top은 라인 top과 다르므로 rect 기반(top/bottom/y-중점) 매칭은 특정 크기의 span을 누락한다. 빈 라인(span이 없는 경우)이면 라인 시작 오프셋을 반환한다. |
 | `getNearestOffsetFromPoint(x, y)` | `CursorPosition \| null` | `getCharOffsetFromPoint`와 동일하다. |
 | `getCharRect(sourceOffset)` | `DOMRect \| null` | 주어진 소스 오프셋에 해당하는 문자 span의 위치를 단락 로컬 좌표로 반환한다. |
 | `getFirstColumnRect()` | `{ top, left, fontSize } \| null` | 첫 번째 컬럼의 첫 번째 라인 div의 단락 로컬 rect와 폰트 크기를 반환한다. 빈 단락에서 커서를 배치할 때 사용한다. |
@@ -365,7 +367,7 @@ const { textStyle, paragraphStyle } = controller.currentStyle;
 | `getLineStartSourceOffset(columnIndex, lineIndex)` | `number \| null` | 주어진 컬럼/라인 인덱스의 시작 source 오프셋을 반환한다. |
 | `getLineRect(columnIndex, lineIndex)` | `{ top, left, width, height } \| null` | 주어진 컬럼/라인 인덱스에 해당하는 line div의 단락 로컬 rect를 반환한다. 빈 줄도 line div가 존재하므로 rect를 반환한다. |
 | `totalLineCount` | `number` | 전체 라인 수(모든 컬럼 합)를 반환한다. |
-| `getTextRange(start, end)` | `Rect[]` | `start`부터 `end`까지(끝 제외)의 선택 사각형 배열을 단락 로컬 좌표로 반환한다. 같은 행의 연속된 span은 병합한다. |
+| `getTextRange(start, end)` | `Rect[]` | `start`부터 `end`까지(끝 제외)의 선택 사각형 배열을 단락 로컬 좌표로 반환한다. **top 기준으로 행을 그룹핑**한다 — 같은 라인 내 크기가 다른 런은 하단 앵커로 top이 달라 분리된 rect가 되어 각 크기의 실제 영역이 하이라이트된다. 인접 라인 간 top 우연 일치는 불가능하다(라인 간격 lineHeight > 침범 깊이). |
 | `getTextContent(start, end)` | `string` | `start`부터 `end`까지(끝 제외)의 소스 텍스트를 반환한다. span의 `innerText`를 읽고 블록 사이의 `\n`을 복원한다. |
 | `findVisualLineBounds(sourceOffset)` | `{ start, end } \| null` | 소스 오프셋이 속한 시각적 라인의 시작/끝 오프셋을 반환한다. `Home`/`End` 키 처리에 사용한다. |
 | `getSpanByOffset(sourceOffset)` | `HTMLSpanElement \| null` | 주어진 소스 오프셋에 해당하는 문자 `span` 요소를 반환한다. `[data-source-offset]` 속성으로 검색하며 임시 span은 제외한다. |
@@ -423,7 +425,7 @@ type CurrentStyle = {
 `currentStyle` 게터는 커서 위치에서 유효한 스타일을 계산한다. 계산 순서:
 
 1. **단락 수준 스타일 + 상속 스타일 병합**: `model.textStyle`의 각 필드와 `model.inheritStyle`의 같은 필드를 `??` 연산자로 병합한다. 단락 자체 스타일이 우선하고, 없으면 상속값을 사용한다.
-2. **런 스타일 찾기**: 런 스타일 조회 헬퍼로 커서가 속한 런의 `TextInlineStyle`을 찾는다. `model.contents` 배열에서 각 런의 시작/끝 오프셋을 누적 계산하여 커서 오프셋이 어느 런에 속하는지 결정한다.
+2. **런 스타일 찾기**: 컨트롤러가 보유한 `runMap`(`src/edit/run-map.ts`)에서 `getStyleAtOffset(runMap, cursorOffset)`으로 커서가 속한 런의 `TextInlineStyle`을 찾는다. `runMap`은 `model.textContent`(`string | (string \| TextInlineData)[]`)에서 `inlineToPlain()`으로 분해한 평문 오프셋 ↔ 런 매핑이다.
 3. **런 스타일로 오버라이드**: `TextInlineStyle`의 정의된 필드(`fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`)만 기본 스타일 위에 오버라이드한다. `undefined`인 필드는 무시한다. 인라인 런은 정렬(`textAlign`)을 오버라이드하지 않는다.
 
 ```ts
@@ -474,6 +476,8 @@ InheritStyle (부모에서 상속)
 | `cursorOffset` | `number \| null` get | 현재 커서 위치. 포커스된 단락이 없으면 `null`. |
 | `selection` | `SelectionRange \| null` get | 현재 선택 영역. 선택이 없거나 포커스된 단락이 없으면 `null`. DOM `Selection` API와 유사하게 현재 selection 객체를 직접 조회. |
 | `currentStyle` | `CurrentStyle \| null` get | 현재 커서 위치의 유효 스타일. 포커스된 단락이 없으면 `null`. |
+| `applyInlineStyle(style)` | `void` | 포커스된 단락의 현재 선택 영역에 인라인 스타일(`Partial<TextInlineStyle>`)을 적용한다. 선택 영역이 없거나 포커스된 단락이 없으면 무시. |
+| `toggleInlineStyle(field, value)` | `void` | 포커스된 단락의 현재 선택 영역에서 인라인 스타일 필드를 토글한다. 선택 영역 전체가 이미 해당 값이면 제거, 아니면 적용. |
 | `controllers` | `Set<TextEditController>` get | 등록된 모든 편집 컨트롤러. |
 | `focusParagraph(target, options?)` | `boolean` | 단락 요소 또는 ID로 포커스를 설정한다. 텍스트 편집 모드가 아니면 자동 활성화. `options.cursorOffset`으로 커서 위치, `options.selection`으로 선택 영역을 지정할 수 있다. 성공 시 `true`, 실패 시 `false`. |
 | `blurParagraph(target?)` | `boolean` | 단락 요소, ID, 또는 생략으로 포커스를 해제한다. 생략하면 현재 포커스된 단락을 blur. 성공 시 `true`, 실패 시 `false`. |
@@ -899,6 +903,8 @@ flowchart TD
 | `Enter` | 없음 | 줄바꿈(`\n`) 삽입. 선택 영역이 있으면 선택 영역을 대체 |
 | `Escape` | 없음 | 활성 선택 영역이 있으면 `_clearSelection()`으로 선택 영역을 해제하고 `selectionEnd` 이벤트 발생. 선택 영역이 없으면 `blurParagraph()`로 포커스를 해제한다. `textEditMode`는 유지되며, `stopPropagation()`으로 외부 핸들러(`use-editor-keyboard`)로의 전파를 차단한다 |
 | `a` | `Ctrl` 또는 `Cmd` | 전체 선택 |
+| `b` | `Ctrl` 또는 `Cmd` | 선택 영역에 굵게(`fontWeight: 700`) 토글 적용 |
+| `i` | `Ctrl` 또는 `Cmd` | 선택 영역에 기울임(`fontStyle: 'italic'`) 토글 적용 |
 | `c` | `Ctrl` 또는 `Cmd` | 선택 영역을 클립보드에 복사 |
 | `x` | `Ctrl` 또는 `Cmd` | 선택 영역을 잘라내기(클립보드 복사 + 삭제) |
 | `v` | `Ctrl` 또는 `Cmd` | 클립보드에서 평문 붙여넣기 |
@@ -1285,10 +1291,10 @@ sequenceDiagram
 3. 활성 선택 영역이 있으면:
    - `selection.normalized()`로 시작/끝을 구한다.
    - `_compositionStartOffset = normalized.start.textOffset`.
-   - 모델에서 선택 영역을 삭제: `model.textContent = content.slice(0, start) + content.slice(end)`.
+   - 모델에서 선택 영역을 삭제: `shiftRunMap(runMap, start, -deletedLen)`으로 런 맵 갱신 후 `model.textContent = plainToInline(newContent, runMap)`.
    - `textarea.value`를 갱신하고 선택 영역을 초기화.
 4. 활성 선택 영역이 없으면 `_compositionStartOffset = _cursorModel.offset`.
-5. `_compositionBeforeContent`를 선택 삭제 후의 `model.textContent`로 캡처.
+5. `_compositionBeforeContent`를 선택 삭제 후의 `textarea.value`로 캡처.
 6. `_cursorModel.selection = null`, `_updateSelection()`.
 7. `paragraph.scheduleRender()` 호출 (마이크로태스크 배치).
 8. `_updateCursorPosition()` 호출.
@@ -1296,9 +1302,10 @@ sequenceDiagram
 ### 6.2 `compositionupdate` 내부 처리
 
 1. `_isComposing`이 false면 무시.
-2. `model.textContent`에 조합 텍스트 반영:
+2. `model.textContent`에 조합 텍스트 반영 (인라인 런 단락 포함 — string 전용 가드 없음):
    - `newText = _compositionBeforeContent.slice(0, _compositionStartOffset) + event.data + _compositionBeforeContent.slice(_compositionStartOffset)`.
-   - `model.textContent = newText`.
+   - 조합 중 텍스트는 삽입 위치가 속한 런의 스타일을 이어받는다. `_runMap`은 조합 시작 전 상태를 유지하므로, 매 업데이트마다 `shiftRunMap(_runMap, start, data.length)`으로 임시 확장한 맵으로 `plainToInline` 변환한다 (확정 시 `_onCompositionEnd`에서 실제 shift).
+   - `model.textContent = plainToInline(newText, tempRunMap)`.
    - `_compositionData = event.data`.
    - `_cursorModel.offset = _compositionStartOffset + event.data.length`.
 3. `paragraph.scheduleRender()` 호출 (microtask). 엔진이 조합 텍스트를 포함하여 라인 넘침과 금칙어 규칙을 재계산. microtask이므로 현재 실행 스택 종료 직후 즉시 렌더링됨.
@@ -1309,16 +1316,17 @@ sequenceDiagram
 
 1. `_isComposing = false`. `_compositionData = ""`.
 2. `_debounceTimer`가 있으면 취소.
-3. `model.textContent = this._textarea.value`.
-4. `composedLength = after.length - _compositionBeforeContent.length`로 커서 offset 계산: `_cursorModel.offset = _compositionStartOffset + composedLength`.
-5. `paragraph.flushRender()` 호출로 전체 재래핑.
-6. `_clearCompositionUnderline()` 호출로 밑줄 제거.
-7. `_updateCursorPosition()` 호출.
+3. `composedLength = textarea.value.length - _compositionBeforeContent.length`가 0이 아니면 `shiftRunMap(_runMap, _compositionStartOffset, composedLength)`으로 런 맵에 조합 삽입을 반영.
+4. `model.textContent = plainToInline(textarea.value, _runMap)`.
+5. 커서 offset 계산: `_cursorModel.offset = _compositionStartOffset + composedLength`.
+6. `paragraph.flushRender()` 호출로 전체 재래핑.
+7. `_clearCompositionUnderline()` 호출로 밑줄 제거.
+8. `_updateCursorPosition()` 호출.
 
 ### 6.4 `compositioncancel` 내부 처리
 
 1. `_isComposing = false`. `_compositionData = ""`.
-2. `model.textContent = _compositionBeforeContent`.
+2. `model.textContent = plainToInline(_compositionBeforeContent, _runMap)`.
 3. `textarea.value = _compositionBeforeContent`.
 4. `_cursorModel.offset = _compositionStartOffset`.
 5. `textarea.setSelectionRange(_compositionStartOffset, _compositionStartOffset)`.
@@ -1334,8 +1342,9 @@ sequenceDiagram
 조합 중에 포커스를 잃거나(`blur`) 탭을 전환(`visibilitychange`, `document.hidden`)하면 조합은 **취소되지 않고 완료**로 처리된다.
 
 - `_resetCompositionState()`로 조합 상태를 초기화 (`_isComposing = false`, `_compositionData = ""`).
-- `model.textContent = textarea.value`.
-- `composedLength = after.length - _compositionBeforeContent.length`로 커서 offset 갱신.
+- `composedLength = textarea.value.length - _compositionBeforeContent.length`가 0이 아니면 `shiftRunMap`으로 런 맵 갱신.
+- `model.textContent = plainToInline(textarea.value, _runMap)`.
+- `composedLength`로 커서 offset 갱신.
 - `_debounceTimer`가 있으면 취소.
 - `paragraph.render()` 호출.
 - `_updateCursorPosition()` 호출.
@@ -1361,6 +1370,64 @@ sequenceDiagram
 - 조합 종료(`compositionend`/`compositioncancel`) 시 `_clearCompositionUnderline()`로 모든 span에서 밑줄을 제거한다.
 - 조합 중에 화살표 키를 누르면, 조합을 시각적으로 취소하고 `textarea` 커서를 조합 시작 위치로 되돌린다.
 - `Escape` 키를 누르면 조합 상태를 해제한다. `model.textContent`는 조합 전 내용으로 복원된다.
+
+---
+
+## 6A. RunMap — 인라인 스타일 편집 데이터 구조
+
+`src/edit/run-map.ts`는 textarea(평문만 다룸)와 인라인 런 `model.textContent`(`(string | TextInlineData)[]`) 사이의 매핑을 담당한다. 편집기는 항상 평문을 다루고, 스타일은 별도의 런 맵으로 관리한다.
+
+### 6A.1 데이터 구조
+
+```ts
+type RunEntry = {
+  start: number;  // 런 시작 오프셋 (평문 기준, 포함)
+  end: number;    // 런 종료 오프셋 (평문 기준, 미포함)
+  style: TextInlineStyle | undefined;  // undefined면 문단 기본 스타일
+};
+
+type RunMap = RunEntry[];
+```
+
+### 6A.2 변환 함수
+
+| 함수 | 설명 |
+|------|------|
+| `plainToInline(text, runMap)` | 평문 + 런 맵 → 엔진 content 배열. **runMap이 덮지 않은 구간(런 갭, 맵 앞/뒤)은 기본 스타일 텍스트로 채운다** — 런 경계 삽입 시 `shiftRunMap`이 만드는 갭에서 새 글자가 유실되지 않도록 한다. |
+| `inlineToPlain(content)` | 엔진 content → `{ text, runMap }`. 컨트롤러 생성 시 초기 런 맵을 구축하고, `postRender()`에서 model과 textarea 불일치 검사에 사용한다. |
+| `getStyleAtOffset(runMap, offset)` | 오프셋이 속한 런의 스타일 반환. `currentStyle`이 커서 위치의 유효 스타일을 계산할 때 사용. |
+| `applyStyleToRange(runMap, start, end, style)` | 범위에 스타일 적용. 기존 런 경계를 가로지르면 분할하고, 인접 동일 스타일 런은 병합. `applyInlineStyle`/`toggleInlineStyle`이 사용. |
+| `shiftRunMap(runMap, at, delta)` | `at` 위치 이후의 런 offset을 `delta`만큼 이동. 걸친 런은 `end`만 이동(삽입 시 연장, 삭제 시 단축). 입력/삭제/붙여넣기/조합 확정 시 사용. |
+| `mergeAdjacentSameStyle(runMap)` | 인접 동일 스타일 런 병합 + 빈 런 제거 (정규화). |
+
+### 6A.3 편집 동기화 흐름
+
+모든 텍스트 변경 경로는 **① 런 맵 갱신 → ② `model.textContent = plainToInline(textarea.value, runMap)`** 순서를 유지한다.
+
+| 경로 | 런 맵 갱신 |
+|------|-----------|
+| `_onInput` (삽입/삭제/교체) | `_computeTextChange` 결과에 따라 `shiftRunMap` |
+| 선택 영역 대체/삭제 | 삭제 길이 → `shiftRunMap(at, -len)`, 삽입 길이 → `shiftRunMap(at, +len)` |
+| IME 조합 (`compositionupdate`) | 매 업데이트마다 원본 맵에서 임시 확장 (확정 전까지 `_runMap` 불변) |
+| IME 확정 (`compositionend`) | 조합 길이만큼 `shiftRunMap(start, composedLength)` — 1회 |
+| 조합 취소 (`compositioncancel`) | 런 맵 갱신 없이 원본 복원 |
+| `applyInlineStyle` / `toggleInlineStyle` | `applyStyleToRange` |
+
+**불일치 안전망**: `postRender()`는 `inlineToPlain(model.textContent)` 결과가 `textarea.value`와 다르면(외부에서 `data` setter로 content를 교체한 경우 등) textarea와 런 맵을 모두 model 기준으로 재동기화한다.
+
+### 6A.4 사용 예시
+
+```ts
+// EditManager API로 선택 영역에 스타일 적용
+const manager = layoutDocEl.editManager;
+manager.applyInlineStyle({ color: 'red', fontSize: 7 });
+
+// 토글 (선택 전체가 이미 700이면 제거)
+manager.toggleInlineStyle('fontWeight', 700);
+
+// 키보드 단축키: Ctrl+B = toggleInlineStyle('fontWeight', 700)
+//               Ctrl+I = toggleInlineStyle('fontStyle', 'italic')
+```
 
 ---
 
@@ -2107,7 +2174,7 @@ function redo() {
 
 | 제약 | 설명 | 이유 및 향후 개선 방향 |
 |------|------|------------------------|
-| 평문 텍스트만 지원 | 굵게, 기울임, 글자 색상 등 서식 있는 텍스트 편집은 지원하지 않는다. | `model.textContent`는 단일 문자열이며 span 스타일은 `genCharStyle()`에서 일괄 생성. 렌더링 엔진은 `TextInlineData` 런 기반 인라인 스타일(`TextInlineStyle`)을 지원하지만, 편집기에서 런 단위 스타일 편집은 아직 구현되지 않았다. 편집 중인 단락의 글자별 인라인 스타일(`TextPartData.inlineStyles`)은 읽기 전용이며, `currentStyle`은 커서 위치 런의 `TextInlineStyle`을 반영한다(런 스타일 조회 헬퍼가 커서 오프셋을 런 스타일로 매핑). 향후 런 생성/분할/병합 편집을 추가해야 한다. |
+| 인라인 스타일 편집 (구현됨) | 굵게, 기울임, 글자 색상/크기/폰트 편집은 `EditManager.applyInlineStyle()` / `toggleInlineStyle()`(또는 `Ctrl+B` / `Ctrl+I`)로 지원한다. | 내부적으로 `RunMap`(`src/edit/run-map.ts`)이 textarea 평문 오프셋 ↔ 인라인 런 매핑을 관리한다. 입력/삭제(`shiftRunMap`), 스타일 적용(`applyStyleToRange`), IME 조합(조합 중 임시 확장 + 확정 시 shift)이 모두 런 맵과 동기화된다. `plainToInline`은 runMap이 덮지 않은 구간(갭/앞/뒤)을 기본 스타일로 채워 런 경계 편집 시 글자 유실을 방지한다. |
 | 단일 단락 편집 | 단락을 넘어가는 선택이나 여러 단락 동시 편집은 지원하지 않는다. | `_cursorModel`과 `_selectionAnchor`가 하나의 `LayoutParagraphElement`에만 연결. 향후 문서 전역 `TextEditController`와 paragraph 간 매핑이 필요하다. |
 | undo/redo 없음 | 실행 취소/다시 실행 스택은 호스트 프로그램이 직접 구현해야 한다. | 텍스트 변경 이력을 보관하면 메모리/복잡도 증가. 라이브러리는 최소한의 상태만 유지하고, 호스트가 정책을 결정하도록 설계되었다. |
 | 드래그 앤 드롭 없음 | 텍스트를 마우스로 끌어 이동하는 기능은 지원하지 않는다. | 선택 핸들과 drop target 계산이 추가로 필요. 클립보드 기반 잘라내기/붙여넣기로 대체 가능하다. |

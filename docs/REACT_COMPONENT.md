@@ -621,6 +621,8 @@ const {
 | `blurParagraph` | `(target?) => boolean` | 포커스 해제. |
 | `selectLayout` | `(target) => boolean` | 레이아웃 선택. |
 | `clearLayoutSelection` | `(preserveFocusedBox?: boolean) => void` | 레이아웃 선택 해제. `preserveFocusedBox=false`면 포커스 박스도 해제. |
+| `applyInlineStyle` | `(style: Partial<TextInlineStyle>) => void` | 포커스된 단락의 선택 영역에 인라인 스타일 적용. 선택 영역이 없으면 무시. |
+| `toggleInlineStyle` | `(field, value) => void` | 포커스된 단락의 선택 영역에서 인라인 스타일 필드 토글. 전체가 이미 해당 값이면 제거. |
 
 #### 메서드 시그니처
 
@@ -637,6 +639,13 @@ selectLayout(
 ): boolean;
 
 clearLayoutSelection(preserveFocusedBox?: boolean): void;
+
+applyInlineStyle(style: Partial<TextInlineStyle>): void;
+
+toggleInlineStyle<K extends keyof TextInlineStyle>(
+  field: K,
+  value: NonNullable<TextInlineStyle[K]>,
+): void;
 ```
 
 #### 내부 동작
@@ -650,7 +659,7 @@ clearLayoutSelection(preserveFocusedBox?: boolean): void;
 
 ```tsx
 function EditorToolbar() {
-  const { focusedParagraph, currentStyle, focusParagraph, blurParagraph } =
+  const { focusedParagraph, currentStyle, focusParagraph, blurParagraph, applyInlineStyle } =
     useEditManager({
       onTextChange: (e) => console.log('text changed'),
     });
@@ -661,6 +670,9 @@ function EditorToolbar() {
     <div>
       <span>Font: {currentStyle.textStyle.fontFamily}</span>
       <span>Size: {currentStyle.textStyle.fontSize}mm</span>
+      <button onClick={() => applyInlineStyle({ fontWeight: 700, color: 'red' })}>
+        Bold + Red
+      </button>
       <button onClick={() => blurParagraph()}>Blur</button>
     </div>
   );

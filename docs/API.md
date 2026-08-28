@@ -1806,6 +1806,10 @@ class EditManager {
   get currentStyle: CurrentStyle | null;
   get controllers: Set<TextEditController>;
 
+  // 인라인 스타일 편집
+  applyInlineStyle(style: Partial<TextInlineStyle>): void;
+  toggleInlineStyle<K extends keyof TextInlineStyle>(field: K, value: NonNullable<TextInlineStyle[K]>): void;
+
   // 휘발성 표시 토글
   get showPlaceholderBorders: boolean;
   set showPlaceholderBorders(value: boolean): void;
@@ -1906,6 +1910,49 @@ blurParagraph(target?: LayoutParagraphElement | string): boolean;
  */
 deactivateAll(): void;
 ```
+
+#### 인라인 스타일 편집
+
+```ts
+/**
+ * 포커스된 단락의 현재 선택 영역에 인라인 스타일을 적용한다.
+ *
+ * 선택 영역이 없거나 포커스된 단락이 없으면 무시. 내부 RunMap
+ * (src/edit/run-map.ts)을 갱신하고 model.textContent를 재구성한 뒤
+ * 재렌더링한다.
+ *
+ * @param style - 적용할 인라인 스타일 (부분 객체)
+ *   필드: fontFamily, fontSize, fontWeight, fontStyle, color
+ *
+ * @example
+ * const manager = layoutDocEl.editManager;
+ * manager.applyInlineStyle({ fontWeight: 700, color: 'red' });
+ */
+applyInlineStyle(style: Partial<TextInlineStyle>): void;
+```
+
+```ts
+/**
+ * 포커스된 단락의 현재 선택 영역에서 인라인 스타일 필드를 토글한다.
+ *
+ * 선택 영역 전체가 이미 해당 값이면 제거(기본 복귀), 아니면 적용한다.
+ *
+ * @param field - 토글할 TextInlineStyle 필드명
+ * @param value - 적용할 값
+ *
+ * @example
+ * const manager = layoutDocEl.editManager;
+ * manager.toggleInlineStyle('fontWeight', 700);  // Ctrl+B와 동일
+ * manager.toggleInlineStyle('fontStyle', 'italic');  // Ctrl+I와 동일
+ */
+toggleInlineStyle<K extends keyof TextInlineStyle>(
+  field: K,
+  value: NonNullable<TextInlineStyle[K]>,
+): void;
+```
+
+> **참고**: 키보드 단축키 `Ctrl+B`(굵게), `Ctrl+I`(기울임)는 이 메서드를 호출한다.
+> 편집 데이터 구조의 상세는 `EDITING_TEXT.md` § 6A(RunMap) 참조.
 
 #### 텍스트 편집 모드
 
@@ -2171,6 +2218,10 @@ manager.focusParagraph('paragraph-1', { cursorOffset: 5 });
 // 편집 모드 + 허용 범위
 manager.setEditableTextRoles(['body', 'title']);
 manager.textEditMode = true;
+
+// 인라인 스타일 편집 (선택 영역 대상)
+manager.applyInlineStyle({ fontWeight: 700, color: 'red' });
+manager.toggleInlineStyle('fontStyle', 'italic');
 
 // 레이아웃 편집 모드 + 루트 제한
 manager.setEditableRootId('root-box');

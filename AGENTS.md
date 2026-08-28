@@ -6,7 +6,7 @@ Newspaper layout engine implemented as Web Components (Custom Elements). Renders
 
 **Engine-first principle**: The engine tree (`DocumentEngine` → `BoxEngine` → `ParagraphEngine`/`ImageEngine`/`TableEngine`) is the single source of truth for all layout calculations and data. DOM elements delegate `data` getter to `engine.extractData` — they do not independently assemble data from their own properties. When editing occurs, DOM properties are updated, `_layoutStructure()` collects data via `_rawData()` (bypassing `data` getter to avoid circular reference), the engine reprocesses it, and the result propagates back to the DOM through `extractData`.
 
-**Editing support is under development.** Cursor, selection, and IME composition are implemented in `TextEditController` and `TextEditCoordinateMapper`. Edit state (focus, events) is managed by per-document `EditManager` instances.
+**Editing support**: Cursor, selection, IME composition, and inline run style editing (bold/italic/size/color via `Ctrl+B`/`Ctrl+I` or `EditManager.applyInlineStyle`/`toggleInlineStyle`) are implemented in `TextEditController` and `TextEditCoordinateMapper`. Inline run editing uses `RunMap` (`src/edit/run-map.ts`) to map plain-text offsets (textarea) ↔ inline runs (`model.textContent`); every text change syncs the run map first, then rebuilds `model.textContent` via `plainToInline`. Edit state (focus, events) is managed by per-document `EditManager` instances.
 
 ## Commands
 
