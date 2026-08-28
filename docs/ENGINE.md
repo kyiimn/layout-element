@@ -409,7 +409,7 @@ static create(data: ImageEngineData): ImageEngine
 interface ParagraphEngineData {
   id?: string
   zIndex?: number
-  content: string | (string | TextBlockData)[]
+  content: string | (string | TextInlineData)[]
   column: number | number[]
   gap: number | number[]
   paragraphStyle: ParagraphStyle  // 주입값만 (부모 스타일과 병합하지 않음)
@@ -426,7 +426,7 @@ interface ParagraphEngineData {
 
 ```ts
 static create(data: ParagraphEngineData): ParagraphEngine
-static createOrphan(content: string | (string | TextBlockData)[], resources: EngineResources): ParagraphEngine  // 부모 없이 생성. appendChildContentEngine()로 연결 후 data setter 주입.
+static createOrphan(content: string | (string | TextInlineData)[], resources: EngineResources): ParagraphEngine  // 부모 없이 생성. appendChildContentEngine()로 연결 후 data setter 주입.
 ```
 
 #### 퍼블릭 메서드
@@ -438,12 +438,12 @@ static createOrphan(content: string | (string | TextBlockData)[], resources: Eng
 | `resetIncrementalState` | `(): void` | 스켈레톤 캐시 초기화 |
 | `updateOverlayContext` | `(overlayEngines, parentAbsRect, inheritStyle): void` | 오버랩 문맥 경량 갱신 (`_layoutCache` 보존) |
 | `genColumnStyle` | `(idx: number): Partial<CSSStyleDeclaration>` | 컬럼 CSS 스타일 생성 |
-| `genLineStyle` | `(textBlockStyle?): Partial<CSSStyleDeclaration>` | 라인 CSS 스타일 |
-| `genPartStyle` | `(textBlockStyle?): Partial<CSSStyleDeclaration>` | 파트 CSS 스타일 |
-| `genCharStyle` | `(char, textBlockStyle?): Partial<CSSStyleDeclaration>` | 문자 외부 CSS 스타일 |
+| `genLineStyle` | `(columnIndex?, lineIndex?): Partial<CSSStyleDeclaration>` | 라인 CSS 스타일 |
+| `genPartStyle` | `(): Partial<CSSStyleDeclaration>` | 파트 CSS 스타일 |
+| `genCharStyle` | `(char, inlineStyle?): Partial<CSSStyleDeclaration>` | 문자 외부 CSS 스타일 |
 | `genCharInnerStyle` | `(): Partial<CSSStyleDeclaration>` | 문자 내부 CSS 스타일 |
-| `genCharStyleFlat` | `(char, textBlockStyle?): Partial<CSSStyleDeclaration>` | 평탄화 문자 스타일 |
-| `getCharWidths` | `(char, textBlockStyle?): { rawWidth, swidth, widthRatio }` | 문자 폭 정보 |
+| `genCharStyleFlat` | `(char, inlineStyle?): Partial<CSSStyleDeclaration>` | 평탄화 문자 스타일 |
+| `getCharWidths` | `(char, inlineStyle?): { rawWidth, swidth, widthRatio }` | 문자 폭 정보 |
 | `getCharRect` | `(sourceOffset: number): MmRect \| null` | 특정 오프셋 문자의 mm 단위 rect |
 | `getOffsetFromPoint` | `(xMm, yMm): CursorPosition \| null` | 좌표→오프셋 매핑 |
 | `getCursorPlacement` | `(sourceOffset, preferLineEnd?): CursorPlacement \| null` | 커서 배치 정보 |
@@ -458,7 +458,7 @@ static createOrphan(content: string | (string | TextBlockData)[], resources: Eng
 | `zIndex` | `number \| undefined` | 렌더링 순서 (엔진 필드에서 관리) |
 | `inheritStyle` | `InheritStyle` | 상속 스타일 |
 | `textContent` | `string` | 현재 텍스트 (편집 반영) |
-| `contents` | `TextBlockData[]` | 텍스트 블록 배열 |
+| `contents` | `TextInlineData[][]` | 라인 × 런 배열 (`\n`으로 분리된 라인별 런 시퀀스) |
 | `textStyle` | `TextStyle` | 텍스트 스타일 (effective getter 반환: 주입값 → 상속값 → 기본값 병합) |
 | `paragraphStyle` | `ParagraphStyle` | 단락 스타일 (effective getter 반환: 주입값 → 상속값 → 기본값 병합) |
 | `effectiveParagraphStyle` | `ParagraphStyle` | 내부 소비용: `{ ...DEFAULT, ..._inheritStyle, ..._paragraphStyle }` |
@@ -488,7 +488,7 @@ static createOrphan(content: string | (string | TextBlockData)[], resources: Eng
 |------|------|------|
 | `data` | `ParagraphEngineData` | 데이터 갱신 (캐시 초기화) |
 | `inheritStyle` | `InheritStyle` | 상속 스타일 |
-| `textContent` | `string \| (string \| TextBlockData)[]` | 텍스트 갱신 (편집). `_dirty = true` |
+| `textContent` | `string \| (string \| TextInlineData)[]` | 텍스트 갱신 (편집). `_dirty = true` |
 | `overlapMode` | `ParagraphOverlapMode` | 오버랩 모드 |
 | `scale` | `number` | 스케일 (no-op) |
 | `textStyle` | `TextStyle` | 텍스트 스타일. `_effectiveTsDirty = true`, `_dirty = true` |

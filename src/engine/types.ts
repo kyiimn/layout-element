@@ -45,8 +45,8 @@ export type {
 } from "@/types";
 
 export type {
-  TextBlockStyle,
-  TextBlockData,
+  TextInlineStyle,
+  TextInlineData,
   TextPartData,
 } from "@/types";
 

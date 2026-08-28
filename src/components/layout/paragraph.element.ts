@@ -1,8 +1,7 @@
 import { TextEditController } from "@/edit/text-edit-controller";
 import { EditManager } from "@/edit/edit-manager";
-import { DEFAULT_LINE_GAP } from "@/constants";
 import { ColorRegistry, FontLoader } from "@/resource";
-import { InheritStyle, ParagraphData, ParagraphOverlapMode, ParagraphStyle, RenderCompleteEventDetail, TextBlockData, TextStyle } from "@/types";
+import { InheritStyle, ParagraphData, ParagraphOverlapMode, ParagraphStyle, RenderCompleteEventDetail, TextInlineData, TextStyle } from "@/types";
 import { genUUID, valueEqual, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay } from "@/utils";
 import { checkOverlapMm } from "@/engine";
 import { LayoutBoxElement } from "./box.element";
@@ -33,7 +32,7 @@ export class LayoutParagraphElement extends HTMLElement {
 
   private _shadowRoot: ShadowRoot;
 
-  private _sourceContent: string | (string | TextBlockData)[];
+  private _sourceContent: string | (string | TextInlineData)[];
   private _column?: number | number[];
   private _gap?: number | number[];
 
@@ -466,8 +465,7 @@ export class LayoutParagraphElement extends HTMLElement {
    * (`inheritStyle.parentHeight`, mm)를 비교해 오버플로우 라인을 식별한다.
    * `LayoutColumnElement.renderText()`의 `display: none` 처리 로직과 동일한
    * 기준을 사용하되 DOM에 의존하지 않고 모델 데이터만으로 동작한다.
-   * `textBlockStyle`에 의해 라인 높이가 오버라이드된 경우를 반영하기 위해
-   * `genLineStyle()`의 height 오버라이드 규칙을 적용한다.
+   * 라인 높이는 문단 기본 fontSize 기준으로 고정이다.
    *
    * @returns `RenderCompleteEventDetail` 페이로드 객체
    */
@@ -486,7 +484,6 @@ export class LayoutParagraphElement extends HTMLElement {
     const columnContents = model.columnContents;
     const columnCount = columnContents.length;
     const parentHeight = this.absHeight;
-    const lineGap = this._paragraphStyle?.lineGap ?? this._inheritStyle?.lineGap ?? DEFAULT_LINE_GAP;
     const defaultLineHeight = model.lineHeight;
     const lastColumnIdx = columnCount - 1;
 
@@ -505,16 +502,8 @@ export class LayoutParagraphElement extends HTMLElement {
       let hasOverflowed = false;
 
       for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-
-        const fontSize = line.textBlockStyle?.fontSize;
-        let lineHeightMm = defaultLineHeight;
-        if (fontSize !== undefined && fontSize > 0 && defaultLineHeight < fontSize * lineGap) {
-          lineHeightMm = Math.ceil((fontSize * lineGap) / defaultLineHeight) * defaultLineHeight;
-        }
-
         const isOverflowLine = hasOverflowed
-          || (effectiveColumnHeight > 0 && accumulatedHeightMm + lineHeightMm > effectiveColumnHeight + 1e-6);
+          || (effectiveColumnHeight > 0 && accumulatedHeightMm + defaultLineHeight > effectiveColumnHeight + 1e-6);
 
         if (isOverflowLine) {
           hasOverflowed = true;
@@ -522,7 +511,7 @@ export class LayoutParagraphElement extends HTMLElement {
             overflowLines++;
           }
         } else {
-          accumulatedHeightMm += lineHeightMm;
+          accumulatedHeightMm += defaultLineHeight;
           placedLines++;
         }
       }
@@ -599,9 +588,9 @@ export class LayoutParagraphElement extends HTMLElement {
    * `model.textContent`를, model이 아직 생성되지 않은 초기 상태에서는
    * 세터로 전달된 원본 콘텐츠(`_sourceContent`)를 반환한다.
    *
-   * @returns 렌더링된 텍스트 콘텐츠. `string` 또는 `TextBlockData[]`.
+   * @returns 렌더링된 텍스트 콘텐츠. `string` 또는 인라인 런 배열.
    */
-  get content(): string | (string | TextBlockData)[] {
+  get content(): string | (string | TextInlineData)[] {
     return this._model?.textContent ?? this._sourceContent;
   }
 
@@ -623,7 +612,7 @@ export class LayoutParagraphElement extends HTMLElement {
    * `data` setter는 내부 필드를 직접 갱신한 뒤 자체 `layout()`을
    * 호출하므로 이 setter를 거치지 않는다 (중복 렌더링 방지).
    *
-   * @param value - 새 텍스트 콘텐츠. `string` 또는 `TextBlockData[]`.
+   * @param value - 새 텍스트 콘텐츠. `string` 또는 인라인 런 배열.
    *
    * @example
    * ```ts
@@ -631,7 +620,7 @@ export class LayoutParagraphElement extends HTMLElement {
    * paragraph.content = '새 본문 텍스트';
    * ```
    */
-  set content(value: string | (string | TextBlockData)[]) {
+  set content(value: string | (string | TextInlineData)[]) {
     this._sourceContent = value;
     if (this._model) this._model.textContent = value;
     this.markStructureChangedAndRender();

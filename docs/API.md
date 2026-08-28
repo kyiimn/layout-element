@@ -398,7 +398,7 @@ class LayoutParagraphElement extends HTMLElement
 | 이름 | 타입 | 단위 | 설명 |
 |---|---|---|---|
 | `data` | `ParagraphData` | — | 한 번에 갱신. `content` 필드는 렌더링된 실제 텍스트를 반환 (편집 반영). |
-| `content` | `string \| (string \| TextBlockData)[]` | — | 텍스트 콘텐츠 단독 갱신/조회. setter는 `_sourceContent`와 `model.textContent`를 동시에 동기화한 뒤 `markStructureChangedAndRender()`로 재렌더링까지 수행. `data` setter는 이 setter를 거치지 않고 내부 필드를 직접 갱신 후 `layout()` + `scheduleRender()` 호출 (중복 렌더링 방지). |
+| `content` | `string \| (string \| TextInlineData)[]` | — | 텍스트 콘텐츠 단독 갱신/조회. setter는 `_sourceContent`와 `model.textContent`를 동시에 동기화한 뒤 `markStructureChangedAndRender()`로 재렌더링까지 수행. `data` setter는 이 setter를 거치지 않고 내부 필드를 직접 갱신 후 `layout()` + `scheduleRender()` 호출 (중복 렌더링 방지). |
 | `column` | `number \| number[]` (via `data`) | — | 하위 컬럼 그리드 (생략 시 부모 상속). |
 | `gap` | `number \| number[]` (via `data`) | mm | 하위 컬럼 간격. |
 | `zIndex` | `number` (via `data`) | — | 렌더링 순서. |
@@ -453,7 +453,7 @@ paragraph.addEventListener('render-error', (e) => {
 
 #### `data` setter 동작
 
-- `content` 필드(`string` 또는 `TextBlockData[]`)를 `model.textContent`에 전파한 후 `layout()` + `scheduleRender()` 호출.
+- `content` 필드(`string` 또는 `(string | TextInlineData)[]`)를 `model.textContent`에 전파한 후 `layout()` + `scheduleRender()` 호출.
 - 구조 변경이 감지되면 `_perfStructureChanged` 플래그가 켜져 다음 `render()`에서
   모든 `<x-layout-column>`을 다시 만듭니다. 변경이 없는 부분(같은 `data-source-offset`)은
   diff로 재사용됩니다.
@@ -466,7 +466,7 @@ p.data = {
   type: 'paragraph',
   content: [
     '첫 번째 단락. ',
-    { content: '굵은 텍스트', textBlockStyle: { fontWeight: 700, fontSize: 5 } },
+    { content: '굵은 텍스트', textInlineStyle: { fontWeight: 700, fontSize: 5 } },
     ' 다시 기본 텍스트.',
   ],
   column: 3,
@@ -1083,14 +1083,14 @@ class ParagraphEngine {
 
   // 스타일 생성
   genColumnStyle(idx: number): Partial<CSSStyleDeclaration>;
-  genLineStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration>;
-  genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration>;
-  genCharStyle: (char: string, textBlockStyle?: TextBlockStyle) => Partial<CSSStyleDeclaration>;
+  genLineStyle(columnIndex?: number, lineIndex?: number): Partial<CSSStyleDeclaration>;
+  genPartStyle(): Partial<CSSStyleDeclaration>;
+  genCharStyle: (char: string, inlineStyle?: TextInlineStyle) => Partial<CSSStyleDeclaration>;
   genCharInnerStyle: () => Partial<CSSStyleDeclaration>;
-  genCharStyleFlat: (char: string, textBlockStyle?: TextBlockStyle) => Partial<CSSStyleDeclaration>;
+  genCharStyleFlat: (char: string, inlineStyle?: TextInlineStyle) => Partial<CSSStyleDeclaration>;
 
   // 문자 폭
-  getCharWidths: (char: string, textBlockStyle?: TextBlockStyle) => { rawWidth, swidth, widthRatio };
+  getCharWidths: (char: string, inlineStyle?: TextInlineStyle) => { rawWidth, swidth, widthRatio };
 
   // 엔진 쿼리 API (mm 단위)
   getCharRect(sourceOffset: number): MmRect | null;
@@ -1101,7 +1101,7 @@ class ParagraphEngine {
   get data: ParagraphEngineData;
   get inheritStyle: InheritStyle;
   get textContent: string;
-  get contents: TextBlockData[];
+  get contents: TextInlineData[][];
   get textStyle: TextStyle;
   get paragraphStyle: ParagraphStyle;
   get columnCount: number;
@@ -1711,7 +1711,7 @@ getFontFamily(fontName?: string): string;
 > `family`가 `fontName`과 일치하는 폰트를 찾아 `FontFace.family`를
 > 반환합니다. 일치하는 폰트가 없으면 등록된 첫 번째 폰트로
 > 폴백됩니다. 스타일 필드(`TextStyle.fontFamily`,
-> `TextBlockStyle.fontFamily`)에는 `FontLoader`에 등록된
+> `TextInlineStyle.fontFamily`)에는 `FontLoader`에 등록된
 > `Font.family` 값만 사용해야 합니다.
 
 #### 예제
@@ -2238,7 +2238,7 @@ get selection: SelectionRange | null;
 /**
  * 현재 커서 위치에서 유효한 TextStyle/ParagraphStyle.
  *
- * 단락의 기본 스타일 + InheritStyle + 커서 위치 블록의 textBlockStyle을 모두 병합.
+ * 단락의 기본 스타일 + InheritStyle + 커서 위치 런의 textInlineStyle을 모두 병합.
  *
  * @returns 현재 스타일
  */
@@ -2718,7 +2718,7 @@ type ParagraphData = {
   id?: string;
   column?: number | number[];
   gap?: number | number[];
-  content: string | (string | TextBlockData)[];
+  content: string | (string | TextInlineData)[];
   paragraphStyle?: ParagraphStyle;
   textStyle?: TextStyle;
   zIndex?: number;
@@ -2740,12 +2740,12 @@ type TextData = {
 };
 ```
 
-#### `TextBlockData` / `TextPartData` / `TextLineData`
+#### `TextInlineData` / `TextPartData` / `TextLineData`
 
 ```ts
-type TextBlockData = {
+type TextInlineData = {
   content: string;
-  textBlockStyle?: TextBlockStyle;
+  textInlineStyle?: TextInlineStyle;
 };
 
 type OverlapParts = { x1: number; x2: number };
@@ -2754,6 +2754,7 @@ type TextPartData = {
   content: string[];
   left: number;     // mm (오버랩 회피 여백)
   width: number;    // mm
+  inlineStyles?: (TextInlineStyle | undefined)[]; // 글자별 인라인 스타일 (content와 평행)
 };
 
 type TextLineData = {
@@ -2762,11 +2763,12 @@ type TextLineData = {
   endOfBlock?: boolean;
   endOfText?: boolean;
   parts: TextPartData[];
-  textBlockStyle?: TextBlockStyle;
 };
 ```
 
-`TextLineData`는 **내부 전용** — `ParagraphEngine`이 자동 생성합니다.
+`TextInlineData`는 연속 텍스트 흐름 안에서 스타일이 적용된 런(span 구간)이다. 독립 블록이 아니며, 런은 여러 라인에 걸쳐 흐를 수 있고 한 라인에 여러 런이 포함될 수 있다. `\n`이 라인 경계를 만들고, `\n` 다음 라인 시작에 문단 indent가 적용된다.
+
+`TextLineData`는 **내부 전용** — `ParagraphEngine`이 자동 생성합니다. `firstOfBlock`/`endOfBlock`은 독립 블록이 아니라 `\n`으로 구분되는 라인의 시작/끝을 표시하는 플래그이다.
 
 #### `ImageData`
 
@@ -2928,15 +2930,15 @@ type ParagraphStyle = {
 };
 ```
 
-#### `TextBlockStyle`
+#### `TextInlineStyle`
 
 ```ts
-type TextBlockStyle = {
+type TextInlineStyle = {
   fontFamily?: string;
   fontSize?: number;       // mm
   fontWeight?: number;
+  fontStyle?: 'normal' | 'italic';
   color?: string;
-  textAlign?: 'left' | 'right' | 'center' | 'justify';
 };
 ```
 
@@ -2989,16 +2991,16 @@ type PrintPostDataChar = {
 };
 ```
 
-`PrintPostDataChar.color` 결정 우선순위 (화면 렌더링 `genPartStyle()`의 CSS 상속과 동일):
+`PrintPostDataChar.color` 결정 우선순위 (화면 렌더링의 글자별 CSS 상속과 동일):
 
-1. `lineData.textBlockStyle.color` — 블록 단위 오버라이드
+1. `part.inlineStyles[charIndex]?.color` — 글자별 인라인 런 오버라이드
 2. `paragraph.textStyle.color` — 단락 수준 글자 스타일
 3. `paragraph.inheritStyle.color` — 부모에서 상속된 색상
 4. 폴백 — K100 검정 `{ c:0, m:0, y:0, k:255 }` (`ColorRegistry._defaultColor`와 동일)
 
 > `ColorRegistry.get('default')`는 브라우저 구현에서 `Error`를 throw하므로, 엔진의 `buildParagraphPrintPostData`는 폴백 시 `ColorRegistry.get()`를 호출하지 않고 직접 `{ c:0, m:0, y:0, k:255 }` 리터럴을 사용한다.
 
-`textBlockStyle.color`만 확인하면 단락 레벨(`textStyle.color`)이나 상속(`inheritStyle.color`)으로 색상을 지정한 일반 텍스트가 검은색 default로 폴백되어, 검은 배경 박스 안의 흰 글자가 보이지 않는 버그가 발생한다.
+`inlineStyle.color`만 확인하면 단락 레벨(`textStyle.color`)이나 상속(`inheritStyle.color`)으로 색상을 지정한 일반 텍스트가 검은색 default로 폴백되어, 검은 배경 박스 안의 흰 글자가 보이지 않는 버그가 발생한다.
 
 #### `ColorMap`
 

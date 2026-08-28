@@ -828,13 +828,13 @@ export type {
 // Layout types
 export type {
   DocumentData, BoxData, ParagraphData, TextData, ImageData, GuideColumnData,
-  TextBlockData, TextPartData, TextLineData, OverlapParts,
+  TextInlineData, TextPartData, TextLineData, OverlapParts,
   BoxPosition, BoxBorderStyle, BoxRole,
 };
 
 // Style types
 export type {
-  TextStyle, ParagraphStyle, TextBlockStyle, InheritStyle,
+  TextStyle, ParagraphStyle, TextInlineStyle, InheritStyle,
   TextAlign, VerticalAlign,
 };
 

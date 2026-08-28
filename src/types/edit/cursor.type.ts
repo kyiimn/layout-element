@@ -5,7 +5,7 @@
  * DOM 위치가 아닌, 콘텐츠 모델 기반의 위치 표현이다.
  *
  * V1: 평문(`string`) 콘텐츠만 지원.
- * 향후 `(string | TextBlockData)[]` 지원 시 `blockIndex` 필드가 추가될 수 있다.
+ * 향후 `(string | TextInlineData)[]` 편집 지원 시 `blockIndex` 필드가 추가될 수 있다.
  */
 export type CursorPosition = {
   /** `\n`을 포함한 소스 텍스트 문자열 내 문자 오프셋 (0-based) */

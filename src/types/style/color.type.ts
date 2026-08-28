@@ -33,7 +33,7 @@ export type CMYKColor = {
  * `#RRGGBB` hex로 반환한다.
  *
  * 이 딕셔너리의 **키(색상 이름)가 곧 스타일 필드의 색상 값**이다.
- * `TextStyle.color`, `TextBlockStyle.color`, `BoxData.backgroundColor`,
+ * `TextStyle.color`, `TextInlineStyle.color`, `BoxData.backgroundColor`,
  * `BoxData.borderColor`는 모두 여기에 등록된 키만 사용해야 하며,
  * `ColorRegistry.getCSSColor()`가 키를 `#RRGGBB` hex 문자열로
  * 변환한다. 등록되지 않은 이름이나 CSS 색상 문자열(`#000`, `rgb(...)`)은

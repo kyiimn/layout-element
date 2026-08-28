@@ -282,7 +282,7 @@ flowchart LR
 |-----|------|------|
 | `cursorOffset` | `number` get | 현재 커서 위치를 소스 텍스트 오프셋(0-based, `\n` 포함)으로 반환한다. |
 | `selection` | `SelectionRange \| null` get | 현재 선택 영역을 반환한다. 선택이 없으면 `null`이다. |
-| `currentStyle` | `CurrentStyle` get | 현재 커서 위치에서 유효한 `TextStyle`과 `ParagraphStyle`을 반환한다. 단락 수준 스타일 + 상속 스타일을 병합하고, 커서가 위치한 텍스트 블록의 `TextBlockStyle`로 오버라이드한 결과이다. |
+| `currentStyle` | `CurrentStyle` get | 현재 커서 위치에서 유효한 `TextStyle`과 `ParagraphStyle`을 반환한다. 단락 수준 스타일 + 상속 스타일을 병합하고, 커서가 위치한 런의 `TextInlineStyle`로 오버라이드한 결과이다. |
 | `focus()` | `void` | 숨겨진 `textarea`에 포커스를 주어 커서를 표시한다. |
 | `blur()` | `void` | 숨겨진 `textarea`에서 포커스를 해제하여 커서를 숨긴다. |
 | `setCursor(position: CursorPosition)` | `void` | 프로그래밍 방식으로 커서 위치를 설정한다. |
@@ -329,8 +329,8 @@ controller.focus();
 커서 위치에서 유효한 `TextStyle`과 `ParagraphStyle`을 반환한다. 내부 동작:
 
 1. `model.inheritStyle`과 `model.textStyle`/`model.paragraphStyle`을 필드별로 `??` 병합하여 기본 스타일을 구성한다.
-2. `_findTextBlockStyleAtOffset(cursorOffset)`으로 커서가 속한 텍스트 블록의 `TextBlockStyle`을 찾는다. `model.contents` 배열에서 각 블록의 시작/끝 오프셋을 누적 계산한다.
-3. `TextBlockStyle`의 정의된 필드만 기본 스타일 위에 오버라이드한다.
+2. 런 스타일 조회 헬퍼로 커서가 속한 런의 `TextInlineStyle`을 찾는다. `model.contents` 배열에서 각 런의 시작/끝 오프셋을 누적 계산한다.
+3. `TextInlineStyle`의 정의된 필드만 기본 스타일 위에 오버라이드한다.
 
 ```ts
 const { textStyle, paragraphStyle } = controller.currentStyle;
@@ -423,8 +423,8 @@ type CurrentStyle = {
 `currentStyle` 게터는 커서 위치에서 유효한 스타일을 계산한다. 계산 순서:
 
 1. **단락 수준 스타일 + 상속 스타일 병합**: `model.textStyle`의 각 필드와 `model.inheritStyle`의 같은 필드를 `??` 연산자로 병합한다. 단락 자체 스타일이 우선하고, 없으면 상속값을 사용한다.
-2. **텍스트 블록 스타일 찾기**: `_findTextBlockStyleAtOffset(cursorOffset)`로 커서가 속한 텍스트 블록의 `TextBlockStyle`을 찾는다. `model.contents` 배열에서 각 블록의 시작/끝 오프셋을 누적 계산하여 커서 오프셋이 어느 블록에 속하는지 결정한다.
-3. **블록 스타일로 오버라이드**: `TextBlockStyle`의 정의된 필드(`fontFamily`, `fontSize`, `fontWeight`, `color`, `textAlign`)만 기본 스타일 위에 오버라이드한다. `undefined`인 필드는 무시한다.
+2. **런 스타일 찾기**: 런 스타일 조회 헬퍼로 커서가 속한 런의 `TextInlineStyle`을 찾는다. `model.contents` 배열에서 각 런의 시작/끝 오프셋을 누적 계산하여 커서 오프셋이 어느 런에 속하는지 결정한다.
+3. **런 스타일로 오버라이드**: `TextInlineStyle`의 정의된 필드(`fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`)만 기본 스타일 위에 오버라이드한다. `undefined`인 필드는 무시한다. 인라인 런은 정렬(`textAlign`)을 오버라이드하지 않는다.
 
 ```ts
 // 사용 예시
@@ -440,7 +440,7 @@ console.log(paragraphStyle.textAlign); // 커서 위치의 정렬 방식
 스타일 우선순위 (높은 것부터):
 
 ```
-TextBlockStyle (블록 단위 오버라이드)
+TextInlineStyle (런 단위 오버라이드)
   ↓ undefined 필드는 무시
 TextStyle / ParagraphStyle (단락 수준)
   ↓ undefined 필드는 무시
@@ -2107,7 +2107,7 @@ function redo() {
 
 | 제약 | 설명 | 이유 및 향후 개선 방향 |
 |------|------|------------------------|
-| 평문 텍스트만 지원 | 굵게, 기울임, 글자 색상 등 서식 있는 텍스트 편집은 지원하지 않는다. | `model.textContent`는 단일 문자열이며 span 스타일은 `genCharStyle()`에서 일괄 생성. 향후 inline style range나 TextBlockData 기반 편집을 추가해야 한다. |
+| 평문 텍스트만 지원 | 굵게, 기울임, 글자 색상 등 서식 있는 텍스트 편집은 지원하지 않는다. | `model.textContent`는 단일 문자열이며 span 스타일은 `genCharStyle()`에서 일괄 생성. 렌더링 엔진은 `TextInlineData` 런 기반 인라인 스타일(`TextInlineStyle`)을 지원하지만, 편집기에서 런 단위 스타일 편집은 아직 구현되지 않았다. 편집 중인 단락의 글자별 인라인 스타일(`TextPartData.inlineStyles`)은 읽기 전용이며, `currentStyle`은 커서 위치 런의 `TextInlineStyle`을 반영한다(런 스타일 조회 헬퍼가 커서 오프셋을 런 스타일로 매핑). 향후 런 생성/분할/병합 편집을 추가해야 한다. |
 | 단일 단락 편집 | 단락을 넘어가는 선택이나 여러 단락 동시 편집은 지원하지 않는다. | `_cursorModel`과 `_selectionAnchor`가 하나의 `LayoutParagraphElement`에만 연결. 향후 문서 전역 `TextEditController`와 paragraph 간 매핑이 필요하다. |
 | undo/redo 없음 | 실행 취소/다시 실행 스택은 호스트 프로그램이 직접 구현해야 한다. | 텍스트 변경 이력을 보관하면 메모리/복잡도 증가. 라이브러리는 최소한의 상태만 유지하고, 호스트가 정책을 결정하도록 설계되었다. |
 | 드래그 앤 드롭 없음 | 텍스트를 마우스로 끌어 이동하는 기능은 지원하지 않는다. | 선택 핸들과 drop target 계산이 추가로 필요. 클립보드 기반 잘라내기/붙여넣기로 대체 가능하다. |

@@ -46,18 +46,19 @@ const model = ParagraphEngine.create({
 
 ```mermaid
 flowchart TD
-    A[입력 콘텐츠] -->|_parseContents| B[TextBlockData[]]
+    A[입력 콘텐츠] -->|_parseContents| B[TextInlineData[][]<br/>라인 × 런]
     B -->|_layoutTextIntoColumns| C[TextLineData[][]<br/>줄, 파트, 글자 배치 완료]
     C -->|columnContents| D[LayoutColumnElement.renderText]
 ```
 
 ### 2.1 Phase 1: 파싱 (`_parseContents`)
 
-입력 콘텐츠를 `\n` 단위로 분리하여 `TextBlockData[]`로 변환한다.
+입력 콘텐츠를 하나의 연속 텍스트 흐름으로 취급하며, `\n` 단위로 라인을 분리하여 `TextInlineData[][]`(라인 × 런)로 변환한다.
 
 - 단순 문자열: `{ content: "..." }`로 래핑 후 분리
-- 배열: 각 원소가 `string`이면 `{ content: "..." }`로 변환, `TextBlockData`이면 그대로 사용 후 분리
-- 분리된 각 블록은 독립적인 줄바꿈 단위가 된다.
+- 배열: 각 원소가 `string`이면 `{ content: "..." }`로 변환, `TextInlineData`이면 그대로 사용 후 분리
+- 배열 원소(런)는 독립적인 블록이 아니라 하나의 텍스트 흐름 안에서 스타일이 적용된 구간이다. 런은 여러 라인에 걸쳐 흐를 수 있고, 한 라인 안에 여러 런이 포함될 수 있다.
+- `\n`은 라인 경계를 만든다. `\n` 다음 라인의 시작에 문단 indent가 적용된다.
 
 결과는 `this._contents`에 저장된다.
 
@@ -76,7 +77,7 @@ flowchart TD
 2. 컬럼별 가상 컬럼 생성
 3. 라인 단위로 `_createLineWithParts()` 호출 (오버랩 감지 + 자유 영역 분할 + 파트 생성)
 4. 글자를 `partWidths`와 `_charWidthPx()`로 비교해 배치
-5. 블록 경계, 오버플로우, COVER 라인, 무한 루프 방지 처리
+5. 라인 경계(`\n`), 오버플로우, COVER 라인, 무한 루프 방지 처리
 6. 결과를 `_columnContents`에 저장
 
 ---
@@ -93,8 +94,8 @@ flowchart TD
     Count -->|No| End1[return]
     Count -->|Yes| Loop{각 컬럼}
     Loop --> InitState[partWidths, cumulativeWidths<br/>currentPartIdx 초기화]
-    InitState --> BlockLoop{각 TextBlockData}
-    BlockLoop --> NeedLine{새 라인 필요?}
+    InitState --> RunLoop{라인 × 런 순회<br/>연속 텍스트 흐름}
+    RunLoop --> NeedLine{새 라인 필요?}
     NeedLine -->|Yes| CreateLine[_createLineWithParts]
     CreateLine --> Cover{cover?}
     Cover -->|Yes| PushCover[columnContent.push<br/>빈 파트 라인]
@@ -243,10 +244,9 @@ type FreeRegion = { start: number; end: number }; // pixels
 ```ts
 private _createLineWithParts(
   vColumnEl: HTMLElement,
-  textBlockStyle: TextBlockStyle | undefined,
   ppm: number,
   isFirstInColumn: boolean,
-  isFirstOfBlock: boolean,
+  isFirstOfLine: boolean,
 ): {
   cover: boolean;
   overflow: boolean;
@@ -266,7 +266,7 @@ private _createLineWithParts(
 5. `lineWidth`를 px에서 mm로 변환 (`getBoundingClientRect().width / ppm`)
 6. `overlapParts`를 px에서 mm로 변환 (`x1 / ppm`, `x2 / ppm`)
 7. `_computeFreeRegions()`로 자유 영역 계산 (mm 단위)
-8. **문단 첫 줄 들여쓰기**: `isFirstOfBlock`이 `true`이면(각 문단/block의 첫 줄) 첫 자유 영역의 `start`를 `fontSize × indent`만큼 오른쪽으로 밀어준다. `indent`는 `TextStyle.indent`(0.0~1.0)이며 `fontSize`에 대한 비율이다.
+8. **문단 첫 줄 들여쓰기**: `isFirstOfLine`이 `true`이면(`\n`으로 시작하는 라인의 첫 줄) 첫 자유 영역의 `start`를 `fontSize × indent`만큼 오른쪽으로 밀어준다. `indent`는 `TextStyle.indent`(0.0~1.0)이며 `fontSize`에 대한 비율이다.
 9. **좁은 자유 영역 필터링**: 글자 하나가 들어갈 수 없는 좁은 자유 영역은 제외한다. 기준은 전각 문자 폭 상한(`widthRatio × fontSize + letterSpacing × fontSize`). 이 필터링이 없으면 무한 루프 가드가 좁은 틈에 글자를 강제 배치하여 파트 폭을 넘어 렌더링되는 현상이 발생한다. 필터링 후 남은 자유 영역이 없으면 COVER로 처리된다.
 10. 자유 영역별 `TextPartData`, `partEls`, `partWidths` 생성 (모두 mm 단위)
 11. 파트 사이 간격은 `marginLeft`로 설정 (mm 단위 CSS)
@@ -331,22 +331,22 @@ freeRegions = [
 `_charWidthMm()`는 폰트 메트릭 테이블(`hmtx`)을 직접 파싱하여 문자의 advance width를 mm 단위로 반환한다. opentype.js로 파싱된 폰트 객체에서 `glyph.advanceWidth / unitsPerEm * fontSize`로 계산한다. 같은 TTF 파일을 사용하는 한 환경(브라우저 엔진/OS/DPI)에 무관하게 동일한 값을 반환하므로, 모니터 작업 결과가 서버 재렌더링/후처리 시스템과 동일하게 보장된다.
 
 ```ts
-private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle): number {
-  const fontSize = textBlockStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
+private _charWidthMm(char: string, inlineStyle?: TextInlineStyle): number {
+  const fontSize = inlineStyle?.fontSize ?? this._textStyle?.fontSize ?? this._inheritStyle?.fontSize ?? DEFAULT_FONT_SIZE;
   const minWidthMm = this.spaceRatio * fontSize;
 
   if (char === ' ') {
     return minWidthMm;
   }
 
-  const fontName = textBlockStyle?.fontFamily ?? '';
+  const fontName = inlineStyle?.fontFamily ?? '';
   const cacheKey = `${char}|${fontName}|${fontSize}`;
   const cached = this._charWidthCache.get(cacheKey);
   if (cached !== undefined) {
     return Math.max(cached, minWidthMm);
   }
 
-  const fontWidth = this._charWidthMmFromFont(char, textBlockStyle, fontSize);
+  const fontWidth = this._charWidthMmFromFont(char, inlineStyle, fontSize);
   if (fontWidth !== null) {
     this._charWidthCache.set(cacheKey, fontWidth);
     return Math.max(fontWidth, minWidthMm);
@@ -355,9 +355,9 @@ private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle): number {
   return minWidthMm;
 }
 
-private _charWidthMmFromFont(char: string, textBlockStyle: TextBlockStyle | undefined, fontSize: number): number | null {
+private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefined, fontSize: number): number | null {
   const fontLoader = FontLoader.getInstance();
-  const fontName = textBlockStyle?.fontFamily;
+  const fontName = inlineStyle?.fontFamily;
   const parsedFont = fontLoader.getParsedFont(fontName);
   if (!parsedFont) return null;
 
@@ -409,22 +409,25 @@ private _charWidthMmFromFont(char: string, textBlockStyle: TextBlockStyle | unde
    결과는 `TextPartData.charOffsets`에 저장되며, flexbox `justify-content`에 의존하지 않고
    렌더링 시 글자 위치를 결정론적으로 결정한다 (§9.3, §11.5 참조).
 
-### 7.2 블록 경계 처리
+### 7.2 라인 × 런 흐름 처리
 
-`\n`으로 분리된 각 블록은 새 라인에서 시작한다.
+콘텐츠 배열은 독립 블록의 집합이 아니라 **하나의 연속 텍스트 흐름**이다. 런(`TextInlineData`)은 흐름 안에서 스타일이 적용된 구간일 뿐이며, 래핑은 런 경계를 넘어 연속적으로 진행된다.
+
+- 한 라인 안에 여러 런이 포함될 수 있다 (스타일이 다른 구간이 한 줄에 섞임).
+- 한 런이 여러 라인에 걸쳐 흐를 수 있다 (런 중간에서 줄바꿈 발생).
+- `\n`은 라인 경계를 만든다. `\n`을 만나면 새 라인을 생성하고, 그 라인의 시작에 문단 indent가 적용된다.
 
 ```ts
-if (idxBlock !== beforeIdxBlock) idxContentOfBlock = 0;
+if (idxLine !== beforeIdxLine) idxContentOfLine = 0;
 ```
 
-블록이 바뀌면 `idxContentOfBlock`를 0으로 재설정하고, 새 라인을 생성한다.
-블록의 마지막 문자가 배치되면 `endOfBlock = true`를 설정한다.
+라인이 바뀌면 `idxContentOfLine`를 0으로 재설정한다. 라인의 마지막 문자가 배치되면 `endOfBlock = true`를 설정한다. `firstOfBlock`/`endOfBlock` 플래그는 독립 블록이 아니라 `\n`으로 구분되는 라인의 시작/끝을 표시하며, 문단 indent 트리거로 사용된다.
 
 ### 7.3 letterSpacing 처리
 
 ```ts
 const letterSpacingEm = this._textStyle?.letterSpacing || this._inheritStyle?.letterSpacing || 0;
-const letterSpacingFontSize = block.textBlockStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
+const letterSpacingFontSize = run.textInlineStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
 const letterSpacingMm = letterSpacingEm * letterSpacingFontSize;
 ```
 
@@ -530,7 +533,7 @@ if (this._overlayRectsMm === null) {
 
 ```ts
 type ParagraphEngineData = {
-  content: string | (string | TextBlockData)[];
+  content: string | (string | TextInlineData)[];
   column: number | number[];
   gap: number | number[];
   paragraphStyle: ParagraphStyle;
@@ -551,18 +554,19 @@ export type TextLineData = {
   endOfBlock?: boolean;
   endOfText?: boolean;
   parts: TextPartData[];
-  textBlockStyle?: TextBlockStyle;
 };
 ```
+
+`firstOfBlock`/`endOfBlock`은 독립 블록이 아니라 `\n`으로 구분되는 라인의 시작/끝을 표시하는 플래그이다. `firstOfBlock` 라인의 시작에 문단 indent가 적용된다.
 
 플래그 조합:
 
 | firstOfBlock | endOfBlock | firstOfText | endOfText | 의미 |
 | :---: | :---: | :---: | :---: | ------ |
 | ✓ | ✓ | ✓ | ✓ | 전체 텍스트가 한 줄 |
-| ✓ | | ✓ | | 첫 블록의 첫 줄 |
-| | ✓ | | | 어떤 블록의 마지막 줄 |
-| ✓ | | | | 새 블록의 시작 줄 |
+| ✓ | | ✓ | | 첫 라인 (`\n` 이전 구간의 시작) |
+| | ✓ | | | `\n` 앞 라인의 끝 |
+| ✓ | | | | `\n` 다음 라인의 시작 (문단 indent 적용) |
 | | | | ✓ | 전체 텍스트의 마지막 줄 |
 
 ### 9.3 `TextPartData`
@@ -573,8 +577,11 @@ export type TextPartData = {
   left: number;          // mm 단위 좌측 여백
   width: number;         // mm 단위 폭
   charOffsets?: number[]; // 각 글자의 파트 내 x 오프셋 (mm, 정렬 반영)
+  inlineStyles?: (TextInlineStyle | undefined)[]; // 글자별 인라인 스타일 (content와 평행한 배열)
 };
 ```
+
+`inlineStyles`는 `content` 배열과 평행한 글자별 인라인 스타일 배열이다. 런(`TextInlineData`)이 라인을 가로지르며 흐르기 때문에 한 파트 안의 글자마다 서로 다른 런의 스타일이 적용될 수 있다. `undefined` 요소는 해당 글자에 인라인 스타일이 없음(문단 기본 스타일 사용)을 의미한다.
 
 `charOffsets`는 `_layoutTextIntoColumns()` 이후 `_computeCharOffsets()` 후처리 패스가 산출한다.
 `content[i]`의 좌측 끝 x 좌표(파트 기준)가 `charOffsets[i]`에 저장된다.
@@ -692,25 +699,24 @@ public genColumnStyle(idx: number): Partial<CSSStyleDeclaration>
 
 > **엔진 우선 원칙 — verticalAlign 좌표 기반 전환**: 과거에는 `flexDirection: 'column'` + `justifyContent`로 브라우저 flexbox가 라인의 수직 정렬을 수행했다. 엔진 우선 원칙에 따라 이를 엔진 좌표 기반으로 전환했다. 엔진이 각 라인의 절대 y 좌표(`alignOffsetMm + lineIndex × lineHeight`)를 산출하고, `genLineStyle()`이 `position: absolute` + `top`으로 DOM에 전달한다. `buildParagraphPrintPostData`, `getCharRect`, `getOffsetFromPoint` 모두 동일한 `_computeAlignOffsetMm()` 헬퍼를 사용한다.
 
-### 11.2 `genLineStyle(textBlockStyle?, columnIndex?, lineIndex?)`
+### 11.2 `genLineStyle(columnIndex?, lineIndex?)`
 
 줄(line) 요소의 스타일을 생성한다.
 
 ```ts
-public genLineStyle(textBlockStyle?: TextBlockStyle, columnIndex?: number, lineIndex?: number): Partial<CSSStyleDeclaration>
+public genLineStyle(columnIndex?: number, lineIndex?: number): Partial<CSSStyleDeclaration>
 ```
 
 - `display: 'flex'`, `flexDirection: 'row'`, `flexWrap: 'nowrap'`, `flexShrink: '0'`
-- `height`: `_lineHeight` mm
-- `fontSize` override가 줄 높이보다 크면 `alignItems: 'center'` 및 높이 조정
+- `height`: `_lineHeight` mm (문단 기본 `textStyle.fontSize` × lineGap으로 고정)
 - `columnIndex` + `lineIndex`가 전달되면 `position: 'absolute'` + `top: ${alignOffsetMm + lineIndex × lineHeight}mm` 적용. 엔진이 라인의 절대 y 좌표를 산출하고 DOM은 좌표에 라인을 배치한다. `buildParagraphPrintPostData`의 `lineTopMm` 계산과 동일하다.
 
-### 11.3 `genPartStyle(textBlockStyle?)`
+### 11.3 `genPartStyle()`
 
 파트(part) 요소의 스타일을 생성한다.
 
 ```ts
-public genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration>
+public genPartStyle(): Partial<CSSStyleDeclaration>
 ```
 
 - `display: 'inline-flex'`, `flexDirection: 'row'`, `alignItems: 'baseline'`
@@ -720,7 +726,8 @@ public genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaratio
   - `'right'` → `flex-end`
   - `'center'` → `center`
   - `'justify'` → `space-between`
-- `textBlockStyle`이 있으면 폰트, 크기, 색상, 정렬 오버라이드
+
+인라인 런 스타일(fontFamily, fontSize, fontWeight, fontStyle, color)은 파트 수준이 아니라 글자 span 수준에서 적용된다 (`LayoutColumnElement._applyInlineOverrides()` 참조).
 
 > **`charOffsets` 오버라이드**: `LayoutColumnElement._applyPartStyle()`는
 > `part.charOffsets`가 정의되어 있으면 이 매핑을 무시하고 `justify-content: flex-start` +
@@ -792,7 +799,7 @@ public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
 `justify`의 경우 마지막 줄(`endOfBlock`)이거나 글자가 1개이면 `left`와 동일하게 처리한다
 (CSS `space-between`의 마지막 줄 동작과 일치).
 
-`textBlockStyle.textAlign`이 있으면 우선한다(블록별 오버라이드).
+정렬은 문단 수준 `textAlign`만 사용한다. 인라인 런은 정렬을 오버라이드하지 않는다.
 
 #### 렌더링 적용 (`LayoutColumnElement.renderText`)
 
@@ -862,13 +869,13 @@ flexbox 정렬에 사용되고 inner의 `scale`이 glyph 축소를 담당한다.
 따라서 후처리 시스템이 동일한 `PrintPostDataChar.rect`를 산출할 수 있다.
 
 `PrintPostDataChar`는 다음 필드를 포함한다:
-- `rect`: 글자별 위치·크기 (mm)
-- `fontFamily`: `textBlockStyle → textStyle → inheritStyle` 폴백 체인으로 해결
-- `fontSize`, `fontWeight`: `textBlockStyle → textStyle → inheritStyle → default` 폴백
+- `rect`: 글자별 위치·크기 (mm). 높이는 항상 `lineHeight`(고정)
+- `fontFamily`: `inlineStyle → textStyle → inheritStyle` 폴백 체인으로 해결 (글자별)
+- `fontSize`, `fontWeight`, `fontStyle`: `inlineStyle → textStyle → inheritStyle → default` 폴백 (글자별)
 - `widthRatio`: `textStyle → inheritStyle → DEFAULT_WIDTH_RATIO`
 - `letterSpacing`: `textStyle → inheritStyle → DEFAULT_LETTER_SPACING` (em 단위)
 - `spaceRatio`: `textStyle → inheritStyle → DEFAULT_SPACE_RATIO` (em 단위)
-- `color`: `textBlockStyle → textStyle → inheritStyle` 폴백 후 CMYK 변환. 모두 undefined면 K100 검정 `{ c:0, m:0, y:0, k:255 }`
+- `color`: `inlineStyle → textStyle → inheritStyle` 폴백 후 CMYK 변환 (글자별). 모두 undefined면 K100 검정 `{ c:0, m:0, y:0, k:255 }`
 
 `width`와 `scale`은 분리되어 작동한다:
 - 외부 span의 `width`는 `_charWidthMm(char)`으로 측정한 원본 폭에 장평을 곱해 정확히 고정한다. 측정값과 DOM 렌더링이 결정론적으로 일치하며, 마지막 글자가 틀을 넘어가는 현상을 방지한다.
@@ -954,7 +961,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | ------ | ------ | ------ |
 | `data` | `ParagraphEngineData` | 모델 전체 데이터 설정. 컬럼, 스타일, 콘텐츠 갱신. `_initLayoutMetrics()` 호출 |
 | `inheritStyle` | `InheritStyle` | 상속 스타일 설정. `_initLayoutMetrics()` 호출 |
-| `textContent` | `string \| (string \| TextBlockData)[]` | 텍스트 콘텐츠 갱신. 래핑은 호출자가 직접 실행 |
+| `textContent` | `string \| (string \| TextInlineData)[]` | 텍스트 콘텐츠 갱신. 래핑은 호출자가 직접 실행 |
 
 ### 13.4 게터/세터 (scale)
 
@@ -967,7 +974,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 
 | 게터 | 반환 타입 | 설명 |
 | ------ | ----------- | ------ |
-| `contents` | `TextBlockData[]` | `\n`으로 분리된 텍스트 블록 배열 |
+| `contents` | `TextInlineData[][]` | 라인 × 런 배열 (`\n`으로 분리된 라인별 런 시퀀스) |
 | `inheritStyle` | `InheritStyle` | 상속 스타일 |
 | `textStyle` | `TextStyle` | 단락 수준 텍스트 스타일 |
 | `paragraphStyle` | `ParagraphStyle` | 단락 레이아웃 스타일 |
@@ -984,7 +991,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `spaceRatio` | `number` | 공백 너비 비율 (em 단위). 기본값: 0.5 |
 | `indent` | `number` | 첫 줄 들여쓰기 비율 (fontSize 대비, 0.0~1.0). 기본값: 0 |
 | `columnWidths` | `number[]` | 컬럼별 너비(mm) 배열 |
-| `textContent` | `string \| (string \| TextBlockData)[]` | 현재 입력 콘텐츠 |
+| `textContent` | `string \| (string \| TextInlineData)[]` | 현재 입력 콘텐츠 |
 | `previousLineCount` | `number` | 이전 렌더링 사이클의 총 줄 수 |
 | `previousOverflow` | `number` | 이전 렌더링 사이클의 오버플로우 문자 수 |
 
@@ -999,11 +1006,11 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `_parseContents()` | 입력 콘텐츠를 `\n` 단위로 분리하여 `_contents` 생성 |
 | `_layoutTextIntoColumns()` | 메인 래핑 메서드. 라인 생성, 오버랩 적용, 글자 배치를 한 번에 수행. 종료 시 `_applyLineBreakRules()` → `_computeCharOffsets()` 순서로 후처리 호출 |
 | `_createLineWithParts(...)` | 라인 DOM 생성 + 오버랩 감지 + 파트/데이터 생성 |
-| `_createLineElement(textBlockStyle?)` | 줄 DOM 요소 생성 |
+| `_createLineElement()` | 줄 DOM 요소 생성 |
 | `_computeFreeRegions(lineWidth, overlapParts)` | 오버랩 영역의 여집합으로 자유 영역 계산 |
 | `_detectOverlapWithCache(lineEl)` | 오버랩 요소와의 겹침 계산. COVER/PART 판정. `_overlayRects` 캐시 사용 |
-| `_charWidthMm(char, textBlockStyle?)` | 폰트 메트릭(`glyph.advanceWidth / unitsPerEm * fontSize`)으로 문자 폭을 mm로 직접 계산. `minWidthMm` 바닥값 적용. `Math.round()` 없음 |
-| `_charWidthMmFromFont(char, textBlockStyle?, fontSize)` | `FontLoader.getParsedFont()`로 폰트 객체 조회 후 글리프 advance width 계산. 폰트/글리프 누락 시 `null` |
+| `_charWidthMm(char, inlineStyle?)` | 폰트 메트릭(`glyph.advanceWidth / unitsPerEm * fontSize`)으로 문자 폭을 mm로 직접 계산. `minWidthMm` 바닥값 적용. `Math.round()` 없음 |
+| `_charWidthMmFromFont(char, inlineStyle?, fontSize)` | `FontLoader.getParsedFont()`로 폰트 객체 조회 후 글리프 advance width 계산. 폰트/글리프 누락 시 `null` |
 | `_createPartElement(widthMm, marginLeftMm)` | 파트 DOM 요소 생성. mm 단위 CSS 적용 |
 | `_removeTrailingEmptyLine(columnContent)` | 빈 파트만 있는 마지막 줄 제거 |
 | `_applyLineBreakRules()` | 한글 조판 금칙문자(행두/행말 금지) 후처리. 인접 줄 경계의 금칙 위반 교정 (§22 참조) |
@@ -1244,7 +1251,7 @@ overlay = overlay.filter(i => {
   - 이후 라인의 `data-source-offset` diff 키 정합성을 위해, `_computeSkippedLineOffsets()`로 오버플로우 라인의 part content 길이만큼 `renderedOffset`/`sourceOffset`을 advance시킨다. 정상 렌더링 경로와 동일한 `_stripSpaces`/선행·후행 공백/`endOfBlock`의 `\n` 처리를 미러링한다.
   - 유효 컬럼 높이가 0 이하이면(부모 높이 미설정) 오버플로우 판정을 생략한다
   - mm 기반 계산이므로 scale에 무관하게 동작한다
-  - **마지막 라인 높이 규칙**: 컬럼의 마지막 라인(`i === lines.length - 1`)은 `lineHeight`가 아닌 `fontSize`만큼만 높이를 차지한다. 이는 `BoxEngine.absHeight`의 `lineHeight * height - (lineHeight - fontSize)` 공식과 일치하며, N 라인 Box의 실제 높이는 `(N-1) * lineHeight + fontSize`이다. `renderText()`는 마지막 라인의 `lineEl.style.height`를 `fontSize` mm로 덮어쓰고, `_getLineHeightMm()`이 그 값을 반환하므로 누적 높이 계산에 반영된다. 단, `textBlockStyle.fontSize`가 기본 `fontSize`와 다른 라인은 자체 높이를 가지므로 이 규칙을 적용하지 않는다.
+   - **마지막 라인 높이 규칙**: 컬럼의 마지막 라인(`i === lines.length - 1`)은 `lineHeight`가 아닌 `fontSize`만큼만 높이를 차지한다. 이는 `BoxEngine.absHeight`의 `lineHeight * height - (lineHeight - fontSize)` 공식과 일치하며, N 라인 Box의 실제 높이는 `(N-1) * lineHeight + fontSize`이다. `renderText()`는 마지막 라인의 `lineEl.style.height`를 `fontSize` mm로 덮어쓰고, `_getLineHeightMm()`이 그 값을 반환하므로 누적 높이 계산에 반영된다.
 - **key 기반 증분 렌더링** (commit cec32e4):
   - `data-source-offset` 속성을 key로 사용하여 기존 span 재사용
   - `data-offset` (rendered offset)은 `EditCoordinateMapper` 호환성을 위해 유지
@@ -1262,7 +1269,7 @@ overlay = overlay.filter(i => {
 
 ### 18.3 `LayoutColumnElement`
 
-텍스트 래핑은 `_layoutTextIntoColumns()`에서 mm 좌표로 직접 수행하며, `isOverflow` 판정은 마지막 라인 높이 규칙을 반영하여 `(lineIndexInColumn + 1) * lineHeight > parentHeight + (lineHeight - fontSize) + 1e-6`로 계산한다 (`textBlockStyle.fontSize`가 기본과 다르면 `parentHeight`만 사용).
+텍스트 래핑은 `_layoutTextIntoColumns()`에서 mm 좌표로 직접 수행하며, `isOverflow` 판정은 마지막 라인 높이 규칙을 반영하여 `(lineIndexInColumn + 1) * lineHeight > parentHeight + (lineHeight - fontSize) + 1e-6`로 계산한다.
 
 ---
 
@@ -1329,7 +1336,7 @@ if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] +
 | `center`  | `center`       |
 | `justify` | `space-between` |
 
-`textBlockStyle?.textAlign`이 명시되면 그 값으로 `justifyContent`가 재정의된다.
+정렬은 문단 수준 `textAlign`만 사용한다. 인라인 런은 정렬을 오버라이드하지 않는다.
 
 #### `LayoutColumnElement.renderText()`의 마지막 줄 처리
 
@@ -1340,7 +1347,7 @@ let partJustify = curPartStyle.justifyContent;
 if (p === line.parts.length - 1 && endOfBlock && partJustify === 'space-between') {
   partJustify = 'flex-start';  // justify: 마지막 줄은 왼쪽 정렬
 }
-switch (textBlockStyle?.textAlign) {
+switch (paragraphStyle.textAlign) {
   case 'center': partJustify = 'center'; break;  // center: 그대로 유지
   case 'right': partJustify = 'flex-end'; break; // right: 그대로 유지
   default: break;

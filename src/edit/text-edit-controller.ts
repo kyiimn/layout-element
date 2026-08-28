@@ -1,6 +1,6 @@
 import { LayoutCursorElement, LayoutSelectionElement } from "@/components";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
-import { TextBlockStyle, ParagraphStyle, TextStyle } from "@/types/style";
+import { TextInlineStyle, ParagraphStyle, TextStyle } from "@/types/style";
 import { CursorPosition } from "@/types/edit/cursor.type";
 import { SelectionRange } from "@/types/edit/selection.type";
 import type { TextLineData } from "@/types/layout/text/text-line.type";
@@ -11,7 +11,7 @@ import { DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_TEXT_ALIGN, DEFAUL
 /**
  * 커서 위치에서 유효한 스타일 정보.
  * 단락의 TextStyle/ParagraphStyle과 상속 스타일(InheritStyle)을 병합하고,
- * 커서가 위치한 텍스트 블록의 TextBlockStyle로 오버라이드한 결과.
+ * 커서가 위치한 인라인 런의 TextInlineStyle로 오버라이드한 결과.
  */
 export type CurrentStyle = {
   /** 커서 위치에서 유효한 글자 스타일 */
@@ -191,8 +191,8 @@ export class TextEditController {
    * 현재 커서 위치에서 유효한 TextStyle과 ParagraphStyle을 반환한다.
    *
    * 단락의 기본 `textStyle`/`paragraphStyle`과 부모에서 상속된
-   * `inheritStyle`을 병합한 후, 커서가 위치한 텍스트 블록의
-   * `textBlockStyle`로 필드를 오버라이드한다.
+   * `inheritStyle`을 병합한 후, 커서가 위치한 인라인 런의
+   * `textInlineStyle`로 필드를 오버라이드한다.
    *
    * 커서가 텍스트 끝이나 빈 단락에 있어도 단락 수준의 스타일을 반환한다.
    * 편집 모드가 활성화되지 않았거나 모델이 없으면 빈 객체를 반환한다.
@@ -218,24 +218,20 @@ export class TextEditController {
       textAlign: model.paragraphStyle?.textAlign ?? inheritStyle.textAlign ?? DEFAULT_TEXT_ALIGN,
     };
 
-    // 2. 커서가 위치한 텍스트 블록의 textBlockStyle 찾기
     const blockStyle = this._findTextBlockStyleAtOffset(this._cursorModel.offset);
     if (!blockStyle) return { textStyle: baseTextStyle, paragraphStyle: baseParagraphStyle };
 
-    // 3. textBlockStyle로 필드 오버라이드
+    // 3. textInlineStyle로 필드 오버라이드 (인라인 런은 정렬을 오버라이드하지 않는다)
     const effectiveTextStyle: TextStyle = {
       ...baseTextStyle,
       ...(blockStyle.fontFamily !== undefined && { fontFamily: blockStyle.fontFamily }),
       ...(blockStyle.fontSize !== undefined && { fontSize: blockStyle.fontSize }),
       ...(blockStyle.fontWeight !== undefined && { fontWeight: blockStyle.fontWeight }),
+      ...(blockStyle.fontStyle !== undefined && { fontStyle: blockStyle.fontStyle }),
       ...(blockStyle.color !== undefined && { color: blockStyle.color }),
     };
-    const effectiveParagraphStyle: ParagraphStyle = {
-      ...baseParagraphStyle,
-      ...(blockStyle.textAlign !== undefined && { textAlign: blockStyle.textAlign }),
-    };
 
-    return { textStyle: effectiveTextStyle, paragraphStyle: effectiveParagraphStyle };
+    return { textStyle: effectiveTextStyle, paragraphStyle: baseParagraphStyle };
   }
 
   /**
@@ -1390,34 +1386,39 @@ export class TextEditController {
   }
 
   /**
-   * 주어진 소스 오프셋이 속한 텍스트 블록의 textBlockStyle을 반환한다.
-   * 각 블록은 `\n`으로 분리되며, 블록의 시작 오프셋부터 끝 오프셋(다음 \n 또는 문자열 끝)까지가 해당 블록의 범위이다.
+   * 주어진 소스 오프셋이 속한 인라인 런의 textInlineStyle을 반환한다.
+   * 각 라인은 `\n`으로 분리되며, 라인 내부의 런 경계는 스타일 변경 지점이다.
    */
-  private _findTextBlockStyleAtOffset(offset: number): TextBlockStyle | undefined {
+  private _findTextBlockStyleAtOffset(offset: number): TextInlineStyle | undefined {
     const model = this._paragraph.model;
     if (!model) return undefined;
 
     const contents = model.contents;
     if (contents.length === 0) return undefined;
 
-    // 각 블록의 시작 오프셋을 누적하며 커서 오프셋이 어느 블록에 속하는지 찾는다
+    // 각 라인의 시작 오프셋을 누적하며 커서 오프셋이 어느 라인의 어느 런에 속하는지 찾는다
     let currentOffset = 0;
-    for (const block of contents) {
-      const blockLength = block.content.length;
-      const blockStart = currentOffset;
-      const blockEnd = currentOffset + blockLength;
+    for (const line of contents) {
+      for (const run of line) {
+        const runLength = run.content.length;
+        const runStart = currentOffset;
+        const runEnd = currentOffset + runLength;
 
-      // 커서가 이 블록의 범위 내에 있으면 (끝 오프셋 포함)
-      if (offset >= blockStart && offset <= blockEnd) {
-        return block.textBlockStyle;
+        // 커서가 이 런의 범위 내에 있으면 (끝 오프셋 포함)
+        if (offset >= runStart && offset <= runEnd) {
+          return run.textInlineStyle;
+        }
+
+        currentOffset = runEnd;
       }
 
-      // 다음 블록으로 이동: 블록 길이 + \n(1)
-      currentOffset = blockEnd + 1;
+      // 다음 라인으로 이동: \n(1)
+      currentOffset += 1;
     }
 
-    // 커서가 마지막 블록 끝을 넘어선 경우, 마지막 블록의 스타일 반환
-    return contents[contents.length - 1].textBlockStyle;
+    // 커서가 마지막 라인 끝을 넘어선 경우, 마지막 라인의 마지막 런 스타일 반환
+    const lastLine = contents[contents.length - 1];
+    return lastLine.length > 0 ? lastLine[lastLine.length - 1].textInlineStyle : undefined;
   }
 
   private _onInput(event: InputEvent): void {

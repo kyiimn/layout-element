@@ -26,8 +26,8 @@ import {
 } from "@/constants";
 import {
   InheritStyle,
-  TextBlockData,
-  TextBlockStyle,
+  TextInlineData,
+  TextInlineStyle,
   ParagraphStyle,
   TextStyle,
   TextPartData,
@@ -75,7 +75,7 @@ const DEFAULT_TEXT_STYLE: Required<TextStyle> = {
 export interface ParagraphEngineData {
   id?: string;
   zIndex?: number;
-  content: string | (string | TextBlockData)[];
+  content: string | (string | TextInlineData)[];
   column: number | number[];
   gap: number | number[];
   paragraphStyle: ParagraphStyle;
@@ -111,13 +111,14 @@ export class ParagraphEngine {
   private _columnWidths: number[] = [];
   private _inheritStyle: InheritStyle = undefined!;
 
-  private _textContent: string | (string | TextBlockData)[] = "";
+  private _textContent: string | (string | TextInlineData)[] = "";
 
   private _textStyle: TextStyle = {};
   private _paragraphStyle: ParagraphStyle = {};
 
   private _columnContents: TextLineData[][] = [];
-  private _contents: TextBlockData[] = [];
+  /** `\n`으로 분리된 라인 원본. 각 라인은 인라인 런 배열이다. */
+  private _contents: TextInlineData[][] = [];
   private _gaps: number[] = [];
   private _overflow: number = 0;
 
@@ -177,7 +178,7 @@ export class ParagraphEngine {
    * @param resources - 엔진 리소스 (fontLoader, colorRegistry)
    * @returns 부모가 없는 ParagraphEngine 인스턴스
    */
-  public static createOrphan(content: string | (string | TextBlockData)[], resources: EngineResources): ParagraphEngine {
+  public static createOrphan(content: string | (string | TextInlineData)[], resources: EngineResources): ParagraphEngine {
     const orphanData: ParagraphEngineData = {
       content,
       column: 1,
@@ -255,25 +256,25 @@ export class ParagraphEngine {
    * **최소 폭(`minWidthMm`)**: 결함 글리프 방어. `spaceRatio × fontSize`를 바닥값으로 사용한다.
    *
    * @param char - 측정할 문자
-   * @param textBlockStyle - 블록 레벨 스타일 오버라이드
+   * @param inlineStyle - 인라인 스타일 오버라이드
    * @returns 문자 폭 (mm, 장평 미적용)
    */
-  private _charWidthMm(char: string, textBlockStyle?: TextBlockStyle): number {
-    const fontSize = textBlockStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
+  private _charWidthMm(char: string, inlineStyle?: TextInlineStyle): number {
+    const fontSize = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
     const minWidthMm = this.spaceRatio * fontSize;
 
     if (char === " ") {
       return minWidthMm;
     }
 
-    const fontName = textBlockStyle?.fontFamily ?? "";
+    const fontName = inlineStyle?.fontFamily ?? "";
     const cacheKey = `${char}|${fontName}|${fontSize}`;
     const cached = this._charWidthCache.get(cacheKey);
     if (cached !== undefined) {
       return Math.max(cached, minWidthMm);
     }
 
-    const fontWidth = this._charWidthMmFromFont(char, textBlockStyle, fontSize);
+    const fontWidth = this._charWidthMmFromFont(char, inlineStyle, fontSize);
     if (fontWidth !== null) {
       this._charWidthCache.set(cacheKey, fontWidth);
       return Math.max(fontWidth, minWidthMm);
@@ -290,13 +291,13 @@ export class ParagraphEngine {
    * **장평(`widthRatio`) 곱셈은 호출자에서 적용**한다.
    *
    * @param char - 측정할 문자
-   * @param textBlockStyle - 블록 레벨 스타일 오버라이드
+   * @param inlineStyle - 인라인 스타일 오버라이드
    * @param fontSize - 폰트 크기 (mm 단위)
    * @returns 문자 폭 (mm, 장평 미적용). 폰트/글리프 조회 실패 시 `null`
    */
-  private _charWidthMmFromFont(char: string, textBlockStyle: TextBlockStyle | undefined, fontSize: number): number | null {
+  private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefined, fontSize: number): number | null {
     const fontLoader = this._resources.fontLoader;
-    const fontName = textBlockStyle?.fontFamily;
+    const fontName = inlineStyle?.fontFamily;
     const parsedFont = fontLoader.getParsedFont(fontName);
     if (!parsedFont) return null;
 
@@ -344,7 +345,13 @@ export class ParagraphEngine {
 
         if (isLineStartForbidden(nextFirstChar)) {
           if (!isLineEndForbidden(curLastChar)) {
+            const movedStyle = nextFirstPart.inlineStyles?.shift();
             curLastPart.content.push(nextFirstChar);
+            if (curLastPart.inlineStyles) curLastPart.inlineStyles.push(movedStyle);
+            else if (movedStyle !== undefined) {
+              curLastPart.inlineStyles = new Array(curLastPart.content.length - 1).fill(undefined);
+              curLastPart.inlineStyles.push(movedStyle);
+            }
             nextFirstPart.content.shift();
           }
           continue;
@@ -352,7 +359,13 @@ export class ParagraphEngine {
 
         if (isLineEndForbidden(curLastChar)) {
           if (!isLineStartForbidden(nextFirstChar)) {
+            const movedStyle = curLastPart.inlineStyles?.pop();
             nextFirstPart.content.unshift(curLastChar);
+            if (nextFirstPart.inlineStyles) nextFirstPart.inlineStyles.unshift(movedStyle);
+            else if (movedStyle !== undefined) {
+              nextFirstPart.inlineStyles = new Array(nextFirstPart.content.length).fill(undefined);
+              nextFirstPart.inlineStyles[0] = movedStyle;
+            }
             curLastPart.content.pop();
           }
         }
@@ -377,7 +390,7 @@ export class ParagraphEngine {
         const line = columnContent[li];
         if (!line || line.parts.length === 0) continue;
 
-        const textAlign = line.textBlockStyle?.textAlign ?? defaultTextAlign;
+        const textAlign = defaultTextAlign;
         const isLastLineOfBlock = line.endOfBlock === true;
         const partCount = line.parts.length;
 
@@ -403,7 +416,7 @@ export class ParagraphEngine {
           let totalWidth = 0;
           for (let i = 0; i < strippedCount; i++) {
             const ch = content[stripStart + i]!;
-            const { swidth } = this.getCharWidths(ch, line.textBlockStyle);
+            const { swidth } = this.getCharWidths(ch, part.inlineStyles?.[stripStart + i]);
             charWidths[i] = swidth;
             totalWidth += swidth;
           }
@@ -523,15 +536,13 @@ export class ParagraphEngine {
    *
    * DOM은 생성하지 않는다. 모든 측정값과 산술은 **mm 단위**로 수행된다.
    *
-   * @param textBlockStyle - 이 라인에 적용할 블록 스타일
    * @param columnIndex - 현재 컬럼 인덱스 (`_columnWidths` 조회용)
    * @param lineIndexInColumn - 컬럼 내에서 이 라인의 0-based 인덱스
    * @param isFirstInColumn - 첫 번째 라인 여부 (firstOfText 플래그 설정용)
-   * @param isFirstOfBlock - 블록의 첫 라인 여부 (firstOfBlock 플래그 설정용)
+   * @param isFirstOfBlock - `\n` 직후 첫 라인 여부 (firstOfBlock 플래그 + 들여쓰기용)
    * @returns cover=true면 라인 전체가 덮임, overflow=true면 컬럼 높이 초과
    */
   private _createLineWithParts(
-    textBlockStyle: TextBlockStyle | undefined,
     columnIndex: number,
     lineIndexInColumn: number,
     isFirstInColumn: boolean,
@@ -566,12 +577,7 @@ export class ParagraphEngine {
     // 마지막 라인은 lineHeight가 아닌 fontSize만큼만 높이를 차지하므로,
     // 컬럼 수용력은 parentHeight + (lineHeight - fontSize)와 같다.
     // (BoxEngine.absHeight = lineHeight * height - (lineHeight - fontSize))
-    // 단, textBlockStyle.fontSize가 기본과 다르면 자체 높이를 가지므로
-    // 마지막 라인 규칙을 적용하지 않는다.
-    const blockFontSize = textBlockStyle?.fontSize;
-    const effectiveColumnHeight = (blockFontSize === undefined || blockFontSize === this.fontSize)
-      ? parentHeight + (this._lineHeight - this.fontSize)
-      : parentHeight;
+    const effectiveColumnHeight = parentHeight + (this._lineHeight - this.fontSize);
     const isOverflow = (lineIndexInColumn + 1) * this._lineHeight > effectiveColumnHeight + 1e-6;
 
     if (cover) {
@@ -579,14 +585,13 @@ export class ParagraphEngine {
         firstOfText: isFirstInColumn,
         firstOfBlock: isFirstOfBlock,
         parts: [],
-        textBlockStyle,
       };
       return { cover: true, overflow: isOverflow, partWidths: [], lineData };
     }
 
     const freeRegions = this._computeFreeRegions(lineWidthMm, overlapParts);
 
-    const fontSize = textBlockStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
+    const fontSize = this.effectiveTextStyle.fontSize!;
     const indentMm = isFirstOfBlock ? fontSize * this.indent : 0;
     const adjustedFreeRegions =
       indentMm > 0 ? freeRegions.map((r, i) => (i === 0 ? { start: r.start + indentMm, end: r.end } : r)) : freeRegions;
@@ -600,7 +605,6 @@ export class ParagraphEngine {
         firstOfText: isFirstInColumn,
         firstOfBlock: isFirstOfBlock,
         parts: [],
-        textBlockStyle,
       };
       return { cover: true, overflow: isOverflow, partWidths: [], lineData };
     }
@@ -617,7 +621,6 @@ export class ParagraphEngine {
       firstOfText: isFirstInColumn,
       firstOfBlock: isFirstOfBlock,
       parts,
-      textBlockStyle,
     };
 
     return { cover: false, overflow: isOverflow, partWidths, lineData };
@@ -633,20 +636,47 @@ export class ParagraphEngine {
   }
 
   /**
-   * `textContent`를 `_contents`로 파싱한다.
+   * `textContent`를 `_contents`(라인 × 런)로 파싱한다.
    * `layoutText()` 호출 시 `textContent`가 변경되었을 수 있으므로
    * 매번 다시 파싱하여 최신 텍스트를 반영한다.
-   * 단일 문자열은 `{ content }`로 래핑하고, `\n`으로 블록을 분리한다.
+   *
+   * 콘텐츠는 하나의 연속 텍스트 흐름이다. 런(`TextInlineData`) 경계는
+   * 라인 경계와 무관하므로, 먼저 전체 흐름을 (런 누적, 문자) 시퀀스로
+   * 펼친 뒤 `\n` 기준으로 라인을 분리한다. 런이 `\n`을 가로지르면
+   * 양쪽 라인으로 분할된다.
    */
   private _parseContents(): void {
     const rawContents = !Array.isArray(this._textContent) ? [{ content: this._textContent }] : this._textContent;
 
+    const runSeq: { style: TextInlineStyle | undefined; char: string }[] = [];
+    for (const c of rawContents) {
+      const style = typeof c === "string" ? undefined : c.textInlineStyle;
+      const content = typeof c === "string" ? c : c.content;
+      for (const ch of content) {
+        runSeq.push({ style, char: ch });
+      }
+    }
+
     this._contents = [];
-    rawContents.forEach((c) => {
-      const rawBlock = typeof c === "string" ? { content: c } : c;
-      const lines = rawBlock.content.split("\n");
-      this._contents.push(...lines.map((l) => ({ ...rawBlock, content: l })));
-    });
+    let curLine: TextInlineData[] = [];
+    let curRun: TextInlineData | null = null;
+
+    for (const { style, char } of runSeq) {
+      if (char === "\n") {
+        this._contents.push(curLine);
+        curLine = [];
+        curRun = null;
+        continue;
+      }
+      const prev = curLine[curLine.length - 1];
+      if (curRun !== null && prev === curRun && inlineStyleEqual(prev.textInlineStyle, style)) {
+        prev.content += char;
+      } else {
+        curRun = { content: char, textInlineStyle: style };
+        curLine.push(curRun);
+      }
+    }
+    if (curLine.length > 0) this._contents.push(curLine);
   }
 
   /**
@@ -714,6 +744,12 @@ export class ParagraphEngine {
    * `_layoutTextIntoColumns`의 핵심 루프를 추출한 것으로,
    * `alignOffsetsMm` 파라미터로 각 컬럼의 verticalAlign 오프셋을 받는다.
    *
+   * `this.contents`는 `\n`으로 분리된 라인 배열이며, 각 라인은
+   * `TextInlineData[]`(런 배열)이다. 배치 시 런을 펼쳐 (문자, 스타일) 쌍으로
+   * 처리하되, 블록(라인) 루프 구조를 유지하여 `firstOfBlock`/`endOfBlock`
+   * 경계 처리와 컬럼 전환 시 `idxContentOfBlock` 진행이 원본과 동일하게
+   * 작동한다.
+   *
    * @param alignOffsetsMm - 컬럼별 alignOffsetMm 배열 (top 정렬이면 모두 0)
    */
   private _layoutColumnsPass(alignOffsetsMm: number[]): void {
@@ -737,7 +773,7 @@ export class ParagraphEngine {
       const alignOffsetMm = alignOffsetsMm[curColumn] ?? 0;
 
       for (; idxBlock < this.contents.length; idxBlock++) {
-        const block = this.contents[idxBlock];
+        const runs = this.contents[idxBlock];
         if (idxBlock !== beforeIdxBlock) idxContentOfBlock = 0;
 
         if (!hasLine || idxContentOfBlock === 0) {
@@ -745,7 +781,6 @@ export class ParagraphEngine {
           while (true) {
             const isFirstInColumn = curColumn === 0 && columnContent.length < 1 && isFirstLineInLoop;
             const result = this._createLineWithParts(
-              block.textBlockStyle,
               curColumn,
               columnContent.length,
               isFirstInColumn,
@@ -795,33 +830,44 @@ export class ParagraphEngine {
           }
         }
 
-        const letterSpacingEm = this.effectiveTextStyle.letterSpacing!;
-        const letterSpacingFontSize = block.textBlockStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
-        const letterSpacingMm = letterSpacingEm * letterSpacingFontSize;
+        const flatChars = runs.flatMap((r) => r.content.split("").map((ch) => ({ ch, style: r.textInlineStyle })));
 
-        for (; idxContentOfBlock < block.content.length; idxContentOfBlock++) {
-          const char = block.content[idxContentOfBlock];
-          const rawCharWidth = this._charWidthMm(char, block.textBlockStyle);
+        const letterSpacingEm = this.effectiveTextStyle.letterSpacing!;
+
+        for (; idxContentOfBlock < flatChars.length; idxContentOfBlock++) {
+          const { ch: char, style: inlineStyle } = flatChars[idxContentOfBlock];
+          const letterSpacingFontSize = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
+          const letterSpacingMm = letterSpacingEm * letterSpacingFontSize;
+          const rawCharWidth = this._charWidthMm(char, inlineStyle);
           const baseWidth = rawCharWidth * this.widthRatio;
           const charWidth = baseWidth + letterSpacingMm;
+
+          const targetLine = columnContent[columnContent.length - 1];
+
+          const pushCharToPart = (line: TextLineData, partIdx: number): void => {
+            const part = line.parts[partIdx];
+            part.content.push(char);
+            (part.inlineStyles ??= []).length = part.content.length;
+            part.inlineStyles[part.content.length - 1] = inlineStyle;
+          };
 
           const placeChar = (): boolean => {
             if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
               cumulativeWidths[currentPartIdx] += charWidth;
-              columnContent[columnContent.length - 1].parts[currentPartIdx].content.push(char);
+              pushCharToPart(targetLine, currentPartIdx);
               return true;
             }
             return false;
           };
 
           if (placeChar()) {
-            if (idxContentOfBlock >= block.content.length - 1) {
+            if (idxContentOfBlock >= flatChars.length - 1) {
               columnContent[columnContent.length - 1].endOfBlock = true;
             }
 
             if (isColumnOverflow) {
               if (curColumn < this._columnWidths.length - 1) {
-                if (idxContentOfBlock < block.content.length - 1) {
+                if (idxContentOfBlock < flatChars.length - 1) {
                   columnContent = this._removeTrailingEmptyLine(columnContent);
                 }
                 break;
@@ -837,7 +883,7 @@ export class ParagraphEngine {
           while (currentPartIdx < partWidths.length) {
             if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
               cumulativeWidths[currentPartIdx] += charWidth;
-              columnContent[columnContent.length - 1].parts[currentPartIdx].content.push(char);
+              pushCharToPart(targetLine, currentPartIdx);
               placed = true;
               break;
             }
@@ -845,13 +891,13 @@ export class ParagraphEngine {
           }
 
           if (placed) {
-            if (idxContentOfBlock >= block.content.length - 1) {
+            if (idxContentOfBlock >= flatChars.length - 1) {
               columnContent[columnContent.length - 1].endOfBlock = true;
             }
 
             if (isColumnOverflow) {
               if (curColumn < this._columnWidths.length - 1) {
-                if (idxContentOfBlock < block.content.length - 1) {
+                if (idxContentOfBlock < flatChars.length - 1) {
                   columnContent = this._removeTrailingEmptyLine(columnContent);
                 }
                 break;
@@ -863,7 +909,7 @@ export class ParagraphEngine {
           }
 
           while (true) {
-            const result = this._createLineWithParts(block.textBlockStyle, curColumn, columnContent.length, false, false, alignOffsetMm);
+            const result = this._createLineWithParts(curColumn, columnContent.length, false, false, alignOffsetMm);
             isColumnOverflow = result.overflow;
 
             if (result.cover) {
@@ -872,7 +918,7 @@ export class ParagraphEngine {
               hasLine = false;
               if (result.overflow) {
                 if (curColumn < this._columnWidths.length - 1) {
-                  if (idxContentOfBlock < block.content.length - 1) {
+                  if (idxContentOfBlock < flatChars.length - 1) {
                     columnContent = this._removeTrailingEmptyLine(columnContent);
                   }
                   break;
@@ -885,7 +931,7 @@ export class ParagraphEngine {
 
             if (result.overflow) {
               if (curColumn < this._columnWidths.length - 1) {
-                if (idxContentOfBlock < block.content.length - 1) {
+                if (idxContentOfBlock < flatChars.length - 1) {
                   columnContent = this._removeTrailingEmptyLine(columnContent);
                 }
                 hasLine = false;
@@ -904,7 +950,7 @@ export class ParagraphEngine {
 
             if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
               cumulativeWidths[currentPartIdx] += charWidth;
-              columnContent[columnContent.length - 1].parts[currentPartIdx].content.push(char);
+              pushCharToPart(columnContent[columnContent.length - 1], currentPartIdx);
               break;
             }
 
@@ -912,7 +958,7 @@ export class ParagraphEngine {
             while (currentPartIdx < partWidths.length) {
               if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
                 cumulativeWidths[currentPartIdx] += charWidth;
-                columnContent[columnContent.length - 1].parts[currentPartIdx].content.push(char);
+                pushCharToPart(columnContent[columnContent.length - 1], currentPartIdx);
                 break;
               }
               currentPartIdx++;
@@ -921,7 +967,7 @@ export class ParagraphEngine {
             if (currentPartIdx >= partWidths.length) {
               const maxPartWidth = partWidths.length > 0 ? Math.max(...partWidths) : 0;
               if (charWidth > maxPartWidth + 1e-6) {
-                columnContent[columnContent.length - 1].parts[0].content.push(char);
+                pushCharToPart(columnContent[columnContent.length - 1], 0);
                 cumulativeWidths[0] += charWidth;
                 break;
               }
@@ -938,13 +984,13 @@ export class ParagraphEngine {
             break;
           }
 
-          if (idxContentOfBlock >= block.content.length - 1) {
+          if (idxContentOfBlock >= flatChars.length - 1) {
             columnContent[columnContent.length - 1].endOfBlock = true;
           }
 
           if (isColumnOverflow) {
             if (curColumn < this._columnWidths.length - 1) {
-              if (idxContentOfBlock < block.content.length - 1) {
+              if (idxContentOfBlock < flatChars.length - 1) {
                 columnContent = this._removeTrailingEmptyLine(columnContent);
               }
               break;
@@ -960,11 +1006,12 @@ export class ParagraphEngine {
       }
 
       if (columnContent.length > 0) {
-        const isEndOfText = idxBlock === this.contents.length && idxContentOfBlock >= this.contents[this.contents.length - 1].content.length;
+        const isEndOfText = idxBlock === this.contents.length && idxContentOfBlock >= this.contents[this.contents.length - 1].length;
         if (isEndOfText || isColumnOverflow) {
           columnContent[columnContent.length - 1].endOfText = true;
         }
       }
+
       beforeIdxContentOfBlock = idxContentOfBlock;
       beforeIdxBlock = idxBlock;
 
@@ -1125,37 +1172,27 @@ export class ParagraphEngine {
   /**
    * 줄 스타일 생성.
    *
-   * - `lineGap` → `height` 계산
-   * - `textBlockStyle` → 폰트, 색상, 높이 오버라이드
-   * - `columnIndex` + `lineIndex` → `position: absolute` + `top` (verticalAlign offset + lineIndex × lineHeight)
+   * 라인 높이는 문단 기본 `fontSize` 기준으로 항상 고정이다. 인라인 폰트가
+   * 커도 라인 높이가 변하지 않으며, 큰 폰트의 글자는 하단 앵커로 배치된다
+   * (span의 `top` 계산은 `LayoutColumnElement`가 담당).
+   *
+   * `columnIndex` + `lineIndex` → `position: absolute` + `top` (verticalAlign offset + lineIndex × lineHeight)
    *
    * 엔진 우선 원칙: 엔진이 각 라인의 절대 y 좌표를 산출하고 DOM은 좌표에 라인을 배치한다.
    * `top` = `alignOffsetMm + lineIndex × lineHeight` (mm)로,
    * `buildParagraphPrintPostData`의 `lineTopMm` 계산과 동일하다.
    *
-   * @param textBlockStyle - 블록 레벨 스타일 오버라이드
    * @param columnIndex - 컬럼 인덱스 (0-based). `top` 계산에 필요.
    * @param lineIndex - 컬럼 내 라인 인덱스 (0-based). `top` 계산에 필요.
    * @returns 줄 CSS 스타일 객체. `columnIndex`/`lineIndex` 생략 시 `position: absolute` 미적용 (레거시 호환).
    * @example
    * ```ts
    * // 2번째 컬럼의 3번째 라인 스타일
-   * const style = engine.genLineStyle(textBlockStyle, 1, 2);
+   * const style = engine.genLineStyle(1, 2);
    * // top = alignOffsetMm + 2 * lineHeight (mm)
    * ```
    */
-  public genLineStyle(textBlockStyle?: TextBlockStyle, columnIndex?: number, lineIndex?: number): Partial<CSSStyleDeclaration> {
-    const lineGap = this.effectiveParagraphStyle.lineGap!;
-
-    const blockStyle: Partial<CSSStyleDeclaration> = {};
-    if (textBlockStyle) {
-      const fontSize = textBlockStyle.fontSize;
-      if (fontSize && this.lineHeight < fontSize * lineGap) {
-        blockStyle.alignItems = "center";
-        blockStyle.height = `${Math.ceil((fontSize * lineGap) / this.lineHeight) * this.lineHeight}mm`;
-      }
-    }
-
+  public genLineStyle(columnIndex?: number, lineIndex?: number): Partial<CSSStyleDeclaration> {
     const positionStyle: Partial<CSSStyleDeclaration> = {};
     if (columnIndex !== undefined && lineIndex !== undefined) {
       const baseFontSizeMm = this.fontSize;
@@ -1178,7 +1215,6 @@ export class ParagraphEngine {
       maxWidth: "100%",
       width: "100%",
       ...positionStyle,
-      ...blockStyle,
     };
   }
 
@@ -1187,16 +1223,13 @@ export class ParagraphEngine {
    *
    * - `letterSpacing` → em 단위 적용
    * - `textAlign` → `justify-content` 매핑 ('justify' → 'space-between')
-   * - `textBlockStyle` → 폰트, 색상, 정렬 오버라이드
    *
-   * @param textBlockStyle - 블록 레벨 스타일 오버라이드
+   * 인라인 스타일(폰트/색상)은 라인/파트가 아닌 글자(span) 단위로 적용된다.
+   *
    * @returns 파트 CSS 스타일 객체
    */
-  public genPartStyle(textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> {
+  public genPartStyle(): Partial<CSSStyleDeclaration> {
     const textAlign = this.effectiveParagraphStyle.textAlign!;
-
-    const fontLoader = this._resources.fontLoader;
-    const colorRegistry = this._resources.colorRegistry;
 
     let justifyContent: "center" | "flex-start" | "flex-end" | "space-between";
     switch (textAlign) {
@@ -1214,32 +1247,12 @@ export class ParagraphEngine {
         break;
     }
 
-    const blockStyle: Partial<CSSStyleDeclaration> = {};
-    if (textBlockStyle) {
-      blockStyle.fontFamily = textBlockStyle.fontFamily ? fontLoader.getFontFamily(textBlockStyle.fontFamily) : undefined;
-      blockStyle.fontWeight = textBlockStyle.fontWeight !== undefined ? String(textBlockStyle.fontWeight) : undefined;
-      blockStyle.fontSize = (textBlockStyle.fontSize && `${textBlockStyle.fontSize}mm`) || undefined;
-      blockStyle.color = textBlockStyle.color ? colorRegistry.getCSSColor(textBlockStyle.color) : undefined;
-
-      switch (textBlockStyle.textAlign) {
-        case "center":
-          justifyContent = "center";
-          break;
-        case "right":
-          justifyContent = "flex-end";
-          break;
-        default:
-          break;
-      }
-    }
-
     return {
       display: "inline-flex",
       flexDirection: "row",
       flexWrap: "nowrap",
       alignItems: "baseline",
       justifyContent,
-      ...blockStyle,
     };
   }
 
@@ -1251,14 +1264,14 @@ export class ParagraphEngine {
    * 공백은 `fontSize × spaceRatio`로 고정한다.
    *
    * @param char - 대상 문자
-   * @param textBlockStyle - 블록 레벨 스타일 오버라이드 (선택)
+   * @param inlineStyle - 인라인 스타일 오버라이드 (선택)
    * @returns 외부 span CSS 스타일 객체
    */
-  public genCharStyle = (char: string, textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> => {
+  public genCharStyle = (char: string, inlineStyle?: TextInlineStyle): Partial<CSSStyleDeclaration> => {
     const wr = this.widthRatio;
     const lsEm = this.effectiveTextStyle.letterSpacing!;
     const sr = this.spaceRatio;
-    const fs = textBlockStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
+    const fs = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
     const cacheKey = `${char}|${wr}|${lsEm}|${sr}|${fs}`;
     const cached = this._charOuterStyleCache.get(cacheKey);
     if (cached) return cached;
@@ -1268,7 +1281,7 @@ export class ParagraphEngine {
     if (char === " ") {
       widthMm = this.spaceRatio * fs * wr + lsMm;
     } else {
-      const rawWidthMm = this._charWidthMm(char, textBlockStyle);
+      const rawWidthMm = this._charWidthMm(char, inlineStyle);
       widthMm = rawWidthMm * wr + lsMm;
     }
 
@@ -1311,20 +1324,20 @@ export class ParagraphEngine {
    * charOffsets(절대 좌표) 경로에서 단일 span에 적용할 통합 스타일을 반환한다.
    *
    * @param char - 대상 문자
-   * @param textBlockStyle - 블록 레벨 스타일 오버라이드 (선택)
+   * @param inlineStyle - 인라인 스타일 오버라이드 (선택)
    * @returns 단일 span용 CSS 스타일 객체
    */
-  public genCharStyleFlat = (char: string, textBlockStyle?: TextBlockStyle): Partial<CSSStyleDeclaration> => {
+  public genCharStyleFlat = (char: string, inlineStyle?: TextInlineStyle): Partial<CSSStyleDeclaration> => {
     const wr = this.widthRatio;
     const lsEm = this.effectiveTextStyle.letterSpacing!;
     const sr = this.spaceRatio;
-    const fs = textBlockStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
+    const fs = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
     const lsMm = lsEm * fs;
     let widthMm: number;
     if (char === " ") {
       widthMm = sr * fs * wr + lsMm;
     } else {
-      const rawWidthMm = this._charWidthMm(char, textBlockStyle);
+      const rawWidthMm = this._charWidthMm(char, inlineStyle);
       widthMm = rawWidthMm * wr + lsMm;
     }
     const widthCss = `${widthMm}mm`;
@@ -1342,19 +1355,19 @@ export class ParagraphEngine {
    * 문자의 원본 폭(mm, 장평 미적용)과 장평 적용 폭(mm)을 반환한다.
    *
    * @param char - 대상 문자
-   * @param textBlockStyle - 블록 레벨 스타일 오버라이드 (선택)
+   * @param inlineStyle - 인라인 스타일 오버라이드 (선택)
    * @returns `{ rawWidth: 원본 폭 mm, swidth: 장평 적용 폭 mm, widthRatio: 현재 장평 }`
    */
-  public getCharWidths = (char: string, textBlockStyle?: TextBlockStyle): { rawWidth: number; swidth: number; widthRatio: number } => {
+  public getCharWidths = (char: string, inlineStyle?: TextInlineStyle): { rawWidth: number; swidth: number; widthRatio: number } => {
     const wr = this.widthRatio;
-    const fontSize = textBlockStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
+    const fontSize = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
     const lsEm = this.effectiveTextStyle.letterSpacing!;
     const lsMm = lsEm * fontSize;
     let rawWidth: number;
     if (char === " ") {
       rawWidth = this.spaceRatio * fontSize;
     } else {
-      rawWidth = this._charWidthMm(char, textBlockStyle);
+      rawWidth = this._charWidthMm(char, inlineStyle);
     }
     const swidth = rawWidth * wr + lsMm;
     return { rawWidth, swidth, widthRatio: wr };
@@ -1710,18 +1723,18 @@ export class ParagraphEngine {
    *
    * @param value - 새 텍스트 콘텐츠.
    */
-  public set textContent(value: string | (string | TextBlockData)[]) {
+  public set textContent(value: string | (string | TextInlineData)[]) {
     this._textContent = value;
     this._dirty = true;
   }
 
   /** 현재 텍스트 콘텐츠 */
-  public get textContent(): string | (string | TextBlockData)[] {
+  public get textContent(): string | (string | TextInlineData)[] {
     return this._textContent;
   }
 
-  /** 텍스트 블록 배열 (`\n`으로 분리된) */
-  public get contents(): TextBlockData[] {
+  /** `\n`으로 분리된 라인 원본 (라인 × 인라인 런 배열) */
+  public get contents(): TextInlineData[][] {
     return this._contents;
   }
 
@@ -1801,9 +1814,9 @@ export class ParagraphEngine {
   /**
    * 입력된 텍스트의 총 문자 수.
    *
-   * `textContent`가 문자열이면 `string.length`, 배열이면 각 블록의 `content.length` 합산.
-   * `TextBlockData` 원소는 `content` 필드 길이를 사용하고, 문자열 원소는 그 자체의 길이를 사용한다.
-   * `\n`은 `_parseContents`가 블록 분리에만 사용하므로 총 문자 수에는 포함되지 않는다.
+   * `textContent`가 문자열이면 `string.length`, 배열이면 각 런의 `content.length` 합산.
+   * `TextInlineData` 원소는 `content` 필드 길이를 사용하고, 문자열 원소는 그 자체의 길이를 사용한다.
+   * `\n`은 `_parseContents`가 라인 분리에만 사용하므로 총 문자 수에는 포함되지 않는다.
    *
    * @returns 총 문자 수
    * @example
@@ -1815,8 +1828,8 @@ export class ParagraphEngine {
     if (typeof this._textContent === "string") {
       return this._textContent.split("\n").reduce((sum, line) => sum + line.length, 0);
     }
-    return this._textContent.reduce((sum, block) => {
-      const content = typeof block === "string" ? block : block.content;
+    return this._textContent.reduce((sum, run) => {
+      const content = typeof run === "string" ? run : run.content;
       return sum + content.split("\n").reduce((s, line) => s + line.length, 0);
     }, 0);
   }
@@ -1847,7 +1860,6 @@ export class ParagraphEngine {
     }
 
     const effectiveColumnHeight = parentHeight + (this._lineHeight - this.fontSize);
-    const lineGap = this.effectiveParagraphStyle.lineGap!;
     let visible = 0;
 
     for (let c = 0; c < this._columnContents.length; c++) {
@@ -1857,11 +1869,7 @@ export class ParagraphEngine {
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        const blockFontSize = line.textBlockStyle?.fontSize;
-        let lineHeightMm = this._lineHeight;
-        if (blockFontSize !== undefined && blockFontSize > 0 && this._lineHeight < blockFontSize * lineGap) {
-          lineHeightMm = Math.ceil((blockFontSize * lineGap) / this._lineHeight) * this._lineHeight;
-        }
+        const lineHeightMm = this._lineHeight;
 
         const isOverflow = hasOverflowed
           || accumulatedHeightMm + lineHeightMm > effectiveColumnHeight + 1e-6;
@@ -2116,6 +2124,24 @@ class _LRU<K, V> {
 // ─────────────────────────────────────────────────────────────
 
 /**
+ * 두 인라인 스타일이 필드 단위로 동일한지 비교한다.
+ * `undefined`와 빈 객체는 모두 "스타일 없음"으로 동일 취급한다.
+ */
+function inlineStyleEqual(a: TextInlineStyle | undefined, b: TextInlineStyle | undefined): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) {
+    return (a === undefined || Object.keys(a).length === 0) && (b === undefined || Object.keys(b).length === 0);
+  }
+  return (
+    a.fontFamily === b.fontFamily &&
+    a.fontSize === b.fontSize &&
+    a.fontWeight === b.fontWeight &&
+    a.fontStyle === b.fontStyle &&
+    a.color === b.color
+  );
+}
+
+/**
  * ParagraphEngine의 printPostData를 생성한다.
  * columnContents를 순회하여 글자별 위치·폰트·색상을 픽셀 좌표로 변환한다.
  *
@@ -2134,14 +2160,14 @@ function computeStripRange(part: TextPartData, line: TextLineData, partIdx: numb
   const content = part.content;
   const isFirst = partIdx === 0;
   const isLast = partIdx === line.parts.length - 1;
-  const firstOfBlock = line.firstOfBlock === true;
-  const endOfBlock = line.endOfBlock === true;
+  const firstOfLine = line.firstOfBlock === true;
+  const endOfLine = line.endOfBlock === true;
   let stripStart = 0;
   let stripEnd = content.length;
-  if (isFirst && !firstOfBlock) {
+  if (isFirst && !firstOfLine) {
     while (stripStart < stripEnd && content[stripStart] === " ") stripStart++;
   }
-  if (isLast && !endOfBlock) {
+  if (isLast && !endOfLine) {
     while (stripEnd > stripStart && content[stripEnd - 1] === " ") stripEnd--;
   }
   return { stripStart, stripEnd };
@@ -2189,22 +2215,6 @@ export function buildParagraphPrintPostData(
 
       if (effectiveColumnHeightMm > 0 && visibleLineIndex * lineHeightMm >= effectiveColumnHeightMm) break;
 
-      const { textBlockStyle } = lineData;
-      const colorName = textBlockStyle?.color
-        ?? textStyle?.color
-        ?? inheritStyle?.color;
-      const cmyk = colorName !== undefined
-        ? colorRegistry.get(colorName)
-        : { c: 0, m: 0, y: 0, k: 255 };
-
-      const lineGap = engine.effectiveParagraphStyle.lineGap!;
-      const fontSizeMm = textBlockStyle?.fontSize
-        ?? engine.effectiveTextStyle.fontSize!;
-      let effectiveLineHeightMm = lineHeightMm;
-      if (textBlockStyle?.fontSize && lineHeightMm < fontSizeMm * lineGap) {
-        effectiveLineHeightMm = Math.ceil((fontSizeMm * lineGap) / lineHeightMm) * lineHeightMm;
-      }
-
       const lineTopMm = absTopMm + alignOffsetMm + visibleLineIndex * lineHeightMm;
 
       let partStartMm = 0;
@@ -2218,13 +2228,15 @@ export function buildParagraphPrintPostData(
         partStartMm += part.left;
         const partAbsLeftMm = partStartMm;
 
-        const { content, charOffsets } = part;
+        const { content, charOffsets, inlineStyles } = part;
 
         const { stripStart, stripEnd } = computeStripRange(part, lineData, pi);
 
         for (let j = stripStart; j < stripEnd; j++) {
           const char = content[j];
           if (!char || char.length === 0) continue;
+
+          const inlineStyle = inlineStyles?.[j];
 
           // charOffsets는 strip된(앞뒤 공백 제거) 기준 0부터 채워지므로
           // raw 인덱스 j가 아닌 strip 기준 인덱스 k로 읽어야 한다.
@@ -2234,28 +2246,35 @@ export function buildParagraphPrintPostData(
             : 0;
           const charXMm = colLeftMm + partAbsLeftMm + charOffsetMm;
 
-          const { swidth } = engine.getCharWidths(char, textBlockStyle);
+          const { swidth } = engine.getCharWidths(char, inlineStyle);
           const charWidthMm = swidth;
-          const charHeightMm = effectiveLineHeightMm;
 
           const widthRatio = engine.widthRatio;
           const letterSpacing = engine.effectiveTextStyle.letterSpacing!;
           const spaceRatio = engine.spaceRatio;
 
-          const charFontFamilyName = textBlockStyle?.fontFamily
+          const charFontFamilyName = inlineStyle?.fontFamily
             ?? textStyle?.fontFamily
             ?? inheritStyle?.fontFamily;
           const charFontFamily = charFontFamilyName !== undefined
             ? fontLoader.getFontFamily(charFontFamilyName)
             : fontLoader.getFontFamily();
-          const charFontSize = fontSizeMm;
-          const charFontWeight = textBlockStyle?.fontWeight
+          const charFontSize = inlineStyle?.fontSize
+            ?? engine.effectiveTextStyle.fontSize!;
+          const charFontWeight = inlineStyle?.fontWeight
             ?? textStyle?.fontWeight
             ?? inheritStyle?.fontWeight
             ?? 400;
-          const charFontStyle = textStyle?.fontStyle
+          const charFontStyle = inlineStyle?.fontStyle
+            ?? textStyle?.fontStyle
             ?? inheritStyle?.fontStyle
             ?? DEFAULT_FONT_STYLE;
+          const colorName = inlineStyle?.color
+            ?? textStyle?.color
+            ?? inheritStyle?.color;
+          const cmyk = colorName !== undefined
+            ? colorRegistry.get(colorName)
+            : { c: 0, m: 0, y: 0, k: 255 };
 
           chars.push({
             char,
@@ -2263,7 +2282,7 @@ export function buildParagraphPrintPostData(
               x: charXMm,
               y: lineTopMm,
               width: charWidthMm,
-              height: charHeightMm,
+              height: lineHeightMm,
             },
             fontFamily: charFontFamily,
             fontSize: charFontSize,

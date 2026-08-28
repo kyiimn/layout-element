@@ -1,4 +1,4 @@
-import { BoxData } from "@/types";
+import { BoxData, TextInlineData } from "@/types";
 
 const title = '서금원, 李정부 국정과제 추진…사회적기업';
 const body = `서민금융진흥원(서금원)이 이재명 정부 국정과제 중 하나인 '사회연대경제 성장 지원'을 위해 사회적기업 관련 대출 규모를 늘린다. 이와 함께 정부에서 강조하고 있는 포용금융 강화를 위해 비금융 대안정보를 활용한 평가모형 개발에도 나선다.
@@ -417,6 +417,51 @@ const ad: BoxData = {
   }
 };
 
+const inlineDemoContent: (string | TextInlineData)[] = [
+  "인라인 런 스타일은 하나의 연속 텍스트 흐름에서 구간별로 스타일을 지정한다. ",
+  { content: "이 구간은 큰 폰트(7mm)이며, ", textInlineStyle: { fontSize: 7, fontWeight: 700 } },
+  "라인 높이는 문단 기본 크기로 고정되고 글자 하단이 라인 하단에 고정된다. 상단은 윗라인을 침범한다. ",
+  { content: "이 구간은 기울임꼴이고 빨간색이다. ", textInlineStyle: { fontStyle: 'italic', color: 'red' } },
+  "이어서 ",
+  { content: "굵은 텍스트(900) ", textInlineStyle: { fontWeight: 900 } },
+  "와 ",
+  { content: "작은 크기(3mm)의 텍스트", textInlineStyle: { fontSize: 3, color: 'blue' } },
+  "가 같은 흐름에서 이어진다. ",
+  { content: "기울임 + 굵게 조합", textInlineStyle: { fontStyle: 'italic', fontWeight: 700, fontSize: 5 } },
+  "도 가능하다. 마지막은 기본 스타일 텍스트로 마무리한다.",
+];
+
+const inlineStyleDemo: BoxData = {
+  type: 'box',
+  left: 4, top: 43,
+  width: 2,
+  height: 20,
+  borderTopWidth: .5,
+  borderBottomWidth: .5,
+  borderColor: 'black',
+  children: [{
+    type: 'box',
+    left: 0, top: 0,
+    width: 2,
+    height: 3,
+    children: {
+      type: 'text',
+      content: '인라인 스타일 데모 (크기·굵기·기울기)',
+      textStyle: { fontSize: 5, fontWeight: 700 },
+      paragraphStyle: { textAlign: 'center', verticalAlign: 'center' }
+    }
+  }, {
+    type: 'box',
+    left: 0, top: 3,
+    width: 2,
+    height: 17,
+    children: {
+      type: 'paragraph',
+      content: inlineDemoContent,
+    }
+  }]
+};
+
 export const exampleData = {
   width: 323,
   height: 470,
@@ -447,6 +492,7 @@ export const exampleData = {
     block3,
     block4,
     block5,
+    inlineStyleDemo,
     ad,
   ]
 };

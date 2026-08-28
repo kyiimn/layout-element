@@ -1,11 +1,10 @@
-import { TextAlign } from "./paragraph-style.type";
-
 /**
- * `ParagraphData` 내 개별 텍스트 블록에 적용되는 스타일.
+ * `ParagraphData.content` 배열 내 인라인 런에 적용되는 스타일.
  *
- * `TextStyle`의 부분집합 + `textAlign`으로 구성된다.
- * `letterSpacing`, `fontStyle`, `widthRatio`는 포함하지 않는다.
- * 이 속성들은 블록 단위가 아닌 문단 전체 수준에서만 제어된다.
+ * `TextStyle`의 부분집합 + `fontStyle`로 구성된다.
+ * `textAlign`, `letterSpacing`, `widthRatio`는 포함하지 않는다.
+ * 정렬은 문단 전체(`ParagraphStyle.textAlign`)에서만 제어되며,
+ * 자간/장평도 문단 전체 수준에서만 제어된다.
  *
  * 색상(`color`)과 폰트 패밀리(`fontFamily`)의 제약은 `TextStyle`과
  * 동일하다 — `color`는 `ColorRegistry`에 등록된 CMYK 색상 이름,
@@ -15,7 +14,7 @@ import { TextAlign } from "./paragraph-style.type";
  *
  * @see TextStyle
  */
-export type TextBlockStyle = {
+export type TextInlineStyle = {
   /**
    * 폰트 패밀리명.
    *
@@ -32,6 +31,9 @@ export type TextBlockStyle = {
   /** 폰트 굵기 */
   fontWeight?: number;
 
+  /** 폰트 스타일 (예: 'normal', 'italic') */
+  fontStyle?: 'normal' | 'italic';
+
   /**
    * 글자 색상.
    *
@@ -41,7 +43,4 @@ export type TextBlockStyle = {
    * 기본 색상 hex로 폴백된다.
    */
   color?: string;
-
-  /** 수평 정렬 (블록 단위 오버라이드) */
-  textAlign?: TextAlign;
 }

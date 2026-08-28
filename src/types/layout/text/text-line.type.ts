@@ -1,4 +1,4 @@
-import { TextBlockStyle } from "../../style";
+import { TextInlineStyle } from "../../style";
 
 /**
  * `TextLayoutEngine.layoutText()`의 출력물. 텍스트 래핑 후 **한 줄**에 해당하는 데이터.
@@ -22,6 +22,17 @@ export type OverlapParts = { x1: number; x2: number; };
 export type TextPartData = {
   /** 이 파트(세그먼트)에 포함된 글자 배열 (글자 단위 분리) */
   content: string[];
+
+  /**
+   * 각 글자에 적용되는 인라인 스타일.
+   *
+   * `content[i]`에 대응하며, 원소가 `undefined`이면 해당 글자는
+   * 문단 기본 스타일을 사용한다. 런(run) 경계에서 파트가 분할되므로
+   * 하나의 파트 내부에서는 일반적으로 동일한 스타일이 적용되지만,
+   * 금칙 교정 등으로 런 경계를 가로지르는 파트에서는 글자별로
+   * 다른 스타일이 지정될 수 있다.
+   */
+  inlineStyles?: (TextInlineStyle | undefined)[];
 
   /** 줄 시작점으로부터의 좌측 여백 (mm) - 오버랩 요소 회피용 */
   left: number;
@@ -54,13 +65,13 @@ export type TextPartData = {
 };
 
 export type TextLineData = {
-  /** 이 줄이 블록의 첫 번째 줄인지 */
+  /** 이 줄이 라인의 첫 번째 줄인지 (`\n` 직후 라인) */
   firstOfBlock?: boolean;
 
   /** 이 줄이 전체 텍스트의 첫 번째 줄인지 */
   firstOfText?: boolean;
 
-  /** 이 줄이 블록의 마지막 줄인지 */
+  /** 이 줄이 라인의 마지막 줄인지 (`\n` 직전 라인) */
   endOfBlock?: boolean;
 
   /** 이 줄이 전체 텍스트의 마지막 줄인지 */
@@ -68,7 +79,4 @@ export type TextLineData = {
 
   /** 이 줄을 구성하는 수평 파트(오버랩 영역 사이의 세그먼트) 목록 */
   parts: TextPartData[];
-
-  /** 이 줄에 적용되는 블록 스타일 */
-  textBlockStyle?: TextBlockStyle;
 };

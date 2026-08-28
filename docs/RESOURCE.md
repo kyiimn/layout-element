@@ -64,7 +64,7 @@ flowchart LR
 - **외부 데이터 주입**: `init(fonts)`로 `Font[]`를 직접 주입할 수 있다. 이 경우 `_loadServer()`를 호출하지 않으며, `base64Data`가 있으면 `data:` URI로 `FontFace`를 생성한다.
 - **외부 데이터 미사용 시**: `init()`을 `fonts` 없이 호출하면 `_loadServer()`로 데이터를 가져온다.
 
-스타일 필드(`TextStyle.fontFamily`, `TextBlockStyle.fontFamily`)에서 지정하는 폰트 패밀리값은 `FontLoader.getFontFamily()`를 통해 `Font.family`와 매칭되어 실제 `FontFace.family`로 변환된다. 일치하는 `family`가 없으면 등록된 첫 번째 폰트로 폴백된다. CSS `font-family` 키워드(`"serif"`, `"sans-serif"` 등)는 사용할 수 없다.
+스타일 필드(`TextStyle.fontFamily`, `TextInlineStyle.fontFamily`)에서 지정하는 폰트 패밀리값은 `FontLoader.getFontFamily()`를 통해 `Font.family`와 매칭되어 실제 `FontFace.family`로 변환된다. 일치하는 `family`가 없으면 등록된 첫 번째 폰트로 폴백된다. CSS `font-family` 키워드(`"serif"`, `"sans-serif"` 등)는 사용할 수 없다.
 
 ### 2.2 `Font` 타입
 
@@ -216,7 +216,7 @@ FontLoader.resetLoader();
 - **기본 로드**: `color.json` (또는 커스텀 로더)에서 `CMYKColorSet`을 가져와 내부에 보관한다.
 - **외부 데이터 주입**: `init(colorSet)`으로 외부에서 주입한 `CMYKColorSet`을 직접 사용한다.
 
-스타일 필드(`TextStyle.color`, `TextBlockStyle.color`, `BoxData.backgroundColor`, `BoxData.borderColor`)에서 지정하는 색상값은 `ColorRegistry.getCSSColor()`를 통해 `#RRGGBB` hex 문자열로 변환된다. 여기서 `{name}`은 `CMYKColorSet`에 등록된 키(색상 이름)이어야 한다. 등록되지 않은 이름이나 CSS 색상 문자열(`#000`, `rgb(...)`)을 넣으면 기본 색상 hex로 폴백되어 의도한 색상이 나오지 않는다. 예: `backgroundColor: "red"` → `#FF0000`로 렌더링.
+스타일 필드(`TextStyle.color`, `TextInlineStyle.color`, `BoxData.backgroundColor`, `BoxData.borderColor`)에서 지정하는 색상값은 `ColorRegistry.getCSSColor()`를 통해 `#RRGGBB` hex 문자열로 변환된다. 여기서 `{name}`은 `CMYKColorSet`에 등록된 키(색상 이름)이어야 한다. 등록되지 않은 이름이나 CSS 색상 문자열(`#000`, `rgb(...)`)을 넣으면 기본 색상 hex로 폴백되어 의도한 색상이 나오지 않는다. 예: `backgroundColor: "red"` → `#FF0000`로 렌더링.
 
 배경색 투명도는 `BoxData.backgroundOpacity`(0~1)로 지정하며, `ColorRegistry.getOpacityHex(opacity)`가 2자리 hex alpha(`00`~`FF`)로 변환한다. `getCSSColor()` 반환값 뒤에 결합하여 `#RRGGBBAA` 8자리 hex로 적용한다.
 
