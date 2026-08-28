@@ -457,16 +457,14 @@ export class TextEditCoordinateMapper {
     }
     if (!closestLineEl) return null;
 
-    const lineRect = closestLineEl.getBoundingClientRect();
-    const lineTop = Math.round(lineRect.top);
-
-    // 해당 라인의 span들 수집
+    // 해당 라인의 span들 수집 — DOM 조상 귀속 (span → part div → line div).
+    // 하단 앵커(bottom anchor) 때문에 큰 폰트 span의 top/bottom은 라인 div의
+    // top/bottom과 모두 다르다(윗라인 침범 + 높이 fontSize). rect 기반 매칭은
+    // 특정 크기의 span을 누락하므로, 엔진이 만든 DOM 구조로 라인 소속을 판별한다.
     const allSpans = this._getColumnSpans(bestColumn);
     const lineSpans: HTMLSpanElement[] = [];
     for (const span of allSpans) {
-      const spanRect = span.getBoundingClientRect();
-      if (spanRect.height <= 1) continue;
-      if (Math.round(spanRect.top) === lineTop) {
+      if (this._getLineDivOfSpan(span, bestColumn) === closestLineEl) {
         lineSpans.push(span);
       }
     }
@@ -563,6 +561,9 @@ export class TextEditCoordinateMapper {
         const localRight = (spanRect.right - paraRect.left) / scale;
         const localHeight = spanRect.height / scale;
 
+        // top 기준 그룹핑: 같은 라인 내 크기가 다른 런(하단 앵커로 top이 다름)은
+        // 분리된 rect로 유지되어 각 크기의 실제 영역을 하이라이트한다.
+        // 인접 라인 간 top 우연 일치는 불가능하다 (라인 간격 lineHeight > 침범 깊이).
         if (currentRow && Math.round(currentRow.top) === Math.round(localTop)) {
           currentRow.right = localRight;
         } else {
@@ -715,6 +716,27 @@ export class TextEditCoordinateMapper {
       }
     }
     return null;
+  }
+
+  /**
+   * span이 소속된 line div를 반환한다.
+   *
+   * 컬럼 shadow DOM 구조는 `line div > part div > span`이므로 span의
+   * shadow 직계 조상(line div)을 찾는다. rect 기반 라인 판별과 달리
+   * 어떤 fontSize의 span이든 정확히 한 라인에 귀속된다.
+   *
+   * @param span - 대상 span
+   * @param column - span이 속한 컬럼 요소
+   * @returns line div 또는 null
+   */
+  private _getLineDivOfSpan(span: HTMLSpanElement, column: LayoutColumnElement): HTMLDivElement | null {
+    const shadow = column.shadowRoot;
+    if (!shadow) return null;
+    let el: Element | null = span.parentElement;
+    while (el && el.parentElement && !(el.parentElement instanceof ShadowRoot)) {
+      el = el.parentElement;
+    }
+    return el instanceof HTMLDivElement ? el : null;
   }
 
   private _getAllColumns(): LayoutColumnElement[] {

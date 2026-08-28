@@ -4,6 +4,7 @@ import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { LayoutTableElement } from "@/components/layout/table.element";
 import type { TextEditController, CurrentStyle } from "./text-edit-controller";
+import type { TextInlineStyle } from "@/types/style";
 import { InsertController } from "./insert-controller";
 import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
@@ -700,6 +701,27 @@ export class EditManager {
    */
   get currentStyle(): CurrentStyle | null {
     return this._focusedController?.currentStyle ?? null;
+  }
+
+  /**
+   * 현재 선택 영역에 인라인 스타일을 적용한다.
+   *
+   * 선택 영역이 없으면 아무 동작도 하지 않는다.
+   *
+   * @param style - 적용할 인라인 스타일 (부분 객체)
+   */
+  applyInlineStyle(style: Partial<TextInlineStyle>): void {
+    this._focusedController?._applyInlineStyle(style);
+  }
+
+  /**
+   * 현재 선택 영역의 인라인 스타일 필드를 토글한다.
+   *
+   * @param field - 토글할 필드명
+   * @param value - 적용할 값
+   */
+  toggleInlineStyle<K extends keyof TextInlineStyle>(field: K, value: NonNullable<TextInlineStyle[K]>): void {
+    this._focusedController?._toggleInlineStyle(field, value);
   }
 
   /**

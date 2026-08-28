@@ -7,6 +7,7 @@ import type { TextLineData } from "@/types/layout/text/text-line.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
 import { DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
+import { RunMap, inlineToPlain, plainToInline, shiftRunMap, getStyleAtOffset, applyStyleToRange } from "./run-map";
 
 /**
  * 커서 위치에서 유효한 스타일 정보.
@@ -77,6 +78,7 @@ export class TextEditController {
   // optimistic span의 현재 폭(mm) — 후속 span 밀어내기/되돌림에 사용
   private _optimisticSpanWidthMm: number = 0;
   private _lastStyleJson: string | null = null;
+  private _runMap: RunMap = [];
 
   private _selectionAnchor: number | null = null;
   private _isMouseDown: boolean = false;
@@ -145,9 +147,9 @@ export class TextEditController {
 
         if (wasComposing) {
           const model = this._paragraph.model;
-          if (model && typeof model.textContent === "string") {
+          if (model) {
             const after = this._textarea.value;
-            model.textContent = after;
+            model.textContent = plainToInline(after, this._runMap);
             const composedLength = after.length - this._compositionBeforeContent.length;
             this._cursorModel.offset = this._compositionStartOffset + composedLength;
             if (this._debounceTimer !== null) {
@@ -164,8 +166,10 @@ export class TextEditController {
 
     // Sync textarea value with model content so _onInput can compute correct diffs
     const model = paragraph.model;
-    if (model && typeof model.textContent === "string") {
-      this._textarea.value = model.textContent;
+    if (model) {
+      const { text, runMap } = inlineToPlain(model.textContent);
+      this._textarea.value = text;
+      this._runMap = runMap;
     }
 
     this._updateCursorPosition();
@@ -218,17 +222,16 @@ export class TextEditController {
       textAlign: model.paragraphStyle?.textAlign ?? inheritStyle.textAlign ?? DEFAULT_TEXT_ALIGN,
     };
 
-    const blockStyle = this._findTextBlockStyleAtOffset(this._cursorModel.offset);
-    if (!blockStyle) return { textStyle: baseTextStyle, paragraphStyle: baseParagraphStyle };
+    const inlineStyle = getStyleAtOffset(this._runMap, this._cursorModel.offset);
+    if (!inlineStyle) return { textStyle: baseTextStyle, paragraphStyle: baseParagraphStyle };
 
-    // 3. textInlineStyle로 필드 오버라이드 (인라인 런은 정렬을 오버라이드하지 않는다)
     const effectiveTextStyle: TextStyle = {
       ...baseTextStyle,
-      ...(blockStyle.fontFamily !== undefined && { fontFamily: blockStyle.fontFamily }),
-      ...(blockStyle.fontSize !== undefined && { fontSize: blockStyle.fontSize }),
-      ...(blockStyle.fontWeight !== undefined && { fontWeight: blockStyle.fontWeight }),
-      ...(blockStyle.fontStyle !== undefined && { fontStyle: blockStyle.fontStyle }),
-      ...(blockStyle.color !== undefined && { color: blockStyle.color }),
+      ...(inlineStyle.fontFamily !== undefined && { fontFamily: inlineStyle.fontFamily }),
+      ...(inlineStyle.fontSize !== undefined && { fontSize: inlineStyle.fontSize }),
+      ...(inlineStyle.fontWeight !== undefined && { fontWeight: inlineStyle.fontWeight }),
+      ...(inlineStyle.fontStyle !== undefined && { fontStyle: inlineStyle.fontStyle }),
+      ...(inlineStyle.color !== undefined && { color: inlineStyle.color }),
     };
 
     return { textStyle: effectiveTextStyle, paragraphStyle: baseParagraphStyle };
@@ -304,9 +307,13 @@ export class TextEditController {
     this._mapper.rebuild();
     this._optimisticSpan = null;
     const model = this._paragraph.model;
-    if (model && typeof model.textContent === "string") {
+    if (model) {
       if (!this._isComposing) {
-        this._textarea.value = model.textContent;
+        const { text: modelText, runMap: modelRunMap } = inlineToPlain(model.textContent);
+        if (modelText !== this._textarea.value) {
+          this._textarea.value = modelText;
+          this._runMap = modelRunMap;
+        }
         this._syncTextareaSelection();
       }
     }
@@ -629,9 +636,9 @@ export class TextEditController {
 
     const model = this._paragraph.model;
     if (!model) return;
-    if (typeof model.textContent !== "string") return;
+    if (typeof model.textContent !== "string" && !Array.isArray(model.textContent)) return;
 
-    const content = model.textContent;
+    const content = this._textarea.value;
     const { start, end } = this._findWordBoundaries(content, sourceOffset);
     this._cursorModel.selection = SelectionRange.fromOffsets(start, end);
     this._cursorModel.offset = end;
@@ -684,9 +691,9 @@ export class TextEditController {
 
     if (wasComposing) {
       const model = this._paragraph.model;
-      if (model && typeof model.textContent === "string") {
+      if (model) {
         const after = this._textarea.value;
-        model.textContent = after;
+        model.textContent = plainToInline(after, this._runMap);
         const composedLength = after.length - this._compositionBeforeContent.length;
         this._cursorModel.offset = this._compositionStartOffset + composedLength;
         if (this._debounceTimer !== null) {
@@ -715,9 +722,9 @@ export class TextEditController {
     const model = this._paragraph.model;
     if (!model) return;
 
-    if (typeof model.textContent !== "string") return;
+    if (typeof model.textContent !== "string" && !Array.isArray(model.textContent)) return;
 
-    const content = model.textContent;
+    const content = this._textarea.value;
     const offset = this._cursorModel.offset;
     const hasShortcut = event.ctrlKey || event.metaKey;
 
@@ -725,6 +732,18 @@ export class TextEditController {
       event.preventDefault();
       this._selectAll();
       this._manager._notifyCursorMove(this);
+      return;
+    }
+
+    if (hasShortcut && event.key.toLowerCase() === "b") {
+      event.preventDefault();
+      this._toggleInlineStyle("fontWeight", 700);
+      return;
+    }
+
+    if (hasShortcut && event.key.toLowerCase() === "i") {
+      event.preventDefault();
+      this._toggleInlineStyle("fontStyle", "italic");
       return;
     }
 
@@ -1096,9 +1115,9 @@ export class TextEditController {
     const selection = this._cursorModel.selection;
     if (!selection) return;
 
-    if (typeof model.textContent !== "string") return;
+    if (typeof model.textContent !== "string" && !Array.isArray(model.textContent)) return;
 
-    const content = model.textContent;
+    const content = this._textarea.value;
     const { start, end } = selection.normalized();
     const newContent = content.slice(0, start.textOffset) + content.slice(end.textOffset);
 
@@ -1122,9 +1141,9 @@ export class TextEditController {
 
     const pastedText = rawPastedText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
-    if (typeof model.textContent !== "string") return;
+    if (typeof model.textContent !== "string" && !Array.isArray(model.textContent)) return;
 
-    const content = model.textContent;
+    const content = this._textarea.value;
     let startOffset = this._cursorModel.offset;
     let endOffset = this._cursorModel.offset;
 
@@ -1152,9 +1171,9 @@ export class TextEditController {
     const model = this._paragraph.model;
     if (!model) return;
 
-    if (typeof model.textContent !== "string") return;
+    if (typeof model.textContent !== "string" && !Array.isArray(model.textContent)) return;
 
-    const content = model.textContent;
+    const content = this._textarea.value;
     this._cursorModel.selection = SelectionRange.fromOffsets(0, content.length);
     this._cursorModel.offset = content.length;
     this._textarea.setSelectionRange(0, content.length);
@@ -1178,7 +1197,7 @@ export class TextEditController {
   private _computeVerticalOffset(direction: -1 | 1): number | null {
     const model = this._paragraph.model;
     if (!model) return null;
-    if (typeof model.textContent !== "string") return null;
+    if (typeof model.textContent !== "string" && !Array.isArray(model.textContent)) return null;
 
     const offset = this._cursorModel.offset;
 
@@ -1268,7 +1287,7 @@ export class TextEditController {
   private _getLineEndSourceOffset(columnIndex: number, lineIndex: number): number {
     const model = this._paragraph.model;
     if (!model) return 0;
-    const content = model.textContent;
+    const content = this._textarea.value;
     if (typeof content !== "string") return 0;
 
     const lineStart = this._mapper.getLineStartSourceOffset(columnIndex, lineIndex);
@@ -1385,40 +1404,11 @@ export class TextEditController {
     return pos;
   }
 
-  /**
-   * 주어진 소스 오프셋이 속한 인라인 런의 textInlineStyle을 반환한다.
-   * 각 라인은 `\n`으로 분리되며, 라인 내부의 런 경계는 스타일 변경 지점이다.
-   */
-  private _findTextBlockStyleAtOffset(offset: number): TextInlineStyle | undefined {
+  private _getPlainText(): string {
     const model = this._paragraph.model;
-    if (!model) return undefined;
-
-    const contents = model.contents;
-    if (contents.length === 0) return undefined;
-
-    // 각 라인의 시작 오프셋을 누적하며 커서 오프셋이 어느 라인의 어느 런에 속하는지 찾는다
-    let currentOffset = 0;
-    for (const line of contents) {
-      for (const run of line) {
-        const runLength = run.content.length;
-        const runStart = currentOffset;
-        const runEnd = currentOffset + runLength;
-
-        // 커서가 이 런의 범위 내에 있으면 (끝 오프셋 포함)
-        if (offset >= runStart && offset <= runEnd) {
-          return run.textInlineStyle;
-        }
-
-        currentOffset = runEnd;
-      }
-
-      // 다음 라인으로 이동: \n(1)
-      currentOffset += 1;
-    }
-
-    // 커서가 마지막 라인 끝을 넘어선 경우, 마지막 라인의 마지막 런 스타일 반환
-    const lastLine = contents[contents.length - 1];
-    return lastLine.length > 0 ? lastLine[lastLine.length - 1].textInlineStyle : undefined;
+    if (!model) return this._textarea.value;
+    const { text } = inlineToPlain(model.textContent);
+    return text;
   }
 
   private _onInput(event: InputEvent): void {
@@ -1426,10 +1416,9 @@ export class TextEditController {
 
     const model = this._paragraph.model;
     if (!model) return;
-    if (typeof model.textContent !== "string") return;
 
-    const before = model.textContent;
-    let after = this._textarea.value;
+    const before = this._getPlainText();
+    const after = this._textarea.value;
     let newOffset: number;
 
     const activeSelection = this._cursorModel.selection;
@@ -1443,11 +1432,20 @@ export class TextEditController {
         inserted = event.data;
       }
 
-      const replaced = before.slice(0, startOffset) + inserted + before.slice(endOffset);
+      const deletedLen = endOffset - startOffset;
+      if (deletedLen > 0) {
+        this._runMap = shiftRunMap(this._runMap, startOffset, -deletedLen);
+        this._runMap = applyStyleToRange(this._runMap, startOffset, startOffset, {});
+      }
+      if (inserted.length > 0) {
+        this._runMap = shiftRunMap(this._runMap, startOffset, inserted.length);
+        this._runMap = applyStyleToRange(this._runMap, startOffset, startOffset + inserted.length, {});
+      }
+
       newOffset = startOffset + inserted.length;
 
-      model.textContent = replaced;
-      this._textarea.value = replaced;
+      model.textContent = plainToInline(after, this._runMap);
+      this._textarea.value = after;
       this._textarea.setSelectionRange(newOffset, newOffset);
       this._cursorModel.offset = newOffset;
       this._cursorModel.selection = null;
@@ -1470,7 +1468,20 @@ export class TextEditController {
 
     const change = this._computeTextChange(before, after, this._cursorModel.offset);
 
-    model.textContent = after;
+    if (change.type === "insert") {
+      this._runMap = shiftRunMap(this._runMap, change.newOffset - change.text.length, change.text.length);
+    } else if (change.type === "delete") {
+      const deletedLen = change.text.length;
+      this._runMap = shiftRunMap(this._runMap, change.newOffset, -deletedLen);
+    } else if (change.type === "replace") {
+      const deletedLen = change.deletedText?.length ?? 0;
+      if (deletedLen > 0) {
+        this._runMap = shiftRunMap(this._runMap, change.newOffset, -deletedLen);
+      }
+      this._runMap = shiftRunMap(this._runMap, change.newOffset, change.text.length);
+    }
+
+    model.textContent = plainToInline(after, this._runMap);
     newOffset = change.newOffset;
     this._cursorModel.offset = newOffset;
 
@@ -1493,16 +1504,23 @@ export class TextEditController {
     const model = this._paragraph.model;
     if (!model) return;
 
-    if (typeof model.textContent !== "string") return;
+    if (typeof model.textContent !== "string" && !Array.isArray(model.textContent)) return;
 
-    const content = model.textContent;
+    const content = this._textarea.value;
     const activeSelection = this._cursorModel.selection;
     if (!activeSelection) return;
 
     const { start, end } = activeSelection.normalized();
     const newContent = content.slice(0, start.textOffset) + replacement + content.slice(end.textOffset);
+    const deletedLen = end.textOffset - start.textOffset;
+    if (deletedLen > 0) {
+      this._runMap = shiftRunMap(this._runMap, start.textOffset, -deletedLen);
+    }
+    if (replacement.length > 0) {
+      this._runMap = shiftRunMap(this._runMap, start.textOffset, replacement.length);
+    }
 
-    model.textContent = newContent;
+    model.textContent = plainToInline(newContent, this._runMap);
     this._textarea.value = newContent;
     this._cursorModel.offset = start.textOffset + replacement.length;
     this._textarea.setSelectionRange(this._cursorModel.offset, this._cursorModel.offset);
@@ -1530,18 +1548,23 @@ export class TextEditController {
       const normalized = this._cursorModel.selection.normalized();
       this._compositionStartOffset = normalized.start.textOffset;
 
-      if (model && typeof model.textContent === "string") {
-        const content = model.textContent;
-        model.textContent = content.slice(0, normalized.start.textOffset) + content.slice(normalized.end.textOffset);
-        this._textarea.value = model.textContent;
+      if (model) {
+        const content = this._textarea.value;
+        const deletedLen = normalized.end.textOffset - normalized.start.textOffset;
+        if (deletedLen > 0) {
+          this._runMap = shiftRunMap(this._runMap, normalized.start.textOffset, -deletedLen);
+        }
+        const newContent = content.slice(0, normalized.start.textOffset) + content.slice(normalized.end.textOffset);
+        model.textContent = plainToInline(newContent, this._runMap);
+        this._textarea.value = newContent;
         this._textarea.setSelectionRange(normalized.start.textOffset, normalized.start.textOffset);
       }
     } else {
       this._compositionStartOffset = this._cursorModel.offset;
     }
 
-    if (model && typeof model.textContent === "string") {
-      this._compositionBeforeContent = model.textContent;
+    if (model) {
+      this._compositionBeforeContent = this._textarea.value;
     } else {
       this._compositionBeforeContent = "";
     }
@@ -1561,12 +1584,16 @@ export class TextEditController {
     if (!this._isComposing) return;
 
     const model = this._paragraph.model;
-    if (model && typeof model.textContent === "string") {
+    if (model) {
       const before = this._compositionBeforeContent;
       const start = this._compositionStartOffset;
       const data = event.data ?? "";
       const newText = before.slice(0, start) + data + before.slice(start);
-      model.textContent = newText;
+      // 조합 중 텍스트는 삽입 위치가 속한 런의 스타일을 이어받는다.
+      // this._runMap은 조합 시작 전 상태를 유지하므로, 매 업데이트마다 원본 런 맵에서
+      // 조합 길이만큼 임시 확장한 맵으로 변환한다 (확정 시 _onCompositionEnd에서 실제 shift).
+      const tempRunMap = shiftRunMap(this._runMap, start, data.length);
+      model.textContent = plainToInline(newText, tempRunMap);
       this._compositionData = data;
       this._cursorModel.offset = start + data.length;
       this._paragraph.scheduleRender();
@@ -1581,8 +1608,8 @@ export class TextEditController {
     this._compositionData = "";
 
     const model = this._paragraph.model;
-    if (model && typeof model.textContent === "string") {
-      model.textContent = this._compositionBeforeContent;
+    if (model) {
+      model.textContent = plainToInline(this._compositionBeforeContent, this._runMap);
       this._textarea.value = this._compositionBeforeContent;
       this._cursorModel.offset = this._compositionStartOffset;
       this._textarea.setSelectionRange(this._compositionStartOffset, this._compositionStartOffset);
@@ -1609,15 +1636,18 @@ export class TextEditController {
 
     const model = this._paragraph.model;
     if (!model) return;
-    if (typeof model.textContent !== "string") return;
+    if (typeof model.textContent !== "string" && !Array.isArray(model.textContent)) return;
 
     const startOffset = this._compositionStartOffset;
     const beforeContent = this._compositionBeforeContent;
 
     const after = this._textarea.value;
-    model.textContent = after;
-
     const composedLength = after.length - beforeContent.length;
+    if (composedLength !== 0) {
+      this._runMap = shiftRunMap(this._runMap, startOffset, composedLength);
+    }
+    model.textContent = plainToInline(after, this._runMap);
+
     this._cursorModel.offset = startOffset + composedLength;
 
     this._paragraph.flushRender();
@@ -1688,9 +1718,9 @@ export class TextEditController {
     before: string,
     after: string,
     cursorOffset: number,
-  ): { type: "insert" | "delete" | "replace"; text: string; newOffset: number } {
+  ): { type: "insert" | "delete" | "replace"; text: string; newOffset: number; deletedText: string } {
     if (before === after) {
-      return { type: "insert", text: "", newOffset: cursorOffset };
+      return { type: "insert", text: "", newOffset: cursorOffset, deletedText: "" };
     }
 
     const minLen = Math.min(before.length, after.length);
@@ -1717,6 +1747,7 @@ export class TextEditController {
       type,
       text: inserted,
       newOffset: prefix + inserted.length,
+      deletedText: removed,
     };
   }
 
@@ -2180,6 +2211,71 @@ export class TextEditController {
       this._lastStyleJson = json;
       this._manager._notifyStyleChange(this);
     }
+  }
+
+  /**
+   * 현재 선택 영역에 인라인 스타일을 적용한다.
+   *
+   * 선택 영역이 있으면 해당 범위의 런들을 분할하여 스타일을 오버라이드하고,
+   * 엔진 content를 갱신하여 재렌더링을 트리거한다.
+   * 선택 영역이 없으면 아무 동작도 하지 않는다.
+   *
+   * @param style - 적용할 인라인 스타일 (부분 객체 — 정의된 필드만 오버라이드)
+   */
+  _applyInlineStyle(style: Partial<TextInlineStyle>): void {
+    const sel = this._cursorModel.selection;
+    if (!sel) return;
+
+    const { start, end } = sel.normalized();
+    if (start.textOffset >= end.textOffset) return;
+
+    this._runMap = applyStyleToRange(this._runMap, start.textOffset, end.textOffset, style);
+
+    const model = this._paragraph.model;
+    if (!model) return;
+
+    const plainText = this._textarea.value;
+    model.textContent = plainToInline(plainText, this._runMap);
+    this._paragraph.scheduleRender();
+    this._emitStyleChange();
+    this._manager._notifyTextChange(this);
+  }
+
+  /**
+   * 현재 선택 영역의 인라인 스타일 필드를 토글한다.
+   *
+   * 선택 영역 전체가 이미 해당 값이면 제거(기본 복귀), 아니면 적용한다.
+   *
+   * @param field - 토글할 TextInlineStyle 필드명
+   * @param value - 적용할 값
+   */
+  _toggleInlineStyle<K extends keyof TextInlineStyle>(field: K, value: NonNullable<TextInlineStyle[K]>): void {
+    const sel = this._cursorModel.selection;
+    if (!sel) return;
+
+    const { start, end } = sel.normalized();
+    if (start.textOffset >= end.textOffset) return;
+
+    let allMatch = true;
+    for (let i = start.textOffset; i < end.textOffset; i++) {
+      const s = getStyleAtOffset(this._runMap, i);
+      if (!s || s[field] !== value) { allMatch = false; break; }
+    }
+
+    if (allMatch) {
+      this._runMap = applyStyleToRange(this._runMap, start.textOffset, end.textOffset, { [field]: undefined } as Partial<TextInlineStyle>);
+    } else {
+      this._runMap = applyStyleToRange(this._runMap, start.textOffset, end.textOffset, { [field]: value } as Partial<TextInlineStyle>);
+    }
+
+    const model = this._paragraph.model;
+    if (!model) return;
+
+    const plainText = this._textarea.value;
+    model.textContent = plainToInline(plainText, this._runMap);
+    this._paragraph.scheduleRender();
+    this._emitStyleChange();
+    this._manager._notifyTextChange(this);
   }
 }
 

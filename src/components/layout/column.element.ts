@@ -247,12 +247,13 @@ export class LayoutColumnElement extends HTMLElement {
       charEl.style.lineHeight = `${inlineStyle.fontSize}mm`;
       charEl.style.display = 'inline-block';
       charEl.style.height = `${inlineStyle.fontSize}mm`;
-      // 하단 앵커: 글자 하단을 라인 하단에 고정. 폰트가 크면(top < 0) 윗라인을 침범한다.
+      // 하단 앵커: 글자 하단을 fontSize 영역 하단(행간 제외)에 고정.
+      // 폰트가 크면(top < 0) 윗라인을 침범한다.
       // charOffsets 경로는 이미 position: absolute이므로 flexbox 경로에서만 relative로 전환한다.
       if (charEl.style.position !== 'absolute') {
         charEl.style.position = 'relative';
       }
-      charEl.style.top = `${model.lineHeight - inlineStyle.fontSize}mm`;
+      charEl.style.top = `${model.fontSize - inlineStyle.fontSize}mm`;
     }
   }
 
