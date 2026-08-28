@@ -1,6 +1,11 @@
 /**
  * 폰트 정보를 나타내는 타입.
  *
+ * **패밀리당 단일 TTF 파일만 사용한다.** weight/style별 파일 변형은 만들지
+ * 않으며, 하나의 패밀리에는 하나의 폰트 파일만 등록된다. 굵기·기울임은
+ * 스타일 계층(`TextStyle.fontWeight`/`fontStyle`)으로 지정하고, 렌더러가
+ * 합성(faux) bold/italic으로 재현한다.
+ *
  * `FontLoader`가 `fonts.json`에서 이 데이터를 로드하여 `FontFace` API로 브라우저에 등록한다.
  *
  * 인쇄 모드에서는 `base64Data`를 사용하여 외부 서버 요청 없이 폰트를 로드한다.
@@ -22,12 +27,6 @@ export type Font = {
    * 찾아 실제 `FontFace.family`를 반환한다.
    */
   family: string;
-
-  /** 폰트 굵기 (400, 700 등) */
-  weight: number;
-
-  /** 폰트 스타일 */
-  style: 'normal' | 'italic';
 
   /** TTF 파일명 (서버에서 로드할 때 사용) */
   ttfFilename?: string;

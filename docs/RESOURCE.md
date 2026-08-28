@@ -76,12 +76,6 @@ type Font = {
    */
   family: string;
 
-  /** 폰트 굵기 (400, 700 등) */
-  weight: number;
-
-  /** 폰트 스타일 */
-  style: 'normal' | 'italic';
-
   /** TTF 파일명 (서버에서 로드할 때 사용) */
   ttfFilename?: string;
 
@@ -90,6 +84,7 @@ type Font = {
 };
 ```
 
+- **패밀리당 단일 TTF만 사용한다.** weight/style별 파일 변형은 존재하지 않으며, 굵기·기울임은 스타일 계층(`TextStyle.fontWeight`/`fontStyle`)으로 지정하고 렌더러가 합성(faux) bold/italic으로 재현한다.
 - `ttfFilename`: 서버 로드 시 `FontFace`의 `src`에 URL로 사용된다.
 - `base64Data`: 외부 데이터 주입 또는 서버 로드 시 `FontFace`의 `src`에 `data:` URI로 사용된다.
 - `family`: 스타일 필드의 `fontFamily` 값이 참조하는 키이다. `FontLoader.getFontFamily(name)`이 일치하는 `family`를 찾아 실제 `FontFace.family`를 반환한다.
@@ -118,7 +113,7 @@ sequenceDiagram
     alt 외부 데이터 주입 (fonts 파라미터 있음)
         FL->>FL: fonts.filter(f => f.base64Data)
         loop 각 폰트
-            FL->>Browser: new FontFace(family, data:URI, {style, weight})
+            FL->>Browser: new FontFace(family, data:URI)
             Browser-->>FL: fontFace.load()
         end
     else 서버 로드 (fonts 파라미터 없음)
@@ -132,7 +127,7 @@ sequenceDiagram
         end
         FL->>FL: fonts.filter(f => f.base64Data || f.ttfFilename)
         loop 각 폰트
-            FL->>Browser: new FontFace(family, url(ttfFilename) 또는 data:URI, {style, weight})
+            FL->>Browser: new FontFace(family, url(ttfFilename) 또는 data:URI)
             Browser-->>FL: fontFace.load()
         end
     end
@@ -189,7 +184,7 @@ FontLoader.resetLoader();
 
 `init()`은 이미 `_ready === true`인 상태에서 동일한 폰트 데이터로 재호출되면 `document.fonts.clear()` 및 `FontFace` 재생성을 스킵하고 기존 `_fontFaces`를 그대로 반환한다.
 
-- **Signature 비교**: `_computeFontsSignature(fonts)`는 각 폰트의 `family`/`weight`/`style`/`ttfFilename`/`base64Data`를 결합한 문자열을 생성하며, 이전 호출 시 저장한 `_lastFontsSignature`와 비교한다.
+- **Signature 비교**: `_computeFontsSignature(fonts)`는 각 폰트의 `family`/`ttfFilename`/`base64Data`를 결합한 문자열을 생성하며, 이전 호출 시 저장한 `_lastFontsSignature`와 비교한다.
 - **스킵 조건**: `_ready === true` && `fonts !== undefined` && `_computeFontsSignature(fonts) === _lastFontsSignature`.
 - **서버 로드**: `init()`을 `fonts` 없이 호출하면 signature 비교가 불가능하므로 항상 재로드한다. 단, 재로드 후 `_lastFontsSignature`가 갱신되므로 이후 동일한 `fonts`를 인자로 넘겨 호출하면 스킵된다.
 - **외부 데이터 주입**: `init(fonts)`로 폰트를 주입하면 signature 비교가 항상 가능하다. 같은 `fonts` 배열로 재호출하면 스킵된다.

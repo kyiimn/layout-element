@@ -132,11 +132,7 @@ export class FontLoader {
           const source = f.base64Data
             ? `url("data:font/ttf;base64,${f.base64Data}") format("truetype")`
             : `url("${f.ttfFilename}") format("truetype")`;
-          const fontFace = new FontFace(
-            f.family,
-            source,
-            { style: f.style, weight: `${f.weight}` }
-          );
+          const fontFace = new FontFace(f.family, source);
           globalThis.document?.fonts.add(fontFace);
 
           return { name: f.family, fontFace: await fontFace.load() };
@@ -222,7 +218,7 @@ export class FontLoader {
    */
   private _computeFontsSignature(fonts: Font[]): string {
     return fonts
-      .map(f => `${f.family}|${f.weight}|${f.style}|${f.ttfFilename ?? ''}|${f.base64Data ?? ''}`)
+      .map(f => `${f.family}|${f.ttfFilename ?? ''}|${f.base64Data ?? ''}`)
       .join('\n');
   }
 

@@ -62,7 +62,7 @@ async function getOpenType(): Promise<OpenTypeModule> {
  * @example
  * const engine = FontLoaderEngineImpl.create();
  * await engine.init([
- *   { family: 'Myoungjo', weight: 400, style: 'normal', base64Data: '...' },
+ *   { family: 'Myoungjo', base64Data: '...' },
  * ]);
  * const parsed = engine.getParsedFont('Myoungjo');
  * const glyph = parsed?.charToGlyph('한');
