@@ -2253,6 +2253,9 @@ export function buildParagraphPrintPostData(
             ?? textStyle?.fontWeight
             ?? inheritStyle?.fontWeight
             ?? 400;
+          const charFontStyle = textStyle?.fontStyle
+            ?? inheritStyle?.fontStyle
+            ?? DEFAULT_FONT_STYLE;
 
           chars.push({
             char,
@@ -2265,6 +2268,7 @@ export function buildParagraphPrintPostData(
             fontFamily: charFontFamily,
             fontSize: charFontSize,
             fontWeight: charFontWeight,
+            fontStyle: charFontStyle,
             widthRatio,
             letterSpacing,
             spaceRatio,

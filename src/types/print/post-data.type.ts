@@ -42,6 +42,9 @@ export type PrintPostDataChar = {
   /** 폰트 굵기 (예: `400`, `700`) */
   fontWeight: number;
 
+  /** 폰트 스타일. `TextStyle.fontStyle` → `inheritStyle.fontStyle` → `'normal'` */
+  fontStyle: 'normal' | 'italic';
+
   /** 장평 비율. CSS `scale` 값에서 추출 (예: `0.9` = 90% 장평) */
   widthRatio: number;
 
