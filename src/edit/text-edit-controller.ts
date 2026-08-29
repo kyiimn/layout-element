@@ -6,7 +6,7 @@ import { SelectionRange } from "@/types/edit/selection.type";
 import type { TextLineData } from "@/types/layout/text/text-line.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
-import { DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
+import { DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_SPACE_RATIO, DEFAULT_INDENT, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
 import { RunMap, inlineToPlain, plainToInline, shiftRunMap, getStyleAtOffset, applyStyleToRange, normalizeRunMap, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline } from "./run-map";
 
 /**
@@ -224,6 +224,8 @@ export class TextEditController {
       fontSize: model.textStyle?.fontSize ?? inheritStyle.fontSize,
       letterSpacing: model.textStyle?.letterSpacing ?? inheritStyle.letterSpacing ?? DEFAULT_LETTER_SPACING,
       widthRatio: model.textStyle?.widthRatio ?? inheritStyle.widthRatio ?? DEFAULT_WIDTH_RATIO,
+      spaceRatio: model.textStyle?.spaceRatio ?? inheritStyle.spaceRatio ?? DEFAULT_SPACE_RATIO,
+      indent: model.textStyle?.indent ?? inheritStyle.indent ?? DEFAULT_INDENT,
     };
     const baseParagraphStyle: ParagraphStyle = {
       lineGap: model.paragraphStyle?.lineGap ?? inheritStyle.lineGap,
@@ -270,6 +272,8 @@ export class TextEditController {
       fontSize: model.textStyle?.fontSize ?? inheritStyle.fontSize,
       letterSpacing: model.textStyle?.letterSpacing ?? inheritStyle.letterSpacing ?? DEFAULT_LETTER_SPACING,
       widthRatio: model.textStyle?.widthRatio ?? inheritStyle.widthRatio ?? DEFAULT_WIDTH_RATIO,
+      spaceRatio: model.textStyle?.spaceRatio ?? inheritStyle.spaceRatio ?? DEFAULT_SPACE_RATIO,
+      indent: model.textStyle?.indent ?? inheritStyle.indent ?? DEFAULT_INDENT,
     };
     const baseParagraphStyle: ParagraphStyle = {
       lineGap: model.paragraphStyle?.lineGap ?? inheritStyle.lineGap,
@@ -278,6 +282,11 @@ export class TextEditController {
     };
 
     const COMMON_FIELDS: (keyof TextStyle)[] = ["color", "fontFamily", "fontWeight", "fontStyle", "fontSize"];
+
+    // 인라인 런으로 오버라이드할 수 없는 paragraph 수준 필드.
+    // computeSelectionCommonStyle은 인라인 필드만 비교하지만, 반환 시
+    // 이 필드들은 baseTextStyle에서 가져와 포함되어야 한다.
+    const PARAGRAPH_LEVEL_FIELDS: (keyof TextStyle)[] = ["letterSpacing", "widthRatio", "spaceRatio", "indent"];
 
     const commonTextStyle: TextStyle = {};
 
@@ -296,8 +305,6 @@ export class TextEditController {
         : baseTextStyle;
 
       if (first) {
-        // 공통값 기준은 첫 offset의 유효 스타일이다. 문단 기본으로 초기화하면
-        // 런이 기본을 오버라이드한 순간 "상이"로 오판되어 필드가 삭제된다.
         for (const field of COMMON_FIELDS) {
           const value: string | number | undefined = offsetStyle[field];
           if (value !== undefined) {
@@ -312,6 +319,12 @@ export class TextEditController {
           }
         }
       }
+    }
+
+    // paragraph 수준 필드는 인라인 런으로 오버라이드되지 않으므로
+    // baseTextStyle에서 그대로 가져온다.
+    for (const field of PARAGRAPH_LEVEL_FIELDS) {
+      (commonTextStyle as Record<string, unknown>)[field] = baseTextStyle[field];
     }
 
     return { textStyle: commonTextStyle, paragraphStyle: baseParagraphStyle };
