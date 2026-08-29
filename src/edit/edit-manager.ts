@@ -4,7 +4,8 @@ import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { LayoutTableElement } from "@/components/layout/table.element";
 import type { TextEditController, CurrentStyle } from "./text-edit-controller";
-import type { TextInlineStyle } from "@/types/style";
+import type { TextInlineStyle, TextStyle, ParagraphStyle } from "@/types/style";
+import { inlineToPlain, plainToInline, normalizeRunMap } from "./run-map";
 import { InsertController } from "./insert-controller";
 import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
@@ -55,6 +56,14 @@ export interface EditManagerEvent {
   previousParagraph?: LayoutParagraphElement | null;
   /** 이전 편집 컨트롤러 (focusChange 이벤트에서만) */
   previousController?: TextEditController | null;
+  /**
+   * 커서/선택 위치의 유효 스타일 (styleChange 이벤트에서만).
+   *
+   * selection이 없으면 커서 위치의 최종 스타일(상속 + 문단 + 런 병합),
+   * selection이 있으면 영역 내 모든 위치에서 공통인 필드만 담긴다 —
+   * 영역 내에 상이한 값이 있는 필드는 생략된다. textStyle/paragraphStyle 각각 반환.
+   */
+  style?: CurrentStyle;
   /** 레이아웃 선택 변경 시 선택된 요소들 (layoutSelectionChange 이벤트에서만) */
   selectedLayouts?: LayoutElement[];
   /** 레이아웃 선택 변경 시 이전 선택 요소들 (layoutSelectionChange 이벤트에서만) */
@@ -722,6 +731,108 @@ export class EditManager {
    */
   toggleInlineStyle<K extends keyof TextInlineStyle>(field: K, value: NonNullable<TextInlineStyle[K]>): void {
     this._focusedController?._toggleInlineStyle(field, value);
+  }
+
+  /**
+   * 텍스트/문단 스타일 주입의 단일 진입점.
+   *
+   * 편집 상태에 따라 주입 대상을 판별한다:
+   * 1. 텍스트 편집 모드에서 포커스 + selection 있음 → 선택 범위에 인라인 주입
+   *    (컨트롤러에 위임)
+   * 2. 텍스트 편집 모드에서 포커스 + selection 없음 → 커서가 인라인 런 안이면
+   *    해당 런만 업데이트, 런 밖이면 paragraph 자체 스타일 수정 + 전체 캐스케이드
+   *    (컨트롤러에 위임 — 인라인 불가 필드는 항상 paragraph로 라우팅)
+   * 3. 포커스 없이 paragraph 또는 content-type='paragraph' box가 selected →
+   *    대상 paragraph 자체 스타일 수정 + 전체 캐스케이드
+   *
+   * 어느 경로든 처리 후 런 맵을 정규화하고 커서/selection을 보존한다.
+   *
+   * @param textPatch - 적용할 TextStyle 부분 객체 (제공된 필드만 부분 업데이트)
+   * @param paragraphPatch - 적용할 ParagraphStyle 부분 객체 (제공된 필드만)
+   * @returns 주입이 수행되었으면 `true`
+   */
+  applyTextStyle(textPatch: Partial<TextStyle> = {}, paragraphPatch: Partial<ParagraphStyle> = {}): boolean {
+    if (this._focusedController) {
+      this._focusedController._applyTextStyle(textPatch, paragraphPatch);
+      return true;
+    }
+
+    // 포커스 없이 selected 상태인 paragraph / paragraph-box 경로
+    const target = this._resolveSelectedParagraphTarget();
+    if (!target) return false;
+
+    return this._applyParagraphLevelStyle(target, textPatch, paragraphPatch);
+  }
+
+  /**
+   * 레이아웃 선택 상태에서 스타일 주입 대상 paragraph를 찾는다.
+   *
+   * selected 요소가 paragraph이면 그대로, content-type='paragraph' box면
+   * 그 box의 contentElement(단일 paragraph)를 반환한다. 복수 선택이면 null.
+   */
+  private _resolveSelectedParagraphTarget(): LayoutParagraphElement | null {
+    if (this._selectedLayouts.length !== 1) return null;
+    const el = this._selectedLayouts[0];
+    if (el instanceof LayoutParagraphElement) return this._paragraphEditableForStyleInjection(el) ? el : null;
+    if (el instanceof LayoutBoxElement && el.contentType === 'paragraph') {
+      const content = el.contentElement;
+      if (content instanceof LayoutParagraphElement) {
+        return this._paragraphEditableForStyleInjection(content) ? content : null;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 스타일 주입 대상 paragraph가 편집 가능한지 판정한다.
+   * lock 등 편집 제한을 `isParagraphEditable`로 재사용한다.
+   */
+  private _paragraphEditableForStyleInjection(paragraph: LayoutParagraphElement): boolean {
+    if (this.textEditMode) {
+      return this.isParagraphEditable(paragraph);
+    }
+    const parentBox = paragraph.parentElement instanceof LayoutBoxElement ? paragraph.parentElement : null;
+    return !parentBox || !this._isBoxOrAncestorLocked(parentBox);
+  }
+
+  /**
+   * paragraph 자체 스타일에 부분 업데이트를 적용하고, 명시 주입 필드를
+   * 내부 모든 인라인 런에 캐스케이드한 뒤 런 맵을 정규화한다.
+   *
+   * 컨트롤러가 없는(포커스 없는) selected 상태에서 동작하므로 런 맵은
+   * `inlineToPlain(model.textContent)`에서 직접 추출한다.
+   */
+  private _applyParagraphLevelStyle(
+    paragraph: LayoutParagraphElement,
+    textPatch: Partial<TextStyle>,
+    paragraphPatch: Partial<ParagraphStyle>,
+  ): boolean {
+    const model = paragraph.model;
+    if (!model) return false;
+
+    model.textStyle = { ...model.textStyle, ...textPatch };
+    model.paragraphStyle = { ...model.paragraphStyle, ...paragraphPatch };
+
+    const { runMap } = inlineToPlain(model.textContent);
+    const INLINE_FIELDS = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "color"] as const;
+    // 문단 기본을 '주입 후' 값으로 비교해야 캐스케이드로 기본과 같아진 필드가 정리된다
+    const paragraphTextStyle = model.effectiveTextStyle;
+
+    for (const entry of runMap) {
+      if (!entry.style) continue;
+      entry.style = { ...entry.style, ...textPatch };
+      for (const field of INLINE_FIELDS) {
+        if (entry.style[field] === paragraphTextStyle[field]) {
+          delete entry.style[field];
+        }
+      }
+    }
+
+    const normalized = normalizeRunMap(runMap, model.effectiveTextStyle);
+    model.textContent = plainToInline(inlineToPlain(model.textContent).text, normalized);
+    paragraph.layout();
+    paragraph.scheduleRender();
+    return true;
   }
 
   /**
@@ -2439,6 +2550,9 @@ export class EditManager {
       previousParagraph: previousParagraph ?? undefined,
       previousController: previousController ?? undefined,
     };
+    if (type === 'styleChange' && controller) {
+      event.style = controller.currentStyle;
+    }
 
     this._dispatching = true;
     try {

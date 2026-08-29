@@ -282,9 +282,11 @@ flowchart LR
 |-----|------|------|
 | `cursorOffset` | `number` get | 현재 커서 위치를 소스 텍스트 오프셋(0-based, `\n` 포함)으로 반환한다. |
 | `selection` | `SelectionRange \| null` get | 현재 선택 영역을 반환한다. 선택이 없으면 `null`이다. |
-| `currentStyle` | `CurrentStyle` get | 현재 커서 위치에서 유효한 `TextStyle`과 `ParagraphStyle`을 반환한다. 단락 수준 스타일 + 상속 스타일을 병합하고, 커서가 위치한 인라인 런의 `TextInlineStyle`(`getStyleAtOffset(runMap, offset)`)로 오버라이드한 결과이다. |
+| `currentStyle` | `CurrentStyle` get | 현재 커서/선택 위치에서 유효한 `TextStyle`과 `ParagraphStyle`을 반환한다. 상속 스타일 + 문단 스타일 + 인라인 런 스타일을 병합한 **최종(effective) 스타일**이다. selection이 있으면 영역 내 모든 위치에서 **공통인 필드만** 반환하며(상이한 필드는 생략), selection이 없으면 커서 위치의 최종 스타일을 반환한다. |
+| `computeSelectionCommonStyle(start, end)` | `CurrentStyle` | `[start, end)` 범위 내 모든 오프셋의 유효 스타일을 비교해 공통 필드만 반환한다. `currentStyle`의 selection 경로가 내부적으로 사용하는 메서드로, 외부에서도 직접 호출 가능하다. |
 | `applyInlineStyle(style)` | `void` | 현재 선택 영역에 인라인 스타일(`Partial<TextInlineStyle>`)을 적용한다. 선택 영역이 없으면 무시. `runMap`을 갱신하고 `plainToInline`으로 `model.textContent`를 재구성한 뒤 재렌더링한다. |
 | `toggleInlineStyle(field, value)` | `void` | 현재 선택 영역의 인라인 스타일 필드를 토글한다. 선택 영역 전체가 이미 해당 값이면 제거(기본 복귀), 아니면 적용한다. `Ctrl+B`(fontWeight 700), `Ctrl+I`(fontStyle italic) 단축키가 이 메서드를 호출한다. |
+| `normalizeNow()` | `void` | 현재 런 맵을 문단 유효 텍스트 스타일 기준으로 정규화한다. 문단 기본과 모든 필드가 동일한 런은 해제하고 인접 동일 런을 병합한다. 텍스트 길이가 변하지 않으므로 커서/selection 오프셋은 불변. 포커스 획득/blur 시 자동 호출된다. |
 | `focus()` | `void` | 숨겨진 `textarea`에 포커스를 주어 커서를 표시한다. |
 | `blur()` | `void` | 숨겨진 `textarea`에서 포커스를 해제하여 커서를 숨긴다. |
 | `setCursor(position: CursorPosition)` | `void` | 프로그래밍 방식으로 커서 위치를 설정한다. |
@@ -478,6 +480,7 @@ InheritStyle (부모에서 상속)
 | `currentStyle` | `CurrentStyle \| null` get | 현재 커서 위치의 유효 스타일. 포커스된 단락이 없으면 `null`. |
 | `applyInlineStyle(style)` | `void` | 포커스된 단락의 현재 선택 영역에 인라인 스타일(`Partial<TextInlineStyle>`)을 적용한다. 선택 영역이 없거나 포커스된 단락이 없으면 무시. |
 | `toggleInlineStyle(field, value)` | `void` | 포커스된 단락의 현재 선택 영역에서 인라인 스타일 필드를 토글한다. 선택 영역 전체가 이미 해당 값이면 제거, 아니면 적용. |
+| `applyTextStyle(textPatch?, paragraphPatch?)` | `boolean` | 텍스트/문단 스타일 주입의 단일 진입점. 편집 상태에 따라 주입 대상을 판별한다: (1) 포커스 + selection → 선택 범위 인라인 주입, (2) 포커스 + 커서가 런 안 → 해당 런만 업데이트, (3) 포커스 + 커서가 런 밖 → paragraph 스타일 수정 + 명시 필드 전체 캐스케이드, (4) 포커스 없이 paragraph/paragraph-box(selected) → 대상 paragraph 스타일 + 전체 캐스케이드. 인라인 불가 필드(textAlign, lineGap, verticalAlign, letterSpacing, widthRatio)는 항상 paragraph로 라우팅. 처리 후 런 맵 정규화 + 커서/selection 보존. |
 | `controllers` | `Set<TextEditController>` get | 등록된 모든 편집 컨트롤러. |
 | `focusParagraph(target, options?)` | `boolean` | 단락 요소 또는 ID로 포커스를 설정한다. 텍스트 편집 모드가 아니면 자동 활성화. `options.cursorOffset`으로 커서 위치, `options.selection`으로 선택 영역을 지정할 수 있다. 성공 시 `true`, 실패 시 `false`. |
 | `blurParagraph(target?)` | `boolean` | 단락 요소, ID, 또는 생략으로 포커스를 해제한다. 생략하면 현재 포커스된 단락을 blur. 성공 시 `true`, 실패 시 `false`. |
@@ -503,10 +506,34 @@ InheritStyle (부모에서 상속)
 |--------|----------|------------------------|
 | `focusChange` | 포커스가 다른 단락으로 이동할 때 | `paragraph`, `controller`, `previousParagraph`, `previousController` |
 | `textChange` | 텍스트 내용이 변경될 때 (입력, 삭제, 붙여넣기, 줄바꿈) | `paragraph`, `controller` |
-| `styleChange` | 커서 위치가 변경되어 유효 스타일이 달라질 때 | `paragraph`, `controller` |
+| `styleChange` | 커서 위치/선택 영역이 변경되어 유효 스타일이 달라질 때. **`style` 페이로드에 현재 유효 스타일이 담긴다** — selection이 없으면 커서 위치의 최종 스타일, selection이 있으면 영역 내 공통 필드만 (상이한 필드는 생략) | `paragraph`, `controller`, `style` |
 | `cursorMove` | 커서 위치가 변경될 때. 키보드 연속 입력 시 모든 KeyDown과 마지막 KeyUp에 발생 | `paragraph`, `controller` |
 | `selectionStart` | 텍스트 선택이 생성될 때 (드래그 시작, 더블클릭, Ctrl+A, triple-click) | `paragraph`, `controller` |
-| `selectionEnd` | 텍스트 선택이 확정/제거될 때 (드래그 종료, 더블클릭, Ctrl+A, triple-click, ESC 해제) | `paragraph`, `controller` |
+| `selectionEnd` | 텍스트 선택이 확정/제거될 때 (드래그 종료, 더블클릭, Ctrl+A, triple-click, ESC 해제). 드래그 종료 시 `styleChange`도 함께 발생 | `paragraph`, `controller` |
+
+#### `styleChange` 이벤트의 `style` 페이로드
+
+`styleChange`는 유효 스타일이 실제로 변경되었을 때만 발생하며, 이벤트 객체의 `style` 필드로 현재 스타일을 즉시 조회할 수 있다 (호스트가 별도로 `manager.currentStyle`을 읽을 필요 없음).
+
+```ts
+manager.addEventListener('styleChange', (e) => {
+  const { textStyle, paragraphStyle } = e.style;
+  // 툴바 상태 갱신에 그대로 사용
+});
+
+manager.addEventListener('cursorMove', (e) => {
+  // cursorMove에는 style 페이로드가 없다 — 필요하면 manager.currentStyle 조회
+});
+```
+
+**스타일 계산 규칙**:
+
+| 상태 | 반환 값 |
+|------|---------|
+| selection 없음 (커서만) | 커서 위치의 **최종 스타일** — 상속값 + 문단 스타일 + 커서가 속한 런의 `TextInlineStyle`을 병합 |
+| selection 있음 | 영역 내 모든 오프셋의 유효 스타일을 비교해 **공통 필드만**. 영역 내에 상이한 값이 있는 필드는 생략 (`undefined` 처리와 동일) |
+
+selection 공통값 판정은 인라인 가능 필드(`color`, `fontFamily`, `fontWeight`, `fontStyle`, `fontSize`)에 대해 수행된다. `paragraphStyle`은 selection이 있어도 문단 단위 속성이므로 항상 현재 문단의 유효값을 반환한다.
 
 ```ts
 type EditManagerEventType =
@@ -523,6 +550,7 @@ interface EditManagerEvent {
   controller: TextEditController;
   previousParagraph?: LayoutParagraphElement | null;
   previousController?: TextEditController | null;
+  style?: CurrentStyle;  // styleChange 이벤트에서만
 }
 
 type EditManagerEventListener = (event: EditManagerEvent) => void;
@@ -1399,6 +1427,7 @@ type RunMap = RunEntry[];
 | `applyStyleToRange(runMap, start, end, style)` | 범위에 스타일 적용. 기존 런 경계를 가로지르면 분할하고, 인접 동일 스타일 런은 병합. `applyInlineStyle`/`toggleInlineStyle`이 사용. |
 | `shiftRunMap(runMap, at, delta)` | `at` 위치 이후의 런 offset을 `delta`만큼 이동. 걸친 런은 `end`만 이동(삽입 시 연장, 삭제 시 단축). 입력/삭제/붙여넣기/조합 확정 시 사용. |
 | `mergeAdjacentSameStyle(runMap)` | 인접 동일 스타일 런 병합 + 빈 런 제거 (정규화). |
+| `normalizeRunMap(runMap, paragraphTextStyle)` | 문단 유효 텍스트 스타일 기준 정규화. 상세는 § 6A.5. |
 
 ### 6A.3 편집 동기화 흐름
 
@@ -1412,10 +1441,80 @@ type RunMap = RunEntry[];
 | IME 확정 (`compositionend`) | 조합 길이만큼 `shiftRunMap(start, composedLength)` — 1회 |
 | 조합 취소 (`compositioncancel`) | 런 맵 갱신 없이 원본 복원 |
 | `applyInlineStyle` / `toggleInlineStyle` | `applyStyleToRange` |
+| `applyTextStyle` (상태 기반 라우팅) | 커서 상태별 상이 — 상세는 § 6A.5.1 판별표 |
 
 **불일치 안전망**: `postRender()`는 `inlineToPlain(model.textContent)` 결과가 `textarea.value`와 다르면(외부에서 `data` setter로 content를 교체한 경우 등) textarea와 런 맵을 모두 model 기준으로 재동기화한다.
 
-### 6A.4 사용 예시
+### 6A.5 정규화 (normalize)
+
+`normalizeRunMap(runMap, paragraphEffectiveTextStyle)`은 런 맵을 문단 기본 스타일 기준으로 정규화한다:
+
+1. **런 해제**: 런에 정의된 모든 필드가 문단 유효 텍스트 스타일과 동일하면 `style: undefined`로 복귀 — 문단과 차이가 없는 런은 인라인 구조를 유지할 의미가 없다. 런의 일부 필드만 문단과 같고 다른 필드가 다르면 유지한다(전체 해제만 수행; 필드 단위 정리는 캐스케이드가 담당 — § 6A.5.1).
+2. **병합**: 인접 동일 스타일 런을 병합한다.
+
+정규화는 텍스트 길이를 바꾸지 않으므로 오프셋이 불변이며, 다음 시점에 자동 수행된다:
+
+- 포커스 획득 시 (`_onFocus` → `normalizeNow`)
+- blur 시 (`_onBlur` → `normalizeNow`)
+- `applyTextStyle` 주입 후
+
+정규화 결과에 `style: undefined` 런과 무스타일 구간이 인접하면 `mergeAdjacentSameStyle` 규칙으로 하나로 합쳐진다. 최종 content 배열은 항상 최소 런 형태를 유지한다: 런이 전혀 없으면 단일 `string`, 있으면 `(string | TextInlineData)[]`.
+
+### 6A.5.1 `EditManager.applyTextStyle` — 스타일 주입 라우팅
+
+호스트 프로그램은 **인라인 데이터를 직접 생성하지 않는다.** 텍스트/문단 스타일 주입은 `EditManager.applyTextStyle(textPatch?, paragraphPatch?)` 단일 진입점이 편집 상태를 판별하여 대상을 결정한다. 편집컨트롤러가 존재하는 DOM 레이어에서 스타일 주입의 책임을 가진다 (엔진은 순수 계산만 담당).
+
+#### 판별표
+
+| 편집 상태 | 인라인 가능 필드<sup>※1</sup> | 인라인 불가 필드<sup>※2</sup> |
+|-----------|------------------------------|------------------------------|
+| 텍스트편집모드, 포커스 + **selection 있음** | 선택 범위에 런 주입 (`applyStyleToRange`). 이미 런이 있으면 **새 런을 만들지 않고 해당 필드만 오버라이드** | paragraph |
+| 텍스트편집모드, 포커스 + selection 없음 + **커서가 런 안** | **해당 런만** 업데이트. paragraph는 무변경 | paragraph |
+| 텍스트편집모드, 포커스 + selection 없음 + **커서가 런 밖(평문)** | **paragraph 자체 스타일** 수정 + 명시 주입 필드를 **내부 모든 런에 캐스케이드** | paragraph |
+| 포커스 없음 + **paragraph 또는 paragraph-box selected** | 대상 paragraph 자체 스타일 수정 + 명시 주입 필드 전체 캐스케이드 | paragraph |
+
+> ※1 인라인 가능 필드: `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color` (TextInlineStyle에 존재)
+> ※2 인라인 불가 필드: `textAlign`, `lineGap`, `verticalAlign` (ParagraphStyle), `letterSpacing`, `widthRatio`, `spaceRatio`, `indent` (TextStyle 중 인라인 미지원) — **항상 paragraph에 적용**
+
+#### paragraph-box 선택 시 대상 결정
+
+- `content-type='paragraph'` box는 바로 하위에 paragraph를 **하나만** 가진다.
+- box가 selected면 그 box의 `contentElement`(단일 paragraph)가 주입 대상이다.
+- paragraph 자체가 selected면 그 paragraph가 대상이다.
+- 복수 선택이거나 대상을 찾지 못하면 주입이 수행되지 않는다(`false` 반환).
+
+#### 캐스케이드(cascade) 동작
+
+커서가 런 밖이거나 selected 경로에서 paragraph 스타일을 수정할 때, **사용자가 명시적으로 주입한 필드만** paragraph 내부 **모든 인라인 런**에 일괄 적용된다:
+
+- 예: `applyTextStyle({ fontFamily: 'Batang' })` → `paragraph.textStyle.fontFamily = 'Batang'` + 모든 런의 fontFamily가 'Batang'으로 교체. 런의 fontSize/색 등 **다른 필드는 유지**.
+- 이는 paragraph 레벨 변경의 시각적 결과가 전체 텍스트에 반영되도록 하기 위함이다 — 런이 fontFamily 오버라이드를 가지면 문단 폰트 변경의 영향을 받지 않기 때문.
+
+#### 캐스케이드 후 필드 정리
+
+캐스케이드로 런 필드가 **주입 후의** 문단 기본값과 동일해지면 해당 필드는 런에서 **제거**된다 (문단 기본을 따르는 중복이므로). 비교는 반드시 paragraph 스타일 갱신 **이후**의 `effectiveTextStyle`로 수행한다 — 갱신 전 값으로 비교하면 캐스케이드로 기본과 같아진 필드가 런에 남는 버그가 발생한다.
+
+> 예: 문단 기본 fontSize 4, 런 A = `{ fontSize: 7 }`. `applyTextStyle({ fontSize: 7 })`을 실행하면 문단 기본이 7이 되고 캐스케이드로 런의 fontSize도 7이 된다. 주입 후 기본(7)과 비교하므로 런의 fontSize 필드는 제거되고, 런에 다른 차이 필드가 없으면 `normalizeRunMap`이 런을 완전히 해제한다.
+
+#### 커서/selection 보존
+
+스타일 주입과 정규화는 텍스트 길이를 변경하지 않는다. 처리 전 `_cursorModel.offset` / `selection`을 캡처하고, 처리 후 동일 오프셋으로 복원하며 `textarea.setSelectionRange`와 커서/selection DOM을 재동기화한다.
+
+#### 내부 구성 요소
+
+| 구성 요소 | 파일 | 역할 |
+|-----------|------|------|
+| `EditManager.applyTextStyle` | `src/edit/edit-manager.ts` | 진입점. 편집 상태 판별 후 컨트롤러 위임 or selected 경로 직접 처리 |
+| `EditManager._resolveSelectedParagraphTarget` | 同 | selected paragraph / paragraph-box → 대상 paragraph 탐색 |
+| `EditManager._applyParagraphLevelStyle` | 同 | 컨트롤러 없는 selected 경로: 부분 업데이트 + 캐스케이드 + 정규화 |
+| `TextEditController._applyTextStyle` | `src/edit/text-edit-controller.ts` | 포커스 있는 3방향 라우팅(selection/런 안/런 밖) 실행 + 커서/selection 보존 |
+| `TextEditController.normalizeNow` | 同 | 런 맵 정규화 + content 재구성 + 커서/selection 보존. 포커스/blur 시 자동 호출 |
+
+#### React 계층
+
+`useEditManager` 훅이 `applyTextStyle(textPatch?, paragraphPatch?)`를 노출한다. React 호스트 UI(툴바 등)는 이 메서드만 호출하면 된다.
+
+### 6A.6 사용 예시
 
 ```ts
 // EditManager API로 선택 영역에 스타일 적용
@@ -1427,6 +1526,22 @@ manager.toggleInlineStyle('fontWeight', 700);
 
 // 키보드 단축키: Ctrl+B = toggleInlineStyle('fontWeight', 700)
 //               Ctrl+I = toggleInlineStyle('fontStyle', 'italic')
+
+// ─── applyTextStyle: 상태 기반 스타일 주입 ───
+
+// 텍스트편집모드에서 커서가 런 안이면 그 런만, 런 밖이면 paragraph + 전체 캐스케이드
+manager.applyTextStyle({ fontFamily: 'Batang' });
+
+// 정렬/행간 등 인라인 불가 필드는 항상 paragraph에 적용
+manager.applyTextStyle({}, { textAlign: 'center', lineGap: 1.8 });
+
+// 동시 주입: 컬러(인라인 가능) + 정렬(인라인 불가) — 커서 상태로 각각 라우팅
+manager.applyTextStyle({ color: 'darkred' }, { textAlign: 'right' });
+
+// 레이아웃 편집 모드 등 포커스 없이 box/paragraph가 selected인 상태라면
+// 동일 호출이 대상 paragraph의 자체 스타일을 수정 + 전체 캐스케이드한다
+const box = manager.selectedLayouts[0];
+manager.applyTextStyle({ fontWeight: 500 });
 ```
 
 ---
@@ -2175,6 +2290,7 @@ function redo() {
 | 제약 | 설명 | 이유 및 향후 개선 방향 |
 |------|------|------------------------|
 | 인라인 스타일 편집 (구현됨) | 굵게, 기울임, 글자 색상/크기/폰트 편집은 `EditManager.applyInlineStyle()` / `toggleInlineStyle()`(또는 `Ctrl+B` / `Ctrl+I`)로 지원한다. | 내부적으로 `RunMap`(`src/edit/run-map.ts`)이 textarea 평문 오프셋 ↔ 인라인 런 매핑을 관리한다. 입력/삭제(`shiftRunMap`), 스타일 적용(`applyStyleToRange`), IME 조합(조합 중 임시 확장 + 확정 시 shift)이 모두 런 맵과 동기화된다. `plainToInline`은 runMap이 덮지 않은 구간(갭/앞/뒤)을 기본 스타일로 채워 런 경계 편집 시 글자 유실을 방지한다. |
+| 상태 기반 스타일 주입 (구현됨) | 텍스트/문단 스타일 주입은 `EditManager.applyTextStyle()` 단일 진입점이 담당한다. 커서/선택 상태에 따라 주입 대상(런 또는 paragraph)이 결정된다. | 판별표와 캐스케이드 동작은 § 6A.5.1 참조. 호스트는 인라인 데이터를 직접 생성하지 않는다. 정규화(`normalizeRunMap`)가 문단 기본과 동일한 런을 자동 해제하므로 content 배열은 항상 최소 런 형태를 유지한다. 정규화는 포커스/blur/주입 시 자동 수행된다. |
 | 단일 단락 편집 | 단락을 넘어가는 선택이나 여러 단락 동시 편집은 지원하지 않는다. | `_cursorModel`과 `_selectionAnchor`가 하나의 `LayoutParagraphElement`에만 연결. 향후 문서 전역 `TextEditController`와 paragraph 간 매핑이 필요하다. |
 | undo/redo 없음 | 실행 취소/다시 실행 스택은 호스트 프로그램이 직접 구현해야 한다. | 텍스트 변경 이력을 보관하면 메모리/복잡도 증가. 라이브러리는 최소한의 상태만 유지하고, 호스트가 정책을 결정하도록 설계되었다. |
 | 드래그 앤 드롭 없음 | 텍스트를 마우스로 끌어 이동하는 기능은 지원하지 않는다. | 선택 핸들과 drop target 계산이 추가로 필요. 클립보드 기반 잘라내기/붙여넣기로 대체 가능하다. |

@@ -1810,6 +1810,9 @@ class EditManager {
   applyInlineStyle(style: Partial<TextInlineStyle>): void;
   toggleInlineStyle<K extends keyof TextInlineStyle>(field: K, value: NonNullable<TextInlineStyle[K]>): void;
 
+  // 텍스트/문단 스타일 주입 (상태 기반 라우팅)
+  applyTextStyle(textPatch?: Partial<TextStyle>, paragraphPatch?: Partial<ParagraphStyle>): boolean;
+
   // 휘발성 표시 토글
   get showPlaceholderBorders: boolean;
   set showPlaceholderBorders(value: boolean): void;
@@ -1863,6 +1866,14 @@ interface EditManagerEvent {
   controller: TextEditController | null;
   previousParagraph?: LayoutParagraphElement | null;
   previousController?: TextEditController | null;
+  /**
+   * 커서/선택 위치의 유효 스타일 (styleChange 이벤트에서만 제공).
+   *
+   * selection이 없으면 커서 위치의 최종 스타일(상속 + 문단 + 런 병합),
+   * selection이 있으면 영역 내 모든 위치에서 공통인 필드만 담긴다 —
+   * 영역 내에 상이한 값이 있는 필드는 생략된다.
+   */
+  style?: CurrentStyle;
   selectedLayouts?: LayoutElement[];
   previousLayouts?: LayoutElement[];
   layoutElement?: LayoutElement;
@@ -1953,6 +1964,53 @@ toggleInlineStyle<K extends keyof TextInlineStyle>(
 
 > **참고**: 키보드 단축키 `Ctrl+B`(굵게), `Ctrl+I`(기울임)는 이 메서드를 호출한다.
 > 편집 데이터 구조의 상세는 `EDITING_TEXT.md` § 6A(RunMap) 참조.
+
+```ts
+/**
+ * 텍스트/문단 스타일 주입의 단일 진입점. 편집 상태에 따라 주입 대상을 판별한다.
+ *
+ * - 포커스 + selection 있음 → 선택 범위에 인라인 주입 (기존 런은 필드 오버라이드)
+ * - 포커스 + 커서가 인라인 런 안 → 해당 런만 업데이트 (paragraph 무변경)
+ * - 포커스 + 커서가 런 밖 → paragraph 스타일 수정 + 명시 필드를 모든 런에 캐스케이드
+ * - 포커스 없음 + paragraph 또는 content-type='paragraph' box가 selected →
+ *   대상 paragraph 수정 + 전체 캐스케이드
+ *
+ * 인라인에 주입 불가한 필드(textAlign, lineGap, verticalAlign,
+ * letterSpacing, widthRatio)는 항상 paragraph에 적용된다.
+ * 처리 후 런 맵을 정규화하고 커서/selection 위치를 보존한다.
+ *
+ * @param textPatch - TextStyle 부분 객체 (제공된 필드만 부분 업데이트)
+ * @param paragraphPatch - ParagraphStyle 부분 객체
+ * @returns 주입이 수행되었으면 true
+ *
+ * @example
+ * const manager = layoutDocEl.editManager;
+ * // 폰트 변경: 커서 상태에 따라 런 또는 paragraph + 전체 캐스케이드
+ * manager.applyTextStyle({ fontFamily: 'Batang' });
+ * // 정렬 변경: 항상 paragraph
+ * manager.applyTextStyle({}, { textAlign: 'center' });
+ */
+applyTextStyle(
+  textPatch?: Partial<TextStyle>,
+  paragraphPatch?: Partial<ParagraphStyle>,
+): boolean;
+```
+
+**주입 대상 판별표** (`EDITING_TEXT.md` § 6A.5.1 상세):
+
+| 편집 상태 | 인라인 가능 필드<sup>※1</sup> | 인라인 불가 필드<sup>※2</sup> |
+|-----------|------------------------------|------------------------------|
+| 포커스 + selection 있음 | 선택 범위 런 주입/업데이트 | paragraph |
+| 포커스 + 커서가 런 안 | 해당 런만 업데이트 | paragraph |
+| 포커스 + 커서가 런 밖 | paragraph + 전체 캐스케이드 | paragraph |
+| 포커스 없음 + paragraph/paragraph-box selected | 대상 paragraph + 전체 캐스케이드 | paragraph |
+
+> ※1 `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`
+> ※2 `textAlign`, `lineGap`, `verticalAlign`, `letterSpacing`, `widthRatio`
+
+**캐스케이드**: 커서가 런 밖이거나 selected 경로에서 paragraph 스타일을 수정하면, 명시 주입 필드가 내부 모든 인라인 런에 일괄 적용된다. 캐스케이드로 런 필드가 주입 후의 문단 기본과 동일해지면 그 필드는 런에서 제거되고, 모든 필드가 동일해진 런은 `normalizeRunMap`이 해제한다. 정규화는 포커스 획득/blur 시에도 자동 수행된다. 병합·해제 규칙의 상세는 `EDITING_TEXT.md` § 6A.5 참조.
+
+**paragraph-box**: `content-type='paragraph'` box는 바로 하위에 paragraph를 하나만 가지므로, box가 selected일 때 그 box의 `contentElement`(단일 paragraph)가 주입 대상이 된다.
 
 #### 텍스트 편집 모드
 
@@ -3379,7 +3437,7 @@ doc.data = exampleData;
 | `render-error` | 단락 오버플로우 시 | `<x-layout-paragraph>` | `{ id, type: 'text-overflow', overflow: number }` |
 | EditManager `focusChange` | 포커스 변경 | `EditManager` | `{ paragraph, controller, previousParagraph, previousController }` |
 | EditManager `textChange` | 텍스트 변경 | `EditManager` | `{ paragraph, controller }` |
-| EditManager `styleChange` | 스타일 변경 | `EditManager` | `{ paragraph, controller }` |
+| EditManager `styleChange` | 스타일 변경 | `EditManager` | `{ paragraph, controller, style: CurrentStyle }` — `style`은 커서 위치의 최종 스타일 또는 selection 공통값(상이 필드 생략) |
 | EditManager `selectionStart` | 선택 시작 | `EditManager` | `{ paragraph, controller }` |
 | EditManager `selectionEnd` | 선택 종료 | `EditManager` | `{ paragraph, controller }` |
 | EditManager `cursorMove` | 커서 이동 | `EditManager` | `{ paragraph, controller }` |

@@ -1,4 +1,4 @@
-import type { TextInlineStyle, TextInlineData } from "@/types";
+import type { TextInlineStyle, TextInlineData, TextStyle } from "@/types";
 
 /**
  * 평문 텍스트와 인라인 스타일 런(run)의 매핑.
@@ -241,4 +241,56 @@ function inlineStyleEqual(a: TextInlineStyle | undefined, b: TextInlineStyle | u
     a.fontStyle === b.fontStyle &&
     a.color === b.color
   );
+}
+
+/**
+ * 런 맵을 문단 기본 스타일 기준으로 정규화한다.
+ *
+ * 1. 문단 유효 텍스트 스타일과 **정의된 필드가 모두 동일한** 런은 해제한다
+ *    (`style: undefined`로 복귀) — 문단과 차이가 없는 런은 인라인 구조를
+ *    유지할 의미가 없다.
+ * 2. 인접한 동일 스타일 런을 병합한다 (`mergeAdjacentSameStyle`과 동일 규칙).
+ *
+ * 텍스트 길이를 변경하지 않으므로 모든 오프셋은 불변이다.
+ *
+ * @param runMap - 원본 런 맵
+ * @param paragraphTextStyle - 문단의 유효 텍스트 스타일 (`ParagraphEngine.effectiveTextStyle`)
+ * @returns 정규화된 새 런 맵
+ */
+export function normalizeRunMap(runMap: RunMap, paragraphTextStyle: TextStyle): RunMap {
+  const result: RunMap = [];
+  for (const entry of runMap) {
+    if (entry.start >= entry.end) continue;
+
+    let style: TextInlineStyle | undefined = entry.style;
+    if (style && inlineStyleMatchesParagraph(style, paragraphTextStyle)) {
+      style = undefined;
+    }
+
+    const prev = result[result.length - 1];
+    if (prev && prev.end === entry.start && inlineStyleEqual(prev.style, style)) {
+      prev.end = entry.end;
+    } else {
+      result.push({ start: entry.start, end: entry.end, style });
+    }
+  }
+  return result;
+}
+
+/**
+ * 런의 인라인 스타일이 문단 유효 텍스트 스타일과 동일한지 판정한다.
+ *
+ * 런에 정의된 모든 필드가 문단 기본과 같으면 `true`. 런에 정의되지 않은
+ * 필드(undefined)는 문단 기본을 따르는 것이므로 비교에서 제외한다.
+ */
+function inlineStyleMatchesParagraph(
+  style: TextInlineStyle,
+  paragraphTextStyle: TextStyle,
+): boolean {
+  if (style.fontFamily !== undefined && style.fontFamily !== paragraphTextStyle.fontFamily) return false;
+  if (style.fontSize !== undefined && style.fontSize !== paragraphTextStyle.fontSize) return false;
+  if (style.fontWeight !== undefined && style.fontWeight !== paragraphTextStyle.fontWeight) return false;
+  if (style.fontStyle !== undefined && style.fontStyle !== paragraphTextStyle.fontStyle) return false;
+  if (style.color !== undefined && style.color !== paragraphTextStyle.color) return false;
+  return true;
 }

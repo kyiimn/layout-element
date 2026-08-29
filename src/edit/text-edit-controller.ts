@@ -7,7 +7,7 @@ import type { TextLineData } from "@/types/layout/text/text-line.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
 import { DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
-import { RunMap, inlineToPlain, plainToInline, shiftRunMap, getStyleAtOffset, applyStyleToRange } from "./run-map";
+import { RunMap, inlineToPlain, plainToInline, shiftRunMap, getStyleAtOffset, applyStyleToRange, normalizeRunMap, mergeAdjacentSameStyle } from "./run-map";
 
 /**
  * 커서 위치에서 유효한 스타일 정보.
@@ -205,6 +205,14 @@ export class TextEditController {
     const model = this._paragraph.model;
     if (!model) return { textStyle: {}, paragraphStyle: {} };
 
+    const sel = this._cursorModel.selection;
+    if (sel) {
+      const { start, end } = sel.normalized();
+      if (start.textOffset < end.textOffset) {
+        return this.computeSelectionCommonStyle(start.textOffset, end.textOffset);
+      }
+    }
+
     // 1. 단락 수준 스타일 + 상속 스타일 병합
     const inheritStyle = model.inheritStyle ?? {};
     const baseTextStyle: TextStyle = {
@@ -235,6 +243,77 @@ export class TextEditController {
     };
 
     return { textStyle: effectiveTextStyle, paragraphStyle: baseParagraphStyle };
+  }
+
+  /**
+   * selection 영역 내 모든 오프셋의 유효 스타일을 비교하여 공통값만 남긴다.
+   *
+   * 각 필드는 영역 내 모든 위치에서 동일한 값만 반환하고, 하나라도 상이하면
+   * `undefined`로 지운다. 상속값 + 문단 스타일 + 런 스타일 순으로 병합한
+   * 최종(effective) 스타일 기준으로 비교한다.
+   *
+   * @param startOffset - selection 시작 오프셋 (포함)
+   * @param endOffset - selection 끝 오프셋 (미포함)
+   * @returns 공통 스타일. 상이한 필드는 해당 객체에서 생략됨
+   */
+  computeSelectionCommonStyle(startOffset: number, endOffset: number): CurrentStyle {
+    const model = this._paragraph.model;
+    if (!model) return { textStyle: {}, paragraphStyle: {} };
+
+    const inheritStyle = model.inheritStyle ?? {};
+    const baseTextStyle: TextStyle = {
+      color: model.textStyle?.color ?? inheritStyle.color,
+      fontFamily: model.textStyle?.fontFamily ?? inheritStyle.fontFamily,
+      fontWeight: model.textStyle?.fontWeight ?? inheritStyle.fontWeight,
+      fontStyle: model.textStyle?.fontStyle ?? inheritStyle.fontStyle,
+      fontSize: model.textStyle?.fontSize ?? inheritStyle.fontSize,
+      letterSpacing: model.textStyle?.letterSpacing ?? inheritStyle.letterSpacing ?? DEFAULT_LETTER_SPACING,
+      widthRatio: model.textStyle?.widthRatio ?? inheritStyle.widthRatio ?? DEFAULT_WIDTH_RATIO,
+    };
+    const baseParagraphStyle: ParagraphStyle = {
+      lineGap: model.paragraphStyle?.lineGap ?? inheritStyle.lineGap,
+      verticalAlign: model.paragraphStyle?.verticalAlign ?? inheritStyle.verticalAlign ?? DEFAULT_VERTICAL_ALIGN,
+      textAlign: model.paragraphStyle?.textAlign ?? inheritStyle.textAlign ?? DEFAULT_TEXT_ALIGN,
+    };
+
+    const COMMON_FIELDS: (keyof TextStyle)[] = ["color", "fontFamily", "fontWeight", "fontStyle", "fontSize"];
+
+    const commonTextStyle: TextStyle = {};
+
+    let first = true;
+    for (let offset = startOffset; offset < endOffset; offset++) {
+      const inlineStyle = getStyleAtOffset(this._runMap, offset);
+      const offsetStyle: TextStyle = inlineStyle
+        ? {
+            ...baseTextStyle,
+            ...(inlineStyle.fontFamily !== undefined && { fontFamily: inlineStyle.fontFamily }),
+            ...(inlineStyle.fontSize !== undefined && { fontSize: inlineStyle.fontSize }),
+            ...(inlineStyle.fontWeight !== undefined && { fontWeight: inlineStyle.fontWeight }),
+            ...(inlineStyle.fontStyle !== undefined && { fontStyle: inlineStyle.fontStyle }),
+            ...(inlineStyle.color !== undefined && { color: inlineStyle.color }),
+          }
+        : baseTextStyle;
+
+      if (first) {
+        // 공통값 기준은 첫 offset의 유효 스타일이다. 문단 기본으로 초기화하면
+        // 런이 기본을 오버라이드한 순간 "상이"로 오판되어 필드가 삭제된다.
+        for (const field of COMMON_FIELDS) {
+          const value: string | number | undefined = offsetStyle[field];
+          if (value !== undefined) {
+            (commonTextStyle as Record<string, unknown>)[field] = value;
+          }
+        }
+        first = false;
+      } else {
+        for (const field of COMMON_FIELDS) {
+          if (commonTextStyle[field] !== undefined && commonTextStyle[field] !== offsetStyle[field]) {
+            delete commonTextStyle[field];
+          }
+        }
+      }
+    }
+
+    return { textStyle: commonTextStyle, paragraphStyle: baseParagraphStyle };
   }
 
   /**
@@ -624,6 +703,7 @@ export class TextEditController {
 
     if (this._cursorModel.selection) {
       this._manager._notifySelectionEnd(this);
+      this._emitStyleChange();
       this._manager._notifyCursorMove(this);
     }
   }
@@ -681,6 +761,7 @@ export class TextEditController {
     } else {
       this._cursorEl.visible = true;
     }
+    this.normalizeNow();
   }
 
   private _onBlur(): void {
@@ -705,6 +786,7 @@ export class TextEditController {
       }
     }
 
+    this.normalizeNow();
     this._cursorEl.visible = false;
   }
 
@@ -2181,7 +2263,12 @@ export class TextEditController {
    */
   setCursor(position: CursorPosition): void {
     const textContent = this._paragraph.model?.textContent;
-    const maxOffset = typeof textContent === 'string' ? textContent.length : 0;
+    let maxOffset = 0;
+    if (typeof textContent === 'string') {
+      maxOffset = textContent.length;
+    } else if (Array.isArray(textContent)) {
+      maxOffset = textContent.reduce((sum, item) => sum + (typeof item === 'string' ? item.length : item.content.length), 0);
+    }
     this._cursorModel.offset = Math.max(0, Math.min(position.textOffset, maxOffset));
     this._syncTextareaSelection();
     this._updateCursorPosition();
@@ -2211,6 +2298,134 @@ export class TextEditController {
       this._lastStyleJson = json;
       this._manager._notifyStyleChange(this);
     }
+  }
+
+  /**
+   * 텍스트/문단 스타일 주입의 단일 진입점.
+   *
+   * 커서/선택 상태에 따라 주입 대상을 라우팅한다:
+   * 1. selection 있음 → 선택 범위에 인라인 가능 필드를 주입 (`applyStyleToRange`,
+   *    기존 런은 필드 오버라이드). 인라인 불가 필드는 paragraph에 적용.
+   * 2. selection 없음 + 커서가 인라인 런 안 → 해당 런만 업데이트.
+   * 3. selection 없음 + 커서가 런 밖(평문) → paragraph 자체 스타일 수정
+   *    + 명시 주입 필드를 모든 인라인 런에 캐스케이드.
+   *
+   * 처리 후 런 맵을 정규화하고(문단 기본과 동일한 런 해제 + 병합),
+   * 커서/selection 위치를 보존한다. 텍스트 길이는 변하지 않으므로 오프셋은 불변.
+   *
+   * @param textPatch - 적용할 TextStyle 부분 객체
+   * @param paragraphPatch - 적용할 ParagraphStyle 부분 객체
+   */
+  _applyTextStyle(textPatch: Partial<TextStyle>, paragraphPatch: Partial<ParagraphStyle>): void {
+    const model = this._paragraph.model;
+    if (!model) return;
+
+    const INLINE_FIELDS = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "color"] as const;
+    const inlinePatch: Partial<TextInlineStyle> = {};
+    for (const field of INLINE_FIELDS) {
+      if (textPatch[field] !== undefined) {
+        (inlinePatch as Record<string, unknown>)[field] = textPatch[field];
+      }
+    }
+
+    const offset = this._cursorModel.offset;
+    const savedSelection = this._cursorModel.selection;
+
+    const hasSelection = savedSelection !== null &&
+      savedSelection.normalized().start.textOffset < savedSelection.normalized().end.textOffset;
+
+    const cursorRunStyle = getStyleAtOffset(this._runMap, offset);
+
+    if (hasSelection && Object.keys(inlinePatch).length > 0) {
+      // 1. selection 있음 → 선택 범위 인라인 주입 (기존 런은 필드 오버라이드)
+      const { start, end } = savedSelection!.normalized();
+      this._runMap = applyStyleToRange(this._runMap, start.textOffset, end.textOffset, inlinePatch);
+      // 주입으로 문단 기본과 동일해진 필드를 제거한다 — 예: 런 fontWeight가 700,
+      // 문단 기본이 500일 때 선택 영역에 500을 주입하면 fontWeight 필드는
+      // 기본을 따르는 중복이므로 제거되어 인접 런과 병합될 수 있다.
+      const paragraphTextStyle = model.effectiveTextStyle;
+      for (const entry of this._runMap) {
+        if (!entry.style) continue;
+        for (const field of INLINE_FIELDS) {
+          if (entry.style[field] === paragraphTextStyle[field]) {
+            delete entry.style[field];
+          }
+        }
+      }
+    } else if (!hasSelection && cursorRunStyle !== undefined && Object.keys(inlinePatch).length > 0) {
+      // 2. 커서가 인라인 런 안 → 해당 런만 업데이트
+      const run = this._runMap.find(r => r.start <= offset && r.end > offset && r.style === cursorRunStyle);
+      if (run && run.style) {
+        run.style = { ...run.style, ...inlinePatch };
+        this._runMap = mergeAdjacentSameStyle(this._runMap);
+      }
+    } else {
+      // 3. 커서가 런 밖(또는 inline patch 없음) → paragraph 자체 스타일 + 캐스케이드
+      if (Object.keys(textPatch).length > 0) {
+        model.textStyle = { ...model.textStyle, ...textPatch };
+      }
+      if (Object.keys(paragraphPatch).length > 0) {
+        model.paragraphStyle = { ...model.paragraphStyle, ...paragraphPatch };
+      }
+      if (Object.keys(inlinePatch).length > 0) {
+        // 문단 기본을 '주입 후' 값으로 비교해야 캐스케이드로 기본과 같아진 필드가 정리된다
+        const paragraphTextStyle = model.effectiveTextStyle;
+        for (const entry of this._runMap) {
+          if (entry.style) {
+            entry.style = { ...entry.style, ...inlinePatch };
+            for (const field of INLINE_FIELDS) {
+              if (entry.style[field] === paragraphTextStyle[field]) {
+                delete entry.style[field];
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 정규화: 문단 기본과 동일한 런 해제 + 인접 병합
+    this._runMap = normalizeRunMap(this._runMap, model.effectiveTextStyle);
+
+    model.textContent = plainToInline(this._textarea.value, this._runMap);
+    this._paragraph.scheduleRender();
+
+    // 커서/selection 복원 (길이 불변이므로 오프셋 유효)
+    this._cursorModel.offset = offset;
+    this._cursorModel.selection = savedSelection;
+    this._syncTextareaSelection();
+    this._updateCursorPosition();
+    this._updateSelection();
+
+    this._emitStyleChange();
+    this._manager._notifyTextChange(this);
+  }
+
+  /**
+   * 현재 런 맵을 문단 유효 텍스트 스타일 기준으로 정규화하여 content에 반영한다.
+   *
+   * 문단 기본과 동일한 런 해제 + 인접 동일 런 병합. 텍스트 길이가 변하지 않으므로
+   * 커서/selection 오프셋은 그대로 유효하다. 포커스 획득/blur 시 호출된다.
+   */
+  normalizeNow(): void {
+    const model = this._paragraph.model;
+    if (!model) return;
+
+    const offset = this._cursorModel.offset;
+    const savedSelection = this._cursorModel.selection;
+
+    const before = JSON.stringify(this._runMap);
+    this._runMap = normalizeRunMap(this._runMap, model.effectiveTextStyle);
+    if (JSON.stringify(this._runMap) === before) return;
+
+    model.textContent = plainToInline(this._textarea.value, this._runMap);
+    this._paragraph.scheduleRender();
+
+    this._cursorModel.offset = offset;
+    this._cursorModel.selection = savedSelection;
+    this._syncTextareaSelection();
+    this._updateCursorPosition();
+    this._updateSelection();
+    this._emitStyleChange();
   }
 
   /**

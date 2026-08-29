@@ -599,7 +599,7 @@ const {
 |---|---|---|
 | `onFocusChange` | `(e: EditManagerEvent) => void` | 포커스 변경 |
 | `onTextChange` | `(e: EditManagerEvent) => void` | 텍스트 변경 |
-| `onStyleChange` | `(e: EditManagerEvent) => void` | 스타일 변경 |
+| `onStyleChange` | `(e: EditManagerEvent) => void` | 스타일 변경. `e.style`로 현재 유효 스타일(`CurrentStyle`)을 즉시 조회 가능 — selection이 있으면 영역 내 공통 필드만, 없으면 커서 위치의 최종 스타일. |
 | `onSelectionStart` | `(e: EditManagerEvent) => void` | 선택 시작 |
 | `onSelectionEnd` | `(e: EditManagerEvent) => void` | 선택 종료 |
 | `onCursorMove` | `(e: EditManagerEvent) => void` | 커서 이동 |
@@ -623,6 +623,7 @@ const {
 | `clearLayoutSelection` | `(preserveFocusedBox?: boolean) => void` | 레이아웃 선택 해제. `preserveFocusedBox=false`면 포커스 박스도 해제. |
 | `applyInlineStyle` | `(style: Partial<TextInlineStyle>) => void` | 포커스된 단락의 선택 영역에 인라인 스타일 적용. 선택 영역이 없으면 무시. |
 | `toggleInlineStyle` | `(field, value) => void` | 포커스된 단락의 선택 영역에서 인라인 스타일 필드 토글. 전체가 이미 해당 값이면 제거. |
+| `applyTextStyle` | `(textPatch?, paragraphPatch?) => boolean` | 텍스트/문단 스타일 주입 단일 진입점. 편집 상태(선택/커서/selected)에 따라 주입 대상(런 또는 paragraph)을 판별한다. 상세는 `EDITING_TEXT.md` § 6A.5.1. |
 
 #### 메서드 시그니처
 
@@ -646,6 +647,11 @@ toggleInlineStyle<K extends keyof TextInlineStyle>(
   field: K,
   value: NonNullable<TextInlineStyle[K]>,
 ): void;
+
+applyTextStyle(
+  textPatch?: Partial<TextStyle>,
+  paragraphPatch?: Partial<ParagraphStyle>,
+): boolean;
 ```
 
 #### 내부 동작
@@ -659,8 +665,13 @@ toggleInlineStyle<K extends keyof TextInlineStyle>(
 
 ```tsx
 function EditorToolbar() {
-  const { focusedParagraph, currentStyle, focusParagraph, blurParagraph, applyInlineStyle } =
+  const { focusedParagraph, currentStyle, focusParagraph, blurParagraph, applyInlineStyle, applyTextStyle } =
     useEditManager({
+      // styleChange 페이로드로 즉시 툴바 상태 갱신 (별도 currentStyle 조회 불필요)
+      onStyleChange: (e) => {
+        const { textStyle } = e.style;
+        console.log('bold:', textStyle.fontWeight === 700, 'italic:', textStyle.fontStyle === 'italic');
+      },
       onTextChange: (e) => console.log('text changed'),
     });
 
@@ -670,8 +681,17 @@ function EditorToolbar() {
     <div>
       <span>Font: {currentStyle.textStyle.fontFamily}</span>
       <span>Size: {currentStyle.textStyle.fontSize}mm</span>
+      {/* 선택 영역에만 적용 */}
       <button onClick={() => applyInlineStyle({ fontWeight: 700, color: 'red' })}>
         Bold + Red
+      </button>
+      {/* 커서/선택 상태에 따라 런 또는 paragraph에 적용 (폰트 변경 전체 캐스케이드) */}
+      <button onClick={() => applyTextStyle({ fontFamily: 'Batang' })}>
+        Font: Batang
+      </button>
+      {/* 정렬 등 인라인 불가 필드 — 항상 paragraph */}
+      <button onClick={() => applyTextStyle({}, { textAlign: 'center' })}>
+        Center
       </button>
       <button onClick={() => blurParagraph()}>Blur</button>
     </div>

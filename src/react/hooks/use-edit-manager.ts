@@ -7,7 +7,7 @@ import {
 } from '@/edit/edit-manager';
 import { LayoutParagraphElement } from '@/components/layout/paragraph.element';
 import type { TextEditController, CurrentStyle } from '@/edit/text-edit-controller';
-import type { TextInlineStyle } from '@/types/style';
+import type { TextInlineStyle, TextStyle, ParagraphStyle } from '@/types/style';
 import type { SelectionRange } from '@/types/edit';
 
 export interface UseEditManagerOptions {
@@ -42,6 +42,10 @@ export interface UseEditManagerReturn {
     field: K,
     value: NonNullable<TextInlineStyle[K]>,
   ) => void;
+  applyTextStyle: (
+    textPatch?: Partial<TextStyle>,
+    paragraphPatch?: Partial<ParagraphStyle>,
+  ) => boolean;
 }
 
 const EVENT_TYPES: Array<{ key: keyof UseEditManagerOptions; type: EditManagerEventType }> = [
@@ -136,6 +140,12 @@ export function useEditManager(
     [manager],
   );
 
+  const applyTextStyle = useCallback(
+    (textPatch?: Partial<TextStyle>, paragraphPatch?: Partial<ParagraphStyle>): boolean =>
+      manager.applyTextStyle(textPatch ?? {}, paragraphPatch ?? {}),
+    [manager],
+  );
+
   return {
     focusedParagraph,
     focusedController,
@@ -150,5 +160,6 @@ export function useEditManager(
     clearLayoutSelection,
     applyInlineStyle,
     toggleInlineStyle,
+    applyTextStyle,
   };
 }
