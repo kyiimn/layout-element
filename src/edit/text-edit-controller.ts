@@ -7,7 +7,7 @@ import type { TextLineData } from "@/types/layout/text/text-line.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
 import { DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_SPACE_RATIO, DEFAULT_INDENT, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
-import { RunMap, inlineToPlain, plainToInline, shiftRunMap, getStyleAtOffset, applyStyleToRange, normalizeRunMap, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline } from "./run-map";
+import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent } from "./run-map";
 
 /**
  * 커서 위치에서 유효한 스타일 정보.
@@ -1546,14 +1546,6 @@ export class TextEditController {
       }
 
       const deletedLen = endOffset - startOffset;
-      if (deletedLen > 0) {
-        this._runMap = shiftRunMap(this._runMap, startOffset, -deletedLen);
-        this._runMap = applyStyleToRange(this._runMap, startOffset, startOffset, {});
-      }
-      if (inserted.length > 0) {
-        this._runMap = shiftRunMap(this._runMap, startOffset, inserted.length);
-        this._runMap = applyStyleToRange(this._runMap, startOffset, startOffset + inserted.length, {});
-      }
 
       const insertedCount = inserted.length;
       const newOffset = startOffset + insertedCount;
@@ -1563,6 +1555,7 @@ export class TextEditController {
         startOffset,
         inserted,
       );
+      this._runMap = runMapFromContent(model.textContent);
       this._textarea.value = after;
       this._textarea.setSelectionRange(newOffset, newOffset);
       this._cursorModel.offset = newOffset;
@@ -1585,17 +1578,6 @@ export class TextEditController {
     const change = this._computeTextChange(before, after, this._cursorModel.offset);
     const deletedLen = change.deletedText?.length ?? 0;
 
-    if (change.type === "insert") {
-      this._runMap = shiftRunMap(this._runMap, change.newOffset - change.text.length, change.text.length);
-    } else if (change.type === "delete") {
-      this._runMap = shiftRunMap(this._runMap, change.newOffset, -deletedLen);
-    } else if (change.type === "replace") {
-      if (deletedLen > 0) {
-        this._runMap = shiftRunMap(this._runMap, change.newOffset, -deletedLen);
-      }
-      this._runMap = shiftRunMap(this._runMap, change.newOffset, change.text.length);
-    }
-
     // 델타 경로: _computeTextChange의 removed/inserted는 같은 prefix 위치에서
     // 시작하므로, splice 위치 = newOffset - inserted.length 로 (삭제+삽입) 한 패스에 반영된다.
     const { text: insertedText, newOffset } = change;
@@ -1605,6 +1587,7 @@ export class TextEditController {
       spliceAt,
       insertedText,
     );
+    this._runMap = runMapFromContent(model.textContent);
     this._cursorModel.offset = newOffset;
 
     if (change.type === "insert" && change.text.length === 1) {
@@ -1633,18 +1616,13 @@ export class TextEditController {
     const { start, end } = activeSelection.normalized();
     const newContent = content.slice(0, start.textOffset) + replacement + content.slice(end.textOffset);
     const deletedLen = end.textOffset - start.textOffset;
-    if (deletedLen > 0) {
-      this._runMap = shiftRunMap(this._runMap, start.textOffset, -deletedLen);
-    }
-    if (replacement.length > 0) {
-      this._runMap = shiftRunMap(this._runMap, start.textOffset, replacement.length);
-    }
 
     model.textContent = insertTextIntoInline(
       deleteTextFromInline(model.textContent, start.textOffset, deletedLen),
       start.textOffset,
       replacement,
     );
+    this._runMap = runMapFromContent(model.textContent);
     this._textarea.value = newContent;
     this._cursorModel.offset = start.textOffset + replacement.length;
     this._textarea.setSelectionRange(this._cursorModel.offset, this._cursorModel.offset);
@@ -1673,11 +1651,9 @@ export class TextEditController {
       if (model) {
         const content = this._textarea.value;
         const deletedLen = normalized.end.textOffset - normalized.start.textOffset;
-        if (deletedLen > 0) {
-          this._runMap = shiftRunMap(this._runMap, normalized.start.textOffset, -deletedLen);
-        }
         const newContent = content.slice(0, normalized.start.textOffset) + content.slice(normalized.end.textOffset);
         model.textContent = deleteTextFromInline(model.textContent, normalized.start.textOffset, deletedLen);
+        this._runMap = runMapFromContent(model.textContent);
         this._textarea.value = newContent;
         this._textarea.setSelectionRange(normalized.start.textOffset, normalized.start.textOffset);
       }
@@ -1709,16 +1685,13 @@ export class TextEditController {
     if (model) {
       const start = this._compositionStartOffset;
       const data = event.data ?? "";
-      // 조합 중 텍스트는 삽입 위치가 속한 런의 스타일을 이어받는다.
-      // _runMap은 조합 시작 전 상태를 유지하며(확정 시 _onCompositionEnd에서 실제 shift),
-      // 모델 콘텐츠는 델타 경로로 이전 조합 텍스트를 지우고 새 조합 텍스트를 넣는다 —
-      // plainToInline 전체 재구축 없이 자모당 O(변경 런 수)만 실행된다.
       const prevCompositionLen = this._compositionData.length;
       model.textContent = insertTextIntoInline(
         deleteTextFromInline(model.textContent, start, prevCompositionLen),
         start,
         data,
       );
+      this._runMap = runMapFromContent(model.textContent);
       this._compositionData = data;
       this._cursorModel.offset = start + data.length;
       this._paragraph.scheduleRender();
@@ -1768,10 +1741,11 @@ export class TextEditController {
 
     const after = this._textarea.value;
     const composedLength = after.length - beforeContent.length;
-    if (composedLength !== 0) {
-      this._runMap = shiftRunMap(this._runMap, startOffset, composedLength);
+
+    if (model.plainText !== after) {
+      model.textContent = plainToInline(after, this._runMap);
     }
-    model.textContent = plainToInline(after, this._runMap);
+    this._runMap = runMapFromContent(model.textContent);
 
     this._cursorModel.offset = startOffset + composedLength;
 

@@ -94,15 +94,49 @@ export function inlineToPlain(content: string | (string | TextInlineData)[]): { 
   let text = "";
   const runMap: RunMap = [];
   for (const item of content) {
-    if (typeof item === "string") {
-      runMap.push({ start: text.length, end: text.length + item.length, style: undefined });
-      text += item;
-    } else {
-      runMap.push({ start: text.length, end: text.length + item.content.length, style: item.textInlineStyle });
-      text += item.content;
-    }
+    const len = itemLength(item);
+    runMap.push({ start: text.length, end: text.length + len, style: itemStyle(item) });
+    text += typeof item === "string" ? item : item.content;
   }
   return { text, runMap: mergeAdjacentSameStyle(runMap) };
+}
+
+/**
+ * 엔진 `content`에서 런 맵만 추출한다.
+ *
+ * `inlineToPlain`의 평문 문자열 생성을 제외한 런 맵 동기화 전용 헬퍼.
+ * `TextEditController`는 텍스트 입력/삭제/IME 확정 후 `model.textContent`를
+ * `insertTextIntoInline`/`deleteTextFromInline`으로 갱신하므로, 런 맵은 이
+ * 결과에서 재추출하면 항상 `model.textContent`와 일관된다 — delta-sync
+ * (`shiftRunMap` + `applyStyleToRange`)가 런 경계에서 발생시키던 불일치를
+ * 회피한다.
+ *
+ * @param content - 엔진 content
+ * @returns `content`에 정확히 대응하는 런 맵 (인접 동일 스타일 병합됨)
+ *
+ * @example
+ * ```ts
+ * runMapFromContent(["ab", { content: "굵게", textInlineStyle: { fontWeight: 700 } }, "cd"])
+ * // → [
+ * //   { start: 0, end: 2, style: undefined },
+ * //   { start: 2, end: 4, style: { fontWeight: 700 } },
+ * //   { start: 4, end: 6, style: undefined },
+ * // ]
+ * ```
+ */
+export function runMapFromContent(content: string | (string | TextInlineData)[]): RunMap {
+  if (typeof content === "string") {
+    return content.length === 0 ? [] : [{ start: 0, end: content.length, style: undefined }];
+  }
+
+  let offset = 0;
+  const runMap: RunMap = [];
+  for (const item of content) {
+    const len = itemLength(item);
+    runMap.push({ start: offset, end: offset + len, style: itemStyle(item) });
+    offset += len;
+  }
+  return mergeAdjacentSameStyle(runMap);
 }
 
 /**

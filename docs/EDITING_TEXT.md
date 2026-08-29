@@ -1321,7 +1321,7 @@ sequenceDiagram
 3. 활성 선택 영역이 있으면:
    - `selection.normalized()`로 시작/끝을 구한다.
    - `_compositionStartOffset = normalized.start.textOffset`.
-   - 모델에서 선택 영역을 삭제: `shiftRunMap(runMap, start, -deletedLen)`으로 런 맵 갱신 후 `model.textContent = plainToInline(newContent, runMap)`.
+   - 모델에서 선택 영역을 삭제: `model.textContent = deleteTextFromInline(...)` 후 `this._runMap = runMapFromContent(model.textContent)`.
    - `textarea.value`를 갱신하고 선택 영역을 초기화.
 4. 활성 선택 영역이 없으면 `_compositionStartOffset = _cursorModel.offset`.
 5. `_compositionBeforeContent`를 선택 삭제 후의 `textarea.value`로 캡처.
@@ -1333,9 +1333,8 @@ sequenceDiagram
 
 1. `_isComposing`이 false면 무시.
 2. `model.textContent`에 조합 텍스트 반영 (인라인 런 단락 포함 — string 전용 가드 없음):
-   - `newText = _compositionBeforeContent.slice(0, _compositionStartOffset) + event.data + _compositionBeforeContent.slice(_compositionStartOffset)`.
-   - 조합 중 텍스트는 삽입 위치가 속한 런의 스타일을 이어받는다. `_runMap`은 조합 시작 전 상태를 유지하므로, 매 업데이트마다 `shiftRunMap(_runMap, start, data.length)`으로 임시 확장한 맵으로 `plainToInline` 변환한다 (확정 시 `_onCompositionEnd`에서 실제 shift).
-   - `model.textContent = plainToInline(newText, tempRunMap)`.
+   - 조합 중 텍스트는 이전 조합 범위를 `deleteTextFromInline`으로 지우고 새 조합 텍스트를 `insertTextIntoInline`으로 삽입한다. 삽입 위치가 속한 런의 스타일을 이어받는다 (`insertTextIntoInline`의 `insertStyle=undefined` 경로).
+   - `model.textContent` 갱신 후 `this._runMap = runMapFromContent(model.textContent)`로 런 맵을 재추출한다.
    - `_compositionData = event.data`.
    - `_cursorModel.offset = _compositionStartOffset + event.data.length`.
 3. `paragraph.scheduleRender()` 호출 (microtask). 엔진이 조합 텍스트를 포함하여 라인 넘침과 금칙어 규칙을 재계산. microtask이므로 현재 실행 스택 종료 직후 즉시 렌더링됨.
@@ -1346,8 +1345,8 @@ sequenceDiagram
 
 1. `_isComposing = false`. `_compositionData = ""`.
 2. `_debounceTimer`가 있으면 취소.
-3. `composedLength = textarea.value.length - _compositionBeforeContent.length`가 0이 아니면 `shiftRunMap(_runMap, _compositionStartOffset, composedLength)`으로 런 맵에 조합 삽입을 반영.
-4. `model.textContent = plainToInline(textarea.value, _runMap)`.
+3. `composedLength = textarea.value.length - _compositionBeforeContent.length`로 조합 확정 길이 계산.
+4. textarea 값과 모델 평문이 불일치하면 `model.textContent = plainToInline(textarea.value, _runMap)`으로 동기화. 이후 `this._runMap = runMapFromContent(model.textContent)`로 런 맵 재추출.
 5. 커서 offset 계산: `_cursorModel.offset = _compositionStartOffset + composedLength`.
 6. `paragraph.flushRender()` 호출로 전체 재래핑.
 7. `_clearCompositionUnderline()` 호출로 밑줄 제거.
@@ -1372,8 +1371,8 @@ sequenceDiagram
 조합 중에 포커스를 잃거나(`blur`) 탭을 전환(`visibilitychange`, `document.hidden`)하면 조합은 **취소되지 않고 완료**로 처리된다.
 
 - `_resetCompositionState()`로 조합 상태를 초기화 (`_isComposing = false`, `_compositionData = ""`).
-- `composedLength = textarea.value.length - _compositionBeforeContent.length`가 0이 아니면 `shiftRunMap`으로 런 맵 갱신.
-- `model.textContent = plainToInline(textarea.value, _runMap)`.
+- `composedLength = textarea.value.length - _compositionBeforeContent.length`로 조합 확정 길이 계산.
+- textarea 값과 모델 평문이 불일치하면 `model.textContent = plainToInline(textarea.value, _runMap)`으로 동기화 후 `this._runMap = runMapFromContent(model.textContent)`.
 - `composedLength`로 커서 offset 갱신.
 - `_debounceTimer`가 있으면 취소.
 - `paragraph.render()` 호출.
@@ -1423,11 +1422,12 @@ type RunMap = RunEntry[];
 
 | 함수 | 설명 |
 |------|------|
-| `plainToInline(text, runMap)` | 평문 + 런 맵 → 엔진 content 배열. **runMap이 덮지 않은 구간(런 갭, 맵 앞/뒤)은 기본 스타일 텍스트로 채운다** — 런 경계 삽입 시 `shiftRunMap`이 만드는 갭에서 새 글자가 유실되지 않도록 한다. |
+| `plainToInline(text, runMap)` | 평문 + 런 맵 → 엔진 content 배열. `runMap`이 덮지 않은 구간(런 갭, 맵 앞/뒤)은 기본 스타일 텍스트로 채운다. `data` setter 복원/undo-redo 등 전체 재구축 경로에서 사용. |
 | `inlineToPlain(content)` | 엔진 content → `{ text, runMap }`. 컨트롤러 생성 시 초기 런 맵을 구축하고, `postRender()`에서 model과 textarea 불일치 검사에 사용한다. |
+| `runMapFromContent(content)` | 엔진 content → `RunMap` (평문 문자열 생성 생략). 모든 텍스트 입력/삭제/IME 확정 후 `model.textContent` 갱신 직후 호출하여 런 맵을 content에서 재추출한다. `model.textContent`가 단일 소스이고 런 맵은 그 투영(projection)이다 — delta-sync(`shiftRunMap`)가 런 경계에서 발생시키던 불일치를 회피한다. |
 | `getStyleAtOffset(runMap, offset)` | 오프셋이 속한 런의 스타일 반환. `currentStyle`이 커서 위치의 유효 스타일을 계산할 때 사용. |
 | `applyStyleToRange(runMap, start, end, style)` | 범위에 스타일 적용. 기존 런 경계를 가로지르면 분할하고, 인접 동일 스타일 런은 병합. `applyInlineStyle`/`toggleInlineStyle`이 사용. |
-| `shiftRunMap(runMap, at, delta)` | `at` 위치 이후의 런 offset을 `delta`만큼 이동. 걸친 런은 `end`만 이동(삽입 시 연장, 삭제 시 단축). 입력/삭제/붙여넣기/조합 확정 시 사용. |
+| `shiftRunMap(runMap, at, delta)` | `at` 위치 이후의 런 offset을 `delta`만큼 이동. 걸친 런은 `end`만 이동(삽입 시 연장, 삭제 시 단축). **더 이상 편집 핫패스에서 사용하지 않는다** — `runMapFromContent` 재추출이 동기화 단일 경로다. 런 경계(`at === entry.end`)에서 갭을 만들어 삽입 텍스트가 plain으로 처리되는 불일치가 있었다. |
 | `mergeAdjacentSameStyle(runMap)` | 인접 동일 스타일 런 병합 + 빈 런 제거 (정규화). |
 | `normalizeRunMap(runMap, paragraphTextStyle)` | 문단 유효 텍스트 스타일 기준 정규화. 상세는 § 6A.5. |
 | `resolvePatchAgainstInherit(patch, inheritStyle)` | patch를 상속 기준으로 해석 — inherit 동등 필드와 undefined 필드를 제거한 patch 반환. 상속 회귀 규칙의 첫 단계 (§ 6A.5.1). |
@@ -1435,17 +1435,18 @@ type RunMap = RunEntry[];
 
 ### 6A.3 편집 동기화 흐름
 
-모든 텍스트 변경 경로는 **① 런 맵 갱신 → ② `model.textContent = plainToInline(textarea.value, runMap)`** 순서를 유지한다.
+모든 텍스트 변경 경로는 **① `model.textContent`를 `insertTextIntoInline`/`deleteTextFromInline`으로 갱신 → ② `this._runMap = runMapFromContent(model.textContent)`로 런 맵 재추출** 순서를 유지한다. `model.textContent`가 단일 소스이고 런 맵은 그 투영이다 — delta-sync(`shiftRunMap`) 경로는 제거되었다.
 
-| 경로 | 런 맵 갱신 |
-|------|-----------|
-| `_onInput` (삽입/삭제/교체) | `_computeTextChange` 결과에 따라 `shiftRunMap` |
-| 선택 영역 대체/삭제 | 삭제 길이 → `shiftRunMap(at, -len)`, 삽입 길이 → `shiftRunMap(at, +len)` |
-| IME 조합 (`compositionupdate`) | 매 업데이트마다 원본 맵에서 임시 확장 (확정 전까지 `_runMap` 불변) |
-| IME 확정 (`compositionend`) | 조합 길이만큼 `shiftRunMap(start, composedLength)` — 1회 |
-| 조합 취소 (`compositioncancel`) | 런 맵 갱신 없이 원본 복원 |
-| `applyInlineStyle` / `toggleInlineStyle` | `applyStyleToRange` |
-| `applyTextStyle` (상태 기반 라우팅) | 커서 상태별 상이 — 상세는 § 6A.5.1 판별표 |
+| 경로 | `model.textContent` 갱신 | 런 맵 동기화 |
+|------|------------------------|-------------|
+| `_onInput` (삽입/삭제/교체, 선택 없음) | `insertTextIntoInline(deleteTextFromInline(...), spliceAt, insertedText)` | `runMapFromContent` |
+| `_onInput` (선택 영역 대체/삭제) | `insertTextIntoInline(deleteTextFromInline(...), startOffset, inserted)` | `runMapFromContent` |
+| `_replaceSelection` | `insertTextIntoInline(deleteTextFromInline(...), start, replacement)` | `runMapFromContent` |
+| IME 조합 (`compositionupdate`) | `insertTextIntoInline(deleteTextFromInline(...), start, data)` | `runMapFromContent` (매 자모) |
+| IME 확정 (`compositionend`) | textarea 값으로 `plainToInline` 후 (불일치 시) `runMapFromContent` | `runMapFromContent` |
+| 조합 취소 (`compositioncancel`) | `plainToInline(_compositionBeforeContent, _runMap)` 원본 복원 | `runMapFromContent` (복원 후) |
+| `applyInlineStyle` / `toggleInlineStyle` | `plainToInline(textarea.value, applyStyleToRange(runMap, ...))` | `plainToInline` 결과에서 `runMapFromContent` |
+| `applyTextStyle` (상태 기반 라우팅) | 커서 상태별 상이 — 상세는 § 6A.5.1 판별표 | `runMapFromContent` |
 
 **불일치 안전망**: `postRender()`는 `inlineToPlain(model.textContent)` 결과가 `textarea.value`와 다르면(외부에서 `data` setter로 content를 교체한 경우 등) textarea와 런 맵을 모두 model 기준으로 재동기화한다.
 
@@ -1474,7 +1475,7 @@ type RunMap = RunEntry[];
 
 | 단계 | 수행 계층 | 설명 |
 |------|----------|------|
-| 런 맵 갱신 (`applyStyleToRange`, `shiftRunMap`) | 편집 계층 (`run-map.ts`) | textarea 평문 ↔ 인라인 런 매핑은 편집 도메인의 데이터 구조다. 엔진은 이 맵을 모른다. |
+| 런 맵 갱신 (`applyStyleToRange`, `runMapFromContent`) | 편집 계층 (`run-map.ts`) | textarea 평문 ↔ 인라인 런 매핑은 편집 도메인의 데이터 구조다. 엔진은 이 맵을 모른다. 텍스트 입력/삭제 후에는 `runMapFromContent(model.textContent)`로 content에서 재추출하고, 스타일 주입 후에는 `applyStyleToRange`로 갱신한다. |
 | **문단 기본중복 필드 정리** (주입 후 `effectiveTextStyle`와 동일해진 필드의 런 제거) | **편집 계층** (`TextEditController._applyTextStyle`, runMap 위에서 수행) | **의도된 편집 영역 배치다.** 이 정리는 편집 정책(사용자 주입의 해석)이며, 엔진이 받는 것은 정규화가 끝난 런 배열이다. `run-map.ts`/컨트롤러에 두는 것이 계층 규약에 부합 — `normalizeRunMap`에 흡수하지 않는다. |
 | `model.textContent = plainToInline(text, runMap)` | 편집 → 엔진 경계 | 편집 계층의 유일한 엔진 반영 지점. 여기까지만 데이터를 만들고 |
 | 래핑/금칙어/컬럼 배치 (`layoutText`) | **엔진** (`ParagraphEngine`) | 엔진이 단일 소스. DOM은 관여하지 않는다 |
@@ -1748,12 +1749,13 @@ paragraph.render();
 
 #### 7.4.3 편집 델타 경로 (run-map 스플라이스)
 
-모든 텍스트 편집 지점(`_onInput` 일반/선택 분기, Backspace, Delete, Enter, `_onPaste`, `_replaceSelection`, `_deleteSelection`, `_onCompositionUpdate`)은 `run-map.ts`의 `insertTextIntoInline`/`deleteTextFromInline` 스플라이스 프리미티브로 `model.textContent`를 갱신한다. 이전의 `plainToInline(plainText, runMap)` 전체 재구축(문단 길이 O(N) 런 배열 신규 생성) 대신 변경 런 수에만 비례한다.
+모든 텍스트 편집 지점(`_onInput` 일반/선택 분기, Backspace, Delete, Enter, `_onPaste`, `_replaceSelection`, `_deleteSelection`, `_onCompositionUpdate`)은 `run-map.ts`의 `insertTextIntoInline`/`deleteTextFromInline` 스플라이스 프리미티브로 `model.textContent`를 갱신한 뒤, 즉시 `this._runMap = runMapFromContent(model.textContent)`로 런 맵을 재추출한다. `model.textContent`가 단일 소스이고 런 맵은 그 투영(projection)이다. 이전의 delta-sync(`shiftRunMap` + `applyStyleToRange`) 경로는 제거되었다 — 런 경계에서 갭이 생겨 삽입 텍스트가 plain으로 처리되고, `model.textContent`와 `_runMap`이 불일치하는 버그가 있었다.
 
-- **`insertTextIntoInline(content, at, text, insertStyle?)`**: 인라인 콘텐츠의 평문 `at` 위치에 텍스트를 스플라이스. 런 경계에 걸치면 런을 분할하고, `insertStyle`이 `undefined`면 직전 런의 스타일을 이어받는다 (타이핑 연속성).
+- **`insertTextIntoInline(content, at, text, insertStyle?)`**: 인라인 콘텐츠의 평문 `at` 위치에 텍스트를 스플라이스. 런 경계에 걸치면 런을 분할하고, `insertStyle`이 `undefined`면 삽입 위치 규칙에 따라 스타일을 이어받는다 — 런 중간 삽입은 해당 런의 스타일, 런 경계 삽입은 직전 런의 스타일(타이핑 연속성).
 - **`deleteTextFromInline(content, start, deleteCount)`**: 평문 범위를 삭제하고 경계가 맞닿은 동일 스타일 런을 병합한다.
+- **`runMapFromContent(content)`**: `model.textContent`에서 런 맵만 추출(O(런 수)). 모든 편집 후 동기화 단일 경로.
 - **`\n` 처리**: 삽입/삭제 텍스트에 `\n`이 포함되어도 엔진 `_parseContents`가 런을 `\n` 기준으로 라인 분할하므로 스플라이스가 그대로 동작한다 (Enter/붙여넣기 줄바꿈).
-- **IME 조합**: `_onCompositionUpdate`는 자모당 이전 조합 범위를 `deleteTextFromInline`으로 지우고 새 조합 텍스트를 `insertTextIntoInline`으로 삽입한다. `_runMap`은 조합 시작 전 상태를 유지하며 확정(`_onCompositionEnd`) 시 실제 shift가 반영된다.
+- **IME 조합**: `_onCompositionUpdate`는 자모당 이전 조합 범위를 `deleteTextFromInline`으로 지우고 새 조합 텍스트를 `insertTextIntoInline`으로 삽입한 뒤 `runMapFromContent`로 런 맵을 재추출한다. 조합 텍스트도 삽입 위치의 런 스타일을 상속받는다.
 - **레이어링 규칙 준수**: 스플라이스 로직은 edit 영역(`run-map.ts`)에 존재하며, 엔진은 여전히 완성된 `(string | TextInlineData)[]`만 받는다 (엔진 우선 원칙 §Architecture).
 
 증분 렌더 후 `postRender(fullRebuild=false)`는 `mapper.rebuildMappingsOnly()`로 엔진 기반 매핑만 재구축하고 span 캐시는 무효화만 수행한다 — 컬럼별 `querySelectorAll` 재쿼리가 타이핑 패스에서 제거된다.
@@ -2389,7 +2391,7 @@ function redo() {
 
 | 제약 | 설명 | 이유 및 향후 개선 방향 |
 |------|------|------------------------|
-| 인라인 스타일 편집 (구현됨) | 굵게, 기울임, 글자 색상/크기/폰트 편집은 `EditManager.applyInlineStyle()` / `toggleInlineStyle()`(또는 `Ctrl+B` / `Ctrl+I`)로 지원한다. | 내부적으로 `RunMap`(`src/edit/run-map.ts`)이 textarea 평문 오프셋 ↔ 인라인 런 매핑을 관리한다. 입력/삭제(`shiftRunMap`), 스타일 적용(`applyStyleToRange`), IME 조합(조합 중 임시 확장 + 확정 시 shift)이 모두 런 맵과 동기화된다. `plainToInline`은 runMap이 덮지 않은 구간(갭/앞/뒤)을 기본 스타일로 채워 런 경계 편집 시 글자 유실을 방지한다. |
+| 인라인 스타일 편집 (구현됨) | 굵게, 기울임, 글자 색상/크기/폰트 편집은 `EditManager.applyInlineStyle()` / `toggleInlineStyle()`(또는 `Ctrl+B` / `Ctrl+I`)로 지원한다. | 내부적으로 `RunMap`(`src/edit/run-map.ts`)이 textarea 평문 오프셋 ↔ 인라인 런 매핑을 관리한다. 텍스트 입력/삭제/IME 조합 후 `model.textContent`를 `insertTextIntoInline`/`deleteTextFromInline`으로 갱신하고 `runMapFromContent`로 런 맵을 재추출하여 항상 일관성을 유지한다. 스타일 적용은 `applyStyleToRange`로 런 맵을 갱신 후 `plainToInline`으로 엔진에 반영한다. 커서 위치의 런 경계(시작/끝)에서 입력 시 직전 런의 스타일을 상속받아 타이핑 연속성을 보장한다. |
 | 상태 기반 스타일 주입 (구현됨) | 텍스트/문단 스타일 주입은 `EditManager.applyTextStyle()` 단일 진입점이 담당한다. 커서/선택 상태에 따라 주입 대상(런 또는 paragraph)이 결정된다. | 판별표와 캐스케이드 동작은 § 6A.5.1 참조. 호스트는 인라인 데이터를 직접 생성하지 않는다. 정규화(`normalizeRunMap`)가 문단 기본과 동일한 런을 자동 해제하므로 content 배열은 항상 최소 런 형태를 유지한다. 정규화는 포커스/blur/주입 시 자동 수행된다. |
 | 단일 단락 편집 | 단락을 넘어가는 선택이나 여러 단락 동시 편집은 지원하지 않는다. | `_cursorModel`과 `_selectionAnchor`가 하나의 `LayoutParagraphElement`에만 연결. 향후 문서 전역 `TextEditController`와 paragraph 간 매핑이 필요하다. |
 | undo/redo 없음 | 실행 취소/다시 실행 스택은 호스트 프로그램이 직접 구현해야 한다. | 텍스트 변경 이력을 보관하면 메모리/복잡도 증가. 라이브러리는 최소한의 상태만 유지하고, 호스트가 정책을 결정하도록 설계되었다. |
