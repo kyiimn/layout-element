@@ -7,7 +7,7 @@ import type { TextLineData } from "@/types/layout/text/text-line.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
 import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
-import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent } from "./run-map";
+import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, normalizeInlineContent, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent } from "./run-map";
 
 /**
  * 커서 위치에서 유효한 스타일 정보.
@@ -2463,9 +2463,12 @@ export class TextEditController {
   }
 
   /**
-   * 현재 런 맵을 문단 유효 텍스트 스타일 기준으로 정규화하여 content에 반영한다.
+   * 런 맵과 저장된 content를 문단 유효 텍스트 스타일 기준으로 정규화한다.
    *
-   * 문단 기본과 동일한 런 해제 + 인접 동일 런 병합. 텍스트 길이가 변하지 않으므로
+   * 런 맵: 문단 기본과 동일한 런 해제 + 인접 동일 런 병합. content: 스타일 없는
+   * 셸 객체(`{content}`) 문자열 환원 + 인접 문자열 병합. 과거 편집 경로가 남긴
+   * 셸은 런 맵상 `undefined` 런과 동등하므로 맵 비교로는 감지되지 않는다 —
+   * content 기준 별도 비교로 이를 정리한다. 텍스트 길이가 변하지 않으므로
    * 커서/selection 오프셋은 그대로 유효하다. 포커스 획득/blur 시 호출된다.
    */
   normalizeNow(): void {
@@ -2475,11 +2478,19 @@ export class TextEditController {
     const offset = this._cursorModel.offset;
     const savedSelection = this._cursorModel.selection;
 
-    const before = JSON.stringify(this._runMap);
+    const beforeMap = JSON.stringify(this._runMap);
     this._runMap = normalizeRunMap(this._runMap, model.effectiveTextStyle);
-    if (JSON.stringify(this._runMap) === before) return;
+    const mapChanged = JSON.stringify(this._runMap) !== beforeMap;
 
-    model.textContent = plainToInline(this._textarea.value, this._runMap);
+    const beforeContent = JSON.stringify(model.textContent);
+    const normalizedContent = normalizeInlineContent(model.textContent);
+    const contentChanged = JSON.stringify(normalizedContent) !== beforeContent;
+
+    if (!mapChanged && !contentChanged) return;
+
+    model.textContent = mapChanged
+      ? plainToInline(this._textarea.value, this._runMap)
+      : normalizedContent;
     this._paragraph.flushRender();
 
     this._cursorModel.offset = offset;

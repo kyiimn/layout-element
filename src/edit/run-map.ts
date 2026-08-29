@@ -610,22 +610,29 @@ function boundaryRunStyle(
 }
 
 /**
- * 인라인 아이템 배열을 정규화한다 — 빈 아이템 제거 + 인접 동일 스타일 병합.
+ * 인라인 아이템 배열을 정규화한다 — 빈 아이템 제거 + 셸 객체 문자열 환원 + 인접 동일 스타일 병합.
  *
- * 스플라이스 결과에 생긴 빈 조각(`content: ""`)과 스타일이 같은 경계 런을
- * 하나로 합쳐 엔진 입력 형식을 유지한다.
+ * 스플라이스 결과에 생긴 빈 조각(`content: ""`)을 제거하고, `textInlineStyle`이
+ * 없는 셸 객체(`{content}` 뿐인 `TextInlineData`)는 문단 기본 스타일 런과 동일하므로
+ * 일반 문자열로 환원한다. 환원된 문자열은 인접 문자열과 병합되고, 스타일이 같은
+ * 경계 런도 하나로 합쳐 엔진 입력 형식을 유지한다.
+ *
+ * @param items - 정규화할 인라인 아이템 배열 (변경하지 않음)
+ * @returns 정규화된 새 아이템 배열
  */
 function mergeInlineItems(items: (string | TextInlineData)[]): (string | TextInlineData)[] {
   const result: (string | TextInlineData)[] = [];
-  for (const item of items) {
-    const hasContent = typeof item === "string" ? item.length > 0 : item.content.length > 0;
+  for (const raw of items) {
+    const hasContent = typeof raw === "string" ? raw.length > 0 : raw.content.length > 0;
     if (!hasContent) continue;
+    // 셸 객체는 일반 문자열로 환원한다 — 저장 데이터에 스타일 없는 객체가
+    // 문자 단위로 누적되는 것을 근원에서 차단한다.
+    const item: string | TextInlineData =
+      typeof raw !== "string" && raw.textInlineStyle === undefined ? raw.content : raw;
     const prev = result[result.length - 1];
-    if (prev !== undefined && itemStyle(prev) === undefined && itemStyle(item) === undefined) {
-      if (typeof prev === "string" && typeof item === "string") {
-        result[result.length - 1] = prev + item;
-        continue;
-      }
+    if (prev !== undefined && typeof prev === "string" && typeof item === "string") {
+      result[result.length - 1] = prev + item;
+      continue;
     }
     const prevStyle = itemStyle(prev);
     const curStyle = itemStyle(item);
@@ -638,6 +645,37 @@ function mergeInlineItems(items: (string | TextInlineData)[]): (string | TextInl
     result.push(typeof item === "string" ? item : { content: item.content, textInlineStyle: item.textInlineStyle });
   }
   return result;
+}
+
+/**
+ * 저장된 인라인 콘텐츠를 정규화한다 — 셸 객체 문자열 환원 + 인접 문자열 병합
+ * + 인접 동일 스타일 런 병합.
+ *
+ * 런 맵 기준으로는 정규화된 상태여도 저장된 content 배열에는 과거 편집 경로가
+ * 남긴 스타일 없는 셸 객체(예: `{ content: "s" }`)가 누적되어 있을 수 있다.
+ * `normalizeRunMap`/`normalizeNow`의 early return이 이를 정리하지 못하므로,
+ * content 기준 정규화가 필요한 곳(예: `TextEditController.normalizeNow`)에서
+ * 이 함수를 사용한다. 텍스트 길이를 변경하지 않으므로 오프셋은 불변이다.
+ *
+ * @param content - 원본 인라인 콘텐츠 (변경하지 않음)
+ * @returns 정규화된 새 콘텐츠
+ * @example
+ * ```ts
+ * normalizeInlineContent(["abc", { content: "d" }, { content: "ef" }])
+ * // → ["abcdef"] — 셸 객체 해제 + 인접 문자열 병합
+ * normalizeInlineContent([
+ *   "ab",
+ *   { content: "굵게", textInlineStyle: { fontWeight: 700 } },
+ *   { content: "!", textInlineStyle: { fontWeight: 700 } },
+ * ])
+ * // → ["ab", { content: "굵게!", textInlineStyle: { fontWeight: 700 } }]
+ * ```
+ */
+export function normalizeInlineContent(
+  content: string | (string | TextInlineData)[],
+): (string | TextInlineData)[] {
+  const items = typeof content === "string" ? [content] : content;
+  return mergeInlineItems(items);
 }
 
 /** 인라인 콘텐츠를 얕게 복제한다 (no-op 편집용). */
