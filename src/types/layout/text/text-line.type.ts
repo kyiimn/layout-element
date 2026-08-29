@@ -79,4 +79,26 @@ export type TextLineData = {
 
   /** 이 줄을 구성하는 수평 파트(오버랩 영역 사이의 세그먼트) 목록 */
   parts: TextPartData[];
+
+  /**
+   * 이 줄의 최대 폰트 크기 (mm).
+   *
+   * 줄에 배치된 모든 파트의 인라인 스타일(`inlineStyles[j].fontSize`)과
+   * 문단 기본 폰트 크기 중 최대값이다. 라인 높이(`lineHeight`)의 산출 근거.
+   *
+   * 빈 줄(cover 줄 등)이거나 인라인 스타일이 없는 줄은 문단 기본 폰트 크기와 같다.
+   */
+  maxFontSize?: number;
+
+  /**
+   * 이 줄의 높이 (mm). `maxFontSize × lineGap`으로 계산된다.
+   *
+   * 레이아웃 후(post-layout) `_computePerLineHeights()`가 산출한다.
+   * 라인 배치/오버플로우 판정 중(레이아웃 과정)에는 아직 채워지지 않는다.
+   *
+   * 마지막 라인의 line gap 제외 규칙은 소비자가 `maxFontSize`로 처리한다:
+   * - `top = cumulativeHeightBefore + alignOffset`
+   * - 마지막 라인 높이 = `maxFontSize` (lineGap 미포함)
+   */
+  lineHeight?: number;
 };

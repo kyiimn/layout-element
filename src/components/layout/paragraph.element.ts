@@ -484,12 +484,10 @@ export class LayoutParagraphElement extends HTMLElement {
     const columnContents = model.columnContents;
     const columnCount = columnContents.length;
     const parentHeight = this.absHeight;
-    const defaultLineHeight = model.lineHeight;
+    const baseLineHeight = model.baseLineHeight;
     const lastColumnIdx = columnCount - 1;
 
-    // 엔진의 visibleChars/hasOverflow 판정 기준과 동일하게
-    // effectiveColumnHeight = parentHeight + (lineHeight - fontSize)를 사용한다.
-    const effectiveColumnHeight = parentHeight + (defaultLineHeight - model.fontSize);
+    const effectiveColumnHeight = parentHeight + (baseLineHeight - model.fontSize);
 
     let placedLines = 0;
     let overflowLines = 0;
@@ -502,8 +500,9 @@ export class LayoutParagraphElement extends HTMLElement {
       let hasOverflowed = false;
 
       for (let i = 0; i < lines.length; i++) {
+        const lineH = lines[i]?.lineHeight ?? baseLineHeight;
         const isOverflowLine = hasOverflowed
-          || (effectiveColumnHeight > 0 && accumulatedHeightMm + defaultLineHeight > effectiveColumnHeight + 1e-6);
+          || (effectiveColumnHeight > 0 && accumulatedHeightMm + lineH > effectiveColumnHeight + 1e-6);
 
         if (isOverflowLine) {
           hasOverflowed = true;
@@ -511,7 +510,7 @@ export class LayoutParagraphElement extends HTMLElement {
             overflowLines++;
           }
         } else {
-          accumulatedHeightMm += defaultLineHeight;
+          accumulatedHeightMm += lineH;
           placedLines++;
         }
       }

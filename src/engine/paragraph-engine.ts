@@ -778,6 +778,7 @@ export class ParagraphEngine {
 
     this._applyLineBreakRules();
     this._computeCharOffsets();
+    this._computePerLineHeights();
 
     this._previousLineCount = this._columnContents.reduce((sum, col) => sum + col.length, 0);
     this._previousOverflow = this._overflow;
@@ -787,6 +788,88 @@ export class ParagraphEngine {
       columnContents: this._columnContents,
       overflow: this._overflow,
     };
+  }
+
+  /**
+   * 각 라인의 `maxFontSize`와 `lineHeight`를 산출하여 `TextLineData`에 채운다.
+   *
+   * 라인 높이 = `maxFontSize × lineGap`이며, 라인 내 모든 파트의
+   * 인라인 `fontSize`와 문단 기본 `fontSize` 중 최대값을 사용한다.
+   *
+   * 레이아웃(라인 분할/오버플로우 판정) 완료 후 호출된다.
+   * 레이아웃 과정 중에는 고정 `_lineHeight`를 사용하고,
+   * 완료 후 이 메서드가 실제 라인별 높이를 결정한다.
+   *
+   * @example
+   * // 라인에 기본(4mm)과 인라인(6mm) 글자가 섞인 경우:
+   * // line.maxFontSize = 6, line.lineHeight = 6 × 1.25 = 7.5
+   */
+  private _computePerLineHeights(): void {
+    const lineGap = this.effectiveParagraphStyle.lineGap!;
+    const baseFontSize = this.fontSize;
+
+    for (const column of this._columnContents) {
+      for (const line of column) {
+        let maxFs = baseFontSize;
+        for (const part of line.parts) {
+          if (!part.inlineStyles) continue;
+          for (const style of part.inlineStyles) {
+            if (style?.fontSize !== undefined && style.fontSize > maxFs) {
+              maxFs = style.fontSize;
+            }
+          }
+        }
+        line.maxFontSize = maxFs;
+        line.lineHeight = maxFs * lineGap;
+      }
+    }
+  }
+
+  /**
+   * 특정 컬럼/라인의 높이를 반환한다.
+   *
+   * @param columnIndex - 컬럼 인덱스
+   * @param lineIndex - 라인 인덱스
+   * @returns 라인 높이 (mm). 라인 데이터가 없으면 `baseLineHeight`
+   */
+  private _getLineHeightForLine(columnIndex: number, lineIndex: number): number {
+    const line = this._columnContents[columnIndex]?.[lineIndex];
+    return line?.lineHeight ?? this.baseLineHeight;
+  }
+
+  /**
+   * 특정 컬럼에서 주어진 라인 인덱스까지의 누적 높이(해당 라인 직전까지)를 반환한다.
+   *
+   * @param columnIndex - 컬럼 인덱스
+   * @param lineIndex - 라인 인덱스 (이 라인 직전까지 누적)
+   * @returns 누적 높이 (mm)
+   */
+  private _getCumulativeLineTop(columnIndex: number, lineIndex: number): number {
+    const column = this._columnContents[columnIndex];
+    if (!column) return 0;
+    let cum = 0;
+    for (let i = 0; i < lineIndex && i < column.length; i++) {
+      cum += column[i]?.lineHeight ?? this.baseLineHeight;
+    }
+    return cum;
+  }
+
+  /**
+   * 라인 내 char의 수직 offset을 반환한다 (단일 소스).
+   *
+   * 하단 앵커 원칙: 모든 글자의 하단을 라인의 fontSize 영역 하단에 맞춘다.
+   * `lineMaxFontSize`가 `charFontSize`보다 크면 offset > 0 (아래로 내려 하단 맞춤).
+   * `lineMaxFontSize`가 `charFontSize`와 같으면 offset = 0.
+   *
+   * `genCharStyle`, `genCharStyleFlat`, `getCharRect`, `buildParagraphPrintPostData`가
+   * 모두 이 메서드를 사용하여 단일 소스를 보장한다.
+   *
+   * @param lineMaxFontSize - 라인의 최대 폰트 크기 (mm)
+   * @param charFontSize - char의 폰트 크기 (mm)
+   * @returns 라인 top 기준 수직 offset (mm, ≥ 0)
+   */
+  public _getCharVerticalOffset(lineMaxFontSize: number, charFontSize: number): number {
+    return lineMaxFontSize - charFontSize;
   }
 
   /**
@@ -1266,8 +1349,12 @@ export class ParagraphEngine {
         : 0;
       const column = this._columnContents[columnIndex] ?? [];
       const alignOffsetMm = this._computeAlignOffsetMm(column, effectiveColumnHeightMm, baseFontSizeMm, columnHeightMm);
+      const cumulativeTop = this._getCumulativeLineTop(columnIndex, lineIndex);
+      const isLastLine = lineIndex === column.length - 1;
+      const lineMaxFontSize = column[lineIndex]?.maxFontSize ?? baseFontSizeMm;
       positionStyle.position = "absolute";
-      positionStyle.top = `${alignOffsetMm + lineIndex * this._lineHeight}mm`;
+      positionStyle.top = `${alignOffsetMm + cumulativeTop}mm`;
+      positionStyle.height = `${isLastLine ? lineMaxFontSize : this._getLineHeightForLine(columnIndex, lineIndex)}mm`;
     }
 
     return {
@@ -1275,7 +1362,6 @@ export class ParagraphEngine {
       flexDirection: "row",
       flexWrap: "nowrap",
       flexShrink: "0",
-      height: `${this._lineHeight}mm`,
       maxWidth: "100%",
       width: "100%",
       ...positionStyle,
@@ -1331,12 +1417,13 @@ export class ParagraphEngine {
    * @param inlineStyle - 인라인 스타일 오버라이드 (선택)
    * @returns 외부 span CSS 스타일 객체
    */
-  public genCharStyle = (char: string, inlineStyle?: TextInlineStyle): Partial<CSSStyleDeclaration> => {
+  public genCharStyle = (char: string, inlineStyle?: TextInlineStyle, lineMaxFontSize?: number): Partial<CSSStyleDeclaration> => {
     const wr = this.widthRatio;
     const lsEm = this.effectiveTextStyle.letterSpacing!;
     const sr = this.spaceRatio;
     const fs = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
-    const cacheKey = `${char}|${wr}|${lsEm}|${sr}|${fs}`;
+    const lmfs = lineMaxFontSize ?? fs;
+    const cacheKey = `${char}|${wr}|${lsEm}|${sr}|${fs}|${lmfs}`;
     const cached = this._charOuterStyleCache.get(cacheKey);
     if (cached) return cached;
 
@@ -1357,6 +1444,12 @@ export class ParagraphEngine {
       maxWidth: widthCss,
       textAlign: "center",
     };
+
+    const topMm = this._getCharVerticalOffset(lmfs, fs);
+    if (topMm !== 0) {
+      style.position = 'relative';
+      style.top = `${topMm}mm`;
+    }
 
     this._charOuterStyleCache.set(cacheKey, style);
     return style;
@@ -1391,11 +1484,12 @@ export class ParagraphEngine {
    * @param inlineStyle - 인라인 스타일 오버라이드 (선택)
    * @returns 단일 span용 CSS 스타일 객체
    */
-  public genCharStyleFlat = (char: string, inlineStyle?: TextInlineStyle): Partial<CSSStyleDeclaration> => {
+  public genCharStyleFlat = (char: string, inlineStyle?: TextInlineStyle, lineMaxFontSize?: number): Partial<CSSStyleDeclaration> => {
     const wr = this.widthRatio;
     const lsEm = this.effectiveTextStyle.letterSpacing!;
     const sr = this.spaceRatio;
     const fs = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
+    const lmfs = lineMaxFontSize ?? fs;
     const lsMm = lsEm * fs;
     let widthMm: number;
     if (char === " ") {
@@ -1405,7 +1499,7 @@ export class ParagraphEngine {
       widthMm = rawWidthMm * wr + lsMm;
     }
     const widthCss = `${widthMm}mm`;
-    return {
+    const style: Partial<CSSStyleDeclaration> = {
       display: "inline-block",
       width: widthCss,
       minWidth: `${sr * fs}mm`,
@@ -1413,6 +1507,13 @@ export class ParagraphEngine {
       scale: `${wr * 0.88} 1`,
       transformOrigin: "0 center",
     };
+
+    const topMm = this._getCharVerticalOffset(lmfs, fs);
+    if (topMm !== 0) {
+      style.top = `${topMm}mm`;
+    }
+
+    return style;
   };
 
   /**
@@ -1471,15 +1572,26 @@ export class ParagraphEngine {
     if (columnHeightMm <= 0) return 0;
 
     let visibleLineCount = 0;
+    let cumulativeHeightMm = 0;
     for (let li = 0; li < column.length; li++) {
       if (!column[li]) continue;
-      if (effectiveColumnHeightMm > 0 && visibleLineCount * this._lineHeight >= effectiveColumnHeightMm) break;
+      const lineH = column[li]?.lineHeight ?? this._lineHeight;
+      if (effectiveColumnHeightMm > 0 && cumulativeHeightMm + lineH > effectiveColumnHeightMm + 1e-6) break;
+      cumulativeHeightMm += lineH;
       visibleLineCount++;
     }
 
-    const contentHeightMm = visibleLineCount > 0
-      ? (visibleLineCount - 1) * this._lineHeight + baseFontSizeMm
-      : 0;
+    let contentHeightMm: number;
+    if (visibleLineCount === 0) {
+      contentHeightMm = 0;
+    } else {
+      let cum = 0;
+      for (let i = 0; i < visibleLineCount - 1; i++) {
+        cum += column[i]?.lineHeight ?? this._lineHeight;
+      }
+      const lastLineMaxFs = column[visibleLineCount - 1]?.maxFontSize ?? baseFontSizeMm;
+      contentHeightMm = cum + lastLineMaxFs;
+    }
 
     const verticalAlign = this.effectiveParagraphStyle.verticalAlign!;
 
@@ -1524,9 +1636,11 @@ export class ParagraphEngine {
 
       const alignOffsetMm = this._computeAlignOffsetMm(column, effectiveColumnHeightMm, baseFontSizeMm, columnHeightMm);
 
+      let cumulativeTopMm = 0;
       for (let li = 0; li < column.length; li++) {
         const line = column[li];
-        const lineTopMm = this._data.parentAbsRect.absTop + alignOffsetMm + li * this._lineHeight;
+        const lineTopMm = this._data.parentAbsRect.absTop + alignOffsetMm + cumulativeTopMm;
+        const lineH = line?.lineHeight ?? this._lineHeight;
 
         for (let p = 0; p < line.parts.length; p++) {
           const part = line.parts[p];
@@ -1552,18 +1666,21 @@ export class ParagraphEngine {
                   : part.width - charOffsets[strippedIdx];
             }
             const left = this._data.parentAbsRect.absLeft + columnLeftMm + part.left + charLeftInPart;
-            const top = lineTopMm;
+            const lineMaxFs = line.maxFontSize ?? baseFontSizeMm;
+            const charFs = part.inlineStyles?.[localIdx]?.fontSize ?? baseFontSizeMm;
+            const top = lineTopMm + this._getCharVerticalOffset(lineMaxFs, charFs);
             return {
               left,
               right: left + charWidth,
               top,
-              bottom: top + this._lineHeight,
+              bottom: top + charFs,
               width: charWidth,
-              height: this._lineHeight,
+              height: charFs,
             };
           }
           offset += part.content.length;
         }
+        cumulativeTopMm += lineH;
       }
     }
 
@@ -1623,13 +1740,16 @@ export class ParagraphEngine {
     const alignOffsetMm = this._computeAlignOffsetMm(column, effectiveColumnHeightMm, baseFontSizeMm, columnHeightMm);
 
     let lineIdx = -1;
+    let cumulativeTopMm = 0;
     for (let li = 0; li < column.length; li++) {
-      const yStart = alignOffsetMm + li * this._lineHeight;
-      const yEnd = yStart + this._lineHeight;
+      const lineH = column[li]?.lineHeight ?? this._lineHeight;
+      const yStart = alignOffsetMm + cumulativeTopMm;
+      const yEnd = yStart + lineH;
       if (relY >= yStart && relY < yEnd) {
         lineIdx = li;
         break;
       }
+      cumulativeTopMm += lineH;
     }
     if (lineIdx < 0) return null;
 
@@ -1842,9 +1962,27 @@ export class ParagraphEngine {
     return this._gaps;
   }
 
-  /** 줄 높이 (mm) */
-  public get lineHeight(): number {
+  /**
+   * 문단 기본 라인 높이 (mm). `baseFontSize × lineGap`.
+   *
+   * 모든 라인의 높이 하한선이다. `_lineHeight`와 동일한 값이지만
+   * 외부에서는 이 getter를 통해서만 기본 라인 높이에 접근한다.
+   *
+   * @returns 기본 라인 높이 (mm)
+   */
+  public get baseLineHeight(): number {
     return this._lineHeight;
+  }
+
+  /**
+   * 특정 컬럼/라인의 최대 폰트 크기를 반환한다.
+   *
+   * @param columnIndex - 컬럼 인덱스
+   * @param lineIndex - 라인 인덱스
+   * @returns 라인의 최대 폰트 크기 (mm). 라인 데이터가 없으면 `fontSize`
+   */
+  public getLineMaxFontSize(columnIndex: number, lineIndex: number): number {
+    return this._columnContents[columnIndex]?.[lineIndex]?.maxFontSize ?? this.fontSize;
   }
 
   /**
@@ -1935,7 +2073,7 @@ export class ParagraphEngine {
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        const lineHeightMm = this._lineHeight;
+        const lineHeightMm = line?.lineHeight ?? this._lineHeight;
 
         const isOverflow = hasOverflowed
           || accumulatedHeightMm + lineHeightMm > effectiveColumnHeight + 1e-6;
@@ -2250,12 +2388,12 @@ export function buildParagraphPrintPostData(
   parentHeightMm: number,
 ): PrintPostData[] {
   const chars: PrintPostDataChar[] = [];
-  const lineHeightMm = engine.lineHeight;
   const columnContents = engine.columnContents;
   const columnWidths = engine.columnWidths;
   const gaps = engine.gaps;
   const inheritStyle = engine.inheritStyle;
   const textStyle = engine.textStyle;
+  const defaultLineHeightMm = engine.baseLineHeight;
 
   for (let colIdx = 0; colIdx < columnContents.length; colIdx++) {
     const col = columnContents[colIdx];
@@ -2268,20 +2406,28 @@ export function buildParagraphPrintPostData(
 
     const baseFontSizeMm = engine.fontSize;
     const effectiveColumnHeightMm = parentHeightMm > 0
-      ? parentHeightMm + (lineHeightMm - baseFontSizeMm)
+      ? parentHeightMm + (defaultLineHeightMm - baseFontSizeMm)
       : 0;
 
     const columnHeightMm = parentHeightMm;
     const alignOffsetMm = engine._computeAlignOffsetMm(col, effectiveColumnHeightMm, baseFontSizeMm, columnHeightMm);
 
-    let visibleLineIndex = 0;
+    let cumulativeTopMm = 0;
+    let hasOverflowed = false;
     for (let li = 0; li < col.length; li++) {
       const lineData = col[li];
       if (!lineData) continue;
 
-      if (effectiveColumnHeightMm > 0 && visibleLineIndex * lineHeightMm >= effectiveColumnHeightMm) break;
+      const lineH = lineData.lineHeight ?? defaultLineHeightMm;
+      const lineMaxFs = lineData.maxFontSize ?? baseFontSizeMm;
 
-      const lineTopMm = absTopMm + alignOffsetMm + visibleLineIndex * lineHeightMm;
+      if (hasOverflowed) break;
+      if (effectiveColumnHeightMm > 0 && cumulativeTopMm + lineH > effectiveColumnHeightMm + 1e-6) {
+        hasOverflowed = true;
+        break;
+      }
+
+      const lineTopMm = absTopMm + alignOffsetMm + cumulativeTopMm;
 
       let partStartMm = 0;
       for (let pi = 0; pi < lineData.parts.length; pi++) {
@@ -2304,8 +2450,6 @@ export function buildParagraphPrintPostData(
 
           const inlineStyle = inlineStyles?.[j];
 
-          // charOffsets는 strip된(앞뒤 공백 제거) 기준 0부터 채워지므로
-          // raw 인덱스 j가 아닌 strip 기준 인덱스 k로 읽어야 한다.
           const k = j - stripStart;
           const charOffsetMm = charOffsets !== undefined && k < charOffsets.length
             ? (charOffsets[k] ?? 0)
@@ -2346,9 +2490,9 @@ export function buildParagraphPrintPostData(
             char,
             rect: {
               x: charXMm,
-              y: lineTopMm,
+              y: lineTopMm + engine._getCharVerticalOffset(lineMaxFs, charFontSize),
               width: charWidthMm,
-              height: lineHeightMm,
+              height: charFontSize,
             },
             fontFamily: charFontFamily,
             fontSize: charFontSize,
@@ -2363,7 +2507,7 @@ export function buildParagraphPrintPostData(
         partStartMm += part.width;
       }
 
-      visibleLineIndex++;
+      cumulativeTopMm += lineH;
     }
   }
 

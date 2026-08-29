@@ -121,20 +121,22 @@ export class LayoutColumnElement extends HTMLElement {
 
   /**
    * 줄 요소의 실제 렌더링 높이(mm)를 반환한다.
-   * 라인 높이는 문단 기준으로 고정이므로 일반적으로 `model.lineHeight`와 동일하다.
+   * 라인별 높이가 있는 경우(`lineData.lineHeight`) 우선 사용하고,
+   * 없으면 DOM 스타일, 최종적으로 `model.baseLineHeight`로 폴백한다.
    * @param lineEl - 높이를 측정할 줄 DOM 요소
-   * @returns 줄 높이(mm). 추출 실패 시 `model.lineHeight` 폴백
-   * @example
-   * // lineEl.style.height === '4mm' → 4 반환
-   * const h = this._getLineHeightMm(lineEl); // 4
+   * @param lineData - 해당 라인의 TextLineData (선택)
+   * @returns 줄 높이(mm)
    */
-  private _getLineHeightMm(lineEl: HTMLDivElement): number {
+  private _getLineHeightMm(lineEl: HTMLDivElement, lineData?: TextLineData): number {
+    if (lineData?.lineHeight !== undefined && lineData.lineHeight > 0) {
+      return lineData.lineHeight;
+    }
     const heightStr = lineEl.style.height;
     if (heightStr) {
       const parsed = parseFloat(heightStr);
       if (!isNaN(parsed) && parsed > 0) return parsed;
     }
-    return this.model!.lineHeight;
+    return this.model!.baseLineHeight;
   }
 
   /** 파트(part) DOM 요소를 생성하고 `genPartStyle()` 결과를 적용한다. */
@@ -167,9 +169,9 @@ export class LayoutColumnElement extends HTMLElement {
   }
 
   /** 글자(span) DOM 요소를 생성하고 `genCharStyle()` 결과와 오프셋 속성을 적용한다. */
-  private _createSpanElement(char: string, renderedOffset: number, sourceOffset: number, charOffsetMm: number | undefined, inlineStyle: TextInlineStyle | undefined): HTMLSpanElement {
+  private _createSpanElement(char: string, renderedOffset: number, sourceOffset: number, charOffsetMm: number | undefined, inlineStyle: TextInlineStyle | undefined, lineMaxFontSize: number): HTMLSpanElement {
     const charEl = document.createElement('span');
-    this._applySpanStyle(charEl, char, renderedOffset, sourceOffset, charOffsetMm, inlineStyle);
+    this._applySpanStyle(charEl, char, renderedOffset, sourceOffset, charOffsetMm, inlineStyle, lineMaxFontSize);
     return charEl;
   }
 
@@ -194,24 +196,22 @@ export class LayoutColumnElement extends HTMLElement {
    *
    * `charOffsetMm === undefined`이면 레거시 flexbox 정렬 경로를 유지한다 (outer/inner 중첩).
    */
-  private _applySpanStyle(charEl: HTMLSpanElement, char: string, renderedOffset: number, sourceOffset: number, charOffsetMm: number | undefined, inlineStyle: TextInlineStyle | undefined): void {
+  private _applySpanStyle(charEl: HTMLSpanElement, char: string, renderedOffset: number, sourceOffset: number, charOffsetMm: number | undefined, inlineStyle: TextInlineStyle | undefined, lineMaxFontSize: number): void {
     charEl.style.cssText = '';
 
     if (charOffsetMm !== undefined) {
-      // 단일 span 경로: scale/transformOrigin을 직접 적용, inner span 없음
-      const flatStyle = this.model!.genCharStyleFlat(char, inlineStyle);
+      const flatStyle = this.model!.genCharStyleFlat(char, inlineStyle, lineMaxFontSize);
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, flatStyle);
       charEl.style.position = 'absolute';
       charEl.style.left = `${charOffsetMm}mm`;
-      charEl.style.top = '0';
+      charEl.style.top = flatStyle.top ?? '0';
       charEl.textContent = char;
 
       // flexbox→charOffsets 전환 시 기존 inner span 제거
       const existingInner = charEl.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
       if (existingInner) existingInner.remove();
     } else {
-      // 중첩 span 경로: outer width/textAlign + inner scale
-      const charStyle = this.model!.genCharStyle(char, inlineStyle);
+      const charStyle = this.model!.genCharStyle(char, inlineStyle, lineMaxFontSize);
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, charStyle);
       let inner = charEl.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
       if (!inner) {
@@ -235,6 +235,7 @@ export class LayoutColumnElement extends HTMLElement {
     // diff 스킵 판정용: 직전 인라인 스타일 스냅샷. 적용 후 갱신해야 다음 렌더에서
     // 변경 감지(_skipSpanStyleIfUnchanged)가 동작한다.
     charEl.dataset.inlineKey = _inlineStyleKey(inlineStyle);
+    charEl.dataset.lineMaxFs = String(lineMaxFontSize);
 
     const { rawWidth, swidth } = this.model!.getCharWidths(char, inlineStyle);
     charEl.dataset.owidth = String(rawWidth);
@@ -256,12 +257,16 @@ export class LayoutColumnElement extends HTMLElement {
    * `ColorRegistry.getCSSColor()`로 `#RRGGBB` hex로 변환하여 적용한다.
    * 변환하지 않으면 CSS가 인식하지 못하는 색상 이름은 무시되어 색상이 적용되지 않는다.
    *
-   * 큰 폰트의 하단 앵커: 라인 높이는 기본 fontSize 기준으로 고정이므로,
-   * 인라인 폰트가 기본보다 크면 span 상단을 `lineHeight - inlineFontSize`만큼
-   * 아래로 내려 라인 하단에 글자 하단을 맞춘다 (윗라인 침범 허용).
+   * 하단 앵커: 글자 하단을 라인의 fontSize 영역 하단(행간 제외)에 고정한다.
+   * `lineMaxFontSize`는 해당 라인의 최대 폰트 크기로, 라인 높이에서 lineGap
+   * 부분을 제외한 실제 글자 영역의 하단 기준이다.
+   * 인라인 폰트가 라인 최대값보다 작으면 아래로 내려 하단을 맞추고,
+   * 인라인 폰트가 라인 최대값보다 크면(동일 라인에 더 큰 폰트가 있는 경우)
+   * 위로 밀려 윗라인을 침범할 수 있다.
    *
    * @param charEl - 스타일을 적용할 글자 span DOM 요소
    * @param inlineStyle - 인라인 런 스타일 오버라이드 (정의된 필드만 적용)
+   * @param lineMaxFontSize - 이 글자가 속한 라인의 최대 폰트 크기 (mm)
    * @throws {Error} `inlineStyle.color`가 `'default'`인 경우 `ColorRegistry.getCSSColor()`가 throw
    * @example
    * ```ts
@@ -271,7 +276,6 @@ export class LayoutColumnElement extends HTMLElement {
    */
   private _applyInlineOverrides(charEl: HTMLSpanElement, inlineStyle: TextInlineStyle | undefined): void {
     if (!inlineStyle) return;
-    const model = this.model!;
 
     if (inlineStyle.fontFamily) {
       charEl.style.fontFamily = inlineStyle.fontFamily;
@@ -285,18 +289,11 @@ export class LayoutColumnElement extends HTMLElement {
     if (inlineStyle.color) {
       charEl.style.color = ColorRegistry.getInstance().getCSSColor(inlineStyle.color);
     }
-    if (inlineStyle.fontSize !== undefined && inlineStyle.fontSize !== model.fontSize) {
+    if (inlineStyle.fontSize !== undefined && inlineStyle.fontSize !== this.model!.fontSize) {
       charEl.style.fontSize = `${inlineStyle.fontSize}mm`;
       charEl.style.lineHeight = `${inlineStyle.fontSize}mm`;
       charEl.style.display = 'inline-block';
       charEl.style.height = `${inlineStyle.fontSize}mm`;
-      // 하단 앵커: 글자 하단을 fontSize 영역 하단(행간 제외)에 고정.
-      // 폰트가 크면(top < 0) 윗라인을 침범한다.
-      // charOffsets 경로는 이미 position: absolute이므로 flexbox 경로에서만 relative로 전환한다.
-      if (charEl.style.position !== 'absolute') {
-        charEl.style.position = 'relative';
-      }
-      charEl.style.top = `${model.fontSize - inlineStyle.fontSize}mm`;
     }
   }
 
@@ -325,6 +322,7 @@ export class LayoutColumnElement extends HTMLElement {
     sourceOffset: number,
     charOffsetMm?: number,
     inlineStyle?: TextInlineStyle,
+    lineMaxFontSize?: number,
   ): boolean {
     if (
       charEl.dataset.offset === String(renderedOffset) &&
@@ -333,16 +331,13 @@ export class LayoutColumnElement extends HTMLElement {
       const existingCharOffset = charEl.dataset.charOffset;
       const newCharOffsetStr = charOffsetMm !== undefined ? String(charOffsetMm) : undefined;
       if (existingCharOffset === newCharOffsetStr) {
-        // 인라인 스타일 변경(굵게/기울임 주입 등)은 텍스트·오프셋을 바꾸지 않으므로
-        // 아래 비교만으로는 감지할 수 없다. dataset에 기록된 직전 인라인 스타일과
-        // 비교하여 변경 시 재적용 대상으로 판정한다.
         const inlineKey = _inlineStyleKey(inlineStyle);
         if ((charEl.dataset.inlineKey ?? '') !== inlineKey) return false;
-        // charOffsets 경로(단일 span): textContent 직접 비교
+        const newLmfs = lineMaxFontSize !== undefined ? String(lineMaxFontSize) : '';
+        if ((charEl.dataset.lineMaxFs ?? '') !== newLmfs) return false;
         if (charOffsetMm !== undefined) {
           return charEl.textContent === char;
         }
-        // flexbox 경로(중첩 span): inner span textContent 비교
         const inner = charEl.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
         return inner !== null && inner.textContent === char;
       }
@@ -409,7 +404,7 @@ export class LayoutColumnElement extends HTMLElement {
     let curSourceOffset = sourceOffset;
 
     const columnHeightMm = this.model.inheritStyle?.parentHeight ?? 0;
-    const baseLineHeightMm = this.model.lineHeight;
+    const baseLineHeightMm = this.model.baseLineHeight;
     const baseFontSizeMm = this.model.fontSize;
     // 엔진(_createLineWithParts)의 overflow 판정과 동일 기준:
     // effectiveColumnHeight = parentHeight + (lineHeight - fontSize)
@@ -421,6 +416,7 @@ export class LayoutColumnElement extends HTMLElement {
       const line = lines[i];
       const { endOfBlock } = line;
       const curPartStyle = this.model.genPartStyle() || {};
+      const lineMaxFontSize = line.maxFontSize ?? baseFontSizeMm;
 
       const lineEl = i < existingLineEls.length
         ? existingLineEls[i]
@@ -431,14 +427,14 @@ export class LayoutColumnElement extends HTMLElement {
         this._shadowRoot.appendChild(lineEl);
       }
 
-      // 마지막 라인은 lineHeight가 아닌 fontSize만큼만 높이를 차지한다.
+      // 마지막 라인은 lineHeight가 아닌 maxFontSize만큼만 높이를 차지한다.
       // BoxEngine.absHeight = lineHeight * height - (lineHeight - fontSize)
       const isLastLineInColumn = i === lines.length - 1;
-      if (isLastLineInColumn && lineEl.style.height !== `${baseFontSizeMm}mm`) {
-        lineEl.style.height = `${baseFontSizeMm}mm`;
+      if (isLastLineInColumn && lineEl.style.height !== `${lineMaxFontSize}mm`) {
+        lineEl.style.height = `${lineMaxFontSize}mm`;
       }
 
-      const lineHeightMm = this._getLineHeightMm(lineEl);
+      const lineHeightMm = this._getLineHeightMm(lineEl, line);
       // 한 번 overflow 발생 후 이후 라인이 마지막 라인 높이 규칙(fontSize)으로
       // 다시 visible로 잘못 판정되는 것을 방지한다.
       const isOverflow = hasOverflowed
@@ -525,12 +521,12 @@ export class LayoutColumnElement extends HTMLElement {
           let charEl: HTMLSpanElement;
           if (existingSpan) {
             charEl = existingSpan;
-            if (!this._skipSpanStyleIfUnchanged(charEl, char, curRenderedOffset, curSourceOffset, offsetMm, charInlineStyle)) {
-              this._applySpanStyle(charEl, char, curRenderedOffset, curSourceOffset, offsetMm, charInlineStyle);
+            if (!this._skipSpanStyleIfUnchanged(charEl, char, curRenderedOffset, curSourceOffset, offsetMm, charInlineStyle, lineMaxFontSize)) {
+              this._applySpanStyle(charEl, char, curRenderedOffset, curSourceOffset, offsetMm, charInlineStyle, lineMaxFontSize);
             }
             existingSpans.delete(thisCharSourceOffset);
           } else {
-            charEl = this._createSpanElement(char, curRenderedOffset, curSourceOffset, offsetMm, charInlineStyle);
+            charEl = this._createSpanElement(char, curRenderedOffset, curSourceOffset, offsetMm, charInlineStyle, lineMaxFontSize);
           }
 
           if (nextRef === charEl) {
