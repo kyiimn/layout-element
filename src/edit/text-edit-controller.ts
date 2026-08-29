@@ -7,7 +7,7 @@ import type { TextLineData } from "@/types/layout/text/text-line.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
 import { DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
-import { RunMap, inlineToPlain, plainToInline, shiftRunMap, getStyleAtOffset, applyStyleToRange, normalizeRunMap, mergeAdjacentSameStyle } from "./run-map";
+import { RunMap, inlineToPlain, plainToInline, shiftRunMap, getStyleAtOffset, applyStyleToRange, normalizeRunMap, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields } from "./run-map";
 
 /**
  * 커서 위치에서 유효한 스타일 정보.
@@ -2321,12 +2321,43 @@ export class TextEditController {
     if (!model) return;
 
     const INLINE_FIELDS = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "color"] as const;
-    const inlinePatch: Partial<TextInlineStyle> = {};
+
+    // 상속 회귀(inherit revert) 규칙:
+    // - patch 필드 값 === inheritStyle 같은 필드 → 오버라이드를 만들지 않고 기존 오버라이드 제거
+    // - patch 필드 값 === undefined → 해당 필드 오버라이드 제거 의미
+    // 두 경우 모두 런 맵에서 필드를 delete하고, paragraph 자체 스타일에서는
+    // 명시 필드가 inheritStyle과 같으면 새로 저장하지 않는다.
+    const inheritStyle = model.inheritStyle as Record<string, unknown> | undefined;
+    const resolvedTextPatch = resolvePatchAgainstInherit(
+      textPatch as Record<string, unknown>,
+      inheritStyle,
+    ) as Partial<TextStyle>;
+    const resolvedParagraphPatch = resolvePatchAgainstInherit(
+      paragraphPatch as Record<string, unknown>,
+      inheritStyle,
+    ) as Partial<ParagraphStyle>;
+
+    const revertTextFields: string[] = [];
     for (const field of INLINE_FIELDS) {
-      if (textPatch[field] !== undefined) {
-        (inlinePatch as Record<string, unknown>)[field] = textPatch[field];
+      // '명시적으로 undefined를 전달한' 필드만 오버라이드 제거 대상이다.
+      // Partial 객체의 미정의 필드도 undefined이므로 hasOwnProperty로 구분하지 않으면
+      // patch에 없는 모든 인라인 필드가 전체 런에서 삭제되는 재앙이 발생한다.
+      const isExplicitlyPassed = Object.prototype.hasOwnProperty.call(textPatch, field);
+      if (!isExplicitlyPassed) continue;
+      if (textPatch[field] === undefined || textPatch[field] === inheritStyle?.[field]) {
+        revertTextFields.push(field);
       }
     }
+
+    const inlinePatch: Partial<TextInlineStyle> = {};
+    for (const field of INLINE_FIELDS) {
+      if (resolvedTextPatch[field] !== undefined) {
+        (inlinePatch as Record<string, unknown>)[field] = resolvedTextPatch[field];
+      }
+    }
+
+    const hasParagraphPatch = Object.keys(resolvedParagraphPatch).length > 0;
+    const hasInlinePatch = Object.keys(inlinePatch).length > 0;
 
     const offset = this._cursorModel.offset;
     const savedSelection = this._cursorModel.selection;
@@ -2336,7 +2367,35 @@ export class TextEditController {
 
     const cursorRunStyle = getStyleAtOffset(this._runMap, offset);
 
-    if (hasSelection && Object.keys(inlinePatch).length > 0) {
+    // paragraph 자체 스타일 갱신 — DOM element setter 사용.
+    // 엔진 직접 수정 시 직후 render의 layout()이 DOM element의 구값으로
+    // 엔진을 되돌려 덮어쓴다 (엔진 우선 단일 소스 흐름 유지).
+    //
+    // 중요: 인라인 가능 필드(fontFamily 등)의 paragraph 반영은 런 밖(캐스케이드) 경로에서만
+    // 수행한다. selection/런-안 경로의 의미는 "그 영역에만 적용"이므로 paragraph 기본을
+    // 바꾸면 effectiveTextStyle이 런 값과 동일해져 normalizeRunMap이 런을 해제해버린다.
+    // 인라인 불가 필드(textAlign/lineGap/verticalAlign/letterSpacing/widthRatio)는
+    // 항상 paragraph 소속이므로 selection이 있어도 paragraph에 반영한다.
+    const paragraphOnlyTextPatch: Partial<TextStyle> = {};
+    for (const key of Object.keys(resolvedTextPatch)) {
+      const isInlineField = (INLINE_FIELDS as readonly string[]).includes(key);
+      if (!hasSelection || !isInlineField) {
+        (paragraphOnlyTextPatch as Record<string, unknown>)[key] = resolvedTextPatch[key as keyof TextStyle];
+      }
+    }
+    if (Object.keys(paragraphOnlyTextPatch).length > 0) {
+      this._paragraph.textStyle = { ...model.textStyle, ...paragraphOnlyTextPatch };
+    }
+    if (hasParagraphPatch) {
+      this._paragraph.paragraphStyle = { ...model.paragraphStyle, ...resolvedParagraphPatch };
+    }
+
+    // 상속 회귀로 제거할 인라인 필드가 있으면 전체 런 맵에서 제거한다
+    if (revertTextFields.length > 0) {
+      this._runMap = stripRunFields(this._runMap, revertTextFields);
+    }
+
+    if (hasSelection && hasInlinePatch) {
       // 1. selection 있음 → 선택 범위 인라인 주입 (기존 런은 필드 오버라이드)
       const { start, end } = savedSelection!.normalized();
       this._runMap = applyStyleToRange(this._runMap, start.textOffset, end.textOffset, inlinePatch);
@@ -2352,33 +2411,22 @@ export class TextEditController {
           }
         }
       }
-    } else if (!hasSelection && cursorRunStyle !== undefined && Object.keys(inlinePatch).length > 0) {
+    } else if (!hasSelection && cursorRunStyle !== undefined && hasInlinePatch) {
       // 2. 커서가 인라인 런 안 → 해당 런만 업데이트
       const run = this._runMap.find(r => r.start <= offset && r.end > offset && r.style === cursorRunStyle);
       if (run && run.style) {
         run.style = { ...run.style, ...inlinePatch };
         this._runMap = mergeAdjacentSameStyle(this._runMap);
       }
-    } else {
-      // 3. 커서가 런 밖(또는 inline patch 없음) → paragraph 자체 스타일 + 캐스케이드
-      // DOM element setter를 사용한다 — 엔진 직접 수정 시 직후 render의 layout()
-      // 이 DOM element의 구값으로 엔진을 되돌려 덮어쓴다 (엔진 우선 단일 소스 흐름 유지).
-      if (Object.keys(textPatch).length > 0) {
-        this._paragraph.textStyle = { ...model.textStyle, ...textPatch };
-      }
-      if (Object.keys(paragraphPatch).length > 0) {
-        this._paragraph.paragraphStyle = { ...model.paragraphStyle, ...paragraphPatch };
-      }
-      if (Object.keys(inlinePatch).length > 0) {
-        // 문단 기본을 '주입 후' 값으로 비교해야 캐스케이드로 기본과 같아진 필드가 정리된다
-        const paragraphTextStyle = model.effectiveTextStyle;
-        for (const entry of this._runMap) {
-          if (entry.style) {
-            entry.style = { ...entry.style, ...inlinePatch };
-            for (const field of INLINE_FIELDS) {
-              if (entry.style[field] === paragraphTextStyle[field]) {
-                delete entry.style[field];
-              }
+    } else if (hasInlinePatch) {
+      // 3. 커서가 런 밖 → 명시 주입 필드를 모든 인라인 런에 캐스케이드
+      const paragraphTextStyle = model.effectiveTextStyle;
+      for (const entry of this._runMap) {
+        if (entry.style) {
+          entry.style = { ...entry.style, ...inlinePatch };
+          for (const field of INLINE_FIELDS) {
+            if (entry.style[field] === paragraphTextStyle[field]) {
+              delete entry.style[field];
             }
           }
         }

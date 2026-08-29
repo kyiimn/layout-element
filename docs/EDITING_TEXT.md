@@ -1428,6 +1428,8 @@ type RunMap = RunEntry[];
 | `shiftRunMap(runMap, at, delta)` | `at` 위치 이후의 런 offset을 `delta`만큼 이동. 걸친 런은 `end`만 이동(삽입 시 연장, 삭제 시 단축). 입력/삭제/붙여넣기/조합 확정 시 사용. |
 | `mergeAdjacentSameStyle(runMap)` | 인접 동일 스타일 런 병합 + 빈 런 제거 (정규화). |
 | `normalizeRunMap(runMap, paragraphTextStyle)` | 문단 유효 텍스트 스타일 기준 정규화. 상세는 § 6A.5. |
+| `resolvePatchAgainstInherit(patch, inheritStyle)` | patch를 상속 기준으로 해석 — inherit 동등 필드와 undefined 필드를 제거한 patch 반환. 상속 회귀 규칙의 첫 단계 (§ 6A.5.1). |
+| `stripRunFields(runMap, fields)` | 모든 런에서 지정 필드의 오버라이드 제거 + 빈 런 해제 + 병합. 상속 회귀 실행 (§ 6A.5.1). |
 
 ### 6A.3 편집 동기화 흐름
 
@@ -1500,6 +1502,24 @@ type RunMap = RunEntry[];
 - lock된 box(또는 lock 조상을 가진 paragraph)는 스킵하며, 나머지는 정상 적용된다. 부분 성공이 허용되어 **하나라도 적용되면 `true`**를 반환하고, 적용 가능한 대상이 하나도 없으면 `false`를 반환한다.
 - content-type이 paragraph가 아닌 box(이미지, 그룹 등)가 선택에 포함되면 그 요소는 무시된다.
 
+#### 상속 회귀(inherit revert) 규칙
+
+호스트 UI가 서브모듈에 스타일을 전달할 때 **inherit 동등성 체크를 직접 수행할 필요가 없다** — `applyTextStyle`이 다음 규칙으로 처리한다. (`layout-ui`의 `applyPopoverTextStyle`이 하던 "inherit과 같으면 delete"를 서브모듈이 흡수한다.)
+
+| 전달 값 | 해석 | 동작 |
+|---------|------|------|
+| patch 값 === 대상 paragraph의 `inheritStyle` 같은 필드 | "사용자가 기본값을 골랐다" | 오버라이드를 생성하지 않고, 기존 오버라이드를 **제거** (기본으로 회귀) |
+| patch 필드 값이 **`undefined`** (명시 전달) | "해당 필드의 오버라이드를 취소" | 기존 오버라이드 **제거** |
+| patch 값이 inherit과 다른 정의된 값 | 일반 주입 | 기존 규칙대로 런/paragraph에 주입 |
+
+- 제거는 `stripRunFields`로 수행: **모든 런**에서 해당 필드를 delete하고, 빈 스타일 런은 해제, 인접 동일 런 병합.
+- paragraph 자체 스타일에는 "inherit과 동일한 값"을 명시로 저장하지 않는다 — `resolvedTextPatch`/`resolvedParagraphPatch`가 이미 inherit 동등 필드를 제거한 상태로 병합된다.
+- 구현: `run-map.ts`의 `resolvePatchAgainstInherit()` (patch 정리) + `stripRunFields()` (런 필드 제거).
+
+> ⚠️ **구현 시 주의 (Partial 함수 함정)**: "undefined 전달" 판별은 반드시 `Object.prototype.hasOwnProperty.call(textPatch, field)`로 **명시 전달** 여부를 먼저 확인해야 한다. `Partial` 객체의 미정의 필드도 `undefined`이므로 이 체크가 없으면 patch에 없는 모든 인라인 필드가 전체 런에서 삭제되는 재앙이 발생한다.
+
+**selection 경로와 paragraph 선반영의 상호 배타**: selection 주입 시 인라인 가능 필드를 paragraph 자체 스타일에 먼저 반영하면 안 된다 — `effectiveTextStyle`이 런 값과 동일해져 `normalizeRunMap`이 방금 만든 런을 해제해버린다. paragraph 반영은 (a) 런 밖(캐스케이드) 경로의 인라인 가능 필드, (b) 인라인 불가 필드에서만 수행한다.
+
 #### 캐스케이드(cascade) 동작
 
 커서가 런 밖이거나 selected 경로에서 paragraph 스타일을 수정할 때, **사용자가 명시적으로 주입한 필드만** paragraph 내부 **모든 인라인 런**에 일괄 적용된다:
@@ -1522,7 +1542,7 @@ type RunMap = RunEntry[];
 | 구성 요소 | 파일 | 역할 |
 |-----------|------|------|
 | `EditManager.applyTextStyle` | `src/edit/edit-manager.ts` | 진입점. 편집 상태 판별 후 컨트롤러 위임 or selected 경로 직접 처리 |
-| `EditManager._resolveSelectedParagraphTarget` | 同 | selected paragraph / paragraph-box → 대상 paragraph 탐색 |
+| `EditManager._resolveSelectedParagraphTargets` | 同 | selected paragraph / paragraph-box → 대상 paragraph 목록 수집 (복수·lock 스킴) |
 | `EditManager._applyParagraphLevelStyle` | 同 | 컨트롤러 없는 selected 경로: 부분 업데이트 + 캐스케이드 + 정규화 |
 | `TextEditController._applyTextStyle` | `src/edit/text-edit-controller.ts` | 포커스 있는 3방향 라우팅(selection/런 안/런 밖) 실행 + 커서/selection 보존 |
 | `TextEditController.normalizeNow` | 同 | 런 맵 정규화 + content 재구성 + 커서/selection 보존. 포커스/blur 시 자동 호출 |

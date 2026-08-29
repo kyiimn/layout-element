@@ -294,3 +294,63 @@ function inlineStyleMatchesParagraph(
   if (style.color !== undefined && style.color !== paragraphTextStyle.color) return false;
   return true;
 }
+
+/**
+ * patch를 상속 스타일 기준으로 해석한다 — 상속 회귀(inherit revert) 규칙.
+ *
+ * 1. patch 필드 값이 **undefined** → "해당 필드의 오버라이드 제거" 의미로 해석해
+ *    제거 목록에 넣는다.
+ * 2. patch 필드 값이 inheritStyle의 같은 필드와 **동일** → 명시적 오버라이드가
+ *    기본에 불과하므로 제거 목록에 넣는다 (기본을 따르는 중복 방지).
+ * 3. 나머지 필드는 일반 주입값으로 유지한다.
+ *
+ * @param patch - 적용할 부분 스타일. `undefined` 값은 오버라이드 제거 의미
+ * @param inheritStyle - 대상 paragraph의 상속 스타일 (null 필드 허용)
+ * @returns 정리된 patch. 이 값들을 그대로 주입하면 상속 회귀가 반영된다
+ */
+export function resolvePatchAgainstInherit<T extends Record<string, unknown>>(
+  patch: T,
+  inheritStyle: Record<string, unknown> | undefined,
+): T {
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(patch)) {
+    const value = patch[key];
+    if (value === undefined) continue;
+    if (inheritStyle && inheritStyle[key] === value) continue;
+    result[key] = value;
+  }
+  return result as T;
+}
+
+/**
+ * 런 맵에서 지정 필드의 오버라이드를 제거한다 (상속 회귀).
+ *
+ * 모든 런의 `style`에서 `fields`에 해당하는 키를 delete한다. 제거 후 빈 스타일이
+ * 된 런은 `style: undefined`로 정리되고, 인접 동일 런은 병합된다.
+ * 텍스트 길이를 변경하지 않으므로 오프셋은 불변이다.
+ *
+ * @param runMap - 원본 런 맵
+ * @param fields - 제거할 필드명 배열
+ * @returns 정리된 새 런 맵
+ */
+export function stripRunFields(runMap: RunMap, fields: readonly string[]): RunMap {
+  const result: RunMap = [];
+  for (const entry of runMap) {
+    if (!entry.style) {
+      result.push({ ...entry });
+      continue;
+    }
+    const style = { ...entry.style };
+    for (const field of fields) {
+      delete style[field as keyof TextInlineStyle];
+    }
+    const cleanedStyle = Object.keys(style).length > 0 ? style : undefined;
+    const prev = result[result.length - 1];
+    if (prev && prev.end === entry.start && inlineStyleEqual(prev.style, cleanedStyle)) {
+      prev.end = entry.end;
+    } else {
+      result.push({ start: entry.start, end: entry.end, style: cleanedStyle });
+    }
+  }
+  return result;
+}

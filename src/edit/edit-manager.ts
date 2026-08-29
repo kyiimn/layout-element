@@ -5,7 +5,7 @@ import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { LayoutTableElement } from "@/components/layout/table.element";
 import type { TextEditController, CurrentStyle } from "./text-edit-controller";
 import type { TextInlineStyle, TextStyle, ParagraphStyle } from "@/types/style";
-import { inlineToPlain, plainToInline, normalizeRunMap } from "./run-map";
+import { inlineToPlain, plainToInline, normalizeRunMap, resolvePatchAgainstInherit, stripRunFields, type RunMap } from "./run-map";
 import { InsertController } from "./insert-controller";
 import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
@@ -819,28 +819,63 @@ export class EditManager {
     const model = paragraph.model;
     if (!model) return false;
 
+    // 상속 회귀(inherit revert): patch 값이 inheritStyle과 동일하면 오버라이드를
+    // 만들지 않고 기존 오버라이드를 제거한다. undefined 값도 오버라이드 제거 의미.
+    const inheritStyle = model.inheritStyle as Record<string, unknown> | undefined;
+    const resolvedTextPatch = resolvePatchAgainstInherit(
+      textPatch as Record<string, unknown>,
+      inheritStyle,
+    ) as Partial<TextStyle>;
+    const resolvedParagraphPatch = resolvePatchAgainstInherit(
+      paragraphPatch as Record<string, unknown>,
+      inheritStyle,
+    ) as Partial<ParagraphStyle>;
+
+    const INLINE_FIELDS = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "color"] as const;
+    const revertTextFields: string[] = [];
+    for (const field of INLINE_FIELDS) {
+      // '명시적으로 undefined를 전달한' 필드만 오버라이드 제거 대상이다.
+      // Partial 객체의 미정의 필드도 undefined이므로 hasOwnProperty로 구분하지 않으면
+      // patch에 없는 모든 인라인 필드가 전체 런에서 삭제되는 재앙이 발생한다.
+      const isExplicitlyPassed = Object.prototype.hasOwnProperty.call(textPatch, field);
+      if (!isExplicitlyPassed) continue;
+      if (textPatch[field] === undefined || textPatch[field] === inheritStyle?.[field]) {
+        revertTextFields.push(field);
+      }
+    }
+
     // DOM element의 textStyle/paragraphStyle setter를 사용한다 — 엔진 우선 단일 소스.
     // model.textStyle(엔진)을 직접 고치면 직후의 paragraph.layout()이
     // DOM element의 _textStyle(갱신 전 값)로 엔진을 되돌려 덮어쓴다.
     // element setter는 DOM 필드 갱신 + layout() + scheduleRender()를 수행한다.
-    if (Object.keys(textPatch).length > 0) {
-      paragraph.textStyle = { ...paragraph.textStyle, ...textPatch };
+    if (Object.keys(resolvedTextPatch).length > 0) {
+      paragraph.textStyle = { ...paragraph.textStyle, ...resolvedTextPatch };
     }
-    if (Object.keys(paragraphPatch).length > 0) {
-      paragraph.paragraphStyle = { ...paragraph.paragraphStyle, ...paragraphPatch };
+    if (Object.keys(resolvedParagraphPatch).length > 0) {
+      paragraph.paragraphStyle = { ...paragraph.paragraphStyle, ...resolvedParagraphPatch };
     }
 
-    const { runMap } = inlineToPlain(model.textContent);
-    const INLINE_FIELDS = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "color"] as const;
+    // 상속 회귀로 제거할 인라인 필드가 있으면 전체 런 맵에서 제거한다
+    let runMap: RunMap;
+    if (revertTextFields.length > 0) {
+      runMap = stripRunFields(inlineToPlain(model.textContent).runMap, revertTextFields);
+    } else {
+      runMap = inlineToPlain(model.textContent).runMap;
+    }
+
     // 문단 기본을 '주입 후' 값으로 비교해야 캐스케이드로 기본과 같아진 필드가 정리된다
     const paragraphTextStyle = model.effectiveTextStyle;
 
-    for (const entry of runMap) {
-      if (!entry.style) continue;
-      entry.style = { ...entry.style, ...textPatch };
-      for (const field of INLINE_FIELDS) {
-        if (entry.style[field] === paragraphTextStyle[field]) {
-          delete entry.style[field];
+    if (resolvedTextPatch.fontFamily !== undefined || resolvedTextPatch.fontWeight !== undefined ||
+        resolvedTextPatch.fontSize !== undefined || resolvedTextPatch.fontStyle !== undefined ||
+        resolvedTextPatch.color !== undefined) {
+      for (const entry of runMap) {
+        if (!entry.style) continue;
+        entry.style = { ...entry.style, ...resolvedTextPatch };
+        for (const field of INLINE_FIELDS) {
+          if (entry.style[field] === paragraphTextStyle[field]) {
+            delete entry.style[field];
+          }
         }
       }
     }
