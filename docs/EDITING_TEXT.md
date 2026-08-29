@@ -1467,6 +1467,15 @@ type RunMap = RunEntry[];
 
 정규화 결과에 `style: undefined` 런과 무스타일 구간이 인접하면 `mergeAdjacentSameStyle` 규칙으로 하나로 합쳐진다. 최종 content 배열은 항상 최소 런 형태를 유지한다: 런이 전혀 없으면 단일 `string`, 있으면 `(string | TextInlineData)[]`.
 
+#### 6A.5.0 content 셸(shell) 정규화 — `normalizeInlineContent`
+
+러 맵이 정규화된 상태여도 저장된 content 배열에는 오래된 편집 경로가 남긴 **스타일 없는 셸 객체**(`{ content: "s" }` 뿐인 `TextInlineData`)가 누적되어 있을 수 있다. 셸은 런 맵상 `style: undefined` 런과 동등하므로 `normalizeRunMap`의 맵 비교로는 감지되지 않는다(early return 경로). 이를 정리하는 두 층:
+
+- **근원 차단** (`mergeInlineItems`, run-map.ts): 스플라이스 경로(`spliceTextIntoRuns`)가 삽입을 `{ content, textInlineStyle: undefined }` 객체로 push해도, 정규화 단계에서 셸을 일반 문자열로 환원하고 인접 문자열과 병합한다. 타이핑 경로는 더 이상 셸을 생성·누적하지 않는다.
+- **기존 데이터 정리** (`normalizeInlineContent` + `normalizeNow`): `normalizeNow`는 런 맵 비교에 더해 `normalizeInlineContent(model.textContent)` 결과를 content 기준으로도 비교한다. 셸이 감지되면 content를 재구축해 저장된 데이터를 정리한다 — 포커스 획득/blur 시점에 기존 오염 데이터가 자동 병합·해제된다.
+
+`normalizeInlineContent`는 텍스트 길이를 변경하지 않으므로 커서/selection 오프셋은 불변이다.
+
 ### 6A.5.1 `EditManager.applyTextStyle` — 스타일 주입 라우팅
 
 호스트 프로그램은 **인라인 데이터를 직접 생성하지 않는다.** 텍스트/문단 스타일 주입은 `EditManager.applyTextStyle(textPatch?, paragraphPatch?)` 단일 진입점이 편집 상태를 판별하여 대상을 결정한다. 편집컨트롤러가 존재하는 DOM 레이어에서 스타일 주입의 책임을 가진다 (엔진은 순수 계산만 담당).
