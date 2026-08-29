@@ -354,3 +354,262 @@ export function stripRunFields(runMap: RunMap, fields: readonly string[]): RunMa
   }
   return result;
 }
+
+/**
+ * 인라인 콘텐츠 배열의 지정 위치에 텍스트를 제자리 삽입한다.
+ *
+ * 편집 델타 경로가 `plainToInline()` 전체 재구축(문단 전체 O(N) 런 배열 신규 생성)
+ * 대신 사용한다. 아이템 단위 슬라이스 스플라이스이므로 비용은 문단 길이가 아닌
+ * **변경 런 수에 비례**한다. 삽입된 텍스트의 스타일은 `insertStyle`로 결정된다:
+ * - `undefined`(미지정): 삽입점 직전 런의 스타일을 이어받는다 (타이핑 연속성).
+ *   경계 분할이 필요하면 런을 분할한다.
+ * - 지정됨: 해당 스타일의 런을 삽입하고 인접 동일 스타일 런을 병합한다.
+ *
+ * @param content - 원본 인라인 콘텐츠 (변경하지 않음)
+ * @param at - 삽입 위치 (평문 오프셋. `\n` 포함 평문 기준)
+ * @param text - 삽입할 텍스트. `\n`을 포함할 수 있다 (엔진 `_parseContents`가 라인 분할)
+ * @param insertStyle - 삽입 텍스트에 적용할 인라인 스타일. `undefined`면 직전 런 스타일 이어받기
+ * @returns 삽입 반영된 새 콘텐츠 배열. 원본은 불변
+ * @throws 삽입 위치가 평문 길이를 벗어나면 Error
+ * @example
+ * ```ts
+ * const content = ["ab", { content: "굵게", textInlineStyle: { fontWeight: 700 } }, "cd"];
+ * insertTextIntoInline(content, 2, "XY");
+ * // → ["abXY", { content: "굵게", textInlineStyle: { fontWeight: 700 } }, "cd"]
+ * ```
+ */
+export function insertTextIntoInline(
+  content: string | (string | TextInlineData)[],
+  at: number,
+  text: string,
+  insertStyle?: TextInlineStyle,
+): (string | TextInlineData)[] {
+  if (text.length === 0) return cloneInlineContent(content);
+  if (at < 0) throw new Error(`insertTextIntoInline: at(${at}) is negative`);
+  const items = typeof content === "string" ? [content] : content;
+  return spliceTextIntoRuns(items, at, 0, text, insertStyle);
+}
+
+/**
+ * 인라인 콘텐츠의 평문에서 지정 범위를 제자리 삭제한다.
+ *
+ * 편집 델타 경로가 `plainToInline()` 전체 재구축 대신 사용한다. 삭제 후
+ * 경계가 맞닿은 동일 스타일 런은 병합한다.
+ *
+ * @param content - 원본 인라인 콘텐츠 (변경하지 않음)
+ * @param start - 삭제 시작 위치 (평문 오프셋, 포함)
+ * @param deleteCount - 삭제할 문자 수. `\n`을 포함할 수 있다 (줄 병합)
+ * @returns 삭제 반영된 새 콘텐츠 배열. 원본은 불변
+ * @throws `start + deleteCount`가 평문 길이를 벗어나면 Error
+ * @example
+ * ```ts
+ * const content = ["ab", { content: "굵게", textInlineStyle: { fontWeight: 700 } }, "cd"];
+ * deleteTextFromInline(content, 2, 2);
+ * // → ["abcd"] — 굵게 런 삭제 후 인접 일반 런과 병합
+ * ```
+ */
+export function deleteTextFromInline(
+  content: string | (string | TextInlineData)[],
+  start: number,
+  deleteCount: number,
+): (string | TextInlineData)[] {
+  if (deleteCount <= 0) return cloneInlineContent(content);
+  if (start < 0) throw new Error(`deleteTextFromInline: start(${start}) is negative`);
+  const items = typeof content === "string" ? [content] : content;
+  return spliceTextIntoRuns(items, start, deleteCount, undefined, undefined);
+}
+
+/**
+ * 인라인 콘텐츠에 (삭제 → 삽입) 스플라이스를 한 패스에 적용한다.
+ *
+ * `insertTextIntoInline`/`deleteTextFromInline`의 공통 코어. 스타일이 다른 런
+ * 경계에 삽입하면 런을 분할하고, 인접 동일 스타일 런은 병합한다. 문자열 아이템은
+ * `style: undefined` 런으로 취급한다. 평문 전체를 재조립하지 않고 아이템 단위로
+ * 슬라이스하므로 문단 길이가 아닌 변경 런 수에 비례한다.
+ *
+ * @param items - 인라인 콘텐츠 아이템 배열 (변경하지 않음)
+ * @param at - 편집 시작 위치 (평문 오프셋. `\n` 포함 평문 기준)
+ * @param deleteCount - 삭제할 문자 수 (0 이상)
+ * @param insertText - 삽입할 텍스트. `\n` 포함 가능. `undefined`면 삭제 전용
+ * @param insertStyle - 삽입 텍스트에 적용할 스타일. `undefined`면 삽입점 직전
+ *   런의 스타일을 이어받는다 (커서 앞 글자와 동일 스타일 연속성)
+ * @returns 편집 반영된 새 콘텐츠 배열
+ * @throws `at`/`deleteCount`가 평문 범위를 벗어나면 Error
+ */
+function spliceTextIntoRuns(
+  items: readonly (string | TextInlineData)[],
+  at: number,
+  deleteCount: number,
+  insertText: string | undefined,
+  insertStyle: TextInlineStyle | undefined,
+): (string | TextInlineData)[] {
+  let remaining = at;
+  let index = 0;
+  while (index < items.length) {
+    const len = itemLength(items[index]);
+    if (remaining < len) break;
+    remaining -= len;
+    index++;
+  }
+  if (index >= items.length && remaining > 0) {
+    throw new Error(`spliceTextIntoRuns: at(${at}) exceeds plain length`);
+  }
+
+  const result: (string | TextInlineData)[] = [];
+  for (let i = 0; i < index; i++) result.push(items[i]);
+
+  let toDelete = deleteCount;
+
+  if (toDelete > 0) {
+    // 삭제: 삽입점이 걸친 아이템부터 순서대로 좌측 보존 → 삽입 → 우측 보존
+    let offset = remaining;
+    let inserted = false;
+    while ((toDelete > 0 || (insertText !== undefined && !inserted)) && index < items.length) {
+      const item = items[index];
+      const len = itemLength(item);
+      if (offset > 0) {
+        result.push(sliceItem(item, 0, offset));
+      }
+      if (!inserted && insertText !== undefined && insertText.length > 0) {
+        const style = insertStyle !== undefined ? insertStyle : itemStyleAtStart(item, remaining);
+        result.push({ content: insertText, textInlineStyle: style });
+        inserted = true;
+      }
+      const take = Math.min(toDelete, len - offset);
+      toDelete -= take;
+      const tailStart = offset + take;
+      if (tailStart < len) {
+        result.push(sliceItem(item, tailStart, len));
+      }
+      offset = 0;
+      index++;
+    }
+    if (toDelete > 0) {
+      throw new Error(`spliceTextIntoRuns: delete range [${at}, ${at + deleteCount}) exceeds plain length`);
+    }
+    if (insertText !== undefined && !inserted) {
+      // 삽입점이 아이템 경계에 정확히 걸친 경우 (삭제 범위 소진 후)
+      const style = insertStyle !== undefined
+        ? insertStyle
+        : boundaryRunStyle(items, index - 1);
+      if (insertText.length > 0) result.push({ content: insertText, textInlineStyle: style });
+    }
+  } else if (insertText !== undefined && insertText.length > 0) {
+    // 삭제 없음: 삽입점이 걸친 단일 아이템을 좌/우로 분할하고 사이에 삽입
+    if (index < items.length) {
+      const item = items[index];
+      const len = itemLength(item);
+      if (remaining > 0) result.push(sliceItem(item, 0, remaining));
+      const style = insertStyle !== undefined ? insertStyle : itemStyleAtBoundary(items, index);
+      result.push({ content: insertText, textInlineStyle: style });
+      if (remaining < len) result.push(sliceItem(item, remaining, len));
+      index++;
+    } else {
+      const style = insertStyle !== undefined ? insertStyle : boundaryRunStyle(items, index - 1);
+      result.push({ content: insertText, textInlineStyle: style });
+    }
+  }
+
+  while (index < items.length) {
+    result.push(items[index]);
+    index++;
+  }
+
+  return mergeInlineItems(result);
+}
+
+/** 아이템의 평문 길이를 반환한다. */
+function itemLength(item: string | TextInlineData): number {
+  return typeof item === "string" ? item.length : item.content.length;
+}
+
+/** 아이템의 [from, to) 부분 문자열을 같은 타입으로 잘라낸다. */
+function sliceItem(item: string | TextInlineData, from: number, to: number): string | TextInlineData {
+  if (typeof item === "string") return item.slice(from, to);
+  return { content: item.content.slice(from, to), textInlineStyle: item.textInlineStyle };
+}
+
+/** 인라인 아이템의 스타일을 반환한다 (문자열이면 undefined). */
+function itemStyle(item: string | TextInlineData | undefined): TextInlineStyle | undefined {
+  return typeof item === "string" || item === undefined ? undefined : item.textInlineStyle;
+}
+
+/**
+ * 삽입점이 아이템 중간에 걸친 경우 삽입 텍스트의 스타일을 결정한다.
+ *
+ * 걸친 아이템의 스타일을 이어받는다 — 타이핑 연속성(직전 글자와 같은 런에
+ * 이어짐)과 런 분할 최소화를 위한 규칙이다.
+ */
+function itemStyleAtStart(
+  item: string | TextInlineData,
+  _offsetInItem: number
+): TextInlineStyle | undefined {
+  return itemStyle(item);
+}
+
+/**
+ * 삽입점이 아이템 경계(삭제 없음)인 경우 삽입 텍스트의 스타일을 결정한다.
+ *
+ * 직전 아이템의 스타일을 이어받는다 — 커서 앞 글자와 동일 스타일 연속성.
+ */
+function itemStyleAtBoundary(
+  items: readonly (string | TextInlineData)[],
+  boundaryIndex: number,
+): TextInlineStyle | undefined {
+  return itemStyle(boundaryIndex > 0 ? items[boundaryIndex - 1] : undefined);
+}
+
+/**
+ * 지정 인덱스의 이전 아이템 기준으로 삽입 텍스트의 스타일을 결정한다.
+ *
+ * 직전 아이템 스타일을 이어받는다. 삽입점이 문단 시작이면 `undefined`
+ * (문단 기본)이다.
+ */
+function boundaryRunStyle(
+  items: readonly (string | TextInlineData)[],
+  prevIndex: number,
+): TextInlineStyle | undefined {
+  if (prevIndex < 0) return undefined;
+  return itemStyle(items[prevIndex]);
+}
+
+/**
+ * 인라인 아이템 배열을 정규화한다 — 빈 아이템 제거 + 인접 동일 스타일 병합.
+ *
+ * 스플라이스 결과에 생긴 빈 조각(`content: ""`)과 스타일이 같은 경계 런을
+ * 하나로 합쳐 엔진 입력 형식을 유지한다.
+ */
+function mergeInlineItems(items: (string | TextInlineData)[]): (string | TextInlineData)[] {
+  const result: (string | TextInlineData)[] = [];
+  for (const item of items) {
+    const hasContent = typeof item === "string" ? item.length > 0 : item.content.length > 0;
+    if (!hasContent) continue;
+    const prev = result[result.length - 1];
+    if (prev !== undefined && itemStyle(prev) === undefined && itemStyle(item) === undefined) {
+      if (typeof prev === "string" && typeof item === "string") {
+        result[result.length - 1] = prev + item;
+        continue;
+      }
+    }
+    const prevStyle = itemStyle(prev);
+    const curStyle = itemStyle(item);
+    if (prev !== undefined && prevStyle !== undefined && curStyle !== undefined &&
+        inlineStyleEqual(prevStyle, curStyle) &&
+        typeof prev !== "string" && typeof item !== "string") {
+      prev.content += item.content;
+      continue;
+    }
+    result.push(typeof item === "string" ? item : { content: item.content, textInlineStyle: item.textInlineStyle });
+  }
+  return result;
+}
+
+/** 인라인 콘텐츠를 얕게 복제한다 (no-op 편집용). */
+function cloneInlineContent(content: string | (string | TextInlineData)[]): (string | TextInlineData)[] {
+  if (typeof content === "string") return [content];
+  const result: (string | TextInlineData)[] = [];
+  for (const item of content) {
+    result.push(typeof item === "string" ? item : { ...item });
+  }
+  return result;
+}
