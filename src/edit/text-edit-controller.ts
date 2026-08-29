@@ -2465,6 +2465,10 @@ export class TextEditController {
     // 엔진 직접 수정 시 직후 render의 layout()이 DOM element의 구값으로
     // 엔진을 되돌려 덮어쓴다 (엔진 우선 단일 소스 흐름 유지).
     //
+    // selection이 없을 때 커서가 런 안(분기 2)이면 런만, 런 밖(분기 3)이면 paragraph 기본 + 캐스케이드.
+    // isCascadePath === true인 경우만 인라인 필드를 paragraph에 반영한다(분기 2는 런만 고치므로 미반영).
+    const isCascadePath = !hasSelection && cursorRunStyle === undefined;
+
     // 중요: 인라인 가능 필드(fontFamily 등)의 paragraph 반영은 런 밖(캐스케이드) 경로에서만
     // 수행한다. selection/런-안 경로의 의미는 "그 영역에만 적용"이므로 paragraph 기본을
     // 바꾸면 effectiveTextStyle이 런 값과 동일해져 normalizeRunMap이 런을 해제해버린다.
@@ -2472,18 +2476,18 @@ export class TextEditController {
     // 항상 paragraph 소속이므로 selection이 있어도 paragraph에 반영한다.
     //
     // revertParagraphTextFields는 인라인 불가 필드이므로 항상 paragraph에 반영한다.
-    // revertTextFields(인라인 가능 필드)는 selection이 없을 때만 paragraph에서 제거한다.
+    // revertTextFields(인라인 가능 필드)는 런 밖(캐스케이드) 경로에서만 paragraph에서 제거한다.
     const paragraphOnlyTextPatch: Partial<TextStyle> = {};
     for (const key of Object.keys(resolvedTextPatch)) {
       const isInlineField = (INLINE_FIELDS as readonly string[]).includes(key);
-      if (!hasSelection || !isInlineField) {
+      if (!isInlineField || isCascadePath) {
         (paragraphOnlyTextPatch as Record<string, unknown>)[key] = resolvedTextPatch[key as keyof TextStyle];
       }
     }
     for (const field of revertParagraphTextFields) {
       (paragraphOnlyTextPatch as Record<string, unknown>)[field] = undefined;
     }
-    if (!hasSelection) {
+    if (isCascadePath) {
       for (const field of revertTextFields) {
         (paragraphOnlyTextPatch as Record<string, unknown>)[field] = undefined;
       }
