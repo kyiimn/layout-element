@@ -2437,7 +2437,9 @@ export class TextEditController {
     this._runMap = normalizeRunMap(this._runMap, model.effectiveTextStyle);
 
     model.textContent = plainToInline(this._textarea.value, this._runMap);
-    this._paragraph.scheduleRender();
+    // textContent setter가 _dirty만 설정하므로 styleChange/textChange 리스너가
+    // extractData를 읽기 전에 커밋(layoutText)이 선행해야 한다 (dirty 가드 throw 방지).
+    this._paragraph.flushRender();
 
     // 커서/selection 복원 (길이 불변이므로 오프셋 유효)
     this._cursorModel.offset = offset;
@@ -2468,7 +2470,7 @@ export class TextEditController {
     if (JSON.stringify(this._runMap) === before) return;
 
     model.textContent = plainToInline(this._textarea.value, this._runMap);
-    this._paragraph.scheduleRender();
+    this._paragraph.flushRender();
 
     this._cursorModel.offset = offset;
     this._cursorModel.selection = savedSelection;
@@ -2501,7 +2503,7 @@ export class TextEditController {
 
     const plainText = this._textarea.value;
     model.textContent = plainToInline(plainText, this._runMap);
-    this._paragraph.scheduleRender();
+    this._paragraph.flushRender();
     this._emitStyleChange();
     this._manager._notifyTextChange(this);
   }
@@ -2538,7 +2540,7 @@ export class TextEditController {
 
     const plainText = this._textarea.value;
     model.textContent = plainToInline(plainText, this._runMap);
-    this._paragraph.scheduleRender();
+    this._paragraph.flushRender();
     this._emitStyleChange();
     this._manager._notifyTextChange(this);
   }

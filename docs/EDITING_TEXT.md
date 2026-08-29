@@ -1575,6 +1575,17 @@ type RunMap = RunEntry[];
 
 스타일 주입과 정규화는 텍스트 길이를 변경하지 않는다. 처리 전 `_cursorModel.offset` / `selection`을 캡처하고, 처리 후 동일 오프셋으로 복원하며 `textarea.setSelectionRange`와 커서/selection DOM을 재동기화한다.
 
+#### 커밋 선행 불변식 (중요)
+
+`textContent`/`textStyle`/`paragraphStyle` 등 ParagraphEngine 개별 setter는 `_dirty` 플래그만 설정하고, 커밋(`layoutText()` → `_dirty = false`)은 `paragraph.render()`에서 수행된다. dirty 상태에서 `extractData`/`printPostData`를 읽으면 `createDirtyError`가 throw된다 (`src/engine/types.ts` Dirty Guard).
+
+따라서 **스타일 주입 경로는 이벤트 styleChange/textChange를 dispatch하기 전에 반드시 커밋을 완료해야 한다** — 이벤트 리스너는 동기적으로 `element.data` getter(→ extractData 체인)를 읽을 수 있다. 주입 후 `scheduleRender()`(microtask 지연) 대신 `flushRender()`(동기 렌더링 = 즉시 커밋)를 사용한다:
+
+- `TextEditController._applyTextStyle` / `_applyInlineStyle` / `_toggleInlineStyle` / `normalizeNow`
+- `EditManager._applyParagraphLevelStyle` (focus 없는 selected 경로)
+
+일반 타이핑 경로(`_onInput` 등)는 rAF 디바운스(`_debouncedRender`)를 유지하되, `textContent` 커밋 전에 리스너에 `extractData`를 노출하는 이벤트를 발행하지 않도록 유지한다. dirty 가드와 편집 계층의 책임 분할은 유지 보수 규칙에서 변경하지 않는다.
+
 #### 내부 구성 요소
 
 | 구성 요소 | 파일 | 역할 |

@@ -882,7 +882,9 @@ export class EditManager {
 
     const normalized = normalizeRunMap(runMap, model.effectiveTextStyle);
     model.textContent = plainToInline(inlineToPlain(model.textContent).text, normalized);
-    paragraph.scheduleRender();
+    // textContent setter가 _dirty만 설정하므로, 이벤트를 받는 쪽이
+    // extractData/printPostData를 읽기 전에 커밋(layoutText)이 반드시 선행해야 한다.
+    paragraph.flushRender();
     return true;
   }
 
