@@ -1533,6 +1533,44 @@ type RunMap = RunEntry[];
 
 > 예: 문단 기본 fontSize 4, 런 A = `{ fontSize: 7 }`. `applyTextStyle({ fontSize: 7 })`을 실행하면 문단 기본이 7이 되고 캐스케이드로 런의 fontSize도 7이 된다. 주입 후 기본(7)과 비교하므로 런의 fontSize 필드는 제거되고, 런에 다른 차이 필드가 없으면 `normalizeRunMap`이 런을 완전히 해제한다.
 
+#### 테이블 셀 선택과의 경계 (TD 누락 아님)
+
+셀 클릭 시 `LayoutSelectionController._findSelectableBoxFromEvent`는 **TD 자체가 아니라 TD 내부의 box를 반환**한다 (`el.items[0]`). 따라서 `_selectedLayouts`에 들어가는 것은 box이며, box의 `contentType === 'paragraph'`이면 `_resolveSelectedParagraphTargets`가 정상 처리한다 — `LayoutTableCellElement`를 별도 처리하지 않는 것은 누락이 아니라 구조상 불필요하다.
+
+| 선택 요소                                      | 주입 처리                                                  |
+| ---------------------------------------------- | ---------------------------------------------------------- |
+| 셀 내부 box (content-type='paragraph') — 셀 클릭의 기본 결과 | 정상 주입 ✓                                                |
+| **빈 셀** (box 없음 — 유일하게 TD 자체가 selected) | paragraph가 없어 텍스트 스타일 대상이 아님 → 스킵 (의도됨) |
+| 셀 블록 선택 (`TableKeyboardController`, `cellSelectionChange`) | `_selectedLayouts`에 오지 않는 별도 상태. 호스트 UI도 텍스트 스타일 팝오버를 셀 블록에 적용하지 않으므로 미지원 유지 — 회귀 아님 |
+
+> 셀 블록 선택에 텍스트 스타일 주입이 필요해지면 별도 스펙으로 추가해야 한다 (셀 집합 → 각 셀의 paragraph 수집이 필요).
+
+#### undo/redo 스냅샷과 런 배열 — 스냅샷은 자연 반영, 복원에는 가드 우회 필요
+
+**스냅샷 반영은 자동이다.** 런 배열(`TextInlineData[]`)은 `ParagraphEngine.extractData`가 `ParagraphData.content`에 원본 그대로 담아 반환하므로(순수 JSON 구조 — 직렬화 무손실), 호스트가 `element.data`(DocumentData)를 스냅샷으로 찍으면 런 구조가 별도 처리 없이 포함된다. 텍스트 입력/삭제/IME/스타일 주입 등 모든 편집 경로가 `model.textContent = plainToInline(...)`으로 끝나므로 직렬화 시점의 런 구조는 항상 최신이다.
+
+**복원 경로(`element.data = snapshot`)에서의 런 구조 보존:**
+
+- `paragraph.data` setter가 `_sourceContent = data.content` + `_model.textContent = data.content`로 런 배열을 반영한다.
+- `TextEditController`가 재생성되면 생성자가 `inlineToPlain(model.textContent)`로 런 맵을 모델에서 재구축한다 — 스냅샷의 런 스타일 유지.
+- 기존 컨트롤러 재사용 시 `postRender()`의 불일치 안전망(`modelText !== textarea.value`)이 런 맵을 model 기준으로 재동기화한다.
+
+**⚠️ 호스트 구현 주의 — 편집 중 복원의 `isEditingThis` 가드:**
+
+`paragraph.data` setter는 `manager.focusedParagraph === this`이면 **`_model.textContent = data.content`를 스킵한다** (편집 중 외부 데이터 주입이 사용자 입력을 덮지 않도록 하는 규칙). undo 복원은 이 가드를 우회해야 하는 유일한 경로다 — 포커스 유지 상태에서 복원하면 스냅샷의 content(런 배열 포함)가 model에 반영되지 않는다. 호스트의 `restoreSnapshot`은 다음 순서를 권장한다:
+
+1. `manager.blurParagraph()` — 가드 해제
+2. `element.data = snapshot.documentData` — 런 배열 포함 전체 복원
+3. `manager.focusParagraph(focusedParagraphId, { selection })` — 커서/selection 재복원 (스냅샷의 `cursorOffset`/`selectionOffsets` 이용)
+
+추가 방어: 복원 후 커서 오프셋이 새 content 길이를 초과하면 컨트롤러의 오프셋 클램프(`setCursor`의 maxOffset 처리)가 방어한다. 런 배열이 바뀌어도 평문 오프셋 체계는 유지되므로, 길이가 다른 스냅샷(텍스트 편집 undo)에서만 클램프가 발동한다.
+
+**회귀 테스트 체크리스트** (호스트 마이그레이션 시):
+1. 스타일 주입 후 스냅샷 → undo → 런 스타일이 스냅샷 시점으로 복원되는지
+2. 텍스트 편집 중(포커스 유지) undo → content와 런 배열이 모두 복원되는지 (가드 우회 확인)
+3. 복원 후 커서 오프셋이 content 길이 내로 클램프되는지
+4. 복원 후 즉시 타이핑 → `_runMap`이 복원된 런 구조와 일치하는지 (`_onInput`이 올바른 before를 계산하는지)
+
 #### 커서/selection 보존
 
 스타일 주입과 정규화는 텍스트 길이를 변경하지 않는다. 처리 전 `_cursorModel.offset` / `selection`을 캡처하고, 처리 후 동일 오프셋으로 복원하며 `textarea.setSelectionRange`와 커서/selection DOM을 재동기화한다.
