@@ -2355,6 +2355,29 @@ export class TextEditController {
       }
     }
 
+    // 인라인 불가 텍스트 필드(letterSpacing, widthRatio, spaceRatio, indent)와
+    // ParagraphStyle 필드(lineGap, textAlign, verticalAlign)도 상속 회귀 대상이다.
+    // resolvePatchAgainstInherit이 이 필드들을 제거하면 paragraph.textStyle/paragraphStyle
+    // setter 호출이 스킵되어 기존 override가 남는 버그를 방지한다.
+    const PARAGRAPH_TEXT_FIELDS = ["letterSpacing", "widthRatio", "spaceRatio", "indent"] as const;
+    const revertParagraphTextFields: string[] = [];
+    for (const field of PARAGRAPH_TEXT_FIELDS) {
+      const isExplicitlyPassed = Object.prototype.hasOwnProperty.call(textPatch, field);
+      if (!isExplicitlyPassed) continue;
+      if (textPatch[field as keyof TextStyle] === undefined || textPatch[field as keyof TextStyle] === inheritStyle?.[field]) {
+        revertParagraphTextFields.push(field);
+      }
+    }
+    const PARAGRAPH_FIELDS = ["lineGap", "textAlign", "verticalAlign"] as const;
+    const revertParagraphFields: string[] = [];
+    for (const field of PARAGRAPH_FIELDS) {
+      const isExplicitlyPassed = Object.prototype.hasOwnProperty.call(paragraphPatch, field);
+      if (!isExplicitlyPassed) continue;
+      if (paragraphPatch[field as keyof ParagraphStyle] === undefined || paragraphPatch[field as keyof ParagraphStyle] === inheritStyle?.[field]) {
+        revertParagraphFields.push(field);
+      }
+    }
+
     const inlinePatch: Partial<TextInlineStyle> = {};
     for (const field of INLINE_FIELDS) {
       if (resolvedTextPatch[field] !== undefined) {
@@ -2382,6 +2405,9 @@ export class TextEditController {
     // 바꾸면 effectiveTextStyle이 런 값과 동일해져 normalizeRunMap이 런을 해제해버린다.
     // 인라인 불가 필드(textAlign/lineGap/verticalAlign/letterSpacing/widthRatio)는
     // 항상 paragraph 소속이므로 selection이 있어도 paragraph에 반영한다.
+    //
+    // revertParagraphTextFields는 인라인 불가 필드이므로 항상 paragraph에 반영한다.
+    // revertTextFields(인라인 가능 필드)는 selection이 없을 때만 paragraph에서 제거한다.
     const paragraphOnlyTextPatch: Partial<TextStyle> = {};
     for (const key of Object.keys(resolvedTextPatch)) {
       const isInlineField = (INLINE_FIELDS as readonly string[]).includes(key);
@@ -2389,11 +2415,33 @@ export class TextEditController {
         (paragraphOnlyTextPatch as Record<string, unknown>)[key] = resolvedTextPatch[key as keyof TextStyle];
       }
     }
-    if (Object.keys(paragraphOnlyTextPatch).length > 0) {
-      this._paragraph.textStyle = { ...model.textStyle, ...paragraphOnlyTextPatch };
+    for (const field of revertParagraphTextFields) {
+      (paragraphOnlyTextPatch as Record<string, unknown>)[field] = undefined;
     }
-    if (hasParagraphPatch) {
-      this._paragraph.paragraphStyle = { ...model.paragraphStyle, ...resolvedParagraphPatch };
+    if (!hasSelection) {
+      for (const field of revertTextFields) {
+        (paragraphOnlyTextPatch as Record<string, unknown>)[field] = undefined;
+      }
+    }
+    const nextTextStyle: Partial<TextStyle> = { ...model.textStyle };
+    for (const [key, value] of Object.entries(paragraphOnlyTextPatch)) {
+      if (value === undefined) {
+        delete (nextTextStyle as Record<string, unknown>)[key];
+      } else {
+        (nextTextStyle as Record<string, unknown>)[key] = value;
+      }
+    }
+    const needsTextStyleUpdate = Object.keys(paragraphOnlyTextPatch).length > 0;
+    if (needsTextStyleUpdate) {
+      this._paragraph.textStyle = nextTextStyle as TextStyle;
+    }
+    const needsParagraphStyleUpdate = hasParagraphPatch || revertParagraphFields.length > 0;
+    if (needsParagraphStyleUpdate) {
+      const nextParagraphStyle: Partial<ParagraphStyle> = { ...model.paragraphStyle, ...resolvedParagraphPatch };
+      for (const field of revertParagraphFields) {
+        delete (nextParagraphStyle as Record<string, unknown>)[field];
+      }
+      this._paragraph.paragraphStyle = nextParagraphStyle as ParagraphStyle;
     }
 
     // 상속 회귀로 제거할 인라인 필드가 있으면 전체 런 맵에서 제거한다

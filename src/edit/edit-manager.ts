@@ -838,7 +838,9 @@ export class EditManager {
     ) as Partial<ParagraphStyle>;
 
     const INLINE_FIELDS = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "color"] as const;
+    const PARAGRAPH_FIELDS = ["lineGap", "textAlign", "verticalAlign"] as const;
     const revertTextFields: string[] = [];
+    const revertParagraphFields: string[] = [];
     for (const field of INLINE_FIELDS) {
       // '명시적으로 undefined를 전달한' 필드만 오버라이드 제거 대상이다.
       // Partial 객체의 미정의 필드도 undefined이므로 hasOwnProperty로 구분하지 않으면
@@ -849,16 +851,41 @@ export class EditManager {
         revertTextFields.push(field);
       }
     }
+    for (const field of PARAGRAPH_FIELDS) {
+      // ParagraphStyle 필드도 동일한 상속 회귀 감지를 적용한다.
+      // patch 값이 inheritStyle과 동일하거나 명시적으로 undefined이면
+      // paragraph.paragraphStyle의 해당 필드 override를 제거해야 한다.
+      const isExplicitlyPassed = Object.prototype.hasOwnProperty.call(paragraphPatch, field);
+      if (!isExplicitlyPassed) continue;
+      if (paragraphPatch[field] === undefined || paragraphPatch[field] === inheritStyle?.[field]) {
+        revertParagraphFields.push(field);
+      }
+    }
 
     // DOM element의 textStyle/paragraphStyle setter를 사용한다 — 엔진 우선 단일 소스.
     // model.textStyle(엔진)을 직접 고치면 직후의 paragraph.layout()이
     // DOM element의 _textStyle(갱신 전 값)로 엔진을 되돌려 덮어쓴다.
     // element setter는 DOM 필드 갱신 + layout() + scheduleRender()를 수행한다.
-    if (Object.keys(resolvedTextPatch).length > 0) {
-      paragraph.textStyle = { ...paragraph.textStyle, ...resolvedTextPatch };
+    //
+    // 상속 회귀 필드가 있으면 resolvePatchAgainstInherit이 해당 필드를 제거하므로
+    // resolvedTextPatch/resolvedParagraphPatch가 빈 객체가 될 수 있다.
+    // 그 경우에도 paragraph.textStyle/paragraphStyle에서 기존 override를
+    // 제거해야 하므로, revert 필드가 있으면 항상 setter를 호출한다.
+    const needsTextStyleUpdate = Object.keys(resolvedTextPatch).length > 0 || revertTextFields.length > 0;
+    const needsParagraphStyleUpdate = Object.keys(resolvedParagraphPatch).length > 0 || revertParagraphFields.length > 0;
+    if (needsTextStyleUpdate) {
+      const nextTextStyle: Partial<TextStyle> = { ...paragraph.textStyle, ...resolvedTextPatch };
+      for (const field of revertTextFields) {
+        delete (nextTextStyle as Record<string, unknown>)[field];
+      }
+      paragraph.textStyle = nextTextStyle as TextStyle;
     }
-    if (Object.keys(resolvedParagraphPatch).length > 0) {
-      paragraph.paragraphStyle = { ...paragraph.paragraphStyle, ...resolvedParagraphPatch };
+    if (needsParagraphStyleUpdate) {
+      const nextParagraphStyle: Partial<ParagraphStyle> = { ...paragraph.paragraphStyle, ...resolvedParagraphPatch };
+      for (const field of revertParagraphFields) {
+        delete (nextParagraphStyle as Record<string, unknown>)[field];
+      }
+      paragraph.paragraphStyle = nextParagraphStyle as ParagraphStyle;
     }
 
     // 상속 회귀로 제거할 인라인 필드가 있으면 전체 런 맵에서 제거한다
