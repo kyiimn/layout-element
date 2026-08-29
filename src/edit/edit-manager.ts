@@ -594,6 +594,12 @@ export class EditManager {
    */
   notifyTextChange(paragraph: LayoutParagraphElement): void {
     if (this._dispatching) return;
+    // 구독자가 element.data → engine.extractData를 동기 읽으므로, 미커밋 dirty가
+    // 남아 있으면 dirty 가드가 throw된다. 디스패치 전에 커밋을 보장한다.
+    const model = paragraph.model;
+    if (model?.hasPendingChanges) {
+      paragraph.flushRender();
+    }
     const listeners = this._listeners.get('textChange');
     if (!listeners || listeners.size === 0) return;
 

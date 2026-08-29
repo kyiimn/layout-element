@@ -149,6 +149,23 @@ export class ParagraphEngine {
   /** `_layoutCache` 존재 여부 (외부 스킵 판정용). */
   get hasLayoutCache(): boolean { return this._layoutCache !== null; }
 
+  /**
+   * 개별 setter(textContent 등)로 인한 미커밋 변경 존재 여부.
+   * 동기 이벤트 구독자가 extractData를 읽기 전에 커밋(render/layoutText)이
+   * 선행했는지 판정하는 용도로만 사용한다.
+   *
+   * @returns `_dirty`가 true면 true
+   * @throws 없음
+   * @example
+   * ```ts
+   * engine.textContent = "변경";     // _dirty = true
+   * engine.hasPendingChanges;        // → true
+   * engine.layoutText();             // 커밋
+   * engine.hasPendingChanges;        // → false
+   * ```
+   */
+  public get hasPendingChanges(): boolean { return this._dirty; }
+
   /** 성능 캐시: effectiveParagraphStyle. _paragraphStyle/_inheritStyle 변경 시 무효화. */
   private _effectivePsCache: ParagraphStyle | null = null;
   private _effectivePsDirty: boolean = true;

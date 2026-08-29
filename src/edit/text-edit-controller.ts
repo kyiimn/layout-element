@@ -2018,12 +2018,19 @@ export class TextEditController {
   private _debouncedRender(): void {
     if (this._debounceTimer !== null) {
       cancelAnimationFrame(this._debounceTimer);
+      this._debounceTimer = null;
     }
     this._wasFocused = this._isFocused;
-    this._debounceTimer = requestAnimationFrame(() => {
-      this._debounceTimer = null;
+    // 텍스트 변경 직후 _notifyTextChange가 동기 디스패치되고, 구독자(LayoutEditor의
+    // 데이터 동기화 핸들러 등)가 즉시 element.data → engine.extractData를 읽는다.
+    // textContent setter의 _dirty는 render()의 layoutText()에서만 커밋되므로,
+    // dirty가 남은 채 이벤트를 쏘면 extractData dirty 가드가 throw된다.
+    // 따라서 커밋(render)을 여기서 동기 실행하고, DOM 갱신만 microtask 배치로 미룬다.
+    if (this._paragraph.model?.hasPendingChanges) {
+      this._paragraph.flushRender();
+    } else {
       this._paragraph.scheduleRender();
-    });
+    }
   }
 
   private _updateCursorPosition(): void {
