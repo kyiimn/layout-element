@@ -4,6 +4,7 @@ import { TextInlineStyle, ParagraphStyle, TextStyle } from "@/types/style";
 import { CursorPosition } from "@/types/edit/cursor.type";
 import { SelectionRange } from "@/types/edit/selection.type";
 import type { TextLineData } from "@/types/layout/text/text-line.type";
+import type { TextInlineData } from "@/types/layout/text/text-inline.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
 import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
@@ -1436,6 +1437,56 @@ export class TextEditController {
     // model.plainText는 캐시 getter — textContent setter에서 무효화되므로 항상 신선하다.
     // 키 입력마다 전체 인라인 콘텐츠를 재순회하던 O(N) inlineToPlain 호출을 제거한다.
     return model.plainText;
+  }
+
+  /**
+   * 편집 중인 문단에 외부에서 주입된 콘텐츠를 무음 반영한다.
+   *
+   * `data` setter가 편집 중(focused) 문단의 `model.textContent`를 직접 갱신하지
+   * 않는 이유는 편집 컨트롤러의 textarea/runMap/커서가 모델과 따로 놀 수 있기
+   * 때문이다. 이 메서드가 편집 상태까지 한 번에 재동기화한다:
+   * 1. model.textContent 갱신 (dirty 후속 렌더는 호출부의 `scheduleRender()`가 처리)
+   * 2. textarea 값과 런 맵을 모델 기준으로 재구축
+   * 3. 커서 오프셋/선택 영역을 새 텍스트 길이로 클램핑
+   *
+   * 어떤 편집 이벤트도 발행하지 않는다 — 주 용도가 undo/redo 복원이므로,
+   * 주입 자체가 새 변경으로 기록되어 히스토리 스택을 오염하는 것을 방지한다.
+   * 렌더 갱신(`render-complete`)만 발생한다.
+   *
+   * IME 조합 중에는 조합 커밋 흐름(`_onCompositionEnd`)과 충돌하므로 무시한다 —
+   * 조합 종료 후의 다음 주입부터 적용된다.
+   *
+   * @param content - 주입된 콘텐츠 (`string | (string | TextInlineData)[]`)
+   * @returns 실제로 반영되었으면 `true` (조합 중이면 `false`)
+   * @example
+   * ```ts
+   * // paragraph.data = {...data, content} 내부에서 편집 중 경로로 호출된다.
+   * controller.applyExternalContent("외부에서 수정한 본문");
+   * ```
+   */
+  applyExternalContent(content: string | (string | TextInlineData)[]): boolean {
+    if (this._isComposing) return false;
+
+    const model = this._paragraph.model;
+    if (!model) return false;
+
+    model.textContent = content;
+
+    const { text, runMap } = inlineToPlain(model.textContent);
+    this._textarea.value = text;
+    this._runMap = runMap;
+
+    const plainLength = text.length;
+    const sel = this._cursorModel.selection;
+    if (sel) {
+      const { start, end } = sel.normalized();
+      const clamp = (offset: number): number => Math.max(0, Math.min(offset, plainLength));
+      this._cursorModel.selection = SelectionRange.fromOffsets(clamp(start.textOffset), clamp(end.textOffset));
+    } else {
+      this._cursorModel.offset = Math.max(0, Math.min(this._cursorModel.offset, plainLength));
+    }
+
+    return true;
   }
 
   private _onInput(event: InputEvent): void {

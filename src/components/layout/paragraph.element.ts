@@ -150,6 +150,12 @@ export class LayoutParagraphElement extends HTMLElement {
     if (!parentBoxEngine) return;
     const existing = parentBoxEngine.childEngines.find(e => e instanceof ParagraphEngine);
     if (existing && this._model !== existing) {
+      // data setter가 model.textContent를 새 content로 갱신했지만, engine 트리 재구축으로
+      // childEngines에 이전 content를 가진 PE가 existing으로 들어올 수 있다. 기존 model의
+      // 신선한 content를 이관하여 텍스트가 되돌려지지 않도록 한다.
+      if (this._model) {
+        existing.textContent = this._model.textContent;
+      }
       this._model = existing;
     }
 
@@ -540,16 +546,27 @@ export class LayoutParagraphElement extends HTMLElement {
     if (data.overlapMode !== undefined) this._overlapMode = data.overlapMode;
 
     this._sourceContent = data.content;
+    let editingPath = false;
     if (this._model && data.content !== undefined) {
       const manager = this._editManagerRef ?? this.editManager;
       const isEditingThis = manager?.focusedParagraph === this;
-      if (!isEditingThis) {
+      const controller = this._editController;
+      if (isEditingThis && controller) {
+        controller.applyExternalContent(data.content);
+        // 편집 중 주입 즉시 this.layout()을 돌리지 않는다 — 이 시점 부모
+        // BoxEngine.childEngines가 아직 이전 트리를 들고 있어 _layoutStructure의
+        // existing 교체가 방금 갱신한 model을 구 content의 PE로 되돌린다.
+        // 상위(document.data setter)의 최종 layout이 model 갱신 완료 후 재구축한다.
+        editingPath = true;
+      } else if (!isEditingThis) {
         this._model.textContent = data.content;
       }
     }
 
-    this.layout();
     this._perfStructureChanged = true;
+    if (!editingPath) {
+      this.layout();
+    }
     this.scheduleRender();
   }
 
