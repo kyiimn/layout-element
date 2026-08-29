@@ -13,7 +13,7 @@
   - [2.1 글자 폭 캐시](#21-글자-폭-캐시-_charwidthcache)
   - [2.2 글자 외부 span 스타일 캐시](#22-글자-외부-span-스타일-캐시-_charouterstylecache)
   - [2.3 내부 span 스타일 캐시](#23-내부-span-스타일-캐시-_charinnerstyle)
-  - [2.4 GridCalculatorEngine ppm 캐시](#24-gridcalculatorengine-ppm-캐시)
+  - [2.4 ppm 주입 및 캐시](#24-ppm-주입-및-캐시)
   - [2.5 이미지 3단계 캐시](#25-이미지-3단계-캐시)
   - [2.6 오버랩 rect 캐시](#26-오버랩-rect-캐시-_overlayrectsmm)
   - [2.7 폰트 파싱 캐시 + 시그니처 스킵](#27-폰트-파싱-캐시--시그니처-스킵)
@@ -53,8 +53,8 @@
   - [4.17 텍스트 영역 스타일 JSON 가드](#417-텍스트-영역-스타일-json-가드)
   - [4.18 LayoutDocumentElement dataVersion 카운터](#418-layoutdocumentelement-dataversion-카운터)
 - [5. 메모리 관리](#5-메모리-관리)
-  - [5.1 Image Object URL 생명 주기 추적](#51-image-object-url-생명-주기-추적)
-  - [5.2 Image canvas willReadFrequently](#52-image-canvas-willreadfrequently)
+  - [5.1 이미지 캐시 생명 주기](#51-이미지-캐시-생명-주기)
+  - [5.2 ~~Image canvas willReadFrequently~~ (제거됨)](#52-image-canvas-willreadfrequently-제거됨)
 - [6. 기하/알고리즘 최적화](#6-기하알고리즘-최적화)
   - [6.1 mergeOverlapParts O(n) 병합](#61-mergeoverlapparts-on-병합)
   - [6.2 타원 기반 픽셀 컬링](#62-타원-기반-픽셀-컬링)
@@ -151,15 +151,16 @@
 
 모든 글자의 내부 span은 동일 스타일을 사용하므로(글자 무관, 장평에만 의존) 단일 키 메모이제이션으로 충분하다.
 
-### 2.4 GridCalculatorEngine ppm 캐시
+### 2.4 ppm 주입 및 캐시
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `GridCalculatorEngine._ppm` (`grid-calculator-engine.ts:55`) |
-| 타입 | `static number \| undefined` (싱글톤) |
-| 무효화 | `GridCalculatorEngine.resetPpm()` 호출 시 |
+| 위치 | `GridCalculatorEngine._ppm` (`grid-calculator-engine.ts:40, 71`) — 인스턴스 필드 |
+| 주입 경로 | `GridCalculatorEngine.create(data, ppm?)` — 생성 시 1회 주입 |
+| 측정 | `LayoutDocumentElement._measurePpm()` (`document.element.ts:268-280`) — 100mm `<div>`를 DOM에 추가해 `getBoundingClientRect()`로 측정 후 `px/100` |
+| 재측정 | `LayoutDocumentElement.resetPpm()` (`document.element.ts:175`) |
 
-최초 접근 시 100mm `<div>`를 생성하여 `getBoundingClientRect()`로 픽셀 폭을 측정하고 `px/100`을 `_ppm`에 저장. 이후 접근은 DOM 측정 없이 캐시된 값을 반환. 줌/CSS transform 등으로 ppm이 변경될 수 있으므로 `resetPpm()`으로 수동 무효화 필요.
+> **변경 이력**: 과거에는 `GridCalculatorEngine`이 `static _ppm` 싱글톤 캐시를 보유하고 최초 접근 시 직접 DOM을 측정했다. Node.js 호환(엔진 레이어 DOM-free) 원칙에 따라 DOM 측정은 `LayoutDocumentElement`로 이동했고, 엔진은 주입받은 `ppm`을 인스턴스 필드로만 보유한다. `grid-calculator-engine.ts` 헤더에 `document.createElement` / `getBoundingClientRect` 사용 금지가 명시되어 있다. ppm은 줌/CSS transform 등으로 변할 수 있으므로 `resetPpm()`으로 재측정한다.
 
 ### 2.5 이미지 3단계 캐시
 
@@ -175,17 +176,17 @@
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `ParagraphEngine._overlayRectsMm` (`paragraph-engine.ts:77`) |
-| 타입 | `Map<LayoutBoxElement, MmRect> \| null` |
-| 생명 주기 | `_initStructureAndMeasureColumns()` 시작 시 `null` 리셋, 첫 `_detectOverlapWithCache()` 호출 시 구축 |
+| 위치 | `ParagraphEngine._overlayRectsMm` (`paragraph-engine.ts:144`) |
+| 타입 | `Map<BoxEngine, MmRect> \| null` |
+| 생명 주기 | 렌더링 사이클 시작(`_layoutTextIntoColumns` 진입/`resetIncrementalState`/`updateOverlayContext`)마다 `null` 리셋, 첫 `_detectOverlapWithCache()` 호출 시 구축 (`paragraph-engine.ts:529-542`) |
 
-한 렌더링 사이클 내에서 오버랩 요소의 rect를 `Map`에 캐싱하여 `getBoundingClientRect()` 호출을 1회로 통합. 라인 수 × 오버랩 요소 수번의 강제 리플로우를 1번으로 감소.
+한 렌더링 사이클 내에서 오버랩 **엔진(`BoxEngine`)**의 `absRect`를 `Map`에 캐싱하여 rect 접근을 1회로 통합. 이후 모든 라인의 오버랩 판정은 이 Map 조회로 수행된다. 엔진 우선 전환으로 키가 DOM 요소(`LayoutBoxElement`)에서 엔진(`BoxEngine`)으로 변경되었다. 오버랩 픽셀 판정 자체는 `ImageEngine.rgbaData`에서 로드 시 1회 추출한 데이터와 사전 빌드된 `opaqueRowBitmap` 비트맵으로 수행되며(`overlap-engine.ts`), 이 캐시는 이 판정에 필요한 rect 조회를 사이클당 1회로 줄인다.
 
 ### 2.7 폰트 파싱 캐시 + 시그니처 스킵
 
 | 항목 | 위치 | 설명 |
 |---|---|---|
-| `_parsedFonts` | `font-loader.ts:42` | `Map<string, opentype.Font>` — 폰트 패밀리별 파싱된 폰트 객체 캐싱 |
+| `_parsedFonts` | `font-loader.ts:50` | `Map<string, ParsedFont>` — 폰트 패밀리별 파싱된 폰트(`ParsedFont` 래퍼, `charToGlyph`/`unitsPerEm` 노출) 캐싱 |
 | `_lastFontsSignature` | `font-loader.ts:50, 240` | 동일 `Font[]`이 전달되면 `init()` 스킵 (재파싱/재등록 방지) |
 | `_ready` | `font-loader.ts` | 초기화 완료 플래그 |
 
@@ -223,14 +224,17 @@
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `LayoutColumnElement._skipSpanStyleIfUnchanged()` (`column.element.ts:172`) |
-| 스킵 조건 | `data-offset` === renderedOffset **AND** `data-source-offset` === sourceOffset **AND** inner `textContent` === char |
+| 위치 | `LayoutColumnElement._skipSpanStyleIfUnchanged()` (`column.element.ts:321`) |
+| 스킵 조건 | `data-offset` === renderedOffset **AND** `data-source-offset` === sourceOffset **AND** `data-char-offset` 일치 **AND** `data-inline-key` 일치 **AND** `textContent` === char |
 
-`renderText()` diff 루프에서 재사용 span의 오프셋/내용이 동일하면 `_applySpanStyle()` 전체 스킵 (`cssText = ''` + `Object.assign` + inner span 갱신 생략).
+renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절대 좌표 경로)/인라인 스타일 키가 모두 동일하면 `_applySpanStyle()` 전체 스킵 (`column.element.ts:329-348`).
+
+- `data-inline-key` 비교: 인라인 런 스타일 주입(굵게/기울임 등)은 텍스트·오프셋을 바꾸지 않으므로 dataset에 기록된 직전 인라인 스타일 키와 비교하여 변경을 감지한다 — 이 비교가 없으면 인라인 스타일 주입 시 재사용 span이 잘못 스킵되어 화면이 갱신되지 않는다.
+- `data-char-offset` 비교: charOffsets 절대 좌표 경로에서 좌표 변화(부모 박스 이동 등)를 감지한다.
 
 #### 스킵이 발생하는 시나리오
 
-- **부모 박스 이동**: 박스 위치 변경 → 단락 `layout()` + `render()` → 컬럼 `renderText()` → 텍스트 내용/오프셋 변경 없음 → 모든 재사용 span 스킵
+- **부모 박스 이동**: 박스 위치 변경 → 단락 `layout()` + `render()` → 컬럼 `renderText()` → 텍스트 내용/오프셋/charOffset 변경 없음 → 모든 재사용 span 스킵
 - **오버플로우 상태 변경 없음**: 동일 텍스트 재렌더링 시 전체 스킵
 - **스타일 변경 없는 재렌더**: `scheduleRender()` 배치 후 동일 내용 재렌더 시
 
@@ -239,6 +243,7 @@
 - **텍스트 편집**: 글자 추가/삭제 → 오프셋 변경 → 스킵 불가
 - **장평/자간 변경**: `textStyle` setter가 `_perfStructureChanged = true`를 설정하여 `render()`에서 전체 재생성(`replaceChildren()`)을 트리거 → diff 루프가 아닌 신규 span 생성 경로로 진입
 - **컬럼 수 변경**: `_perfShouldFullRecreate()`가 전체 재생성을 트리거 → diff 루프 미진입
+- **인라인 런 스타일 변경**: `data-inline-key` 불일치 → 스킵 불가 (재적용)
 
 ### 3.2 queueMicrotask 배치 렌더링 (`scheduleRender`)
 
@@ -286,21 +291,23 @@
 
 | 요소 | 위치 |
 |---|---|
-| `LayoutDocumentElement.data` | `document.element.ts:342-406` |
-| `LayoutBoxElement.data` | `box.element.ts:550-637` |
-| `LayoutTableElement.data` | `table.element.ts:169-197` |
-| `LayoutTableRowElement.data` | `tr.element.ts:82-124` |
-| `LayoutTableCellElement.data` | `td.element.ts:146-212` |
+| `LayoutDocumentElement.data` | `document.element.ts` (`data` setter + `dataVersion`) |
+| `LayoutBoxElement.data` | `box.element.ts` (`data` setter, `_rebuildingChildren` 가드) |
+| `LayoutTableElement.data` | `table.element.ts` (ID-keyed reconcile) |
+| `LayoutTableRowElement.data` | `tr.element.ts` (ID-keyed reconcile) |
+| `LayoutTableCellElement.data` | `td.element.ts` (ID-keyed reconcile) |
 
 기존 자식을 `id`로 매핑(`Map<id, element>`), 동일 `id`+동일 태그 타입이면 `element.data = child`로 in-place 갱신, 순서는 `appendChild`로 재정렬, 미사용 `id`는 제거. 전체 자식 재생성(이미지 깜빡임, GC 부하)을 방지.
 
 #### `_pendingData` getter 캐시
 
-`box.element.ts:87-88`, `document.element.ts:35-36` — 데이터 세터 실행 중 `_rebuildingChildren = true`일 때 getter가 `_pendingData`를 반환하여 외부 코드가 중간 상태를 읽지 않도록 방지.
+`box.element.ts:89-92, 1084-1085`, `document.element.ts:101-104, 695-696` — 데이터 세터 실행 중 `_rebuildingChildren = true`일 때 getter가 `_pendingData`를 반환하여 외부 코드가 중간 상태를 읽지 않도록 방지.
 
-#### `_rebuildingChildren` MutationObserver 가드
+#### `_rebuildingChildren` 재귀 가드
 
-`box.element.ts:1743-1761`, `document.element.ts:612-629`, `tr.element.ts:236-244`, `td.element.ts` — `MutationObserver`가 `_rebuildingChildren === true`일 때 콜백을 스킵하여 데이터 세터 실행 중 중복 `layout()` + `render()`를 방지.
+`box.element.ts:723-733` — 자식 `remove()`가 부모의 `_rebuildingChildren` 플래그를 읽어, 데이터 세터의 reconcile 과정 중이면 부모의 `removeChildData()` 호출을 생략하고 `super.remove()`로 무한 재귀를 방지한다.
+
+> **변경 이력**: 과거에는 `box`/`document`/`tr`/`td`가 `MutationObserver`(`{ childList: true }`)로 자식 DOM 변이를 감시하고 `_rebuildingChildren === true`일 때 콜백을 스킵했다. MutationObserver는 컴포넌트·컨트롤러 전역에서 제거되었고, 현재는 위 플래그 기반 가드(및 부모 플래그 읽기)만 남아 있다.
 
 #### 박스 value-equal setter 조기 반환
 
@@ -462,13 +469,18 @@ flexbox 폴백 경로(`charOffsets === undefined`, 외부에서 임의로 `TextP
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `text-edit-controller.ts:1860-1868` |
-| 메커니즘 | `requestAnimationFrame` → `scheduleRender()` |
+| 위치 | `text-edit-controller.ts:2018-2034` |
+| 메커니즘 | 보류 중 rAF 취소 → **엔진 dirty 여부 분기** |
 | 통합 대상 | 키 입력, Backspace, Delete, Enter, 붙여넣기, 문자 입력 |
 
-`_debounceTimer`에 보류 중인 rAF가 있으면 취소하고 새 rAF 스케줄링. rAF 콜백 내에서 `paragraph.scheduleRender()`를 호출하여 `queueMicrotask` 배치에 참여. blur/compositionstart/compositionupdate 핸들러도 `scheduleRender()`를 사용하여 배치 통합.
+`_debounceTimer`에 보류 중인 rAF가 있으면 취소하고 새 rAF 스케줄링. rAF 콜백에서:
 
-Enter/compositionend 핸들러와 같이 `render()` 직후 동기적 커서/선택 갱신이 필요한 경우 `paragraph.flushRender()`를 사용 — 대기 중인 `scheduleRender()` 배치를 취소하고 즉시 `render()`를 실행하여 `postRender()` → `_updateCursorPosition()` 흐름을 동기적으로 보장.
+- **`model.hasPendingChanges === true`** → `paragraph.flushRender()`로 **동기 실행**. `textContent` setter의 `_dirty`는 `render()`의 `layoutText()`에서만 커밋되므로, dirty가 남은 채 `textChange` 이벤트를 먼저 쏘면 이벤트 구독자가 `element.data` → `engine.extractData`를 읽는 순간 dirty 가드가 throw된다. 이를 방지하기 위해 커밋(render)은 동기 실행하고, 뒤따르는 `renderText()` DOM 갱신만 microtask 배치로 미룬다 (`text-edit-controller.ts:2024-2032` 주석 참조).
+- **dirty가 아닐 때** → `paragraph.scheduleRender()` (queueMicrotask 배치 참여).
+
+Enter/compositionend 핸들러 등 커서/선택 동기 갱신이 필요한 경우에도 `flushRender()`를 사용한다. blur/compositionstart/compositionupdate/compositioncancel 핸들러는 `scheduleRender()`를 사용해 배치에 참여한다.
+
+> **변경 이력**: 과거에는 rAF 콜백 내 `scheduleRender()`(microtask 배치)만 수행했다. printPostData/extractData가 dirty 가드를 도입하면서 커밋 시점이 render 내부로 이동했고, 이에 맞춰 동기 flush 경로가 추가되었다. 결과적으로 키 입력마다 `layoutText()` 전체 재배치가 동기 실행된다 — 이것이 연속 타이핑 성능의 주요 비용 중 하나다 (§10 참조).
 
 ### 4.2 낙관적 span (optimistic span)
 
@@ -642,21 +654,24 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 ## 5. 메모리 관리
 
-### 5.1 Image Object URL 생명 주기 추적
+### 5.1 이미지 캐시 생명 주기
 
-| 항목 | 값 |
-|---|---|
-| 위치 | `image.element.ts:74, 130-134, 260-265` |
+| 항목 | 위치 | 설명 |
+|---|---|---|
+| resolved URL | `_cachedResolvedUrl` | `image.element.ts:105` |
+| HTMLImageElement | `_cachedImage` + `_cachedImageSrc` | `image.element.ts:87-93` |
+| 로딩 Promise | `_imageLoadingPromise` (동일 URL 동시 로드 통합) | `image.element.ts:99, 366-385` |
+| blob URL 캐시 | `imageUrlCache` (호스트 앱 `apps/layout-ui/src/lib/layout-loader.ts:144`) | URL → blob URL Map. `releaseLayoutImageCache()`(동일 파일 :185-189)로 앱 수명 주기 종료 시 전체 해제 |
 
-`urlLoader`가 `blob:` URL을 반환하거나 `url` 자체가 `blob:`인 경우, `_objectUrl`에 추적. 재렌더 시 새 URL이 기존과 다르면 `URL.revokeObjectURL()`로 이전 URL 해제. `disconnectedCallback`에서도 해제. 메모리 누수 방지.
+캐시 히트 시 동기 `drawImage` 경로로 진행하여 `await` 없이 빈 프레임 없이 즉시 렌더링 (`image.element.ts:282-284`).
 
-### 5.2 Image canvas willReadFrequently
+#### blob URL 해제 정책
 
-| 항목 | 값 |
-|---|---|
-| 위치 | `image.element.ts:229` |
+과거의 `_objectUrl` 필드 기반 `revokeObjectURL()` 추적은 제거되었다. blob URL의 수명은 **호스트 앱의 모듈 레벨 `imageUrlCache`**가 관리한다 — 같은 URL은 세션 내 재사용되므로, 요소가 DOM에서 분리되면(disconnectedCallback) 해제하지 않고 캐시도 보존한다(`image.element.ts:130-153` 코멘트 참조). 이미지 캐시는 URL 변경(`data`/`url` setter) 또는 명시적 `_clearImageCache()` 호출 시에만 무효화된다. 엔진 주입용 rgbaData는 로드 완료 시 1회 추출하며, 이후 오버랩 판정은 typed array/비트맵 스캔으로 동작한다.
 
-`canvas.getContext('2d', { willReadFrequently: true })`로 컨텍스트를 요청. 브라우저가 CPU 기반 백엔드(GPU가 아닌)를 선택하여 `getImageData()` 읽기 성능을 최적화. 오버랩 탐지 및 object-fit 렌더링에서 캔버스 픽셀 읽기가 빈번하므로 중요.
+### ~~5.2 Image canvas willReadFrequently~~ (제거됨)
+
+> 과거 `canvas.getContext('2d', { willReadFrequently: true })`를 사용했다 — 오버랩 `getImageData()` 픽셀 읽기 성능 최적화 목적. 오버랩 판정이 `ImageEngine.rgbaData`(로드 시 1회 추출, Node.js는 pngjs) + `opaqueRowBitmap` 비트맵 기반으로 전환되면서 오버랩 경로에서 `getImageData()` 호출이 사라졌고, 이 옵션도 제거되었다. 현재 src 전역에 `willReadFrequently` 사용처는 없다.
 
 ---
 
@@ -706,9 +721,9 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `table-keyboard-controller.ts:607` |
+| 위치 | `table-keyboard-controller.ts:608-612` |
 
-셀 블록 선택 영역 확장 시 `Set<string>`(키 `row-col`)으로 동일 물리 셀의 중복 추가를 방지. 병합된 셀을 스팬할 때 중복을 방지.
+셀 블록 선택 영역 확장 시 `Set<string>`(키 **`cell.id`**)으로 동일 물리 셀의 중복 추가를 방지. 병합된 셀을 스팬할 때 중복을 방지.
 
 ### 6.7 테이블 removeSet 배치 제거
 
@@ -731,7 +746,9 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
   │   └─ this.scheduleRender()  [queueMicrotask 배치]
   │
   ├─ text edit input
-  │   └─ _debouncedRender()     [rAF → scheduleRender → queueMicrotask 배치]
+  │   └─ _debouncedRender()     [rAF 코일: 보류 rAF 취소 → 재스케줄]
+  │       ├─ model.hasPendingChanges → flushRender()  [동기 커밋 — §4.1]
+  │       └─ 아니면 → scheduleRender()  [queueMicrotask 배치]
   │
   ├─ text edit (Enter/compositionend — 동기 커서 갱신 필요)
   │   └─ paragraph.flushRender()  [대기 중 배치 취소 + 즉시 render()]
@@ -749,12 +766,14 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
       │
       ├─ model.layoutText()
       │   └─ _layoutTextIntoColumns()
-      │       └─ _charWidthMm() per char
-      │           ├─ _charWidthCache 히트? → 즉시 반환
-      │           └─ 미스 → opentype.js → 캐시 저장
+      │       ├─ _computeLayoutInputHash() 히트? → 캐시 반환
+      │       └─ 미스 → 전체 재래핑
+      │           └─ _charWidthMm() per char
+      │               ├─ _charWidthCache 히트? → 즉시 반환
+      │               └─ 미스 → opentype.js → 캐시 저장
       │
       └─ column.renderText()
-          ├─ colStyle 변경? → _cachedColStyleKey 비교
+          ├─ colStyle 변경? → _cachedColStyleKey 비교 (+CSSOM 무효화 감지)
           │   ├─ 변경 → 스타일 시트 재구축
           │   └─ 미변경 → 스킵
           │
@@ -763,8 +782,11 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
               ├─ 라인/파트 div 재사용 (인덱스 기반)
               ├─ 재사용 span + 동일 내용?
               │   ├─ _skipSpanStyleIfUnchanged → true → 스킵
+              │   │   (data-offset + data-source-offset + data-char-offset
+              │   │    + data-inline-key + textContent 비교 — §3.1)
               │   └─ false → _applySpanStyle
-              │       ├─ genCharStyle → _charOuterStyleCache (LRU, 키: char|wr|ls|sr)
+              │       ├─ genCharStyle → _charOuterStyleCache
+              │       │   (LRU, 키: char|wr|ls|sr|fs)
               │       └─ genCharInnerStyle → 단일 키 메모이제이션
               └─ 신규 span → _createSpanElement
 ```
@@ -776,7 +798,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | 캐시 | 용량 | 근거 |
 |---|---|---|
 | `_charWidthCache` | 5000 | 한국어 11,172 음절 + ASCII + 기호. 폰트×크기 조합 2~3개 고려 시 충분. |
-| `_charOuterStyleCache` | 5000 | `${char}\|${widthRatio}\|${letterSpacing}\|${spaceRatio}` 키. 장평/자간/공백비율 조합 × 고유 문자. |
+| `_charOuterStyleCache` | 5000 | `${char}\|${widthRatio}\|${letterSpacing}\|${spaceRatio}\|${fontSize}` 키. 장평/자간/공백비율/폰트크기 조합 × 고유 문자. |
 | `_charInnerStyle` | 1 | 모든 글자 동일 내부 스타일. |
 | `_parsedFonts` | 무제한 (`Map`) | 등록된 폰트 패밀리 수는 제한적. |
 | `_overlayRectsMm` | 무제한 (`Map`) | 렌더링 사이클당 오버랩 요소 수는 제한적. 매 사이클 재구축. |
@@ -793,14 +815,15 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 | 영역 | 메서드 | 문제 |
 |---|---|---|
-| `_getAllColumns()` | `EditCoordinateMapper` | 호출마다 `querySelectorAll('x-layout-column')` 수행 |
-| `getCharRect()` | `EditCoordinateMapper` | 호출마다 `span.getBoundingClientRect()` 수행 |
+| `_getAllColumns()` | `EditCoordinateMapper` | 호출마다 `querySelectorAll('x-layout-column')` 수행 (`text-edit-coordinate-mapper.ts:734-736`) — 8개 호출 지점 (§10 후보) |
+| `getCharRect()` | `EditCoordinateMapper` | 호출마다 `span.getBoundingClientRect()` 수행 (엔진 쿼리 플래그 `useEngineCoordinateQueries`로 전환 가능) |
 | `getCharOffsetFromPoint()` | `EditCoordinateMapper` | binary search 내에서 span마다 `getBoundingClientRect()` 수행 |
 | `getTextRange()` | `EditCoordinateMapper` | 선택 영역 계산 시 span마다 `getBoundingClientRect()` 수행 |
 | `findVisualLineBounds()` | `EditCoordinateMapper` | Home/End 키 처리 시 span마다 `getBoundingClientRect()` 수행 |
-| 라인 rect 측정 | `_detectOverlapWithCache()` | `_overlayRectsMm`는 오버랩 요소만 캐싱, 라인 자체의 rect는 라인마다 측정 |
-| `getImageData` 캐싱 | `computeOverlapSizeMm()` | 동일 이미지에 대해 라인마다 `getImageData()` 재호출 |
+| 라인 rect 측정 | `_detectOverlapWithCache()` | `_overlayRectsMm`는 오버랩 엔진 rect만 캐싱, 라인 자체의 rect는 라인마다 측정 |
+| 오버랩 픽셀 스캔 | `computePixelOverlap()` | 재래핑마다 겹침 밴드의 rgbaData/비트맵 재스캔. `getImageData()`는 아니지만(오버랩 경로에서 제거됨) 큰 이미지 × 다수 라인에서 비용 발생 |
 | `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산. `overlapMode === 'none'` 이미지/paragraph는 `checkOverlap()` 이전에 제외. `checkOverlap()`은 mm 좌표(`absLeft`/`absTop`/`absWidth`/`absHeight`) 기반으로 동작하므로 `getBoundingClientRect()` 강제 리플로우 비용이 발생하지 않음 |
+| 키 입력 O(N) 변환 | `TextEditController` / `ParagraphEngine` | 타이핑 1회당 `inlineToPlain`×2 + `plainToInline`×1 + `_computeLayoutInputHash` + mapper `rebuild()`가 문단 길이 O(N)으로 실행. `model.plainText` 캐시 getter가 존재하지만 컨트롤러가 미사용 (§10 참조) |
 
 ---
 
@@ -811,7 +834,8 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | Web Worker 레이아웃 | `_layoutTextIntoColumns()`를 Web Worker로 이관 | 메인 스레드 블로킹 제거 | 중간-높음 |
 | 한국어 정적 폭 테이블 | 11,172 한글 음절 균일 폭(970/1000 em) 룩업 테이블 | 콜드 스타트 시 opentype.js 파싱 생략 | 중간 |
 | ~~Skeleton 캐시~~ | ~~Univer 패턴 — 레이아웃 결과 캐시~~ | ~~증분 리플로우~~ | ~~구현됨 (§3.12)~~ |
-| `Promise.all` 병렬 렌더 | `LayoutDocumentElement.render()` 순차 await → 병렬 | 이미지 로드 블로킹 해소 | 낮음 |
+| `Promise.all` 병렬 렌더 | `LayoutDocumentElement.render()` 순차 await (`document.element.ts:506`) → 병렬 | 이미지 로드 블로킹 해소 | 낮음 |
 | 가상화 | 뷰포트 밖 컬럼/라인 DOM 지연 생성 | 다중 페이지 DOM 크기 감소 | 중간 |
 | `_getAllColumns()` 캐싱 | `EditCoordinateMapper`에서 컬럼 목록 캐싱 | `querySelectorAll` 호출 감소 | 낮음 |
-| `getImageData` 캐싱 | 동일 이미지의 `getImageData()` 결과 캐싱 | 라인당 픽셀 읽기 비용 감소 | 낮음 |
+| 키 입력 O(N) 패스 제거 | `_getPlainText()`/`postRender`가 **캐시 getter `model.plainText`** 사용 + `mapper.rebuild()` 증분화 (캐럿 이후 placement만 갱신) | 타이핑 1회당 O(N) inlineToPlain/plainToInline/rebuild 제거 | 중간 |
+| 부분 증분 `layoutText` | 캐럿 이전 라인 재래핑 불변성을 이용한 prefix 라인 캐시 (엔진 단일 소스 원칙 내) | 연속 타이핑 중 전체 재래핑 제거 | 높음 |
