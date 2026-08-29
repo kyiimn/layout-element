@@ -1,4 +1,5 @@
 import { LayoutParagraphElement } from "./paragraph.element";
+import { ColorRegistry } from "@/resource";
 import type { TextLineData, TextPartData } from "@/types/layout/text/text-line.type";
 import type { TextInlineStyle } from "@/types/style/text-inline-style.type";
 
@@ -250,9 +251,23 @@ export class LayoutColumnElement extends HTMLElement {
    * 글자 span에 직접 반영된다. `fontFamily`는 등록 폰트 패밀리명이므로
    * 브라우저가 그대로 해석한다.
    *
+   * `color`는 `ColorRegistry`에 등록된 CMYK 색상 이름(예: `'K100'`, `'red'`)이다.
+   * 문단 수준 color(`paragraph.element.ts _applyStyle`)와 동일하게
+   * `ColorRegistry.getCSSColor()`로 `#RRGGBB` hex로 변환하여 적용한다.
+   * 변환하지 않으면 CSS가 인식하지 못하는 색상 이름은 무시되어 색상이 적용되지 않는다.
+   *
    * 큰 폰트의 하단 앵커: 라인 높이는 기본 fontSize 기준으로 고정이므로,
    * 인라인 폰트가 기본보다 크면 span 상단을 `lineHeight - inlineFontSize`만큼
    * 아래로 내려 라인 하단에 글자 하단을 맞춘다 (윗라인 침범 허용).
+   *
+   * @param charEl - 스타일을 적용할 글자 span DOM 요소
+   * @param inlineStyle - 인라인 런 스타일 오버라이드 (정의된 필드만 적용)
+   * @throws {Error} `inlineStyle.color`가 `'default'`인 경우 `ColorRegistry.getCSSColor()`가 throw
+   * @example
+   * ```ts
+   * // inlineStyle = { color: 'K100' }
+   * // → charEl.style.color = '#000000' (ColorRegistry.getCSSColor('K100'))
+   * ```
    */
   private _applyInlineOverrides(charEl: HTMLSpanElement, inlineStyle: TextInlineStyle | undefined): void {
     if (!inlineStyle) return;
@@ -268,7 +283,7 @@ export class LayoutColumnElement extends HTMLElement {
       charEl.style.fontStyle = inlineStyle.fontStyle;
     }
     if (inlineStyle.color) {
-      charEl.style.color = inlineStyle.color;
+      charEl.style.color = ColorRegistry.getInstance().getCSSColor(inlineStyle.color);
     }
     if (inlineStyle.fontSize !== undefined && inlineStyle.fontSize !== model.fontSize) {
       charEl.style.fontSize = `${inlineStyle.fontSize}mm`;
