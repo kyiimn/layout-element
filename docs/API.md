@@ -1972,8 +1972,8 @@ toggleInlineStyle<K extends keyof TextInlineStyle>(
  * - 포커스 + selection 있음 → 선택 범위에 인라인 주입 (기존 런은 필드 오버라이드)
  * - 포커스 + 커서가 인라인 런 안 → 해당 런만 업데이트 (paragraph 무변경)
  * - 포커스 + 커서가 런 밖 → paragraph 스타일 수정 + 명시 필드를 모든 런에 캐스케이드
- * - 포커스 없음 + paragraph 또는 content-type='paragraph' box가 selected →
- *   대상 paragraph 수정 + 전체 캐스케이드
+ * - 포커스 없음 + paragraph / content-type='paragraph' box가 selected (단일·복수 모두) →
+ *   선택된 모든 대상의 paragraph 수정 + 전체 캐스케이드. lock된 대상은 스킵.
  *
  * 인라인에 주입 불가한 필드(textAlign, lineGap, verticalAlign,
  * letterSpacing, widthRatio)는 항상 paragraph에 적용된다.
@@ -1981,7 +1981,7 @@ toggleInlineStyle<K extends keyof TextInlineStyle>(
  *
  * @param textPatch - TextStyle 부분 객체 (제공된 필드만 부분 업데이트)
  * @param paragraphPatch - ParagraphStyle 부분 객체
- * @returns 주입이 수행되었으면 true
+ * @returns 최소 1개 대상에 주입이 수행되었으면 true
  *
  * @example
  * const manager = layoutDocEl.editManager;
@@ -1989,6 +1989,7 @@ toggleInlineStyle<K extends keyof TextInlineStyle>(
  * manager.applyTextStyle({ fontFamily: 'Batang' });
  * // 정렬 변경: 항상 paragraph
  * manager.applyTextStyle({}, { textAlign: 'center' });
+ * // 다중 선택(마키/Shift+클릭) 시 선택된 모든 paragraph-box에 적용
  */
 applyTextStyle(
   textPatch?: Partial<TextStyle>,
@@ -2003,14 +2004,14 @@ applyTextStyle(
 | 포커스 + selection 있음 | 선택 범위 런 주입/업데이트 | paragraph |
 | 포커스 + 커서가 런 안 | 해당 런만 업데이트 | paragraph |
 | 포커스 + 커서가 런 밖 | paragraph + 전체 캐스케이드 | paragraph |
-| 포커스 없음 + paragraph/paragraph-box selected | 대상 paragraph + 전체 캐스케이드 | paragraph |
+| 포커스 없음 + paragraph/paragraph-box selected (단일·복수) | 선택된 모든 대상 + 전체 캐스케이드 (lock 스킵) | paragraph |
 
 > ※1 `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`
 > ※2 `textAlign`, `lineGap`, `verticalAlign`, `letterSpacing`, `widthRatio`
 
 **캐스케이드**: 커서가 런 밖이거나 selected 경로에서 paragraph 스타일을 수정하면, 명시 주입 필드가 내부 모든 인라인 런에 일괄 적용된다. 캐스케이드로 런 필드가 주입 후의 문단 기본과 동일해지면 그 필드는 런에서 제거되고, 모든 필드가 동일해진 런은 `normalizeRunMap`이 해제한다. 정규화는 포커스 획득/blur 시에도 자동 수행된다. 병합·해제 규칙의 상세는 `EDITING_TEXT.md` § 6A.5 참조.
 
-**paragraph-box**: `content-type='paragraph'` box는 바로 하위에 paragraph를 하나만 가지므로, box가 selected일 때 그 box의 `contentElement`(단일 paragraph)가 주입 대상이 된다.
+**paragraph-box**: `content-type='paragraph'` box는 바로 하위에 paragraph를 하나만 가지므로, box가 selected일 때 그 box의 `contentElement`(단일 paragraph)가 주입 대상이 된다. **복수 선택**이면 선택된 모든 paragraph-box/paragraph가 대상이며, lock된 대상은 스킵하고 하나라도 적용되면 `true`를 반환한다.
 
 #### 텍스트 편집 모드
 

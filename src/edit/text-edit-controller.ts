@@ -2361,11 +2361,13 @@ export class TextEditController {
       }
     } else {
       // 3. 커서가 런 밖(또는 inline patch 없음) → paragraph 자체 스타일 + 캐스케이드
+      // DOM element setter를 사용한다 — 엔진 직접 수정 시 직후 render의 layout()
+      // 이 DOM element의 구값으로 엔진을 되돌려 덮어쓴다 (엔진 우선 단일 소스 흐름 유지).
       if (Object.keys(textPatch).length > 0) {
-        model.textStyle = { ...model.textStyle, ...textPatch };
+        this._paragraph.textStyle = { ...model.textStyle, ...textPatch };
       }
       if (Object.keys(paragraphPatch).length > 0) {
-        model.paragraphStyle = { ...model.paragraphStyle, ...paragraphPatch };
+        this._paragraph.paragraphStyle = { ...model.paragraphStyle, ...paragraphPatch };
       }
       if (Object.keys(inlinePatch).length > 0) {
         // 문단 기본을 '주입 후' 값으로 비교해야 캐스케이드로 기본과 같아진 필드가 정리된다

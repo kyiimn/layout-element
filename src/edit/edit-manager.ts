@@ -742,14 +742,14 @@ export class EditManager {
    * 2. 텍스트 편집 모드에서 포커스 + selection 없음 → 커서가 인라인 런 안이면
    *    해당 런만 업데이트, 런 밖이면 paragraph 자체 스타일 수정 + 전체 캐스케이드
    *    (컨트롤러에 위임 — 인라인 불가 필드는 항상 paragraph로 라우팅)
-   * 3. 포커스 없이 paragraph 또는 content-type='paragraph' box가 selected →
-   *    대상 paragraph 자체 스타일 수정 + 전체 캐스케이드
+   * 3. 포커스 없이 selected 상태 → **선택된 모든** paragraph / paragraph-box의
+   *    단일 paragraph에 순회 주입. lock된 대상은 스킵하고, 하나라도 성공하면 `true`.
    *
    * 어느 경로든 처리 후 런 맵을 정규화하고 커서/selection을 보존한다.
    *
    * @param textPatch - 적용할 TextStyle 부분 객체 (제공된 필드만 부분 업데이트)
    * @param paragraphPatch - 적용할 ParagraphStyle 부분 객체 (제공된 필드만)
-   * @returns 주입이 수행되었으면 `true`
+   * @returns 최소 1개 대상에 주입이 수행되었으면 `true`
    */
   applyTextStyle(textPatch: Partial<TextStyle> = {}, paragraphPatch: Partial<ParagraphStyle> = {}): boolean {
     if (this._focusedController) {
@@ -757,30 +757,39 @@ export class EditManager {
       return true;
     }
 
-    // 포커스 없이 selected 상태인 paragraph / paragraph-box 경로
-    const target = this._resolveSelectedParagraphTarget();
-    if (!target) return false;
-
-    return this._applyParagraphLevelStyle(target, textPatch, paragraphPatch);
+    // 포커스 없이 selected 상태인 paragraph / paragraph-box 경로 — 다중 선택 지원
+    const targets = this._resolveSelectedParagraphTargets();
+    let succeeded = false;
+    for (const target of targets) {
+      if (this._applyParagraphLevelStyle(target, textPatch, paragraphPatch)) {
+        succeeded = true;
+      }
+    }
+    return succeeded;
   }
 
   /**
-   * 레이아웃 선택 상태에서 스타일 주입 대상 paragraph를 찾는다.
+   * 레이아웃 선택 상태에서 스타일 주입 대상 paragraph 목록을 수집한다.
    *
    * selected 요소가 paragraph이면 그대로, content-type='paragraph' box면
-   * 그 box의 contentElement(단일 paragraph)를 반환한다. 복수 선택이면 null.
+   * 그 box의 contentElement(단일 paragraph)를 대상에 추가한다. 복수 선택이면
+   * 모든 selected 요소가 대상이 된다. lock 등 접근 불가 대상은 이 단계에서 제외한다.
    */
-  private _resolveSelectedParagraphTarget(): LayoutParagraphElement | null {
-    if (this._selectedLayouts.length !== 1) return null;
-    const el = this._selectedLayouts[0];
-    if (el instanceof LayoutParagraphElement) return this._paragraphEditableForStyleInjection(el) ? el : null;
-    if (el instanceof LayoutBoxElement && el.contentType === 'paragraph') {
-      const content = el.contentElement;
-      if (content instanceof LayoutParagraphElement) {
-        return this._paragraphEditableForStyleInjection(content) ? content : null;
+  private _resolveSelectedParagraphTargets(): LayoutParagraphElement[] {
+    const targets: LayoutParagraphElement[] = [];
+    for (const el of this._selectedLayouts) {
+      if (el instanceof LayoutParagraphElement) {
+        if (this._paragraphEditableForStyleInjection(el)) targets.push(el);
+        continue;
+      }
+      if (el instanceof LayoutBoxElement && el.contentType === 'paragraph') {
+        const content = el.contentElement;
+        if (content instanceof LayoutParagraphElement && this._paragraphEditableForStyleInjection(content)) {
+          targets.push(content);
+        }
       }
     }
-    return null;
+    return targets;
   }
 
   /**
@@ -810,8 +819,16 @@ export class EditManager {
     const model = paragraph.model;
     if (!model) return false;
 
-    model.textStyle = { ...model.textStyle, ...textPatch };
-    model.paragraphStyle = { ...model.paragraphStyle, ...paragraphPatch };
+    // DOM element의 textStyle/paragraphStyle setter를 사용한다 — 엔진 우선 단일 소스.
+    // model.textStyle(엔진)을 직접 고치면 직후의 paragraph.layout()이
+    // DOM element의 _textStyle(갱신 전 값)로 엔진을 되돌려 덮어쓴다.
+    // element setter는 DOM 필드 갱신 + layout() + scheduleRender()를 수행한다.
+    if (Object.keys(textPatch).length > 0) {
+      paragraph.textStyle = { ...paragraph.textStyle, ...textPatch };
+    }
+    if (Object.keys(paragraphPatch).length > 0) {
+      paragraph.paragraphStyle = { ...paragraph.paragraphStyle, ...paragraphPatch };
+    }
 
     const { runMap } = inlineToPlain(model.textContent);
     const INLINE_FIELDS = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "color"] as const;
@@ -830,7 +847,6 @@ export class EditManager {
 
     const normalized = normalizeRunMap(runMap, model.effectiveTextStyle);
     model.textContent = plainToInline(inlineToPlain(model.textContent).text, normalized);
-    paragraph.layout();
     paragraph.scheduleRender();
     return true;
   }

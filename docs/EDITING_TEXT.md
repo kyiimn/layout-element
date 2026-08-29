@@ -1464,6 +1464,22 @@ type RunMap = RunEntry[];
 
 호스트 프로그램은 **인라인 데이터를 직접 생성하지 않는다.** 텍스트/문단 스타일 주입은 `EditManager.applyTextStyle(textPatch?, paragraphPatch?)` 단일 진입점이 편집 상태를 판별하여 대상을 결정한다. 편집컨트롤러가 존재하는 DOM 레이어에서 스타일 주입의 책임을 가진다 (엔진은 순수 계산만 담당).
 
+#### 엔진 우선 원칙과의 관계 (중요)
+
+스타일 주입 파이프라인의 각 단계와 책임 계층:
+
+| 단계 | 수행 계층 | 설명 |
+|------|----------|------|
+| 런 맵 갱신 (`applyStyleToRange`, `shiftRunMap`) | 편집 계층 (`run-map.ts`) | textarea 평문 ↔ 인라인 런 매핑은 편집 도메인의 데이터 구조다. 엔진은 이 맵을 모른다. |
+| **문단 기본중복 필드 정리** (주입 후 `effectiveTextStyle`와 동일해진 필드의 런 제거) | **편집 계층** (`TextEditController._applyTextStyle`, runMap 위에서 수행) | **의도된 편집 영역 배치다.** 이 정리는 편집 정책(사용자 주입의 해석)이며, 엔진이 받는 것은 정규화가 끝난 런 배열이다. `run-map.ts`/컨트롤러에 두는 것이 계층 규약에 부합 — `normalizeRunMap`에 흡수하지 않는다. |
+| `model.textContent = plainToInline(text, runMap)` | 편집 → 엔진 경계 | 편집 계층의 유일한 엔진 반영 지점. 여기까지만 데이터를 만들고 |
+| 래핑/금칙어/컬럼 배치 (`layoutText`) | **엔진** (`ParagraphEngine`) | 엔진이 단일 소스. DOM은 관여하지 않는다 |
+| 렌더링 (`columnContents` 소비, span 스타일 적용) | DOM (`column.element.ts`) | 엔진 출력(`TextLineData.parts[].inlineStyles`)의 디스플레이만 |
+
+즉 **새 인라인 영역(런)은 반드시 엔진에 반영되며**(`model.textContent` 경유 — `ParagraphEngine.textContent` setter가 `_dirty` 플래그 후 `layoutText()`가 재계산), **스타일 주입은 엔진을 경유**해 데이터가 갱신되고 **DOM은 엔진의 출력(`columnContents`)을 표시만 한다.** 편집 계층이 수행하는 런 맵 가공(위 표 2·3행)은 엔진에 도달하기 전 편집 데이터를 정형하는 단계로, `AGENTS.md`의 "엔진 우선, 단일 소스" 원칙과 충돌하지 않는다 — 엔진은 언제나 정규화 완료된 `TextInlineData[]`만 입력받는다.
+
+> ⚠️ 유지 보수 규칙: `normalizeRunMap`(run-map.ts)은 "런 전체 해제 + 인접 병합"만 담당하고, "문단 기본과 동일해진 개별 필드의 제거"는 `TextEditController._applyTextStyle`(selection 경로와 캐스케이드 경로 2곳)이 담당한다. 이 책임 분할을 run-map.ts로 흡수하거나 엔진으로 옮기지 않는다 — 편집 정책은 편집 계층에 둔다.
+
 #### 판별표
 
 | 편집 상태 | 인라인 가능 필드<sup>※1</sup> | 인라인 불가 필드<sup>※2</sup> |
@@ -1471,17 +1487,18 @@ type RunMap = RunEntry[];
 | 텍스트편집모드, 포커스 + **selection 있음** | 선택 범위에 런 주입 (`applyStyleToRange`). 이미 런이 있으면 **새 런을 만들지 않고 해당 필드만 오버라이드** | paragraph |
 | 텍스트편집모드, 포커스 + selection 없음 + **커서가 런 안** | **해당 런만** 업데이트. paragraph는 무변경 | paragraph |
 | 텍스트편집모드, 포커스 + selection 없음 + **커서가 런 밖(평문)** | **paragraph 자체 스타일** 수정 + 명시 주입 필드를 **내부 모든 런에 캐스케이드** | paragraph |
-| 포커스 없음 + **paragraph 또는 paragraph-box selected** | 대상 paragraph 자체 스타일 수정 + 명시 주입 필드 전체 캐스케이드 | paragraph |
+| 포커스 없음 + **paragraph / paragraph-box selected (단일·복수 모두)** | **선택된 모든 대상**의 paragraph 자체 스타일 수정 + 명시 주입 필드 전체 캐스케이드. lock된 대상은 스킵. 하나라도 성공하면 `true` | paragraph |
 
 > ※1 인라인 가능 필드: `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color` (TextInlineStyle에 존재)
 > ※2 인라인 불가 필드: `textAlign`, `lineGap`, `verticalAlign` (ParagraphStyle), `letterSpacing`, `widthRatio`, `spaceRatio`, `indent` (TextStyle 중 인라인 미지원) — **항상 paragraph에 적용**
 
-#### paragraph-box 선택 시 대상 결정
+#### paragraph-box 선택 시 대상 결정 (단일·복수)
 
 - `content-type='paragraph'` box는 바로 하위에 paragraph를 **하나만** 가진다.
-- box가 selected면 그 box의 `contentElement`(단일 paragraph)가 주입 대상이다.
-- paragraph 자체가 selected면 그 paragraph가 대상이다.
-- 복수 선택이거나 대상을 찾지 못하면 주입이 수행되지 않는다(`false` 반환).
+- selected 요소가 paragraph이면 그 paragraph, content-type='paragraph' box면 그 box의 `contentElement`(단일 paragraph)가 주입 대상이다.
+- **복수 선택이면 모든 selected 요소가 대상이다** — 마키/Shift+클릭으로 여러 paragraph-box를 선택한 뒤 주입하면 각 box의 paragraph에 순회 적용된다.
+- lock된 box(또는 lock 조상을 가진 paragraph)는 스킵하며, 나머지는 정상 적용된다. 부분 성공이 허용되어 **하나라도 적용되면 `true`**를 반환하고, 적용 가능한 대상이 하나도 없으면 `false`를 반환한다.
+- content-type이 paragraph가 아닌 box(이미지, 그룹 등)가 선택에 포함되면 그 요소는 무시된다.
 
 #### 캐스케이드(cascade) 동작
 
