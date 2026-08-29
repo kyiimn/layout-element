@@ -181,7 +181,6 @@ class LayoutDocumentElement extends HTMLElement
 | `model` | `GridCalculatorEngine \| undefined` | 컬럼 그리드 계산기. |
 | `engine` | `DocumentEngine \| undefined` | 문서 루트 엔진 (ppm, 리소스, 트리 관리). |
 | `editManager` | `EditManager` | 이 문서 요소 전용 `EditManager` 인스턴스. constructor에서 생성되어 요소 생명주기 내내 존재한다. |
-| `dataVersion` | `number` | `data` setter가 호출될 때마다 증가하는 변경 버전 카운터. React 레이어에서 `element.data` getter가 매번 새 객체를 반환하므로 reference 비교가 불가능하여, `JSON.stringify` 전체 비교 대신 이 버전 번호로 O(1) 변경 여부를 판별한다. |
 | `visibleGuide` | `boolean` | 가이드 컬럼 표시 여부. |
 | `type` | `'document'` | 타입 리터럴. |
 | `zIndex` | `number` | 항상 0. |

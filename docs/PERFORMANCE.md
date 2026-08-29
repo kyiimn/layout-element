@@ -51,7 +51,6 @@
   - [4.15 InsertController 기하 fallback 지연](#415-insertcontroller-기하-fallback-지연)
   - [4.16 PlaceGun 미리보기 요소 재사용](#416-placegun-미리보기-요소-재사용)
   - [4.17 텍스트 영역 스타일 JSON 가드](#417-텍스트-영역-스타일-json-가드)
-  - [4.18 LayoutDocumentElement dataVersion 카운터](#418-layoutdocumentelement-dataversion-카운터)
 - [5. 메모리 관리](#5-메모리-관리)
   - [5.1 이미지 캐시 생명 주기](#51-이미지-캐시-생명-주기)
   - [5.2 ~~Image canvas willReadFrequently~~ (제거됨)](#52-image-canvas-willreadfrequently-제거됨)
@@ -293,7 +292,7 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 
 | 요소 | 위치 |
 |---|---|
-| `LayoutDocumentElement.data` | `document.element.ts` (`data` setter + `dataVersion`) |
+| `LayoutDocumentElement.data` | `document.element.ts` (`data` setter) |
 | `LayoutBoxElement.data` | `box.element.ts` (`data` setter, `_rebuildingChildren` 가드) |
 | `LayoutTableElement.data` | `table.element.ts` (ID-keyed reconcile) |
 | `LayoutTableRowElement.data` | `tr.element.ts` (ID-keyed reconcile) |
@@ -644,26 +643,6 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | 위치 | `text-edit-controller.ts:74, 2083-2084` |
 
 `JSON.stringify`로 직렬화한 스타일 객체를 `_lastStyleJson`과 비교하여 동일하면 textarea 스타일 재적용을 스킵.
-
-### 4.18 LayoutDocumentElement dataVersion 카운터
-
-| 항목 | 값 |
-|---|---|
-| 위치 | `LayoutDocumentElement._dataVersion` (`document.element.ts`) |
-| 타입 | `number` (단조 증가 카운터) |
-| 증가 시점 | `data` setter 호출 시마다 `this._dataVersion++` |
-| 노출 | `get dataVersion(): number` public getter |
-
-`LayoutDocumentElement.data` getter는 `engine.extractData`를 반환하는데, 엔진의 `extractData`는 호출마다 새 객체를 생성하므로 React 레이어에서 reference 비교로 변경 여부를 판별할 수 없다. 이전에는 `useEditorHistory.pushSnapshot`이 `JSON.stringify(a) === JSON.stringify(b)`로 전체 직렬화 비교를 수행하여 문서 규모가 커지면 O(n) 비용이 발생했다.
-
-`dataVersion` 카운터는 `data` setter가 호출될 때마다 증가하므로, React 레이어에서 `element.dataVersion === lastPushedVersion` 비교만으로 O(1)에 변경 여부를 판별할 수 있다.
-
-#### 사용처
-
-| 사용처 | 위치 | 용도 |
-|---|---|---|
-| `useEditorHistory.pushSnapshot` | `apps/layout-ui/src/hooks/editor/use-editor-history.ts` | `lastPushedVersionRef`와 비교하여 동일 버전이면 snapshot push 스킵 (기존 `documentDataEqual` + `JSON.stringify` 대체) |
-| `useEditorHistory.undo`/`redo`/`resetHistory` | 동일 파일 | 복원 후 `element.dataVersion`으로 `lastPushedVersionRef` 동기화 |
 
 ---
 
