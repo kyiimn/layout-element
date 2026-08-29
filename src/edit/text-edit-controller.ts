@@ -7,7 +7,7 @@ import type { TextLineData } from "@/types/layout/text/text-line.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
 import { DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
-import { RunMap, inlineToPlain, plainToInline, shiftRunMap, getStyleAtOffset, applyStyleToRange, normalizeRunMap, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields } from "./run-map";
+import { RunMap, inlineToPlain, plainToInline, shiftRunMap, getStyleAtOffset, applyStyleToRange, normalizeRunMap, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline } from "./run-map";
 
 /**
  * 커서 위치에서 유효한 스타일 정보.
@@ -152,11 +152,12 @@ export class TextEditController {
             model.textContent = plainToInline(after, this._runMap);
             const composedLength = after.length - this._compositionBeforeContent.length;
             this._cursorModel.offset = this._compositionStartOffset + composedLength;
-            if (this._debounceTimer !== null) {
-              cancelAnimationFrame(this._debounceTimer);
-              this._debounceTimer = null;
-              this._wasFocused = false;
-            }
+    if (this._debounceTimer !== null) {
+      cancelAnimationFrame(this._debounceTimer);
+      this._debounceTimer = null;
+      // destroy 시점에도 커밋(render) → 알림 순서를 유지해 구독자가 일관된 상태를 읽게 한다.
+      this._commitPendingInput();
+    }
             this._paragraph.scheduleRender();
           }
         }
@@ -382,15 +383,26 @@ export class TextEditController {
    * @param fullRebuild - DOM이 새로 생성되었으면 true, 기존 컬럼을
    *   재사용한 경우 false. 매퍼는 항상 전체 재구축을 수행한다.
    */
-  postRender(_fullRebuild: boolean = true): void {
-    this._mapper.rebuild();
+  postRender(fullRebuild: boolean = true): void {
+    // 증분 렌더(컬럼 DOM 재사용, span diff) 시에는 span 캐시가 유효하므로
+    // 매핑만 재구축한다 — 타이핑 핫패스의 querySelectorAll 재쿼리 제거.
+    if (fullRebuild) {
+      this._mapper.rebuild();
+    } else {
+      this._mapper.rebuildMappingsOnly();
+      this._mapper.invalidateSpanCache();
+    }
     this._optimisticSpan = null;
     const model = this._paragraph.model;
     if (model) {
       if (!this._isComposing) {
-        const { text: modelText, runMap: modelRunMap } = inlineToPlain(model.textContent);
+        // plainText는 캐시 getter이므로 inlineToPlain 대신 사용해도 O(N) 순회가 아니다.
+        // 런 맵이 정규화(normalizeNow)된 상태에서는 모델과 textarea가 일치하는 것이
+        // 정상 경로이므로, 값이 다를 때만 전체 runMap 재구축이 실행된다.
+        const modelText = model.plainText;
         if (modelText !== this._textarea.value) {
-          this._textarea.value = modelText;
+          const { text: correctedText, runMap: modelRunMap } = inlineToPlain(model.textContent);
+          this._textarea.value = correctedText;
           this._runMap = modelRunMap;
         }
         this._syncTextareaSelection();
@@ -777,10 +789,18 @@ export class TextEditController {
         model.textContent = plainToInline(after, this._runMap);
         const composedLength = after.length - this._compositionBeforeContent.length;
         this._cursorModel.offset = this._compositionStartOffset + composedLength;
-        if (this._debounceTimer !== null) {
-          cancelAnimationFrame(this._debounceTimer);
-          this._debounceTimer = null;
-        }
+    if (this._debounceTimer !== null) {
+      cancelAnimationFrame(this._debounceTimer);
+      this._debounceTimer = null;
+      // 보류 중 입력이 있으면 커밋+알림을 완료한 뒤 정리한다 — 미커밋 dirty 상태로
+      // 엔진이 남아 이후 extractData dirty 가드가 throw되는 것을 방지.
+      const model = this._paragraph.model;
+      if (model?.hasPendingChanges) {
+        model.textContent = model.textContent;
+        this._paragraph.flushRender();
+        this._manager._notifyTextChange(this);
+      }
+    }
         this._paragraph.scheduleRender();
         this._pendingTextChangeOnBlur = true;
       }
@@ -1075,14 +1095,11 @@ export class TextEditController {
       if (activeSelection) {
         this._replaceSelection("");
       } else if (offset > 0) {
-        const newContent = content.slice(0, offset - 1) + content.slice(offset);
-        model.textContent = newContent;
-        this._textarea.value = newContent;
+        model.textContent = deleteTextFromInline(model.textContent, offset - 1, 1);
+        this._textarea.value = content.slice(0, offset - 1) + content.slice(offset);
         this._cursorModel.offset = offset - 1;
         this._textarea.setSelectionRange(offset - 1, offset - 1);
         this._debouncedRender();
-        this._manager._notifyTextChange(this);
-        this._manager._notifyCursorMove(this);
       }
       break;
     }
@@ -1094,13 +1111,10 @@ export class TextEditController {
       if (activeSelection) {
         this._replaceSelection("");
       } else if (offset < content.length) {
-        const newContent = content.slice(0, offset) + content.slice(offset + 1);
-        model.textContent = newContent;
-        this._textarea.value = newContent;
+        model.textContent = deleteTextFromInline(model.textContent, offset, 1);
+        this._textarea.value = content.slice(0, offset) + content.slice(offset + 1);
         this._textarea.setSelectionRange(offset, offset);
         this._debouncedRender();
-        this._manager._notifyTextChange(this);
-        this._manager._notifyCursorMove(this);
       }
       break;
     }
@@ -1113,15 +1127,17 @@ export class TextEditController {
         const replaceStart = start?.textOffset ?? offset;
         const replaceEnd = end?.textOffset ?? offset;
 
-    const newContent = content.slice(0, replaceStart) + "\n" + content.slice(replaceEnd);
-    model.textContent = newContent;
-    this._textarea.value = newContent;
+    const deleteLen = replaceEnd - replaceStart;
+    model.textContent = insertTextIntoInline(
+      deleteTextFromInline(model.textContent, replaceStart, deleteLen),
+      replaceStart,
+      "\n",
+    );
+    this._textarea.value = content.slice(0, replaceStart) + "\n" + content.slice(replaceEnd);
     this._cursorModel.offset = replaceStart + 1;
     this._textarea.setSelectionRange(replaceStart + 1, replaceStart + 1);
     this._cursorModel.selection = null;
     this._debouncedRender();
-    this._manager._notifyTextChange(this);
-    this._manager._notifyCursorMove(this);
     break;
   }
       default:
@@ -1203,7 +1219,7 @@ export class TextEditController {
     const { start, end } = selection.normalized();
     const newContent = content.slice(0, start.textOffset) + content.slice(end.textOffset);
 
-    model.textContent = newContent;
+    model.textContent = deleteTextFromInline(model.textContent, start.textOffset, end.textOffset - start.textOffset);
     this._textarea.value = newContent;
     this._cursorModel.offset = start.textOffset;
     this._cursorModel.selection = null;
@@ -1239,14 +1255,16 @@ export class TextEditController {
     const newContent = content.slice(0, startOffset) + pastedText + content.slice(endOffset);
     const newOffset = startOffset + pastedText.length;
 
-    model.textContent = newContent;
+    model.textContent = insertTextIntoInline(
+      deleteTextFromInline(model.textContent, startOffset, endOffset - startOffset),
+      startOffset,
+      pastedText,
+    );
     this._textarea.value = newContent;
     this._cursorModel.offset = newOffset;
     this._cursorModel.selection = null;
     this._textarea.setSelectionRange(newOffset, newOffset);
     this._debouncedRender();
-    this._manager._notifyTextChange(this);
-    this._manager._notifyCursorMove(this);
   }
 
   private _selectAll(): void {
@@ -1489,8 +1507,9 @@ export class TextEditController {
   private _getPlainText(): string {
     const model = this._paragraph.model;
     if (!model) return this._textarea.value;
-    const { text } = inlineToPlain(model.textContent);
-    return text;
+    // model.plainText는 캐시 getter — textContent setter에서 무효화되므로 항상 신선하다.
+    // 키 입력마다 전체 인라인 콘텐츠를 재순회하던 O(N) inlineToPlain 호출을 제거한다.
+    return model.plainText;
   }
 
   private _onInput(event: InputEvent): void {
@@ -1501,7 +1520,6 @@ export class TextEditController {
 
     const before = this._getPlainText();
     const after = this._textarea.value;
-    let newOffset: number;
 
     const activeSelection = this._cursorModel.selection;
     if (activeSelection) {
@@ -1524,15 +1542,20 @@ export class TextEditController {
         this._runMap = applyStyleToRange(this._runMap, startOffset, startOffset + inserted.length, {});
       }
 
-      newOffset = startOffset + inserted.length;
+      const insertedCount = inserted.length;
+      const newOffset = startOffset + insertedCount;
 
-      model.textContent = plainToInline(after, this._runMap);
+      model.textContent = insertTextIntoInline(
+        deleteTextFromInline(model.textContent, startOffset, deletedLen),
+        startOffset,
+        inserted,
+      );
       this._textarea.value = after;
       this._textarea.setSelectionRange(newOffset, newOffset);
       this._cursorModel.offset = newOffset;
       this._cursorModel.selection = null;
 
-      if (inserted.length === 1) {
+      if (insertedCount === 1) {
         this._optimisticSpanUpdate(newOffset - 1, inserted);
       }
 
@@ -1541,30 +1564,34 @@ export class TextEditController {
         this._updateSelection();
       }
       this._debouncedRender();
-      this._manager._notifyTextChange(this);
-      this._manager._notifyCursorMove(this);
       return;
     }
 
     if (before === after) return;
 
     const change = this._computeTextChange(before, after, this._cursorModel.offset);
+    const deletedLen = change.deletedText?.length ?? 0;
 
     if (change.type === "insert") {
       this._runMap = shiftRunMap(this._runMap, change.newOffset - change.text.length, change.text.length);
     } else if (change.type === "delete") {
-      const deletedLen = change.text.length;
       this._runMap = shiftRunMap(this._runMap, change.newOffset, -deletedLen);
     } else if (change.type === "replace") {
-      const deletedLen = change.deletedText?.length ?? 0;
       if (deletedLen > 0) {
         this._runMap = shiftRunMap(this._runMap, change.newOffset, -deletedLen);
       }
       this._runMap = shiftRunMap(this._runMap, change.newOffset, change.text.length);
     }
 
-    model.textContent = plainToInline(after, this._runMap);
-    newOffset = change.newOffset;
+    // 델타 경로: _computeTextChange의 removed/inserted는 같은 prefix 위치에서
+    // 시작하므로, splice 위치 = newOffset - inserted.length 로 (삭제+삽입) 한 패스에 반영된다.
+    const { text: insertedText, newOffset } = change;
+    const spliceAt = newOffset - insertedText.length;
+    model.textContent = insertTextIntoInline(
+      deleteTextFromInline(model.textContent, spliceAt, deletedLen),
+      spliceAt,
+      insertedText,
+    );
     this._cursorModel.offset = newOffset;
 
     if (change.type === "insert" && change.text.length === 1) {
@@ -1578,8 +1605,6 @@ export class TextEditController {
     }
     this._debouncedRender();
     this._emitStyleChange();
-    this._manager._notifyTextChange(this);
-    this._manager._notifyCursorMove(this);
   }
 
   private _replaceSelection(replacement: string): void {
@@ -1602,15 +1627,17 @@ export class TextEditController {
       this._runMap = shiftRunMap(this._runMap, start.textOffset, replacement.length);
     }
 
-    model.textContent = plainToInline(newContent, this._runMap);
+    model.textContent = insertTextIntoInline(
+      deleteTextFromInline(model.textContent, start.textOffset, deletedLen),
+      start.textOffset,
+      replacement,
+    );
     this._textarea.value = newContent;
     this._cursorModel.offset = start.textOffset + replacement.length;
     this._textarea.setSelectionRange(this._cursorModel.offset, this._cursorModel.offset);
     this._cursorModel.selection = null;
 
     this._debouncedRender();
-    this._manager._notifyTextChange(this);
-    this._manager._notifyCursorMove(this);
   }
 
   private _onCompositionStart(): void {
@@ -1637,7 +1664,7 @@ export class TextEditController {
           this._runMap = shiftRunMap(this._runMap, normalized.start.textOffset, -deletedLen);
         }
         const newContent = content.slice(0, normalized.start.textOffset) + content.slice(normalized.end.textOffset);
-        model.textContent = plainToInline(newContent, this._runMap);
+        model.textContent = deleteTextFromInline(model.textContent, normalized.start.textOffset, deletedLen);
         this._textarea.value = newContent;
         this._textarea.setSelectionRange(normalized.start.textOffset, normalized.start.textOffset);
       }
@@ -1667,15 +1694,18 @@ export class TextEditController {
 
     const model = this._paragraph.model;
     if (model) {
-      const before = this._compositionBeforeContent;
       const start = this._compositionStartOffset;
       const data = event.data ?? "";
-      const newText = before.slice(0, start) + data + before.slice(start);
       // 조합 중 텍스트는 삽입 위치가 속한 런의 스타일을 이어받는다.
-      // this._runMap은 조합 시작 전 상태를 유지하므로, 매 업데이트마다 원본 런 맵에서
-      // 조합 길이만큼 임시 확장한 맵으로 변환한다 (확정 시 _onCompositionEnd에서 실제 shift).
-      const tempRunMap = shiftRunMap(this._runMap, start, data.length);
-      model.textContent = plainToInline(newText, tempRunMap);
+      // _runMap은 조합 시작 전 상태를 유지하며(확정 시 _onCompositionEnd에서 실제 shift),
+      // 모델 콘텐츠는 델타 경로로 이전 조합 텍스트를 지우고 새 조합 텍스트를 넣는다 —
+      // plainToInline 전체 재구축 없이 자모당 O(변경 런 수)만 실행된다.
+      const prevCompositionLen = this._compositionData.length;
+      model.textContent = insertTextIntoInline(
+        deleteTextFromInline(model.textContent, start, prevCompositionLen),
+        start,
+        data,
+      );
       this._compositionData = data;
       this._cursorModel.offset = start + data.length;
       this._paragraph.scheduleRender();
@@ -2020,14 +2050,36 @@ export class TextEditController {
       cancelAnimationFrame(this._debounceTimer);
       this._debounceTimer = null;
     }
-    this._wasFocused = this._isFocused;
     // 텍스트 변경 직후 _notifyTextChange가 동기 디스패치되고, 구독자(LayoutEditor의
     // 데이터 동기화 핸들러 등)가 즉시 element.data → engine.extractData를 읽는다.
     // textContent setter의 _dirty는 render()의 layoutText()에서만 커밋되므로,
     // dirty가 남은 채 이벤트를 쏘면 extractData dirty 가드가 throw된다.
-    // 따라서 커밋(render)을 여기서 동기 실행하고, DOM 갱신만 microtask 배치로 미룬다.
-    if (this._paragraph.model?.hasPendingChanges) {
+    // 따라서 커밋(render)과 이벤트 발행을 rAF 프레임에서 1회로 병합한다 —
+    // 연속 타이핑 시 키 입력당 layoutText 전체 재배치가 프레임당 1회로 수렴하고,
+    // 대기 구간의 시각 피드백은 optimistic span이 담당한다.
+    this._debounceTimer = requestAnimationFrame(() => {
+      this._debounceTimer = null;
+      this._commitPendingInput();
+    });
+  }
+
+  /**
+   * 보류 중인 텍스트 입력을 커밋하고 구독자에게 변경을 알린다.
+   *
+   * 커밋(`flushRender` → `layoutText`)과 `textChange`/`cursorMove` 발행은
+   * 반드시 이 순서대로 한 프레임 안에서 실행되어야 한다 — 커밋 전에 이벤트를
+   * 발행하면 구독자의 `engine.extractData` dirty 가드가 throw된다. 변경이
+   * 없으면 이벤트 없이 배치 렌더링에만 참여한다.
+   *
+   * @returns void
+   */
+  private _commitPendingInput(): void {
+    this._wasFocused = this._isFocused;
+    const model = this._paragraph.model;
+    if (model?.hasPendingChanges) {
       this._paragraph.flushRender();
+      this._manager._notifyTextChange(this);
+      this._manager._notifyCursorMove(this);
     } else {
       this._paragraph.scheduleRender();
     }

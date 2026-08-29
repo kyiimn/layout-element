@@ -109,6 +109,23 @@ export class TextEditCoordinateMapper {
     this._rebuildMappings();
   }
 
+  /**
+   * 오프셋 매핑만 재구축하고 DOM span 캐시는 유지한다.
+   *
+   * 증분 렌더링(컬럼 재사용, span diff) 후에는 DOM 요소가 교체되지 않으므로
+   * `querySelectorAll` 재쿼리 없이 엔진 `columnContents` 기반 매핑만 갱신하면
+   * 된다. `postRender`의 타이핑 핫패스에서 이 메서드를 사용해 키 입력당
+   * 컬럼 전체 `querySelectorAll` 비용을 제거한다.
+   */
+  rebuildMappingsOnly(): void {
+    this._sourceToPlacement.clear();
+    this._lineEndPlacements.clear();
+    this._columnRanges = [];
+    this._lineSourceOffsets = [];
+    this._totalLineCount = 0;
+    this._rebuildMappings();
+  }
+
   invalidateSpanCache(): void {
     this._spanCache.clear();
     this._columnSpansCache.clear();
