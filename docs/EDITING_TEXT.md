@@ -1571,10 +1571,14 @@ type RunMap = RunEntry[];
 
 **⚠️ 호스트 구현 주의 — 편집 중 복원의 `isEditingThis` 가드:**
 
-`paragraph.data` setter는 `manager.focusedParagraph === this`이면 **`_model.textContent = data.content`를 스킵한다** (편집 중 외부 데이터 주입이 사용자 입력을 덮지 않도록 하는 규칙). undo 복원은 이 가드를 우회해야 하는 유일한 경로다 — 포커스 유지 상태에서 복원하면 스냅샷의 content(런 배열 포함)가 model에 반영되지 않는다. 호스트의 `restoreSnapshot`은 다음 순서를 권장한다:
+`paragraph.data` setter는 `manager.focusedParagraph === this`이면 **편집 컨트롤러의 `applyExternalContent(content)`로 위임한다**. 이 경로는 model.textContent 갱신과 함께 편집 상태(textarea/런 맵 재구축, 커서·selection 클램핑)까지 재동기화하되, **어떤 편집 이벤트도 발행하지 않는다** — 주 용도가 undo/redo 복원이므로 주입 자체가 새 변경으로 기록되어 히스토리 스택을 오염하는 것을 방지한다. 렌더 갱신(`render-complete`)만 발생한다. 편집 중 외부 주입(documentData 재주입, undo 복원 등)은 포커스 유지 상태에서 정상 반영된다. IME 조합 중에는 조합 커밋과 충돌하지 않도록 무시된다(조합 종료 후 다음 주입부터 적용).
 
-1. `manager.blurParagraph()` — 가드 해제
-2. `element.data = snapshot.documentData` — 런 배열 포함 전체 복원
+편집 중 주입 시 `paragraph.data` setter는 즉시 `layout()`을 수행하지 않는다(`_promoStructureChanged` + `scheduleRender()`만). 이 시점 부모 BoxEngine의 `childEngines`에 이전 트리가 남아 있어 `_layoutStructure`의 existing 교체가 방금 갱신한 model을 구 content의 엔진으로 되돌릴 수 있기 때문이다 — 상위(`document.data` setter)의 최종 `layout()`이 모든 자식 갱신 완료 후 엔진 트리를 재구축한다.
+
+단, 컨트롤러가 없는 상태(editableText 미활성)에서 포커스만 있는 경우는 기존과 같이 `model.textContent = data.content` 직접 반영을 유지한다. 호스트가 취하는 blur→복원→재포커스 순서(권장)와 별개로 편집 중 주입은 위 위임 경로로 안전하다:
+
+1. `manager.blurParagraph()` — (권장) 가드 상태 명시적 정리
+2. `element.data = snapshot.documentData` — 런 배열 포함 전체 복원 (`applyExternalContent` 경로)
 3. `manager.focusParagraph(focusedParagraphId, { selection })` — 커서/selection 재복원 (스냅샷의 `cursorOffset`/`selectionOffsets` 이용)
 
 추가 방어: 복원 후 커서 오프셋이 새 content 길이를 초과하면 컨트롤러의 오프셋 클램프(`setCursor`의 maxOffset 처리)가 방어한다. 런 배열이 바뀌어도 평문 오프셋 체계는 유지되므로, 길이가 다른 스냅샷(텍스트 편집 undo)에서만 클램프가 발동한다.
