@@ -6,7 +6,7 @@ import { SelectionRange } from "@/types/edit/selection.type";
 import type { TextLineData } from "@/types/layout/text/text-line.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
-import { DEFAULT_LETTER_SPACING, DEFAULT_WIDTH_RATIO, DEFAULT_SPACE_RATIO, DEFAULT_INDENT, DEFAULT_TEXT_ALIGN, DEFAULT_VERTICAL_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
+import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
 import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent } from "./run-map";
 
 /**
@@ -195,139 +195,52 @@ export class TextEditController {
   /**
    * 현재 커서 위치에서 유효한 TextStyle과 ParagraphStyle을 반환한다.
    *
-   * 단락의 기본 `textStyle`/`paragraphStyle`과 부모에서 상속된
-   * `inheritStyle`을 병합한 후, 커서가 위치한 인라인 런의
-   * `textInlineStyle`로 필드를 오버라이드한다.
+   * 엔진(`ParagraphEngine`)이 단일 소스이다. 커서 위치의 effective 스타일은
+   * `engine.getEffectiveStyleAt(offset)`, 선택 영역의 공통 스타일은
+   * `engine.getCommonStyleInRange(start, end)`으로 조회한다. 문단 스타일은
+   * `engine.effectiveParagraphStyle`에서 가져온다.
    *
    * 커서가 텍스트 끝이나 빈 단락에 있어도 단락 수준의 스타일을 반환한다.
-   * 편집 모드가 활성화되지 않았거나 모델이 없으면 빈 객체를 반환한다.
+   * 편집 모드가 활성화되지 않았거나 엔진이 없으면 빈 객체를 반환한다.
    */
   get currentStyle(): CurrentStyle {
-    const model = this._paragraph.model;
-    if (!model) return { textStyle: {}, paragraphStyle: {} };
+    const engine = this._paragraph.engine;
+    if (!engine) return { textStyle: {}, paragraphStyle: {} };
 
     const sel = this._cursorModel.selection;
     if (sel) {
       const { start, end } = sel.normalized();
       if (start.textOffset < end.textOffset) {
-        return this.computeSelectionCommonStyle(start.textOffset, end.textOffset);
+        return {
+          textStyle: engine.getCommonStyleInRange(start.textOffset, end.textOffset),
+          paragraphStyle: engine.effectiveParagraphStyle,
+        };
       }
     }
 
-    // 1. 단락 수준 스타일 + 상속 스타일 병합
-    const inheritStyle = model.inheritStyle ?? {};
-    const baseTextStyle: TextStyle = {
-      color: model.textStyle?.color ?? inheritStyle.color,
-      fontFamily: model.textStyle?.fontFamily ?? inheritStyle.fontFamily,
-      fontWeight: model.textStyle?.fontWeight ?? inheritStyle.fontWeight,
-      fontStyle: model.textStyle?.fontStyle ?? inheritStyle.fontStyle,
-      fontSize: model.textStyle?.fontSize ?? inheritStyle.fontSize,
-      letterSpacing: model.textStyle?.letterSpacing ?? inheritStyle.letterSpacing ?? DEFAULT_LETTER_SPACING,
-      widthRatio: model.textStyle?.widthRatio ?? inheritStyle.widthRatio ?? DEFAULT_WIDTH_RATIO,
-      spaceRatio: model.textStyle?.spaceRatio ?? inheritStyle.spaceRatio ?? DEFAULT_SPACE_RATIO,
-      indent: model.textStyle?.indent ?? inheritStyle.indent ?? DEFAULT_INDENT,
+    return {
+      textStyle: engine.getEffectiveStyleAt(this._cursorModel.offset),
+      paragraphStyle: engine.effectiveParagraphStyle,
     };
-    const baseParagraphStyle: ParagraphStyle = {
-      lineGap: model.paragraphStyle?.lineGap ?? inheritStyle.lineGap,
-      verticalAlign: model.paragraphStyle?.verticalAlign ?? inheritStyle.verticalAlign ?? DEFAULT_VERTICAL_ALIGN,
-      textAlign: model.paragraphStyle?.textAlign ?? inheritStyle.textAlign ?? DEFAULT_TEXT_ALIGN,
-    };
-
-    const inlineStyle = getStyleAtOffset(this._runMap, this._cursorModel.offset);
-    if (!inlineStyle) return { textStyle: baseTextStyle, paragraphStyle: baseParagraphStyle };
-
-    const effectiveTextStyle: TextStyle = {
-      ...baseTextStyle,
-      ...(inlineStyle.fontFamily !== undefined && { fontFamily: inlineStyle.fontFamily }),
-      ...(inlineStyle.fontSize !== undefined && { fontSize: inlineStyle.fontSize }),
-      ...(inlineStyle.fontWeight !== undefined && { fontWeight: inlineStyle.fontWeight }),
-      ...(inlineStyle.fontStyle !== undefined && { fontStyle: inlineStyle.fontStyle }),
-      ...(inlineStyle.color !== undefined && { color: inlineStyle.color }),
-    };
-
-    return { textStyle: effectiveTextStyle, paragraphStyle: baseParagraphStyle };
   }
 
   /**
    * selection 영역 내 모든 오프셋의 유효 스타일을 비교하여 공통값만 남긴다.
    *
-   * 각 필드는 영역 내 모든 위치에서 동일한 값만 반환하고, 하나라도 상이하면
-   * `undefined`로 지운다. 상속값 + 문단 스타일 + 런 스타일 순으로 병합한
-   * 최종(effective) 스타일 기준으로 비교한다.
+   * 엔진의 `getCommonStyleInRange`에 위임한다. 문단 스타일은
+   * `engine.effectiveParagraphStyle`에서 가져온다.
    *
    * @param startOffset - selection 시작 오프셋 (포함)
    * @param endOffset - selection 끝 오프셋 (미포함)
    * @returns 공통 스타일. 상이한 필드는 해당 객체에서 생략됨
    */
   computeSelectionCommonStyle(startOffset: number, endOffset: number): CurrentStyle {
-    const model = this._paragraph.model;
-    if (!model) return { textStyle: {}, paragraphStyle: {} };
-
-    const inheritStyle = model.inheritStyle ?? {};
-    const baseTextStyle: TextStyle = {
-      color: model.textStyle?.color ?? inheritStyle.color,
-      fontFamily: model.textStyle?.fontFamily ?? inheritStyle.fontFamily,
-      fontWeight: model.textStyle?.fontWeight ?? inheritStyle.fontWeight,
-      fontStyle: model.textStyle?.fontStyle ?? inheritStyle.fontStyle,
-      fontSize: model.textStyle?.fontSize ?? inheritStyle.fontSize,
-      letterSpacing: model.textStyle?.letterSpacing ?? inheritStyle.letterSpacing ?? DEFAULT_LETTER_SPACING,
-      widthRatio: model.textStyle?.widthRatio ?? inheritStyle.widthRatio ?? DEFAULT_WIDTH_RATIO,
-      spaceRatio: model.textStyle?.spaceRatio ?? inheritStyle.spaceRatio ?? DEFAULT_SPACE_RATIO,
-      indent: model.textStyle?.indent ?? inheritStyle.indent ?? DEFAULT_INDENT,
+    const engine = this._paragraph.engine;
+    if (!engine) return { textStyle: {}, paragraphStyle: {} };
+    return {
+      textStyle: engine.getCommonStyleInRange(startOffset, endOffset),
+      paragraphStyle: engine.effectiveParagraphStyle,
     };
-    const baseParagraphStyle: ParagraphStyle = {
-      lineGap: model.paragraphStyle?.lineGap ?? inheritStyle.lineGap,
-      verticalAlign: model.paragraphStyle?.verticalAlign ?? inheritStyle.verticalAlign ?? DEFAULT_VERTICAL_ALIGN,
-      textAlign: model.paragraphStyle?.textAlign ?? inheritStyle.textAlign ?? DEFAULT_TEXT_ALIGN,
-    };
-
-    const COMMON_FIELDS: (keyof TextStyle)[] = ["color", "fontFamily", "fontWeight", "fontStyle", "fontSize"];
-
-    // 인라인 런으로 오버라이드할 수 없는 paragraph 수준 필드.
-    // computeSelectionCommonStyle은 인라인 필드만 비교하지만, 반환 시
-    // 이 필드들은 baseTextStyle에서 가져와 포함되어야 한다.
-    const PARAGRAPH_LEVEL_FIELDS: (keyof TextStyle)[] = ["letterSpacing", "widthRatio", "spaceRatio", "indent"];
-
-    const commonTextStyle: TextStyle = {};
-
-    let first = true;
-    for (let offset = startOffset; offset < endOffset; offset++) {
-      const inlineStyle = getStyleAtOffset(this._runMap, offset);
-      const offsetStyle: TextStyle = inlineStyle
-        ? {
-            ...baseTextStyle,
-            ...(inlineStyle.fontFamily !== undefined && { fontFamily: inlineStyle.fontFamily }),
-            ...(inlineStyle.fontSize !== undefined && { fontSize: inlineStyle.fontSize }),
-            ...(inlineStyle.fontWeight !== undefined && { fontWeight: inlineStyle.fontWeight }),
-            ...(inlineStyle.fontStyle !== undefined && { fontStyle: inlineStyle.fontStyle }),
-            ...(inlineStyle.color !== undefined && { color: inlineStyle.color }),
-          }
-        : baseTextStyle;
-
-      if (first) {
-        for (const field of COMMON_FIELDS) {
-          const value: string | number | undefined = offsetStyle[field];
-          if (value !== undefined) {
-            (commonTextStyle as Record<string, unknown>)[field] = value;
-          }
-        }
-        first = false;
-      } else {
-        for (const field of COMMON_FIELDS) {
-          if (commonTextStyle[field] !== undefined && commonTextStyle[field] !== offsetStyle[field]) {
-            delete commonTextStyle[field];
-          }
-        }
-      }
-    }
-
-    // paragraph 수준 필드는 인라인 런으로 오버라이드되지 않으므로
-    // baseTextStyle에서 그대로 가져온다.
-    for (const field of PARAGRAPH_LEVEL_FIELDS) {
-      (commonTextStyle as Record<string, unknown>)[field] = baseTextStyle[field];
-    }
-
-    return { textStyle: commonTextStyle, paragraphStyle: baseParagraphStyle };
   }
 
   /**

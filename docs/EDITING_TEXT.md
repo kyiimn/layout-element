@@ -282,8 +282,8 @@ flowchart LR
 |-----|------|------|
 | `cursorOffset` | `number` get | 현재 커서 위치를 소스 텍스트 오프셋(0-based, `\n` 포함)으로 반환한다. |
 | `selection` | `SelectionRange \| null` get | 현재 선택 영역을 반환한다. 선택이 없으면 `null`이다. |
-| `currentStyle` | `CurrentStyle` get | 현재 커서/선택 위치에서 유효한 `TextStyle`과 `ParagraphStyle`을 반환한다. 상속 스타일 + 문단 스타일 + 인라인 런 스타일을 병합한 **최종(effective) 스타일**이다. selection이 있으면 영역 내 모든 위치에서 **공통인 필드만** 반환하며(상이한 필드는 생략), selection이 없으면 커서 위치의 최종 스타일을 반환한다. |
-| `computeSelectionCommonStyle(start, end)` | `CurrentStyle` | `[start, end)` 범위 내 모든 오프셋의 유효 스타일을 비교해 공통 필드만 반환한다. `currentStyle`의 selection 경로가 내부적으로 사용하는 메서드로, 외부에서도 직접 호출 가능하다. |
+| `currentStyle` | `CurrentStyle` get | 현재 커서/선택 위치에서 유효한 `TextStyle`과 `ParagraphStyle`을 반환한다. **엔진이 단일 소스** — `ParagraphEngine.getEffectiveStyleAt(offset)`(커서) 또는 `getCommonStyleInRange(start, end)`(선택)으로 조회하고 `effectiveParagraphStyle`을 문단 스타일로 사용한다. selection이 있으면 영역 내 공통 필드만 반환하며(상이한 필드는 생략), selection이 없으면 커서 위치의 최종 스타일을 반환한다. |
+| `computeSelectionCommonStyle(start, end)` | `CurrentStyle` | `[start, end)` 범위 내 공통 스타일을 반환한다. 엔진의 `getCommonStyleInRange`에 위임한다. 외부에서도 직접 호출 가능하다. |
 | `applyInlineStyle(style)` | `void` | 현재 선택 영역에 인라인 스타일(`Partial<TextInlineStyle>`)을 적용한다. 선택 영역이 없으면 무시. `runMap`을 갱신하고 `plainToInline`으로 `model.textContent`를 재구성한 뒤 재렌더링한다. |
 | `toggleInlineStyle(field, value)` | `void` | 현재 선택 영역의 인라인 스타일 필드를 토글한다. 선택 영역 전체가 이미 해당 값이면 제거(기본 복귀), 아니면 적용한다. `Ctrl+B`(fontWeight 700), `Ctrl+I`(fontStyle italic) 단축키가 이 메서드를 호출한다. |
 | `normalizeNow()` | `void` | 현재 런 맵을 문단 유효 텍스트 스타일 기준으로 정규화한다. 문단 기본과 모든 필드가 동일한 런은 해제하고 인접 동일 런을 병합한다. 텍스트 길이가 변하지 않으므로 커서/selection 오프셋은 불변. 포커스 획득/blur 시 자동 호출된다. |
@@ -330,11 +330,13 @@ controller.focus();
 
 #### `currentStyle`
 
-커서 위치에서 유효한 `TextStyle`과 `ParagraphStyle`을 반환한다. 내부 동작:
+커서 위치에서 유효한 `TextStyle`과 `ParagraphStyle`을 반환한다. **엔진이 단일 소스** — 컨트롤러는 `ParagraphEngine`에 위임한다:
 
-1. `model.inheritStyle`과 `model.textStyle`/`model.paragraphStyle`을 필드별로 `??` 병합하여 기본 스타일을 구성한다.
-2. 런 스타일 조회로 커서가 속한 런의 `TextInlineStyle`을 찾는다. 컨트롤러가 보유한 `runMap`(`src/edit/run-map.ts`)에서 `getStyleAtOffset(runMap, cursorOffset)`으로 조회한다.
-3. `TextInlineStyle`의 정의된 필드만 기본 스타일 위에 오버라이드한다.
+1. selection이 있으면 `engine.getCommonStyleInRange(start, end)`으로 영역 내 공통 필드만 조회.
+2. selection이 없으면 `engine.getEffectiveStyleAt(cursorOffset)`으로 커서 위치의 effective 스타일 조회.
+3. 문단 스타일은 `engine.effectiveParagraphStyle`에서 가져온다.
+
+엔진은 `_textContent`에서 구축한 소스 런 인덱스(`_styleRuns`)로 이진 탐색 조회한다. 오프셋 공간은 `\n`을 포함한 평문 기준이며 textarea/`RunMap`과 동일하다. `layoutText()`와 무관하므로 레이아웃 전에도 동작한다.
 
 ```ts
 const { textStyle, paragraphStyle } = controller.currentStyle;
