@@ -1069,6 +1069,20 @@ export class ParagraphEngine {
           parts.push(block);
         } else {
           parts.push(block.content);
+          // textInlineStyle이 해시에 빠지면 스타일만 변경된 주입(굵게/기울임 등)에서
+          // 텍스트가 동일해 해시가 동일 → _layoutCache 히트 → 구 columnContents
+          // (구 inlineStyles) 재사용으로 화면이 갱신되지 않는다.
+          const s = block.textInlineStyle;
+          if (s) {
+            parts.push(
+              "s:" +
+                (s.fontFamily ?? "") + "," +
+                (s.fontSize ?? "") + "," +
+                (s.fontWeight ?? "") + "," +
+                (s.fontStyle ?? "") + "," +
+                (s.color ?? ""),
+            );
+          }
         }
       }
     }

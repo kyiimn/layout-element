@@ -379,6 +379,7 @@
 | 매개변수 | 설명 |
 |---|---|
 | `textContent` | 텍스트 내용 |
+| `textInlineStyle` (배열 블록별) | 인라인 런 스타일 (`fontFamily`/`fontSize`/`fontWeight`/`fontStyle`/`color`). **제외 시 인라인 스타일만 변경된 주입(굵게/기울임 등)에서 텍스트 불변 → 해시 동일 → 캐시 히트 → 구 `columnContents`(구 `inlineStyles`) 재사용으로 화면 미갱신 버그 발생** |
 | `_columnWidths` + `_gaps` | 컬럼 폭/간격 |
 | `_lineHeight` | 줄 높이 (fontSize × lineGap) |
 | `widthRatio` | 장평 |

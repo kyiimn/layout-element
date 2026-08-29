@@ -5,6 +5,31 @@ import type { TextInlineStyle } from "@/types/style/text-inline-style.type";
 const HOST_STYLE_ID = '__layout_host_style__';
 
 /**
+ * 인라인 스타일의 변경 감지용 키. 정의된 필드만 `key=value`로 직렬화한다.
+ * `undefined`/빈 스타일은 `''`로 정규화하여 "주입 없음" 상태도 비교 가능하게 한다.
+ *
+ * @param style - 직렬화할 인라인 스타일 (선택)
+ * @returns 변경 감지용 키 문자열
+ * @throws 없음
+ * @example
+ * ```ts
+ * _inlineStyleKey({ fontWeight: 700 });            // → "fontWeight=700"
+ * _inlineStyleKey({ fontSize: 7, color: 'red' });  // → "fontSize=7|color=red"
+ * _inlineStyleKey(undefined);                      // → ""
+ * ```
+ */
+function _inlineStyleKey(style: TextInlineStyle | undefined): string {
+  if (!style) return '';
+  const parts: string[] = [];
+  if (style.fontFamily !== undefined) parts.push(`fontFamily=${style.fontFamily}`);
+  if (style.fontSize !== undefined) parts.push(`fontSize=${style.fontSize}`);
+  if (style.fontWeight !== undefined) parts.push(`fontWeight=${style.fontWeight}`);
+  if (style.fontStyle !== undefined) parts.push(`fontStyle=${style.fontStyle}`);
+  if (style.color !== undefined) parts.push(`color=${style.color}`);
+  return parts.join('|');
+}
+
+/**
  * 텍스트 컬럼 렌더링 요소. `<x-layout-column>` 커스텀 엘리먼트.
  *
  * `TextLayoutEngine`에서 생성된 `TextLineData[]`를 받아 각 줄을 렌더링한다.
@@ -206,6 +231,9 @@ export class LayoutColumnElement extends HTMLElement {
     } else {
       delete charEl.dataset.charOffset;
     }
+    // diff 스킵 판정용: 직전 인라인 스타일 스냅샷. 적용 후 갱신해야 다음 렌더에서
+    // 변경 감지(_skipSpanStyleIfUnchanged)가 동작한다.
+    charEl.dataset.inlineKey = _inlineStyleKey(inlineStyle);
 
     const { rawWidth, swidth } = this.model!.getCharWidths(char, inlineStyle);
     charEl.dataset.owidth = String(rawWidth);
@@ -281,6 +309,7 @@ export class LayoutColumnElement extends HTMLElement {
     renderedOffset: number,
     sourceOffset: number,
     charOffsetMm?: number,
+    inlineStyle?: TextInlineStyle,
   ): boolean {
     if (
       charEl.dataset.offset === String(renderedOffset) &&
@@ -289,6 +318,11 @@ export class LayoutColumnElement extends HTMLElement {
       const existingCharOffset = charEl.dataset.charOffset;
       const newCharOffsetStr = charOffsetMm !== undefined ? String(charOffsetMm) : undefined;
       if (existingCharOffset === newCharOffsetStr) {
+        // 인라인 스타일 변경(굵게/기울임 주입 등)은 텍스트·오프셋을 바꾸지 않으므로
+        // 아래 비교만으로는 감지할 수 없다. dataset에 기록된 직전 인라인 스타일과
+        // 비교하여 변경 시 재적용 대상으로 판정한다.
+        const inlineKey = _inlineStyleKey(inlineStyle);
+        if ((charEl.dataset.inlineKey ?? '') !== inlineKey) return false;
         // charOffsets 경로(단일 span): textContent 직접 비교
         if (charOffsetMm !== undefined) {
           return charEl.textContent === char;
@@ -476,7 +510,7 @@ export class LayoutColumnElement extends HTMLElement {
           let charEl: HTMLSpanElement;
           if (existingSpan) {
             charEl = existingSpan;
-            if (!this._skipSpanStyleIfUnchanged(charEl, char, curRenderedOffset, curSourceOffset, offsetMm)) {
+            if (!this._skipSpanStyleIfUnchanged(charEl, char, curRenderedOffset, curSourceOffset, offsetMm, charInlineStyle)) {
               this._applySpanStyle(charEl, char, curRenderedOffset, curSourceOffset, offsetMm, charInlineStyle);
             }
             existingSpans.delete(thisCharSourceOffset);
