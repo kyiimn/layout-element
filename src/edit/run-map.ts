@@ -500,7 +500,9 @@ function spliceTextIntoRuns(
       const item = items[index];
       const len = itemLength(item);
       if (remaining > 0) result.push(sliceItem(item, 0, remaining));
-      const style = insertStyle !== undefined ? insertStyle : itemStyleAtBoundary(items, index);
+      const style = insertStyle !== undefined
+        ? insertStyle
+        : remaining > 0 ? itemStyleAtStart(item, remaining) : itemStyleAtBoundary(items, index);
       result.push({ content: insertText, textInlineStyle: style });
       if (remaining < len) result.push(sliceItem(item, remaining, len));
       index++;
