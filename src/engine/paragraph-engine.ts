@@ -158,6 +158,39 @@ export class ParagraphEngine {
 
   private _dirty: boolean = false;
 
+  /** 성능 캐시: plainText getter 결과. textContent/data setter에서 무효화. */
+  private _plainTextCache: string | null = null;
+
+  /**
+   * 캐시된 평문 텍스트. `textContent`가 배열(인라인 런)이면 런 content를 이어붙인
+   * 평문을 반환하고, 문자열이면 그대로 반환한다. 편집 전용 오프셋 판정(`\n` 스킵,
+   * 라인 끝 검사, 커서 매핑)은 반드시 이 getter를 사용해야 한다 — `textContent`는
+   * 배열일 수 있어 문자열 인덱싱(`textContent[i] === '\n'`)이 항상 실패한다.
+   *
+   * @returns `textContent`의 평문 문자열
+   * @throws 없음 (빈 콘텐츠면 빈 문자열 반환)
+   * @example
+   * ```ts
+   * // textContent가 배열인 경우
+   * // ["ab", { content: "굵게", textInlineStyle: {...} }]
+   * engine.plainText; // → "ab굵게"
+   * ```
+   */
+  public get plainText(): string {
+    if (this._plainTextCache !== null) return this._plainTextCache;
+    const tc = this._textContent;
+    if (typeof tc === "string") {
+      this._plainTextCache = tc;
+      return tc;
+    }
+    let result = "";
+    for (const item of tc) {
+      result += typeof item === "string" ? item : item.content;
+    }
+    this._plainTextCache = result;
+    return result;
+  }
+
   /**
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
    *
@@ -1678,6 +1711,7 @@ export class ParagraphEngine {
     this._resources = options.resources;
     this._inheritStyle = options.inheritStyle;
     this._textContent = options.content;
+    this._plainTextCache = null;
     this._paragraphStyle = options.paragraphStyle;
     this._textStyle = options.textStyle;
     this._id = options.id;
@@ -1725,6 +1759,7 @@ export class ParagraphEngine {
    */
   public set textContent(value: string | (string | TextInlineData)[]) {
     this._textContent = value;
+    this._plainTextCache = null;
     this._dirty = true;
   }
 

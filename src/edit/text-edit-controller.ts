@@ -1444,7 +1444,7 @@ export class TextEditController {
   private _getEndKeyOffset(offset: number): number {
     const lineEnd = this._getLogicalLineEnd(offset);
     // lineEnd가 \n 위치이면 그대로 반환 (\n 앞에서 멈춤)
-    if (this._paragraph.model?.textContent?.[lineEnd] === "\n") {
+    if (this._paragraph.model?.plainText[lineEnd] === "\n") {
       return lineEnd;
     }
     if (this._mapper.getCursorPlacement(lineEnd) !== null) {
@@ -1844,15 +1844,14 @@ export class TextEditController {
 
     if (!this._paragraph.model) return;
 
-    const textContent = this._paragraph.model.textContent;
-    if (typeof textContent !== "string") return;
+    const plainText = this._paragraph.model.plainText;
 
     const placement = this._mapper.getCursorPlacement(sourceOffset);
 
     // placement가 null: \n 바로 다음(새 라인 시작)이거나 빈 줄 시작.
     // 새 라인 시작인 경우 line div 첫 자식으로 삽입.
     if (!placement) {
-      if (sourceOffset > 0 && textContent[sourceOffset - 1] === '\n') {
+      if (sourceOffset > 0 && plainText[sourceOffset - 1] === '\n') {
         this._insertOptimisticSpanAtLineStart(char, sourceOffset);
       }
       return;

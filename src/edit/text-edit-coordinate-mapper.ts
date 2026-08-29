@@ -129,7 +129,7 @@ export class TextEditCoordinateMapper {
 
     const columnContents = model.columnContents;
     let sourceOffset = 0;
-    const textContent = model.textContent;
+    const textContent = model.plainText;
 
     for (let columnIndex = 0; columnIndex < columnContents.length; columnIndex++) {
       const lines = columnContents[columnIndex];
@@ -620,22 +620,14 @@ export class TextEditCoordinateMapper {
 
         if (srcOff < startOffset || srcOff >= endOffset) continue;
 
-        if (srcOff > lastSourceOffset + 1 && typeof model.textContent === 'string') {
-          for (let gap = lastSourceOffset + 1; gap < srcOff; gap++) {
-            if (gap >= startOffset && gap < endOffset) {
-              result += model.textContent[gap] ?? '\n';
-            }
-          }
-        }
-
-        result += span.innerText;
+        result += model.plainText[srcOff] ?? span.innerText;
         lastSourceOffset = srcOff;
       }
     }
 
-    if (lastSourceOffset < endOffset - 1 && typeof model.textContent === 'string') {
+    if (lastSourceOffset < endOffset - 1) {
       for (let gap = lastSourceOffset + 1; gap < endOffset; gap++) {
-        result += model.textContent[gap] ?? '\n';
+        result += model.plainText[gap] ?? '\n';
       }
     }
 

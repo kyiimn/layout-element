@@ -355,6 +355,8 @@ const { textStyle, paragraphStyle } = controller.currentStyle;
 
 소스 오프셋은 `textContent` 기반 0-indexed 위치이며 `\n`과 공백을 포함한다. 렌더링에서 생략된 leading/trailing space와 `\n`은 span이 생성되지 않지만 `data-source-offset`이 연속된 가시 문자에 부여되므로 소스 오프셋 기반으로 span을 직접 찾을 수 있다.
 
+**plainText 규약 (중요)**: 첫 텍스트 편집 후 `ParagraphEngine.textContent`는 `plainToInline` 결과인 **배열**(`(string | TextInlineData)[]`)이 된다. 따라서 오프셋 기반 문자 판정(`\n` 스킵, 라인 끝 검사, 커서 매핑 등)은 반드시 `model.plainText`를 사용해야 하며, `textContent[i] === '\n'` 같은 문자열 인덱싱은 배열에서 항상 실패한다. `plainText`는 `textContent`가 배열이면 런 content를 이어붙인 평문을 캐시하여 반환한다(`ParagraphEngine.plainText` — `textContent`/`data` setter에서 캐시 무효화). 이 규약을 위반하면 `\n` 스킵이 전부 무시되어, 단(column)을 넘어갈수록 커서/선택 영역/타이핑 주입 오프셋이 실제 소스 오프셋보다 작아지는 누적 드리프트(블록당 −1)가 발생한다.
+
 **좌표계 메모**: paragraph의 shadow root 자식 요소(cursor/selection)의 `top`/`left`는 paragraph local coordinate(transform: scale 적용 전 픽셀)를 기대하지만 `getBoundingClientRect()`는 transform 적용 후 viewport 픽셀을 반환한다. `getCharRect`/`getTextRange`/`getFirstColumnRect`가 반환하는 top/left/width/height는 모두 `EditManager.scale`로 나누어 local coordinate로 변환한다.
 
 | API | 타입 | 설명 |
