@@ -179,6 +179,13 @@ export class ParagraphEngine {
   private _plainTextCache: string | null = null;
 
   /**
+   * 소스 런 스타일 인덱스. `_textContent`의 각 아이템을 평문 오프셋 공간(`\n` 포함,
+   * textarea/RunMap과 동일)의 연속된 런으로 펼친 배열. 지연 구축, `textContent`/`data`
+   * setter에서 무효화. `layoutText()`와 무관 (레이아웃 전에도 조회 가능).
+   */
+  private _styleRuns: readonly { start: number; end: number; style: TextInlineStyle | undefined }[] | null = null;
+
+  /**
    * 캐시된 평문 텍스트. `textContent`가 배열(인라인 런)이면 런 content를 이어붙인
    * 평문을 반환하고, 문자열이면 그대로 반환한다. 편집 전용 오프셋 판정(`\n` 스킵,
    * 라인 끝 검사, 커서 매핑)은 반드시 이 getter를 사용해야 한다 — `textContent`는
@@ -1863,6 +1870,7 @@ export class ParagraphEngine {
     this._inheritStyle = options.inheritStyle;
     this._textContent = options.content;
     this._plainTextCache = null;
+    this._styleRuns = null;
     this._paragraphStyle = options.paragraphStyle;
     this._textStyle = options.textStyle;
     this._id = options.id;
@@ -1911,6 +1919,7 @@ export class ParagraphEngine {
   public set textContent(value: string | (string | TextInlineData)[]) {
     this._textContent = value;
     this._plainTextCache = null;
+    this._styleRuns = null;
     this._dirty = true;
   }
 
@@ -2234,6 +2243,159 @@ export class ParagraphEngine {
     this._effectiveTsCache = { ...DEFAULT_TEXT_STYLE, ...this._inheritStyle, ...this._textStyle };
     this._effectiveTsDirty = false;
     return this._effectiveTsCache;
+  }
+
+  /**
+   * `_textContent`에서 소스 런 인덱스를 구축한다.
+   *
+   * 각 아이템(string 또는 `TextInlineData`)을 평문 오프셋 공간의 연속된 런으로
+   * 펼친다. 오프셋 공간은 `\n`을 포함하며 textarea/`RunMap`과 정확히 일치한다.
+   * `layoutText()`와 무관하므로 레이아웃 전에도 조회 가능하다.
+   *
+   * @returns 런 인덱스 (정렬됨, 비중첩, 연속)
+   */
+  private _buildStyleRuns(): { start: number; end: number; style: TextInlineStyle | undefined }[] {
+    const content = this._textContent;
+    if (typeof content === "string") {
+      return content.length === 0 ? [] : [{ start: 0, end: content.length, style: undefined }];
+    }
+    const runs: { start: number; end: number; style: TextInlineStyle | undefined }[] = [];
+    let offset = 0;
+    for (const item of content) {
+      const len = typeof item === "string" ? item.length : item.content.length;
+      const style = typeof item === "string" ? undefined : item.textInlineStyle;
+      runs.push({ start: offset, end: offset + len, style });
+      offset += len;
+    }
+    return runs;
+  }
+
+  /**
+   * 소스 오프셋이 속한 런의 주입된 인라인 스타일(raw)을 반환한다.
+   *
+   * 오프셋 공간은 `\n`을 포함한 평문 기준이며 textarea/`RunMap`과 동일하다.
+   * 경계 의미: 반개구간 `[start, end)` — 런 경계 오프셋은 다음 런의 스타일을
+   * 반환한다. 텍스트 끝(`offset === 전체 길이`)이면 마지막 런의 스타일을
+   * 반환한다(타이핑 연속성). 빈 단락이거나 범위 밖이면 `undefined`.
+   *
+   * `layoutText()` 의존 없음 — 엔진이 Node.js 단독 모드이거나 편집 중
+   * pre-layout 상태에서도 동작한다.
+   *
+   * @param sourceOffset - 평문 오프셋 (`\n` 포함)
+   * @returns 해당 위치의 인라인 스타일. `undefined`면 문단 기본 스타일
+   *
+   * @example
+   * ```ts
+   * // content: ["ab", { content: "굵게", textInlineStyle: { fontWeight: 700 } }, "cd"]
+   * engine.getInlineStyleAt(0);  // → undefined (plain "ab")
+   * engine.getInlineStyleAt(2);  // → { fontWeight: 700 } (bold run 시작)
+   * engine.getInlineStyleAt(4);  // → undefined (plain "cd" 시작)
+   * engine.getInlineStyleAt(6);  // → undefined (텍스트 끝, 마지막 런이 plain)
+   * ```
+   */
+  public getInlineStyleAt(sourceOffset: number): TextInlineStyle | undefined {
+    const runs = this._styleRuns ?? (this._styleRuns = this._buildStyleRuns());
+    if (runs.length === 0) return undefined;
+    let lo = 0, hi = runs.length - 1, found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (runs[mid].start <= sourceOffset) { found = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    if (found >= 0 && sourceOffset < runs[found].end) return runs[found].style;
+    const last = runs[runs.length - 1];
+    if (found === runs.length - 1 && sourceOffset === last.end) return last.style;
+    return undefined;
+  }
+
+  /**
+   * 소스 오프셋의 유효(effective) 텍스트 스타일을 반환한다.
+   *
+   * `effectiveTextStyle`(기본값 + 상속값 + 문단 주입값 병합)에 해당 위치 런의
+   * 인라인 스타일 5개 필드(`fontFamily`, `fontSize`, `fontWeight`,
+   * `fontStyle`, `color`)를 오버라이드한다. 런 스타일의 `undefined` 필드는
+   * 무시한다 (명시적 `undefined` 키가 기본값을 덮어쓰지 않도록 조건부 spread).
+   *
+   * @param sourceOffset - 평문 오프셋 (`\n` 포함)
+   * @returns 해당 위치의 유효 텍스트 스타일 (모든 필드 materialized)
+   *
+   * @example
+   * ```ts
+   * // 문단 기본: fontSize 4, color 'black'. 런: { fontWeight: 700 }
+   * engine.getEffectiveStyleAt(2);
+   * // → { color: 'black', fontFamily: '...', fontWeight: 700, fontStyle: 'normal', fontSize: 4, ... }
+   * ```
+   */
+  public getEffectiveStyleAt(sourceOffset: number): TextStyle {
+    const inline = this.getInlineStyleAt(sourceOffset);
+    const base = this.effectiveTextStyle;
+    if (!inline) return base;
+    return {
+      ...base,
+      ...(inline.fontFamily !== undefined && { fontFamily: inline.fontFamily }),
+      ...(inline.fontSize !== undefined && { fontSize: inline.fontSize }),
+      ...(inline.fontWeight !== undefined && { fontWeight: inline.fontWeight }),
+      ...(inline.fontStyle !== undefined && { fontStyle: inline.fontStyle }),
+      ...(inline.color !== undefined && { color: inline.color }),
+    };
+  }
+
+  /**
+   * 범위 내 모든 위치의 유효 스타일이 일치하는 필드만 반환한다.
+   *
+   * 인라인 오버라이드 가능 필드(`color`, `fontFamily`, `fontWeight`,
+   * `fontStyle`, `fontSize`)는 범위 내 런들을 순회하며 공통값만 유지한다.
+   * 단락 수준 필드(`letterSpacing`, `widthRatio`, `spaceRatio`, `indent`)는
+   * 런으로 오버라이드 불가능하므로 항상 `effectiveTextStyle`에서 가져온다.
+   *
+   * 런 단위로 비교하므로 O(범위 내 런 수)이다 — 문자 수에 비례하지 않는다.
+   *
+   * @param startOffset - 범위 시작 오프셋 (포함)
+   * @param endOffset - 범위 끝 오프셋 (미포함)
+   * @returns 공통 필드만 포함된 텍스트 스타일. 빈 범위면 전체 effective 스타일
+   *
+   * @example
+   * ```ts
+   * // "ab굵게cd"에서 [2, 6) 선택 (bold run + plain run 걸침)
+   * engine.getCommonStyleInRange(2, 6);
+   * // → { letterSpacing, widthRatio, spaceRatio, indent, fontSize: 4, ... }
+   * //    fontWeight는 bold(700) vs plain(400) 상이 → 제외
+   * ```
+   */
+  public getCommonStyleInRange(startOffset: number, endOffset: number): TextStyle {
+    const base = this.effectiveTextStyle;
+    if (endOffset <= startOffset) return { ...base };
+
+    const INLINE_FIELDS = ["color", "fontFamily", "fontWeight", "fontStyle", "fontSize"] as const;
+    const runs = this._styleRuns ?? (this._styleRuns = this._buildStyleRuns());
+
+    let first = true;
+    const common: Partial<Record<string, string | number | undefined>> = {};
+
+    for (const run of runs) {
+      if (run.end <= startOffset) continue;
+      if (run.start >= endOffset) break;
+
+      const eff = this.getEffectiveStyleAt(Math.max(run.start, startOffset));
+      for (const field of INLINE_FIELDS) {
+        if (first) {
+          common[field] = eff[field];
+        } else if (common[field] !== undefined && common[field] !== eff[field]) {
+          delete common[field];
+        }
+      }
+      first = false;
+    }
+
+    if (first) return { ...base };
+
+    return {
+      ...common,
+      letterSpacing: base.letterSpacing,
+      widthRatio: base.widthRatio,
+      spaceRatio: base.spaceRatio,
+      indent: base.indent,
+    } as TextStyle;
   }
 
   get extractData(): ParagraphData {

@@ -447,6 +447,9 @@ static createOrphan(content: string | (string | TextInlineData)[], resources: En
 | `getCharRect` | `(sourceOffset: number): MmRect \| null` | 특정 오프셋 문자의 mm 단위 rect |
 | `getOffsetFromPoint` | `(xMm, yMm): CursorPosition \| null` | 좌표→오프셋 매핑 |
 | `getCursorPlacement` | `(sourceOffset, preferLineEnd?): CursorPlacement \| null` | 커서 배치 정보 |
+| `getInlineStyleAt` | `(sourceOffset: number): TextInlineStyle \| undefined` | 소스 오프셋의 raw 인라인 스타일 (주입값만). `undefined`면 문단 기본. `\n` 포함 평문 오프셋 공간, `layoutText()` 무관 |
+| `getEffectiveStyleAt` | `(sourceOffset: number): TextStyle` | 소스 오프셋의 effective 스타일 (`effectiveTextStyle` + 런 인라인 5필드 오버라이드). 모든 필드 materialized |
+| `getCommonStyleInRange` | `(startOffset, endOffset): TextStyle` | `[start, end)` 범위에서 공통 필드만. 런 단위 비교(O(런 수)). 단락 수준 필드는 항상 `effectiveTextStyle`에서 |
 
 #### 퍼블릭 게터
 
