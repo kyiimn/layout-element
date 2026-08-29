@@ -564,11 +564,6 @@ export class LayoutDocumentElement extends HTMLElement {
       this._paragraphStyle = data.paragraphStyle;
       this._textStyle = data.textStyle;
 
-      // 자식 reconcile 전에 부모 모델(columnCoords)을 새 데이터로 갱신해야
-      // appendChild 중 자식 connectedCallback → layout → relLeft getter가
-      // stale columnCoords[this.left]를 읽어 `undefined.x1` 크래시가 발생하지 않는다.
-      this._layoutStructure();
-
       const existingBoxes = this.items;
       const existingById = new Map<string, LayoutBoxElement>();
       for (const box of existingBoxes) {
@@ -586,6 +581,12 @@ export class LayoutDocumentElement extends HTMLElement {
           const existingBox = existingById.get(childId)!;
           usedIds.add(childId);
           existingBox.data = child;
+          // 이미 같은 위치에 있으면 appendChild를 생략한다 — 불필요한
+          // detach/re-attach가 transient disconnect를 유발해 편집 중인
+          // box의 TextEditController가 destroy되고 포커스가 손실된다.
+          if (existingBox.parentElement === this && existingBoxes[i] === existingBox) {
+            continue;
+          }
           this.appendChild(existingBox);
         } else {
           const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
@@ -601,6 +602,9 @@ export class LayoutDocumentElement extends HTMLElement {
         }
       }
 
+      // [재배치 이유] 아래 layout() 내부의 _layoutStructure가 items의 _rawData로
+      // 엔진 트리를 다시 구성한다. reconcile 전에 호출하면 구 content가 엔진에
+      // 재주입되어 이번 주입의 텍스트가 되돌려진다 — 자식 reconcile이 항상 선행해야 한다.
       this.layout();
       this.render();
     } finally {

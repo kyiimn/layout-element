@@ -796,6 +796,13 @@ export class LayoutBoxElement extends HTMLElement {
             (existingEl as unknown as { data: typeof child }).data = child.type === 'text'
               ? { ...child, type: 'paragraph' as const, column: 1, gap: 0 }
               : child;
+            // 이미 같은 위치에 있으면 appendChild를 생략한다 — 불필요한
+            // detach/re-attach가 transient disconnect를 유발해 편집 중인
+            // 자식의 TextEditController가 destroy되고 포커스가 손실된다
+            // (appendChild는 동일 부모 재부착에서도 disconnectedCallback를 발화).
+            if (existingEl.parentElement === this && existingChildren[i] === existingEl) {
+              continue;
+            }
             this.appendChild(existingEl);
             continue;
           }
