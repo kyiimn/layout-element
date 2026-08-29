@@ -1734,7 +1734,7 @@ paragraph.render();
 
 | 전략 | 대상 | 효과 |
 |------|------|------|
-| 디바운스 렌더링 | `_debouncedRender()` | `requestAnimationFrame` → `scheduleRender()` (`queueMicrotask`) 기반으로 연속 입력을 단일 렌더링으로 통합. Enter/compositionend는 `flushRender()`로 즉시 실행 |
+| 디바운스 렌더링 | `_debouncedRender()` | rAF 프레임 병합: 연속 입력을 프레임당 단일 렌더링으로 통합. dirty 시 `flushRender()` 동기 커밋 후 `textChange`/`cursorMove`를 프레임당 1회 발행. Enter/compositionend는 `flushRender()`로 즉시 실행 |
 | 낙관적 span | `_optimisticSpanUpdate()` | 단일 문자 입력 시 전체 렌더링 대기 없이 즉시 시각적 피드백 제공 |
 | key 기반 증분 span 렌더링 | `renderText()` | `data-source-offset` key로 span 재사용 + `_skipSpanStyleIfUnchanged()`로 변경 없는 span 스킵 |
 | 스타일 시트 증분 갱신 | `renderText()` `:host` rule | `_cachedColStyleKey` 비교 후 변경 시에만 재구축 |
@@ -1744,7 +1744,19 @@ paragraph.render();
 
 #### 7.4.2 디바운스 렌더링 커서 갱신 시점
 
-텍스트 변경(Backspace, Delete, 붙여넣기, 문자 입력) 후에는 `_updateCursorPosition()`을 즉시 호출하지 않고 `_debouncedRender()`만 예약한다. `_debouncedRender()`는 rAF 콜백 내에서 `paragraph.scheduleRender()`를 호출하여 `queueMicrotask` 배치에 참여한다. 커서 위치는 `paragraph.render()` → `postRender()` → `_updateCursorPosition()` 흐름에서 **최신 DOM 기준**으로 갱신된다. 예외: (1) `_onInput`에서 `_optimisticSpan`이 생성된 경우(단일 문자 입력)에는 즉시 `_updateCursorPosition()`을 호출하여 즉각적인 피드백을 제공한다. (2) Enter/compositionend 핸들러는 `paragraph.flushRender()`를 사용하여 대기 중인 `scheduleRender()` 배치를 취소하고 즉시 `render()`를 실행한 후 동기적으로 `_updateCursorPosition()`을 호출한다.
+텍스트 변경(Backspace, Delete, 붙여넣기, 문자 입력) 후에는 `_updateCursorPosition()`을 즉시 호출하지 않고 `_debouncedRender()`만 예약한다. `_debouncedRender()`는 rAF 콜백 내에서 `_commitPendingInput()`을 호출한다 — `model.hasPendingChanges`가 true면 `paragraph.flushRender()`로 동기 커밋한 뒤 같은 프레임 안에서 `textChange`/`cursorMove`를 프레임당 1회 발행하고, 아니면 `paragraph.scheduleRender()`로 `queueMicrotask` 배치에 참여한다. 연속 타이핑 시 같은 프레임의 여러 키 입력은 하나의 rAF로 병합된다. 커서 위치는 `paragraph.render()` → `postRender()` → `_updateCursorPosition()` 흐름에서 **최신 DOM 기준**으로 갱신된다. 예외: (1) `_onInput`에서 `_optimisticSpan`이 생성된 경우(단일 문자 입력)에는 즉시 `_updateCursorPosition()`을 호출하여 즉각적인 피드백을 제공한다. (2) Enter/compositionend 핸들러는 `paragraph.flushRender()`를 사용하여 대기 중인 `scheduleRender()` 배치를 취소하고 즉시 `render()`를 실행한 후 동기적으로 `_updateCursorPosition()`을 호출한다.
+
+#### 7.4.3 편집 델타 경로 (run-map 스플라이스)
+
+모든 텍스트 편집 지점(`_onInput` 일반/선택 분기, Backspace, Delete, Enter, `_onPaste`, `_replaceSelection`, `_deleteSelection`, `_onCompositionUpdate`)은 `run-map.ts`의 `insertTextIntoInline`/`deleteTextFromInline` 스플라이스 프리미티브로 `model.textContent`를 갱신한다. 이전의 `plainToInline(plainText, runMap)` 전체 재구축(문단 길이 O(N) 런 배열 신규 생성) 대신 변경 런 수에만 비례한다.
+
+- **`insertTextIntoInline(content, at, text, insertStyle?)`**: 인라인 콘텐츠의 평문 `at` 위치에 텍스트를 스플라이스. 런 경계에 걸치면 런을 분할하고, `insertStyle`이 `undefined`면 직전 런의 스타일을 이어받는다 (타이핑 연속성).
+- **`deleteTextFromInline(content, start, deleteCount)`**: 평문 범위를 삭제하고 경계가 맞닿은 동일 스타일 런을 병합한다.
+- **`\n` 처리**: 삽입/삭제 텍스트에 `\n`이 포함되어도 엔진 `_parseContents`가 런을 `\n` 기준으로 라인 분할하므로 스플라이스가 그대로 동작한다 (Enter/붙여넣기 줄바꿈).
+- **IME 조합**: `_onCompositionUpdate`는 자모당 이전 조합 범위를 `deleteTextFromInline`으로 지우고 새 조합 텍스트를 `insertTextIntoInline`으로 삽입한다. `_runMap`은 조합 시작 전 상태를 유지하며 확정(`_onCompositionEnd`) 시 실제 shift가 반영된다.
+- **레이어링 규칙 준수**: 스플라이스 로직은 edit 영역(`run-map.ts`)에 존재하며, 엔진은 여전히 완성된 `(string | TextInlineData)[]`만 받는다 (엔진 우선 원칙 §Architecture).
+
+증분 렌더 후 `postRender(fullRebuild=false)`는 `mapper.rebuildMappingsOnly()`로 엔진 기반 매핑만 재구축하고 span 캐시는 무효화만 수행한다 — 컬럼별 `querySelectorAll` 재쿼리가 타이핑 패스에서 제거된다.
 
 ### 7.5 렌더링 비용 분석
 

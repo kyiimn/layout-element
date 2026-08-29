@@ -202,7 +202,9 @@
 | `_columnRanges` | `text-edit-coordinate-mapper.ts` | — | 컬럼별 시작/끝 source offset 범위 |
 | `_lineSourceOffsets` | `text-edit-coordinate-mapper.ts` | — | 라인별 source offset 시작 위치 |
 
-`rebuild()` 호출 시 모든 캐시가 `clear()`되고 `_rebuildMappings()`로 재구축. `rebuild()`는 `EditController.postRender()`에서 호출되므로 렌더링 후 자동 갱신.
+`rebuild()` 호출 시 모든 캐시가 `clear()`되고 `_rebuildMappings()`로 재구축. `rebuild()`는 `EditController.postRender(fullRebuild=true)`(전체 재생성 렌더)에서 호출된다.
+
+증분 렌더(컬럼 재사용 + span diff, `postRender(fullRebuild=false)`)에서는 `rebuildMappingsOnly()`가 호출되어 엔진 `columnContents` 기반 매핑만 재구축하고 `_spanCache`/`_columnSpansCache`는 `invalidateSpanCache()`로만 정리한다 — 타이핑 핫패스에서 컬럼별 `querySelectorAll` 재쿼리가 제거된다.
 
 `getNearestOffsetFromPoint()` 내부에서 로컬 `Map<HTMLSpanElement, DOMRect>`를 구축하여 모든 `getBoundingClientRect()` 호출을 단일 패스로 통합한다.
 
@@ -469,18 +471,31 @@ flexbox 폴백 경로(`charOffsets === undefined`, 외부에서 임의로 `TextP
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `text-edit-controller.ts:2018-2034` |
-| 메커니즘 | 보류 중 rAF 취소 → **엔진 dirty 여부 분기** |
+| 위치 | `text-edit-controller.ts` (`_debouncedRender` / `_commitPendingInput`) |
+| 메커니즘 | 보류 중 rAF 취소 → **rAF 프레임 병합** |
 | 통합 대상 | 키 입력, Backspace, Delete, Enter, 붙여넣기, 문자 입력 |
 
-`_debounceTimer`에 보류 중인 rAF가 있으면 취소하고 새 rAF 스케줄링. rAF 콜백에서:
+`_debounceTimer`에 보류 중인 rAF가 있으면 취소하고 새 rAF 스케줄링. rAF 콜백에서
+`_commitPendingInput()`이 실행된다:
 
-- **`model.hasPendingChanges === true`** → `paragraph.flushRender()`로 **동기 실행**. `textContent` setter의 `_dirty`는 `render()`의 `layoutText()`에서만 커밋되므로, dirty가 남은 채 `textChange` 이벤트를 먼저 쏘면 이벤트 구독자가 `element.data` → `engine.extractData`를 읽는 순간 dirty 가드가 throw된다. 이를 방지하기 위해 커밋(render)은 동기 실행하고, 뒤따르는 `renderText()` DOM 갱신만 microtask 배치로 미룬다 (`text-edit-controller.ts:2024-2032` 주석 참조).
+- **`model.hasPendingChanges === true`** → `paragraph.flushRender()`로 **동기 커밋** 후 같은 프레임 안에서 `_notifyTextChange` + `_notifyCursorMove`를 **프레임당 1회** 발행. `textContent` setter의 `_dirty`는 `render()`의 `layoutText()`에서만 커밋되므로, dirty가 남은 채 `textChange` 이벤트를 먼저 쏘면 이벤트 구독자가 `element.data` → `engine.extractData`를 읽는 순간 dirty 가드가 throw된다. 커밋 → 알림 순서는 반드시 유지된다.
 - **dirty가 아닐 때** → `paragraph.scheduleRender()` (queueMicrotask 배치 참여).
 
-Enter/compositionend 핸들러 등 커서/선택 동기 갱신이 필요한 경우에도 `flushRender()`를 사용한다. blur/compositionstart/compositionupdate/compositioncancel 핸들러는 `scheduleRender()`를 사용해 배치에 참여한다.
+연속 타이핑 시 같은 프레임 내 여러 키 입력은 하나의 rAF로 병합되어 `layoutText()` 전체
+재배치가 **프레임당 1회**로 수렴한다. 대기 구간의 시각 피드백은 optimistic span(§4.2)이
+담당한다. `destroy()` 시에도 보류 중 입력이 있으면 `_commitPendingInput()`으로 커밋 → 알림
+순서를 유지한다.
 
-> **변경 이력**: 과거에는 rAF 콜백 내 `scheduleRender()`(microtask 배치)만 수행했다. printPostData/extractData가 dirty 가드를 도입하면서 커밋 시점이 render 내부로 이동했고, 이에 맞춰 동기 flush 경로가 추가되었다. 결과적으로 키 입력마다 `layoutText()` 전체 재배치가 동기 실행된다 — 이것이 연속 타이핑 성능의 주요 비용 중 하나다 (§10 참조).
+Enter/compositionend 핸들러는 커서/선택 동기 갱신이 필요하므로 여전히 동기
+`flushRender()` + 즉시 이벤트를 사용한다. blur/compositionstart/compositionupdate/compositioncancel
+핸들러는 `scheduleRender()`를 사용해 배치에 참여한다.
+
+> **변경 이력**: (1차) rAF 콜백 내 `scheduleRender()`(microtask 배치)만 수행했다. (2차)
+> printPostData/extractData dirty 가드 도입으로 커밋 시점이 render 내부로 이동하면서 키
+> 입력마다 동기 `flushRender()`가 실행되었다 — 인라인 런 도입과 함께 연속 타이핑 성능의
+> 주요 병목이 되었다. (3차, 현재) 커밋과 이벤트 발행을 rAF 프레임에서 1회로 병합했다.
+> 키 입력당 O(N) `inlineToPlain` 2회(`_getPlainText`/`postRender`)도 `model.plainText`
+> 캐시 getter로 제거했다.
 
 ### 4.2 낙관적 span (optimistic span)
 
@@ -746,9 +761,11 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
   │   └─ this.scheduleRender()  [queueMicrotask 배치]
   │
   ├─ text edit input
-  │   └─ _debouncedRender()     [rAF 코일: 보류 rAF 취소 → 재스케줄]
-  │       ├─ model.hasPendingChanges → flushRender()  [동기 커밋 — §4.1]
-  │       └─ 아니면 → scheduleRender()  [queueMicrotask 배치]
+  │   └─ _debouncedRender()     [rAF 프레임 병합: 보류 rAF 취소 → 재스케줄]
+  │       └─ _commitPendingInput()
+  │           ├─ model.hasPendingChanges → flushRender()  [동기 커밋 — §4.1]
+  │           │   └─ 같은 프레임에 _notifyTextChange/_notifyCursorMove 1회
+  │           └─ 아니면 → scheduleRender()  [queueMicrotask 배치]
   │
   ├─ text edit (Enter/compositionend — 동기 커서 갱신 필요)
   │   └─ paragraph.flushRender()  [대기 중 배치 취소 + 즉시 render()]
@@ -823,7 +840,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | 라인 rect 측정 | `_detectOverlapWithCache()` | `_overlayRectsMm`는 오버랩 엔진 rect만 캐싱, 라인 자체의 rect는 라인마다 측정 |
 | 오버랩 픽셀 스캔 | `computePixelOverlap()` | 재래핑마다 겹침 밴드의 rgbaData/비트맵 재스캔. `getImageData()`는 아니지만(오버랩 경로에서 제거됨) 큰 이미지 × 다수 라인에서 비용 발생 |
 | `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산. `overlapMode === 'none'` 이미지/paragraph는 `checkOverlap()` 이전에 제외. `checkOverlap()`은 mm 좌표(`absLeft`/`absTop`/`absWidth`/`absHeight`) 기반으로 동작하므로 `getBoundingClientRect()` 강제 리플로우 비용이 발생하지 않음 |
-| 키 입력 O(N) 변환 | `TextEditController` / `ParagraphEngine` | 타이핑 1회당 `inlineToPlain`×2 + `plainToInline`×1 + `_computeLayoutInputHash` + mapper `rebuild()`가 문단 길이 O(N)으로 실행. `model.plainText` 캐시 getter가 존재하지만 컨트롤러가 미사용 (§10 참조) |
+| 키 입력 O(N) 패스 | `TextEditController` | Phase 2로 해소: 모든 텍스트 편집 지점이 `insertTextIntoInline`/`deleteTextFromInline` 델타 스플라이스 사용 (`run-map.ts`). 편집 비용이 문단 길이가 아닌 **변경 런 수**에 비례. 잔존: `_computeLayoutInputHash`(해시용 문자열 조립) + 렌더 diff |
 
 ---
 
@@ -837,5 +854,5 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | `Promise.all` 병렬 렌더 | `LayoutDocumentElement.render()` 순차 await (`document.element.ts:506`) → 병렬 | 이미지 로드 블로킹 해소 | 낮음 |
 | 가상화 | 뷰포트 밖 컬럼/라인 DOM 지연 생성 | 다중 페이지 DOM 크기 감소 | 중간 |
 | `_getAllColumns()` 캐싱 | `EditCoordinateMapper`에서 컬럼 목록 캐싱 | `querySelectorAll` 호출 감소 | 낮음 |
-| 키 입력 O(N) 패스 제거 | `_getPlainText()`/`postRender`가 **캐시 getter `model.plainText`** 사용 + `mapper.rebuild()` 증분화 (캐럿 이후 placement만 갱신) | 타이핑 1회당 O(N) inlineToPlain/plainToInline/rebuild 제거 | 중간 |
+| ~~키 입력 O(N) 패스 제거~~ | ~~`_getPlainText()`/`postRender`가 캐시 getter 사용 + `mapper.rebuild()` 증분화~~ | ~~타이핑 O(N) inlineToPlain 제거~~ | ~~구현됨: Phase 1(캐시 getter) + Phase 2(델타 스플라이스 + `rebuildMappingsOnly()`)~~ |
 | 부분 증분 `layoutText` | 캐럿 이전 라인 재래핑 불변성을 이용한 prefix 라인 캐시 (엔진 단일 소스 원칙 내) | 연속 타이핑 중 전체 재래핑 제거 | 높음 |
