@@ -246,19 +246,69 @@
           for (let i = 0; i < count; i++) {
             const tTotal0 = performance.now();
 
+            // focus+selection 측정 (대기 없이 순수 동기 시간만)
             const tF0 = performance.now();
             em.focusParagraph(para(), { selection: SelectionRange.fromOffsets(0, half) });
-            await new Promise(r => setTimeout(r, 50));
             focusTimes.push(performance.now() - tF0);
 
             const tA0 = performance.now();
             em.applyInlineStyle(i % 2 === 0 ? { fontWeight: 700 } : { fontWeight: undefined });
             applyTimes.push(performance.now() - tA0);
 
-            await new Promise(r => setTimeout(r, 50));
+            await new Promise(r => setTimeout(r, 30));
             totalTimes.push(performance.now() - tTotal0);
           }
           return { focusTimes, applyTimes, totalTimes };
+        },
+
+        // 7. 분해 계측: applyInlineStyle 파이프라인 단계별 동기 시간
+        async breakdownApplyStyle(count) {
+          const controller = em._focusedController;
+          const ta = controller?._textarea;
+          if (!ta) throw new Error("textarea not available");
+          const half = Math.floor(ta.value.length / 2);
+          const { applyStyleToRange, plainToInline } = await import("/src/edit/run-map");
+
+          const engine = para().engine;
+          const model = para().model;
+          const t = {
+            runMap: [], textContentSetter: [], layoutText: [], renderText: [],
+            cacheHit: [], full: [],
+          };
+          for (let i = 0; i < count; i++) {
+            em.focusParagraph(para(), { selection: SelectionRange.fromOffsets(0, half) });
+            await new Promise(r => setTimeout(r, 30));
+
+            const t0 = performance.now();
+            const runMap = applyStyleToRange(controller._runMap, 0, half, { fontWeight: 700 });
+            const inline = plainToInline(ta.value, runMap);
+            t.runMap.push(performance.now() - t0);
+
+            let t1 = performance.now();
+            model.textContent = inline;
+            t.textContentSetter.push(performance.now() - t1);
+
+            t.cacheHit.push(engine.hasLayoutCache);
+
+            t1 = performance.now();
+            engine.layoutText();
+            t.layoutText.push(performance.now() - t1);
+
+            const columns = para().querySelectorAll("x-layout-column");
+            t1 = performance.now();
+            columns.forEach(c => c.renderText());
+            t.renderText.push(performance.now() - t1);
+
+            t.full.push(performance.now() - t0);
+
+            // 원복
+            controller._runMap = applyStyleToRange(runMap, 0, half, { fontWeight: undefined });
+            model.textContent = plainToInline(ta.value, controller._runMap);
+            engine.layoutText();
+            columns.forEach(c => c.renderText());
+            await new Promise(r => setTimeout(r, 30));
+          }
+          return t;
         },
 
         getParaBox: () => paraBox,

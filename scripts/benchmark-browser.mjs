@@ -118,9 +118,17 @@ try {
 
   // 6. 분해 계측: 인라인 스타일 시나리오 단계별
   const bd = await page.evaluate(() => window.bench.breakdownInlineStyle(10));
-  printResult('6a. focusParagraph+selection', stats(bd.focusTimes));
-  printResult('6b. applyInlineStyle', stats(bd.applyTimes));
-  printResult('6c. 전체 (focus+apply)', stats(bd.totalTimes));
+  printResult('6a. focusParagraph+selection (동기)', stats(bd.focusTimes));
+  printResult('6b. applyInlineStyle (동기)', stats(bd.applyTimes));
+
+  // 7. 분해 계측: applyInlineStyle 파이프라인 단계별 (동기)
+  const bd2 = await page.evaluate(() => window.bench.breakdownApplyStyle(8));
+  printResult('7a. applyStyleToRange+plainToInline', stats(bd2.runMap));
+  printResult('7b. textContent setter (엔진)', stats(bd2.textContentSetter));
+  printResult('7c. layoutText (캐시 히트)', stats(bd2.layoutText));
+  printResult('7d. renderText (DOM diff)', stats(bd2.renderText));
+  printResult('7e. 전체 합계 (동기)', stats(bd2.full));
+  console.log(`    (캐시 히트: ${bd2.cacheHit.filter(Boolean).length}/${bd2.cacheHit.length})`);
 
   // ── 요약 ──
   console.log('\n── 요약 (60fps 프레임 예산 16.7ms 기준) ──');
