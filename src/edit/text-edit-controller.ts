@@ -1651,7 +1651,11 @@ export class TextEditController {
     if (this._debounceTimer !== null) {
       cancelAnimationFrame(this._debounceTimer);
       this._debounceTimer = null;
-      this._paragraph.scheduleRender();
+      // 조합 시작 전 보류 변경분이 있으면 즉시 반영한다. 조합 중에는 렌더를
+      // 예약하지 않으므로(optimistic span이 표시 담당), 여기가 마지막 flush 기회다.
+      if (this._paragraph.model?.hasPendingChanges) {
+        this._paragraph.flushRender();
+      }
     }
 
     const model = this._paragraph.model;
@@ -1686,7 +1690,11 @@ export class TextEditController {
       this._debounceTimer = null;
     }
     this._wasFocused = false;
-    this._paragraph.scheduleRender();
+    // 조합 시작: selection 삭제로 엔진 텍스트가 변경된 경우만 렌더한다.
+    // (커서 이동만의 조합 시작에서는 전체 renderText가 불필요하다)
+    if (model?.hasPendingChanges) {
+      this._paragraph.scheduleRender();
+    }
     this._updateCursorPosition();
   }
 
@@ -1698,6 +1706,13 @@ export class TextEditController {
       const start = this._compositionStartOffset;
       const data = event.data ?? "";
       const prevCompositionLen = this._compositionData.length;
+      // 엔진 데이터는 매 음절 즉시 갱신한다 (구독자/hasPendingChanges 정합성).
+      // 그러나 DOM 렌더는 예약하지 않는다 — 조합 중간 텍스트(ㅎ→하→한)는
+      // optimistic span이 화면에 표시하고, 최종 커밋은 compositionend의
+      // flushRender가 1회로 처리한다. 조합 중 debounce rAF가 flushRender를
+      // 실행하면 매 음절마다 전체 renderText가 2회(scheduleRender microtask +
+      // rAF 커밋)씩 실행돼 한글 타이핑이 영문 대비 2배 이상 느려진다 (실측:
+      // 조합 스트림 30음절에서 80회 render).
       model.textContent = insertTextIntoInline(
         deleteTextFromInline(model.textContent, start, prevCompositionLen),
         start,
@@ -1706,11 +1721,83 @@ export class TextEditController {
       this._runMap = runMapFromContent(model.textContent);
       this._compositionData = data;
       this._cursorModel.offset = start + data.length;
-      this._paragraph.scheduleRender();
+
+      this._optimisticCompositionUpdate(start, data);
+      this._updateCursorPosition();
+    } else {
+      this._updateCursorPosition();
     }
 
-    this._updateCursorPosition();
     this._emitStyleChange();
+  }
+
+  /**
+   * IME 조합 중인 음절을 optimistic span으로 표시한다.
+   *
+   * 조합 위치에 이미 optimistic 조합 span이 있으면 내용만 교체하고(1-span dirty),
+   * 없으면 조합 시작 위치에 생성한다. 전체 renderText는 `_debouncedRender()`가
+   * rAF 프레임에 1회로 병합 실행한다.
+   *
+   * @param startOffset - 조합 시작 source offset
+   * @param data - 현재 조합 음절 (예: 'ㅎ' → '하' → '한')
+   * @returns void
+   *
+   * @example
+   * ```ts
+   * // '한글' 입력 중 '한' 조합: startOffset=100, data='한'
+   * this._optimisticCompositionUpdate(100, '한');
+   * ```
+   */
+  private _optimisticCompositionUpdate(startOffset: number, data: string): void {
+    if (this._optimisticSpan && this._optimisticSpan.parentNode) {
+      // 기존 조합 span 재사용: 내용 교체만으로 1-span dirty 유지.
+      this._optimisticSpan.textContent = data;
+      this._optimisticSpan.dataset.sourceOffset = String(startOffset);
+      // 폭 변화(ㅎ→하→한) 반영: 새 음절 폭으로 재계산하여 후속 span 밀기 조정.
+      const prevWidthMm = this._optimisticSpanWidthMm;
+      const widthMm = this._computeTempSpanWidthMm(data[data.length - 1] ?? '');
+      if (widthMm !== prevWidthMm) {
+        this._shiftFollowingSpans(this._optimisticSpan, prevWidthMm - widthMm);
+        this._optimisticSpanWidthMm = widthMm;
+      }
+      return;
+    }
+
+    // 첫 조합 음절: 조합 시작 위치에 optimistic span 생성.
+    // 기존 _optimisticSpanUpdate는 단일 문자 삽입용이므로 여기서 직접 생성한다.
+    this._optimisticSpan = null;
+    this._optimisticSpanWidthMm = 0;
+    if (!this._paragraph.model) return;
+
+    const placement = this._mapper.getCursorPlacement(startOffset);
+    if (placement) {
+      const span = this._mapper.getSpanByOffset(placement.sourceOffset);
+      if (span) {
+        const newSpan = this._createOptimisticSpan(data, startOffset);
+        const leftMm = this._computeTempSpanLeft(span, placement.atEndOfChar);
+        if (leftMm !== undefined) {
+          newSpan.style.position = 'absolute';
+          newSpan.style.left = `${leftMm}mm`;
+          newSpan.style.top = '0';
+        }
+        if (placement.atEndOfChar) {
+          span.after(newSpan);
+        } else {
+          span.before(newSpan);
+        }
+        const widthMm = this._computeTempSpanWidthMm(data[data.length - 1] ?? '');
+        this._shiftFollowingSpans(newSpan, widthMm);
+        this._optimisticSpanWidthMm = widthMm;
+        this._optimisticSpan = newSpan;
+        return;
+      }
+    }
+
+    // placement 실패(라인 시작/빈 줄): 기존 line-start 경로 재사용 시도.
+    const plainText = this._paragraph.model.plainText;
+    if (startOffset > 0 && plainText[startOffset - 1] === '\n') {
+      this._insertOptimisticSpanAtLineStart(data, startOffset);
+    }
   }
 
   private _onCompositionCancel(): void {
