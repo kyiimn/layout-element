@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>Layout Element Benchmark</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #f0f0f0; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+  </style>
+</head>
+
+<body>
+  <x-layout-document id="doc"></x-layout-document>
+
+  <script type="module">
+    import "/src/index.ts";
+
+    import { ColorRegistry } from "/src/resource/color-registry";
+    import { FontLoader } from "/src/resource/font-loader";
+    import { SelectionRange } from "/src/types/edit/selection.type";
+
+    (async () => {
+      await ColorRegistry.getInstance().init();
+      await FontLoader.getInstance().init();
+
+      const doc = document.getElementById("doc");
+
+      // 신문 기사 본문 (약 2000자)
+      const body = `서민금융진흥원이 이재명 정부 국정과제 중 하나인 사회연대경제 성장 지원을 위해 사회적기업 관련 대출 규모를 늘린다. 이와 함께 정부에서 강조하고 있는 포용금융 강화를 위해 비금융 대안정보를 활용한 평가모형 개발에도 나선다. 국회 정무위원회 소속 의원실에 따르면 서금원은 이 같은 내용을 담은 업무계획을 금융위원회에 제출했다. 올해 서금원은 사회적금융 활성화를 위해 사회적기업 대출 규모를 기존 60억원에서 150억원으로 확대한다. 대출사업 수행기관 등 민간사업수행기관 신규 발굴 및 선정도 추진한다. 서금원은 미소금융 기업이나 은행재단 등 사업수행기관을 통해 2018년부터 사회적기업이나 사회적협동조합에 자금을 대출하고 있다. 미소금융이란 담보나 신용이 없어 제도권 금융을 이용하기 어려운 취약계층을 대상으로 창업 및 운영자금 등을 지원하는 소액대출사업을 말한다. 서금원이 취급하는 미소금융 사회연대금융 대출의 경우 연 매출 5억원 이하의 사회적기업이나 협동조합이 대상이며 대출한도는 최대 1억원, 금리는 연 4.5% 이내다. 비금융 대안정보를 활용한 평가모형 개발에도 나선다. 비금융 서민 대안 신용평가모형을 개발해 서금원이 취급하는 상품의 대출심사에 활용한다는 계획이다. 평가모형에는 최저신용자나 플랫폼 노동자의 성실 상환 여부, 금융교육 이수 여부, 서금원 컨설팅 이용 여부 등을 반영한다. 또 비금융 대안정보를 활용한 상환능력 평가도 개선한다. 기존에는 통합 신용평가모형에 대안정보로 산출한 점수를 가점하는 방식이었으나 개선안에서는 보증이 거절된 소비자를 추가로 선별하는 데 대안정보를 활용한다. 이를 통해 저신용자 지원은 강화하고 고액자산가의 대출 한도는 축소해 도덕적 해이를 최소화하겠다는 설명이다. 청년과 자영업자를 위한 컨설팅도 확대한다. 청년도약계좌 이용자를 위한 청년금융 컨설팅 기능을 청년 모두를 위한 재무상담으로 확대 및 개편한다. 예를 들어 서금원 통합지원센터를 기반으로 한 재무상담과 위촉 컨설턴트를 통해 찾아가는 컨설팅을 제공할 예정이다. 자영업자의 경우 서금원 자영업 지원센터를 구축해 세무 노무 법무 자영업 진단 컨설팅 등 비대면 컨설팅을 지원할 수 있는 환경을 마련할 계획이다. 신용관리가 취약할 수 있는 계층을 대상으로 한 신용 부채관리 컨설팅도 검토하고 있다. 휴면예금 찾아주기 서비스도 강화한다. 금융소비자는 서금원에 출연된 휴면예금을 돌려받을 수 있는데 소액의 경우 간편결제 서비스의 페이머니로 전환해 지급하는 방안을 추진한다. 한편 서금원은 올해 정책서민금융 공급액을 지난해와 동일한 6조8100억원으로 책정했다. 지난해와 다르게 햇살론 일반보증 공급액 1조원을 줄이는 대신 특례보증 공급액을 1조원 늘린 것이 특징이다.`;
+
+      // 문서: 391×545mm, 6단
+      // - 본문 문단 (absolute box, 3컬럼) — 텍스트 편집/스타일/정렬 벤치마크 대상
+      // - 이미지 박스 (absolute) — 오버랩 이동 벤치마크 대상
+      doc.data = {
+        id: "bench-doc",
+        width: 391,
+        height: 545,
+        paddingTop: 10,
+        paddingBottom: 10,
+        paddingLeft: 10,
+        paddingRight: 10,
+        columns: 6,
+        gap: 5,
+        paragraphStyle: { lineGap: 1.2 },
+        textStyle: { fontSize: 4 },
+        children: [
+          {
+            id: "bench-body-box",
+            type: "box",
+            position: "absolute",
+            left: 10, top: 10,
+            width: 371, height: 500,
+            zIndex: 1,
+            children: {
+              id: "bench-body-para",
+              type: "paragraph",
+              content: body,
+              column: 3,
+              gap: 5,
+              paragraphStyle: {},
+              textStyle: {},
+            },
+          },
+          {
+            id: "bench-image-box",
+            type: "box",
+            position: "absolute",
+            left: 250, top: 40,
+            width: 120, height: 90,
+            zIndex: 10,
+            contentType: "image",
+            children: {
+              id: "bench-image",
+              type: "image",
+              url: "/examples/test/g10525mv.png",
+              overlapMode: "path",
+              overlapPadding: 2,
+            },
+          },
+        ],
+      };
+
+      await doc.render();
+
+      const em = doc.editManager;
+      em.textEditMode = true;
+
+      const paraBox = [...doc.querySelectorAll("x-layout-box")].find(b => b.id === "bench-body-box");
+      const imageBox = [...doc.querySelectorAll("x-layout-box")].find(b => b.id === "bench-image-box");
+      const para = () => paraBox.querySelector("x-layout-paragraph") || paraBox.contentElement;
+
+      // render-complete 이벤트 Promise — 작업 완료 감지. 타임아웃 시 null 반환.
+      function waitRenderComplete(timeoutMs = 1000) {
+        return new Promise((resolve) => {
+          let done = false;
+          const onDone = (timedOut) => {
+            if (done) return;
+            done = true;
+            para().removeEventListener("render-complete", onDone);
+            resolve(timedOut ? null : performance.now());
+          };
+          para().addEventListener("render-complete", () => onDone(false));
+          setTimeout(() => onDone(true), timeoutMs);
+        });
+      }
+
+      // 문단 선택 후 포커스 — selection은 focusParagraph options로 전달
+      async function focusPara(selStart, selEnd) {
+        const p = para();
+        if (!p.editableText) {
+          p.editableText = true;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        let ok;
+        if (selStart !== undefined) {
+          ok = em.focusParagraph(p, { selection: SelectionRange.fromOffsets(selStart, selEnd) });
+        } else {
+          ok = em.focusParagraph(p);
+        }
+        await new Promise(r => setTimeout(r, 100));
+        if (!ok) throw new Error("focusParagraph failed");
+        return p;
+      }
+
+      // ── 벤치마크 API ──
+      window.bench = {
+        doc,
+
+        // 1. 텍스트 편집: 문단 끝 지속 타이핑 — 동기 작업 시간 측정
+        async typeText(count) {
+          const p = await focusPara();
+          const controller = em._focusedController;
+          const ta = controller?._textarea;
+
+          const times = [];
+          const chars = "가나다라마바사";
+          for (let i = 0; i < count; i++) {
+            const t0 = performance.now();
+            if (ta) {
+              const before = ta.value;
+              const offset = ta.selectionStart ?? before.length;
+              ta.value = before.slice(0, offset) + chars[i % chars.length] + before.slice(ta.selectionEnd ?? offset);
+              ta.setSelectionRange(offset + 1, offset + 1);
+              ta.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            } else {
+              const cur = typeof p.content === "string" ? p.content : "";
+              p.content = cur + chars[i % chars.length];
+            }
+            // input 핸들러는 flushRender를 동기 호출하므로 이 시점에 이미 완료.
+            // 이후 rAF로 paint 완료 대기.
+            times.push(performance.now() - t0);
+            await new Promise(r => requestAnimationFrame(r));
+          }
+          return times;
+        },
+
+        // 2. 오버랩 항목(이미지 박스) 이동 — 렌더 완료까지 프레임 시간
+        async moveImage(iterations) {
+          const times = [];
+          const origLeft = imageBox.left;
+          for (let i = 0; i < iterations; i++) {
+            const endPromise = waitRenderComplete();
+            const t0 = performance.now();
+            imageBox.left = origLeft + (i % 20) * 0.5;
+            const tEnd = await endPromise;
+            if (tEnd !== null) times.push(tEnd - t0);
+            else times.push(performance.now() - t0); // 타임아웃 시에도 경과 시간 기록
+          }
+          imageBox.left = origLeft;
+          await new Promise(r => setTimeout(r, 200));
+          return times;
+        },
+
+        // 3. 인라인 스타일 주입: 절반 선택 → bold/italic/color 주입/해제
+        async inlineStyle(count) {
+          const controller = em._focusedController;
+          const ta = controller?._textarea;
+          if (!ta) throw new Error("textarea not available");
+
+          const times = [];
+          const styles = [
+            { fontWeight: 700 },
+            { fontStyle: "italic" },
+            { color: "blue" },
+            { fontWeight: undefined },
+            { fontStyle: undefined },
+            { color: undefined },
+          ];
+          const half = Math.floor(ta.value.length / 2);
+          for (let i = 0; i < count; i++) {
+            await focusPara(0, half);
+            const endPromise = waitRenderComplete();
+            const t0 = performance.now();
+            em.applyInlineStyle(styles[i % styles.length]);
+            const tEnd = await endPromise;
+            if (tEnd !== null) times.push(tEnd - t0);
+          }
+          return times;
+        },
+
+        // 4. 인라인 글자크기: 절반 선택 → 크기 지정/수정/제거
+        async inlineFontSize(count) {
+          const controller = em._focusedController;
+          const ta = controller?._textarea;
+          if (!ta) throw new Error("textarea not available");
+
+          const times = [];
+          const sizes = [5, 6, undefined];
+          const half = Math.floor(ta.value.length / 2);
+          for (let i = 0; i < count; i++) {
+            await focusPara(0, half);
+            const endPromise = waitRenderComplete();
+            const t0 = performance.now();
+            em.applyInlineStyle({ fontSize: sizes[i % sizes.length] });
+            const tEnd = await endPromise;
+            if (tEnd !== null) times.push(tEnd - t0);
+          }
+          return times;
+        },
+
+        // 5. 문단 정렬 변경 — 렌더 완료까지 동기 시간
+        async alignChange(count) {
+          const aligns = ["justify", "left", "center", "right", "justify"];
+          const times = [];
+          for (let i = 0; i < count; i++) {
+            const endPromise = waitRenderComplete();
+            const t0 = performance.now();
+            para().paragraphStyle = { textAlign: aligns[i % aligns.length] };
+            const tEnd = await endPromise;
+            if (tEnd !== null) times.push(tEnd - t0);
+          }
+          return times;
+        },
+
+        // 6. 분해 계측: 인라인 스타일 시나리오의 단계별 시간
+        async breakdownInlineStyle(count) {
+          const controller = em._focusedController;
+          const ta = controller?._textarea;
+          if (!ta) throw new Error("textarea not available");
+          const half = Math.floor(ta.value.length / 2);
+
+          const focusTimes = [];
+          const applyTimes = [];
+          const totalTimes = [];
+          for (let i = 0; i < count; i++) {
+            const tTotal0 = performance.now();
+
+            const tF0 = performance.now();
+            em.focusParagraph(para(), { selection: SelectionRange.fromOffsets(0, half) });
+            await new Promise(r => setTimeout(r, 50));
+            focusTimes.push(performance.now() - tF0);
+
+            const tA0 = performance.now();
+            em.applyInlineStyle(i % 2 === 0 ? { fontWeight: 700 } : { fontWeight: undefined });
+            applyTimes.push(performance.now() - tA0);
+
+            await new Promise(r => setTimeout(r, 50));
+            totalTimes.push(performance.now() - tTotal0);
+          }
+          return { focusTimes, applyTimes, totalTimes };
+        },
+
+        getParaBox: () => paraBox,
+        getImageBox: () => imageBox,
+        getEditManager: () => em,
+      };
+
+      document.title = "BENCH_READY";
+    })();
+  </script>
+</body>
+
+</html>
