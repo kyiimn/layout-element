@@ -21,6 +21,22 @@ npm run preview          # Preview production build
 
 No test runner, linter, or formatter is configured.
 
+## Measurement & Verification Harness (scripts/)
+
+성능 최적화와 버그 수정의 검증 도구. **모든 최적화는 실측 데이터로 근거를 확보하고, 모든 수정은 정합성 검증을 통과해야 한다.**
+
+```bash
+npx tsx scripts/benchmark-browser.mjs   # 브라우저 전체 파이프라인 벤치마크 (5 시나리오, 60fps 판정)
+npx tsx scripts/benchmark-typing.mjs     # 엔진 layoutText 타이핑 패스별 실측 (Node)
+npx tsx scripts/snapshot-layout.mjs > /tmp/opencode/snapshot.json  # 엔진 배치 결과 직렬화 (전후 byte 비교)
+npx tsx scripts/verify-dom-diff.mjs     # DOM ↔ 엔진 렌더 정합성 (fontSize/trailing \n/wrap)
+npx tsx scripts/verify-ime.mjs          # 한글 IME 조합 정합성 (커밋/취소/혼합)
+npx tsx scripts/verify-multicolumn.mjs  # 멀티컬럼 타이핑 정합성 (prefix 캐시 경로)
+npx tsx scripts/verify-engine-node.mjs  # 엔진 계층 Node.js 호환성 (DOM-free 검증)
+```
+
+각 스크립트의 목적·측정 원칙·오탐 주의사항·워크플로는 **`scripts/README.md`** 참조. 성능 작업 시 `scripts/README.md`의 워크플로(기준선 측정 → 수정 → 검증 → 재측정)를 따른다.
+
 ## Required Documentation Loading
 
 Before working on any feature, you **must** read the corresponding documentation file first. After completing changes, you **must** also update the documentation to reflect the results.

@@ -98,10 +98,13 @@ try {
   console.log('  LayoutElement keys:', Object.keys(LayoutElement).slice(0, 20).join(', '));
 
   // 핵심 프로퍼티 존재 확인
+  // 참고: 과거 심볼 GridCalculator/TextLayoutEngine은 각각
+  // GridCalculatorEngine/ParagraphEngine으로 개명되어 engine 레이어로 이동했다.
   const expected = [
     'LayoutDocumentElement', 'LayoutBoxElement', 'LayoutParagraphElement',
-    'LayoutImageElement', 'GridCalculator', 'TextLayoutEngine',
-    'ColorRegistry', 'FontLoader',
+    'LayoutImageElement', 'LayoutTableElement',
+    'GridCalculatorEngine', 'ParagraphEngine', 'DocumentEngine',
+    'ColorRegistry', 'FontLoader', 'EditManager',
   ];
   let missing = [];
   for (const name of expected) {
