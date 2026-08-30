@@ -564,6 +564,33 @@ export class LayoutDocumentElement extends HTMLElement {
       this._paragraphStyle = data.paragraphStyle;
       this._textStyle = data.textStyle;
 
+      // reconcile 전에 엔진의 문서 속성(width/height/columns/gap/styles)만 갱신한다.
+      // childrenData + layout()은 reconcile 후에 호출해야 구 content가 엔진에
+      // 재주입되지 않는다. 단, GridCalculatorEngine은 여기서 갱신하여
+      // 자식 connectedCallback이 읽는 columnCoords가 신선하도록 한다.
+      const fontLoader = new FontLoaderSingletonAdapter(FontLoader.getInstance());
+      const colorRegistry = new ColorRegistrySingletonAdapter(ColorRegistry.getInstance());
+      const docData: DocumentData = {
+        id: this.id,
+        width: this._width,
+        height: this._height,
+        paddingTop: this._paddingTop,
+        paddingBottom: this._paddingBottom,
+        paddingLeft: this._paddingLeft,
+        paddingRight: this._paddingRight,
+        columns: this._columns,
+        gap: this._gap,
+        paragraphStyle: this._paragraphStyle,
+        textStyle: this._textStyle,
+      };
+      if (!this._engine) {
+        this._engine = DocumentEngine.create(docData, fontLoader, colorRegistry, this._ppm);
+      } else {
+        this._engine.data = docData;
+        this._engine.ppm = this._ppm;
+      }
+      this._engine.layout();
+
       const existingBoxes = this.items;
       const existingById = new Map<string, LayoutBoxElement>();
       for (const box of existingBoxes) {
@@ -580,10 +607,12 @@ export class LayoutDocumentElement extends HTMLElement {
         if (childId && existingById.has(childId)) {
           const existingBox = existingById.get(childId)!;
           usedIds.add(childId);
-          existingBox.data = child;
-          // 이미 같은 위치에 있으면 appendChild를 생략한다 — 불필요한
-          // detach/re-attach가 transient disconnect를 유발해 편집 중인
-          // box의 TextEditController가 destroy되고 포커스가 손실된다.
+          (existingBox as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren = true;
+          try {
+            existingBox.data = child;
+          } finally {
+            (existingBox as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren = false;
+          }
           if (existingBox.parentElement === this && existingBoxes[i] === existingBox) {
             continue;
           }
@@ -602,10 +631,16 @@ export class LayoutDocumentElement extends HTMLElement {
         }
       }
 
-      // [재배치 이유] 아래 layout() 내부의 _layoutStructure가 items의 _rawData로
-      // 엔진 트리를 다시 구성한다. reconcile 전에 호출하면 구 content가 엔진에
-      // 재주입되어 이번 주입의 텍스트가 되돌려진다 — 자식 reconcile이 항상 선행해야 한다.
-      this.layout();
+      // reconcile 후 layout()이 _layoutStructure()를 통해 childrenData를
+      // 신선한 DOM 데이터로 재설정 + 엔진 트리 재구축한다.
+      // _rebuildingChildren을 유지하여 _propagateInheritStyle이 각 box/paragraph의
+      // layout()을 중복 호출하지 않도록 한다.
+      this._rebuildingChildren = true;
+      try {
+        this.layout();
+      } finally {
+        this._rebuildingChildren = false;
+      }
       this.render();
     } finally {
       this._rebuildingChildren = false;
