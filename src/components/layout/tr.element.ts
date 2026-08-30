@@ -84,6 +84,9 @@ export class LayoutTableRowElement extends HTMLElement {
       this._height = data.height;
       this.setAttribute('height', String(data.height));
 
+      const wasRebuilding = (this as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren;
+      (this as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren = true;
+      try {
       const existingChildren = this.items;
       const existingById = new Map<string, LayoutTableCellElement>();
       for (const child of existingChildren) {
@@ -114,9 +117,14 @@ export class LayoutTableRowElement extends HTMLElement {
           Element.prototype.remove.call(child);
         }
       }
+      } finally {
+        (this as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren = wasRebuilding;
+      }
 
-      this.layout();
-      void this.render();
+      if (!wasRebuilding) {
+        this.layout();
+        void this.render();
+      }
   }
 
   get height(): number { return this._height; }

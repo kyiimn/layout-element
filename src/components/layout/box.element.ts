@@ -734,6 +734,7 @@ export class LayoutBoxElement extends HTMLElement {
 
   set data(data: BoxData) {
     if (!data.id) data = { ...data, id: genUUID() };
+    const wasRebuilding = this._rebuildingChildren;
     this._rebuildingChildren = true;
     this._pendingData = data;
     try {
@@ -793,13 +794,16 @@ export class LayoutBoxElement extends HTMLElement {
           usedIds.add(childId);
           const targetType = child.type === 'text' ? 'paragraph' : child.type;
           if (existingEl.localName === 'x-layout-' + targetType) {
-            (existingEl as unknown as { data: typeof child }).data = child.type === 'text'
-              ? { ...child, type: 'paragraph' as const, column: 1, gap: 0 }
-              : child;
-            // 이미 같은 위치에 있으면 appendChild를 생략한다 — 불필요한
-            // detach/re-attach가 transient disconnect를 유발해 편집 중인
-            // 자식의 TextEditController가 destroy되고 포커스가 손실된다
-            // (appendChild는 동일 부모 재부착에서도 disconnectedCallback를 발화).
+            // 자식 data setter 호출 전 _rebuildingChildren을 전파하여
+            // table/tr/td 계층의 layout+render 중복을 차단한다.
+            (existingEl as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren = true;
+            try {
+              (existingEl as unknown as { data: typeof child }).data = child.type === 'text'
+                ? { ...child, type: 'paragraph' as const, column: 1, gap: 0 }
+                : child;
+            } finally {
+              (existingEl as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren = false;
+            }
             if (existingEl.parentElement === this && existingChildren[i] === existingEl) {
               continue;
             }
@@ -818,11 +822,13 @@ export class LayoutBoxElement extends HTMLElement {
         }
       }
 
-      this.layout();
-      this.render();
-      this.requestRerenderAffectedParagraphs();
+      if (!wasRebuilding) {
+        this.layout();
+        this.render();
+        this.requestRerenderAffectedParagraphs();
+      }
     } finally {
-      this._rebuildingChildren = false;
+      this._rebuildingChildren = wasRebuilding;
       this._pendingData = null;
     }
   }
@@ -1052,7 +1058,9 @@ export class LayoutBoxElement extends HTMLElement {
 
   set inheritStyle(style: InheritStyle | undefined) {
     this._inheritStyle = style;
-    this.layout();
+    if (!this._rebuildingChildren) {
+      this.layout();
+    }
   }
 
   /**

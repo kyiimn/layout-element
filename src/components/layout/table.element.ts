@@ -55,6 +55,8 @@ export class LayoutTableElement extends HTMLElement {
   private _colWidths?: number | number[];
   private _borders?: TableBorders;
 
+  _rebuildingChildren = false;
+
   get rows(): TableRowData[] { return this.items.map(e => e.data); }
 
   private _inheritStyle?: InheritStyle;
@@ -166,6 +168,9 @@ export class LayoutTableElement extends HTMLElement {
       this._colWidths = data.colWidths;
       this._borders = data.borders;
 
+      const wasRebuilding = this._rebuildingChildren;
+      this._rebuildingChildren = true;
+      try {
       this._layoutStructure();
 
       const existingChildren = this.items;
@@ -196,9 +201,14 @@ export class LayoutTableElement extends HTMLElement {
           Element.prototype.remove.call(child);
         }
       }
+      } finally {
+        this._rebuildingChildren = wasRebuilding;
+      }
 
-      this.layout();
-      requestAnimationFrame(() => { void this.render(); });
+      if (!wasRebuilding) {
+        this.layout();
+        requestAnimationFrame(() => { void this.render(); });
+      }
   }
 
   get colWidths(): number | number[] | undefined { return this._colWidths; }

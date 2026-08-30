@@ -152,6 +152,9 @@ export class LayoutTableCellElement extends HTMLElement {
       this._paddingBottom = data.paddingBottom ?? 0;
       this._paddingLeft = data.paddingLeft ?? 0;
 
+      const wasRebuilding = (this as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren;
+      (this as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren = true;
+      try {
       const existingChildren = this.items;
       const existingById = new Map<string, LayoutBoxElement>();
       for (const child of existingChildren) {
@@ -182,9 +185,14 @@ export class LayoutTableCellElement extends HTMLElement {
           Element.prototype.remove.call(child);
         }
       }
+      } finally {
+        (this as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren = wasRebuilding;
+      }
 
-      this.layout();
-      void this.render();
+      if (!wasRebuilding) {
+        this.layout();
+        void this.render();
+      }
   }
 
   get colspan(): number { return this._colspan; }

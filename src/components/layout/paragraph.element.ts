@@ -552,11 +552,12 @@ export class LayoutParagraphElement extends HTMLElement {
       const isEditingThis = manager?.focusedParagraph === this;
       const controller = this._editController;
       if (isEditingThis && controller) {
-        controller.applyExternalContent(data.content);
-        // 편집 중 주입 즉시 this.layout()을 돌리지 않는다 — 이 시점 부모
-        // BoxEngine.childEngines가 아직 이전 트리를 들고 있어 _layoutStructure의
-        // existing 교체가 방금 갱신한 model을 구 content의 PE로 되돌린다.
-        // 상위(document.data setter)의 최종 layout이 model 갱신 완료 후 재구축한다.
+        const applied = controller.applyExternalContent(data.content);
+        if (!applied) {
+          // IME 조합 중 — applyExternalContent가 content를 적용하지 못했다.
+          // model에 직접 반영하여 content가 손실되지 않도록 한다.
+          this._model.textContent = data.content;
+        }
         editingPath = true;
       } else if (!isEditingThis) {
         this._model.textContent = data.content;
@@ -565,9 +566,15 @@ export class LayoutParagraphElement extends HTMLElement {
 
     this._perfStructureChanged = true;
     if (!editingPath) {
-      this.layout();
+      const parentBox = this.parentElement;
+      const rebuilding = parentBox && (parentBox as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren;
+      if (!rebuilding) {
+        this.layout();
+        this.scheduleRender();
+      }
+    } else {
+      this.scheduleRender();
     }
-    this.scheduleRender();
   }
 
   /**
@@ -742,7 +749,11 @@ export class LayoutParagraphElement extends HTMLElement {
 
   set inheritStyle(style: InheritStyle | undefined) {
     this._inheritStyle = style;
-    this.layout();
+    const parentBox = this.parentElement;
+    const rebuilding = parentBox && (parentBox as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren;
+    if (!rebuilding) {
+      this.layout();
+    }
     this._perfStructureChanged = true;
   }
 
