@@ -14,6 +14,7 @@
 | `verify-dom-diff.mjs` | 정합성 (DOM) | DOM ↔ 엔진 텍스트/span 무결성 | ALL PASS |
 | `verify-ime.mjs` | 정합성 (IME) | 한글 조합 커밋/취소/혼합 | ALL PASS |
 | `verify-multicolumn.mjs` | 정합성 (멀티컬럼) | prefix 캐시 경로 === 전체 재래핑 | ALL PASS |
+| `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/런/캐스케이드) | ALL PASS |
 | `verify-engine-node.mjs` | 정합성 (Node) | 엔진 계층 DOM-free 동작 | ALL PASS |
 | `verify-obfuscated.mjs` | 정합성 (빌드) | 난독화 IIFE 번들 로딩 | ALL PASS |
 | `obfuscate.mjs` | 빌드 | IIFE 번들 난독화 | build 완료 |
@@ -158,6 +159,23 @@ npx tsx scripts/verify-ime.mjs   # 11항목 ALL PASS
 **실행**:
 ```bash
 npx tsx scripts/verify-multicolumn.mjs   # 15항목 ALL PASS
+```
+
+### `verify-style-revert.mjs` — 인라인 스타일 회귀 주입 범위 (브라우저)
+
+**목적**: `_applyTextStyle`이 문단 상속값과 동일한 값을 주입받을 때(상속 회귀), **적용 범위가 편집 상태에 맞는지** 검증한다. 이력: 회귀 주입이 편집 분기와 무관하게 전체 런 맵에서 필드를 제거해, "문단 fontSize 4 + 런 fontSize 6" 상태에서 런 일부에 4를 주입하면 **런 전체는 물론 다른 런의 오버라이드까지 사라지는** 버그가 있었다.
+
+**시나리오** (4개 인라인 필드 × 7 assertion = 28항목):
+- **selection 경로**: 선택 영역만 회귀 — 선택 밖 런 오버라이드 보존
+- **커서가 런 안**: 그 런만 회귀 (런 단위 시맨틱) — 다른 런 보존
+- **캐스케이드**(커서가 런 밖): 전체 런 회귀 (기본 복원 — 의도적 동작)
+- 무관 필드 런(fontWeight 마커)이 회귀 주입에서 영향받지 않는지
+
+**검증기 작성 주의 (이 세션의 오탐 교훈)**: `focusParagraph(cursorOffset)` → `setCursor`는 **selection을 clear하지 않는다** — selection 시나리오 후 커서 시나리오를 실행하려면 `_cursorModel.selection = null`을 명시해야 분기가 독립적으로 진입한다.
+
+**실행**:
+```bash
+npx tsx scripts/verify-style-revert.mjs   # 28항목 ALL PASS
 ```
 
 ### `verify-engine-node.mjs` — 엔진 Node.js 호환성

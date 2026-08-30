@@ -2526,7 +2526,6 @@ export class TextEditController {
     }
 
     const hasParagraphPatch = Object.keys(resolvedParagraphPatch).length > 0;
-    const hasInlinePatch = Object.keys(inlinePatch).length > 0;
 
     const offset = this._cursorModel.offset;
     const savedSelection = this._cursorModel.selection;
@@ -2588,10 +2587,24 @@ export class TextEditController {
       this._paragraph.paragraphStyle = nextParagraphStyle as ParagraphStyle;
     }
 
-    // 상속 회귀로 제거할 인라인 필드가 있으면 전체 런 맵에서 제거한다
-    if (revertTextFields.length > 0) {
+    // 상속 회귀 필드의 적용 범위는 편집 상태(분기)에 따라 다르다:
+    // - 캐스케이드(커서가 런 밖): 문단 기본을 상속으로 되돌리는 것이므로
+    //   전체 런 맵에서 필드 제거가 의도적 (완전한 기본 복원).
+    // - selection / 커서가 런 안: "이 영역만 기본으로"의 의미이므로
+    //   전체 런에서 제거하면 선택 밖 오버라이드까지 사라진다
+    //   (실측 재현: 문단 fontSize 4, 런 A fontSize 6, 런 A 일부에 4 주입 시
+    //   런 A 전체의 fontSize 6이 제거됨). 이 경로에서는 inlinePatch에
+    //   회귀 값을 포함해 applyStyleToRange/런 병합으로 범위를 제한한다.
+    if (revertTextFields.length > 0 && isCascadePath) {
       this._runMap = stripRunFields(this._runMap, revertTextFields);
+    } else if (revertTextFields.length > 0) {
+      // selection/런-안 경로의 회귀 주입: 값 자체가 문단 상속값이므로
+      // inlinePatch에 넣으면 주입 후 "문단 기본과 동일해진 필드 제거"가 정리한다.
+      for (const field of revertTextFields) {
+        (inlinePatch as Record<string, unknown>)[field] = textPatch[field as keyof TextStyle];
+      }
     }
+    const hasInlinePatch = Object.keys(inlinePatch).length > 0;
 
     if (hasSelection && hasInlinePatch) {
       // 1. selection 있음 → 선택 범위 인라인 주입 (기존 런은 필드 오버라이드)
