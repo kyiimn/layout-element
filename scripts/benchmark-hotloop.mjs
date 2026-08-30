@@ -35,6 +35,8 @@ const stats = {
   charWidth: { totalMs: 0, calls: 0 },
   createLine: { totalMs: 0, calls: 0 },
   charWidthFromFont: { totalMs: 0, calls: 0 },
+  stripRange: { totalMs: 0, calls: 0 },
+  computeCharOffsets: { totalMs: 0, calls: 0 },
 };
 
 const p = ParagraphEngine.prototype;
@@ -71,6 +73,30 @@ const p = ParagraphEngine.prototype;
     } finally {
       stats.charWidthFromFont.totalMs += performance.now() - t0;
       stats.charWidthFromFont.calls++;
+    }
+  };
+}
+{
+  const orig = p._computeStripRange;
+  p._computeStripRange = function (...args) {
+    const t0 = performance.now();
+    try {
+      return orig.apply(this, args);
+    } finally {
+      stats.stripRange.totalMs += performance.now() - t0;
+      stats.stripRange.calls++;
+    }
+  };
+}
+{
+  const orig = p._computeCharOffsets;
+  p._computeCharOffsets = function (...args) {
+    const t0 = performance.now();
+    try {
+      return orig.apply(this, args);
+    } finally {
+      stats.computeCharOffsets.totalMs += performance.now() - t0;
+      stats.computeCharOffsets.calls++;
     }
   };
 }
@@ -125,6 +151,8 @@ function run(label, charCount, columns, keystrokes) {
 
   console.log(`\n── ${label} (${charCount}자, ${columns}컬럼, ${keystrokes}키) ──`);
   console.log(`layoutText 총:            ${layoutTotal.toFixed(1)}ms (키당 ${(layoutTotal / keystrokes).toFixed(3)}ms)`);
+  console.log(`_computeCharOffsets:      ${stats.computeCharOffsets.totalMs.toFixed(1)}ms (키당 ${(stats.computeCharOffsets.totalMs / keystrokes).toFixed(3)}ms, ${(stats.computeCharOffsets.totalMs / layoutTotal * 100).toFixed(1)}%)`);
+  console.log(`  _computeStripRange:     ${stats.stripRange.totalMs.toFixed(1)}ms (${stats.stripRange.calls}회)`);
   console.log(`_charWidthMm:             ${stats.charWidth.totalMs.toFixed(1)}ms (${stats.charWidth.calls}회, 키당 ${(stats.charWidth.totalMs / keystrokes).toFixed(3)}ms, ${(stats.charWidth.totalMs / layoutTotal * 100).toFixed(1)}%)`);
   console.log(`_createLineWithParts:      ${stats.createLine.totalMs.toFixed(1)}ms (${stats.createLine.calls}회, 키당 ${(stats.createLine.totalMs / keystrokes).toFixed(3)}ms, ${(stats.createLine.totalMs / layoutTotal * 100).toFixed(1)}%)`);
   console.log(`_charWidthMmFromFont:     ${stats.charWidthFromFont.totalMs.toFixed(1)}ms (${stats.charWidthFromFont.calls}회)`);

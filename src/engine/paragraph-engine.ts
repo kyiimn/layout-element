@@ -138,6 +138,12 @@ export class ParagraphEngine {
   private _charInnerStyleKey: string = "";
   /** 성능 캐시: 문자 폭(mm). 키 `${char}|${fontName}|${fontSize}`. LRU (5000). */
   private _charWidthCache: _LRU<string, number> = new _LRU(5000);
+  /**
+   * 2단 글자 폭 캐시: 폰트/크기 조합 → (문자 → 폭 mm).
+   * 핫 루프에서 매 글자마다 `${char}|${fontName}|${fontSize}` 키 생성을 제거하기 위해
+   * 조합 키는 런/파트당 1회만 생성하고, 글자 조회는 단일 문자 키로 수행.
+   */
+  private _charWidthByFontCache: Map<string, Map<string, number>> = new Map();
 
   private _lineHeight: number = 0;
 
@@ -467,6 +473,13 @@ export class ParagraphEngine {
    */
   private _computeCharOffsets(): void {
     const defaultTextAlign = this.effectiveParagraphStyle.textAlign!;
+    const effTextStyle = this.effectiveTextStyle;
+    const baseFontSizeMm = effTextStyle.fontSize!;
+    const wr = this.widthRatio;
+    const effSpaceRatio = this.spaceRatio;
+    const letterSpacingEm = effTextStyle.letterSpacing!;
+    const charWidthCache = this._charWidthCache;
+    const charWidthByFont = this._charWidthByFontCache;
 
     for (let c = 0; c < this._columnContents.length; c++) {
       const columnContent = this._columnContents[c];
@@ -500,9 +513,42 @@ export class ParagraphEngine {
 
           const charWidths: number[] = new Array(strippedCount);
           let totalWidth = 0;
+          let prevFontKey = "";
+          let prevFontMap: Map<string, number> | null = null;
           for (let i = 0; i < strippedCount; i++) {
             const ch = content[stripStart + i]!;
-            const { swidth } = this.getCharWidths(ch, part.inlineStyles?.[stripStart + i]);
+            const inlineStyle = part.inlineStyles?.[stripStart + i];
+            // getCharWidths 인라인: 객체 할당/중복 getter 제거, 2단 캐시 직조회
+            const fontSize = inlineStyle?.fontSize ?? baseFontSizeMm;
+            const lsMm = letterSpacingEm * fontSize;
+            const minWidthMm = effSpaceRatio * fontSize;
+            let rawWidth: number;
+            if (ch === " ") {
+              rawWidth = minWidthMm;
+            } else {
+              const fontKey = (inlineStyle?.fontFamily ?? "") + "|" + fontSize;
+              if (fontKey !== prevFontKey || prevFontMap === null) {
+                prevFontMap = charWidthByFont.get(fontKey) ?? null;
+                if (prevFontMap === null) {
+                  prevFontMap = new Map();
+                  charWidthByFont.set(fontKey, prevFontMap);
+                }
+                prevFontKey = fontKey;
+              }
+              let cached = prevFontMap.get(ch);
+              if (cached === undefined) {
+                const fontWidth = this._charWidthMmFromFont(ch, inlineStyle, fontSize);
+                if (fontWidth !== null) {
+                  prevFontMap.set(ch, fontWidth);
+                  charWidthCache.set(ch + "|" + fontKey, fontWidth);
+                  cached = fontWidth;
+                } else {
+                  cached = 0;
+                }
+              }
+              rawWidth = cached > minWidthMm ? cached : minWidthMm;
+            }
+            const swidth = rawWidth * wr + lsMm;
             charWidths[i] = swidth;
             totalWidth += swidth;
           }
@@ -1300,6 +1346,7 @@ export class ParagraphEngine {
         const effSpaceRatio = this.spaceRatio;
         const lastColumnIdx = this._columnWidths.length - 1;
         const charWidthCache = this._charWidthCache;
+        const charWidthByFont = this._charWidthByFontCache;
 
         charLoop: while (runIdx < runs.length) {
           const run = runs[runIdx];
@@ -1310,27 +1357,33 @@ export class ParagraphEngine {
           const letterSpacingMm = letterSpacingEm * inlineFontSize;
           const minWidthMm = effSpaceRatio * inlineFontSize;
 
+          const fontKey = inlineFontName + "|" + inlineFontSize;
+          let fontWidthMap = charWidthByFont.get(fontKey);
+          if (fontWidthMap === undefined) {
+            fontWidthMap = new Map();
+            charWidthByFont.set(fontKey, fontWidthMap);
+          }
+
           for (; charIdx < content.length; charIdx++, flatIdxInBlock++) {
             const char = content[charIdx];
 
-            // _charWidthMm 인라인: 캐시 키 조회만 수행 (미스 시에만 _charWidthMm 호출)
+            // _charWidthMm 인라인: 런당 1회 조합 키, 글자별 단일 키 조회
             let rawCharWidth: number;
             if (char === " ") {
               rawCharWidth = minWidthMm;
             } else {
-              const cacheKey = char + "|" + inlineFontName + "|" + inlineFontSize;
-              const cached = charWidthCache.get(cacheKey);
-              if (cached !== undefined) {
-                rawCharWidth = cached > minWidthMm ? cached : minWidthMm;
-              } else {
+              let cached = fontWidthMap.get(char);
+              if (cached === undefined) {
                 const fontWidth = this._charWidthMmFromFont(char, inlineStyle, inlineFontSize);
                 if (fontWidth !== null) {
-                  charWidthCache.set(cacheKey, fontWidth);
-                  rawCharWidth = fontWidth > minWidthMm ? fontWidth : minWidthMm;
+                  fontWidthMap.set(char, fontWidth);
+                  charWidthCache.set(char + "|" + fontKey, fontWidth);
+                  cached = fontWidth;
                 } else {
-                  rawCharWidth = minWidthMm;
+                  cached = 0;
                 }
               }
+              rawCharWidth = cached > minWidthMm ? cached : minWidthMm;
             }
             const charWidth = rawCharWidth * wr + letterSpacingMm;
 
