@@ -122,6 +122,12 @@ export class ParagraphEngine {
   private _gaps: number[] = [];
   private _overflow: number = 0;
 
+  /**
+   * 컬럼별 누적 왼쪽 오프셋 (mm). `_columnWidths` + `_gaps`의 prefix sum.
+   * `_layoutColumnsPass` 시작 시 1회 계산, `_createLineWithParts`에서 O(1) 조회.
+   */
+  private _columnLeftOffsets: number[] = [];
+
   private _previousLineCount: number = -1;
   private _previousOverflow: number = -1;
 
@@ -634,9 +640,7 @@ export class ParagraphEngine {
     partWidths: number[];
     lineData: TextLineData;
   } {
-    const columnLeftMm =
-      this._columnWidths.slice(0, columnIndex).reduce((a, b) => a + b, 0) +
-      this._gaps.slice(0, columnIndex).reduce((a, b) => a + b, 0);
+    const columnLeftMm = this._columnLeftOffsets[columnIndex] ?? 0;
     const lineLeftMm = this._data.parentAbsRect.absLeft + columnLeftMm;
     const lineTopMm = this._data.parentAbsRect.absTop + alignOffsetMm + lineIndexInColumn * this._lineHeight;
     const lineWidthMm = this._columnWidths[columnIndex];
@@ -1199,6 +1203,13 @@ export class ParagraphEngine {
     if (startColumn === 0) {
       this._columnContents = [];
       this._overflow = 0;
+      this._columnLeftOffsets = new Array(this._columnWidths.length + 1);
+      let cum = 0;
+      this._columnLeftOffsets[0] = 0;
+      for (let i = 0; i < this._columnWidths.length; i++) {
+        cum += this._columnWidths[i];
+        this._columnLeftOffsets[i + 1] = cum + (i < this._gaps.length ? this._gaps[i] : 0);
+      }
     }
     this._overlayRectsMm = null;
 
@@ -1283,47 +1294,63 @@ export class ParagraphEngine {
         }
 
         const letterSpacingEm = this.effectiveTextStyle.letterSpacing!;
+        const effTextStyle = this.effectiveTextStyle;
+        const baseFontSizeMm = effTextStyle.fontSize!;
+        const wr = this.widthRatio;
+        const effSpaceRatio = this.spaceRatio;
+        const lastColumnIdx = this._columnWidths.length - 1;
+        const charWidthCache = this._charWidthCache;
 
         charLoop: while (runIdx < runs.length) {
           const run = runs[runIdx];
           const inlineStyle = run.textInlineStyle;
           const content = run.content;
+          const inlineFontSize = inlineStyle?.fontSize ?? baseFontSizeMm;
+          const inlineFontName = inlineStyle?.fontFamily ?? "";
+          const letterSpacingMm = letterSpacingEm * inlineFontSize;
+          const minWidthMm = effSpaceRatio * inlineFontSize;
 
           for (; charIdx < content.length; charIdx++, flatIdxInBlock++) {
             const char = content[charIdx];
-            const letterSpacingFontSize = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
-            const letterSpacingMm = letterSpacingEm * letterSpacingFontSize;
-            const rawCharWidth = this._charWidthMm(char, inlineStyle);
-            const baseWidth = rawCharWidth * this.widthRatio;
-            const charWidth = baseWidth + letterSpacingMm;
+
+            // _charWidthMm 인라인: 캐시 키 조회만 수행 (미스 시에만 _charWidthMm 호출)
+            let rawCharWidth: number;
+            if (char === " ") {
+              rawCharWidth = minWidthMm;
+            } else {
+              const cacheKey = char + "|" + inlineFontName + "|" + inlineFontSize;
+              const cached = charWidthCache.get(cacheKey);
+              if (cached !== undefined) {
+                rawCharWidth = cached > minWidthMm ? cached : minWidthMm;
+              } else {
+                const fontWidth = this._charWidthMmFromFont(char, inlineStyle, inlineFontSize);
+                if (fontWidth !== null) {
+                  charWidthCache.set(cacheKey, fontWidth);
+                  rawCharWidth = fontWidth > minWidthMm ? fontWidth : minWidthMm;
+                } else {
+                  rawCharWidth = minWidthMm;
+                }
+              }
+            }
+            const charWidth = rawCharWidth * wr + letterSpacingMm;
 
             const targetLine = columnContent[columnContent.length - 1];
-
-            const pushCharToPart = (line: TextLineData, partIdx: number): void => {
-              const part = line.parts[partIdx];
-              part.content.push(char);
-              (part.inlineStyles ??= []).length = part.content.length;
-              part.inlineStyles[part.content.length - 1] = inlineStyle;
-            };
-
-            const placeChar = (): boolean => {
-              if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
-                cumulativeWidths[currentPartIdx] += charWidth;
-                pushCharToPart(targetLine, currentPartIdx);
-                return true;
-              }
-              return false;
-            };
+            const targetPart = targetLine.parts[currentPartIdx];
 
             const isLastCharInBlock = flatIdxInBlock >= blockTotalChars - 1;
 
-            if (placeChar()) {
+            if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
+              cumulativeWidths[currentPartIdx] += charWidth;
+              targetPart.content.push(char);
+              (targetPart.inlineStyles ??= []).length = targetPart.content.length;
+              targetPart.inlineStyles[targetPart.content.length - 1] = inlineStyle;
+
               if (isLastCharInBlock) {
-                columnContent[columnContent.length - 1].endOfBlock = true;
+                targetLine.endOfBlock = true;
               }
 
               if (isColumnOverflow) {
-                if (curColumn < this._columnWidths.length - 1) {
+                if (curColumn < lastColumnIdx) {
                   if (!isLastCharInBlock) {
                     columnContent = this._removeTrailingEmptyLine(columnContent);
                   }
@@ -1340,7 +1367,10 @@ export class ParagraphEngine {
             while (currentPartIdx < partWidths.length) {
               if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
                 cumulativeWidths[currentPartIdx] += charWidth;
-                pushCharToPart(targetLine, currentPartIdx);
+                const part = targetLine.parts[currentPartIdx];
+                part.content.push(char);
+                (part.inlineStyles ??= []).length = part.content.length;
+                part.inlineStyles[part.content.length - 1] = inlineStyle;
                 placed = true;
                 break;
               }
@@ -1349,11 +1379,11 @@ export class ParagraphEngine {
 
             if (placed) {
               if (isLastCharInBlock) {
-                columnContent[columnContent.length - 1].endOfBlock = true;
+                targetLine.endOfBlock = true;
               }
 
               if (isColumnOverflow) {
-                if (curColumn < this._columnWidths.length - 1) {
+                if (curColumn < lastColumnIdx) {
                   if (!isLastCharInBlock) {
                     columnContent = this._removeTrailingEmptyLine(columnContent);
                   }
@@ -1374,7 +1404,7 @@ export class ParagraphEngine {
                 partWidths = [];
                 hasLine = false;
                 if (result.overflow) {
-                  if (curColumn < this._columnWidths.length - 1) {
+                  if (curColumn < lastColumnIdx) {
                     if (!isLastCharInBlock) {
                       columnContent = this._removeTrailingEmptyLine(columnContent);
                     }
@@ -1387,7 +1417,7 @@ export class ParagraphEngine {
               }
 
               if (result.overflow) {
-                if (curColumn < this._columnWidths.length - 1) {
+                if (curColumn < lastColumnIdx) {
                   if (!isLastCharInBlock) {
                     columnContent = this._removeTrailingEmptyLine(columnContent);
                   }
@@ -1405,9 +1435,13 @@ export class ParagraphEngine {
               currentPartIdx = 0;
               cumulativeWidths = new Array(partWidths.length).fill(0);
 
+              const newLine = columnContent[columnContent.length - 1];
               if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
                 cumulativeWidths[currentPartIdx] += charWidth;
-                pushCharToPart(columnContent[columnContent.length - 1], currentPartIdx);
+                const part = newLine.parts[currentPartIdx];
+                part.content.push(char);
+                (part.inlineStyles ??= []).length = part.content.length;
+                part.inlineStyles[part.content.length - 1] = inlineStyle;
                 break;
               }
 
@@ -1415,7 +1449,10 @@ export class ParagraphEngine {
               while (currentPartIdx < partWidths.length) {
                 if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
                   cumulativeWidths[currentPartIdx] += charWidth;
-                  pushCharToPart(columnContent[columnContent.length - 1], currentPartIdx);
+                  const part = newLine.parts[currentPartIdx];
+                  part.content.push(char);
+                  (part.inlineStyles ??= []).length = part.content.length;
+                  part.inlineStyles[part.content.length - 1] = inlineStyle;
                   break;
                 }
                 currentPartIdx++;
@@ -1424,7 +1461,10 @@ export class ParagraphEngine {
               if (currentPartIdx >= partWidths.length) {
                 const maxPartWidth = partWidths.length > 0 ? Math.max(...partWidths) : 0;
                 if (charWidth > maxPartWidth + 1e-6) {
-                  pushCharToPart(columnContent[columnContent.length - 1], 0);
+                  const part = newLine.parts[0];
+                  part.content.push(char);
+                  (part.inlineStyles ??= []).length = part.content.length;
+                  part.inlineStyles[part.content.length - 1] = inlineStyle;
                   cumulativeWidths[0] += charWidth;
                   break;
                 }
@@ -1438,7 +1478,7 @@ export class ParagraphEngine {
               break;
             }
 
-            if (isColumnOverflow && curColumn < this._columnWidths.length - 1) {
+            if (isColumnOverflow && curColumn < lastColumnIdx) {
               break charLoop;
             }
 
@@ -1447,7 +1487,7 @@ export class ParagraphEngine {
             }
 
             if (isColumnOverflow) {
-              if (curColumn < this._columnWidths.length - 1) {
+              if (curColumn < lastColumnIdx) {
                 if (!isLastCharInBlock) {
                   columnContent = this._removeTrailingEmptyLine(columnContent);
                 }
