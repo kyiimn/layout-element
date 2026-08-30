@@ -167,11 +167,39 @@ const r = await page.evaluate(async () => {
   const eng3 = engineVisibleText();
   out.cleanupMatch = dom3.map(c => c.join('')).join('\n') === eng3.map(c => c.join('')).join('\n');
 
+  // ── 시나리오 D: trailing \n (문단 끝 엔터) — 빈 라인 렌더/매핑/round-trip ──
+  p.content = '가나다\n마바사\n';
+  p.flushRender();
+  await waitSettle();
+  const trailingDom = domVisibleText();
+  const trailingEng = engineVisibleText();
+  const trailingBefore = ta.value;
+  out.trailingNewline = {
+    domEngineMatch: trailingDom.map(c => c.join('')).join('\n') === trailingEng.map(c => c.join('')).join('\n'),
+    lineCount: engine.columnContents[0].length,
+    // 마지막 빈 라인에 커서 → 라인 rect 폴백이 새 빈 라인을 가리키는지
+    cursorLine: (() => {
+      const li = controller._mapper.getLineInfoBySourceOffset(8);
+      return li ? li.lineIndex : null;
+    })(),
+  };
+  // round-trip: extractData 재주입 후에도 trailing \n 보존
+  const dataBefore = JSON.stringify(p.data);
+  p.data = JSON.parse(dataBefore);
+  p.flushRender();
+  await waitSettle();
+  out.trailingNewline.roundTrip = JSON.stringify(p.data) === dataBefore && ta.value.endsWith('\n');
+
+  // 원상 복원 (이후 시나리오 없음 — trailing 텍스트 유지)
+
   // 커서 위치 조회 정합성 (mapper가 DOM 재사용 후에도 올바른 span을 찾는지)
-  const probeOffsets = [0, 1, Math.floor(ta.value.length / 4), half, ta.value.length - 1];
+  // 현재 텍스트(trailing \n 포함 8자) 기준 오프셋으로 조회한다.
+  const curLen = ta.value.length;
+  const probeOffsets = [0, 1, Math.floor(curLen / 4), curLen - 2, curLen - 1];
   out.cursorRects = probeOffsets.map(off => {
     const rect = controller._mapper.getCharRect(off);
-    return { off, found: rect !== null };
+    const line = controller._mapper.getLineInfoBySourceOffset(off);
+    return { off, found: rect !== null || line !== null };
   });
 
   return out;
@@ -188,6 +216,9 @@ for (const s of r.typingDuringWrap) {
   check('타이핑+wrap 혼합: span 정렬 유지', s.sorted.monotonic && s.sorted.duplicates === 0);
 }
 check('fontSize 제거 후 원상 복원 일치', r.cleanupMatch);
+check('D. trailing \\n: DOM===엔진 (빈 라인 포함)', r.trailingNewline.domEngineMatch, `lines=${r.trailingNewline.lineCount}`);
+check('D. trailing \\n: 커서 폴백이 마지막 빈 라인 가리킴', r.trailingNewline.cursorLine === r.trailingNewline.lineCount - 1, `cursorLine=${r.trailingNewline.cursorLine}`);
+check('D. trailing \\n: extractData round-trip 보존', r.trailingNewline.roundTrip);
 check('커서 rect 조회 전 경로 유효', r.cursorRects.every(c => c.found), JSON.stringify(r.cursorRects.filter(c => !c.found)));
 
 await browser.close();

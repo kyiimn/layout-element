@@ -792,11 +792,13 @@ export class ParagraphEngine {
     this._contents = [];
     let curLine: TextInlineData[] = [];
     let curRun: TextInlineData | null = null;
+    let lastCh = "";
 
     for (const c of rawContents) {
       const style = typeof c === "string" ? undefined : c.textInlineStyle;
       const content = typeof c === "string" ? c : c.content;
       for (const ch of content) {
+        lastCh = ch;
         if (ch === "\n") {
           this._contents.push(curLine);
           curLine = [];
@@ -812,7 +814,12 @@ export class ParagraphEngine {
         }
       }
     }
-    if (curLine.length > 0) this._contents.push(curLine);
+    // 텍스트가 \n으로 끝나면 마지막 빈 블록도 push한다 — 문단 끝에서 엔터를
+    // 입력하면 커서가 배치될 빈 라인이 엔진에 존재해야 한다. length 체크만
+    // 하면 trailing \n의 빈 블록이 사라져 매핑이 없고, 커서가 이전 라인의
+    // 맨 앞으로 폴백한다. (\n 직전 push에는 length 체크가 없으므로 중간
+    // 연속 개행은 이미 빈 블록을 유지한다 — 여기만 맞추면 일관된다.)
+    if (curLine.length > 0 || lastCh === "\n") this._contents.push(curLine);
 
     this._parsedContentsCache = { textContent: this._textContent, contents: this._contents };
   }
