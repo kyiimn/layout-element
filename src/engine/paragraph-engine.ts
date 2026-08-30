@@ -1081,6 +1081,14 @@ export class ParagraphEngine {
         for (const part of line.parts) {
           colCharCount += part.content.length;
         }
+        // endOfBlock 라인 뒤의 블록 구분자 '\n'도 plain offset에 포함된다.
+        // caretOffset가 plain 기준이므로 컬럼 경계 계산에 이를 반영해야 한다.
+        // 누락 시 globalOffset이 컬럼당 블록 수만큼 짧아져 재개 위치가
+        // 앞 블록 중간을 가리키고, 앞 단의 마지막 글자들이 현재 단으로
+        // 당겨와 렌더된다 (3단 문서의 2·3단 타이핑 시 재현).
+        if (line.endOfBlock && globalOffset + colCharCount + 1 <= plain.length && plain[globalOffset + colCharCount] === '\n') {
+          colCharCount++;
+        }
       }
       if (globalOffset + colCharCount <= caretOffset) {
         prefixColumnCount = c + 1;
