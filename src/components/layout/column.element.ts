@@ -31,6 +31,48 @@ function _inlineStyleKey(style: TextInlineStyle | undefined): string {
 }
 
 /**
+ * 치수(width/height/top)에 영향을 주는 인라인 필드만 직렬화한 키.
+ * `fontFamily`/`fontSize`만 포함 — `fontWeight`/`fontStyle`/`color`는
+ * `genCharStyleFlat`의 치수 계산에 무영향이므로 델타 판별에서 제외한다.
+ *
+ * @param style - 직렬화할 인라인 스타일 (선택)
+ * @returns 치수 영향 필드 키. fontWeight 등만 변경 시 기존 키와 동일
+ */
+function _dimensionKey(style: TextInlineStyle | undefined): string {
+  if (!style) return '';
+  const parts: string[] = [];
+  if (style.fontFamily !== undefined) parts.push(`fontFamily=${style.fontFamily}`);
+  if (style.fontSize !== undefined) parts.push(`fontSize=${style.fontSize}`);
+  return parts.join('|');
+}
+
+/**
+ * inlineKey 변경이 "치수 무영향 필드의 값 변경/추가"인지 검사한다.
+ * 오버라이드 **제거**(정의 필드 감소)는 기존 style 속성이 잔존하므로
+ * full 재적용이 필요하다. 이 함수는 그 안전 판정을 제공한다.
+ *
+ * @param prevKey - 이전 인라인 키 (`_inlineStyleKey` 직렬화)
+ * @param nextKey - 새 인라인 키
+ * @returns 안전하면 true (inline-only 모드 사용 가능)
+ *
+ * @example
+ * ```ts
+ * _isNonDestructiveInlineDelta('fontSize=5', 'fontSize=5|fontWeight=700'); // → true (추가)
+ * _isNonDestructiveInlineDelta('fontSize=5|fontWeight=700', 'fontSize=5');  // → false (제거 → full)
+ * _isNonDestructiveInlineDelta('fontWeight=400', 'fontWeight=700');        // → true (값 변경)
+ * ```
+ */
+function _isNonDestructiveInlineDelta(prevKey: string, nextKey: string): boolean {
+  if (prevKey === '') return true;
+  const prevFields = new Set(prevKey.split('|').map(f => f.split('=')[0]));
+  const nextFields = new Set(nextKey.split('|').map(f => f.split('=')[0]));
+  for (const field of prevFields) {
+    if (!nextFields.has(field)) return false;
+  }
+  return true;
+}
+
+/**
  * 텍스트 컬럼 렌더링 요소. `<x-layout-column>` 커스텀 엘리먼트.
  *
  * `TextLayoutEngine`에서 생성된 `TextLineData[]`를 받아 각 줄을 렌더링한다.
@@ -40,6 +82,8 @@ export class LayoutColumnElement extends HTMLElement {
   private _index?: number;
   private _shadowRoot: ShadowRoot;
   private _cachedColStyleKey: string = '';
+  /** 직전 renderText에서 실제 스타일이 재적용된 span 수 (postRender 지연 판정용). */
+  private _lastRestyledCount: number = 0;
 
   constructor() {
     super();
@@ -195,8 +239,79 @@ export class LayoutColumnElement extends HTMLElement {
    * DOM 노드 수 절반, querySelector/inner span 갱신 비용 제거.
    *
    * `charOffsetMm === undefined`이면 레거시 flexbox 정렬 경로를 유지한다 (outer/inner 중첩).
+   *
+   * @param charEl - 스타일을 적용할 글자 span DOM 요소
+   * @param char - 현재 글자
+   * @param renderedOffset - 렌더링 오프셋 (data-offset)
+   * @param sourceOffset - 소스 오프셋 (data-source-offset)
+   * @param charOffsetMm - 절대 정렬 오프셋 (undefined = 레거시 경로)
+   * @param inlineStyle - 인라인 런 스타일 오버라이드
+   * @param lineMaxFontSize - 이 글자가 속한 라인의 최대 폰트 크기 (mm)
+   * @param mode - 델타 적용 모드 (기본값 'full' — 전체 재적용)
+   * @throws {Error} `inlineStyle.color`가 `'default'`인 경우 `ColorRegistry.getCSSColor()`가 throw
+   *
+   * @example
+   * ```ts
+   * // 전체 적용 (span 신규 생성/구조 변경): mode 생략
+   * this._applySpanStyle(charEl, '가', 10, 10, 2.5, undefined, 4);
+   *
+   * // fontWeight만 주입된 경우: 위치 재적용 생략
+   * this._applySpanStyle(charEl, '가', 10, 10, 2.5, { fontWeight: 700 }, 4, 'inline-only');
+   *
+   * // 정렬 변경으로 left만 바뀐 경우: 스타일 재적용 생략
+   * this._applySpanStyle(charEl, '가', 10, 10, 3.1, undefined, 4, 'position-only');
+   * ```
    */
-  private _applySpanStyle(charEl: HTMLSpanElement, char: string, renderedOffset: number, sourceOffset: number, charOffsetMm: number | undefined, inlineStyle: TextInlineStyle | undefined, lineMaxFontSize: number): void {
+  private _applySpanStyle(
+    charEl: HTMLSpanElement,
+    char: string,
+    renderedOffset: number,
+    sourceOffset: number,
+    charOffsetMm: number | undefined,
+    inlineStyle: TextInlineStyle | undefined,
+    lineMaxFontSize: number,
+    mode: 'full' | 'inline-only' | 'position-only' = 'full',
+  ): void {
+    if (mode === 'inline-only') {
+      // 위치/치수/문자는 이미 동일(_skipSpanStyleIfUnchanged가 charOffset/char 비교 완료).
+      // 런 오버라이드 필드(fontWeight/fontStyle/color/fontSize)만 적용하고
+      // dataset 스냅샷만 갱신한다. left/top/width 쓰기와 cssText 초기화를 건너뛴다.
+      // 식별 필드(offset/sourceOffset/char)는 skip 실패 원인과 무관하게 항상 동기화한다 —
+      // text 대체+스타일 주입이 동시에 일어나도 EditCoordinateMapper의 data-offset가
+      // 최신을 유지해야 한다.
+      this._applyInlineOverrides(charEl, inlineStyle);
+      charEl.dataset.offset = String(renderedOffset);
+      charEl.dataset.sourceOffset = String(sourceOffset);
+      if (charEl.textContent !== char) charEl.textContent = char;
+      if (charOffsetMm !== undefined) charEl.dataset.charOffset = String(charOffsetMm);
+      charEl.dataset.inlineKey = _inlineStyleKey(inlineStyle);
+      const { rawWidth, swidth } = this.model!.getCharWidths(char, inlineStyle);
+      charEl.dataset.owidth = String(rawWidth);
+      charEl.dataset.swidth = String(swidth);
+      charEl.dataset.lineMaxFs = String(lineMaxFontSize);
+      charEl.dataset.dimKey = _dimensionKey(inlineStyle);
+      return;
+    }
+
+    if (mode === 'position-only' && charOffsetMm !== undefined) {
+      // 정렬 변경 등으로 charOffset만 바뀐 경우: left 재적용만.
+      // top은 수직 위치가 불변인 경우 쓰기를 생략한다 — 쓰기 자체가
+      // style dirty 플래그를 세워 리플로우 범위를 넓히기 때문이다.
+      const flatStyle = this.model!.genCharStyleFlat(char, inlineStyle, lineMaxFontSize);
+      const newLeft = `${charOffsetMm}mm`;
+      if (charEl.style.left !== newLeft) charEl.style.left = newLeft;
+      const newTop = flatStyle.top ?? '0';
+      if (charEl.style.top !== newTop) charEl.style.top = newTop;
+      charEl.dataset.offset = String(renderedOffset);
+      charEl.dataset.sourceOffset = String(sourceOffset);
+      if (charEl.textContent !== char) charEl.textContent = char;
+      charEl.dataset.charOffset = String(charOffsetMm);
+      const { rawWidth, swidth } = this.model!.getCharWidths(char, inlineStyle);
+      charEl.dataset.owidth = String(rawWidth);
+      charEl.dataset.swidth = String(swidth);
+      return;
+    }
+
     charEl.style.cssText = '';
 
     if (charOffsetMm !== undefined) {
@@ -235,6 +350,7 @@ export class LayoutColumnElement extends HTMLElement {
     // diff 스킵 판정용: 직전 인라인 스타일 스냅샷. 적용 후 갱신해야 다음 렌더에서
     // 변경 감지(_skipSpanStyleIfUnchanged)가 동작한다.
     charEl.dataset.inlineKey = _inlineStyleKey(inlineStyle);
+    charEl.dataset.dimKey = _dimensionKey(inlineStyle);
     charEl.dataset.lineMaxFs = String(lineMaxFontSize);
 
     const { rawWidth, swidth } = this.model!.getCharWidths(char, inlineStyle);
@@ -402,6 +518,7 @@ export class LayoutColumnElement extends HTMLElement {
 
     let curRenderedOffset = renderedOffset;
     let curSourceOffset = sourceOffset;
+    let restyledCount = 0;
 
     const columnHeightMm = this.model.inheritStyle?.parentHeight ?? 0;
     const baseLineHeightMm = this.model.baseLineHeight;
@@ -522,11 +639,39 @@ export class LayoutColumnElement extends HTMLElement {
           if (existingSpan) {
             charEl = existingSpan;
             if (!this._skipSpanStyleIfUnchanged(charEl, char, curRenderedOffset, curSourceOffset, offsetMm, charInlineStyle, lineMaxFontSize)) {
-              this._applySpanStyle(charEl, char, curRenderedOffset, curSourceOffset, offsetMm, charInlineStyle, lineMaxFontSize);
+              const newInlineKey = _inlineStyleKey(charInlineStyle);
+              const inlineKeyChanged = (charEl.dataset.inlineKey ?? '') !== newInlineKey;
+              const lineMaxFsChanged = (charEl.dataset.lineMaxFs ?? '') !== String(lineMaxFontSize);
+              const positionChanged = offsetMm !== undefined && charEl.dataset.charOffset !== String(offsetMm);
+              const pathSwitched = (charEl.dataset.charOffset !== undefined) !== (offsetMm !== undefined);
+              const dimKeyChanged = (charEl.dataset.dimKey ?? '') !== _dimensionKey(charInlineStyle);
+
+              let mode: 'full' | 'inline-only' | 'position-only';
+              if (pathSwitched || dimKeyChanged || lineMaxFsChanged || (inlineKeyChanged && positionChanged)) {
+                mode = 'full';
+              } else if (inlineKeyChanged) {
+                // inlineKey 전체는 다르지만 치수·경로·라인MaxFs 불변 → 오버라이드 필드만 갱신.
+                // 오버라이드 "제거"도 이 경로로 처리한다 — 적용 대상 필드가 정의 필드만이므로,
+                // 제거는 full 재적용이 필요한 것이 아니라 기본값 적용이 필요한 것이다.
+                // 그러나 fontWeight 700→undefined 시 기존 style.fontWeight='700'이 잔존하므로
+                // full 경로의 cssText 재초기화가 필요하다. 따라서 inline-only가 안전한 경우는
+                // "치수 무영향 필드(fontWeight/fontStyle/color)의 값 변경/추가"로 한정한다.
+                const prevKey = charEl.dataset.inlineKey ?? '';
+                const nextKey = newInlineKey;
+                const isSafeInlineDelta = _isNonDestructiveInlineDelta(prevKey, nextKey);
+                mode = isSafeInlineDelta ? 'inline-only' : 'full';
+              } else if (positionChanged) {
+                mode = 'position-only';
+              } else {
+                mode = 'full';
+              }
+              this._applySpanStyle(charEl, char, curRenderedOffset, curSourceOffset, offsetMm, charInlineStyle, lineMaxFontSize, mode);
+              restyledCount++;
             }
             existingSpans.delete(thisCharSourceOffset);
           } else {
             charEl = this._createSpanElement(char, curRenderedOffset, curSourceOffset, offsetMm, charInlineStyle, lineMaxFontSize);
+            restyledCount++;
           }
 
           if (nextRef === charEl) {
@@ -561,6 +706,8 @@ export class LayoutColumnElement extends HTMLElement {
     for (let i = lines.length; i < existingLineEls.length; i++) {
       existingLineEls[i].remove();
     }
+
+    this._lastRestyledCount = restyledCount;
   }
 
   /**
@@ -628,6 +775,13 @@ export class LayoutColumnElement extends HTMLElement {
   get index() { return this._index; }
   get zIndex() { return 0; }
   get type() { return 'column' as const; }
+
+  /**
+   * 직전 renderText에서 스타일이 재적용된 span 수.
+   * 큰 값은 layout이 크게 dirty 상태임을 뜻한다 — postRender의 커서/선택
+   * rect 읽기 강제 리플로우 회피 지연 여부 판정에 사용한다.
+   */
+  get lastRestyledCount(): number { return this._lastRestyledCount; }
 
   get parentElement() {
     return super.parentElement as LayoutParagraphElement;

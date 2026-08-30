@@ -245,7 +245,42 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 - **텍스트 편집**: 글자 추가/삭제 → 오프셋 변경 → 스킵 불가
 - **장평/자간 변경**: `textStyle` setter가 `_perfStructureChanged = true`를 설정하여 `render()`에서 전체 재생성(`replaceChildren()`)을 트리거 → diff 루프가 아닌 신규 span 생성 경로로 진입
 - **컬럼 수 변경**: `_perfShouldFullRecreate()`가 전체 재생성을 트리거 → diff 루프 미진입
-- **인라인 런 스타일 변경**: `data-inline-key` 불일치 → 스킵 불가 (재적용)
+- **인라인 런 스타일 변경**: `data-inline-key` 불일치 → 스킵 불가 (델타 적용, §3.15 참조)
+
+### 3.15 Span 델타 적용 모드 (`_applySpanStyle` mode)
+
+| 항목 | 값 |
+|---|---|
+| 위치 | `LayoutColumnElement._applySpanStyle()` (`column.element.ts`) |
+| 모드 | `'full'` \| `'inline-only'` \| `'position-only'` |
+| 판별 데이터 | `dataset.inlineKey` / `dataset.dimKey` / `dataset.charOffset` / `dataset.lineMaxFs` |
+
+스킵 조건(`§3.1`)을 통과하지 못한 재사용 span은 **무조건 전체 재적용하지 않고**, 변경 원인에 따라 세 모드로 나누어 최소한의 DOM 쓰기만 수행한다. 2000자 전체 선택 후 굵게 주입 시 전체 스타일 재적용(cssText 초기화 + 모든 property 쓰기)이 renderText의 지배적 비용이었기 때문이다 (실측 8.7ms → 4.4ms).
+
+#### 모드 판별 규칙
+
+| 조건 | 모드 | DOM 쓰기 |
+|---|---|---|
+| 레거시 flexbox ↔ charOffsets 경로 전환 | `full` | 전체 재적용 |
+| `dimKey`(fontFamily/fontSize) 변경 | `full` | 전체 재적용 (치수가 실제로 바뀜) |
+| `lineMaxFs` 변경 | `full` | 전체 재적용 (수직 하단 앵커 재계산) |
+| inlineKey + position 동시 변경 | `full` | 전체 재적용 (방어적) |
+| inlineKey만 변경 (치수 무영향 필드: fontWeight/fontStyle/color 값 변경/추가) | `inline-only` | 오버라이드 property만 + dataset |
+| charOffset만 변경 (정렬 변경) | `position-only` | `left`/`top` (값이 같으면 쓰기 생략) |
+| 그 외 (skip 실패 원인 불명) | `full` | 전체 재적용 |
+
+- **`inline-only` 안전 조건** (`_isNonDestructiveInlineDelta`): 이전 inlineKey의 필드 집합이 새 필드 집합의 부분집합일 때만. 오버라이드 **제거**(예: `fontWeight 700 → undefined`)는 기존 style 속성이 잔존하므로 반드시 `full`로 cssText를 재초기화해야 한다.
+- **`position-only`의 조건부 쓰기**: `style.left`/`style.top`을 현재 값과 비교해 변경 시에만 쓴다 — 동일 값 쓰기도 style dirty 플래그를 세워 리플로우 범위를 넓히기 때문이다. `justify → center` 전환에서도 실제로 위치가 변하지 않는 span(라인 첫 문자 등)의 쓰기가 생략된다.
+- **식별 필드 동기화**: `data-offset`/`data-source-offset`/`textContent`는 모드와 무관하게 항상 갱신한다. 텍스트 대체 + 스타일 주입이 동시에 일어나도 `TextEditCoordinateMapper`의 오프셋 매핑이 최신을 유지해야 하기 때문이다.
+
+#### 연동: postRender 커서/선택 배치 지연 (`POST_RENDER_DEFER_THRESHOLD`)
+
+`postRender(fullRebuild, restyledSpans)`는 직전 `renderText()`가 재적용한 span 수를 받아 커서/선택 rect 읽기(`getBoundingClientRect`)의 실행 시점을 정한다:
+
+- `restyledSpans ≤ 8` (타이핑 등 소량 변경): **동기 배치**. 소량 dirty 위 rect 읽기 비용 < rAF 지연 비용이며, 지연 시 다음 입력 프레임과 2차 리플로우가 겹쳐 오히려 느려진다 (실측: 동기 6.4ms ↔ 무조건 지연 14.6ms).
+- `restyledSpans > 8` (대량 스타일 주입): **rAF 지연 배치** (`_scheduleCursorSelectionUpdate`). 수천 span을 dirty로 만든 직후의 rect 읽기는 강제 리플로우를 유발한다 (실측: fontSize 주입 18ms). 다음 프레임에 clean layout에서 읽는다.
+
+컬럼은 `lastRestyledCount` getter로 재적용 수를 노출하고, `paragraph.render()`가 전 컬럼 합산을 `postRender`에 전달한다. 지연 배치는 `_cancelCursorSelectionUpdate()`로 취소 가능하며 `destroy()`가 항상 해제한다.
 
 ### 3.2 queueMicrotask 배치 렌더링 (`scheduleRender`)
 

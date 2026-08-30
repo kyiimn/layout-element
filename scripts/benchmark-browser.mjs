@@ -96,9 +96,11 @@ try {
   const warmup = await page.evaluate(() => window.bench.typeText(10));
   console.log(`(warmup ${warmup.length}키 완료)\n`);
 
-  // 1. 텍스트 편집
+  // 1. 텍스트 편집 — 입력 동기 시간 + rAF 프레임 델타
   const typeTimes = await page.evaluate(() => window.bench.typeText(150));
-  printResult('1. 텍스트 편집(타이핑)', stats(typeTimes));
+  printResult('1. 텍스트 편집(타이핑) — 입력 동기', stats(typeTimes));
+  const typingFrames = await page.evaluate(() => window.bench._lastTypingFrames ?? []);
+  printResult('1b. 타이핑 rAF 프레임 델타', stats(typingFrames));
 
   // 2. 오버랩 이미지 이동
   const moveTimes = await page.evaluate(() => window.bench.moveImage(100));

@@ -11,6 +11,13 @@ import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
 import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, normalizeInlineContent, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent } from "./run-map";
 
 /**
+ * postRender의 커서/선택 rect 읽기를 rAF로 지연할 span 재적용 수 임계값.
+ * 이 값 이하(타이핑 등 소량 변경)는 동기 배치가, 초과(대량 스타일 주입)는
+ * 지연 배치가 프레임당 총 비용이 더 낮다 (실측 기준).
+ */
+const POST_RENDER_DEFER_THRESHOLD = 8;
+
+/**
  * 커서 위치에서 유효한 스타일 정보.
  * 단락의 TextStyle/ParagraphStyle과 상속 스타일(InheritStyle)을 병합하고,
  * 커서가 위치한 인라인 런의 TextInlineStyle로 오버라이드한 결과.
@@ -87,6 +94,9 @@ export class TextEditController {
   private _isFocused: boolean = false;
   private _pendingTextChangeOnBlur: boolean = false;
   private _mousemoveRafId: number | null = null;
+
+  /** postRender의 커서/선택 배치 지연 rAF 핸들 (강제 리플로우 회피). */
+  private _cursorSelectionRafId: number | null = null;
   private _lastMouseX: number = 0;
   private _lastMouseY: number = 0;
 
@@ -282,6 +292,11 @@ export class TextEditController {
       this._mousemoveRafId = null;
     }
 
+    if (this._cursorSelectionRafId !== null) {
+      cancelAnimationFrame(this._cursorSelectionRafId);
+      this._cursorSelectionRafId = null;
+    }
+
     document.removeEventListener("visibilitychange", this._handleVisibilityChange);
 
     this._isFocused = false;
@@ -310,7 +325,7 @@ export class TextEditController {
    * @param fullRebuild - DOM이 새로 생성되었으면 true, 기존 컬럼을
    *   재사용한 경우 false. 매퍼는 항상 전체 재구축을 수행한다.
    */
-  postRender(fullRebuild: boolean = true): void {
+  postRender(fullRebuild: boolean = true, restyledSpans: number = 0): void {
     // 증분 렌더(컬럼 DOM 재사용, span diff) 시에는 span 캐시가 유효하므로
     // 매핑만 재구축한다 — 타이핑 핫패스의 querySelectorAll 재쿼리 제거.
     if (fullRebuild) {
@@ -335,8 +350,19 @@ export class TextEditController {
         this._syncTextareaSelection();
       }
     }
-    this._updateCursorPosition();
-    this._updateSelection();
+
+    // 커서/선택 배치(getBoundingClientRect)는 재적용 span 수에 따라 갈린다.
+    // 소량(타이핑 1~2개): dirty cost < rAF 지연 비용이므로 동기 배치 — 지연 시
+    // 다음 입력 프레임에서 2차 리플로우가 겹쳐 오히려 느려진다(실측: 6.4→14.6ms).
+    // 대량(스타일 주입 수백 개): dirty 위 rect 읽기가 강제 리플로우를 유발하므로
+    // (실측: fontSize 주입 18ms) 다음 프레임으로 지연해 clean layout에서 읽는다.
+    if (restyledSpans > POST_RENDER_DEFER_THRESHOLD) {
+      this._scheduleCursorSelectionUpdate();
+    } else {
+      this._cancelCursorSelectionUpdate();
+      this._updateCursorPosition();
+      this._updateSelection();
+    }
 
     if (this._isComposing) {
       this._applyCompositionUnderline();
@@ -348,6 +374,28 @@ export class TextEditController {
       // preventScroll: textarea 자동 스크롤이 스크롤 컨테이너를 좌상단으로 점프시키는 버그 방지.
       this._textarea.focus({ preventScroll: true });
       this._wasFocused = false;
+    }
+  }
+
+  /**
+   * 커서/선택 영역 배치를 다음 rAF 프레임으로 지연 예약한다.
+   * 보류 중인 예약이 있으면 병합한다. 파기 시에는 `destroy()`가 취소한다.
+   * @returns void
+   */
+  private _scheduleCursorSelectionUpdate(): void {
+    if (this._cursorSelectionRafId !== null) return;
+    this._cursorSelectionRafId = requestAnimationFrame(() => {
+      this._cursorSelectionRafId = null;
+      this._updateCursorPosition();
+      this._updateSelection();
+    });
+  }
+
+  /** 보류 중인 커서/선택 지연 배치를 취소한다 (동기 배치로 전환 직전 호출). */
+  private _cancelCursorSelectionUpdate(): void {
+    if (this._cursorSelectionRafId !== null) {
+      cancelAnimationFrame(this._cursorSelectionRafId);
+      this._cursorSelectionRafId = null;
     }
   }
 

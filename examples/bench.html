@@ -127,15 +127,27 @@
       window.bench = {
         doc,
 
-        // 1. 텍스트 편집: 문단 끝 지속 타이핑 — 동기 작업 시간 측정
+        // 1. 텍스트 편집: 문단 끝 지속 타이핑 — 입력 동기 시간 + 프레임 시간 분리 측정
         async typeText(count) {
           const p = await focusPara();
           const controller = em._focusedController;
           const ta = controller?._textarea;
 
-          const times = [];
+          const inputTimes = [];
+          const frameDeltas = [];
           const chars = "가나다라마바사";
+          let lastRafTs = 0;
+          const raf = () => new Promise(r => requestAnimationFrame(ts => {
+            if (lastRafTs > 0) frameDeltas.push(ts - lastRafTs);
+            lastRafTs = ts;
+            r();
+          }));
           for (let i = 0; i < count; i++) {
+            // 이전 키의 커밋(_debouncedRender rAF) + 지연 커서 갱신 + paint가
+            // 모두 정착한 뒤 입력 — 실사용 패턴(키보드 이벤트는 paint 후 도착).
+            await raf();
+            await raf();
+
             const t0 = performance.now();
             if (ta) {
               const before = ta.value;
@@ -147,12 +159,10 @@
               const cur = typeof p.content === "string" ? p.content : "";
               p.content = cur + chars[i % chars.length];
             }
-            // input 핸들러는 flushRender를 동기 호출하므로 이 시점에 이미 완료.
-            // 이후 rAF로 paint 완료 대기.
-            times.push(performance.now() - t0);
-            await new Promise(r => requestAnimationFrame(r));
+            inputTimes.push(performance.now() - t0);
           }
-          return times;
+          window.bench._lastTypingFrames = frameDeltas;
+          return inputTimes;
         },
 
         // 2. 오버랩 항목(이미지 박스) 이동 — 렌더 완료까지 프레임 시간
@@ -195,6 +205,8 @@
             em.applyInlineStyle(styles[i % styles.length]);
             const tEnd = await endPromise;
             if (tEnd !== null) times.push(tEnd - t0);
+            // 지연된 커서/선택 갱신 rAF가 정착한 뒤 다음 iteration 진입
+            await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
           }
           return times;
         },
@@ -215,6 +227,7 @@
             em.applyInlineStyle({ fontSize: sizes[i % sizes.length] });
             const tEnd = await endPromise;
             if (tEnd !== null) times.push(tEnd - t0);
+            await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
           }
           return times;
         },
@@ -229,6 +242,7 @@
             para().paragraphStyle = { textAlign: aligns[i % aligns.length] };
             const tEnd = await endPromise;
             if (tEnd !== null) times.push(tEnd - t0);
+            await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
           }
           return times;
         },

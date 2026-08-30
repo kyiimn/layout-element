@@ -426,7 +426,12 @@ export class LayoutParagraphElement extends HTMLElement {
     }
 
     if (this._editController) {
-      this._editController.postRender(needsFullRecreate);
+      let restyledSpans = 0;
+      const colEls = this.querySelectorAll('x-layout-column');
+      for (let i = 0; i < colEls.length; i++) {
+        restyledSpans += (colEls[i] as LayoutColumnElement & { lastRestyledCount?: number }).lastRestyledCount ?? 0;
+      }
+      this._editController.postRender(needsFullRecreate, restyledSpans);
     }
 
     this.dispatchEvent(new CustomEvent('render-complete', {
