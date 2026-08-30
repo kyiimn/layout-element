@@ -1713,6 +1713,7 @@ export class TextEditController {
 
     this._cursorModel.offset = startOffset + composedLength;
 
+    model.caretHint = this._cursorModel.offset;
     this._paragraph.flushRender();
     this._clearCompositionUnderline();
     this._updateCursorPosition();
@@ -2028,6 +2029,7 @@ export class TextEditController {
     this._wasFocused = this._isFocused;
     const model = this._paragraph.model;
     if (model?.hasPendingChanges) {
+      model.caretHint = this._cursorModel.offset;
       this._paragraph.flushRender();
       this._manager._notifyTextChange(this);
       this._manager._notifyCursorMove(this);

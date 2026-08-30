@@ -152,6 +152,21 @@ export class ParagraphEngine {
    */
   private _parsedContentsCache: { textContent: string | (string | TextInlineData)[]; contents: TextInlineData[][] } | null = null;
 
+  /**
+   * Prefix 캐시: 캐럿 이전 컬럼들의 배치 결과를 재사용. 연속 타이핑 시 재배치 비용을
+   * 캐럿 이후 길이에 비례하도록 단축. `textContent` setter에서 무효화하지 않음 —
+   * 해시가 정확성을 보장. `data` setter에서만 무효화.
+   */
+  private _prefixCache: {
+    caretOffset: number;
+    hash: string;
+    columnContents: TextLineData[][];
+    startColumnIdx: number;
+    startBlockIdx: number;
+    startRunIdx: number;
+    startCharIdx: number;
+  } | null = null;
+
   /** `_layoutCache` 존재 여부 (외부 스킵 판정용). */
   get hasLayoutCache(): boolean { return this._layoutCache !== null; }
 
@@ -180,6 +195,8 @@ export class ParagraphEngine {
   private _effectiveTsDirty: boolean = true;
 
   private _dirty: boolean = false;
+
+  private _caretHint: number | undefined = undefined;
 
   /** 성능 캐시: plainText getter 결과. textContent/data setter에서 무효화. */
   private _plainTextCache: string | null = null;
@@ -758,7 +775,24 @@ export class ParagraphEngine {
       this._overflow = this._layoutCache.overflow;
       this._overlayRectsMm = null;
       this._refreshInlineStylesOnly();
+      this._caretHint = undefined;
       return;
+    }
+
+    const verticalAlign = this.effectiveParagraphStyle.verticalAlign!;
+    const caretOffset = this._caretHint;
+    if (
+      caretOffset !== undefined && caretOffset > 0 &&
+      this._prefixCache !== null &&
+      verticalAlign !== 'center' && verticalAlign !== 'bottom'
+    ) {
+      const cachedCaret = this._prefixCache.caretOffset;
+      const prefixHash = this._computePrefixHash(cachedCaret);
+      if (this._prefixCache.hash === prefixHash) {
+        this._applyPrefixCache(caretOffset);
+        this._caretHint = undefined;
+        return;
+      }
     }
 
     this._columnContents = [];
@@ -774,7 +808,6 @@ export class ParagraphEngine {
 
     this._layoutColumnsPass(new Array(this.columnCount).fill(0));
 
-    const verticalAlign = this.effectiveParagraphStyle.verticalAlign!;
     if (verticalAlign === 'center' || verticalAlign === 'bottom') {
       for (let iter = 0; iter < 3; iter++) {
         const alignOffsetsMm = this._columnContents.map(column =>
@@ -801,6 +834,12 @@ export class ParagraphEngine {
       columnContents: this._columnContents,
       overflow: this._overflow,
     };
+
+    if (caretOffset !== undefined && caretOffset > 0 && verticalAlign !== 'center' && verticalAlign !== 'bottom') {
+      this._buildPrefixCache(caretOffset);
+    }
+
+    this._caretHint = undefined;
   }
 
   /**
@@ -863,6 +902,194 @@ export class ParagraphEngine {
     }
 
     this._computePerLineHeights();
+  }
+
+  /**
+   * 캐럿 이전 텍스트 + 배치 파라미터의 해시를 계산한다.
+   * `_prefixCache`에 저장된 `caretOffset`으로 계산하여, 연속 타이핑 시
+   * 이전 키스트로크의 prefix와 현재 텍스트의 동일 구간을 비교한다.
+   */
+  private _computePrefixHash(caretOffset: number): string {
+    const parts: string[] = [];
+    const plain = this.plainText;
+    const prefixText = plain.slice(0, caretOffset);
+    parts.push("pt:" + prefixText);
+
+    const tc = this._textContent;
+    if (typeof tc !== "string") {
+      let consumed = 0;
+      for (const block of tc) {
+        const content = typeof block === "string" ? block : block.content;
+        const blockLen = content.length;
+        if (consumed >= caretOffset) break;
+        const end = Math.min(consumed + blockLen, caretOffset);
+        const slice = content.slice(0, end - consumed);
+        parts.push(slice);
+        if (typeof block !== "string") {
+          const s = block.textInlineStyle;
+          if (s) {
+            parts.push(
+              "s:" + (s.fontFamily ?? "") + "," +
+                    (s.fontSize ?? "") + "," +
+                    (s.fontStyle ?? ""),
+            );
+          }
+        }
+        consumed += blockLen;
+      }
+    }
+
+    const pAbsLeft = this._data.parentAbsRect.absLeft;
+    const pAbsTop = this._data.parentAbsRect.absTop;
+    const overlapEls = this._data.overlayEngines;
+    for (const el of overlapEls) {
+      let mode: OverlapMode | ParagraphOverlapMode = "path";
+      let hasRgba = false;
+      let paddingKey = "";
+      if (el.contentType === "image") {
+        const img = el.contentElement as ImageEngineRef | null;
+        if (img) {
+          mode = img.overlapMode;
+          hasRgba = img.rgbaData !== null;
+          const pad = img.overlapPadding;
+          if (pad === undefined) {
+            paddingKey = "0";
+          } else if (typeof pad === "number") {
+            paddingKey = "n" + pad;
+          } else {
+            paddingKey = "o" + (pad.top ?? 0) + "," + (pad.right ?? 0) + "," + (pad.bottom ?? 0) + "," + (pad.left ?? 0);
+          }
+        }
+      }
+      const rect = el.absRect;
+      const relLeft = rect.absLeft - pAbsLeft;
+      const relTop = rect.absTop - pAbsTop;
+      parts.push("o:" + relLeft + "," + relTop + "," + rect.absWidth + "," + rect.absHeight + "," + mode + "," + (hasRgba ? 1 : 0) + "," + paddingKey);
+    }
+
+    parts.push(
+      "cw:" + this._columnWidths.join(","),
+      "g:" + this._gaps.join(","),
+      "lh:" + this._lineHeight,
+      "wr:" + this.widthRatio,
+      "ls:" + this.effectiveTextStyle.letterSpacing!,
+      "sr:" + this.spaceRatio,
+      "fs:" + this.effectiveTextStyle.fontSize!,
+      "ph:" + (this._inheritStyle?.parentHeight ?? 0),
+    );
+
+    return parts.join("|");
+  }
+
+  /**
+   * plain-text 오프셋을 `_contents`의 (blockIdx, runIdx, charIdx)로 변환한다.
+   * plain-text는 `\n`을 포함하므로, 각 블록 후 `offset++`로 `\n`을 건너뛴다.
+   */
+  private _plainOffsetToContentsPos(plainOffset: number): { blockIdx: number; runIdx: number; charIdx: number } | null {
+    let offset = 0;
+    for (let blockIdx = 0; blockIdx < this._contents.length; blockIdx++) {
+      const runs = this._contents[blockIdx];
+      for (let runIdx = 0; runIdx < runs.length; runIdx++) {
+        const run = runs[runIdx];
+        const runLen = run.content.length;
+        if (offset + runLen > plainOffset) {
+          return { blockIdx, runIdx, charIdx: plainOffset - offset };
+        }
+        offset += runLen;
+      }
+      offset++;
+    }
+    return null;
+  }
+
+  /**
+   * 전체 재배치 후 prefix 캐시를 구축한다.
+   * 캐럿 이전의 컬럼들을 저장하고, 재배치 시작점을 계산한다.
+   *
+   * 수정된 시작 위치 계산:
+   * - prefixColumnCount === 0 (캐럿이 첫 컬럼 내부): 캐시 구축하지 않음 (return)
+   * - prefixColumnCount > 0: 시작점 = `_plainOffsetToContentsPos(globalOffset)`
+   *   (컬럼 경계에 해당하는 plain-text 오프셋)
+   */
+  private _buildPrefixCache(caretOffset: number): void {
+    const plain = this.plainText;
+    if (caretOffset >= plain.length) return;
+
+    let globalOffset = 0;
+    let prefixColumnCount = 0;
+
+    for (let c = 0; c < this._columnContents.length; c++) {
+      const column = this._columnContents[c];
+      let colCharCount = 0;
+      for (const line of column) {
+        for (const part of line.parts) {
+          colCharCount += part.content.length;
+        }
+      }
+      if (globalOffset + colCharCount <= caretOffset) {
+        prefixColumnCount = c + 1;
+        globalOffset += colCharCount;
+      } else {
+        break;
+      }
+    }
+
+    if (prefixColumnCount === 0) return;
+
+    const pos = this._plainOffsetToContentsPos(globalOffset);
+    if (!pos) return;
+
+    this._prefixCache = {
+      caretOffset,
+      hash: this._computePrefixHash(caretOffset),
+      columnContents: this._columnContents.slice(0, prefixColumnCount),
+      startColumnIdx: prefixColumnCount,
+      startBlockIdx: pos.blockIdx,
+      startRunIdx: pos.runIdx,
+      startCharIdx: pos.charIdx,
+    };
+  }
+
+  /**
+   * prefix 캐시를 적용하여 캐럿 이전 컬럼은 재사용, 이후만 재배치한다.
+   * `_layoutColumnsPass`를 일반화하여 `startColumn`부터 시작한다.
+   */
+  private _applyPrefixCache(caretOffset: number): void {
+    const cache = this._prefixCache!;
+    this._parseContents();
+
+    this._columnContents = [...cache.columnContents];
+    this._overflow = 0;
+    this._overlayRectsMm = null;
+
+    const startColumn = cache.startColumnIdx;
+    const startBlockIdx = cache.startBlockIdx;
+    const startRunIdx = cache.startRunIdx;
+    const startCharIdx = cache.startCharIdx;
+
+    this._layoutColumnsPass(
+      new Array(this.columnCount).fill(0),
+      startColumn,
+      startBlockIdx,
+      startRunIdx,
+      startCharIdx,
+    );
+
+    this._applyLineBreakRules();
+    this._computeCharOffsets();
+    this._computePerLineHeights();
+
+    this._previousLineCount = this._columnContents.reduce((sum, col) => sum + col.length, 0);
+    this._previousOverflow = this._overflow;
+
+    const fullHash = this._computeLayoutInputHash();
+    this._layoutCache = {
+      hash: fullHash,
+      columnContents: this._columnContents,
+      overflow: this._overflow,
+    };
+
+    this._buildPrefixCache(caretOffset);
   }
 
   /**
@@ -957,17 +1184,29 @@ export class ParagraphEngine {
    * 만들지 않고 (runIdx, charIdx) 이중 인덱스로 직접 순회한다.
    *
    * @param alignOffsetsMm - 컬럼별 alignOffsetMm 배열 (top 정렬이면 모두 0)
+   * @param startColumn - 재배치 시작 컬럼 (prefix 캐시 시 0이 아님)
+   * @param startBlockIdx - 재배치 시작 블록 인덱스
+   * @param startRunIdx - 재배치 시작 런 인덱스
+   * @param startCharIdx - 재배치 시작 글자 인덱스
    */
-  private _layoutColumnsPass(alignOffsetsMm: number[]): void {
-    this._columnContents = [];
-    this._overflow = 0;
+  private _layoutColumnsPass(
+    alignOffsetsMm: number[],
+    startColumn: number = 0,
+    startBlockIdx: number = 0,
+    startRunIdx: number = 0,
+    startCharIdx: number = 0,
+  ): void {
+    if (startColumn === 0) {
+      this._columnContents = [];
+      this._overflow = 0;
+    }
     this._overlayRectsMm = null;
 
-    let beforeIdxBlock = 0;
-    let beforeRunIdx = 0;
-    let beforeCharIdx = 0;
+    let beforeIdxBlock = startBlockIdx;
+    let beforeRunIdx = startRunIdx;
+    let beforeCharIdx = startCharIdx;
 
-    for (let curColumn = 0; curColumn < this.columnCount; curColumn++) {
+    for (let curColumn = startColumn; curColumn < this.columnCount; curColumn++) {
       let columnContent: TextLineData[] = [];
       let hasLine = false;
       let partWidths: number[] = [];
@@ -1239,7 +1478,11 @@ export class ParagraphEngine {
       beforeCharIdx = charIdx;
       beforeIdxBlock = idxBlock;
 
-      this._columnContents.push(columnContent);
+      if (curColumn < this._columnContents.length) {
+        this._columnContents[curColumn] = columnContent;
+      } else {
+        this._columnContents.push(columnContent);
+      }
     }
   }
 
@@ -1955,6 +2198,7 @@ export class ParagraphEngine {
     this._plainTextCache = null;
     this._styleRuns = null;
     this._parsedContentsCache = null;
+    this._prefixCache = null;
     this._paragraphStyle = options.paragraphStyle;
     this._textStyle = options.textStyle;
     this._id = options.id;
@@ -1999,10 +2243,6 @@ export class ParagraphEngine {
    * 텍스트 콘텐츠를 설정한다.
    *
    * @param value - 새 텍스트 콘텐츠.
-   * @param caretEditOffset - 편집이 발생한 plain-text 오프셋 (prefix 캐시용 힌트).
-   *   생략 시 prefix 캐시를 사용하지 않고 전체 재배치. `TextEditController`가
-   *   타이핑 시 커서 위치를 전달하면 캐럿 이전 배치 결과를 재사용하여
-   *   재배치 비용을 캐럿 이후 길이에 비례하도록 단축.
    */
   public set textContent(value: string | (string | TextInlineData)[]) {
     this._textContent = value;
@@ -2015,6 +2255,18 @@ export class ParagraphEngine {
   /** 현재 텍스트 콘텐츠 */
   public get textContent(): string | (string | TextInlineData)[] {
     return this._textContent;
+  }
+
+  /**
+   * 편집 위치 힌트를 설정한다. `layoutText()`가 prefix 캐시 적용 시도에 사용.
+   * `textContent` setter 후, `layoutText()` 호출 전에 설정. 소비 후 자동 리셋.
+   */
+  public set caretHint(offset: number | undefined) {
+    this._caretHint = offset;
+  }
+
+  public get caretHint(): number | undefined {
+    return this._caretHint;
   }
 
   /** `\n`으로 분리된 라인 원본 (라인 × 인라인 런 배열) */
