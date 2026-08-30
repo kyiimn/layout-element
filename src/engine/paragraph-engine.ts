@@ -123,10 +123,41 @@ export class ParagraphEngine {
   private _overflow: number = 0;
 
   /**
-   * 컬럼별 누적 왼쪽 오프셋 (mm). `_columnWidths` + `_gaps`의 prefix sum.
-   * `_layoutColumnsPass` 시작 시 1회 계산, `_createLineWithParts`에서 O(1) 조회.
+   * 컬럼별 누적 왼쪽 오프셋 (mm). `_columnLeftOffsets[i]` = widths[0..i-1] 합 + gaps[0..i-1] 합.
+   * `_layoutColumnsPass` 시작 시 1회 계산, `_createLineWithParts`/`getCharRect`/`getOffsetFromPoint`
+   * 에서 O(1) 조회한다. 렌더 전 조회를 위해 `columnLeftOffset()`가 lazy 초기화한다.
    */
   private _columnLeftOffsets: number[] = [];
+
+  /**
+   * 컬럼 idx의 왼쪽 오프셋 (mm)을 반환한다.
+   *
+   * `_columnLeftOffsets`는 `_layoutColumnsPass`가 채우므로 렌더 전에는 비어 있다 —
+   * 이때는 원본 공식으로 직접 계산한다. 단일 소스 보장을 위해 두 경로 모두
+   * 동일한 prefix sum 공식을 사용한다.
+   *
+   * @param idx - 컬럼 인덱스
+   * @returns 컬럼 왼쪽 오프셋 (mm). idx가 범위 밖이면 0
+   *
+   * @example
+   * ```ts
+   * // widths [57.7, 57.7, 57.7], gaps [5, 5]
+   * columnLeftOffset(0); // → 0
+   * columnLeftOffset(1); // → 62.7 (57.7 + 5)
+   * columnLeftOffset(2); // → 125.3 (57.7×2 + 5×2)
+   * ```
+   */
+  private columnLeftOffset(idx: number): number {
+    if (idx >= 0 && idx < this._columnLeftOffsets.length) {
+      return this._columnLeftOffsets[idx]!;
+    }
+    let sum = 0;
+    for (let i = 0; i < idx && i < this._columnWidths.length; i++) {
+      sum += this._columnWidths[i]!;
+      if (i < this._gaps.length) sum += this._gaps[i]!;
+    }
+    return sum;
+  }
 
   private _previousLineCount: number = -1;
   private _previousOverflow: number = -1;
@@ -692,7 +723,7 @@ export class ParagraphEngine {
     partWidths: number[];
     lineData: TextLineData;
   } {
-    const columnLeftMm = this._columnLeftOffsets[columnIndex] ?? 0;
+    const columnLeftMm = this.columnLeftOffset(columnIndex);
     const lineLeftMm = this._data.parentAbsRect.absLeft + columnLeftMm;
     const lineTopMm = this._data.parentAbsRect.absTop + alignOffsetMm + lineIndexInColumn * this._lineHeight;
     const lineWidthMm = this._columnWidths[columnIndex];
@@ -1270,12 +1301,17 @@ export class ParagraphEngine {
     if (startColumn === 0) {
       this._columnContents = [];
       this._overflow = 0;
+      // 컬럼 왼쪽 오프셋 prefix sum: columnLeft(idx) = widths[0..idx-1] 합 + gaps[0..idx-1] 합.
+      // cum에 gap도 함께 누적해야 한다 — width만 누적하고 직전 gap 하나만 더하면
+      // 3단(idx≥2)부터 이전 gap들이 누락되어 라인 rect가 실제보다 왼쪽으로
+      // 계산되고, 오버랩 회피 free region이 오른쪽으로 치우쳐진다.
       this._columnLeftOffsets = new Array(this._columnWidths.length + 1);
       let cum = 0;
       this._columnLeftOffsets[0] = 0;
       for (let i = 0; i < this._columnWidths.length; i++) {
         cum += this._columnWidths[i];
-        this._columnLeftOffsets[i + 1] = cum + (i < this._gaps.length ? this._gaps[i] : 0);
+        if (i < this._gaps.length) cum += this._gaps[i];
+        this._columnLeftOffsets[i + 1] = cum;
       }
     }
     this._overlayRectsMm = null;
@@ -2117,9 +2153,7 @@ export class ParagraphEngine {
     let offset = 0;
     for (let c = 0; c < this._columnContents.length; c++) {
       const column = this._columnContents[c];
-      const columnLeftMm =
-        this._columnWidths.slice(0, c).reduce((a, b) => a + b, 0) +
-        this._gaps.slice(0, c).reduce((a, b) => a + b, 0);
+      const columnLeftMm = this.columnLeftOffset(c);
 
       const alignOffsetMm = this._computeAlignOffsetMm(column, effectiveColumnHeightMm, baseFontSizeMm, columnHeightMm);
 
@@ -2203,9 +2237,7 @@ export class ParagraphEngine {
     let columnIdx = -1;
     let columnLeftMm = 0;
     for (let c = 0; c < this._columnWidths.length; c++) {
-      const xStart =
-        this._columnWidths.slice(0, c).reduce((a, b) => a + b, 0) +
-        this._gaps.slice(0, c).reduce((a, b) => a + b, 0);
+      const xStart = this.columnLeftOffset(c);
       const xEnd = xStart + this._columnWidths[c];
       const isLastColumn = c === this._columnWidths.length - 1;
       if (relX >= xStart && (isLastColumn ? relX <= xEnd : relX < xEnd)) {
