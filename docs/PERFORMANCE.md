@@ -33,6 +33,7 @@
   - [3.11 AI 처리 오버레이 CSS 토글](#311-ai-처리-오버레이-css-토글)
   - [3.12 Skeleton 레이아웃 캐시](#312-skeleton-레이아웃-캐시-_layoutcache)
   - [3.13 charOffsets 단일 span 구조](#313-charoffsets-단일-span-구조)
+  - [3.14 Prefix 캐시](#314-prefix-캐시-_prefixcache)
 - [4. 이벤트/입력 최적화](#4-이벤트입력-최적화)
   - [4.1 TextEditController 디바운스 렌더링](#41-texteditcontroller-디바운스-렌더링-_debouncedrender)
   - [4.2 낙관적 span](#42-낙관적-span-optimistic-span)
@@ -387,7 +388,7 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 | 매개변수 | 설명 |
 |---|---|
 | `textContent` | 텍스트 내용 |
-| `textInlineStyle` (배열 블록별) | 인라인 런 스타일 (`fontFamily`/`fontSize`/`fontWeight`/`fontStyle`/`color`). **제외 시 인라인 스타일만 변경된 주입(굵게/기울임 등)에서 텍스트 불변 → 해시 동일 → 캐시 히트 → 구 `columnContents`(구 `inlineStyles`) 재사용으로 화면 미갱신 버그 발생** |
+| `textInlineStyle` (배열 블록별) | 인라인 런 스타일 중 **배치 영향 필드** (`fontFamily`/`fontSize`/`fontStyle`). `fontWeight`/`color`는 글자 폭/라인 높이에 무영향이므로 **해시에서 제외** — 굵게/색상 주입 시 캐시 히트 → 재래핑 생략. 캐시 히트 시 `_refreshInlineStylesOnly()` 경량 패스가 `inlineStyles`만 최신 `textContent`에서 재매핑 |
 | `_columnWidths` + `_gaps` | 컬럼 폭/간격 |
 | `_lineHeight` | 줄 높이 (fontSize × lineGap) |
 | `widthRatio` | 장평 |
@@ -412,6 +413,14 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 - 입력 매개변수 변경 시 자동으로 해시가 달라져 캐시 미스 → 전체 재배치
 - **이미지 로드 완료 시**: `LayoutImageElement.render()`의 캐시 미스(첫 로드) 경로 완료 후 `_notifyOverlapParagraphs()`가 부모 박스의 `requestRerenderAffectedParagraphs()`를 호출 → `markStructureChangedAndRender()` → `resetIncrementalState()` → 캐시 무효화 → 재배치. 최초 로딩 시 이미지 canvas가 비어 있는 상태에서 단락이 먼저 렌더링되어 오버랩 판정이 누락되는 문제를 해결.
 
+#### 캐시 히트 시 `inlineStyles` 갱신 (`_refreshInlineStylesOnly`)
+
+해시에서 `fontWeight`/`color`가 제외되어, 굵게/색상 주입만 변경된 경우 캐시 히트가 발생. 이때 캐시된 `columnContents`의 `inlineStyles`는 구 값이므로, `_refreshInlineStylesOnly()` 경량 패스가 `_contents`를 평탄화하여 각 파트의 `inlineStyles[j]`를 최신 `textContent`에서 재매핑. 배치 결과(라인/파트 구조, `charOffsets`)는 캐시된 그대로 유지. `_computePerLineHeights()`도 재호출하여 인라인 `fontSize` 변경 시 `maxFontSize`/`lineHeight` 갱신.
+
+#### `_parseContents()` 결과 캐싱 (`_parsedContentsCache`)
+
+`_parseContents()`는 `_textContent` 참조 동일성 기반으로 결과를 캐싱. Skeleton 캐시 미스 시에도 `textContent`가 변경되지 않았으면 편집(블록/런 분해)을 생략. `data` setter / `textContent` setter에서 무효화. `updateOverlayContext()`는 `textContent`를 변경하지 않으므로 캐시 보존.
+
 #### 효과
 
 | 시나리오 | 현재 (캐시 없음) | Skeleton 캐시 적용 후 |
@@ -423,6 +432,32 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 | 장평/자간 변경 | 전체 재배치 | 해시 미스 → 전체 재배치 (정확함) |
 | 오버랩 이미지만 독립 이동 | 전체 재배치 | 상대 좌표 변화 → 해시 미스 → 전체 재배치 (정확함) |
 | 이미지 첫 로드 완료 | 오버랩 누락 (canvas 비어있음) | `_notifyOverlapParagraphs()` → 캐시 무효화 → **재배치로 오버랩 정상 적용** |
+| 인라인 굵게/색상 주입 (인라인 런) | 전체 재배치 | `fontWeight`/`color` 해시 제외 → **캐시 히트 → `_refreshInlineStylesOnly` 경량 패스** |
+| 인라인 `fontSize`/`fontFamily` 변경 | 전체 재배치 | 해시 미스 → 전체 재배치 (정확함 — 폭/높이 영향) |
+| 연속 타이핑 (캐럿 이후 1글자 추가) | 전체 재배치 | **prefix 캐시 히트 → 캐럿 이후만 재배치** (§3.14) |
+
+#### 3.14 Prefix 캐시 (`_prefixCache`)
+
+| 항목 | 값 |
+|---|---|
+| 위치 | `ParagraphEngine._prefixCache` (`paragraph-engine.ts`) |
+| 타입 | `{ hash, columnContents, startColumnIdx, startBlockIdx, startRunIdx, startCharIdx, cumulativeOverflow } \| null` |
+| 적용 대상 | `_layoutTextIntoColumns()` 진입부, `_caretHint`가 설정된 경우 |
+
+연속 타이핑 시 재배치 비용을 문단 전체 길이가 아닌 **캐럿 이후 길이**에 비례하도록 단축. `TextEditController._commitPendingInput()`이 `flushRender()` 전에 `model.caretHint = cursorOffset`으로 편집 위치를 전달하면, 엔진이 캐럿 이전 컬럼들의 배치 결과를 재사용하고 이후만 재배치.
+
+**적용 조건** (모두 만족 시):
+- `_caretHint`가 `undefined`가 아니고 `> 0`
+- `verticalAlign`이 `'top'` (`'center'`/`'bottom'`은 라인 수 의존적이므로 제외)
+- `_prefixCache`가 존재하고 해시가 동일
+
+**`_computePrefixHash`**: 캐럿 이전의 plain-text + 배치 영향 인라인 필드(`fontFamily`/`fontSize`/`fontStyle`) + 컬럼/스타일 파라미터 + 오버랩 상대 좌표를 해싱.
+
+**`_buildPrefixCache`**: 전체 재배치 후 호출. 캐럿 오프셋 이전에 해당하는 컬럼들을 prefix로 저장하고, 재배치 시작점(`startColumnIdx`/`startBlockIdx`/`startRunIdx`/`startCharIdx`)을 계산.
+
+**`_applyPrefixCache`**: prefix 컬럼들을 `this._columnContents`에 복원하고, `_layoutColumnsPass`를 `startColumn`부터 시작하여 재배치. 이후 `_applyLineBreakRules`/`_computeCharOffsets`/`_computePerLineHeights`로 후처리.
+
+**캐시 무효화**: `data` setter / `textContent` setter / `verticalAlign`이 `center`/`bottom`인 경우. `layoutText()` 소비 후 `_caretHint`는 자동으로 `undefined`로 리셋.
 
 #### 테이블 `refreshBorder` 증분 갱신
 
@@ -834,4 +869,8 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | 가상화 | 뷰포트 밖 컬럼/라인 DOM 지연 생성 | 다중 페이지 DOM 크기 감소 | 중간 |
 | `_getAllColumns()` 캐싱 | `EditCoordinateMapper`에서 컬럼 목록 캐싱 | `querySelectorAll` 호출 감소 | 낮음 |
 | ~~키 입력 O(N) 패스 제거~~ | ~~`_getPlainText()`/`postRender`가 캐시 getter 사용 + `mapper.rebuild()` 증분화~~ | ~~타이핑 O(N) inlineToPlain 제거~~ | ~~구현됨: Phase 1(캐시 getter) + Phase 2(델타 스플라이스 + `rebuildMappingsOnly()`)~~ |
-| 부분 증분 `layoutText` | 캐럿 이전 라인 재래핑 불변성을 이용한 prefix 라인 캐시 (엔진 단일 소스 원칙 내) | 연속 타이핑 중 전체 재래핑 제거 | 높음 |
+| ~~부분 증분 `layoutText`~~ | ~~캐럿 이전 라인 재래핑 불변성을 이용한 prefix 라인 캐시 (엔진 단일 소스 원칙 내)~~ | ~~연속 타이핑 중 전체 재래핑 제거~~ | ~~구현됨 (§3.14 — 컬럼 단위 prefix 캐시, `verticalAlign: top` 한정)~~ |
+| ~~`_parseContents()` 1패스화~~ | ~~중간 `runSeq` 배열 제거, 1패스 직접 구축~~ | ~~편집 메모리 할당 50% 감소~~ | ~~구현됨~~ |
+| ~~`_layoutColumnsPass()` `flatChars` 제거~~ | ~~`flatMap`+`split("")` 중간 배열 제거, `(runIdx, charIdx)` 이중 인덱스 직접 순회~~ | ~~배치 시 객체 할당 0, 속도 40~60% 개선~~ | ~~구현됨~~ |
+| ~~Skeleton 캐시 키 분리~~ | ~~`fontWeight`/`color` 해시 제외 + `_refreshInlineStylesOnly` 경량 패스~~ | ~~굵게/색상 주입 시 재래핑 생략~~ | ~~구현됨~~ |
+| ~~`_parseContents()` 결과 캐싱~~ | ~~`_parsedContentsCache`: `textContent` 참조 동일성 기반~~ | ~~캐시 미스 시 편집 생략~~ | ~~구현됨~~ |

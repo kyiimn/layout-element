@@ -146,6 +146,12 @@ export class ParagraphEngine {
   /** Skeleton 캐시: 입력 매개변수 해시가 동일하면 _layoutTextIntoColumns() 결과를 재사용. */
   private _layoutCache: { hash: string; columnContents: TextLineData[][]; overflow: number } | null = null;
 
+  /**
+   * `_parseContents()` 결과 캐시. `textContent` 참조가 동일하면 편집(블록/런 분해)을 생략.
+   * `data` setter / `textContent` setter에서 무효화.
+   */
+  private _parsedContentsCache: { textContent: string | (string | TextInlineData)[]; contents: TextInlineData[][] } | null = null;
+
   /** `_layoutCache` 존재 여부 (외부 스킵 판정용). */
   get hasLayoutCache(): boolean { return this._layoutCache !== null; }
 
@@ -703,37 +709,39 @@ export class ParagraphEngine {
    * 양쪽 라인으로 분할된다.
    */
   private _parseContents(): void {
-    const rawContents = !Array.isArray(this._textContent) ? [{ content: this._textContent }] : this._textContent;
-
-    const runSeq: { style: TextInlineStyle | undefined; char: string }[] = [];
-    for (const c of rawContents) {
-      const style = typeof c === "string" ? undefined : c.textInlineStyle;
-      const content = typeof c === "string" ? c : c.content;
-      for (const ch of content) {
-        runSeq.push({ style, char: ch });
-      }
+    if (this._parsedContentsCache !== null && this._parsedContentsCache.textContent === this._textContent) {
+      this._contents = this._parsedContentsCache.contents;
+      return;
     }
+
+    const rawContents = !Array.isArray(this._textContent) ? [{ content: this._textContent }] : this._textContent;
 
     this._contents = [];
     let curLine: TextInlineData[] = [];
     let curRun: TextInlineData | null = null;
 
-    for (const { style, char } of runSeq) {
-      if (char === "\n") {
-        this._contents.push(curLine);
-        curLine = [];
-        curRun = null;
-        continue;
-      }
-      const prev = curLine[curLine.length - 1];
-      if (curRun !== null && prev === curRun && inlineStyleEqual(prev.textInlineStyle, style)) {
-        prev.content += char;
-      } else {
-        curRun = { content: char, textInlineStyle: style };
-        curLine.push(curRun);
+    for (const c of rawContents) {
+      const style = typeof c === "string" ? undefined : c.textInlineStyle;
+      const content = typeof c === "string" ? c : c.content;
+      for (const ch of content) {
+        if (ch === "\n") {
+          this._contents.push(curLine);
+          curLine = [];
+          curRun = null;
+          continue;
+        }
+        const prev = curLine[curLine.length - 1];
+        if (curRun !== null && prev === curRun && inlineStyleEqual(prev.textInlineStyle, style)) {
+          prev.content += ch;
+        } else {
+          curRun = { content: ch, textInlineStyle: style };
+          curLine.push(curRun);
+        }
       }
     }
     if (curLine.length > 0) this._contents.push(curLine);
+
+    this._parsedContentsCache = { textContent: this._textContent, contents: this._contents };
   }
 
   /**
@@ -749,6 +757,7 @@ export class ParagraphEngine {
       this._columnContents = this._layoutCache.columnContents;
       this._overflow = this._layoutCache.overflow;
       this._overlayRectsMm = null;
+      this._refreshInlineStylesOnly();
       return;
     }
 
@@ -763,11 +772,8 @@ export class ParagraphEngine {
       ? columnHeightMm + (this._lineHeight - baseFontSizeMm)
       : 0;
 
-    // Pass 1: alignOffsetMm=0 으로 레이아웃 수행하여 라인 수 결정.
     this._layoutColumnsPass(new Array(this.columnCount).fill(0));
 
-    // verticalAlign center/bottom: Pass 1 결과로 alignOffsetMm 계산 후 재수행.
-    // 라인 수가 안정될 때까지 반복 (최대 3회).
     const verticalAlign = this.effectiveParagraphStyle.verticalAlign!;
     if (verticalAlign === 'center' || verticalAlign === 'bottom') {
       for (let iter = 0; iter < 3; iter++) {
@@ -795,6 +801,68 @@ export class ParagraphEngine {
       columnContents: this._columnContents,
       overflow: this._overflow,
     };
+  }
+
+  /**
+   * 캐시된 배치 결과의 `inlineStyles`만 현재 `textContent`에서 재매핑한다.
+   *
+   * Skeleton 캐시 히트 시(배치 영향 필드인 fontFamily/fontSize/fontStyle이
+   * 불변, fontWeight/color만 변경) 호출된다. 배치 결과(라인/파트 구조,
+   * 글자 순서, charOffsets)는 캐시된 그대로 유지하고, 각 파트의
+   * `inlineStyles[j]`만 최신 `_contents`에서 다시 채운다.
+   *
+   * 알고리즘: `_contents`를 평탄화된 글자 스트림으로 순회하며,
+   * `columnContents`의 각 파트 `content` 글자를 순서대로 소비하여
+   * 대응하는 런의 `textInlineStyle`을 `inlineStyles[j]`에 설정한다.
+   * `_applyLineBreakRules()`로 인한 라인 간 글자 이동이 있어도
+   * 전체 평탄화 순서는 불변이므로 정확히 매칭된다.
+   */
+  private _refreshInlineStylesOnly(): void {
+    this._parseContents();
+
+    let blockIdx = 0;
+    let runIdx = 0;
+    let charIdx = 0;
+
+    const nextStyle = (): TextInlineStyle | undefined => {
+      while (blockIdx < this._contents.length) {
+        const runs = this._contents[blockIdx];
+        if (runIdx >= runs.length) {
+          blockIdx++;
+          runIdx = 0;
+          charIdx = 0;
+          continue;
+        }
+        const run = runs[runIdx];
+        if (charIdx >= run.content.length) {
+          runIdx++;
+          charIdx = 0;
+          continue;
+        }
+        const style = run.textInlineStyle;
+        charIdx++;
+        return style;
+      }
+      return undefined;
+    };
+
+    for (const column of this._columnContents) {
+      for (const line of column) {
+        for (const part of line.parts) {
+          if (part.content.length === 0) {
+            part.inlineStyles = [];
+            continue;
+          }
+          const styles: (TextInlineStyle | undefined)[] = new Array(part.content.length);
+          for (let j = 0; j < part.content.length; j++) {
+            styles[j] = nextStyle();
+          }
+          part.inlineStyles = styles;
+        }
+      }
+    }
+
+    this._computePerLineHeights();
   }
 
   /**
@@ -885,10 +953,8 @@ export class ParagraphEngine {
    * `alignOffsetsMm` 파라미터로 각 컬럼의 verticalAlign 오프셋을 받는다.
    *
    * `this.contents`는 `\n`으로 분리된 라인 배열이며, 각 라인은
-   * `TextInlineData[]`(런 배열)이다. 배치 시 런을 펼쳐 (문자, 스타일) 쌍으로
-   * 처리하되, 블록(라인) 루프 구조를 유지하여 `firstOfBlock`/`endOfBlock`
-   * 경계 처리와 컬럼 전환 시 `idxContentOfBlock` 진행이 원본과 동일하게
-   * 작동한다.
+   * `TextInlineData[]`(런 배열)이다. 런을 펼쳐서 중간 배열(flatChars)을
+   * 만들지 않고 (runIdx, charIdx) 이중 인덱스로 직접 순회한다.
    *
    * @param alignOffsetsMm - 컬럼별 alignOffsetMm 배열 (top 정렬이면 모두 0)
    */
@@ -898,7 +964,8 @@ export class ParagraphEngine {
     this._overlayRectsMm = null;
 
     let beforeIdxBlock = 0;
-    let beforeIdxContentOfBlock = 0;
+    let beforeRunIdx = 0;
+    let beforeCharIdx = 0;
 
     for (let curColumn = 0; curColumn < this.columnCount; curColumn++) {
       let columnContent: TextLineData[] = [];
@@ -909,14 +976,20 @@ export class ParagraphEngine {
       let isColumnOverflow = false;
 
       let idxBlock = beforeIdxBlock;
-      let idxContentOfBlock = beforeIdxContentOfBlock;
+      let runIdx = beforeRunIdx;
+      let charIdx = beforeCharIdx;
       const alignOffsetMm = alignOffsetsMm[curColumn] ?? 0;
 
       for (; idxBlock < this.contents.length; idxBlock++) {
         const runs = this.contents[idxBlock];
-        if (idxBlock !== beforeIdxBlock) idxContentOfBlock = 0;
+        if (idxBlock !== beforeIdxBlock) { runIdx = 0; charIdx = 0; }
 
-        if (!hasLine || idxContentOfBlock === 0) {
+        const blockTotalChars = runs.reduce((sum, r) => sum + r.content.length, 0);
+        let flatIdxInBlock = 0;
+        for (let r = 0; r < runIdx; r++) flatIdxInBlock += runs[r].content.length;
+        flatIdxInBlock += charIdx;
+
+        if (!hasLine || (runIdx === 0 && charIdx === 0)) {
           let isFirstLineInLoop = true;
           while (true) {
             const isFirstInColumn = curColumn === 0 && columnContent.length < 1 && isFirstLineInLoop;
@@ -924,7 +997,7 @@ export class ParagraphEngine {
               curColumn,
               columnContent.length,
               isFirstInColumn,
-              idxContentOfBlock === 0,
+              runIdx === 0 && charIdx === 0,
               alignOffsetMm,
             );
             isColumnOverflow = result.overflow;
@@ -970,98 +1043,52 @@ export class ParagraphEngine {
           }
         }
 
-        const flatChars = runs.flatMap((r) => r.content.split("").map((ch) => ({ ch, style: r.textInlineStyle })));
-
         const letterSpacingEm = this.effectiveTextStyle.letterSpacing!;
 
-        for (; idxContentOfBlock < flatChars.length; idxContentOfBlock++) {
-          const { ch: char, style: inlineStyle } = flatChars[idxContentOfBlock];
-          const letterSpacingFontSize = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
-          const letterSpacingMm = letterSpacingEm * letterSpacingFontSize;
-          const rawCharWidth = this._charWidthMm(char, inlineStyle);
-          const baseWidth = rawCharWidth * this.widthRatio;
-          const charWidth = baseWidth + letterSpacingMm;
+        charLoop: while (runIdx < runs.length) {
+          const run = runs[runIdx];
+          const inlineStyle = run.textInlineStyle;
+          const content = run.content;
 
-          const targetLine = columnContent[columnContent.length - 1];
+          for (; charIdx < content.length; charIdx++, flatIdxInBlock++) {
+            const char = content[charIdx];
+            const letterSpacingFontSize = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
+            const letterSpacingMm = letterSpacingEm * letterSpacingFontSize;
+            const rawCharWidth = this._charWidthMm(char, inlineStyle);
+            const baseWidth = rawCharWidth * this.widthRatio;
+            const charWidth = baseWidth + letterSpacingMm;
 
-          const pushCharToPart = (line: TextLineData, partIdx: number): void => {
-            const part = line.parts[partIdx];
-            part.content.push(char);
-            (part.inlineStyles ??= []).length = part.content.length;
-            part.inlineStyles[part.content.length - 1] = inlineStyle;
-          };
+            const targetLine = columnContent[columnContent.length - 1];
 
-          const placeChar = (): boolean => {
-            if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
-              cumulativeWidths[currentPartIdx] += charWidth;
-              pushCharToPart(targetLine, currentPartIdx);
-              return true;
-            }
-            return false;
-          };
+            const pushCharToPart = (line: TextLineData, partIdx: number): void => {
+              const part = line.parts[partIdx];
+              part.content.push(char);
+              (part.inlineStyles ??= []).length = part.content.length;
+              part.inlineStyles[part.content.length - 1] = inlineStyle;
+            };
 
-          if (placeChar()) {
-            if (idxContentOfBlock >= flatChars.length - 1) {
-              columnContent[columnContent.length - 1].endOfBlock = true;
-            }
-
-            if (isColumnOverflow) {
-              if (curColumn < this._columnWidths.length - 1) {
-                if (idxContentOfBlock < flatChars.length - 1) {
-                  columnContent = this._removeTrailingEmptyLine(columnContent);
-                }
-                break;
-              } else {
-                this._overflow++;
+            const placeChar = (): boolean => {
+              if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
+                cumulativeWidths[currentPartIdx] += charWidth;
+                pushCharToPart(targetLine, currentPartIdx);
+                return true;
               }
-            }
-            continue;
-          }
+              return false;
+            };
 
-          let placed = false;
-          currentPartIdx++;
-          while (currentPartIdx < partWidths.length) {
-            if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
-              cumulativeWidths[currentPartIdx] += charWidth;
-              pushCharToPart(targetLine, currentPartIdx);
-              placed = true;
-              break;
-            }
-            currentPartIdx++;
-          }
+            const isLastCharInBlock = flatIdxInBlock >= blockTotalChars - 1;
 
-          if (placed) {
-            if (idxContentOfBlock >= flatChars.length - 1) {
-              columnContent[columnContent.length - 1].endOfBlock = true;
-            }
-
-            if (isColumnOverflow) {
-              if (curColumn < this._columnWidths.length - 1) {
-                if (idxContentOfBlock < flatChars.length - 1) {
-                  columnContent = this._removeTrailingEmptyLine(columnContent);
-                }
-                break;
-              } else {
-                this._overflow++;
+            if (placeChar()) {
+              if (isLastCharInBlock) {
+                columnContent[columnContent.length - 1].endOfBlock = true;
               }
-            }
-            continue;
-          }
 
-          while (true) {
-            const result = this._createLineWithParts(curColumn, columnContent.length, false, false, alignOffsetMm);
-            isColumnOverflow = result.overflow;
-
-            if (result.cover) {
-              columnContent.push(result.lineData);
-              partWidths = [];
-              hasLine = false;
-              if (result.overflow) {
+              if (isColumnOverflow) {
                 if (curColumn < this._columnWidths.length - 1) {
-                  if (idxContentOfBlock < flatChars.length - 1) {
+                  if (!isLastCharInBlock) {
                     columnContent = this._removeTrailingEmptyLine(columnContent);
                   }
-                  break;
+                  break charLoop;
                 } else {
                   this._overflow++;
                 }
@@ -1069,75 +1096,130 @@ export class ParagraphEngine {
               continue;
             }
 
-            if (result.overflow) {
-              if (curColumn < this._columnWidths.length - 1) {
-                if (idxContentOfBlock < flatChars.length - 1) {
-                  columnContent = this._removeTrailingEmptyLine(columnContent);
-                }
-                hasLine = false;
-                partWidths = [];
-                break;
-              } else {
-                this._overflow++;
-              }
-            }
-
-            columnContent.push(result.lineData);
-            hasLine = true;
-            partWidths = result.partWidths;
-            currentPartIdx = 0;
-            cumulativeWidths = new Array(partWidths.length).fill(0);
-
-            if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
-              cumulativeWidths[currentPartIdx] += charWidth;
-              pushCharToPart(columnContent[columnContent.length - 1], currentPartIdx);
-              break;
-            }
-
+            let placed = false;
             currentPartIdx++;
             while (currentPartIdx < partWidths.length) {
               if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
                 cumulativeWidths[currentPartIdx] += charWidth;
-                pushCharToPart(columnContent[columnContent.length - 1], currentPartIdx);
+                pushCharToPart(targetLine, currentPartIdx);
+                placed = true;
                 break;
               }
               currentPartIdx++;
             }
 
-            if (currentPartIdx >= partWidths.length) {
-              const maxPartWidth = partWidths.length > 0 ? Math.max(...partWidths) : 0;
-              if (charWidth > maxPartWidth + 1e-6) {
-                pushCharToPart(columnContent[columnContent.length - 1], 0);
-                cumulativeWidths[0] += charWidth;
-                break;
+            if (placed) {
+              if (isLastCharInBlock) {
+                columnContent[columnContent.length - 1].endOfBlock = true;
               }
-              columnContent = this._removeTrailingEmptyLine(columnContent);
-              idxContentOfBlock--;
-              currentPartIdx = 0;
+
+              if (isColumnOverflow) {
+                if (curColumn < this._columnWidths.length - 1) {
+                  if (!isLastCharInBlock) {
+                    columnContent = this._removeTrailingEmptyLine(columnContent);
+                  }
+                  break charLoop;
+                } else {
+                  this._overflow++;
+                }
+              }
               continue;
             }
 
-            break;
-          }
+            while (true) {
+              const result = this._createLineWithParts(curColumn, columnContent.length, false, false, alignOffsetMm);
+              isColumnOverflow = result.overflow;
 
-          if (isColumnOverflow && curColumn < this._columnWidths.length - 1) {
-            break;
-          }
-
-          if (idxContentOfBlock >= flatChars.length - 1) {
-            columnContent[columnContent.length - 1].endOfBlock = true;
-          }
-
-          if (isColumnOverflow) {
-            if (curColumn < this._columnWidths.length - 1) {
-              if (idxContentOfBlock < flatChars.length - 1) {
-                columnContent = this._removeTrailingEmptyLine(columnContent);
+              if (result.cover) {
+                columnContent.push(result.lineData);
+                partWidths = [];
+                hasLine = false;
+                if (result.overflow) {
+                  if (curColumn < this._columnWidths.length - 1) {
+                    if (!isLastCharInBlock) {
+                      columnContent = this._removeTrailingEmptyLine(columnContent);
+                    }
+                    break charLoop;
+                  } else {
+                    this._overflow++;
+                  }
+                }
+                continue;
               }
+
+              if (result.overflow) {
+                if (curColumn < this._columnWidths.length - 1) {
+                  if (!isLastCharInBlock) {
+                    columnContent = this._removeTrailingEmptyLine(columnContent);
+                  }
+                  hasLine = false;
+                  partWidths = [];
+                  break charLoop;
+                } else {
+                  this._overflow++;
+                }
+              }
+
+              columnContent.push(result.lineData);
+              hasLine = true;
+              partWidths = result.partWidths;
+              currentPartIdx = 0;
+              cumulativeWidths = new Array(partWidths.length).fill(0);
+
+              if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
+                cumulativeWidths[currentPartIdx] += charWidth;
+                pushCharToPart(columnContent[columnContent.length - 1], currentPartIdx);
+                break;
+              }
+
+              currentPartIdx++;
+              while (currentPartIdx < partWidths.length) {
+                if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
+                  cumulativeWidths[currentPartIdx] += charWidth;
+                  pushCharToPart(columnContent[columnContent.length - 1], currentPartIdx);
+                  break;
+                }
+                currentPartIdx++;
+              }
+
+              if (currentPartIdx >= partWidths.length) {
+                const maxPartWidth = partWidths.length > 0 ? Math.max(...partWidths) : 0;
+                if (charWidth > maxPartWidth + 1e-6) {
+                  pushCharToPart(columnContent[columnContent.length - 1], 0);
+                  cumulativeWidths[0] += charWidth;
+                  break;
+                }
+                columnContent = this._removeTrailingEmptyLine(columnContent);
+                charIdx--;
+                flatIdxInBlock--;
+                currentPartIdx = 0;
+                continue;
+              }
+
               break;
-            } else {
-              this._overflow++;
+            }
+
+            if (isColumnOverflow && curColumn < this._columnWidths.length - 1) {
+              break charLoop;
+            }
+
+            if (isLastCharInBlock) {
+              columnContent[columnContent.length - 1].endOfBlock = true;
+            }
+
+            if (isColumnOverflow) {
+              if (curColumn < this._columnWidths.length - 1) {
+                if (!isLastCharInBlock) {
+                  columnContent = this._removeTrailingEmptyLine(columnContent);
+                }
+                break charLoop;
+              } else {
+                this._overflow++;
+              }
             }
           }
+          charIdx = 0;
+          runIdx++;
         }
 
         if (isColumnOverflow) {
@@ -1146,13 +1228,15 @@ export class ParagraphEngine {
       }
 
       if (columnContent.length > 0) {
-        const isEndOfText = idxBlock === this.contents.length && idxContentOfBlock >= this.contents[this.contents.length - 1].length;
+        const isEndOfText = idxBlock === this.contents.length
+          && runIdx >= this.contents[this.contents.length - 1].length;
         if (isEndOfText || isColumnOverflow) {
           columnContent[columnContent.length - 1].endOfText = true;
         }
       }
 
-      beforeIdxContentOfBlock = idxContentOfBlock;
+      beforeRunIdx = runIdx;
+      beforeCharIdx = charIdx;
       beforeIdxBlock = idxBlock;
 
       this._columnContents.push(columnContent);
@@ -1176,18 +1260,17 @@ export class ParagraphEngine {
           parts.push(block);
         } else {
           parts.push(block.content);
-          // textInlineStyle이 해시에 빠지면 스타일만 변경된 주입(굵게/기울임 등)에서
-          // 텍스트가 동일해 해시가 동일 → _layoutCache 히트 → 구 columnContents
-          // (구 inlineStyles) 재사용으로 화면이 갱신되지 않는다.
           const s = block.textInlineStyle;
           if (s) {
+            // 배치(글자 폭, 라인 분할)에 영향을 주는 필드만 해시에 포함.
+            // fontWeight/color는 폭/높이에 무영향이므로 제외 — 스타일만 변경된
+            // 주입(굵게/색상)에서 캐시 히트 → 재래핑 생략. inlineStyles는
+            // _refreshInlineStylesOnly() 경량 패스로 최신화된다.
             parts.push(
               "s:" +
                 (s.fontFamily ?? "") + "," +
                 (s.fontSize ?? "") + "," +
-                (s.fontWeight ?? "") + "," +
-                (s.fontStyle ?? "") + "," +
-                (s.color ?? ""),
+                (s.fontStyle ?? ""),
             );
           }
         }
@@ -1871,6 +1954,7 @@ export class ParagraphEngine {
     this._textContent = options.content;
     this._plainTextCache = null;
     this._styleRuns = null;
+    this._parsedContentsCache = null;
     this._paragraphStyle = options.paragraphStyle;
     this._textStyle = options.textStyle;
     this._id = options.id;
@@ -1915,11 +1999,16 @@ export class ParagraphEngine {
    * 텍스트 콘텐츠를 설정한다.
    *
    * @param value - 새 텍스트 콘텐츠.
+   * @param caretEditOffset - 편집이 발생한 plain-text 오프셋 (prefix 캐시용 힌트).
+   *   생략 시 prefix 캐시를 사용하지 않고 전체 재배치. `TextEditController`가
+   *   타이핑 시 커서 위치를 전달하면 캐럿 이전 배치 결과를 재사용하여
+   *   재배치 비용을 캐럿 이후 길이에 비례하도록 단축.
    */
   public set textContent(value: string | (string | TextInlineData)[]) {
     this._textContent = value;
     this._plainTextCache = null;
     this._styleRuns = null;
+    this._parsedContentsCache = null;
     this._dirty = true;
   }
 

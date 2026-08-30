@@ -442,7 +442,7 @@ const letterSpacingMm = letterSpacingEm * letterSpacingFontSize;
 ```ts
 if (vColumnEl.isOverflow) {
   if (curColumn < this._columnWidths.length - 1) {
-    if (idxContentOfBlock < block.content.length - 1) {
+    if (!isLastCharInBlock) {
       columnContent = this._removeTrailingEmptyLine(columnContent);
     }
     break;
