@@ -295,7 +295,7 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 
 **안전 가드**: 라인 수/오버플로우가 실제로 다르면 `_perfShouldFullRecreate()` 비교가 정상적으로 전체 재생성한다. `lineGap`/`verticalAlign` 등 래핑·라인 수에 영향을 주는 필드는 예약 대상에서 제외된다(`textAlign` 키 검사).
 
-**fontSize 주입은 이 경로의 대상이 아니다** — 폰트 크기 변경은 라인 수가 실제로 변한다(실측: 25→28 라인)는 점에서 full recreate가 정당하며, 이 비용은 구조적이다.
+**fontSize 주입 — 라인 수 변화 diff 렌더링**: `_perfShouldFullRecreate()`는 라인 수 비교를 하지 않는다(overflow 비교만). 라인 수가 변해도 line div 생성/제거와 span 재사용(`data-source-offset` 키)이 라인 인덱스와 무관하게 동작하므로, 재래핑(fontSize 변경, 문단 폭 변경)에서 겹치는 span을 그대로 재사용한다 (실측: fontSize 주입 p95 32.5ms → 21.5ms). overflow 변화는 여전히 전체 재생성을 트리거한다 — 오버플로우 라인은 part/span DOM을 생략하므로 visible↔overflow 전환 시 stale span 정리가 필요하기 때문이다. DOM 정합성은 `scripts/verify-dom-diff.mjs`가 검증한다 (DOM ↔ 엔진 라인별 텍스트 일치, span source-offset 단조성·무중복, 타이핑+wrap 혼합).
 
 ### 3.2 queueMicrotask 배치 렌더링 (`scheduleRender`)
 

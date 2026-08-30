@@ -392,10 +392,9 @@ export class LayoutParagraphElement extends HTMLElement {
       this.dispatchEvent(event);
     }
 
-    const lineCountAfter = this._model.columnContents.reduce((sum, col) => sum + col.length, 0);
     const overflowAfter = this._model.overflow;
 
-    const needsFullRecreate = this._perfShouldFullRecreate(lineCountBefore, overflowBefore, lineCountAfter, overflowAfter);
+    const needsFullRecreate = this._perfShouldFullRecreate(lineCountBefore, overflowBefore, overflowAfter);
 
     if (needsFullRecreate) {
       this.replaceChildren();
@@ -449,23 +448,27 @@ export class LayoutParagraphElement extends HTMLElement {
    * Skeleton 레이아웃 캐시가 히트하면 `columnContents`가 동일 → 라인 수/오버플로우
    * 불변 → diff 렌더링으로 매 프레임 `replaceChildren()` + 전체 span 재생성을 회피.
    *
-   * 단, `lineCountBefore === -1`(초기 렌더 또는 `resetIncrementalState()` 직후)은
-   * 항상 전체 재생성이 필요하다 — 이전 상태가 없으므로 diff 비교가 불가능하다.
+   * 라인 수가 변해도 diff 경로를 사용한다 — line div 생성/제거와 span 재사용
+   * (`data-source-offset` 키)이 라인 인덱스와 무관하게 동작하므로 재래핑
+   * (fontSize 변경, 문단 폭 변경)에서 겹치는 span을 그대로 재사용한다.
+   *
+   * 단, 아래 두 경우는 항상 전체 재생성이 필요하다:
+   * - `lineCountBefore === -1` (초기 렌더 또는 `resetIncrementalState()` 직후):
+   *   이전 상태가 없으므로 diff 비교가 불가능하다.
+   * - overflow 변화: 오버플로우 라인은 part/span DOM을 생략(display:none)하므로
+   *   visible↔overflow 전환 시 stale span 정리를 전체 재생성이 담당한다.
    *
    * @param lineCountBefore - 이전 렌더의 총 라인 수. `-1`이면 초기 상태.
    * @param overflowBefore - 이전 렌더의 오버플로우 문자 수.
-   * @param lineCountAfter - 현재 렌더의 총 라인 수.
    * @param overflowAfter - 현재 렌더의 오버플로우 문자 수.
    * @returns `true`이면 전체 재생성(`replaceChildren()`), `false`이면 diff 렌더링.
    */
   private _perfShouldFullRecreate(
     lineCountBefore: number,
     overflowBefore: number,
-    lineCountAfter: number,
     overflowAfter: number,
   ): boolean {
     return lineCountBefore === -1
-      || lineCountBefore !== lineCountAfter
       || overflowBefore !== overflowAfter;
   }
 
