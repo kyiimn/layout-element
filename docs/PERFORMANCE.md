@@ -282,6 +282,21 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 
 컬럼은 `lastRestyledCount` getter로 재적용 수를 노출하고, `paragraph.render()`가 전 컬럼 합산을 `postRender`에 전달한다. 지연 배치는 `_cancelCursorSelectionUpdate()`로 취소 가능하며 `destroy()`가 항상 해제한다.
 
+### 3.16 정렬 변경 증분 렌더 (`preserveRenderShapeAcrossReset`)
+
+| 항목 | 값 |
+|---|---|
+| 위치 | `ParagraphEngine.preserveRenderShapeAcrossReset()` (`paragraph-engine.ts`) + `paragraphStyle` setter (`paragraph.element.ts`) |
+| 효과 | 정렬 변경 p95 31.6ms → 12.4ms (2000자, 3컬럼) |
+
+`textAlign`은 래핑(line breaking)에 영향을 주지 않아 라인 수가 불변이다. 그러나 `paragraphStyle` setter → `layout()` → 엔진 `data` setter → `resetIncrementalState()` 경로에서 `_previousLineCount`가 -1로 리셋되고, `render()`의 `_perfShouldFullRecreate(-1, …)`가 항상 true가 되어 2000개 span 전체 파괴·재생성(`replaceChildren()`)이 발생했다.
+
+해결: `paragraphStyle` setter가 **textAlign-only 변경**을 감지하면 렌더 직전 형태(라인 수/오버플로우)를 `preserveRenderShapeAcrossReset()`으로 예약한다. `resetIncrementalState()`는 예약이 있으면 캐시 무효화는 하되 센티넬만 보존하고(1회성 소비), 이후 `layoutText()`가 커밋한 새 형태와 비교되어 diff 경로(`position-only` 델타)가 실행된다.
+
+**안전 가드**: 라인 수/오버플로우가 실제로 다르면 `_perfShouldFullRecreate()` 비교가 정상적으로 전체 재생성한다. `lineGap`/`verticalAlign` 등 래핑·라인 수에 영향을 주는 필드는 예약 대상에서 제외된다(`textAlign` 키 검사).
+
+**fontSize 주입은 이 경로의 대상이 아니다** — 폰트 크기 변경은 라인 수가 실제로 변한다(실측: 25→28 라인)는 점에서 full recreate가 정당하며, 이 비용은 구조적이다.
+
 ### 3.2 queueMicrotask 배치 렌더링 (`scheduleRender`)
 
 | 항목 | 값 |

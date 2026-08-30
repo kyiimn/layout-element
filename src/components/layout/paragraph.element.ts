@@ -788,11 +788,23 @@ export class LayoutParagraphElement extends HTMLElement {
    * 단락의 문단 스타일을 설정한다.
    * 스타일이 변경되면 단락의 구조 재계산과 텍스트 재렌더링을 수행한다.
    *
+   * `textAlign`은 래핑(line breaking)에 영향을 주지 않아 라인 수가 불변이다.
+   * 그 외 필드(lineGap 등)는 라인 수가 변할 수 있다. 라인 수가 불변인 변경은
+   * 렌더 형태 보존을 예약(`preserveRenderShapeAcrossReset`)하여 data setter의
+   * 센티널 리셋이 DOM diff 경로를 차단하지 않도록 한다 — 보존 예약이 있어도
+   * 라인 수가 실제로 바뀌면 `_perfShouldFullRecreate()`가 전체 재생성한다.
+   *
    * @param value - 새로운 ParagraphStyle 객체. 기존 값과 같으면 아무 작업도 수행하지 않는다.
    */
   set paragraphStyle(value: ParagraphStyle) {
     if (this._paragraphStyle === value) return;
+    const textAlignOnly = this._model !== undefined
+      && value !== undefined
+      && Object.keys(value).every(k => k === 'textAlign');
     this._paragraphStyle = value;
+    if (textAlignOnly && this._model) {
+      this._model.preserveRenderShapeAcrossReset();
+    }
     this.layout();
     this._perfStructureChanged = true;
     this.scheduleRender();

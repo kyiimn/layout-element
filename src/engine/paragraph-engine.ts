@@ -131,6 +131,12 @@ export class ParagraphEngine {
   private _previousLineCount: number = -1;
   private _previousOverflow: number = -1;
 
+  /**
+   * `preserveRenderShapeAcrossReset()`가 예약한 렌더 형태 보존 요청 (1회성).
+   * `resetIncrementalState()`가 소비 후 null로 돌아간다.
+   */
+  private _renderShapePreserved: { lineCount: number; overflow: number } | null = null;
+
   /** 성능 캐시: 문자별 외부 span 스타일. 키 `${char}|${widthRatio}|${letterSpacing}|${spaceRatio}|${fontSize}`. LRU (5000). */
   private _charOuterStyleCache: _LRU<string, Partial<CSSStyleDeclaration>> = new _LRU(5000);
   /** 성능 캐시: 내부 span 스타일. 장평 변경 시 갱신. */
@@ -1713,10 +1719,50 @@ export class ParagraphEngine {
    * `previousLineCount`와 `previousOverflow`를 -1로 설정한다.
    */
   public resetIncrementalState(): void {
-    this._previousLineCount = -1;
-    this._previousOverflow = -1;
+    if (this._renderShapePreserved) {
+      // preserveRenderShapeAcrossReset()이 예약한 형태 유지 요청이 있으면
+      // 라인 수/오버플로우 센티널만 보존하고 캐시는 무효화한다.
+      const { lineCount, overflow } = this._renderShapePreserved;
+      this._previousLineCount = lineCount;
+      this._previousOverflow = overflow;
+      this._renderShapePreserved = null;
+    } else {
+      this._previousLineCount = -1;
+      this._previousOverflow = -1;
+    }
     this._layoutCache = null;
     this._overlayRectsMm = null;
+  }
+
+  /**
+   * 다음 `data` setter의 `resetIncrementalState()`가 라인 수/오버플로우
+   * 센티널을 보존하도록 현재 렌더 형태를 예약한다.
+   *
+   * 래핑(line breaking)에 영향을 주지 않는 스타일 변경(예: `textAlign`)은
+   * 라인 수가 불변하다. 그런데 `data` setter는 센티널을 -1로 리셋하여
+   * `_perfShouldFullRecreate()`가 항상 true가 되고, DOM diff 경로가 차단되어
+   * 전체 span 재생성(2000자 문단에서 ~30ms)이 발생한다. 이 메서드로 렌더 직전
+   * 형태를 예약하면 `layoutText()`가 커밋한 새 형태와 비교되고, 라인 수가 같으면
+   * 증분 diff(position-only 델타)가 실행된다.
+   *
+   * 안전 가드: `layoutText()` 후 라인 수/오버플로우가 실제로 다르면
+   * `_perfShouldFullRecreate()` 비교가 false→true로 정상 전체 재생성한다.
+   * 예약은 1회성이며, 이후 `data` setter 호출에는 다시 -1 센티널이 적용된다.
+   *
+   * @returns void
+   *
+   * @example
+   * ```ts
+   * // 정렬 변경: 래핑 불변이므로 형태 보존 예약 후 data 주입
+   * engine.preserveRenderShapeAcrossReset();
+   * paragraph.layout();  // data setter → 센티널 보존
+   * ```
+   */
+  public preserveRenderShapeAcrossReset(): void {
+    this._renderShapePreserved = {
+      lineCount: this._previousLineCount,
+      overflow: this._previousOverflow,
+    };
   }
 
   /** 컬럼 스타일 생성 (라인 절대 위치 기반 컨테이너) */
