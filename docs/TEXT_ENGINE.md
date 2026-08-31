@@ -434,6 +434,40 @@ const letterSpacingMm = letterSpacingEm * letterSpacingFontSize;
 `letterSpacing`은 em 단위로 지정되며, 실제 mm 폭은 `letterSpacing * fontSize`로 계산된다 (mm 단위).
 각 문자 폭에 `letterSpacingMm`를 더해 파트 가용 폭(mm)과 비교한다.
 
+### 7.3.1 Right Indent Tab (`\t`) 처리
+
+텍스트의 `\t` 문자는 **Right Indent Tab** 마커로 취급된다 (InDesign Shift+Tab 대응). 편집 단축키와 레이아웃 의미론은 `docs/EDITING_TEXT.md` § 4.1.5를 참조.
+
+**폭 0 규칙 (모든 폭 경로에 적용)**:
+
+| 경로 | 처리 |
+|------|------|
+| `_layoutColumnsPass` 인라인 폭 루프 | `charWidth = 0` |
+| `_computeCharOffsets` 인라인 폭 루프 | `swidth = 0` (letterSpacing 미부가) |
+| `_charWidthMm(char)` | `return 0` (폰트 글리프 조회 스킵) |
+| `getCharWidths(char)` | `{ rawWidth: 0, swidth: 0 }` |
+| `genCharStyle` / `genCharStyleFlat` | `width: 0mm`, `minWidth: 0mm` (+ flat은 `visibility: hidden`) |
+| `buildParagraphPrintPostData` | 출력에서 제외 (iteration은 유지 — offset 산술 보존) |
+
+**배치**: 탭은 폭 0이므로 일반 배치 비교(`cumulative + 0 <= partWidth`)를 통과해 항상 현재 파트에 배치된다. `cumulativeWidths`를 조작하지 않으므로 이후 텍스트의 줄바꿈은 일반 규칙을 따른다.
+
+**정렬 (`_computeCharOffsets` 후처리)**: 파트 content에 탭이 있으면(스트리핑된 범위 내 첫 번째 탭 기준):
+
+```text
+파트 (width W)
+├─ 탭 이전 글자들: 좌측 정렬 — offsets[i] = Σwidths[0..i-1]
+├─ 탭: offsets[tabIdx] = W - Σ(postWidths)   ← 우측 세그먼트 시작
+└─ 탭 이후 글자들: 우측 정렬 — offsets[i] = (W - ΣpostWidths) + Σwidths[firstAfter..i-1]
+```
+
+- 문단 `textAlign`(`justify`/`center` 포함)은 탭이 있는 파트에서 **무시**된다.
+- **오버랩 파트**: 탭은 현재 파트(자유 영역)의 오른쪽 끝에 정렬된다. 컬럼 끝이 아니라 자유 영역 끝이 기준 — 오버랩 회피가 우선한다.
+- **다중 탭**: 첫 탭 기준 collapse (두 번째 이후 탭은 0폭 무의미 마커).
+- **trailing tab**: 우측 세그먼트가 비면 탭 offset = `partWidth`.
+- 배치 단계가 이미 세그먼트를 파트 내에 제한했으므로 `postStart >= leftEnd` (세그먼트 비-겹침)가 항상 성립한다.
+
+**렌더링**: 탭은 0폭 + `visibility: hidden` 단일 span으로 렌더링된다 (`genCharStyleFlat`의 탭 분기). `textContent = '\t'`를 유지하므로 `data-source-offset` diff 키와 `_skipSpanStyleIfUnchanged`의 textContent 비교가 정상 동작한다.
+
 ### 7.4 오버플로우 처리
 
 - 마지막 컬럼이 아닌 경우: 비어 있지 않은 마지막 줄은 유지하고, 빈 줄은 제거한 뒤 다음 컬럼으로 이동

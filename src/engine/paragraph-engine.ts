@@ -90,6 +90,21 @@ export interface ParagraphEngineData {
 type FreeRegion = { start: number; end: number };
 
 /**
+ * Right Indent Tab 문자 (`\t`).
+ *
+ * InDesign의 Shift+Tab(Right Indent Tab)과 동일한 의미론을 가지는
+ * 특수 마커 문자이다. 레이아웃 폭은 항상 **0**이며, `_computeCharOffsets()`
+ * 후처리에서 이 문자 이후의 같은 파트 내 텍스트를 파트 오른쪽 끝에
+ * 우측 정렬시키는 기준점으로 사용된다.
+ *
+ * 폭 0 규칙: 모든 폭 계산 경로(`_charWidthMm`, `_layoutColumnsPass`,
+ * `_computeCharOffsets`, `getCharWidths`, `genCharStyle`, `genCharStyleFlat`)는
+ * 이 문자를 특수 처리하여 0을 반환해야 한다. 폰트 글리프 조회 폴백
+ * (`minWidthMm`)이 적용되면 의도치 않은 공백 폭이 생기므로 금지.
+ */
+const RIGHT_INDENT_TAB_CHAR = "\t";
+
+/**
  * 텍스트 래핑과 다중 컬럼 렌더링을 수행하는 엔진.
  *
  * `ParagraphEngineData`를 받아 텍스트를 래핑하여 `TextLineData[][]`(컬럼별 줄 데이터)로 변환한다.
@@ -392,6 +407,10 @@ export class ParagraphEngine {
     const fontSize = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
     const minWidthMm = this.spaceRatio * fontSize;
 
+    if (char === RIGHT_INDENT_TAB_CHAR) {
+      return 0;
+    }
+
     if (char === " ") {
       return minWidthMm;
     }
@@ -550,6 +569,7 @@ export class ParagraphEngine {
 
           const charWidths: number[] = new Array(strippedCount);
           let totalWidth = 0;
+          let tabIdx = -1;
           let prevFontKey = "";
           let prevFontMap: Map<string, number> | null = null;
           for (let i = 0; i < strippedCount; i++) {
@@ -559,8 +579,11 @@ export class ParagraphEngine {
             const fontSize = inlineStyle?.fontSize ?? baseFontSizeMm;
             const lsMm = letterSpacingEm * fontSize;
             const minWidthMm = effSpaceRatio * fontSize;
+            if (ch === RIGHT_INDENT_TAB_CHAR && tabIdx === -1) tabIdx = i;
             let rawWidth: number;
-            if (ch === " ") {
+            if (ch === RIGHT_INDENT_TAB_CHAR) {
+              rawWidth = 0;
+            } else if (ch === " ") {
               rawWidth = minWidthMm;
             } else {
               const fontKey = (inlineStyle?.fontFamily ?? "") + "|" + fontSize;
@@ -585,13 +608,43 @@ export class ParagraphEngine {
               }
               rawWidth = cached > minWidthMm ? cached : minWidthMm;
             }
-            const swidth = rawWidth * wr + lsMm;
+            const swidth = ch === RIGHT_INDENT_TAB_CHAR ? 0 : rawWidth * wr + lsMm;
             charWidths[i] = swidth;
             totalWidth += swidth;
           }
 
           const offsets = new Array<number>(strippedCount);
           const remaining = Math.max(0, partWidth - totalWidth);
+
+          if (tabIdx !== -1) {
+            // Right Indent Tab: 탭을 기준으로 파트를 좌측/우측 세그먼트로 분할한다.
+            // - 탭 이전 글자: 좌측 정렬 (파트 왼쪽 끝부터)
+            // - 탭: 우측 세그먼트 시작 위치 (= partWidth - ΣpostWidths)
+            // - 탭 이후 글자: 우측 정렬 (파트 오른쪽 끝에 붙임)
+            // 탭이 있으면 문단 textAlign을 무시한다 — justify/center 분산은
+            // 적용하지 않고 세그먼트별로 left/right를 강제한다.
+            // 배치 단계(0-폭 마커)가 이미 전체 세그먼트를 파트 내에
+            // 제한했으므로 우측 세그먼트 시작 offset은 항상 탭 이전
+            // 글자들의 끝(≥ 0)보다 크거나 같다.
+            let postWidths = 0;
+            for (let i = tabIdx + 1; i < strippedCount; i++) postWidths += charWidths[i]!;
+            const postStart = Math.max(partWidth - postWidths, 0);
+
+            let cursor = 0;
+            for (let i = 0; i < tabIdx; i++) {
+              offsets[i] = cursor;
+              cursor += charWidths[i]!;
+            }
+            offsets[tabIdx] = postStart;
+            cursor = postStart;
+            for (let i = tabIdx + 1; i < strippedCount; i++) {
+              offsets[i] = cursor;
+              cursor += charWidths[i]!;
+            }
+
+            part.charOffsets = offsets;
+            continue;
+          }
 
           let align: "left" | "right" | "center" | "justify";
           if (textAlign === "center") align = "center";
@@ -1426,7 +1479,9 @@ export class ParagraphEngine {
 
             // _charWidthMm 인라인: 런당 1회 조합 키, 글자별 단일 키 조회
             let rawCharWidth: number;
-            if (char === " ") {
+            if (char === RIGHT_INDENT_TAB_CHAR) {
+              rawCharWidth = 0;
+            } else if (char === " ") {
               rawCharWidth = minWidthMm;
             } else {
               let cached = fontWidthMap.get(char);
@@ -1442,7 +1497,7 @@ export class ParagraphEngine {
               }
               rawCharWidth = cached > minWidthMm ? cached : minWidthMm;
             }
-            const charWidth = rawCharWidth * wr + letterSpacingMm;
+            const charWidth = char === RIGHT_INDENT_TAB_CHAR ? 0 : rawCharWidth * wr + letterSpacingMm;
 
             const targetLine = columnContent[columnContent.length - 1];
             const targetPart = targetLine.parts[currentPartIdx];
@@ -1952,7 +2007,9 @@ export class ParagraphEngine {
 
     const lsMm = lsEm * fs;
     let widthMm: number;
-    if (char === " ") {
+    if (char === RIGHT_INDENT_TAB_CHAR) {
+      widthMm = 0;
+    } else if (char === " ") {
       widthMm = this.spaceRatio * fs * wr + lsMm;
     } else {
       const rawWidthMm = this._charWidthMm(char, inlineStyle);
@@ -1963,7 +2020,7 @@ export class ParagraphEngine {
     const style: Partial<CSSStyleDeclaration> = {
       display: "inline-block",
       width: widthCss,
-      minWidth: `${this.spaceRatio * fs}mm`,
+      minWidth: char === RIGHT_INDENT_TAB_CHAR ? "0mm" : `${this.spaceRatio * fs}mm`,
       maxWidth: widthCss,
       textAlign: "center",
     };
@@ -2015,7 +2072,9 @@ export class ParagraphEngine {
     const lmfs = lineMaxFontSize ?? fs;
     const lsMm = lsEm * fs;
     let widthMm: number;
-    if (char === " ") {
+    if (char === RIGHT_INDENT_TAB_CHAR) {
+      widthMm = 0;
+    } else if (char === " ") {
       widthMm = sr * fs * wr + lsMm;
     } else {
       const rawWidthMm = this._charWidthMm(char, inlineStyle);
@@ -2025,10 +2084,11 @@ export class ParagraphEngine {
     const style: Partial<CSSStyleDeclaration> = {
       display: "inline-block",
       width: widthCss,
-      minWidth: `${sr * fs}mm`,
+      minWidth: char === RIGHT_INDENT_TAB_CHAR ? "0mm" : `${sr * fs}mm`,
       maxWidth: widthCss,
       scale: `${wr * 0.88} 1`,
       transformOrigin: "0 center",
+      visibility: char === RIGHT_INDENT_TAB_CHAR ? "hidden" : undefined,
     };
 
     const topMm = this._getCharVerticalOffset(lmfs, fs);
@@ -2050,13 +2110,16 @@ export class ParagraphEngine {
     const wr = this.widthRatio;
     const fontSize = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
     const lsEm = this.effectiveTextStyle.letterSpacing!;
-    const lsMm = lsEm * fontSize;
     let rawWidth: number;
-    if (char === " ") {
+    if (char === RIGHT_INDENT_TAB_CHAR) {
+      rawWidth = 0;
+      return { rawWidth, swidth: 0, widthRatio: wr };
+    } else if (char === " ") {
       rawWidth = this.spaceRatio * fontSize;
     } else {
       rawWidth = this._charWidthMm(char, inlineStyle);
     }
+    const lsMm = lsEm * fontSize;
     const swidth = rawWidth * wr + lsMm;
     return { rawWidth, swidth, widthRatio: wr };
   };
@@ -3136,6 +3199,7 @@ export function buildParagraphPrintPostData(
         for (let j = stripStart; j < stripEnd; j++) {
           const char = content[j];
           if (!char || char.length === 0) continue;
+          if (char === RIGHT_INDENT_TAB_CHAR) continue;
 
           const inlineStyle = inlineStyles?.[j];
 

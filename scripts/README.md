@@ -15,6 +15,9 @@
 | `verify-ime.mjs` | 정합성 (IME) | 한글 조합 커밋/취소/혼합 | ALL PASS |
 | `verify-multicolumn.mjs` | 정합성 (멀티컬럼) | prefix 캐시 경로 === 전체 재래핑 | ALL PASS |
 | `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/런/캐스케이드) | ALL PASS |
+| `verify-right-indent-tab.mjs` | 정합성 (엔진) | Right Indent Tab(`\t`) 배치·정렬·print 스킵 | ALL PASS |
+| `verify-right-indent-tab-browser.mjs` | 정합성 (브라우저) | Shift+Tab 키 삽입·DOM 렌더·커서 | ALL PASS |
+| `verify-right-indent-tab-composition.mjs` | 정합성 (브라우저) | 탭 라인 한글 조합 표시·우측 정렬·이탈 방지 | ALL PASS |
 | `verify-engine-node.mjs` | 정합성 (Node) | 엔진 계층 DOM-free 동작 | ALL PASS |
 | `verify-obfuscated.mjs` | 정합성 (빌드) | 난독화 IIFE 번들 로딩 | ALL PASS |
 | `obfuscate.mjs` | 빌드 | IIFE 번들 난독화 | build 완료 |
@@ -176,6 +179,31 @@ npx tsx scripts/verify-multicolumn.mjs   # 15항목 ALL PASS
 **실행**:
 ```bash
 npx tsx scripts/verify-style-revert.mjs   # 28항목 ALL PASS
+```
+
+### `verify-right-indent-tab.mjs` / `verify-right-indent-tab-browser.mjs` — Right Indent Tab 정합성
+
+**목적**: InDesign의 Shift+Tab(Right Indent Tab) 기능 — `\t` 이후 텍스트를 파트 오른쪽 끝에 우측 정렬 — 의 엔진/브라우저 정합성 검증.
+
+**Node 스크립트** (`verify-right-indent-tab.mjs`, 32항목):
+1. 탭 파트 보존 + plain text round-trip
+2. 우측 정렬 수식 (`lastRight == partWidth`, `tabOffset == partWidth - ΣpostWidths`)
+3. justify 문단에서 탭 파트 비분산
+4. 다중 탭 collapse
+5. trailing tab offset == partWidth
+6. `getCharWidths('\t').swidth === 0`
+7. printPostData에서 `\t` 제외 + print 좌표 == 엔진 charOffsets
+8. 오버랩 파트 내 우측 정렬 (자유 영역 끝 기준, 컬럼 끝 아님)
+9. 멀티컬럼 파트 폭 내 유지
+
+**브라우저 스크립트** (`verify-right-indent-tab-browser.mjs`, 10항목): bench.html에서 Shift+Tab 키 이벤트 → 탭 삽입, 0폭/hidden span 렌더링, 커서 위치, textarea 동기화. dev server 필요 (5175 → 5173).
+
+**주의 — 좌표 검증 방식**: DOM `getBoundingClientRect().width`는 `scale: 0.704 1` transform이 반영된 **시각적 glyph 폭**이라 엔진의 배치 폭(`swidth`)과 다르다. 좌표 비교는 span의 `dataset.charOffset` + `dataset.swidth` (엔진 산출값)로 수행한다.
+
+**실행**:
+```bash
+npx tsx scripts/verify-right-indent-tab.mjs            # Node (엔진)
+npx tsx scripts/verify-right-indent-tab-browser.mjs   # 브라우저 (dev server 필요)
 ```
 
 ### `verify-engine-node.mjs` — 엔진 Node.js 호환성

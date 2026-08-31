@@ -645,9 +645,13 @@ export class LayoutColumnElement extends HTMLElement {
               const positionChanged = offsetMm !== undefined && charEl.dataset.charOffset !== String(offsetMm);
               const pathSwitched = (charEl.dataset.charOffset !== undefined) !== (offsetMm !== undefined);
               const dimKeyChanged = (charEl.dataset.dimKey ?? '') !== _dimensionKey(charInlineStyle);
+              // 같은 data-source-offset 슬롯에 다른 글자가 배치되면 폭이 달라질 수
+              // 있으므로(탭의 0폭 등) position-only로 left만 갱신해서는 안 된다.
+              // full 재적용으로 width/minWidth/visibility까지 새로 계산한다.
+              const charChanged = charEl.textContent !== char;
 
               let mode: 'full' | 'inline-only' | 'position-only';
-              if (pathSwitched || dimKeyChanged || lineMaxFsChanged || (inlineKeyChanged && positionChanged)) {
+              if (pathSwitched || dimKeyChanged || lineMaxFsChanged || charChanged || (inlineKeyChanged && positionChanged)) {
                 mode = 'full';
               } else if (inlineKeyChanged) {
                 // inlineKey 전체는 다르지만 치수·경로·라인MaxFs 불변 → 오버라이드 필드만 갱신.

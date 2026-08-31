@@ -218,6 +218,13 @@ export class LayoutDocumentElement extends HTMLElement {
       if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLButtonElement || active instanceof HTMLSelectElement) {
         return;
       }
+      // paragraph shadow DOM 내부의 편집 textarea: activeElement은 host로
+      // retarget되므로 위 검사를 통과한다. composedPath()[0]이 실제 이벤트
+      // 대상(편집 textarea)인지 검사하여 TextEditController가 Tab을 처리하게 한다.
+      const target = event.composedPath()[0];
+      if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
+        return;
+      }
       const handled = this._editManager.navigateByTab(event.shiftKey);
       if (handled) {
         event.preventDefault();

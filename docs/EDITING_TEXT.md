@@ -933,6 +933,8 @@ flowchart TD
 | `Backspace` | 없음 | 커서 앞 문자를 삭제. 선택 영역이 있으면 선택 영역을 삭제 |
 | `Delete` | 없음 | 커서 뒤 문자를 삭제. 선택 영역이 있으면 선택 영역을 삭제 |
 | `Enter` | 없음 | 줄바꿈(`\n`) 삽입. 선택 영역이 있으면 선택 영역을 대체 |
+| `Tab` | 없음 | 다음 단락으로 포커스 이동 (`EditManager.navigateByTab(false)` 호출) |
+| `Tab` | `Shift` | **Right Indent Tab**(`\t`) 삽입. 탭 이후 텍스트를 같은 라인의 파트 오른쪽 끝에 우측 정렬. 선택 영역이 있으면 대체. 상세는 §4.1.5 |
 | `Escape` | 없음 | 활성 선택 영역이 있으면 `_clearSelection()`으로 선택 영역을 해제하고 `selectionEnd` 이벤트 발생. 선택 영역이 없으면 `blurParagraph()`로 포커스를 해제한다. `textEditMode`는 유지되며, `stopPropagation()`으로 외부 핸들러(`use-editor-keyboard`)로의 전파를 차단한다 |
 | `a` | `Ctrl` 또는 `Cmd` | 전체 선택 |
 | `b` | `Ctrl` 또는 `Cmd` | 선택 영역에 굵게(`fontWeight: 700`) 토글 적용 |
@@ -948,6 +950,8 @@ flowchart TD
 ### 4.1 Tab / Shift+Tab: 단락 간 포커스 이동
 
 텍스트 편집 모드에서 `Tab`과 `Shift+Tab`은 문서 내 모든 편집 가능한 단락 사이를 순환하며 포커스를 이동한다. 이 단축키는 `LayoutDocumentElement._onWindowKeyDown`이 `window`의 capture 단계에서 먼저 가로채며, `EditManager.navigateByTab(shiftKey)`를 호출한다. 호스트 프로그램은 동일한 공개 API를 프로그래밍 방식으로 호출할 수 있다.
+
+> **편집 중 키 라우팅 (중요)**: 단락의 편집 textarea는 paragraph shadow DOM 내부에 있어 `document.activeElement`가 host(`x-layout-paragraph`)로 retarget된다. 따라서 `_onWindowKeyDown`의 `document.activeElement instanceof HTMLTextAreaElement` 검사만으로는 편집 중을 감지할 수 없다 — **`event.composedPath()[0]`이 textarea/input인지 추가 검사**하여 편집 중에는 이벤트를 textarea의 bubble 핸들러(`TextEditController._onKeydown`)로 넘긴다. 편집 중: `Shift+Tab` → 탭 문자 삽입(§4.1.5), `Tab` → `navigateByTab(false)` 호출(포커스 이동 유지). 편집 중이 아닐 때는 `navigateByTab(shiftKey)`이 양방향 모두 처리한다.
 
 | 동작 | 키 | 결과 |
 |------|-----|------|
@@ -996,6 +1000,42 @@ const handledReverse = manager.navigateByTab(true);
 - `shiftKey: false` — 순방향(Tab).
 - `shiftKey: true` — 역방향(Shift+Tab).
 - 반환값: 포커스 이동이 실제로 처리되면 `true`, 가드 조건(삽입 모드, 후보 없음)으로 중단되면 `false`.
+
+### 4.1.5 Shift+Tab: Right Indent Tab 삽입 (편집 중)
+
+텍스트 편집 포커스가 있는 단락에서 `Shift+Tab`을 누르면 포커스 이동 대신 **탭 문자(`\t`)를 삽입**한다. InDesign의 Right Indent Tab(Shift+Tab)과 동일한 기능으로, 주로 바이라인(기자명)을 기사 내용과 같은 라인의 오른쪽 끝에 배치할 때 사용한다.
+
+```
+기사 내용입니다    ─ 홍길동 기자
+                 ↑ \t 이후 텍스트가 파트 오른쪽 끝에 우측 정렬
+```
+
+#### 동작 상세
+
+1. `TextEditController._onKeydown`의 `case "Tab"`이 처리한다. `event.preventDefault()` + `stopPropagation()`으로 window capture 단계의 `navigateByTab`과 브라우저 기본 포커스 이동을 모두 차단한다.
+2. 활성 선택 영역이 있으면 대체하고, 없으면 커서 위치에 삽입한다 (Enter 키와 동일한 패턴: `deleteTextFromInline` → `insertTextIntoInline`).
+3. 삽입 후 `this._runMap = runMapFromContent(model.textContent)`으로 런 맵을 재추출한다 (RunMap은 `\t`를 일반 평문 문자로 취급하므로 추가 처리 불필요).
+4. 커서는 삽입된 탭 바로 뒤(`insertAt + 1`)로 이동한다.
+5. 일반 `Tab`(Shift 없음)은 편집 중에도 `navigateByTab(false)`을 호출하여 다음 단락 포커스 이동을 유지한다.
+
+#### 레이아웃 의미론 (`ParagraphEngine`)
+
+- **폭 0 마커**: `\t`는 모든 폭 계산 경로에서 0으로 취급된다 (`_charWidthMm`, `getCharWidths`, `genCharStyle`, `genCharStyleFlat`, `_layoutColumnsPass`, `_computeCharOffsets`). 폰트 글리프 폭을 조회하지 않는다.
+- **배치**: 탭은 현재 파트에 그리디하게 배치된다 (폭 0이므로 항상 현재 파트에 들어간다). `cumulativeWidths`를 채우지 않으므로 이후 텍스트의 줄바꿈은 일반 규칙을 따른다.
+- **정렬**: `_computeCharOffsets` 후처리에서 탭을 기준으로 파트를 좌/우 세그먼트로 분할한다. 탭 이전 글자는 좌측 정렬, 탭과 이후 글자는 `partWidth - Σ(postWidths)` 위치부터 우측 정렬. 문단 `textAlign`(justify/center 포함)은 탭이 있는 파트에서 무시된다.
+- **오버랩 회피와의 상호작용**: 탭은 **현재 파트(자유 영역)의 오른쪽 끝**에 정렬된다. 이미지 오버랩으로 파트가 분할된 라인에서 탭은 컬럼 끝이 아니라 자유 영역의 끝을 기준으로 한다 — 오버랩 회피가 우선한다.
+- **다중 탭**: 한 파트에 탭이 여러 개면 첫 번째 탭 기준으로 collapse된다 (InDesign은 후속 탭을 다음 라인으로 밀지만, v1은 collapse로 단순화 — 의도된 편차).
+- **렌더링**: 탭은 `data-source-offset` diff 키를 유지하는 **0폭 + `visibility: hidden` span**으로 렌더링된다. span이 존재하므로 커서/선택/클릭 매핑(`TextEditCoordinateMapper`)이 오프셋 산술을 그대로 유지한다.
+- **낙관적 span(optimistic) 스킵 + 탭 라인 조합의 엔진 렌더 반영**: 탭이 포함된 **라인**에서는 `_optimisticSpanUpdate`(일반 타이핑)와 `_optimisticCompositionUpdate`(IME 조합) 모두 임시 span을 생성하지 않는다. 우측 정렬은 새 글자가 파트 끝에 붙고 **기존 글자가 왼쪽으로 밀리지만**, `_shiftFollowingSpans`/`_computeTempSpanLeft`는 좌측 정렬 가정(오른쪽 밀어내기)으로 설계되어 방향이 반전된다. 좌측 세그먼트 타이핑도 같은 파트의 우측 세그먼트 span들을 밀어내므로, 라인에 탭이 있으면 optimistic을 아예 끈다.
+  - **탭 라인 조합 표시**: optimistic이 없으면 조합 중 텍스트가 화면에 표시되지 않으므로(조합 중 렌더 지연 최적화가 표시를 optimistic에 위임하기 때문), `_onCompositionUpdate`는 탭 라인 조합 시(`_isTabLineComposition`) **`_debouncedRender()`로 조합 중 텍스트를 실제 엔진 렌더에 반영**한다. 엔진이 매 프레임 정확한 우측 정렬을 계산하므로 조합 글자가 항상 올바른 위치에 표시되고, 밑줄(`_applyCompositionUnderline`)도 정상 적용된다. 음절당 렌더는 rAF로 프레임당 1회로 병합되며, 바이라인은 짧아 렌더 비용이 미미하다.
+  - **조합 중 커서 폴백**: 조합 중 커서가 stale mapper 범위 밖(조합 텍스트 끝 offset)을 가리키면 `_updateCursorPosition`의 placement-없음 폴백이 실패해 커서가 (0,0)(paragraph 좌상단)으로 이동하는 **화면 이탈**이 발생한다. 폴백에 **조합 중 분기**를 추가한다: `_isComposing && _compositionStartOffset > 0`이면 조합 시작 위치의 placement(phantom end 우선)로 커서를 배치한다 — 커서가 조합 텍스트가 표시될 지점에 머무르고, 조합 텍스트의 실제 위치는 compositionend의 flushRender 후 확정된다.
+- **인쇄**: `buildParagraphPrintPostData`는 `\t`를 출력에서 제외한다 (좌표는 charOffsets 기반으로 그대로 유지).
+- **붙여넣기**: 클립보드에서 붙여넣은 텍스트의 `\t`도 Right Indent Tab으로 동작한다 (의도된 동작).
+
+#### 검증
+
+- `scripts/verify-right-indent-tab.mjs` (Node, 엔진 32항목): 파트 보존, 우측 정렬 수식, justify 비분산, 다중 탭 collapse, trailing tab, 폭 0, printPostData 제외, 오버랩 파트 내 정렬, 멀티컬럼.
+- `scripts/verify-right-indent-tab-browser.mjs` (브라우저 E2E 10항목): Shift+Tab 키 삽입, DOM span 0폭/hidden, 커서 위치, textarea 동기화.
 
 ### 4.2 각 키의 내부 처리 과정
 
