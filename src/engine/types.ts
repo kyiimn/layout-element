@@ -454,7 +454,7 @@ export type LayoutResult =
  * @example
  * ```ts
  * // 소비자(스냅샷 경계)의 올바른 패턴 — flush-then-read
- * if (docEngine.hasPendingChanges) docEngine.ensureCommitted();
+ * if (docEngine.dirty) docEngine.ensureCommitted();
  * const snapshot = docEngine.printPostData;
  *
  * boxEngine.left = 100;       // _dirty = true

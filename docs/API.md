@@ -1299,7 +1299,7 @@ class DocumentEngine {
   set childBoxEngines(engines: BoxEngine[]): void;
 
   layout(childrenData?: BoxData[]): void;  // childrenData로 전체 엔진 트리 자동 구축. _data.children 사용 안 함
-  ensureCommitted(): void;  // 명시적 스냅샷 경계: 트리 전체의 개별 setter pending 변경을 타입별 커밋 (Box/Table→layout, Paragraph→layoutText, Image→layout). hasPendingChanges인 단락은 편집 파이프라인 소유이므로 skip. dirty 없으면 O(1) 반환
+  ensureCommitted(): void;  // 명시적 스냅샷 경계: 트리 전체의 개별 setter pending 변경을 타입별 커밋 (Box/Image→layout, Paragraph 건너뜀, Table→layout + buildCellBoxEngines). hasPendingChanges인 편집 중 단락은 편집 파이프라인 소유이므로 skip. dirty 없으면 O(1) 반환
 }
 ```
 

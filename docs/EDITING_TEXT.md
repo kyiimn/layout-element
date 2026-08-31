@@ -1802,7 +1802,7 @@ paragraph.render();
 
 #### 7.4.2a dirty 계약과 스냅샷 읽기
 
-`extractData`/`printPostData`는 **순수 읽기**다 — dirty 상태에서 조회하면 `DirtyPendingError`(`e.name === 'DirtyPendingError'`)를 throw하며 자가 치유하지 않는다. 편집 중 단락의 dirty는 이 rAF 디바운스 커밋(커밋 → 이벤트 발행 순서)이 소유하므로, 일관 스냅샷이 필요한 외부 소비자(저장/내보내기/print)는 읽기 전에 `DocumentEngine.ensureCommitted()`를 호출한다 — `hasPendingChanges`인 **편집 중** 단락은 건너뛰고 나머지 트리(테이블 셀 내부 포함)의 pending 변경을 타입별 커밋한다. 이 에러가 정상 편집 흐름에서 관찰되면 커밋 순서 버그 신호이며, 자가 치유로 흡수하지 않는다.
+`extractData`/`printPostData`는 **순수 읽기**다 — dirty 상태에서 조회하면 `DirtyPendingError`(`e.name === 'DirtyPendingError'`)를 throw하며 자가 치유하지 않는다. 편집 중 단락의 dirty는 이 rAF 디바운스 커밋(커밋 → 이벤트 발행 순서)이 소유하므로, 일관 스냅샷이 필요한 외부 소비자(저장/내보내기/print)는 읽기 전에 `DocumentEngine.ensureCommitted()`를 호출한다 — `hasPendingChanges`인 **편집 중** 단락은 커밋하지 않고 건너뛰며(편집 파이프라인의 dirty 소유 보호), 나머지 트리(테이블 셀 내부 포함)의 pending 변경을 타입별 커밋한다(Box/Image → `layout()`, Table → `layout()` + `buildCellBoxEngines()`; 셀 하강에서도 단락은 건너뜀). 이 에러가 정상 편집 흐름에서 관찰되면 커밋 순서 버그 신호이며, 자가 치유로 흡수하지 않는다.
 
 #### 7.4.3 편집 델타 경로 (run-map 스플라이스)
 

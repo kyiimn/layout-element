@@ -747,9 +747,11 @@ export class DocumentEngine {
    * 호출해 트리 전체의 커밋되지 않은 변경을 한 번에 반영한다.
    *
    * 타입별 커밋 연산이 다르다: Box/Table/Document는 `layout()`, Paragraph는
-   * `layoutText()`, Image는 `layout()`. 이 메서드는 타입별 커밋을 트리 순서로
-   * 수행하며, 편집 세션(TextEditController rAF 디바운스)이 pending 입력을 보유한
-   * 단락은 커밋하지 않는다 — `hasPendingChanges`가 true인 단락은 편집 파이프라인의
+   * `layoutText()`, Image는 `layout()` (+ Table은 `layout()` 후
+   * `buildCellBoxEngines()`로 셀 박스 엔진을 재구축). 구현: `_ensureSubtreeCommitted`.
+   *
+   * **편집 세션 소유 단락 제외**: `hasPendingChanges`가 true인 단락(TextEditController
+   * rAF 디바운스가 pending 입력을 보유)은 커밋하지 않고 건너뛴다 — 편집 파이프라인의
    * 커밋 순서(커밋 → 이벤트 발행)가 소유하므로 건드리지 않는다.
    *
    * dirty가 없으면 O(1)으로 즉시 반환한다.
@@ -772,12 +774,18 @@ export class DocumentEngine {
   /**
    * 하위 엔진 트리의 pending 개별 setter 변경을 커밋한다.
    *
-   * `hasPendingChanges`가 true인 단락은 편집 파이프라인(rAF 디바운스 커밋,
-   * 커밋 → 이벤트 순서 계약)이 소유하므로 커밋하지 않고 건너뛴다.
+   * 타입별 커밋: Box/Image는 `layout()`, Paragraph는 `layoutText()`, Table은
+   * `layout()` + `buildCellBoxEngines()` (레이아웃 결과 그리드에 맞춰 셀 박스
+   * 엔진을 재구축). 단, `hasPendingChanges`가 true인 단락은 편집 파이프라인
+   * (rAF 디바운스 커밋, 커밋 → 이벤트 순서 계약)이 소유하므로 커밋하지 않고
+   * 건너뛴다.
    *
    * @param boxEngines - 커밋할 박스 엔진 목록
+   * @param parentBox - `boxEngines`의 부모 박스 엔진. 셀 박스 하강 커밋 시
+   *                    `TableEngine.buildCellBoxEngines()` 호출에 필요하다.
+   *                    생략 시 셀 박스 재구축을 건너뜁니다.
    */
-  private _ensureSubtreeCommitted(boxEngines: BoxEngine[]): void {
+  private _ensureSubtreeCommitted(boxEngines: BoxEngine[], parentBox?: BoxEngine): void {
     for (const be of boxEngines) {
       if (be.dirty) {
         be.layout(
@@ -793,14 +801,23 @@ export class DocumentEngine {
       }
       for (const ce of be.childEngines) {
         if (ce instanceof BoxEngine) {
-          this._ensureSubtreeCommitted([ce]);
+          this._ensureSubtreeCommitted([ce], be);
         } else if (ce instanceof ParagraphEngine) {
-          if (ce.hasPendingChanges) ce.layoutText();
+          // 편집 세션(rAF 디바운스)이 소유 중인 단락은 커밋하지 않고 건너뛴다 —
+          // 조기 커밋은 caretHint 소비와 커밋 → 이벤트 발행 순서 계약을 깬다.
         } else if (ce instanceof ImageEngine) {
           if (ce.dirty) ce.layout();
         } else if (ce instanceof TableEngine) {
           if (ce.dirty) {
             ce.layout();
+            // 계약 이유 #3: Table 커밋은 layout()만으로 불완전 — gridResolution에
+            // 맞춰 셀 박스 엔진을 재구축해야 TableCellEngine.boxEngine이 최신 상태.
+            if (parentBox) {
+              ce.buildCellBoxEngines(
+                be,
+                { prevContentEnginesByBoxId: new Map(), prevCellBoxEnginesById: ce.collectPrevCellBoxEngines(), newEnginesCreated: false },
+              );
+            }
           }
           // 셀 내부(박스 → 단락/이미지)의 pending 변경은 TableEngine.layout()과
           // 무관하므로 셀 박스로 재귀 하강해 커밋한다.
@@ -808,7 +825,7 @@ export class DocumentEngine {
             for (const cellEngine of rowEngine.cellEngines) {
               const cellBox = cellEngine.boxEngine;
               if (cellBox) {
-                this._ensureSubtreeCommitted([cellBox]);
+                this._ensureSubtreeCommitted([cellBox], be);
               }
             }
           }

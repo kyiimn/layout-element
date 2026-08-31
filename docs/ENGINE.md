@@ -1067,9 +1067,9 @@ import { createDirtyError, DirtyPendingError } from "./types";
 
 모든 엔진의 개별 setter pending 변경을 커밋하는 **명시적 스냅샷 경계** API. `extractData` / `printPostData`는 순수 읽기(자가 치유 없음)로 유지되므로, 일관 스냅샷이 필요한 소비자(저장/내보내기/print 후처리)는 데이터를 읽기 **전에** 이 메서드를 호출한다.
 
-- 자기(`DocumentEngine`) dirty 시 `layout()`, 이후 하위 트리를 재귀 순회하며 타입별 커밋 수행: Box/Table → `layout()`, Paragraph → `layoutText()`, Image → `layout()`.
-- **테이블 하강**: `TableEngine` 커밋 후 `rowEngines → cellEngines → boxEngine`으로 재귀 하강해 셀 내부(셀 박스 → 단락/이미지)의 pending 변경까지 커밋한다 — `TableEngine.layout()`은 셀 내부 커밋을 다루지 않기 때문이다 (D-1, `_refreshParagraphOverlays`와 동일한 순회 구조).
-- `hasPendingChanges`가 true인 단락은 **커밋하지 않고 건너뛴다** — 편집 파이프라인(rAF 디바운스, 커밋 → 이벤트 발행 순서 계약)이 소유 중이므로 `caretHint` 소비와 커밋 순서를 침범하지 않기 위함이다. 편집 중 단락의 스냅샷이 필요하면 `paragraph.flushRender()`를 먼저 호출할 것.
+- 자기(`DocumentEngine`) dirty 시 `layout()`, 이후 하위 트리를 재귀 순회하며 타입별 커밋 수행: Box/Image → `layout()`, Table → `layout()` + `buildCellBoxEngines()`.
+- **단락 커밋 제외**: `hasPendingChanges`가 true인 단락은 **커밋하지 않고 건너뛴다** — 편집 파이프라인(rAF 디바운스, 커밋 → 이벤트 발행 순서 계약)이 소유 중이므로 `caretHint` 소비와 커밋 순서를 침범하지 않기 위함이다. 편집 중 단락의 스냅샷이 필요하면 `paragraph.flushRender()`를 먼저 호출할 것.
+- **테이블 하강**: `TableEngine` 커밋 후 `rowEngines → cellEngines → boxEngine`으로 재귀 하강해 셀 내부(셀 박스 → 이미지)의 pending 변경까지 커밋한다 — `TableEngine.layout()`은 셀 내부 커밋을 다루지 않기 때문이다 (D-1, `_refreshParagraphOverlays`와 동일한 순회 구조). 셀 하강에서도 단락은 동일하게 건너뛴다.
 - dirty가 없으면 O(1)로 즉시 반환한다.
 
 ```ts
