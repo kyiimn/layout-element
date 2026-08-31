@@ -738,6 +738,85 @@ export class DocumentEngine {
     this._dirty = false;
   }
 
+  /**
+   * 모든 엔진의 개별 setter pending 변경을 커밋한다 (명시적 스냅샷 경계).
+   *
+   * `extractData` / `printPostData`는 순수 읽기 유지를 위해 dirty를 자가 치유하지
+   * 않고 throw한다 (계약: types.ts DirtyPendingError). 일관 스냅샷이 필요한
+   * 소비자(저장/내보내기/print 후처리)는 데이터를 읽기 **전에** 이 메서드를
+   * 호출해 트리 전체의 커밋되지 않은 변경을 한 번에 반영한다.
+   *
+   * 타입별 커밋 연산이 다르다: Box/Table/Document는 `layout()`, Paragraph는
+   * `layoutText()`, Image는 `layout()`. 이 메서드는 타입별 커밋을 트리 순서로
+   * 수행하며, 편집 세션(TextEditController rAF 디바운스)이 pending 입력을 보유한
+   * 단락은 커밋하지 않는다 — `hasPendingChanges`가 true인 단락은 편집 파이프라인의
+   * 커밋 순서(커밋 → 이벤트 발행)가 소유하므로 건드리지 않는다.
+   *
+   * dirty가 없으면 O(1)으로 즉시 반환한다.
+   *
+   * @throws 없음
+   * @example
+   * ```ts
+   * // 저장/내보내기 직전 일관 스냅샷 확보
+   * docEngine.ensureCommitted();
+   * const post = docEngine.printPostData;
+   * ```
+   */
+  public ensureCommitted(): void {
+    if (this._dirty) {
+      this.layout();
+    }
+    this._ensureSubtreeCommitted(this._childBoxEngines);
+  }
+
+  /**
+   * 하위 엔진 트리의 pending 개별 setter 변경을 커밋한다.
+   *
+   * `hasPendingChanges`가 true인 단락은 편집 파이프라인(rAF 디바운스 커밋,
+   * 커밋 → 이벤트 순서 계약)이 소유하므로 커밋하지 않고 건너뛴다.
+   *
+   * @param boxEngines - 커밋할 박스 엔진 목록
+   */
+  private _ensureSubtreeCommitted(boxEngines: BoxEngine[]): void {
+    for (const be of boxEngines) {
+      if (be.dirty) {
+        be.layout(
+          {
+            prevContentEnginesByBoxId: new Map(),
+            prevCellBoxEnginesById: new Map(),
+            newEnginesCreated: false,
+          },
+          undefined,
+          this.resources,
+          { paragraphStyle: this._data.paragraphStyle, textStyle: this._data.textStyle },
+        );
+      }
+      for (const ce of be.childEngines) {
+        if (ce instanceof BoxEngine) {
+          this._ensureSubtreeCommitted([ce]);
+        } else if (ce instanceof ParagraphEngine) {
+          if (ce.hasPendingChanges) ce.layoutText();
+        } else if (ce instanceof ImageEngine) {
+          if (ce.dirty) ce.layout();
+        } else if (ce instanceof TableEngine) {
+          if (ce.dirty) {
+            ce.layout();
+          }
+          // 셀 내부(박스 → 단락/이미지)의 pending 변경은 TableEngine.layout()과
+          // 무관하므로 셀 박스로 재귀 하강해 커밋한다.
+          for (const rowEngine of ce.rowEngines) {
+            for (const cellEngine of rowEngine.cellEngines) {
+              const cellBox = cellEngine.boxEngine;
+              if (cellBox) {
+                this._ensureSubtreeCommitted([cellBox]);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   /** layout() 호출 시 새 엔진이 생성/추가되었는지 여부 (외부에서 _syncEngineIdsToDom 스킵 판단용). */
   get newEnginesCreated(): boolean {
     return this._newEnginesCreated;
@@ -818,9 +897,11 @@ export class DocumentEngine {
   private _buildTree(childrenData: BoxData[]): void {
     const ctx: BoxBuildContext = {
       prevContentEnginesByBoxId: new Map(),
+      prevCellBoxEnginesById: new Map(),
       newEnginesCreated: false,
     };
     this._collectPrevContentEngines(this._childBoxEngines, ctx.prevContentEnginesByBoxId);
+    this._collectPrevCellBoxEngines(this._childBoxEngines, ctx.prevCellBoxEnginesById);
 
     const docStyle = {
       paragraphStyle: this._data.paragraphStyle,
@@ -882,6 +963,34 @@ export class DocumentEngine {
               }
             }
           }
+        }
+      }
+    }
+  }
+
+  /**
+   * 이전 엔진 트리에서 모든 테이블 셀 박스 엔진을 boxId → BoxEngine 맵으로 수집한다.
+   * 셀 라벨 시프트(행/열 삭제, merge/split) 후에도 셀 박스 엔진을 재사용하여
+   * 단락 `_layoutCache` / 이미지 `rgbaData`를 보존한다.
+   */
+  private _collectPrevCellBoxEngines(boxEngines: BoxEngine[], map: Map<string, BoxEngine>): void {
+    for (const be of boxEngines) {
+      if (be.data.id) {
+        map.set(be.data.id, be);
+      }
+      for (const ce of be.childEngines) {
+        if (ce instanceof TableEngine) {
+          for (const rowEngine of ce.rowEngines) {
+            for (const cellEngine of rowEngine.cellEngines) {
+              const cellBox = cellEngine.boxEngine;
+              if (cellBox && cellBox.data.id) {
+                map.set(cellBox.data.id, cellBox);
+                this._collectPrevCellBoxEngines([cellBox], map);
+              }
+            }
+          }
+        } else if (ce instanceof BoxEngine) {
+          this._collectPrevCellBoxEngines([ce], map);
         }
       }
     }

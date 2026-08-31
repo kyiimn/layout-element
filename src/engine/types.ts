@@ -428,23 +428,67 @@ export type LayoutResult =
  * dirty 상태에서 `extractData` / `printPostData` 조회 시 이 에러가 발생하여
  * 부분 갱신된 데이터가 외부로 전파되는 것을 차단한다.
  *
+ * ## 계약 (명시적 스냅샷 경계)
+ *
+ * `extractData` / `printPostData`는 **순수 읽기**로 유지된다 — 읽기가 레이아웃을
+ * 유발하지 않으며, dirty를 자가 치유(layout() 자동 호출)하지 않는다. 이유:
+ *
+ * 1. **편집 파이프라인 순서 보호**: 편집 중 단락의 dirty는 rAF 디바운스 커밋
+ *    (커밋 → 이벤트 발행, PERFORMANCE.md §4.1)이 소유한다. 읽기가 자가 치유하면
+ *    `caretHint`(prefix 캐시 용)를 조기 소비시켜 커밋 순서 계약을 깬다.
+ * 2. **O(1) 읽기 유지**: `printPostData`는 전체 트리를 재귀 순회하므로 이 안에서
+ *    `DocumentEngine.layout()`(전체 트리 재구축)이 유발되면 읽기 비용이 O(N)으로
+ *    폭증하고, 순회 중 자식 엔진 배열이 교체되는 재진입 결과가 섞일 수 있다.
+ * 3. **타입별 커밋 의미 차이**: Box/Image는 `layout()`, Paragraph는 `layoutText()`,
+ *    Table은 `layout()` + `buildCellBoxEngines()` — 단일 "자가 치유" 루틴이
+ *    의미 없는 커밋을 수행할 수 있다.
+ *
+ * 따라서 일관 스냅샷이 필요한 소비자(저장/내보내기/print)는 **자체 flush를 먼저
+ * 수행**: 편집 세션 활성 중이 아니면 `DocumentEngine.ensureCommitted()`를 호출하거나
+ * 직렬 `layout()` 패스를 통과시킨 후 읽는다. 커밋 후 이벤트가 발행되는 정상 편집
+ * 흐름에서는 이 에러가 관찰되지 않는다. 이 에러가 보인다면 **순서 어긋남(버그) 신호**다.
+ *
+ * `engine.hasPendingChanges`로 읽기 전 이 에러 가능 여부를 선제 판정할 수 있다.
+ * 타입 판별: `e instanceof Error && e.name === 'DirtyPendingError'`.
+ *
  * @example
  * ```ts
- * boxEngine.left = 100;      // _dirty = true
+ * // 소비자(스냅샷 경계)의 올바른 패턴 — flush-then-read
+ * if (docEngine.hasPendingChanges) docEngine.ensureCommitted();
+ * const snapshot = docEngine.printPostData;
+ *
+ * boxEngine.left = 100;       // _dirty = true
  * boxEngine.width = 50;       // _dirty = true
- * boxEngine.extractData;      // ❌ throws DirtyPendingError
+ * boxEngine.extractData;      // ❌ throws DirtyPendingError (순서 어긋남 신호)
  * boxEngine.layout(ctx, ...); // 커밋 — _dirty = false
  * boxEngine.extractData;      // ✅ 정상
  * ```
  *
  * @param engineName - 엔진 클래스명 (예: "BoxEngine")
- * @returns 발생시킬 Error 인스턴스
+ * @returns 발생시킬 `DirtyPendingError` 인스턴스 (name = "DirtyPendingError")
+ */
+export class DirtyPendingError extends Error {
+  constructor(engineName: string) {
+    super(
+      `${engineName} has pending changes from individual setters. ` +
+      `This is a read path and does not auto-commit. Flush first: call the ` +
+      `document-level DocumentEngine.ensureCommitted() (outside an active edit ` +
+      `session) or the engine's own layout()/layoutText(), then read again. ` +
+      `If this fires during a normal edit flow it indicates a commit-ordering bug.`,
+    );
+    this.name = 'DirtyPendingError';
+  }
+}
+
+/**
+ * @deprecated 구조 기반 에러 판별 대신 `new DirtyPendingError(name)`을 사용하십시오.
+ * 하위 호환을 위해 유지 — 반환 인스턴스는 `name === 'DirtyPendingError'`를 갖는다.
+ *
+ * @param engineName - 엔진 클래스명 (예: "BoxEngine")
+ * @returns 발생시킬 `DirtyPendingError` 인스턴스
  */
 export const createDirtyError = (engineName: string): Error => {
-  return new Error(
-    `${engineName} has pending changes from individual setters. ` +
-    `Call layout() before reading extractData or printPostData.`,
-  );
+  return new DirtyPendingError(engineName);
 };
 
 /**
