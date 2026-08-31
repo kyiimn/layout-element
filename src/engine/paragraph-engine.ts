@@ -1194,6 +1194,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       "sr:" + this.spaceRatio,
       "fs:" + this.effectiveTextStyle.fontSize!,
       "ph:" + (this._inheritStyle?.parentHeight ?? 0),
+      "ta:" + this.effectiveParagraphStyle.textAlign!,
+      "va:" + this.effectiveParagraphStyle.verticalAlign!,
+      "in:" + this.indent,
     );
 
     return parts.join("|");
@@ -1834,6 +1837,14 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       "sr:" + this.spaceRatio,
       "fs:" + this.effectiveTextStyle.fontSize!,
       "ph:" + (this._inheritStyle?.parentHeight ?? 0),
+      // charOffsets(정렬), alignOffsetMm(수직 정렬), free regions(들여쓰기)에
+      // 반영되는 필드. DOM 경로에서는 data setter가 resetIncrementalState()로
+      // 캐시를 무효화하지만, 엔진 직접 경로(Node.js / 향후 canvas 렌더링)에서는
+      // paragraphStyle/textStyle 개별 setter만으로 캐시가 살아 있으므로
+      // 해시에 포함해 stale 히트를 방지한다.
+      "ta:" + this.effectiveParagraphStyle.textAlign!,
+      "va:" + this.effectiveParagraphStyle.verticalAlign!,
+      "in:" + this.indent,
     );
 
     return parts.join("|");
@@ -2072,7 +2083,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const sr = this.spaceRatio;
     const fs = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
     const lmfs = lineMaxFontSize ?? fs;
-    const cacheKey = `${char}|${wr}|${lsEm}|${sr}|${fs}|${lmfs}`;
+    const fontName = inlineStyle?.fontFamily ?? "";
+    const cacheKey = `${char}|${wr}|${lsEm}|${sr}|${fs}|${lmfs}|${fontName}`;
     const cached = this._charOuterStyleCache.get(cacheKey);
     if (cached) return cached;
 
