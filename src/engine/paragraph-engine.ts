@@ -829,18 +829,36 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    *
    * DOM은 생성하지 않는다. 모든 측정값과 산술은 **mm 단위**로 수행된다.
    *
+   * 라인 rect의 top은 **per-line 누적 높이**(이전 라인들의 실제
+   * `lineHeight` 합)를 사용하고, 높이는 **pending 폰트 크기**(이번 라인에
+   * 배치될 글자들의 max fontSize 근사)를 사용한다. 이는 실제 렌더링
+   * 위치(`genLineStyle` → `_getCumulativeLineTop`)와 오버랩 판정 위치를
+   * 일치시킨다 — 인라인으로 큰 글자가 섞인 컬럼에서 라인이 실제보다
+   * 위에 있다고 판정해 오버랩 회피가 어긋나는 것을 방지한다.
+   * 인라인 fontSize 오버라이드가 없는 문단에서는 누적 top이
+   * `lineIndex × lineHeight`(균일)와 동일하므로 기존 결과와 정확히
+   * 일치한다.
+   *
+   * @example
+   * // 문단 fontSize 4mm, lineGap 1.25, 이전 라인 2개가 6mm 인라인 포함:
+   * // cumulativeTopMm = 6 × 1.25 × 2 = 15, pendingMaxFontSizeMm = 4
+   * // → lineTopMm = absTop + alignOffset + 15 (균일 가정이면 2 × 5 = 10 — 어긋남)
+   *
    * @param columnIndex - 현재 컬럼 인덱스 (`_columnWidths` 조회용)
-   * @param lineIndexInColumn - 컬럼 내에서 이 라인의 0-based 인덱스
    * @param isFirstInColumn - 첫 번째 라인 여부 (firstOfText 플래그 설정용)
    * @param isFirstOfBlock - `\n` 직후 첫 라인 여부 (firstOfBlock 플래그 + 들여쓰기용)
+   * @param alignOffsetMm - verticalAlign 오프셋 (mm)
+   * @param cumulativeTopMm - 이전 라인들의 확정 높이 누적합 (mm). 균일 경로에서는 `lineIndex × lineHeight`
+   * @param pendingMaxFontSizeMm - 이번 라인 rect 높이 산출용 max fontSize 근사 (mm). 균일 경로에서는 문단 기본 fontSize
    * @returns cover=true면 라인 전체가 덮임, overflow=true면 컬럼 높이 초과
    */
   private _createLineWithParts(
     columnIndex: number,
-    lineIndexInColumn: number,
     isFirstInColumn: boolean,
     isFirstOfBlock: boolean,
     alignOffsetMm: number,
+    cumulativeTopMm: number,
+    pendingMaxFontSizeMm: number,
   ): {
     cover: boolean;
     overflow: boolean;
@@ -849,9 +867,10 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   } {
     const columnLeftMm = this.columnLeftOffset(columnIndex);
     const lineLeftMm = this._data.parentAbsRect.absLeft + columnLeftMm;
-    const lineTopMm = this._data.parentAbsRect.absTop + alignOffsetMm + lineIndexInColumn * this._lineHeight;
+    const lineTopMm = this._data.parentAbsRect.absTop + alignOffsetMm + cumulativeTopMm;
     const lineWidthMm = this._columnWidths[columnIndex];
-    const lineHeightMm = this._lineHeight;
+    const lineGap = this.effectiveParagraphStyle.lineGap!;
+    const lineHeightMm = pendingMaxFontSizeMm * lineGap;
 
     const lineRectMm: MmRect = {
       left: lineLeftMm,
@@ -869,7 +888,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     // 컬럼 수용력은 parentHeight + (lineHeight - fontSize)와 같다.
     // (BoxEngine.absHeight = lineHeight * height - (lineHeight - fontSize))
     const effectiveColumnHeight = parentHeight + (this._lineHeight - this.fontSize);
-    const isOverflow = (lineIndexInColumn + 1) * this._lineHeight > effectiveColumnHeight + 1e-6;
+    const isOverflow = cumulativeTopMm + lineHeightMm > effectiveColumnHeight + 1e-6;
 
     if (cover) {
       const lineData: TextLineData = {
@@ -1337,23 +1356,173 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    */
   private _computePerLineHeights(): void {
     const lineGap = this.effectiveParagraphStyle.lineGap!;
-    const baseFontSize = this.fontSize;
 
     for (const column of this._columnContents) {
       for (const line of column) {
-        let maxFs = baseFontSize;
-        for (const part of line.parts) {
-          if (!part.inlineStyles) continue;
-          for (const style of part.inlineStyles) {
-            if (style?.fontSize !== undefined && style.fontSize > maxFs) {
-              maxFs = style.fontSize;
-            }
-          }
-        }
+        const maxFs = this._computeLineMaxFontSize(line);
         line.maxFontSize = maxFs;
         line.lineHeight = maxFs * lineGap;
       }
     }
+  }
+
+  /**
+   * 라인에 실제 배치된 글자들의 최대 폰트 크기를 계산한다.
+   *
+   * 라인 내 모든 파트의 `inlineStyles` 글자별 폰트 크기와 문단 기본
+   * `fontSize` 중 최대값을 사용한다. 빈 파트(cover 라인 등)는 기본값을
+   * 반환한다 — `_computePerLineHeights`와 동일 규칙의 단일 소스로서,
+   * `_layoutColumnsPass`의 per-line 누적 top 계산과 렌더링 높이
+   * (`genLineStyle`)가 항상 동일 값을 사용하도록 보장한다.
+   *
+   * @example
+   * // 문단 기본 fontSize 4mm, 라인에 6mm 인라인 런이 있는 경우:
+   * // _computeLineMaxFontSize(line) → 6
+   * // → line.lineHeight = 6 × lineGap (mm)
+   *
+   * @param line - 라인 데이터
+   * @returns 라인의 최대 폰트 크기 (mm). 인라인 오버라이드가 없으면 문단 기본값
+   */
+  private _computeLineMaxFontSize(line: TextLineData): number {
+    const baseFontSize = this.fontSize;
+    let maxFs = baseFontSize;
+    for (const part of line.parts) {
+      if (!part.inlineStyles) continue;
+      for (const style of part.inlineStyles) {
+        if (style?.fontSize !== undefined && style.fontSize > maxFs) {
+          maxFs = style.fontSize;
+        }
+      }
+    }
+    return maxFs;
+  }
+
+  /**
+   * 아직 높이가 확정되지 않은 마지막 라인의 `maxFontSize`/`lineHeight`를
+   * 확정하고, per-line 누적 top에 반영한다.
+   *
+   * `_layoutColumnsPass`가 **다음 라인을 생성하기 직전에** 호출한다.
+   * 라인의 실제 높이는 글자가 배치된 후에야 알 수 있으므로, 라인 생성
+   * 시점의 rect 근사(pending)와 달리 이 값이 실제 렌더링 높이
+   * (`genLineStyle` → `_getCumulativeLineTop`)와 일치하는 확정값이다.
+   *
+   * 마지막 라인은 항상 미확정 상태이다 — 확정은 다음 라인 생성 직전에만
+   * 일어나고, `_removeTrailingEmptyLine`이 제거하는 라인도 항상 마지막
+   * (미확정) 라인이므로, 확정된 라인이 제거되어 누적 top이 어긋나는 경우는
+   * 없다.
+   *
+   * @example
+   * // columnContent = [line0(확정됨, 5mm), line1(미확정, 6mm 인라인 포함)]
+   * // cumulativeTopMm = 5일 때 호출:
+   * // → line1.maxFontSize = 6, line1.lineHeight = 6 × lineGap
+   * // → 반환값 = 5 + 6 × lineGap
+   *
+   * @param columnContent - 현재 컬럼의 라인 배열
+   * @param cumulativeTopMm - 현재까지 확정된 라인 높이 누적합 (mm)
+   * @returns 갱신된 누적 top (mm)
+   */
+  private _confirmLineHeight(
+    columnContent: TextLineData[],
+    cumulativeTopMm: number,
+  ): number {
+    const line = columnContent[columnContent.length - 1];
+    if (line && line.lineHeight === undefined) {
+      const maxFs = this._computeLineMaxFontSize(line);
+      const lineGap = this.effectiveParagraphStyle.lineGap!;
+      line.maxFontSize = maxFs;
+      line.lineHeight = maxFs * lineGap;
+      return cumulativeTopMm + line.lineHeight;
+    }
+    return cumulativeTopMm;
+  }
+
+  /**
+   * 배치 커서부터 폭 누적이 컬럼 폭에 도달할 때까지 스캔한 런들의
+   * 최대 폰트 크기를 계산한다 (오버랩 판정 rect 높이 근사).
+   *
+   * `_layoutColumnsPass`가 라인을 **생성하기 직전에** 호출하며, 반환값에
+   * `lineGap`을 곱해 라인 rect의 높이로 사용한다. 라인에 실제로 배치될
+   * 글자들은 오버랩 파트가 라인 폭을 좁히면 스캔 범위보다 적어질 수
+   * 있으므로 근사값 ≥ 실제값이다 — 오차 방향이 안전(과도 회피)하다:
+   * 근사 높이가 크면 rect 하단이 내려가 아래쪽 오버랩 요소를 더 많이
+   * 피하게 될 뿐, 텍스트가 요소 위로 덮이는 반대 방향의 오차는 없다.
+   *
+   * 폭 계산은 charLoop의 배치 폭 공식(`원본폭 × widthRatio +
+   * letterSpacing × fontSize`)과 동일하며 `_charWidthByFontCache`를
+   * 공유한다. 라인은 블록(`\n` 구분)을 넘지 않으므로 시작 블록만 스캔한다.
+   *
+   * @example
+   * // 문단 fontSize 4mm, 커서 이후 "큰글자(6mm) 30mm분 + 일반(4mm) ..."
+   * // 컬럼 폭 60mm 스캔 → 6mm 런이 폭 범위 안에 포함 → 6 반환
+   * // → 라인 rect 높이 = 6 × lineGap
+   *
+   * @param startBlock - 스캔 시작 블록 인덱스 (`_contents` 기준)
+   * @param startRun - 시작 블록 내 런 인덱스
+   * @param startChar - 시작 런 내 글자 인덱스
+   * @param widthBudgetMm - 스캔 폭 상한 (mm, 통상 컬럼 폭)
+   * @returns 스캔 범위 런들의 최대 폰트 크기 (mm)
+   */
+  private _computePendingMaxFontSize(
+    startBlock: number,
+    startRun: number,
+    startChar: number,
+    widthBudgetMm: number,
+  ): number {
+    const baseFontSizeMm = this.fontSize;
+    const effTextStyle = this.effectiveTextStyle;
+    const wr = this.widthRatio;
+    const effSpaceRatio = this.spaceRatio;
+    const letterSpacingEm = effTextStyle.letterSpacing!;
+    const charWidthByFont = this._charWidthByFontCache;
+
+    let maxFs = baseFontSizeMm;
+    let widthMm = 0;
+
+    // 라인은 블록(`\n` 구분)을 넘지 않으므로 시작 블록만 스캔한다.
+    const runs = this._contents[startBlock];
+    if (!runs) return maxFs;
+
+    for (let runIdx = startRun; runIdx < runs.length; runIdx++) {
+      const run = runs[runIdx];
+      const inlineStyle = run.textInlineStyle;
+      const runFontSize = inlineStyle?.fontSize ?? baseFontSizeMm;
+      if (runFontSize > maxFs) maxFs = runFontSize;
+
+      const letterSpacingMm = letterSpacingEm * runFontSize;
+      const minWidthMm = effSpaceRatio * runFontSize;
+      const fontKey = (inlineStyle?.fontFamily ?? '') + '|' + runFontSize;
+      let fontWidthMap = charWidthByFont.get(fontKey);
+      if (fontWidthMap === undefined) {
+        fontWidthMap = new Map();
+        charWidthByFont.set(fontKey, fontWidthMap);
+      }
+
+      for (let charIdx = runIdx === startRun ? startChar : 0; charIdx < run.content.length; charIdx++) {
+        const char = run.content[charIdx];
+        let rawWidth: number;
+        if (char === RIGHT_INDENT_TAB_CHAR) {
+          rawWidth = 0;
+        } else if (char === ' ') {
+          rawWidth = minWidthMm;
+        } else {
+          let cached = fontWidthMap.get(char);
+          if (cached === undefined) {
+            const fontWidth = this._charWidthMmFromFont(char, inlineStyle, runFontSize);
+            if (fontWidth !== null) {
+              fontWidthMap.set(char, fontWidth);
+              this._charWidthCache.set(char + '|' + fontKey, fontWidth);
+              cached = fontWidth;
+            } else {
+              cached = 0;
+            }
+          }
+          rawWidth = cached > minWidthMm ? cached : minWidthMm;
+        }
+        widthMm += rawWidth * wr + letterSpacingMm;
+        if (widthMm >= widthBudgetMm) return maxFs;
+      }
+    }
+    return maxFs;
   }
 
   /**
@@ -1443,6 +1612,15 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     }
     this._overlayRectsMm = null;
 
+    // 인라인 fontSize 오버라이드가 있으면 라인 rect를 per-line 높이로 계산한다
+    // (오버랩 판정/overflow 판정을 실제 렌더링 위치와 일치시킨다). 오버라이드가
+    // 없으면 모든 라인 높이가 균일(base)하므로 기존 균일 경로를 쓴다 — 성능과
+    // 결과를 그대로 보존한다.
+    const baseFontSizeMmForPending = this.fontSize;
+    const hasInlineFontSizeOverride = this._contents.some(
+      (line) => line.some((run) => (run.textInlineStyle?.fontSize ?? baseFontSizeMmForPending) > baseFontSizeMmForPending),
+    );
+
     let beforeIdxBlock = startBlockIdx;
     let beforeRunIdx = startRunIdx;
     let beforeCharIdx = startCharIdx;
@@ -1454,11 +1632,16 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       let currentPartIdx = 0;
       let cumulativeWidths: number[] = [];
       let isColumnOverflow = false;
+      // per-line 라인 rect 계산 상태: 컬럼 내 확정 라인 높이 누적합 (mm).
+      // 미확정(undefined)인 마지막 라인만 확정 대상이며, 확정은 다음 라인
+      // 생성 직전에 이루어진다. 균일 경로에서는 사용되지 않는다.
+      let cumulativeTopMm = 0;
 
       let idxBlock = beforeIdxBlock;
       let runIdx = beforeRunIdx;
       let charIdx = beforeCharIdx;
       const alignOffsetMm = alignOffsetsMm[curColumn] ?? 0;
+      const columnWidthMm = this._columnWidths[curColumn];
 
       for (; idxBlock < this.contents.length; idxBlock++) {
         const runs = this.contents[idxBlock];
@@ -1473,12 +1656,23 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
           let isFirstLineInLoop = true;
           while (true) {
             const isFirstInColumn = curColumn === 0 && columnContent.length < 1 && isFirstLineInLoop;
+            let cumulativeTopForRect: number;
+            let pendingMaxFontSizeMm: number;
+            if (hasInlineFontSizeOverride) {
+              cumulativeTopMm = this._confirmLineHeight(columnContent, cumulativeTopMm);
+              cumulativeTopForRect = cumulativeTopMm;
+              pendingMaxFontSizeMm = this._computePendingMaxFontSize(idxBlock, runIdx, charIdx, columnWidthMm);
+            } else {
+              cumulativeTopForRect = columnContent.length * this._lineHeight;
+              pendingMaxFontSizeMm = baseFontSizeMmForPending;
+            }
             const result = this._createLineWithParts(
               curColumn,
-              columnContent.length,
               isFirstInColumn,
               runIdx === 0 && charIdx === 0,
               alignOffsetMm,
+              cumulativeTopForRect,
+              pendingMaxFontSizeMm,
             );
             isColumnOverflow = result.overflow;
 
@@ -1635,7 +1829,17 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
             }
 
             while (true) {
-              const result = this._createLineWithParts(curColumn, columnContent.length, false, false, alignOffsetMm);
+              let cumulativeTopForRect: number;
+              let pendingMaxFontSizeMm: number;
+              if (hasInlineFontSizeOverride) {
+                cumulativeTopMm = this._confirmLineHeight(columnContent, cumulativeTopMm);
+                cumulativeTopForRect = cumulativeTopMm;
+                pendingMaxFontSizeMm = this._computePendingMaxFontSize(idxBlock, runIdx, charIdx, columnWidthMm);
+              } else {
+                cumulativeTopForRect = columnContent.length * this._lineHeight;
+                pendingMaxFontSizeMm = baseFontSizeMmForPending;
+              }
+              const result = this._createLineWithParts(curColumn, false, false, alignOffsetMm, cumulativeTopForRect, pendingMaxFontSizeMm);
               isColumnOverflow = result.overflow;
 
               if (result.cover) {
