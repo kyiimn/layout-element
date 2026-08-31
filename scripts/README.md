@@ -19,6 +19,7 @@
 | `verify-right-indent-tab-browser.mjs` | 정합성 (브라우저) | Shift+Tab 키 삽입·DOM 렌더·커서 | ALL PASS |
 | `verify-right-indent-tab-composition.mjs` | 정합성 (브라우저) | 탭 라인 한글 조합 표시·우측 정렬·이탈 방지 | ALL PASS |
 | `verify-right-indent-tab-guide.mjs` | 정합성 (브라우저) | 탭 점선 가이드 (편집 모드 전용 표시·원복) | ALL PASS |
+| `verify-right-indent-tab-single-source.mjs` | 정합성 (원칙) | 탭 좌표 단일 소스: DOM === 엔진 === print | ALL PASS |
 | `verify-engine-node.mjs` | 정합성 (Node) | 엔진 계층 DOM-free 동작 | ALL PASS |
 | `verify-obfuscated.mjs` | 정합성 (빌드) | 난독화 IIFE 번들 로딩 | ALL PASS |
 | `obfuscate.mjs` | 빌드 | IIFE 번들 난독화 | build 완료 |
@@ -205,6 +206,25 @@ npx tsx scripts/verify-style-revert.mjs   # 28항목 ALL PASS
 ```bash
 npx tsx scripts/verify-right-indent-tab.mjs            # Node (엔진)
 npx tsx scripts/verify-right-indent-tab-browser.mjs   # 브라우저 (dev server 필요)
+```
+
+### `verify-right-indent-tab-single-source.mjs` — 탭 좌표 단일 소스 원칙 (원칙 검증)
+
+**목적**: 엔진 우선/단일 소스 원칙 검증 — 화면 렌더링 좌표와 인쇄(printPostData) 좌표가 모두 엔진의 `_computeCharOffsets()` 단일 루틴에서 나오는지. DOM은 엔진 출력을 받아 표시만 하고, 인쇄 후처리도 동일한 charOffsets를 소비하며, 어느 쪽에서도 정렬 재계산을 하지 않는다. 이렇게 해야 **화면 편집 내역과 실제 출력 내용이 일치**한다. (탭 가이드는 DOM 전용 표시로 이 원칙에서 제외)
+
+**정적 검증** (소스 코드 패턴):
+1. `renderText`(DOM)에 정렬 재계산 공식 없음 — `offsetMm` 소스가 엔진 `charOffsets`뿐
+2. `buildParagraphPrintPostData`가 `charOffsets[k]`를 소비만 하고 재계산 없음
+3. `charOffsets` 쓰기는 `_computeCharOffsets` 단일 지점
+
+**런타임 검증** (탭+긴 텍스트 재배치 후):
+- DOM span `dataset.charOffset` === 엔진 `columnContents[].parts[].charOffsets` (전 span, 1e-9 허용 오차)
+- `printPostData`에 탭 문자 미포함
+- Node에서 print 좌표를 파트 로컬로 환산한 값 === 엔진 `charOffsets` (전 글자, 정밀 수치 비교)
+
+**실행**:
+```bash
+npx tsx scripts/verify-right-indent-tab-single-source.mjs   # dev server 필요
 ```
 
 ### `verify-engine-node.mjs` — 엔진 Node.js 호환성
