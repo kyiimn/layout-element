@@ -697,12 +697,8 @@ interface LayoutRemoveEventDetail {
 
 **`_rebuildingChildren` 플래그 + `_pendingData` 캐시**: `data` 세터 실행 전 `_rebuildingChildren = true`와 `_pendingData = data`를 설정하고, `try/finally` 블록에서 항상 둘을 복원한다(`_rebuildingChildren = false`, `_pendingData = null`). 이 플래그가 `true`인 동안:
 
-1. MutationObserver 콜백이 무시된다. 자식 제거/추가로 인한 DOM 변경이 `layout()`/`render()`를 중복 트리거하지 않는다.
+1. 자식의 data 세터가 자체 `layout()`/`render()`를 실행하지 않는다 (부모 reconcile 후 상위 최종 `layout()` 1회에 수렴).
 2. `data` getter가 `_pendingData` 캐시를 반환한다. `this.items.map(e => e.data)`가 중간 상태(`children: []`)를 반환하는 것을 방지하여, 외부(React 래퍼, EditManager 이벤트 핸들러)에서 `element.data`를 읽더라도 항상 올바른 전체 데이터를 얻을 수 있다.
-
-**`LayoutBoxElement`**는 `connectedCallback`에서 `_startChildObserver()`로 MutationObserver를 등록하고, `disconnectedCallback`에서 `_stopChildObserver()`로 해제한다.
-
-**`LayoutDocumentElement`**도 동일하게 `connectedCallback`에서 `_startChildObserver()`로 등록하고, `disconnectedCallback`에서 `_stopChildObserver()`로 해제한다.
 
 ---
 

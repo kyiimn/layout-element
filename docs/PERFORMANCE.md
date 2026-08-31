@@ -127,10 +127,10 @@
 | 위치 | `ParagraphEngine._charOuterStyleCache` (`paragraph-engine.ts:66`) |
 | 타입 | `LRU<string, Partial<CSSStyleDeclaration>>` |
 | 용량 | 5000 |
-| 키 | `${char}\|${widthRatio}\|${letterSpacing}\|${spaceRatio}\|${fontSize}` |
+| 키 | `${char}\|${widthRatio}\|${letterSpacing}\|${spaceRatio}\|${fontSize}\|${lineMaxFontSize}\|${fontName}` |
 | 값 | `genCharStyle()` 결과 CSS 스타일 객체 |
 
-`genCharStyle()`은 장평을 적용한 최종 `width`를 CSS 값으로 포함하므로 장평이 키에 포함된다. `width` 계산에 `letterSpacing`(`lsMm`)과 `spaceRatio`도 사용되므로 이 값들도 키에 포함된다 — 자간이나 공백 비율이 변경되면 별도 캐시 항목이 생성되어 잘못된 스타일이 반환되는 것을 방지한다. 이전에는 `Map` + `size > 5000 → clear()` 전체 삭제 정책이었으나 LRU eviction으로 변경하여 성능 cliff를 제거.
+`genCharStyle()`은 장평을 적용한 최종 `width`를 CSS 값으로 포함하므로 장평이 키에 포함된다. `width` 계산에 `letterSpacing`(`lsMm`)과 `spaceRatio`도 사용되므로 이 값들도 키에 포함된다 — 자간이나 공백 비율이 변경되면 별도 캐시 항목이 생성되어 잘못된 스타일이 반환되는 것을 방지한다. **`lineMaxFontSize`(수직 하단 앵커 계산 입력)와 `fontName`도 키에 포함된다** — `width`가 `inlineStyle.fontFamily`별 메트릭(`_charWidthMm`)에서 나오므로, 동일 수치 파라미터 + 다른 폰트 조합이 충돌하면 잘못된 `width/minWidth/maxWidth` CSS가 반환된다 (D-2 교착 폰트 충돌 수정). 이전에는 `Map` + `size > 5000 → clear()` 전체 삭제 정책이었으나 LRU eviction으로 변경하여 성능 cliff를 제거.
 
 #### LRU 도입 전후 비교
 
@@ -446,6 +446,9 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 | `spaceRatio` | 공백 비율 |
 | `fontSize` | 폰트 크기 |
 | `_inheritStyle.parentHeight` | 단락 높이 (오버플로우 판정) |
+| `textAlign` | charOffsets 계산에 반영 (§6A 정렬은 래핑에 무영향이지만 캐시된 `columnContents`의 charOffsets에 영향) |
+| `verticalAlign` | 라인 y 오프셋(alignOffsetMm) 계산에 반영 |
+| `indent` | 자유 영역(free regions) 계산에 반영 |
 | 오버랩 요소 **상대 좌표** (`el.absLeft - paragraph.absLeft`, `el.absTop - paragraph.absTop`) | 단락 기준 상대 위치. 오버랩 요소가 없으면 해시에 포함되지 않음 |
 | 오버랩 요소 `absWidth/absHeight` | 오버랩 크기 |
 | 오버랩 요소 `overlapMode` | 오버랩 처리 모드 (`'path'`/`'box'`). 모드 변경 시 캐시 무효화 |
@@ -501,7 +504,7 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 - `verticalAlign`이 `'top'` (`'center'`/`'bottom'`은 라인 수 의존적이므로 제외)
 - `_prefixCache`가 존재하고 해시가 동일
 
-**`_computePrefixHash`**: 캐럿 이전의 plain-text + 배치 영향 인라인 필드(`fontFamily`/`fontSize`/`fontStyle`) + 컬럼/스타일 파라미터 + 오버랩 상대 좌표를 해싱.
+**`_computePrefixHash`**: 캐럿 이전의 plain-text + 배치 영향 인라인 필드(`fontFamily`/`fontSize`/`fontStyle`) + 컬럼/스타일 파라미터(`textAlign`/`verticalAlign`/`indent` 포함) + 오버랩 상대 좌표를 해싱.
 
 **`_buildPrefixCache`**: 전체 재배치 후 호출. 캐럿 오프셋 이전에 해당하는 컬럼들을 prefix로 저장하고, 재배치 시작점(`startColumnIdx`/`startBlockIdx`/`startRunIdx`/`startCharIdx`)을 계산.
 
@@ -879,7 +882,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | 캐시 | 용량 | 근거 |
 |---|---|---|
 | `_charWidthCache` | 5000 | 한국어 11,172 음절 + ASCII + 기호. 폰트×크기 조합 2~3개 고려 시 충분. |
-| `_charOuterStyleCache` | 5000 | `${char}\|${widthRatio}\|${letterSpacing}\|${spaceRatio}\|${fontSize}` 키. 장평/자간/공백비율/폰트크기 조합 × 고유 문자. |
+| `_charOuterStyleCache` | 5000 | `${char}\|${widthRatio}\|${letterSpacing}\|${spaceRatio}\|${fontSize}\|${lineMaxFontSize}\|${fontName}` 키. 장평/자간/공백비율/폰트크기/혼용폰트 조합 × 고유 문자. |
 | `_charInnerStyle` | 1 | 모든 글자 동일 내부 스타일. |
 | `_parsedFonts` | 무제한 (`Map`) | 등록된 폰트 패밀리 수는 제한적. |
 | `_overlayRectsMm` | 무제한 (`Map`) | 렌더링 사이클당 오버랩 요소 수는 제한적. 매 사이클 재구축. |

@@ -314,6 +314,16 @@ static createOrphan(data: BoxData): BoxEngine  // 부모 없이 생성. appendCh
 `computeOverlap()`은 `displayRect`를 기준으로 오버랩을 판정한다.
 `overlapMode: 'path'`일 때 원본 RGBA를 `displayRect`에 매핑하여 픽셀 단위 판정을 수행한다.
 
+#### rgbaData 소유권 (DOM 로드 실패와 무관)
+
+오버랩 판정의 진실은 엔진 `rgbaData`가 소유한다. DOM 렌더 경로의 일시적 실패(DOM 로드 실패
+`image-load-failed`, url loader가 null 반환)는 **표시 수준의 실패**일 뿐 엔진 픽셀을 소각하지
+않는다 — `_clearImageCache()`는 DOM 표시 캐시(resolved URL, HTMLImageElement, 로딩
+Promise)만 지우고, `rgbaData = null`은 **실제 URL 변경 시에만** 허용된다
+(`data`/`url` setter의 urlChanged 분기). 인쇄/내보내기는 엔진 픽셀로 그려지므로 DOM 로드
+실패와 무관하게 이미지가 출력되며, 화면 오버랩 회피도 엔진 판정과 일치를 유지한다. 실패
+렌더는 오버랩 단락을 재갱신(`_notifyOverlapParagraphs()`)하여 화면·엔진 불일치를 해소한다.
+
 #### Node.js 자동 rgbaData 주입
 
 Node.js 환경에서 `ImageData.url`이 base64 data URI(`data:image/png;base64,...`)인 경우,
@@ -560,7 +570,8 @@ static createOrphan(data: TableData): TableEngine  // 부모 없이 생성. appe
 |--------|----------|------|
 | `layout` | `(rowsData?: TableRowData[]): void` | `childrenData` setter로 주입된 행 데이터에서 그리드 계산. 파라미터 전달 시 setter 호출(deprecated). `_data.children`을 읽지 않음. `setRowMetrics`에 행 ID 주입. |
 | `childrenData` (setter) | `TableRowData[]` | 행 데이터 설정. `data` setter는 테이블 자체 속성(colWidths/borders)만 담당. 설정 시 `_dirty = true` |
-| `buildCellBoxEngines` | `(parentBox: BoxEngine, ctx: BoxBuildContext): void` | `layout()` 후 셀 내부 박스 엔진을 재구축. `gridResolution.placements`를 기반으로 각 셀의 `boxEngine`을 재생성/재사용. `TableStructureEditor`의 merge/split/insert/delete 등 구조 변경 후 `TableCellEngine.boxEngine`이 null이 되는 것을 방지. `prevBoxEnginesByBoxId`로 ID 기반 엔진 재사용을 시도하고, 실패하면 새 `BoxEngine`을 생성. `newEnginesCreated` 플래그를 `ctx`에 반영. |
+| `buildCellBoxEngines` | `(parentBox: BoxEngine, ctx: BoxBuildContext): void` | `layout()` 후 셀 내부 박스 엔진을 재구축. `gridResolution.placements`를 기반으로 각 셀의 `boxEngine`을 재생성/재사용. `TableStructureEditor`의 merge/split/insert/delete 등 구조 변경 후 `TableCellEngine.boxEngine`이 null이 되는 것을 방지. 재사용 체인: (1) `cellEngine.findBoxEngineById(id)` — `layout()`의 cellLabel 복원, (2) `ctx.prevCellBoxEnginesById` box-ID stash 폴백 (라벨 시프트 시 캐시 보존), (3) 둘 다 실패 시 새 `BoxEngine` 생성. 재사용된 stash 엔트리는 consume 시 삭제. `newEnginesCreated` 플래그를 `ctx`에 반영. |
+| `collectPrevCellBoxEngines` | `(): Map<string, BoxEngine>` | 현재 셀 박스 엔진을 box ID로 수집. `TableElement._layoutStructure()`가 `ctx.prevCellBoxEnginesById`에 주입하여 `buildCellBoxEngines` 재구축 시 라벨 시프트 후에도 엔진 상태(단락 `_layoutCache`, 이미지 `rgbaData`)를 보존. |
 
 #### `TableCellEngine`
 
@@ -1045,11 +1056,26 @@ engine.printPostData;                      // ❌ throw: "DocumentEngine has pen
 
 ### `createDirtyError(engineName)`
 
-`src/engine/types.ts`에서 export하는 헬퍼 함수. dirty 상태에서 `extractData`/`printPostData` 조회 시 발생시킬 에러를 생성한다.
+`src/engine/types.ts`에서 export하는 헬퍼 함수. dirty 상태에서 `extractData`/`printPostData` 조회 시 발생시킬 에러를 생성한다. `Error` 서브클래스 `DirtyPendingError`(`name === 'DirtyPendingError'`)를 반환하므로, 소비자는 메시지 문자열 파싱 대신 `e instanceof Error && e.name === 'DirtyPendingError'`로 판별할 수 있다.
 
 ```ts
-import { createDirtyError } from "./types";
-// createDirtyError('BoxEngine') → Error("BoxEngine has pending changes from individual setters. Call layout() before reading extractData or printPostData.")
+import { createDirtyError, DirtyPendingError } from "./types";
+// createDirtyError('BoxEngine') → DirtyPendingError("BoxEngine has pending changes from individual setters. ...")
+```
+
+### `DocumentEngine.ensureCommitted()`
+
+모든 엔진의 개별 setter pending 변경을 커밋하는 **명시적 스냅샷 경계** API. `extractData` / `printPostData`는 순수 읽기(자가 치유 없음)로 유지되므로, 일관 스냅샷이 필요한 소비자(저장/내보내기/print 후처리)는 데이터를 읽기 **전에** 이 메서드를 호출한다.
+
+- 자기(`DocumentEngine`) dirty 시 `layout()`, 이후 하위 트리를 재귀 순회하며 타입별 커밋 수행: Box/Table → `layout()`, Paragraph → `layoutText()`, Image → `layout()`.
+- **테이블 하강**: `TableEngine` 커밋 후 `rowEngines → cellEngines → boxEngine`으로 재귀 하강해 셀 내부(셀 박스 → 단락/이미지)의 pending 변경까지 커밋한다 — `TableEngine.layout()`은 셀 내부 커밋을 다루지 않기 때문이다 (D-1, `_refreshParagraphOverlays`와 동일한 순회 구조).
+- `hasPendingChanges`가 true인 단락은 **커밋하지 않고 건너뛴다** — 편집 파이프라인(rAF 디바운스, 커밋 → 이벤트 발행 순서 계약)이 소유 중이므로 `caretHint` 소비와 커밋 순서를 침범하지 않기 위함이다. 편집 중 단락의 스냅샷이 필요하면 `paragraph.flushRender()`를 먼저 호출할 것.
+- dirty가 없으면 O(1)로 즉시 반환한다.
+
+```ts
+// 저장/내보내기 직전 일관 스냅샷 확보
+documentEngine.ensureCommitted();
+const post = documentEngine.printPostData;
 ```
 
 ### `createNoParentError(engineName, attachMethod)`

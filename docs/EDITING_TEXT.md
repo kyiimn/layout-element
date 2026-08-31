@@ -1800,6 +1800,10 @@ paragraph.render();
 
 텍스트 변경(Backspace, Delete, 붙여넣기, 문자 입력) 후에는 `_updateCursorPosition()`을 즉시 호출하지 않고 `_debouncedRender()`만 예약한다. `_debouncedRender()`는 rAF 콜백 내에서 `_commitPendingInput()`을 호출한다 — `model.hasPendingChanges`가 true면 `paragraph.flushRender()`로 동기 커밋한 뒤 같은 프레임 안에서 `textChange`/`cursorMove`를 프레임당 1회 발행하고, 아니면 `paragraph.scheduleRender()`로 `queueMicrotask` 배치에 참여한다. 연속 타이핑 시 같은 프레임의 여러 키 입력은 하나의 rAF로 병합된다. 커서 위치는 `paragraph.render()` → `postRender()` → `_updateCursorPosition()` 흐름에서 **최신 DOM 기준**으로 갱신된다. 예외: (1) `_onInput`에서 `_optimisticSpan`이 생성된 경우(단일 문자 입력)에는 즉시 `_updateCursorPosition()`을 호출하여 즉각적인 피드백을 제공한다. (2) Enter/compositionend 핸들러는 `paragraph.flushRender()`를 사용하여 대기 중인 `scheduleRender()` 배치를 취소하고 즉시 `render()`를 실행한 후 동기적으로 `_updateCursorPosition()`을 호출한다.
 
+#### 7.4.2a dirty 계약과 스냅샷 읽기
+
+`extractData`/`printPostData`는 **순수 읽기**다 — dirty 상태에서 조회하면 `DirtyPendingError`(`e.name === 'DirtyPendingError'`)를 throw하며 자가 치유하지 않는다. 편집 중 단락의 dirty는 이 rAF 디바운스 커밋(커밋 → 이벤트 발행 순서)이 소유하므로, 일관 스냅샷이 필요한 외부 소비자(저장/내보내기/print)는 읽기 전에 `DocumentEngine.ensureCommitted()`를 호출한다 — `hasPendingChanges`인 **편집 중** 단락은 건너뛰고 나머지 트리(테이블 셀 내부 포함)의 pending 변경을 타입별 커밋한다. 이 에러가 정상 편집 흐름에서 관찰되면 커밋 순서 버그 신호이며, 자가 치유로 흡수하지 않는다.
+
 #### 7.4.3 편집 델타 경로 (run-map 스플라이스)
 
 모든 텍스트 편집 지점(`_onInput` 일반/선택 분기, Backspace, Delete, Enter, `_onPaste`, `_replaceSelection`, `_deleteSelection`, `_onCompositionUpdate`)은 `run-map.ts`의 `insertTextIntoInline`/`deleteTextFromInline` 스플라이스 프리미티브로 `model.textContent`를 갱신한 뒤, 즉시 `this._runMap = runMapFromContent(model.textContent)`로 런 맵을 재추출한다. `model.textContent`가 단일 소스이고 런 맵은 그 투영(projection)이다. 이전의 delta-sync(`shiftRunMap` + `applyStyleToRange`) 경로는 제거되었다 — 런 경계에서 갭이 생겨 삽입 텍스트가 plain으로 처리되고, `model.textContent`와 `_runMap`이 불일치하는 버그가 있었다.

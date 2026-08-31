@@ -313,7 +313,7 @@ class LayoutBoxElement extends HTMLElement
 - 새 `children`에 없는 `id`를 가진 기존 자식은 제거합니다.
 - 자식 순서는 `appendChild`로 재배열합니다.
 - `id`가 없는 자식은 항상 새로 생성됩니다 (안정적 식별자가 없음).
-- `_rebuildingChildren` 플래그로 `MutationObserver`의 중복 트리거를 억제합니다.
+- `_rebuildingChildren` 플래그로 reconcile 중 자식의 중복 layout/render를 억제합니다.
 - `lock: true`면 box 자신과 모든 자손이 편집에서 제외됩니다 (drag/resize/text edit 모두).
 - `data.lock === true`일 때만 잠금으로 설정됩니다. `data.lock`이 `undefined` 또는 `false`이면 기존 잠금 상태와 무관하게 **잠금이 해제**됩니다. (role 전환 등으로 `setBoxLockDeep(false)`가 `delete next.lock`을 수행해 `data.lock`이 `undefined`가 되는 경우를 안전하게 처리하기 위함입니다.)
 
@@ -338,12 +338,13 @@ box.convertPosition('absolute');
 console.log(box.left, box.top, box.width, box.height); // mm 값
 ```
 
-#### MutationObserver
+#### 자식 DOM 직접 조작 금지
 
-`<x-layout-box>`는 `{ childList: true }` 옵션의 `MutationObserver`를 등록하여
-`appendChild`/`removeChild`로 직접 자식을 조작해도 자동으로 `layout()` + `render()`를
-수행합니다. `data` setter를 통한 재구축 시에는 `_rebuildingChildren` 플래그로
-중복 호출을 방지합니다.
+`<x-layout-box>`는 MutationObserver로 자식 변이를 감시하지 않습니다 — 자식 reconcile은
+오직 `data` setter(ID 기반 diff)와 `appendChildData()`/`removeChildData()`(증분 추가/삭제)
+경로로만 수행됩니다. raw `appendChild`/`removeChild`로 자식을 조작하면 엔진 트리가
+DOM과 어긋납니다 (PERFORMANCE.md §3.4 변경 이력 참조: MutationObserver는 제거되었고
+현재는 `_rebuildingChildren` 플래그 기반 가드만 존재).
 
 #### Attributes
 
@@ -568,11 +569,11 @@ class LayoutImageElement extends HTMLElement
 
 | 트리거 | 경로 | 비고 |
 |---|---|---|
-| `data` setter | `layout()` + `render()` | `objectFit`, `x`/`y`/`width`/`height`, `url`, `originalWidth`/`originalHeight` 등 일괄 갱신 |
-| `x`, `y`, `width`, `height`, `dpi`, `url`, `originalWidth`, `originalHeight` setter | `render()` | 단일 필드 변경 (기존 값과 같으면 no-op) |
-| `objectFit` setter | (없음) | 메타데이터만 갱신. 렌더링 미영향. 편집 UI가 별도로 `x`/`y`/`width`/`height`를 갱신. |
+| `data` setter | `layout()` + `render()` | `objectFit`, `x`/`y`/`width`/`height`, `url`, `originalWidth`/`originalHeight` 등 일괄 갱신. URL 변경 시에만 엔진 `rgbaData` 무효화 |
+| `x`, `y`, `width`, `height`, `dpi`, `url`, `originalWidth`, `originalHeight` setter | `render()` | 단일 필드 변경 (기존 값과 같으면 no-op). `x`/`y`/`width`/`height`/`originalWidth`/`originalHeight`는 `requestRerenderAffectedParagraphs()`도 호출 — `displayRect`(오버랩 경계)가 이 값들에서 파생되므로 형제 단락 회피 재계산 필요 |
+| `objectFit` setter | `render()` + 부모 `requestRerenderAffectedParagraphs()` | 엔진 `_updateEngine` + `displayRect` 재계산 (`_applyObjectFit`이 `_x/_y/_width/_height` 갱신) |
 | `zIndex`, `overlapPadding`, `overlapMode` setter | `layout()` + `render()` + 부모 `requestRerenderAffectedParagraphs()` | 형제 단락 텍스트 회피 재계산 |
-| `inheritStyle` setter | `layout()` + `render()` | 상위 box의 크기/여백 변경 시. `absWidth`/`absHeight`가 `inheritStyle.parentWidth`/`parentHeight`에 의존하므로 캔버스 픽셀을 다시 그려야 함 |
+| `inheritStyle` setter | `layout()` + `render()` | 상위 box의 크기/여백 변경 시. `absWidth`/`absHeight`가 `inheritStyle.parentWidth`/`parentHeight`에 의존하므로 캔버스 픽셀을 다시 그려야 함. `_applyObjectFit()` 후 `_syncObjectFitToEngine()`으로 재계산된 표시 오프셋을 엔진에 역방향 동기화 (H-2 — stale 좌표의 `extractData` 유출 방지) |
 
 **상위 box 크기/여백 변경 경로**:
 
@@ -1298,10 +1299,13 @@ class DocumentEngine {
   set childBoxEngines(engines: BoxEngine[]): void;
 
   layout(childrenData?: BoxData[]): void;  // childrenData로 전체 엔진 트리 자동 구축. _data.children 사용 안 함
+  ensureCommitted(): void;  // 명시적 스냅샷 경계: 트리 전체의 개별 setter pending 변경을 타입별 커밋 (Box/Table→layout, Paragraph→layoutText, Image→layout). hasPendingChanges인 단락은 편집 파이프라인 소유이므로 skip. dirty 없으면 O(1) 반환
 }
 ```
 
 > **ppm은 옵셔널** — Node.js에서 DOM 없이 연산할 때 생략 가능. `layout(childrenData)`에 자식 박스 데이터 배열을 전달하면 전체 트리 구축.
+>
+> **dirty 계약**: 개별 setter는 `_dirty`만 설정하고 `extractData`/`printPostData` 조회 시 `DirtyPendingError`(`e.name === 'DirtyPendingError'`로 판별 가능)를 throw한다 — 읽기는 자가 치유하지 않는다. 일관 스냅샷이 필요한 소비자(저장/내보내기/print)는 읽기 전에 `ensureCommitted()`를 호출한다. `engine.layout()` 등 커밋 연산 후에는 조회가 정상화된다.
 
 ---
 

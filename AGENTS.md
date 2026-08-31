@@ -30,6 +30,7 @@ npx tsx scripts/benchmark-browser.mjs   # 브라우저 전체 파이프라인 �
 npx tsx scripts/benchmark-typing.mjs     # 엔진 layoutText 타이핑 패스별 실측 (Node)
 npx tsx scripts/snapshot-layout.mjs > /tmp/opencode/snapshot.json  # 엔진 배치 결과 직렬화 (전후 byte 비교)
 npx tsx scripts/verify-dom-diff.mjs     # DOM ↔ 엔진 렌더 정합성 (fontSize/trailing \n/wrap)
+npx tsx scripts/verify-visual-render.mjs # 실제 화면 렌더 검증 (호스트 CSS rule stale/0폭/클립 — rect 기반)
 npx tsx scripts/verify-ime.mjs          # 한글 IME 조합 정합성 (커밋/취소/혼합)
 npx tsx scripts/verify-multicolumn.mjs  # 멀티컬럼 타이핑 정합성 (prefix 캐시 경로)
 npx tsx scripts/verify-engine-node.mjs  # 엔진 계층 Node.js 호환성 (DOM-free 검증)
@@ -179,6 +180,31 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 - **Default values via effective getters**: Engine getters (`effectiveParagraphStyle`, `effectiveTextStyle`, `effectiveOverlapMode`, etc.) merge injected values → inherited values → default values. These getters are for **internal layout computation only** — they are NOT used by `extractData`. DOM receives data from the engine where `paragraphStyle`/`textStyle` contain injected values only (not merged with inherited/default).
 - **`sourceParagraphStyle`/`sourceTextStyle` removed**: `_paragraphStyle`/`_textStyle` store injected values only (no merge with parent styles). `effectiveParagraphStyle`/`effectiveTextStyle` getters perform the merge: `{ ...DEFAULT, ..._inheritStyle, ..._paragraphStyle }`.
 
+#### Single-Source Invariants (Engine = Truth for PDF/Print Parity)
+
+엔진은 PDF·인쇄물·화면이 **동일한 데이터**를 유지하게 하는 단일 소스다. 이를 깨는 모든 이중 소스는
+화면과 출력의 어긋남(렌더링 미스)으로 돌아온다. 아래 불변식은 엔진-우선 원칙의 소유권별 정리다:
+
+1. **좌표/기하(mm)**: 엔진 단일 소스 (`ImageEngine.displayRect`, `BoxEngine.absRect`,
+   `ParagraphEngine.getCharRect`). DOM px 변환은 표시 전용이며 계산에 역주입되지 않는다.
+   이외의 mm 계산 공식을 DOM에 새로 추가하는 것은 금지 — 엔진 getter로 소비한다.
+   (예외적으로 DOM 좌표 변환은 엔진의 순수 함수(`computeObjectFit` 등)만 호출할 수 있다.)
+2. **픽셀(이미지)**: `ImageEngine.rgbaData`가 오버랩 판정의 진실. DOM 로드 실패는 표시 수준의
+   실패일 뿐 엔진 픽셀을 소각하지 않는다 (`_clearImageCache()`는 DOM 캐시만 지운다).
+   `rgbaData = null`은 **실제 URL 변경 시에만** 허용된다.
+3. **데이터 추출**: 스냅샷(`extractData`/`printPostData`)은 오직 엔진에서 조립된다. 읽기는
+   자가 치유하지 않는다 (`DirtyPendingError` 계약, `DocumentEngine.ensureCommitted()` 참조).
+4. **ID 발급**: 인덱스 기반이 아닌 `id` 키 재사용(부모 자식 reconcile, `findBoxEngineById`,
+   `prevCellBoxEnginesById`의 key)은 엔진이 소유한 id를 기준으로 판정한다. 엔진 발급 id는
+   `_syncEngineIdsToDom`을 통해 DOM에 write-back되어 id가 양방향으로 어긋나지 않는다.
+5. **라인/라벨 배치**: 테이블 셀 라벨, 행 Y/높이, 컬럼 폭, 보더 면 등의 배치 결정은
+   `TableEngine.layout()`(→`resolveTableGrid`)만이 수행한다. DOM은 `_setRowMetrics`/
+   `_setCellMetrics`로 엔진 결과를 전달받을 뿐이며, 그리드를 재계산하지 않는다.
+
+> 판별 규칙: 새 코드에서 mm 계산·배치·판정 로직을 작성할 때, 그 함수가 **DOM 없이 Node.js에서
+> 실행되고 있지 않다면**(`scripts/verify-engine-node.mjs`가 감지) 엔진-우선 원칙 위반이다.
+> 위치는 `src/engine/`이어야 하고, DOM 엘리먼트는 그 결과를 표시만 한다.
+
 ### `extractData` — Engine Data Extraction
 
 - **`DocumentEngine.extractData`**: Returns `DocumentData` with `children` dynamically assembled from `childBoxEngines.map(e => e.extractData)`. Padding values use getter defaults (`?? 0`).
@@ -203,6 +229,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 - **`connectedCallback`**: `genUUID()` calls removed from all elements' `connectedCallback`. ID generation is now exclusively handled by `data` setter (for DOM) or engine (for Node.js standalone).
 - **Engine fallback**: `_buildBoxEngine`, `_buildParagraphEngine`, `_buildImageEngine`, `_buildTableEngine` still auto-generate `id` via `generateEngineId()` when `data.id` is `undefined`, for Node.js standalone usage without DOM.
 - **`_syncEngineIdsToDom()`**: After `engine.layout()`, engine-generated IDs are written back to DOM elements recursively (`_syncEngineIdsToDomRecursive`). This covers nested boxes, paragraphs, images, and tables.
+- **Ownership rule (single source)**: All reuse decisions keyed by `id` — the DOM `data` setter reconcile (`existingById`), `findBoxEngineById`, `prevCellBoxEnginesById` stash — must use the **engine-owned** id. When the DOM `genUUID()` and the engine `generateEngineId()` would diverge (id-less input), the engine-assigned id wins and is written back to DOM by `_syncEngineIdsToDom`; DOM `genUUID()` only exists so that the DOM element has a stable key *before* the first `engine.layout()` (engine needs a context: parent GC, resources). Never re-generate ids from DOM state on top of engine-assigned ones — that breaks the reconcile and `prevCellBoxEnginesById` reuse.
 
 ### `_syncEngineIdsToDom()` — Engine ID Write-Back
 
@@ -223,6 +250,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 - **`LayoutImageElement.disconnectedCallback` must NOT call `_clearImageCache()`.**
 - During `data` setter reconcile, `appendChild` triggers `disconnectedCallback`. Clearing the cache forces async re-loading (`await _resolveUrl + await _loadImage`), causing image flicker.
 - Image cache is invalidated only on URL change (`data`/`url` setter) or explicit `_clearImageCache()` call.
+- **Engine `rgbaData` survives DOM load failures** — overlap truth is owned by the engine, not the DOM canvas. `_clearImageCache()` clears only DOM display caches (resolved URL, HTMLImageElement, loading promise). Engine `rgbaData` is nulled **only on real URL change** (`data`/`url` setter) and re-fed by `_feedRgbaToEngine` on successful load. A DOM load failure (`image-load-failed` / loader null) keeps the previous `rgbaData` alive: print/export render from engine pixels regardless of the DOM failure, so overlap avoidance must remain consistent with the engine — failed renders re-notify overlap paragraphs (`_notifyOverlapParagraphs()`) rather than wiping the engine's pixel truth.
 
 ### `disconnectedCallback` — Cursor/Selection Preservation
 
@@ -270,9 +298,10 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 - `TableEngine.layout()` rebuilds `_rowEngines` and `TableCellEngine` instances but does **not** rebuild cell box engines (`TableCellEngine.boxEngine`). Cell box engines are only created inside `BoxEngine._buildTableEngine()`, which is called during the parent `BoxEngine.layout()`.
 - After table structure edits (merge/split/insert/delete via `TableStructureEditor`), `TableElement._layoutStructure()` calls `engine.layout()` but the parent `BoxEngine.layout()` is never called, so `boxEngine` stays `null` for cells where `prevBoxEngines` label-based restoration fails.
 - `TableCellEngine.extractData` returns `this._boxEngine ? [this._boxEngine.extractData] : []` — when `boxEngine` is null, `children` is an empty array, losing cell content data.
-- `TableEngine.buildCellBoxEngines(parentBox, ctx)` iterates `gridResolution.placements`, finds matching `TableCellEngine`, and calls `parentBox.buildCellBoxEngine(cellData, cellEngine, ctx)` for each cell to rebuild its `boxEngine`. It reuses existing box engines by ID (`prevBoxEnginesByBoxId`) and creates new ones when needed.
+- `TableEngine.buildCellBoxEngines(parentBox, ctx)` iterates `gridResolution.placements`, finds matching `TableCellEngine`, and calls `parentBox.buildCellBoxEngine(cellData, cellEngine, ctx)` for each cell to rebuild its `boxEngine`. Reuse chain: (1) `cellEngine.findBoxEngineById(id)` (label restoration in `TableEngine.layout()`), (2) `ctx.prevCellBoxEnginesById` box-ID stash, then create new if both miss.
+- `BoxBuildContext.prevCellBoxEnginesById`: `Map<boxId, BoxEngine>` stash of previous cell box engines. `DocumentEngine._buildTree()` collects it recursively via `_collectPrevCellBoxEngines()` (including table cell boxes and nested boxes inside them). `TableElement._layoutStructure()` builds it via `TableEngine.collectPrevCellBoxEngines()`. `buildCellBoxEngine` deletes a map entry when consumed, preventing double reuse. This preserves paragraph `_layoutCache` and image `rgbaData` across label shifts (row/col delete, merge/split).
 - `BoxEngine.buildCellBoxEngine(data, cellEngine, ctx)` is the public alias of `_buildCellBoxEngine`, exposing cell box engine construction for `TableEngine` to call after its own `layout()`.
-- `TableElement._layoutStructure()` calls `this._engine.buildCellBoxEngines(parentBoxEngine, ctx)` immediately after `this._engine.layout(...)` with a fresh `BoxBuildContext`, ensuring `extractData` always returns complete cell content after structure edits.
+- `TableElement._layoutStructure()` calls `this._engine.buildCellBoxEngines(parentBoxEngine, ctx)` immediately after `this._engine.layout(...)`, with `ctx.prevCellBoxEnginesById` populated by `TableEngine.collectPrevCellBoxEngines()` (snapshot taken before `TableEngine.layout()` rebuilds cell engines), ensuring `extractData` always returns complete cell content after structure edits without losing engine state.
 
 ### `DocumentEngine._buildBoxEngine()` — GC Reuse
 
@@ -323,7 +352,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 - **Edited text flows through `model.textContent`**: `paragraph.data.content` getter and `_layoutStructure()` use `this._model?.textContent ?? this._sourceContent`.
 - **`paragraph.data` setter triggers `scheduleRender()`**: `layout()` + `_perfStructureChanged = true` + `scheduleRender()`.
 - **TextEditContextAdapter** (`@deprecated`): `create()` always returns `null`. Textarea-based fallback is used in all browsers.
-- **Box child DOM mutation detection**: `MutationObserver` (`_childObserver`) with `{ childList: true }`. `_rebuildingChildren` flag suppresses during `data` setter. `_pendingData` cache ensures correct `data` getter during setter execution.
+- **Box `_rebuildingChildren` flag (MutationObserver removed)**: Direct DOM `appendChild`/`remove` on a box does NOT sync the engine — the flag-based guard alone (with `_pendingData` cache) suppresses double layout/render during `data` setter reconcile. External code must use `appendChildData()`/`removeChildData()`, never raw DOM `appendChild`, or the engine tree diverges. Performance docs (`docs/PERFORMANCE.md` §3.4) reflect the same history.
 - **`contentElement` getter**: Recursively follows `contentType` path to return deepest non-box child. Used by `computeOverlapSizeMm` for safe `overlapPadding`/`canvas`/mm coordinate access in nested box structures.
 - **Reparent mode**: `layoutEditMode = { type: 'reparent' }`. `_tryReparent` extracts `box.data`, converts coordinates, clamps via `clampStaticToContainer`/`clampAbsoluteToContainer`, sets zIndex to new container's max + 1, calls `newContainer.appendChildData()`.
 - **Container clamp**: `clampStaticToContainer`/`clampAbsoluteToContainer` applied in reparent, insert, and placegun.

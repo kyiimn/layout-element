@@ -624,6 +624,15 @@ tableEl.structureEditor.deleteCol();
 
 이를 방지하기 위해 `TableElement._layoutStructure()`에서 `engine.layout()` 호출 직후 `engine.buildCellBoxEngines(parentBoxEngine, ctx)`를 호출하여 셀 박스 엔진을 재구축한다. `buildCellBoxEngines`는 `gridResolution.placements`를 기반으로 각 셀의 `boxEngine`을 ID 기반 재사용 또는 새로 생성한다.
 
+#### 7.7.1 셀 박스 엔진 재사용 체인 (라벨 시프트 대응)
+
+`buildCellBoxEngine`의 재사용은 2단 폴백 체인으로 동작한다 (H-3):
+
+1. `cellEngine.findBoxEngineById(id)` — `TableEngine.layout()`이 `cellLabel`을 키로 복원한 엔진(구조 불변 시 대부분 여기서 히트)
+2. `ctx.prevCellBoxEnginesById.get(id)` — **box-ID stash 폴백**. 행/열 삭제, merge/split으로 `cellLabel`이 시프트되어 1단 매칭이 실패한 셀에서 기존 `BoxEngine`을 box ID로 복원한다. 이때 단락 `_layoutCache`와 이미지 `rgbaData`가 보존되어 구조 편집 1회당 전체 셀 재래핑 비용이 발생하지 않는다.
+
+stash는 상위에서 주입된다: `TableElement._layoutStructure()`는 `TableEngine.collectPrevCellBoxEngines()`(현재 셀 박스 엔진을 box ID로 수집)을 `ctx.prevCellBoxEnginesById`에 채우고, `DocumentEngine._buildTree()`는 `_collectPrevCellBoxEngines()`로 트리 전체(중첩 셀 박스 포함)를 수집한다. 재사용된 엔트리는 consume 시 삭제되어 이중 재사용을 방지한다.
+
 ---
 
 ## 8. Selection Overlay
