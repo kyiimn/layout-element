@@ -4,6 +4,7 @@ declare module 'opentype.js' {
   }
   export interface Font {
     charToGlyph(char: string): Glyph | null;
+    charToGlyphIndex(char: string): number;
     unitsPerEm: number;
   }
   export function parse(buffer: ArrayBuffer): Font;

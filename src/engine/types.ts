@@ -203,17 +203,25 @@ export interface FontLoaderEngine {
 
 /**
  * opentype.js 파싱 결과 타입 (최소 인터페이스).
- * `opentype.Font`의 `charToGlyph`/`unitsPerEm`/`advanceWidth`만 사용.
+ * `opentype.Font`의 `charToGlyph`/`charToGlyphIndex`/`unitsPerEm`/`advanceWidth`만 사용.
  */
 export interface ParsedFont {
   /** 폰트의 units per em */
   unitsPerEm: number;
   /**
    * 문자를 글리프로 변환한다.
+   * cmap에 매핑이 없는 문자는 `.notdef`(gid 0) 글리프를 반환한다.
    * @param char - 변환할 문자
    * @returns 글리프 객체
    */
   charToGlyph(char: string): { advanceWidth: number };
+  /**
+   * 문자의 glyph id를 조회한다 (cmap 직접 조회).
+   * 폴백 폭 계산에서 `.notdef`(gid 0) 매핑을 감지하는 데 사용한다.
+   * @param char - 조회할 문자
+   * @returns glyph id. cmap 매핑이 없으면 0
+   */
+  charToGlyphIndex(char: string): number;
 }
 
 /**

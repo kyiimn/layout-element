@@ -47,6 +47,7 @@ import {
   MmRect,
   OverlapMode,
   ParagraphOverlapMode,
+  ParsedFont,
   createDirtyError,
   createNoParentError,
 } from "./types";
@@ -103,6 +104,19 @@ type FreeRegion = { start: number; end: number };
  * (`minWidthMm`)이 적용되면 의도치 않은 공백 폭이 생기므로 금지.
  */
 const RIGHT_INDENT_TAB_CHAR = "\t";
+
+/**
+ * 한글 완성형 음절 유니코드 범위 시작 (U+AC00, '가').
+ */
+const HANGUL_SYLLABLE_START = 0xac00;
+/**
+ * 한글 완성형 음절 유니코드 범위 끝 (U+D7A3, '힣').
+ */
+const HANGUL_SYLLABLE_END = 0xd7a3;
+/**
+ * 폴백 폭의 기준 글자. 한글 음절의 대표 폭으로 '가'(U+AC00)를 사용한다.
+ */
+const HANGUL_FALLBACK_REFERENCE_CHAR = "가";
 
 /**
  * 텍스트 래핑과 다중 컬럼 렌더링을 수행하는 엔진.
@@ -433,28 +447,85 @@ export class ParagraphEngine {
 
   /**
    * 폰트 메트릭 기반 문자 폭 측정.
-   *
-   * `FontLoaderEngine`에서 파싱된 폰트 객체에서 `charToGlyph(char)`로
-   * 글리프를 조회하고, `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 폭을 계산한다.
-   * **장평(`widthRatio`) 곱셈은 호출자에서 적용**한다.
-   *
-   * @param char - 측정할 문자
-   * @param inlineStyle - 인라인 스타일 오버라이드
-   * @param fontSize - 폰트 크기 (mm 단위)
-   * @returns 문자 폭 (mm, 장평 미적용). 폰트/글리프 조회 실패 시 `null`
-   */
-  private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefined, fontSize: number): number | null {
-    const fontLoader = this._resources.fontLoader;
-    const fontName = inlineStyle?.fontFamily;
-    const parsedFont = fontLoader.getParsedFont(fontName);
-    if (!parsedFont) return null;
+ *
+ * `FontLoaderEngine`에서 파싱된 폰트 객체에서 `charToGlyph(char)`로
+ * 글리프를 조회하고, `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 폭을 계산한다.
+ * **장평(`widthRatio`) 곱셈은 호출자에서 적용**한다.
+ *
+ * **한글 음절 `.notdef` 폴백**: 폰트가 KS X 1001 완성형 위주로 제작되어
+ * 현대 한글 11,172자 중 일부(`핳` 등)가 cmap에 등록되어 있지 않은 경우가 있다.
+ * opentype.js `charToGlyph()`는 cmap에 없는 문자에 대해 null을 반환하지 않고
+ * `.notdef`(gid 0) 글리프를 반환하는데, 이 글리프의 `advanceWidth`는 반각
+ * (이 폰트 기준 0.5em)이라 정상 측정값처럼 보이지만 실제 브라우저 렌더링은
+ * 폴백 폰트의 풀폭 글리프로 표시된다. 측정 폭과 표시 폭이 어긋나면 글자
+ * 겹침/줄바꿈 오류가 발생한다. 이에 cmap 조회(`charToGlyphIndex`)에서
+ * gid 0이 반환된 한글 음절은 기준 글자 '가'의 실측 폭으로 대체한다.
+ * 폰트에 '가'조차 없는 경우(한글 미지원 폰트) 폴백을 포기하고 기존
+ * `minWidthMm` 경로로 되돌린다.
+ *
+ * @example
+ * // KMIBMyoungjo 폰트 (unitsPerEm=1000, '가' advanceWidth=920)
+ * // - '하' (cmap 등록): 920/1000*4 = 3.68mm 반환
+ * // - '핳' (cmap 미등록 → .notdef 폭 0.5em): '가' 폭 0.92em 대체 → 3.68mm 반환
+ * // - 'A'   (cmap 등록): 자체 폭 0.768em → 3.072mm 반환 (폴백 미적용)
+ * // - '가' 없는 폰트 + '핳': null 반환 → 호출자의 minWidthMm 사용
+ *
+ * @param char - 측정할 문자
+ * @param inlineStyle - 인라인 스타일 오버라이드
+ * @param fontSize - 폰트 크기 (mm 단위)
+ * @returns 문자 폭 (mm, 장평 미적용). 폰트/글리프 조회 실패 시 `null`
+ */
+private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefined, fontSize: number): number | null {
+  const fontLoader = this._resources.fontLoader;
+  const fontName = inlineStyle?.fontFamily;
+  const parsedFont = fontLoader.getParsedFont(fontName);
+  if (!parsedFont) return null;
 
-    const glyph = parsedFont.charToGlyph(char);
-    if (!glyph || glyph.advanceWidth === undefined || glyph.advanceWidth === null) {
-      return null;
-    }
+  // cmap 미등록 한글 음절 → 기준 글자 '가'의 폭으로 폴백
+  if (this._isUnmappedHangulSyllable(char, parsedFont)) {
+    return this._hangulFallbackWidthMm(parsedFont, fontSize);
+  }
+
+  const glyph = parsedFont.charToGlyph(char);
+  if (!glyph || glyph.advanceWidth === undefined || glyph.advanceWidth === null) {
+    return null;
+  }
 
     return (glyph.advanceWidth / parsedFont.unitsPerEm) * fontSize;
+  }
+
+  /**
+   * 문자가 한글 완성형 음절(U+AC00~U+D7A3)이면서 폰트 cmap에 매핑되지 않아
+   * `.notdef`(gid 0)로 반환되는지 판정한다.
+   *
+   * @param char - 판정할 문자
+   * @param parsedFont - 조회할 폰트 객체
+   * @returns 폴백 대상이면 `true`
+   */
+  private _isUnmappedHangulSyllable(char: string, parsedFont: ParsedFont): boolean {
+    const codePoint = char.codePointAt(0);
+    if (codePoint === undefined) return false;
+    if (codePoint < HANGUL_SYLLABLE_START || codePoint > HANGUL_SYLLABLE_END) return false;
+    return parsedFont.charToGlyphIndex(char) === 0;
+  }
+
+  /**
+   * 한글 음절 폴백 폭. 기준 글자 '가'의 advanceWidth를 fontSize에 스케일링한다.
+   *
+   * @example
+   * // KMIBMyoungjo (unitsPerEm=1000, 가 advanceWidth=920), fontSize=4mm
+   * // _hangulFallbackWidthMm(font, 4) → 920/1000*4 = 3.68 (mm)
+   *
+   * @param parsedFont - 기준 폭을 측정할 폰트 객체
+   * @param fontSize - 폰트 크기 (mm 단위)
+   * @returns '가'의 폭 (mm). '가' 글리프가 없으면 `null` (호출자가 minWidthMm로 폴백)
+   */
+  private _hangulFallbackWidthMm(parsedFont: ParsedFont, fontSize: number): number | null {
+    const referenceGlyph = parsedFont.charToGlyph(HANGUL_FALLBACK_REFERENCE_CHAR);
+    if (!referenceGlyph || referenceGlyph.advanceWidth === undefined || referenceGlyph.advanceWidth === null) {
+      return null;
+    }
+    return (referenceGlyph.advanceWidth / parsedFont.unitsPerEm) * fontSize;
   }
 
   /** 마지막 줄의 모든 파트가 비어 있으면 해당 줄을 제거한다. */
