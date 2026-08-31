@@ -824,9 +824,10 @@ export class LayoutTableElement extends HTMLElement {
     newColWidths[leftIdx] = newLeft;
     newColWidths[rightIdx] = newRight;
     this._colWidths = newColWidths;
+    // 드래그 중에는 boxPropertyChange를 발생시키지 않는다 — undo 스냅샷이
+    // 프레임마다 홍수되는 것을 방지한다. 최종 스냅샷은 pointerup에서 1회 발행.
     this.layout();
     void this.render();
-    this._notifyTablePropertyChange();
   }
 
   private _applyRowResize(row: number, deltaMm: number): void {
@@ -846,7 +847,6 @@ export class LayoutTableElement extends HTMLElement {
     if (this._engine) { this._engine.childrenData = this.items.map(e => e._rawData()); this._engine.layout(); }
     this.layout();
     void this.render();
-    this._notifyTablePropertyChange();
   }
 
   private _onTableResizeMouseUp = (_event: PointerEvent): void => {
@@ -855,6 +855,7 @@ export class LayoutTableElement extends HTMLElement {
       cancelAnimationFrame(this._resizeState.rafId);
       this._resizeState.rafId = null;
     }
+    const moved = this._resizeState.moved;
     this._resizeState = null;
     document.removeEventListener('pointermove', this._onTableResizeMouseMove);
     document.removeEventListener('pointerup', this._onTableResizeMouseUp);
@@ -862,6 +863,8 @@ export class LayoutTableElement extends HTMLElement {
     if (this._keyboardController?.selection) {
       this._renderSelectionOverlay(this._keyboardController.selection);
     }
+    // 드래그가 실제로 이동했을 때만 최종 스냅샷 1회 발행
+    if (moved) this._notifyTablePropertyChange();
   };
 
   private _onTableResizeKeyDown = (event: KeyboardEvent): void => {
@@ -884,6 +887,7 @@ export class LayoutTableElement extends HTMLElement {
     }
     this.layout();
     void this.render();
+    // ESC 취소는 데이터에 변화가 없으므로 스냅샷을 발행하지 않는다
     document.removeEventListener('pointermove', this._onTableResizeMouseMove);
     document.removeEventListener('pointerup', this._onTableResizeMouseUp);
     document.removeEventListener('keydown', this._onTableResizeKeyDown);

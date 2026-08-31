@@ -383,17 +383,18 @@ focus:  { row: currentCell.row, col: maxCol }
 `_applyColumnResize(col, deltaMm)`:
 - `col-1`과 `col`의 너비를 deltaMm만큼 조정 (총합 유지)
 - `MIN_TABLE_COL_WIDTH(5mm)` 보장
-- `this.colWidths` 갱신 → `layout()` + `render()` → `notifyTablePropertyChange()`
+- `this.colWidths` 갱신 → `layout()` + `render()`. 드래그 중에는 `notifyTablePropertyChange()`를 호출하지 않는다 (프레임마다 이벤트가 발생해 undo 스냅샷이 홍수되는 것을 방지).
 
 `_applyRowResize(row, deltaMm)`:
 - `row-1`과 `row`의 높이를 deltaMm만큼 조정 (총합 유지)
 - `MIN_TABLE_ROW_HEIGHT(5mm)` 보장
-- `trEl[row-1].height`와 `trEl[row].height` 갱신 → `layout()` + `render()`
+- `trEl[row-1].height`와 `trEl[row].height` 갱신 → `layout()` + `render()`. 드래그 중에는 `notifyTablePropertyChange()`를 호출하지 않는다.
 
 `_onTableResizeMouseUp`:
 - 리스너 제거
 - `_resizeState = null`
 - 선택 overlay가 있으면 `_renderSelectionOverlay` 재호출 (좌표 갱신)
+- 리사이즈가 실제로 발생했으면(`moved === true`) `notifyTablePropertyChange()`를 **1회** 발행한다 — undo 스냅샷의 경계가 된다. ESC 취소 시에는 발행하지 않는다.
 
 ### 5.3 ESC 취소
 
@@ -591,6 +592,7 @@ tableEl.structureEditor.deleteCol();
 
 - 선택 영역의 열 너비 합을 열 수로 나누어 균등 분할
 - `colWidths` 갱신 → `notifyTablePropertyChange()`
+- 구조 편집(스마트 연산)은 즉시 스냅샷 발행 — 드래그 리사이즈와 달리 프레임 배치가 없다
 
 #### equalizeHeight(selection)
 
