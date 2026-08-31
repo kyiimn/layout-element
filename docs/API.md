@@ -1952,8 +1952,8 @@ applyInlineStyle(style: Partial<TextInlineStyle>): void;
  *
  * @example
  * const manager = layoutDocEl.editManager;
- * manager.toggleInlineStyle('fontWeight', 700);  // Ctrl+B와 동일
- * manager.toggleInlineStyle('fontStyle', 'italic');  // Ctrl+I와 동일
+ * manager.toggleInlineStyle('fontWeight', 700);  // 굵게 토글
+ * manager.toggleInlineStyle('fontStyle', 'italic');  // 기울임 토글
  */
 toggleInlineStyle<K extends keyof TextInlineStyle>(
   field: K,
@@ -1961,8 +1961,7 @@ toggleInlineStyle<K extends keyof TextInlineStyle>(
 ): void;
 ```
 
-> **참고**: 키보드 단축키 `Ctrl+B`(굵게), `Ctrl+I`(기울임)는 이 메서드를 호출한다.
-> 편집 데이터 구조의 상세는 `EDITING_TEXT.md` § 6A(RunMap) 참조.
+> **참고**: 편집 데이터 구조의 상세는 `EDITING_TEXT.md` § 6A(RunMap) 참조.
 
 ```ts
 /**

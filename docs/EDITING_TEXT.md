@@ -124,7 +124,7 @@ sequenceDiagram
 
 ### 1.6 제약 사항
 
-- **서식 있는 텍스트 편집 지원**한다. 굵게(`Ctrl+B`), 기울임(`Ctrl+I`), 글자 크기/색상/폰트 변경은 `EditManager.applyInlineStyle()` / `toggleInlineStyle()`로 편집하며, 내부적으로 `RunMap`(`src/edit/run-map.ts`)이 평문 오프셋 ↔ 인라인 런 매핑을 관리한다. IME 조합(한글 입력)도 인라인 런 단락에서 동작한다.
+- **서식 있는 텍스트 편집 지원**한다. 굵게, 기울임, 글자 크기/색상/폰트 변경은 `EditManager.applyInlineStyle()` / `toggleInlineStyle()`로 편집하며, 내부적으로 `RunMap`(`src/edit/run-map.ts`)이 평문 오프셋 ↔ 인라인 런 매핑을 관리한다. IME 조합(한글 입력)도 인라인 런 단락에서 동작한다.
 - **단일 단락 편집**만 가능하다. 단락을 넘어가는 선택이나 여러 단락 동시 편집은 지원하지 않는다.
 
 ---
@@ -285,7 +285,7 @@ flowchart LR
 | `currentStyle` | `CurrentStyle` get | 현재 커서/선택 위치에서 유효한 `TextStyle`과 `ParagraphStyle`을 반환한다. **엔진이 단일 소스** — `ParagraphEngine.getEffectiveStyleAt(offset)`(커서) 또는 `getCommonStyleInRange(start, end)`(선택)으로 조회하고 `effectiveParagraphStyle`을 문단 스타일로 사용한다. selection이 있으면 영역 내 공통 필드만 반환하며(상이한 필드는 생략), selection이 없으면 커서 위치의 최종 스타일을 반환한다. |
 | `computeSelectionCommonStyle(start, end)` | `CurrentStyle` | `[start, end)` 범위 내 공통 스타일을 반환한다. 엔진의 `getCommonStyleInRange`에 위임한다. 외부에서도 직접 호출 가능하다. |
 | `applyInlineStyle(style)` | `void` | 현재 선택 영역에 인라인 스타일(`Partial<TextInlineStyle>`)을 적용한다. 선택 영역이 없으면 무시. `runMap`을 갱신하고 `plainToInline`으로 `model.textContent`를 재구성한 뒤 재렌더링한다. |
-| `toggleInlineStyle(field, value)` | `void` | 현재 선택 영역의 인라인 스타일 필드를 토글한다. 선택 영역 전체가 이미 해당 값이면 제거(기본 복귀), 아니면 적용한다. `Ctrl+B`(fontWeight 700), `Ctrl+I`(fontStyle italic) 단축키가 이 메서드를 호출한다. |
+| `toggleInlineStyle(field, value)` | `void` | 현재 선택 영역의 인라인 스타일 필드를 토글한다. 선택 영역 전체가 이미 해당 값이면 제거(기본 복귀), 아니면 적용한다. |
 | `normalizeNow()` | `void` | 현재 런 맵을 문단 유효 텍스트 스타일 기준으로 정규화한다. 문단 기본과 모든 필드가 동일한 런은 해제하고 인접 동일 런을 병합한다. 텍스트 길이가 변하지 않으므로 커서/selection 오프셋은 불변. 포커스 획득/blur 시 자동 호출된다. |
 | `focus()` | `void` | 숨겨진 `textarea`에 포커스를 주어 커서를 표시한다. |
 | `blur()` | `void` | 숨겨진 `textarea`에서 포커스를 해제하여 커서를 숨긴다. |
@@ -1669,9 +1669,6 @@ manager.applyInlineStyle({ color: 'red', fontSize: 7 });
 // 토글 (선택 전체가 이미 700이면 제거)
 manager.toggleInlineStyle('fontWeight', 700);
 
-// 키보드 단축키: Ctrl+B = toggleInlineStyle('fontWeight', 700)
-//               Ctrl+I = toggleInlineStyle('fontStyle', 'italic')
-
 // ─── applyTextStyle: 상태 기반 스타일 주입 ───
 
 // 텍스트편집모드에서 커서가 런 안이면 그 런만, 런 밖이면 paragraph + 전체 캐스케이드
@@ -2447,7 +2444,7 @@ function redo() {
 
 | 제약 | 설명 | 이유 및 향후 개선 방향 |
 |------|------|------------------------|
-| 인라인 스타일 편집 (구현됨) | 굵게, 기울임, 글자 색상/크기/폰트 편집은 `EditManager.applyInlineStyle()` / `toggleInlineStyle()`(또는 `Ctrl+B` / `Ctrl+I`)로 지원한다. | 내부적으로 `RunMap`(`src/edit/run-map.ts`)이 textarea 평문 오프셋 ↔ 인라인 런 매핑을 관리한다. 텍스트 입력/삭제/IME 조합 후 `model.textContent`를 `insertTextIntoInline`/`deleteTextFromInline`으로 갱신하고 `runMapFromContent`로 런 맵을 재추출하여 항상 일관성을 유지한다. 스타일 적용은 `applyStyleToRange`로 런 맵을 갱신 후 `plainToInline`으로 엔진에 반영한다. 커서 위치의 런 경계(시작/끝)에서 입력 시 직전 런의 스타일을 상속받아 타이핑 연속성을 보장한다. |
+| 인라인 스타일 편집 (구현됨) | 굵게, 기울임, 글자 색상/크기/폰트 편집은 `EditManager.applyInlineStyle()` / `toggleInlineStyle()`로 지원한다. | 내부적으로 `RunMap`(`src/edit/run-map.ts`)이 textarea 평문 오프셋 ↔ 인라인 런 매핑을 관리한다. 텍스트 입력/삭제/IME 조합 후 `model.textContent`를 `insertTextIntoInline`/`deleteTextFromInline`으로 갱신하고 `runMapFromContent`로 런 맵을 재추출하여 항상 일관성을 유지한다. 스타일 적용은 `applyStyleToRange`로 런 맵을 갱신 후 `plainToInline`으로 엔진에 반영한다. 커서 위치의 런 경계(시작/끝)에서 입력 시 직전 런의 스타일을 상속받아 타이핑 연속성을 보장한다. |
 | 상태 기반 스타일 주입 (구현됨) | 텍스트/문단 스타일 주입은 `EditManager.applyTextStyle()` 단일 진입점이 담당한다. 커서/선택 상태에 따라 주입 대상(런 또는 paragraph)이 결정된다. | 판별표와 캐스케이드 동작은 § 6A.5.1 참조. 호스트는 인라인 데이터를 직접 생성하지 않는다. 정규화(`normalizeRunMap`)가 문단 기본과 동일한 런을 자동 해제하므로 content 배열은 항상 최소 런 형태를 유지한다. 정규화는 포커스/blur/주입 시 자동 수행된다. |
 | 단일 단락 편집 | 단락을 넘어가는 선택이나 여러 단락 동시 편집은 지원하지 않는다. | `_cursorModel`과 `_selectionAnchor`가 하나의 `LayoutParagraphElement`에만 연결. 향후 문서 전역 `TextEditController`와 paragraph 간 매핑이 필요하다. |
 | undo/redo 없음 | 실행 취소/다시 실행 스택은 호스트 프로그램이 직접 구현해야 한다. | 텍스트 변경 이력을 보관하면 메모리/복잡도 증가. 라이브러리는 최소한의 상태만 유지하고, 호스트가 정책을 결정하도록 설계되었다. |
