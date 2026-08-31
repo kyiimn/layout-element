@@ -362,6 +362,113 @@ export class LayoutColumnElement extends HTMLElement {
   }
 
   /**
+   * 탭 span에 편집 모드 전용 점선 가이드를 적용한다.
+   *
+   * 갭 시작점은 같은 파트에서 탭 **앞쪽**에 위치한 마지막 span의 우측 끝
+   * (`data-char-offset + data-swidth`)이고, 끝점은 탭 span 자체의
+   * `data-char-offset`(= 우측 정렬 세그먼트 시작)이다. 탭 span은
+   * `position: absolute; left: 탭offset`인데, 이 left와 `data-char-offset`을
+   * 건드리면 다음 렌더 diff의 positionChanged 판정과 충돌하므로
+   * `transform: translateX(-gapWidth)`로 시각적으로만 갭 시작 위치로 옮긴다.
+   *
+   * **편집 모드에서만 표시**한다 (`x-layout-paragraph`의 `editableText` 판정).
+   * dataset은 변경하지 않고 style만 건드리며, 인쇄(printPostData)에는 영향이 없다.
+   *
+   * @param tabEl - 탭 문자 span
+   * @returns void
+   */
+  private _applyTabGuideStyle(tabEl: HTMLSpanElement): void {
+    // 편집 모드가 아니면 가이드를 표시하지 않는다.
+    // 이전 렌더에서 가이드가 켜져 있었다면 인라인 스타일이 잔존하므로(genCharStyleFlat의
+    // visibility:hidden 경로만으로는 해제되지 않음) 원복해야 한다.
+    const paragraph = this.parentElement as { editableText?: boolean; localName?: string } | null;
+    const wasGuided = tabEl.dataset.tabGuide === 'true';
+    const isEditable = paragraph?.localName === 'x-layout-paragraph' && paragraph.editableText === true;
+    if (!isEditable) {
+      if (wasGuided) {
+        tabEl.dataset.tabGuide = 'false';
+        tabEl.style.transform = '';
+        tabEl.style.width = '0mm';
+        tabEl.style.minWidth = '0mm';
+        tabEl.style.maxWidth = '0mm';
+        tabEl.style.backgroundImage = 'none';
+        tabEl.style.visibility = 'hidden';
+        tabEl.style.opacity = '';
+      }
+      return;
+    }
+
+    // 갭 시작: 탭 span 기준 **앞쪽** 형제 중 문자 오프셋을 가진 마지막 span의 우측 끝.
+    // 우측 정렬 세그먼트 span들은 탭보다 DOM 뒤에 있으므로, 탭 위치까지만 역순 스캔해야
+    // 우측 글자의 offset을 잘못 잡는 것을 방지한다.
+    // 스트리핑된 공백/`\n` span은 charOffset dataset이 없어 자동으로 건너뛴다.
+    // swidth에 장평 스케일(widthRatio × 0.88)을 곱한다 — dataset.swidth는 장평 미적용
+    // 배치 폭이고 실제 시각 우측 끝은 스케일 적용 후이므로, 점선이 이전 글자에 침범하지 않는다.
+    const flatScaleX = this.model ? this.model.widthRatio * 0.88 : 1;
+    const siblings = Array.from(tabEl.parentElement?.children ?? []) as HTMLElement[];
+    const tabIdxInDom = siblings.indexOf(tabEl);
+    let gapStartMm: number | null = null;
+    for (let i = tabIdxInDom - 1; i >= 0; i--) {
+      const el = siblings[i];
+      if (!(el instanceof HTMLSpanElement)) continue;
+      const off = el.dataset.charOffset;
+      if (off === undefined) continue;
+      gapStartMm = parseFloat(off) + parseFloat(el.dataset.swidth ?? '0') * flatScaleX;
+      break;
+    }
+
+    const tabOffsetStr = tabEl.dataset.charOffset;
+    if (tabOffsetStr === undefined) return;
+    const tabOffsetMm = parseFloat(tabOffsetStr);
+    if (Number.isNaN(tabOffsetMm)) return;
+
+    const gapWidthMm = gapStartMm !== null && !Number.isNaN(gapStartMm) && gapStartMm < tabOffsetMm
+      ? tabOffsetMm - gapStartMm
+      : 0;
+
+    // 갭이 없으면(탭이 좌측 세그먼트에 바짝 붙은 케이스) 가이드 없음.
+    if (gapWidthMm <= 0.01) {
+      tabEl.dataset.tabGuide = 'false';
+      tabEl.style.transform = '';
+      tabEl.style.width = '0mm';
+      tabEl.style.minWidth = '0mm';
+      tabEl.style.maxWidth = '0mm';
+      tabEl.style.backgroundImage = 'none';
+      tabEl.style.visibility = 'hidden';
+      return;
+    }
+
+    // 시각 확장: left/data-char-offset은 건드리지 않고, width를 갭 폭으로 늘린 뒤
+    // transform으로 갭 시작 위치로 옮긴다.
+    // 점선 색은 fixed 색(#888)을 쓴다 — color: transparent(currentColor 무효화)와
+    // 함께 currentColor를 쓰면 점선까지 투명해져 보이지 않는다.
+    // scale 개별 프로퍼티(genCharStyleFlat의 장평 스케일)를 1로 리셋한다 — 탭 span은
+    // 시각 글자가 없어 장평이 무의미하고, scale은 translateX와 무관하게 배경 폭을
+    // 압축해 갭 전체를 덮지 못한다. scale=1이면 translate와 width가 1:1 대응된다.
+    tabEl.dataset.tabGuide = 'true';
+    tabEl.style.scale = '1 1';
+    tabEl.style.width = `${gapWidthMm}mm`;
+    tabEl.style.minWidth = '0mm';
+    tabEl.style.maxWidth = `${gapWidthMm}mm`;
+    tabEl.style.visibility = 'visible';
+    tabEl.style.color = 'transparent';
+    tabEl.style.overflow = 'hidden';
+    const lineH = parseFloat(tabEl.style.lineHeight || '');
+    const guideHeightMm = Number.isNaN(lineH) ? (this.model?.fontSize ?? 4) : lineH;
+    tabEl.style.height = `${guideHeightMm}mm`;
+    tabEl.style.backgroundImage =
+      'repeating-linear-gradient(to right, #888 0, #888 0.7mm, transparent 0.7mm, transparent 1.4mm)';
+    tabEl.style.backgroundSize = '100% 0.3mm';
+    tabEl.style.backgroundRepeat = 'no-repeat';
+    // 라인의 상하 중간에 점선을 배치한다 — 배경 밴드 높이(0.3mm)의 절반만큼 보정한
+    // 중앙 정렬. %는 (박스 높이 - 이미지 높이) 기준으로 해석되므로 50%가 중앙.
+    tabEl.style.backgroundPosition = '0 calc(50% - 0.15mm)';
+    tabEl.style.opacity = '0.45';
+    tabEl.style.transform = `translateX(${-gapWidthMm}mm)`;
+    tabEl.style.transformOrigin = '0 center';
+  }
+
+  /**
    * 인라인 스타일 오버라이드 필드를 span에 적용한다.
    *
    * 라인/파트는 문단 기본 스타일만 갖고, 런별 차이(폰트/크기/굵기/기울임/색상)는
@@ -682,6 +789,10 @@ export class LayoutColumnElement extends HTMLElement {
             nextRef = charEl.nextSibling;
           } else {
             partEl.insertBefore(charEl, nextRef);
+          }
+
+          if (char === '\t') {
+            this._applyTabGuideStyle(charEl);
           }
 
           curRenderedOffset++;

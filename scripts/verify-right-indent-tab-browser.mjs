@@ -52,6 +52,7 @@ const r = await page.evaluate(async () => {
   out.tabSpanRectWidth = tabSpan ? tabSpan.getBoundingClientRect().width : null;
   out.tabSpanVisibility = tabSpan ? tabSpan.style.visibility : null;
   out.tabSpanCssWidth = tabSpan ? tabSpan.style.width : null;
+  out.tabSpanGuide = tabSpan ? (tabSpan.dataset.tabGuide ?? 'false') : null;
 
   // 좌표 검증: post-tab 첫 글자와 마지막 글자 span의 dataset (엔진 산출) 기준
   const visibleSpans = spans.filter(s => s.textContent !== '\t' && s.textContent !== ' ');
@@ -95,8 +96,8 @@ const r = await page.evaluate(async () => {
 check('E1: 엔진에 탭 보존', r.joined?.includes('\t') ?? false, `joined="${(r.joined ?? '').slice(0, 25)}"`);
 check('E2: 바이라인 1라인 배치', r.lineCount === 1, `lines=${r.lineCount}`);
 check('E3: 탭 span DOM 존재', r.tabSpanExists);
-check('E4: 탭 span 0폭 (CSS)', r.tabSpanCssWidth === '0mm', `cssWidth=${r.tabSpanCssWidth}, rect=${r.tabSpanRectWidth}`);
-check('E5: 탭 span visibility hidden', r.tabSpanVisibility === 'hidden', `vis=${r.tabSpanVisibility}`);
+check('E4: 탭 span 0폭 (CSS, 비편집 렌더 기준)', r.tabSpanCssWidth === '0mm' || r.tabSpanGuide === 'true', `cssWidth=${r.tabSpanCssWidth}, rect=${r.tabSpanRectWidth}, guide=${r.tabSpanGuide}`);
+check('E5: 탭 span visibility hidden (가이드 미표시 시)', r.tabSpanVisibility === 'hidden' || r.tabSpanGuide === 'true', `vis=${r.tabSpanVisibility}, guide=${r.tabSpanGuide}`);
 check('E6: 탭 이후 텍스트 우측 정렬 (mm)', Math.abs((r.lastCharRightMm ?? -1) - (r.partWidthMm ?? -2)) < 0.05, `lastRight=${r.lastCharRightMm?.toFixed(3)} vs partWidth=${r.partWidthMm?.toFixed(3)}`);
 check('E6b: 탭 위치 = 우측 세그먼트 시작', r.tabLeftMm !== undefined && Math.abs(r.tabLeftMm - (r.firstAfterTabLeftMm ?? -99)) < 0.01, `tabLeft=${r.tabLeftMm?.toFixed(3)} vs firstAfterTab=${r.firstAfterTabLeftMm?.toFixed(3)}`);
 check('E7: Shift+Tab으로 끝에 탭 삽입', r.modelPlainText === '기사 내용입니다\t─ 홍길동 기자\t', `plain="${r.modelPlainText}"`);

@@ -18,6 +18,7 @@
 | `verify-right-indent-tab.mjs` | 정합성 (엔진) | Right Indent Tab(`\t`) 배치·정렬·print 스킵 | ALL PASS |
 | `verify-right-indent-tab-browser.mjs` | 정합성 (브라우저) | Shift+Tab 키 삽입·DOM 렌더·커서 | ALL PASS |
 | `verify-right-indent-tab-composition.mjs` | 정합성 (브라우저) | 탭 라인 한글 조합 표시·우측 정렬·이탈 방지 | ALL PASS |
+| `verify-right-indent-tab-guide.mjs` | 정합성 (브라우저) | 탭 점선 가이드 (편집 모드 전용 표시·원복) | ALL PASS |
 | `verify-engine-node.mjs` | 정합성 (Node) | 엔진 계층 DOM-free 동작 | ALL PASS |
 | `verify-obfuscated.mjs` | 정합성 (빌드) | 난독화 IIFE 번들 로딩 | ALL PASS |
 | `obfuscate.mjs` | 빌드 | IIFE 번들 난독화 | build 완료 |
