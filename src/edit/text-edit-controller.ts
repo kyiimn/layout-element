@@ -822,18 +822,6 @@ export class TextEditController {
       return;
     }
 
-    if (hasShortcut && event.key.toLowerCase() === "b") {
-      event.preventDefault();
-      this._toggleInlineStyle("fontWeight", 700);
-      return;
-    }
-
-    if (hasShortcut && event.key.toLowerCase() === "i") {
-      event.preventDefault();
-      this._toggleInlineStyle("fontStyle", "italic");
-      return;
-    }
-
     if (hasShortcut && (event.key.toLowerCase() === "c" || event.key.toLowerCase() === "x")) {
       event.preventDefault();
       this._copySelection();
