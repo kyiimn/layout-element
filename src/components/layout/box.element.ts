@@ -274,6 +274,7 @@ export class LayoutBoxElement extends HTMLElement {
     const docEngine = docEl.engine;
     const ctx: BoxBuildContext = {
       prevContentEnginesByBoxId: new Map(),
+      prevCellBoxEnginesById: new Map(),
       newEnginesCreated: false,
     };
     const resources = docEngine.resources;
@@ -1058,6 +1059,10 @@ export class LayoutBoxElement extends HTMLElement {
 
   set inheritStyle(style: InheritStyle | undefined) {
     this._inheritStyle = style;
+    // 자식 propagate(cascade) 시 각 자식이 자체 layout()으로 구조 갱신 + 호스트 CSS
+    // 규칙(width/height 등)을 재적용해야 한다. 이 경로를 억제하면 마지막 doc.layout()
+    // 수정 패스가 끊겨 호스트 rule이 이전 width(0mm 등)에 고정되고 텍스트가
+    // 보이지 않는 회귀가 발생한다 (절대 억제 금지).
     if (!this._rebuildingChildren) {
       this.layout();
     }
@@ -1610,7 +1615,9 @@ export class LayoutBoxElement extends HTMLElement {
     // 박스 top의 최대 위치: 박스 bottom(top + staticHeight × lineHeight)이
     // 부모 하단(floor(editableHeight / lineHeight) × lineHeight)에 닿도록 계산.
     // absHeight 공식의 (lineHeight − fontSize) 보정은 무시하고 라인 기반으로 계산하여
-    // 부모 하단에 정확히 맞춘다.
+    // 부모 하단에 정확히 맞춘다. clampStaticToContainer는 (editableTextHeight − fontSize)
+    // 기반의 더 타이트한 컨테이너 라인 수를 쓰지만, 이 변환은 position 전환의 시각적
+    // 원점 보존이 목적이므로 변환 전 위치를 최대한 보존하는 라인 기반 계산을 쓴다.
     const maxTop = Math.max(0, Math.floor(editableHeight / lineHeight) - staticHeight);
     const clampedLine = Math.max(0, Math.min(maxTop, nearestLine));
     const staticWidth = Math.max(1, Math.round(width / avgColWidth));

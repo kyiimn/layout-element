@@ -12,6 +12,7 @@
 | `benchmark-browser.mjs` | 벤치마크 (브라우저) | 전체 파이프라인 5 시나리오 + 프레임 시간 | 60fps 예산 16.7ms |
 | `snapshot-layout.mjs` | 정합성 (엔진) | `columnContents` + `overflow` 직렬화 | **byte 동일** |
 | `verify-dom-diff.mjs` | 정합성 (DOM) | DOM ↔ 엔진 텍스트/span 무결성 | ALL PASS |
+| `verify-visual-render.mjs` | 정합성 (화면) | 실제 렌더 검증 — rect 기반 표시성 (호스트 CSS rule stale/0폭/클립 감지) | ALL PASS |
 | `verify-ime.mjs` | 정합성 (IME) | 한글 조합 커밋/취소/혼합 | ALL PASS |
 | `verify-multicolumn.mjs` | 정합성 (멀티컬럼) | prefix 캐시 경로 === 전체 재래핑 | ALL PASS |
 | `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/런/캐스케이드) | ALL PASS |
@@ -131,6 +132,25 @@ diff /tmp/opencode/snapshot-before.json /tmp/opencode/snapshot-after.json
 **실행**:
 ```bash
 npx tsx scripts/verify-dom-diff.mjs   # ALL PASS / exit 1
+```
+
+### `verify-visual-render.mjs` — 실제 화면 렌더 검증 (브라우저)
+
+**목적**: `verify-dom-diff.mjs`는 DOM↔엔진 **데이터** 일치를 보지만, **데이터는 있는데 화면에 안 보이는** 결함 클래스는 잡지 못한다. 실제 회귀 사례: M-1 수정이 box `inheritStyle` 캐스케이드를 억제하면서 단락의 자체 `layout()`이 생략 → 호스트 CSS `:host` rule이 `width: 0mm`에 고정 → span 수천 개가 존재해도 화면에 텍스트 없음 (데이터 비교로는 무장애 통과).
+
+이 스크립트는 `getBoundingClientRect()`(실제 레이아웃 결과) 기반으로 검증한다:
+
+1. **A. 단락 표시성**: 내용 있는 단락 전부 화면에 표시 span 존재 (3단 본문 회귀 감지)
+2. **B. 멀티컬럼**: 컬럼 수 === 엔진 `columnContents` 수, 각 컬럼에 화면 텍스트
+3. **C. 호스트 CSS 정합**: 내용 있는 단락의 `:host` rule width ≠ `0mm`, rule ↔ 실제 rect 정합 (M-1 회귀 직접 감지)
+4. **D. 표 셀**: 각 td의 셀 단락이 화면에 텍스트
+5. **E. 타이핑 체인**: 입력 1글자 → textarea 커밋 → 새 span 화면 rect (렌더 체인 실측)
+
+**판별 원칙**: 스팬 존재가 아니라 **비어있지 않은 화면 사각형**이 기준 — 사용자가 "본다"는 것의 프로그래밍적 정의.
+
+**실행**:
+```bash
+npx tsx scripts/verify-visual-render.mjs   # ALL PASS
 ```
 
 ### `verify-ime.mjs` — 한글 IME 조합 정합성 (브라우저)
