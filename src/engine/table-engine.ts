@@ -500,6 +500,39 @@ export class TableEngine {
   }
 
   /**
+   * 현재 셀 박스 엔진을 box id로 수집한다.
+   *
+   * `buildCellBoxEngines()` 재구축 시 `ctx.prevCellBoxEnginesById`로 주입하여,
+   * 라벨 시프트(행/열 삭제, merge/split)로 `cellLabel` 매칭이 실패한 셀도
+   * 기존 BoxEngine을 재사용(단락 `_layoutCache`, 이미지 `rgbaData` 보존)할 수 있게 한다.
+   *
+   * @returns boxId → BoxEngine 맵 (id가 없는 박스 엔진은 수집에서 제외)
+   * @throws 없음
+   * @example
+   * ```ts
+   * const ctx = {
+   *   prevContentEnginesByBoxId: new Map(),
+   *   prevCellBoxEnginesById: tableEngine.collectPrevCellBoxEngines(),
+   *   newEnginesCreated: false,
+   * };
+   * tableEngine.buildCellBoxEngines(parentBox, ctx);
+   * ```
+   */
+  collectPrevCellBoxEngines(): Map<string, BoxEngine> {
+    const map = new Map<string, BoxEngine>();
+    for (const rowEngine of this._rowEngines) {
+      for (const cell of rowEngine.cellEngines) {
+        const cellBox = cell.boxEngine;
+        const cellBoxId = cellBox?.data.id;
+        if (cellBox && cellBoxId) {
+          map.set(cellBoxId, cellBox);
+        }
+      }
+    }
+    return map;
+  }
+
+  /**
    * `layout()` 이후 셀 박스 엔진을 재구축한다.
    *
    * `TableElement._layoutStructure()`에서 `engine.layout()` 호출 후

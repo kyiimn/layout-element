@@ -102,7 +102,14 @@ export class LayoutTableRowElement extends HTMLElement {
         if (cellId && existingById.has(cellId)) {
           const existingEl = existingById.get(cellId)!;
           usedIds.add(cellId);
-          existingEl.data = cellData;
+          // 자식 TD data setter의 layout+render를 억제 — 테이블 data setter가
+          // 이미 rebuilding 중이므로 상위 layout() 1회에 수렴시킨다.
+          (existingEl as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren = true;
+          try {
+            existingEl.data = cellData;
+          } finally {
+            (existingEl as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren = false;
+          }
           if (existingEl !== this.children[i]) {
             this.appendChild(existingEl);
           }

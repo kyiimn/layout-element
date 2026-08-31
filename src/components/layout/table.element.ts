@@ -207,7 +207,9 @@ export class LayoutTableElement extends HTMLElement {
 
       if (!wasRebuilding) {
         this.layout();
-        requestAnimationFrame(() => { void this.render(); });
+        // 구조 편집기(table-structure-editor)와 동일한 동기 render 경로로 정합화 —
+        // rAF 지연 시 1프레임 stale 시각 + 외부 읽기 경합이 발생한다.
+        void this.render();
       }
   }
 
@@ -323,6 +325,7 @@ export class LayoutTableElement extends HTMLElement {
     // 이 호출을 통해 TableCellEngine.boxEngine이 올바른 BoxData와 연결된다.
     const ctx: BoxBuildContext = {
       prevContentEnginesByBoxId: new Map(),
+      prevCellBoxEnginesById: this._engine.collectPrevCellBoxEngines(),
       newEnginesCreated: false,
     };
     this._engine.buildCellBoxEngines(parentBoxEngine, ctx);
@@ -1033,7 +1036,7 @@ export class LayoutTableElement extends HTMLElement {
     trEl.data = child;
     this.appendChild(trEl);
     this.layout();
-    requestAnimationFrame(() => { void this.render(); });
+    void this.render();
     return trEl;
   }
 
@@ -1045,7 +1048,7 @@ export class LayoutTableElement extends HTMLElement {
     if (!child) return;
     Element.prototype.remove.call(child);
     this.layout();
-    requestAnimationFrame(() => { void this.render(); });
+    void this.render();
   }
 
   private _appendChildData(child: TableRowData): void {

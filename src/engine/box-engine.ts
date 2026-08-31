@@ -1421,10 +1421,17 @@ export class BoxEngine {
       cellBoxData = { ...cellBoxData, id: generateEngineId() };
     }
 
-    const existingBox = cellEngine.findBoxEngineById(cellBoxData.id ?? '');
+    const existingBox = cellEngine.findBoxEngineById(cellBoxData.id ?? '')
+      ?? ctx.prevCellBoxEnginesById.get(cellBoxData.id!);
     if (existingBox) {
+      const cellBoxId = cellBoxData.id!;
       existingBox.data = cellBoxData;
-      existingBox.parent = cellEngine;
+      if (existingBox.parent !== cellEngine) {
+        existingBox.parent = cellEngine;
+      } else {
+        existingBox._markDirty();
+      }
+      ctx.prevCellBoxEnginesById.delete(cellBoxId);
     } else {
       ctx.newEnginesCreated = true;
     }
@@ -1494,9 +1501,13 @@ export class BoxEngine {
 /**
  * BoxEngine.layout() 트리 구축 중 공유되는 컨텍스트.
  * - prevContentEnginesByBoxId: 이전 트리의 content 엔진을 id로 보존하여 rgbaData 등 유지
+ * - prevCellBoxEnginesById: 이전 트리의 테이블 셀 박스 엔진을 box id로 보존.
+ *   라벨 시프트(행/열 삭제, merge/split)로 cellLabel 매칭이 실패해도
+ *   단락 `_layoutCache` / 이미지 `rgbaData`를 재사용한다.
  * - newEnginesCreated: 새 엔진이 생성되었는지 여부 (DocumentEngine._syncEngineIdsToDom 스킵 판단)
  */
 export interface BoxBuildContext {
   prevContentEnginesByBoxId: Map<string, (ImageEngine | ParagraphEngine | TableEngine)[]>;
+  prevCellBoxEnginesById: Map<string, BoxEngine>;
   newEnginesCreated: boolean;
 }

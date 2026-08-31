@@ -170,7 +170,14 @@ export class LayoutTableCellElement extends HTMLElement {
         if (childId && existingById.has(childId)) {
           const existingEl = existingById.get(childId)!;
           usedIds.add(childId);
-          existingEl.data = childData;
+          // 셀 내 박스의 layout+render 캐스케이드를 억제 — 테이블 전체 복원 시
+          // O(셀 × 콘텐츠) 중복 렌더를 차단한다 (부모 table/tr이 이미 rebuilding 중).
+          (existingEl as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren = true;
+          try {
+            existingEl.data = childData;
+          } finally {
+            (existingEl as unknown as { _rebuildingChildren?: boolean })._rebuildingChildren = false;
+          }
           if (existingEl !== this.children[i]) {
             this.appendChild(existingEl);
           }
