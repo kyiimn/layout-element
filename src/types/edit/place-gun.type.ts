@@ -36,7 +36,7 @@ export type ArticleContent = {
   title: string;
   /** 기사 본문 텍스트. */
   body: string;
-  /** 기자명(검별). 빈 문자열일 수 있다. */
+  /** 기자명(검별). 빈 문자열일 수 있다. 주입 시 본문 맨 뒤에 `\t{byline}`으로 결합되어 주입된다. */
   byline: string;
 };
 

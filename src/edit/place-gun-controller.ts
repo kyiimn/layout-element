@@ -4,7 +4,7 @@ import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
-import { staticGridContains, clampStaticToContainer, clampAbsoluteToContainer } from "@/utils";
+import { staticGridContains, clampStaticToContainer, clampAbsoluteToContainer, appendBylineToBody } from "@/utils";
 import { DEFAULT_IMAGE_DPI, Z_INDEX_INSERT_PREVIEW, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER, Z_INDEX_MAX_LAYOUT } from "@/constants";
 import type { PlaceGunItem, ArticleContent, ImageContent, ElementPatternContent, StylePatternContent } from "@/types/edit";
 import type { BoxData } from "@/types/layout/box.type";
@@ -18,9 +18,9 @@ import type { BoxData } from "@/types/layout/box.type";
  *
  * 기사(text) 항목의 주입은 클릭한 box의 역할에 따라 3가지 케이스로 분기한다:
  * 1. 조상에 `role === 'group-article'`인 box가 있으면 그 그룹 내의
- *    `title`/`byline`/`body` box에 각각 제목/검별/본문을 주입한다.
- * 2. 클릭한 box의 role이 `title`/`byline`/`body`이면 그에 맞는 내용을 주입한다.
- * 3. 그 외는 본문을 주입한다.
+ *    `title`/`body` box에 각각 제목/본문을 주입한다.
+ * 2. 클릭한 box의 role이 `title`/`body`이면 그에 맞는 내용을 주입한다.
+ * 3. 그 외는 본문을 주입한다 (byline이 존재하면 본문 맨 뒤에 `\t{byline}` 결합).
  *
  * 이미지/광고(image) 항목의 주입도 동일한 패턴으로 3가지 케이스로 분기한다:
  * 1. 조상에 `role === 'group-image'`인 box가 있으면 그 그룹 내의
@@ -178,9 +178,9 @@ export class PlaceGunController {
    * 기사 항목을 box에 주입한다.
    *
    * 3가지 케이스로 분기:
-   * 1. 조상에 `group-article` box가 있으면 그 그룹 내의 title/byline/body에 주입
-   * 2. box의 role이 title/byline/body이면 그에 맞는 내용 주입
-   * 3. 그 외는 본문을 paragraph에 주입
+   * 1. 조상에 `group-article` box가 있으면 그 그룹 내의 title/body에 주입
+   * 2. box의 role이 title/body이면 그에 맞는 내용 주입
+   * 3. 그 외는 본문을 paragraph에 주입 (byline이 존재하면 `\t{byline}` 결합)
    *
    * @param box - 클릭한 box 요소
    * @param item - 기사 항목
@@ -188,18 +188,19 @@ export class PlaceGunController {
   private _injectArticle(box: LayoutBoxElement, item: PlaceGunItem): void {
     const article = item.content as ArticleContent;
     const uid = article.uid;
+    const bodyWithByline = appendBylineToBody(article.body, article.byline);
 
     const groupArticle = this._findAncestorByRole(box, 'group-article');
     if (groupArticle) {
-      this._injectIntoGroupArticle(groupArticle, article, uid);
+      this._injectIntoGroupArticle(groupArticle, article, uid, bodyWithByline);
       return;
     }
 
     const role = box.role;
-    if (role === 'title' || role === 'byline' || role === 'body') {
+    if (role === 'title' || role === 'body') {
       const paragraph = this._findParagraphInBox(box);
       if (!paragraph) return;
-      const text = role === 'title' ? article.title : role === 'byline' ? article.byline : article.body;
+      const text = role === 'title' ? article.title : bodyWithByline;
       this._injectText(paragraph, text);
       box.contentUid = uid;
       box.requestRerenderAffectedParagraphs();
@@ -208,31 +209,31 @@ export class PlaceGunController {
 
     const paragraph = this._findParagraphInBox(box);
     if (!paragraph) return;
-    this._injectText(paragraph, article.body);
+    this._injectText(paragraph, bodyWithByline);
     box.contentUid = uid;
     box.requestRerenderAffectedParagraphs();
   }
 
   /**
-   * group-article box 내의 title/byline/body 하위 box에 데이터를 주입한다.
+   * group-article box 내의 title/body 하위 box에 데이터를 주입한다.
    *
    * group-article 내에서 `role === 'title'`인 box의 paragraph에 제목을,
-   * `role === 'byline'`인 box의 paragraph에 검별을,
-   * `role === 'body'`인 box의 paragraph에 본문을 주입한다.
+   * `role === 'body'`인 box의 paragraph에 본문(byline 결합 포함)을 주입한다.
    * 각 box의 contentUid에 기사 UID를 저장하고, group-article의
    * groupMember에 기사 UID를 추가한다.
    *
    * @param groupArticle - group-article role의 box
    * @param article - 기사 content 객체
    * @param uid - 기사 UID
+   * @param bodyWithByline - `\t{byline}`이 결합된 본문 텍스트
    */
   private _injectIntoGroupArticle(
     groupArticle: LayoutBoxElement,
     article: ArticleContent,
     uid: string,
+    bodyWithByline: string,
   ): void {
     const titleBox = this._findDescendantBoxByRole(groupArticle, 'title');
-    const bylineBox = this._findDescendantBoxByRole(groupArticle, 'byline');
     const bodyBox = this._findDescendantBoxByRole(groupArticle, 'body');
 
     if (titleBox) {
@@ -244,19 +245,10 @@ export class PlaceGunController {
       }
     }
 
-    if (bylineBox) {
-      const paragraph = this._findParagraphInBox(bylineBox);
-      if (paragraph) {
-        this._injectText(paragraph, article.byline);
-        bylineBox.contentUid = uid;
-        bylineBox.requestRerenderAffectedParagraphs();
-      }
-    }
-
     if (bodyBox) {
       const paragraph = this._findParagraphInBox(bodyBox);
       if (paragraph) {
-        this._injectText(paragraph, article.body);
+        this._injectText(paragraph, bodyWithByline);
         bodyBox.contentUid = uid;
         bodyBox.requestRerenderAffectedParagraphs();
       }

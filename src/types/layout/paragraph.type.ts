@@ -35,7 +35,7 @@ import { TextInlineData } from "./text/text-inline.type";
  *
  * - `'box'`: (기본값) paragraph를 감싼 박스가 다른 paragraph의 텍스트 회피 대상이 된다.
  * - `'none'`: paragraph를 감싼 박스가 다른 paragraph의 텍스트 회피 대상에서 제외된다.
- *   byline처럼 본문과 시각적으로 겹치되 텍스트가 회피하지 않아야 하는 영역에 사용한다.
+ *   본문과 시각적으로 겹치되 텍스트가 회피하지 않아야 하는 영역에 사용한다.
  */
 export type ParagraphOverlapMode = 'box' | 'none';
 
@@ -80,11 +80,11 @@ export type ParagraphData = {
    * 생략 시 `'box'`(회피 대상)가 적용된다.
    *
    * `'none'`으로 설정하면 다른 paragraph가 이 박스와 겹쳐도 텍스트를 회피하지 않는다.
-   * byline처럼 본문과 시각적으로 겹치되 텍스트 회피가 필요 없는 영역에 사용한다.
+   * 본문과 시각적으로 겹치되 텍스트 회피가 필요 없는 영역에 사용한다.
    *
    * @example
-   * // byline paragraph — 다른 paragraph가 이 영역을 회피하지 않음
-   * { type: 'paragraph', content: "기자 이름", overlapMode: 'none' }
+   * // 오버랩 박스 위를 겹치는 paragraph — 다른 paragraph가 이 영역을 회피하지 않음
+   * { type: 'paragraph', content: "겹침 텍스트", overlapMode: 'none' }
    */
   overlapMode?: ParagraphOverlapMode;
 }
