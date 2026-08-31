@@ -11,6 +11,7 @@
 - **반드시 `glyph.advanceWidth / unitsPerEm * fontSize`를 사용할 것.** `actualBoundingBoxLeft + actualBoundingBoxRight`는 잉크 영역만 측정하여 좁은 문자(i, l, j)와 공백의 폭을 과소측정한다.
 - **`minWidthMm = spaceRatio * fontSize` 하한 클램프.** 0폭 문자가 렌더링되는 것을 방지한다.
 - **`rawWidth * widthRatio`를 곱하지 말 것.** `maxWidthMm = widthRatio * fontSize` 상한 클램프가 장평 비율을 반영한다. 이중 적용 방지.
+- **cmap 미등록 한글 음절은 `가` 폭 폴백.** opentype.js `charToGlyph()`는 cmap에 없는 문자에 `.notdef`(반각 폭)를 반환하므로, `charToGlyphIndex() === 0`인 한글 완성형 음절(U+AC00~U+D7A3)은 기준 글자 `가`(U+AC00)의 `advanceWidth`로 대체한다. 이 폴백을 제거하면 미등록 음절(`핳` 등)이 반각으로 측정되어 화면 표시(풀폭 폴백 폰트)와 어긋나고 글자 겹침이 재발한다. `가` 글리프가 없는 폰트는 기존 `minWidthMm` 경로 유지. 검증: `scripts/verify-hangul-glyph-fallback.mjs`.
 
 ### 1.2 `genCharStyle()` 스타일 생성
 

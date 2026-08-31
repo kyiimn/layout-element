@@ -361,6 +361,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   const parsedFont = fontLoader.getParsedFont(fontName);
   if (!parsedFont) return null;
 
+  // cmap 미등록 한글 음절 → 기준 글자 '가'의 폭으로 폴백 (§6.4)
+  if (this._isUnmappedHangulSyllable(char, parsedFont)) {
+    return this._hangulFallbackWidthMm(parsedFont, fontSize);
+  }
+
   const glyph = parsedFont.charToGlyph(char);
   if (!glyph || glyph.advanceWidth === undefined || glyph.advanceWidth === null) {
     return null;
@@ -384,6 +389,25 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 - 폰트 파싱에 실패했거나 특정 글리프를 찾을 수 없는 경우 `_charWidthMmFromFont`가 `null`을 반환하고 `_charWidthMm`은 `minWidthMm` 바닥값을 사용한다.
 - `FontLoader._parsed === false`이면 이후 모든 폰트 조회 시도가 즉시 `null`을 반환하여 불필요한 오버헤드를 방지한다.
 - **`base64Data`가 없는 폰트**: `ttfFilename` 경로의 폰트는 별도 fetch가 필요하므로 파싱 캐시에서 누락될 수 있다. `base64Data`가 우선되므로 대부분의 케이스가 커버된다.
+
+### 6.4 cmap 미등록 한글 음절 폴백 (`.notdef` 폭 대체)
+
+KS X 1001 완성형 위주로 제작된 한글 폰트는 현대 한글 11,172자(U+AC00~U+D7A3) 중 완성형 2,350자만 cmap에 등록한 경우가 있다 (예제 폰트 KMIBMyoungjo: 2,722자 등록, 8,450자 미등록). 이때 발생하는 문제:
+
+1. opentype.js `charToGlyph()`는 cmap에 없는 문자에 `null`을 반환하지 않고 **`.notdef`(gid 0) 글리프**를 반환한다.
+2. `.notdef`의 `advanceWidth`는 반각 수준(이 폰트 기준 0.5em)이라 **정상 측정값으로 보이지만** 실제 브라우저는 폴백 폰트의 풀폭 글리프로 렌더링한다.
+3. 결과: `핳` 같은 미등록 음절이 `하`와 같은 폭으로 화면에 표시되는데 측정 폭은 반각 → 글자 겹침, 줄바꿈 위치 오류, `printPostData` 좌표 불일치가 발생한다. `minWidthMm` 바닥값(0.5em)도 `.notdef` 폭과 우연히 같아 이 방어로는 잡히지 않는다.
+
+**폴백 규칙** (`_charWidthMmFromFont` → `_isUnmappedHangulSyllable` / `_hangulFallbackWidthMm`):
+
+- **대상**: 문자가 한글 완성형 음절 범위(U+AC00~U+D7A3)이고 `charToGlyphIndex()`가 0을 반환하는 문자만.
+- **폭**: 기준 글자 **`가`(U+AC00)의 advanceWidth**를 `fontSize`에 스케일링한 값 (폴백 폰트가 한글 음절을 풀폭으로 표시하는 것과 정합).
+- **예외**: 폰트에 `가` 글리프 자체가 없으면(한글 미지원 폰트) 폴백을 포기하고 기존 `minWidthMm` 경로로 되돌린다.
+- **비적용**: 비한글 문자, 한글 자모(U+3131~), cmap에 등록된 음절(폭이 특이해도 자체 메트릭 존중 — 글리프가 있으므로 렌더링도 해당 폰트 글리프로 됨).
+
+폴백 폭도 일반 측정값과 동일하게 `_charWidthCache`에 캐싱되므로 성능 비용은 최초 조회 1회뿐이다.
+
+**검증**: `npx tsx scripts/verify-hangul-glyph-fallback.mjs` (25항목 — 폭 측정/파이프라인 배치 동일성/한글 미지원 폰트 회귀 방어).
 
 ---
 

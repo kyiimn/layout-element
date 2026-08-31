@@ -15,6 +15,7 @@
 | `verify-ime.mjs` | 정합성 (IME) | 한글 조합 커밋/취소/혼합 | ALL PASS |
 | `verify-multicolumn.mjs` | 정합성 (멀티컬럼) | prefix 캐시 경로 === 전체 재래핑 | ALL PASS |
 | `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/런/캐스케이드) | ALL PASS |
+| `verify-hangul-glyph-fallback.mjs` | 정합성 (엔진) | cmap 미등록 한글 음절 폭 폴백 (`가` 폭 대체) | ALL PASS |
 | `verify-right-indent-tab.mjs` | 정합성 (엔진) | Right Indent Tab(`\t`) 배치·정렬·print 스킵 | ALL PASS |
 | `verify-right-indent-tab-browser.mjs` | 정합성 (브라우저) | Shift+Tab 키 삽입·DOM 렌더·커서 | ALL PASS |
 | `verify-right-indent-tab-composition.mjs` | 정합성 (브라우저) | 탭 라인 한글 조합 표시·우측 정렬·이탈 방지 | ALL PASS |
@@ -237,6 +238,22 @@ npx tsx scripts/verify-engine-node.mjs
 ```
 
 엔진 코드에 DOM 참조가 추가되면 import/실행 단계에서 실패한다.
+
+### `verify-hangul-glyph-fallback.mjs` — cmap 미등록 한글 음절 폭 폴백
+
+**목적**: 완성형 위주 한글 폰트(KMIBMyoungjo 등)에 cmap이 등록되지 않은 음절(`핳` 등)의 측정 폭이 `.notdef` 반각 폭이 아닌 **기준 글자 `가`의 실측 폭**으로 대체되는지. 폴백이 없으면 측정 폭(반각)과 브라우저 표시 폭(폴백 폰트 풀폭)이 어긋나 글자 겹침/줄바꿈 오류가 발생한다.
+
+**검증 항목** (25항목):
+1. 미등록 음절 폭 === `가` 폭 (폴백 작동 + `.notdef` 폭이 아님 증명)
+2. cmap 등록 음절은 자체 메트릭 유지 (폴백이 등록 글리프를 덮어쓰지 않음)
+3. 비한글/한글 자모(U+3131, 범위 밖)는 폴백 미적용
+4. 파이프라인 전체: `핳` 포함 텍스트 배치 geometry === `가` 치환 텍스트 배치 (byte 동일), justify charOffsets 균등 간격, `getCharRect` 폭 동일
+5. `가` 글리프가 없는 폰트(스텁) → 폴백 포기, `minWidthMm` 회귀 방어
+
+**실행**:
+```bash
+npx tsx scripts/verify-hangul-glyph-fallback.mjs   # 25항목 ALL PASS
+```
 
 ### `verify-obfuscated.mjs` — 난독화 빌드 무결성
 
