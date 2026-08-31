@@ -120,7 +120,7 @@ console.log(manager.layoutEditType); // 'move' | 'reparent'
 > manager.setSelectableRoles(null);             // 선택: 편집 필터 fallback → 같이 제한됨
 >
 > // 대안: 선택은 모든 역할 허용 (편집 필터를 덮어씀)
-> manager.setSelectableRoles(['none', 'title', 'body', 'group-article', 'image', 'caption', 'header', 'ad', 'byline']);
+> manager.setSelectableRoles(['none', 'title', 'body', 'group-article', 'image', 'caption', 'header', 'ad']);
 > ```
 >
 > 또는 편집과 선택 모두 모든 box에 허용하려면 `setEditableRoles(null)`을 사용한다.
@@ -830,7 +830,6 @@ type BoxRole =
   | 'group-image'     // 이미지 그룹 컨테이너
   | 'header'          // 면머리 그룹 컨테이너
   | 'ad'              // 광고 이미지 영역
-  | 'byline'          // 기자정보 영역
   | 'none';           // 역할 미지정 (기본값)
 ```
 
@@ -844,7 +843,6 @@ type BoxRole =
 | `'group-image'` | 이미지 그룹 컨테이너. 여러 이미지 박스를 묶어 하나의 이미지 그룹으로 구성 |
 | `'header'` | 면머리 그룹 컨테이너. 신문 지면 상단의 면머리 영역을 구성하는 박스 그룹 |
 | `'ad'` | 광고 이미지 영역. 광고 이미지가 위치하는 박스 |
-| `'byline'` | 기자정보 영역. paragraph를 가진 박스에 설정하여 기자정보를 표시 |
 | `'none'` | 역할 미지정. `role` 속성이 없는 box의 기본값 |
 
 `role` 속성은 `<x-layout-box>`의 `observedAttributes`에 등록되어 있어, DOM 속성 변경 시 `attributeChangedCallback`을 통해 `_role` 필드로 반영된다. `data` setter를 통해서도 `data.role`에서 `_role`로 동기화된다. React 래퍼(`LayoutBox`)는 `role` prop을 통해 이 값을 설정한다. role이 설정되지 않은 box의 `box.role` getter는 이제 `null` 대신 `'none'`을 반환한다.

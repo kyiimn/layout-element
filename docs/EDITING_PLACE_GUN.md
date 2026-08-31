@@ -144,7 +144,7 @@ export type ArticleContent = {
   uid: string;   // 기사 고유 식별자
   title: string; // 기사 제목
   body: string;   // 기사 본문 텍스트
-  byline: string; // 기자명(검별). 빈 문자열일 수 있다.
+  byline: string; // 기자명(검별). 빈 문자열일 수 있다. 주입 시 본문 맨 뒤에 `\t{byline}`으로 결합되어 주입된다.
 };
 
 export type ImageContent = {
@@ -266,28 +266,26 @@ export type PlaceGunChangeEventDetail = {
 
 ### 4.3 기사(text) 데이터 주입
 
-기사 항목(`contentType === 'text'`)은 클릭한 box의 역할에 따라 3가지 케이스로 분기한다.
+기사 항목(`contentType === 'text'`)은 클릭한 box의 역할에 따라 3가지 케이스로 분기한다. 아래 표에서 `article.body`는 byline이 존재하면 본문 맨 뒤에 `\t{byline}`을 결합한 텍스트를 의미한다.
 
 #### 케이스 1: 조상에 `group-article` box가 있는 경우
 
-클릭한 box의 조상 중 `role === 'group-article'`인 box가 있으면, 그 group-article 내에서 title/byline/body box를 찾아 각각 주입한다.
+클릭한 box의 조상 중 `role === 'group-article'`인 box가 있으면, 그 group-article 내에서 title/body box를 찾아 각각 주입한다.
 
 | 대상 box (role) | 주입 내용 | contentUid |
 |-----------------|----------|-----------|
 | group-article 내 `role === 'title'` box의 paragraph | `article.title` | 기사 UID |
-| group-article 내 `role === 'byline'` box의 paragraph | `article.byline` | 기사 UID |
 | group-article 내 `role === 'body'` box의 paragraph | `article.body` | 기사 UID |
 
 추가로 group-article box의 `groupMember` 배열에 기사 UID를 추가한다.
 
-#### 케이스 2: 클릭한 box의 role이 `title`/`byline`/`body`인 경우
+#### 케이스 2: 클릭한 box의 role이 `title`/`body`인 경우
 
-group-article 하위가 아니지만 box 자체의 role이 `title`/`byline`/`body`이면 그에 맞는 내용을 주입한다.
+group-article 하위가 아니지만 box 자체의 role이 `title`/`body`이면 그에 맞는 내용을 주입한다.
 
 | box role | 주입 내용 | contentUid |
 |----------|----------|-----------|
 | `title` | `article.title` | 기사 UID |
-| `byline` | `article.byline` | 기사 UID |
 | `body` | `article.body` | 기사 UID |
 
 #### 케이스 3: 그 외

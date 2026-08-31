@@ -401,7 +401,7 @@ class LayoutParagraphElement extends HTMLElement
 | `column` | `number \| number[]` (via `data`) | — | 하위 컬럼 그리드 (생략 시 부모 상속). |
 | `gap` | `number \| number[]` (via `data`) | mm | 하위 컬럼 간격. |
 | `zIndex` | `number` (via `data`) | — | 렌더링 순서. |
-| `overlapMode` (set) | `ParagraphOverlapMode` | — | 다른 paragraph가 이 paragraph를 감싼 박스를 텍스트 회피 대상으로 취급할지 제어 (`'box'` \| `'none'`). 기본값 `'box'`. `'none'`으로 설정하면 다른 paragraph가 이 박스와 겹쳐도 텍스트를 회피하지 않는다. 변경 시 부모 `requestRerenderAffectedParagraphs()` 호출. byline처럼 본문과 시각적으로 겹치되 텍스트 회피가 필요 없는 영역에 사용. |
+| `overlapMode` (set) | `ParagraphOverlapMode` | — | 다른 paragraph가 이 paragraph를 감싼 박스를 텍스트 회피 대상으로 취급할지 제어 (`'box'` \| `'none'`). 기본값 `'box'`. `'none'`으로 설정하면 다른 paragraph가 이 박스와 겹쳐도 텍스트를 회피하지 않는다. 변경 시 부모 `requestRerenderAffectedParagraphs()` 호출. 본문과 시각적으로 겹치되 텍스트 회피가 필요 없는 영역에 사용. |
 | `textStyle` (set) | `TextStyle` | — | 글자 스타일. 변경 시 구조 재계산 + 재렌더링. 기존 값과 같으면 no-op. |
 | `paragraphStyle` (set) | `ParagraphStyle` | — | 문단 스타일. 변경 시 구조 재계산 + 재렌더링. 기존 값과 같으면 no-op. |
 | `editableText` (set) | `boolean` | — | 텍스트 편집 모드. |
@@ -2813,7 +2813,7 @@ type BoxPosition = 'static' | 'absolute';
 type BoxBorderStyle = 'solid' | 'dotted' | 'dashed';
 type BoxRole =
   | 'group-article' | 'body' | 'image' | 'title' | 'caption'
-  | 'group-image' | 'header' | 'ad' | 'byline' | 'none';
+  | 'group-image' | 'header' | 'ad' | 'none';
 ```
 
 #### `ParagraphData`
@@ -2834,7 +2834,7 @@ type ParagraphData = {
 };
 ```
 
-`overlapMode` — 다른 paragraph가 이 paragraph를 감싼 박스를 텍스트 회피 대상으로 취급할지 제어. 기본값 `'box'` (회피 대상). `'none'`으로 설정하면 다른 paragraph가 이 박스와 겹쳐도 텍스트를 회피하지 않는다. byline처럼 본문과 시각적으로 겹치되 텍스트 회피가 필요 없는 영역에 사용. UI에서 직접 설정하지 않고, box의 `role`이 `'byline'`으로 변경되면 layout-editor에서 내부 paragraph의 `overlapMode`를 `'none'`으로 자동 설정한다.
+`overlapMode` — 다른 paragraph가 이 paragraph를 감싼 박스를 텍스트 회피 대상으로 취급할지 제어. 기본값 `'box'` (회피 대상). `'none'`으로 설정하면 다른 paragraph가 이 박스와 겹쳐도 텍스트를 회피하지 않는다. 본문과 시각적으로 겹치되 텍스트 회피가 필요 없는 영역에 사용.
 
 #### `TextData`
 

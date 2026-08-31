@@ -98,7 +98,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **Column grid system**: `columns: number` = equal-width columns; `columns: number[]` = explicit per-column widths. Same for `gap`.
 - **`position: 'static'`** (default): `left` = column index (0-based), `width` = column span count, `height` = line count. **Not mm.**
 - **`position: 'absolute'`**: `left`/`top`/`width`/`height` are actual mm values.
-- **`BoxRole`** (`BoxData.role`): `'group-article'`, `'body'`, `'image'`, `'title'`, `'caption'`, `'group-image'`, `'header'`, `'ad'`, `'byline'`, `'none'` (default).
+- **`BoxRole`** (`BoxData.role`): `'group-article'`, `'body'`, `'image'`, `'title'`, `'caption'`, `'group-image'`, `'header'`, `'ad'`, `'none'` (default).
 - **InheritStyle cascade**: `TextStyle` + `ParagraphStyle` + parent dimensions flow downward. Children override individual fields.
 - **Text overflow**: `render-error` CustomEvent with `{ type: 'text-overflow', overflow: number }`. `:host` gets `inset 0 -8px 0 0 #ff0000` when overflow.
 - **Render complete**: `render-complete` CustomEvent after every `LayoutParagraphElement.render()`. Payload: `RenderCompleteEventDetail`.
