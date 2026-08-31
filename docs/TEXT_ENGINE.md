@@ -243,15 +243,15 @@ type FreeRegion = { start: number; end: number }; // pixels
 
 ```ts
 private _createLineWithParts(
-  vColumnEl: HTMLElement,
-  ppm: number,
+  columnIndex: number,
   isFirstInColumn: boolean,
-  isFirstOfLine: boolean,
+  isFirstOfBlock: boolean,
+  alignOffsetMm: number,
+  cumulativeTopMm: number,
+  pendingMaxFontSizeMm: number,
 ): {
   cover: boolean;
   overflow: boolean;
-  lineEl: HTMLDivElement | null;
-  partEls: HTMLDivElement[];
   partWidths: number[];
   lineData: TextLineData;
 }
@@ -259,17 +259,32 @@ private _createLineWithParts(
 
 주요 작업:
 
-1. `_createLineElement()`로 라인 요소 생성
+1. 라인 rect 구성 — top은 **per-line 누적 높이**(`cumulativeTopMm`), 높이는 **pending max fontSize × lineGap**(`pendingMaxFontSizeMm`)
 2. `_detectOverlapWithCache()`으로 오버랩 감지
 3. COVER면 빈 `TextLineData` 반환
-4. OVERFLOW면 플래그만 반환 (lineEl은 DOM에 유지)
-5. `lineWidth`를 px에서 mm로 변환 (`getBoundingClientRect().width / ppm`)
-6. `overlapParts`를 px에서 mm로 변환 (`x1 / ppm`, `x2 / ppm`)
-7. `_computeFreeRegions()`로 자유 영역 계산 (mm 단위)
-8. **문단 첫 줄 들여쓰기**: `isFirstOfLine`이 `true`이면(`\n`으로 시작하는 라인의 첫 줄) 첫 자유 영역의 `start`를 `fontSize × indent`만큼 오른쪽으로 밀어준다. `indent`는 `TextStyle.indent`(0.0~1.0)이며 `fontSize`에 대한 비율이다.
-9. **좁은 자유 영역 필터링**: 글자 하나가 들어갈 수 없는 좁은 자유 영역은 제외한다. 기준은 전각 문자 폭 상한(`widthRatio × fontSize + letterSpacing × fontSize`). 이 필터링이 없으면 무한 루프 가드가 좁은 틈에 글자를 강제 배치하여 파트 폭을 넘어 렌더링되는 현상이 발생한다. 필터링 후 남은 자유 영역이 없으면 COVER로 처리된다.
-10. 자유 영역별 `TextPartData`, `partEls`, `partWidths` 생성 (모두 mm 단위)
-11. 파트 사이 간격은 `marginLeft`로 설정 (mm 단위 CSS)
+4. overflow 판정: `cumulativeTopMm + pendingHeight > effectiveColumnHeight` (per-line 누적 — DOM `renderText`의 visible 판정과 동일 공식)
+5. `_computeFreeRegions()`로 자유 영역 계산 (mm 단위)
+6. **문단 첫 줄 들여쓰기**: `isFirstOfBlock`이 `true`이면(`\n`으로 시작하는 라인의 첫 줄) 첫 자유 영역의 `start`를 `fontSize × indent`만큼 오른쪽으로 밀어준다. `indent`는 `TextStyle.indent`(0.0~1.0)이며 `fontSize`에 대한 비율이다.
+7. **좁은 자유 영역 필터링**: 글자 하나가 들어갈 수 없는 좁은 자유 영역은 제외한다. 기준은 전각 문자 폭 상한(`widthRatio × fontSize + letterSpacing × fontSize`). 이 필터링이 없으면 무한 루프 가드가 좁은 틈에 글자를 강제 배치하여 파트 폭을 넘어 렌더링되는 현상이 발생한다. 필터링 후 남은 자유 영역이 없으면 COVER로 처리된다.
+8. 자유 영역별 `TextPartData`, `partWidths` 생성 (모두 mm 단위)
+
+#### 5.4.1 per-line 라인 rect — 오버랩 판정과 렌더링 위치의 일치
+
+라인 rect의 top/높이는 두 파라미터로 산출되며, 실제 렌더링 위치(`genLineStyle` → `_getCumulativeLineTop`, `getCharRect`, `buildParagraphPrintPostData`)와 동일한 규칙을 사용한다:
+
+| 파라미터 | 의미 | 균일 경로 |
+|---|---|---|
+| `cumulativeTopMm` | 이전 라인들의 **확정 높이 합** (`line.lineHeight` = per-line maxFontSize × lineGap) | `lineIndex × lineHeight` (모든 라인 높이가 base 균일) |
+| `pendingMaxFontSizeMm` | 이번 라인에 배치될 글자들의 max fontSize **근사** (커서부터 컬럼 폭만큼 폭 누적 스캔) | 문단 기본 fontSize |
+
+- **왜 필요한가**: 인라인으로 큰 글자(예: 2단 인라인 영역 6mm > 문단 기본 4mm)가 섞인 컬럼에서 렌더링 라인 위치는 per-line 높이 누적으로 내려가지만, 과거 판정 rect는 `lineIndex × baseLineHeight` 균일 가정이었다. 이 어긋남으로 오버랩 회피가 실제 위치가 아닌 엉뚱한 라인에서 발생해 텍스트가 오버랩 요소 위로 덮였다.
+- **확정 vs 근사**: 라인의 실제 높이는 글자가 배치된 후에야 알 수 있으므로, 라인 생성 시점(rect 계산)에는 pending 근사를 쓰고 **다음 라인 생성 직전에** `_confirmLineHeight()`가 `inlineStyles` 기반 실제 max fontSize로 `line.maxFontSize`/`line.lineHeight`를 확정한다. 확정값이 누적 top(`cumulativeTopMm`)에 반영되므로 이후 라인들의 rect는 렌더링 위치와 정확히 일치한다.
+- **pending 근사의 안전 방향**: 폭 누적 스캔 범위(컬럼 폭) ≥ 실제 배치 폭(오버랩 파트가 좁히면)이므로 pending ≥ actual이다. 오차 방향이 과도 회피(텍스트가 요소를 더 피함)이지 그 반대(덮임)가 아니다.
+- **성능 이원화**: `_layoutColumnsPass`가 `_contents`에 base를 초과하는 인라인 fontSize 오버라이드가 있는지 먼저 검사한다. 오버라이드가 없으면 모든 라인 높이가 균일하므로 기존 균일 공식(`lineIndex × lineHeight`)을 그대로 사용 — pending 스캔/확정 비용 없이 기존 성능과 결과를 byte 단위로 보존한다. 오버라이드가 있는 문단에서만 `_computePendingMaxFontSize()` 스캔(라인당 컬럼 폭만큼, `_charWidthByFontCache` 공유)이 실행된다.
+- **`_removeTrailingEmptyLine` 불변식**: 제거되는 라인은 항상 마지막(아직 확정 전) 라인이므로, 확정된 라인이 제거되어 누적 top이 어긋나는 경우는 없다.
+- **`getCharRect` multi-part 파트 누적**: multi-part 라인(오버랩 파트 분할)에서 이후 파트의 x 좌표는 `partStartMm`(첫 파트 start + 이후 파트들의 갭/폭 누적) 기반으로 계산한다 — `buildParagraphPrintPostData`의 `partStartMm` 규칙과 동일하다. 과거에는 `part.left`(첫 파트=절대 start, 이후 파트=이전 파트 끝에서의 갭)를 누적 없이 더해 이후 파트 좌표가 오버랩 쪽으로 어긋났다.
+
+검증: `npx tsx scripts/verify-overlap-inline-fontsize.mjs` (22항목 — 균일 경로 보존/버그 재현/overflow per-line화/혼합 누적 top/COVER).
 
 ### 5.5 COVER vs PART 시각적 예시
 

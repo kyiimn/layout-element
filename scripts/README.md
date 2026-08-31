@@ -17,6 +17,7 @@
 | `verify-multicolumn.mjs` | 정합성 (멀티컬럼) | prefix 캐시 경로 === 전체 재래핑 | ALL PASS |
 | `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/런/캐스케이드) | ALL PASS |
 | `verify-hangul-glyph-fallback.mjs` | 정합성 (엔진) | cmap 미등록 한글 음절 폭 폴백 (`가` 폭 대체) | ALL PASS |
+| `verify-overlap-inline-fontsize.mjs` | 정합성 (엔진) | 인라인 fontSize 오버라이드 컬럼의 오버랩 판정 rect — per-line 높이 기준 | ALL PASS |
 | `verify-right-indent-tab.mjs` | 정합성 (엔진) | 좌우 밀기 탭(`\t`) 배치·정렬·print 스킵 | ALL PASS |
 | `verify-right-indent-tab-browser.mjs` | 정합성 (브라우저) | Shift+Tab 키 삽입·DOM 렌더·커서 | ALL PASS |
 | `verify-right-indent-tab-composition.mjs` | 정합성 (브라우저) | 탭 라인 한글 조합 표시·우측 정렬·이탈 방지 | ALL PASS |
@@ -273,6 +274,24 @@ npx tsx scripts/verify-engine-node.mjs
 **실행**:
 ```bash
 npx tsx scripts/verify-hangul-glyph-fallback.mjs   # 25항목 ALL PASS
+```
+
+### `verify-overlap-inline-fontsize.mjs` — 인라인 fontSize 오버라이드 + 오버랩 판정 rect (엔진)
+
+**목적**: 인라인으로 큰 글자(예: 2단 인라인 영역 6mm > 문단 기본 4mm)가 섞인 컬럼에서 오버랩 회피 판정이 **per-line 렌더링 위치**(`getCharRect`/`genLineStyle`와 동일한 라인별 maxFontSize 높이 누적)에서 발생하는지. 이력: `_createLineWithParts`가 라인 rect top을 `lineIndex × baseLineHeight`(균일 가정)로 계산하던 시절, 2단 인라인 큰 글자 문단에서 회피가 실제 위치보다 위의 엉뚱한 라인에서 일어나 텍스트가 오버랩 요소 위로 덮였다.
+
+**검증 항목** (22항목, 실측 글자 폭 기반):
+1. 균일 경로 보존 — 오버라이드 없는 오버랩 문단은 기존 회피 위치·결과 유지 (스냅샷 회귀 방어)
+2. 사용자 버그 재현 — 2단 big 런 + 중단 오버랩: 파트 분할이 per-line top 라인에서 발생 (균일 가정이면 한 라인 뒤에서 발생)
+3. overflow 판정 per-line화 — 큰 글자 컬럼이 균일 가정보다 일찍 참 (DOM visible 판정과 동일 공식)
+4. 혼합 라인 누적 top — base→big 전환 라인의 `getCharRect` top (하단 앵커 vertical offset 포함)
+5. 하단 COVER + 전 visible 글자 오버랩 영역 밖 (렌더링 관점 최종)
+
+**재현 환경 주의**: 문단은 박스 children이 **단일 객체**일 때만 ParagraphEngine으로 생성되므로 (배열이면 BoxEngine 취급), 오버랩 박스는 문단 박스와 **document 형제 박스**로 둔다. 기대값은 `getCharWidths` 실측 폭('가' 4mm→2.544mm, 6mm→3.816mm) 기반으로 계산한다 — 폭 공식(장평/letterSpacing)이 들어간 값이므로 `advanceWidth` 직접 계산으로 기대값을 만들면 오탐된다.
+
+**실행**:
+```bash
+npx tsx scripts/verify-overlap-inline-fontsize.mjs   # 22항목 ALL PASS
 ```
 
 ### `verify-obfuscated.mjs` — 난독화 빌드 무결성
