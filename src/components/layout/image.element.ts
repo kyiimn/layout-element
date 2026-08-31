@@ -275,6 +275,9 @@ export class LayoutImageElement extends HTMLElement {
     if (!resolvedUrl) {
       this._clearImageCache();
       this._fillTransparent(ctx);
+      // 엔진 rgbaData는 보존되므로 오버랩 회피도 유지된다 — 영향 단락만
+      // 최신 상태로 갱신한다.
+      this._notifyOverlapParagraphs();
       return;
     }
 
@@ -291,7 +294,12 @@ export class LayoutImageElement extends HTMLElement {
 
     const img = await this._loadImage(resolvedUrl);
     if (!img) {
+      // 로드 실패는 표시 수준의 실패다. 엔진 rgbaData는 보존되므로(
+      // _clearImageCache가 더 이상 지우지 않음), 엔진에 이미지가 있다면
+      // 오버랩 회피는 유지되는 것이 맞다. 영향 단락을 갱신해 DOM 캔버스가
+      // 비어 있어도 엔진 판정과 인쇄 출력의 정합성을 유지한다.
       this._dispatchRenderError('image-load-failed', resolvedUrl);
+      this._notifyOverlapParagraphs();
       return;
     }
     this._drawImage(ctx, img);
@@ -439,17 +447,20 @@ export class LayoutImageElement extends HTMLElement {
   }
 
   /**
-   * 이미지 캐시를 무효화한다. `url`/`data` 세터 변경이나 `disconnectedCallback`
-   * 시 호출하여 새 이미지를 강제로 로드하게 한다.
+   * DOM 표시 캐시(resolved URL, HTMLImageElement, 로딩 Promise)를 무효화한다.
+   * `url`/`data` 세터 변경이나 캐시 미스 재시도 시 호출하여 새 이미지를 강제로 로드하게 한다.
+   *
+   * 엔진 `rgbaData`는 지우지 않는다 — 오버랩 판정의 진실은 엔진이 소유하며,
+   * DOM 로드 실패는 표시 수준의 문제일 뿐이다. 인쇄/내보내기는 엔진 픽셀로
+   * 그리므로 DOM 로드 실패와 무관하게 이미지가 출력된다. rgbaData는
+   * 성공 경로(`_feedRgbaToEngine`)가 다시 주입하거나, 엔진 데이터 교체에서
+   * 무효화된다.
    */
   private _clearImageCache(): void {
     this._cachedImage = undefined;
     this._cachedImageSrc = undefined;
     this._imageLoadingPromise = undefined;
     this._cachedResolvedUrl = undefined;
-    if (this._engine) {
-      this._engine.rgbaData = null;
-    }
   }
 
   /**
@@ -480,38 +491,77 @@ export class LayoutImageElement extends HTMLElement {
       this._y = 0;
       this._width = this.absWidth;
       this._height = this.absHeight;
-      return;
-    }
+    } else {
+      const engine = this._engine;
+      if (engine && engine.contentAbsRect) {
+        const displayRect = engine.displayRect;
+        const content = engine.contentAbsRect;
+        this._x = displayRect.absLeft - content.absLeft;
+        this._y = displayRect.absTop - content.absTop;
+        this._width = displayRect.absWidth;
+        this._height = displayRect.absHeight;
+      } else {
+        const origW = this._originalWidth ?? 0;
+        const origH = this._originalHeight ?? 0;
+        const boxW = this.absWidth;
+        const boxH = this.absHeight;
+        if (origW <= 0 || origH <= 0 || boxW <= 0 || boxH <= 0) {
+          return;
+        }
 
+        const rect = computeObjectFitEngine({
+          fit: this._objectFit,
+          originalWidth: origW,
+          originalHeight: origH,
+          boxWidth: boxW,
+          boxHeight: boxH,
+        });
+
+        this._x = rect.x;
+        this._y = rect.y;
+        this._width = rect.width;
+        this._height = rect.height;
+      }
+    }
+    this._syncObjectFitToEngine();
+  }
+
+  /**
+   * `_applyObjectFit()`이 재계산한 표시 오프셋(`_x`/`_y`/`_width`/`_height`)을
+   * ImageEngine data에 역방향으로 동기화한다.
+   *
+   * `originalWidth`/`originalHeight`/`objectFit`/`inheritStyle` 세터는
+   * `_updateEngine()`을 `_applyObjectFit()`보다 먼저 실행하므로, 엔진 `_data`에는
+   * 재계산되기 이전의 stale x/y/width/height가 남는다. 이 값은 `extractData`로
+   * 유출되어 저장/undo-redo/리로드 시 이미지가 이전 위치로 렌더링되는
+   * 렌더링 미스의 원인이 된다.
+   *
+   * 엔진 개별 세터는 값이 동일하면 쓰기를 생략하므로 중복 호출이 무해하며,
+   * `engine.layout()`으로 dirty/displayRect dirty를 커밋 해제한다.
+   *
+   * @returns 동기화 결과. 엔진이 없거나 유효한 표시 크기가 없으면 false
+   * @throws 없음
+   * @example
+   * ```ts
+   * // image.element.ts 내부 전용. object-fit 재계산 후 엔진 정합성 유지에 사용.
+   * image.objectFit = 'contain';
+   * // → _applyObjectFit()가 _x/_y/_width/_height를 재계산하고,
+   * //   _syncObjectFitToEngine()이 engine.data.x/y/width/height를 동일 값으로 갱신
+   * ```
+   */
+  private _syncObjectFitToEngine(): boolean {
     const engine = this._engine;
-    if (engine && engine.contentAbsRect) {
-      const displayRect = engine.displayRect;
-      const content = engine.contentAbsRect;
-      this._x = displayRect.absLeft - content.absLeft;
-      this._y = displayRect.absTop - content.absTop;
-      this._width = displayRect.absWidth;
-      this._height = displayRect.absHeight;
-      return;
-    }
+    if (!engine || !this._inheritStyle) return false;
+    if (this._x === undefined || this._y === undefined
+      || this._width === undefined || this._height === undefined) return false;
+    if (this._width <= 0 || this._height <= 0) return false;
 
-    const origW = this._originalWidth ?? 0;
-    const origH = this._originalHeight ?? 0;
-    const boxW = this.absWidth;
-    const boxH = this.absHeight;
-    if (origW <= 0 || origH <= 0 || boxW <= 0 || boxH <= 0) return;
-
-    const rect = computeObjectFitEngine({
-      fit: this._objectFit,
-      originalWidth: origW,
-      originalHeight: origH,
-      boxWidth: boxW,
-      boxHeight: boxH,
-    });
-
-    this._x = rect.x;
-    this._y = rect.y;
-    this._width = rect.width;
-    this._height = rect.height;
+    engine.x = this._x;
+    engine.y = this._y;
+    engine.width = this._width;
+    engine.height = this._height;
+    engine.layout();
+    return true;
   }
 
   set data(data: ImageData) {
@@ -534,6 +584,9 @@ export class LayoutImageElement extends HTMLElement {
 
     if (urlChanged) {
       this._clearImageCache();
+      // URL이 실제로 바뀌었으므로 이전 이미지의 픽셀은 오버랩 판정에서
+      // 무효다. 새 rgbaData는 로드 성공 후 _feedRgbaToEngine이 재주입한다.
+      if (this._engine) this._engine.rgbaData = null;
     }
 
     if (data.x === undefined && data.y === undefined && data.width === undefined && data.height === undefined) {
@@ -597,6 +650,7 @@ export class LayoutImageElement extends HTMLElement {
     this._x = value;
     this._updateEngine();
     this.render();
+    this.parentElement?.requestRerenderAffectedParagraphs();
   }
 
   set y(value: number | undefined) {
@@ -604,6 +658,7 @@ export class LayoutImageElement extends HTMLElement {
     this._y = value;
     this._updateEngine();
     this.render();
+    this.parentElement?.requestRerenderAffectedParagraphs();
   }
 
   set width(value: number | undefined) {
@@ -611,6 +666,7 @@ export class LayoutImageElement extends HTMLElement {
     this._width = value;
     this._updateEngine();
     this.render();
+    this.parentElement?.requestRerenderAffectedParagraphs();
   }
 
   set height(value: number | undefined) {
@@ -618,6 +674,7 @@ export class LayoutImageElement extends HTMLElement {
     this._height = value;
     this._updateEngine();
     this.render();
+    this.parentElement?.requestRerenderAffectedParagraphs();
   }
 
   set dpi(value: number) {
@@ -630,6 +687,9 @@ export class LayoutImageElement extends HTMLElement {
     if (this._url === value) return;
     this._url = value;
     this._clearImageCache();
+    // URL이 실제로 바뀌었으므로 이전 이미지의 픽셀은 오버랩 판정에서
+    // 무효다. 새 rgbaData는 로드 성공 후 _feedRgbaToEngine이 재주입한다.
+    if (this._engine) this._engine.rgbaData = null;
     this.render();
   }
 
