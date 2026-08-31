@@ -458,9 +458,9 @@ const letterSpacingMm = letterSpacingEm * letterSpacingFontSize;
 `letterSpacing`은 em 단위로 지정되며, 실제 mm 폭은 `letterSpacing * fontSize`로 계산된다 (mm 단위).
 각 문자 폭에 `letterSpacingMm`를 더해 파트 가용 폭(mm)과 비교한다.
 
-### 7.3.1 Right Indent Tab (`\t`) 처리
+### 7.3.1 좌우 밀기 탭 (`\t`) 처리
 
-텍스트의 `\t` 문자는 **Right Indent Tab** 마커로 취급된다 (InDesign Shift+Tab 대응). 편집 단축키와 레이아웃 의미론은 `docs/EDITING_TEXT.md` § 4.1.5를 참조.
+텍스트의 `\t` 문자는 **좌우 밀기 탭** 마커로 취급된다 (InDesign Shift+Tab 대응). 편집 단축키와 레이아웃 의미론은 `docs/EDITING_TEXT.md` § 4.1.5를 참조.
 
 **폭 0 규칙 (모든 폭 경로에 적용)**:
 

@@ -1,5 +1,5 @@
 /**
- * Right Indent Tab 브라우저 E2E 검증 (최종본).
+ * 좌우 밀기 탭 브라우저 E2E 검증 (최종본).
  *
  * 검증 전략:
  * - Phase 1 (데이터 주입): model.textContent 직접 설정 + flushRender → 엔진/DOM 검증

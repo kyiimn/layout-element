@@ -16,7 +16,7 @@
 | `verify-multicolumn.mjs` | 정합성 (멀티컬럼) | prefix 캐시 경로 === 전체 재래핑 | ALL PASS |
 | `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/런/캐스케이드) | ALL PASS |
 | `verify-hangul-glyph-fallback.mjs` | 정합성 (엔진) | cmap 미등록 한글 음절 폭 폴백 (`가` 폭 대체) | ALL PASS |
-| `verify-right-indent-tab.mjs` | 정합성 (엔진) | Right Indent Tab(`\t`) 배치·정렬·print 스킵 | ALL PASS |
+| `verify-right-indent-tab.mjs` | 정합성 (엔진) | 좌우 밀기 탭(`\t`) 배치·정렬·print 스킵 | ALL PASS |
 | `verify-right-indent-tab-browser.mjs` | 정합성 (브라우저) | Shift+Tab 키 삽입·DOM 렌더·커서 | ALL PASS |
 | `verify-right-indent-tab-composition.mjs` | 정합성 (브라우저) | 탭 라인 한글 조합 표시·우측 정렬·이탈 방지 | ALL PASS |
 | `verify-right-indent-tab-guide.mjs` | 정합성 (브라우저) | 탭 점선 가이드 (편집 모드 전용 표시·원복) | ALL PASS |
@@ -184,9 +184,9 @@ npx tsx scripts/verify-multicolumn.mjs   # 15항목 ALL PASS
 npx tsx scripts/verify-style-revert.mjs   # 28항목 ALL PASS
 ```
 
-### `verify-right-indent-tab.mjs` / `verify-right-indent-tab-browser.mjs` — Right Indent Tab 정합성
+### `verify-right-indent-tab.mjs` / `verify-right-indent-tab-browser.mjs` — 좌우 밀기 탭 정합성
 
-**목적**: InDesign의 Shift+Tab(Right Indent Tab) 기능 — `\t` 이후 텍스트를 파트 오른쪽 끝에 우측 정렬 — 의 엔진/브라우저 정합성 검증.
+**목적**: InDesign의 Shift+Tab(좌우 밀기 탭) 기능 — `\t` 이후 텍스트를 파트 오른쪽 끝에 우측 정렬 — 의 엔진/브라우저 정합성 검증.
 
 **Node 스크립트** (`verify-right-indent-tab.mjs`, 32항목):
 1. 탭 파트 보존 + plain text round-trip

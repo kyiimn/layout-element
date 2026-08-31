@@ -1,5 +1,5 @@
 /**
- * Right Indent Tab (`\t`) 정합성 검증 (Node).
+ * 좌우 밀기 탭 (`\t`) 정합성 검증 (Node).
  *
  * 검증 항목:
  * 1. 탭 문자가 파트 content에 보존된다 (plain text round-trip)
@@ -98,7 +98,7 @@ function charRight(engine, part, idx) {
   return part.charOffsets[idx] + engine.getCharWidths(part.content[idx]).swidth;
 }
 
-console.log('\n=== Right Indent Tab Verification ===\n');
+console.log('\n=== 좌우 밀기 탭 Verification ===\n');
 
 // ── 1. 탭 문자 파트 보존 + 단일 라인 배치 ──
 {

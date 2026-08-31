@@ -1,5 +1,5 @@
 /**
- * 엔진 우선 / 단일 소스 원칙 검증 (Right Indent Tab).
+ * 엔진 우선 / 단일 소스 원칙 검증 (좌우 밀기 탭).
  *
  * 원칙: 화면 렌더링 좌표와 인쇄(printPostData) 좌표는 모두 엔진의
  * `_computeCharOffsets()` 단일 루틴에서 나와야 한다. DOM은 엔진 출력을

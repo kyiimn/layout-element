@@ -416,6 +416,11 @@ export class LayoutColumnElement extends HTMLElement {
       gapStartMm = parseFloat(off) + parseFloat(el.dataset.swidth ?? '0') * flatScaleX;
       break;
     }
+    if (gapStartMm === null) {
+      // 탭 앞에 가시 span이 없다(라인/문단 시작부터 탭) — 갭의 시작은 파트 왼쪽 끝(0)이다.
+      // 이때도 탭 위치까지 점선을 그려야 한다.
+      gapStartMm = 0;
+    }
 
     const tabOffsetStr = tabEl.dataset.charOffset;
     if (tabOffsetStr === undefined) return;

@@ -91,9 +91,9 @@ export interface ParagraphEngineData {
 type FreeRegion = { start: number; end: number };
 
 /**
- * Right Indent Tab 문자 (`\t`).
+ * 좌우 밀기 탭 문자 (`\t`).
  *
- * InDesign의 Shift+Tab(Right Indent Tab)과 동일한 의미론을 가지는
+ * InDesign의 Shift+Tab(좌우 밀기 탭)과 동일한 의미론을 가지는
  * 특수 마커 문자이다. 레이아웃 폭은 항상 **0**이며, `_computeCharOffsets()`
  * 후처리에서 이 문자 이후의 같은 파트 내 텍스트를 파트 오른쪽 끝에
  * 우측 정렬시키는 기준점으로 사용된다.
@@ -688,7 +688,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
           const remaining = Math.max(0, partWidth - totalWidth);
 
           if (tabIdx !== -1) {
-            // Right Indent Tab: 탭을 기준으로 파트를 좌측/우측 세그먼트로 분할한다.
+            // 좌우 밀기 탭: 탭을 기준으로 파트를 좌측/우측 세그먼트로 분할한다.
             // - 탭 이전 글자: 좌측 정렬 (파트 왼쪽 끝부터)
             // - 탭: 우측 세그먼트 시작 위치 (= partWidth - ΣpostWidths)
             // - 탭 이후 글자: 우측 정렬 (파트 오른쪽 끝에 붙임)
