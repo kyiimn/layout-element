@@ -2309,8 +2309,10 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         const lineTopMm = this._data.parentAbsRect.absTop + alignOffsetMm + cumulativeTopMm;
         const lineH = line?.lineHeight ?? this._lineHeight;
 
+        let partStartMm = 0;
         for (let p = 0; p < line.parts.length; p++) {
           const part = line.parts[p];
+          partStartMm += part.left;
           if (sourceOffset >= offset && sourceOffset < offset + part.content.length) {
             const localIdx = sourceOffset - offset;
             const charOffsets = part.charOffsets;
@@ -2332,7 +2334,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
                   ? charOffsets[strippedIdx + 1] - charOffsets[strippedIdx]
                   : part.width - charOffsets[strippedIdx];
             }
-            const left = this._data.parentAbsRect.absLeft + columnLeftMm + part.left + charLeftInPart;
+            // part.left는 첫 파트의 절대 start, 이후 파트는 이전 파트 끝에서의
+            // 갭이므로 파트 시작 절대 오프셋을 누적한다 (buildParagraphPrintPostData의
+            // partStartMm 규칙과 동일 — 누적 없이는 multi-part 라인에서 이후 파트
+            // 좌표가 오버랩 쪽으로 어긋난다).
+            const left = this._data.parentAbsRect.absLeft + columnLeftMm + partStartMm + charLeftInPart;
             const lineMaxFs = line.maxFontSize ?? baseFontSizeMm;
             const charFs = part.inlineStyles?.[localIdx]?.fontSize ?? baseFontSizeMm;
             const top = lineTopMm + this._getCharVerticalOffset(lineMaxFs, charFs);
@@ -2346,6 +2352,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
             };
           }
           offset += part.content.length;
+          partStartMm += part.width;
         }
         cumulativeTopMm += lineH;
       }
