@@ -1180,28 +1180,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const pAbsTop = this._data.parentAbsRect.absTop;
     const overlapEls = this._data.overlayEngines;
     for (const el of overlapEls) {
-      let mode: OverlapMode | ParagraphOverlapMode = "path";
-      let hasRgba = false;
-      let paddingKey = "";
-      if (el.contentType === "image") {
-        const img = el.contentElement as ImageEngineRef | null;
-        if (img) {
-          mode = img.overlapMode;
-          hasRgba = img.rgbaData !== null;
-          const pad = img.overlapPadding;
-          if (pad === undefined) {
-            paddingKey = "0";
-          } else if (typeof pad === "number") {
-            paddingKey = "n" + pad;
-          } else {
-            paddingKey = "o" + (pad.top ?? 0) + "," + (pad.right ?? 0) + "," + (pad.bottom ?? 0) + "," + (pad.left ?? 0);
-          }
-        }
-      }
-      const rect = el.absRect;
-      const relLeft = rect.absLeft - pAbsLeft;
-      const relTop = rect.absTop - pAbsTop;
-      parts.push("o:" + relLeft + "," + relTop + "," + rect.absWidth + "," + rect.absHeight + "," + mode + "," + (hasRgba ? 1 : 0) + "," + paddingKey);
+      parts.push(this._overlayHashKey(el, pAbsLeft, pAbsTop));
     }
 
     parts.push(
@@ -1970,6 +1949,58 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   }
 
   /**
+   * 오버랩 요소 하나의 해시 키(배치에 영향을 주는 모든 요소)를 생성한다.
+   *
+   * `_computeLayoutInputHash`와 `_computePrefixHash`가 동일 키를 사용해야
+   * prefix 캐시와 전체 캐시가 일관되게 무효화되므로 단일 소스로 추출했다.
+   *
+   * 이미지 오버랩 판정(`ImageEngine.computeOverlap`)은 박스 rect(`el.absRect`)가
+   * 아니라 **`displayRect`**(objectFit/none x/y/w/h 기반 실제 표시 영역)를
+   * 기준으로 수행한다. 따라서 `objectFit` 변경이나 `'none'` 모드의
+   * x/y/width/height 변경은 displayRect 변화 → 오버랩 회피 결과 변화로
+   * 이어지므로, 해시는 반드시 displayRect를 포함해야 stale 캐시 히트를
+   * 막을 수 있다 (박스 rect는 이때 불변이므로 감지 불가).
+   *
+   * @param el - 오버랩 박스 엔진
+   * @param pAbsLeft - 부모 박스 절대 left (mm)
+   * @param pAbsTop - 부모 박스 절대 top (mm)
+   * @returns 오버랩 요소 해시 키
+   */
+  private _overlayHashKey(el: BoxEngine, pAbsLeft: number, pAbsTop: number): string {
+    let mode: OverlapMode | ParagraphOverlapMode = "path";
+    let hasRgba = false;
+    let paddingKey = "";
+    let displayRectKey = "";
+    if (el.contentType === "image") {
+      const img = el.contentElement as ImageEngineRef | null;
+      if (img) {
+        mode = img.overlapMode;
+        hasRgba = img.rgbaData !== null;
+        const pad = img.overlapPadding;
+        if (pad === undefined) {
+          paddingKey = "0";
+        } else if (typeof pad === "number") {
+          paddingKey = "n" + pad;
+        } else {
+          paddingKey = "o" + (pad.top ?? 0) + "," + (pad.right ?? 0) + "," + (pad.bottom ?? 0) + "," + (pad.left ?? 0);
+        }
+        // 오버랩 판정의 실제 기준 영역. objectFit/'none' x/y/w/h 변경 감지용.
+        // ImageEngineRef.displayRect는 optional이지만 ImageEngine 구현은 항상
+        // 반환하므로, 미제공(레거시 stub) 시 빈 키로 폴백한다.
+        const dr = img.displayRect;
+        displayRectKey = dr
+          ? "d:" + (dr.absLeft - pAbsLeft) + "," + (dr.absTop - pAbsTop) + "," + dr.absWidth + "," + dr.absHeight
+          : "d:-";
+      }
+    }
+    const rect = el.absRect;
+    const relLeft = rect.absLeft - pAbsLeft;
+    const relTop = rect.absTop - pAbsTop;
+    return "o:" + relLeft + "," + relTop + "," + rect.absWidth + "," + rect.absHeight
+      + "," + mode + "," + (hasRgba ? 1 : 0) + "," + paddingKey + "," + displayRectKey;
+  }
+
+  /**
    * 레이아웃 입력 매개변수 해시를 계산한다.
    * 해시가 동일하면 레이아웃 결과가 동일하므로 `_layoutTextIntoColumns()`를 생략할 수 있다.
    *
@@ -2008,28 +2039,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 
     const overlapEls = this._data.overlayEngines;
     for (const el of overlapEls) {
-      let mode: OverlapMode | ParagraphOverlapMode = "path";
-      let hasRgba = false;
-      let paddingKey = "";
-      if (el.contentType === "image") {
-        const img = el.contentElement as ImageEngineRef | null;
-        if (img) {
-          mode = img.overlapMode;
-          hasRgba = img.rgbaData !== null;
-          const pad = img.overlapPadding;
-          if (pad === undefined) {
-            paddingKey = "0";
-          } else if (typeof pad === "number") {
-            paddingKey = "n" + pad;
-          } else {
-            paddingKey = "o" + (pad.top ?? 0) + "," + (pad.right ?? 0) + "," + (pad.bottom ?? 0) + "," + (pad.left ?? 0);
-          }
-        }
-      }
-      const rect = el.absRect;
-      const relLeft = rect.absLeft - pAbsLeft;
-      const relTop = rect.absTop - pAbsTop;
-      parts.push("o:" + relLeft + "," + relTop + "," + rect.absWidth + "," + rect.absHeight + "," + mode + "," + (hasRgba ? 1 : 0) + "," + paddingKey);
+      parts.push(this._overlayHashKey(el, pAbsLeft, pAbsTop));
     }
 
     parts.push(
