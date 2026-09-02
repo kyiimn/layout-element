@@ -345,8 +345,8 @@ element.editableLayout = false;
 1. 선택 가능한 box를 문서 전체에서 평탄화한 목록을 만든다.
 2. 동일 깊이의 형제 box는 `zIndex` 오름차순으로 정렬한다. `zIndex`가 같으면 DOM의 children 순서를 따른다.
 3. 중첩된 box는 부모보다 먼저 수집되지 않는다. 형제 목록을 전부 순회한 뒤 자식 box로 재귀 들어가므로, 결과적으로 **pre-order DFS** 순서가 된다.
-4. 표(`<x-layout-table>`) 내부의 box는 셀 배치(grid row → grid col) 순서대로 수집되며, 각 셀 안의 box는 셀 내부에서 다시 pre-order DFS로 수집된다.
-5. lock된 box나 조상이 lock된 box, 그리고 선택 필터(`selectableRoles`/`selectableBoxIds`/`selectableRootId`)를 통과하지 못하는 box는 목록에서 제외된다.
+4. 표(`<x-layout-table>`) 내부의 box는 셀 배치(grid row → grid col) 순서대로 수집되며, 각 셀 안의 box는 셀 내부에서 다시 pre-order DFS로 수집된다. **빈 셀**(자식 box가 없는 TD)은 TD 자체가 후보에 포함되어, 내용 있는 셀의 box와 동일하게 Tab 순환에서 이동·선택된다. 빈 셀로 이동하면 `selectLayout(td)`로 TD 자체가 선택된다 (셀 클릭과 동일한 선택 시맨틱).
+5. lock된 box나 조상이 lock된 box, 그리고 선택 필터(`selectableRoles`/`selectableBoxIds`/`selectableRootId`)를 통과하지 못하는 box는 목록에서 제외된다. 빈 셀 TD도 동일한 lock/필터 검사를 통과해야 후보가 된다.
 
 **선택 방식**:
 
