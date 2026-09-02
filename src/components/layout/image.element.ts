@@ -2,7 +2,7 @@ import { InheritStyle, ImageData, ImageObjectFit, OverlapMode } from "@/types";
 import { LayoutBoxElement } from "./box.element";
 import { genUUID, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay } from "@/utils";
 import { DEFAULT_IMAGE_DPI } from "@/constants";
-import { ImageEngine, computeObjectFit as computeObjectFitEngine } from "@/engine";
+import { ImageEngine } from "@/engine";
 
 /**
  * URL 로더 함수 타입.
@@ -396,9 +396,9 @@ export class LayoutImageElement extends HTMLElement {
   /**
    * 캔버스에 이미지를 그린다.
    *
-   * 원본 이미지 전체를 `width`×`height`(mm) 크기로 리사이즈하여 박스 내
-   * `(x, y)` 위치에 배치한다. 캔버스 크기 = 박스 크기이므로 박스 밖 영역은
-   * 자동으로 clip되어 크롭 효과를 낸다.
+   * 엔진의 `displayRect`(objectFit/originalWidth/originalHeight/contentAbsRect 기반)
+   * 를 단일 소스로 사용하여 표시 위치와 크기를 결정한다. DOM이 독자적으로
+   * x/y/width/height를 계산하지 않는다.
    *
    * 깜빡임 방지: 새 캔버스 크기가 기존과 같으면 `clearRect` + `drawImage`로
    * 교체하고, 다르면 `width`/`height`를 설정한 뒤 즉시 `drawImage`로 채운다.
@@ -420,10 +420,35 @@ export class LayoutImageElement extends HTMLElement {
       ctx.clearRect(0, 0, canvasW, canvasH);
     }
 
-    const dx = Math.round((this._x ?? 0) * ppm);
-    const dy = Math.round((this._y ?? 0) * ppm);
-    const dw = Math.round((this._width ?? this.absWidth) * ppm);
-    const dh = Math.round((this._height ?? this.absHeight) * ppm);
+    // 엔진-우선: displayRect가 objectFit 계산 결과의 단일 소스.
+    // contentAbsRect가 없는 초기 라이프사이클에서는 effectiveX/Y/Width/Height(데이터 주입값) 폴백.
+    const engine = this._engine;
+    let dx: number;
+    let dy: number;
+    let dw: number;
+    let dh: number;
+
+    if (engine) {
+      const displayRect = engine.displayRect;
+      const content = engine.contentAbsRect;
+      if (content) {
+        // displayRect는 절대 좌표이므로 contentAbsRect 기준 상대 오프셋으로 변환
+        dx = Math.round((displayRect.absLeft - content.absLeft) * ppm);
+        dy = Math.round((displayRect.absTop - content.absTop) * ppm);
+      } else {
+        // contentAbsRect가 없으면 effectiveX/Y(데이터 주입값)를 상대 오프셋으로 사용
+        dx = Math.round(engine.effectiveX * ppm);
+        dy = Math.round(engine.effectiveY * ppm);
+      }
+      dw = Math.round(displayRect.absWidth * ppm);
+      dh = Math.round(displayRect.absHeight * ppm);
+    } else {
+      // 엔진이 없는 극초기 폴백 (connectedCallback 이전)
+      dx = 0;
+      dy = 0;
+      dw = Math.round(this.absWidth * ppm);
+      dh = Math.round(this.absHeight * ppm);
+    }
 
     try {
       ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, dx, dy, dw, dh);
@@ -476,93 +501,7 @@ export class LayoutImageElement extends HTMLElement {
     return result;
   }
 
-  /**
-   * 현재 `objectFit`/`originalWidth`/`originalHeight`와 박스 크기로
-   * `x`/`y`/`width`/`height`를 자동 계산하여 저장한다.
-   *
-   * `originalWidth`/`originalHeight` 또는 `absWidth`/`absHeight`가 0이면
-   * 계산을 건너뛴다(초기 라이프사이클 또는 메타데이터 미설정).
-   *
-   * @returns {void}
-   */
-  private _applyObjectFit(): void {
-    if (this._objectFit === 'none') {
-      this._x = 0;
-      this._y = 0;
-      this._width = this.absWidth;
-      this._height = this.absHeight;
-    } else {
-      const engine = this._engine;
-      if (engine && engine.contentAbsRect) {
-        const displayRect = engine.displayRect;
-        const content = engine.contentAbsRect;
-        this._x = displayRect.absLeft - content.absLeft;
-        this._y = displayRect.absTop - content.absTop;
-        this._width = displayRect.absWidth;
-        this._height = displayRect.absHeight;
-      } else {
-        const origW = this._originalWidth ?? 0;
-        const origH = this._originalHeight ?? 0;
-        const boxW = this.absWidth;
-        const boxH = this.absHeight;
-        if (origW <= 0 || origH <= 0 || boxW <= 0 || boxH <= 0) {
-          return;
-        }
 
-        const rect = computeObjectFitEngine({
-          fit: this._objectFit,
-          originalWidth: origW,
-          originalHeight: origH,
-          boxWidth: boxW,
-          boxHeight: boxH,
-        });
-
-        this._x = rect.x;
-        this._y = rect.y;
-        this._width = rect.width;
-        this._height = rect.height;
-      }
-    }
-    this._syncObjectFitToEngine();
-  }
-
-  /**
-   * `_applyObjectFit()`이 재계산한 표시 오프셋(`_x`/`_y`/`_width`/`_height`)을
-   * ImageEngine data에 역방향으로 동기화한다.
-   *
-   * `originalWidth`/`originalHeight`/`objectFit`/`inheritStyle` 세터는
-   * `_updateEngine()`을 `_applyObjectFit()`보다 먼저 실행하므로, 엔진 `_data`에는
-   * 재계산되기 이전의 stale x/y/width/height가 남는다. 이 값은 `extractData`로
-   * 유출되어 저장/undo-redo/리로드 시 이미지가 이전 위치로 렌더링되는
-   * 렌더링 미스의 원인이 된다.
-   *
-   * 엔진 개별 세터는 값이 동일하면 쓰기를 생략하므로 중복 호출이 무해하며,
-   * `engine.layout()`으로 dirty/displayRect dirty를 커밋 해제한다.
-   *
-   * @returns 동기화 결과. 엔진이 없거나 유효한 표시 크기가 없으면 false
-   * @throws 없음
-   * @example
-   * ```ts
-   * // image.element.ts 내부 전용. object-fit 재계산 후 엔진 정합성 유지에 사용.
-   * image.objectFit = 'contain';
-   * // → _applyObjectFit()가 _x/_y/_width/_height를 재계산하고,
-   * //   _syncObjectFitToEngine()이 engine.data.x/y/width/height를 동일 값으로 갱신
-   * ```
-   */
-  private _syncObjectFitToEngine(): boolean {
-    const engine = this._engine;
-    if (!engine || !this._inheritStyle) return false;
-    if (this._x === undefined || this._y === undefined
-      || this._width === undefined || this._height === undefined) return false;
-    if (this._width <= 0 || this._height <= 0) return false;
-
-    engine.x = this._x;
-    engine.y = this._y;
-    engine.width = this._width;
-    engine.height = this._height;
-    engine.layout();
-    return true;
-  }
 
   set data(data: ImageData) {
     if (!data.id) data = { ...data, id: genUUID() };
@@ -584,13 +523,7 @@ export class LayoutImageElement extends HTMLElement {
 
     if (urlChanged) {
       this._clearImageCache();
-      // URL이 실제로 바뀌었으므로 이전 이미지의 픽셀은 오버랩 판정에서
-      // 무효다. 새 rgbaData는 로드 성공 후 _feedRgbaToEngine이 재주입한다.
       if (this._engine) this._engine.rgbaData = null;
-    }
-
-    if (data.x === undefined && data.y === undefined && data.width === undefined && data.height === undefined) {
-      this._applyObjectFit();
     }
 
     this._updateEngine();
@@ -601,6 +534,11 @@ export class LayoutImageElement extends HTMLElement {
 
   /**
    * ImageEngine 인스턴스를 생성/갱신한다.
+   *
+   * 엔진-우선 원칙: x/y/width/height/objectFit/originalWidth/originalHeight를
+   * 엔진에 전달하면 엔진의 `displayRect` getter가 모드별로 계산한다.
+   * - `'cover'`/`'contain'`/`'fill'`: 입력 x/y/width/height를 무시하고 자동 계산.
+   * - `'none'`: 입력 x/y/width/height를 그대로 사용.
    */
   private _updateEngine(): void {
     const parentBox = this.parentElement;
@@ -645,6 +583,12 @@ export class LayoutImageElement extends HTMLElement {
     }
   }
 
+  /**
+   * 이미지 표시 시작 X 위치 (mm).
+   *
+   * `objectFit`이 `'none'`일 때만 렌더링에 반영된다. 그 외 모드
+   * (`cover`/`contain`/`fill`)에서는 엔진의 `displayRect`가 자동 계산한 값만 사용된다.
+   */
   set x(value: number | undefined) {
     if (this._x === value) return;
     this._x = value;
@@ -653,6 +597,12 @@ export class LayoutImageElement extends HTMLElement {
     this.parentElement?.requestRerenderAffectedParagraphs();
   }
 
+  /**
+   * 이미지 표시 시작 Y 위치 (mm).
+   *
+   * `objectFit`이 `'none'`일 때만 렌더링에 반영된다. 그 외 모드
+   * (`cover`/`contain`/`fill`)에서는 엔진의 `displayRect`가 자동 계산한 값만 사용된다.
+   */
   set y(value: number | undefined) {
     if (this._y === value) return;
     this._y = value;
@@ -661,6 +611,12 @@ export class LayoutImageElement extends HTMLElement {
     this.parentElement?.requestRerenderAffectedParagraphs();
   }
 
+  /**
+   * 이미지 표시 너비 (mm).
+   *
+   * `objectFit`이 `'none'`일 때만 렌더링에 반영된다. 그 외 모드
+   * (`cover`/`contain`/`fill`)에서는 엔진의 `displayRect`가 자동 계산한 값만 사용된다.
+   */
   set width(value: number | undefined) {
     if (this._width === value) return;
     this._width = value;
@@ -669,6 +625,12 @@ export class LayoutImageElement extends HTMLElement {
     this.parentElement?.requestRerenderAffectedParagraphs();
   }
 
+  /**
+   * 이미지 표시 높이 (mm).
+   *
+   * `objectFit`이 `'none'`일 때만 렌더링에 반영된다. 그 외 모드
+   * (`cover`/`contain`/`fill`)에서는 엔진의 `displayRect`가 자동 계산한 값만 사용된다.
+   */
   set height(value: number | undefined) {
     if (this._height === value) return;
     this._height = value;
@@ -740,7 +702,6 @@ export class LayoutImageElement extends HTMLElement {
   set originalWidth(value: number | undefined) {
     this._originalWidth = value;
     this._updateEngine();
-    this._applyObjectFit();
     this.render();
     this.parentElement?.requestRerenderAffectedParagraphs();
   }
@@ -752,7 +713,6 @@ export class LayoutImageElement extends HTMLElement {
   set originalHeight(value: number | undefined) {
     this._originalHeight = value;
     this._updateEngine();
-    this._applyObjectFit();
     this.render();
     this.parentElement?.requestRerenderAffectedParagraphs();
   }
@@ -765,7 +725,6 @@ export class LayoutImageElement extends HTMLElement {
     if (this._objectFit === value) return;
     this._objectFit = value;
     this._updateEngine();
-    this._applyObjectFit();
     this.render();
     this.parentElement?.requestRerenderAffectedParagraphs();
   }
@@ -821,15 +780,33 @@ export class LayoutImageElement extends HTMLElement {
   }
 
   _rawData(): ImageData {
+    // 엔진-우선: x/y/width/height는 엔진 displayRect(모드별 단일 소스)에서 산출.
+    // - cover/contain/fill: 자동 계산값, - none: 입력값(엔진이 그대로 반환).
+    // 엔진/콘텐츠 rect 미설정 초기 라이프사이클에서만 DOM 저장값을 폴백으로 사용.
+    const engine = this._engine;
+    let x: number | undefined = this._x;
+    let y: number | undefined = this._y;
+    let width: number | undefined = this._width;
+    let height: number | undefined = this._height;
+
+    if (engine && engine.contentAbsRect) {
+      const displayRect = engine.displayRect;
+      const content = engine.contentAbsRect;
+      x = displayRect.absLeft - content.absLeft;
+      y = displayRect.absTop - content.absTop;
+      width = displayRect.absWidth;
+      height = displayRect.absHeight;
+    }
+
     return {
       id: this.id,
       zIndex: this._zIndex,
       overlapPadding: this._overlapPadding,
       overlapMode: this._overlapMode,
-      x: this._x,
-      y: this._y,
-      width: this._width,
-      height: this._height,
+      x,
+      y,
+      width,
+      height,
       dpi: this._dpi,
       url: this._url || '',
       originalWidth: this._originalWidth,
@@ -839,10 +816,30 @@ export class LayoutImageElement extends HTMLElement {
     };
   }
 
-  get x() { return this._x; }
-  get y() { return this._y; }
-  get width() { return this._width; }
-  get height() { return this._height; }
+  get x() {
+    const engine = this._engine;
+    if (engine && engine.contentAbsRect) {
+      return engine.displayRect.absLeft - engine.contentAbsRect.absLeft;
+    }
+    return this._x;
+  }
+  get y() {
+    const engine = this._engine;
+    if (engine && engine.contentAbsRect) {
+      return engine.displayRect.absTop - engine.contentAbsRect.absTop;
+    }
+    return this._y;
+  }
+  get width() {
+    const engine = this._engine;
+    if (engine) return engine.displayRect.absWidth;
+    return this._width;
+  }
+  get height() {
+    const engine = this._engine;
+    if (engine) return engine.displayRect.absHeight;
+    return this._height;
+  }
   get dpi() { return this._dpi; }
   get url() { return this._url; }
   get zIndex() { return this._zIndex; }
@@ -862,7 +859,6 @@ export class LayoutImageElement extends HTMLElement {
     this._inheritStyle = style;
     this.layout();
     this._updateEngine();
-    this._applyObjectFit();
     this.render();
   }
 

@@ -125,9 +125,24 @@ export class ImageEngine {
 
   /**
    * 이미지 실제 표시 영역 (절대 좌표, mm).
-   * contentAbsRect + objectFit + originalWidth/Height로 계산.
+   *
+   * objectFit 모드에 따라 단일 소스로 계산한다:
+   * - `'cover'`/`'contain'`/`'fill'`: 입력 x/y/width/height를 **무시**하고
+   *   `computeObjectFit()` 결과만 사용한다. `contentAbsRect`가 없으면
+   *   계산 불가(빈 rect), 원본 크기 미설정이면 박스 영역으로 폴백.
+   * - `'none'`: 입력 x/y/width/height를 그대로 사용한다. 생략된 필드는
+   *   x/y → 0, width/height → originalWidth/originalHeight(1:1) 폴백.
+   *   `contentAbsRect`가 없으면 입력값을 절대 좌표로 해석한다.
+   *
    * 메모이제이션: contentAbsRect/data 변경 시 dirty 플래그로 무효화.
+   *
    * @returns 표시 영역 AbsRect
+   *
+   * @example
+   * ```ts
+   * // cover: 원본 100×50mm → 박스 80×80mm → { absLeft: box.x-60, absTop: box.y, 160, 80 }
+   * // none + { x: 10, y: 5, width: 50, height: 25 } → 박스 내 (10, 5)에 50×25mm 배치
+   * ```
    */
   get displayRect(): AbsRect {
     if (this._displayRectCache !== null && !this._displayRectDirty) {
@@ -135,21 +150,40 @@ export class ImageEngine {
     }
 
     const content = this._contentAbsRect;
+    const objectFit = this.effectiveObjectFit;
     let result: AbsRect;
 
-    if (!content) {
-      result = {
-        absLeft: this.effectiveX,
-        absTop: this.effectiveY,
-        absWidth: this.effectiveWidth,
-        absHeight: this.effectiveHeight,
-      };
+    if (objectFit === 'none') {
+      // none: 입력 x/y/width/height를 그대로 사용.
+      // width/height 생략 시 originalWidth/originalHeight(1:1) 폴백.
+      const w = this._data.width ?? this.effectiveOriginalWidth ?? 0;
+      const h = this._data.height ?? this.effectiveOriginalHeight ?? 0;
+      const relX = this.effectiveX;
+      const relY = this.effectiveY;
+
+      result = content
+        ? {
+            absLeft: content.absLeft + relX,
+            absTop: content.absTop + relY,
+            absWidth: w,
+            absHeight: h,
+          }
+        : {
+            absLeft: relX,
+            absTop: relY,
+            absWidth: w,
+            absHeight: h,
+          };
+    } else if (!content) {
+      // cover/contain/fill이지만 contentAbsRect 미설정(초기 라이프사이클):
+      // 계산 불가 — 빈 rect.
+      result = { absLeft: 0, absTop: 0, absWidth: 0, absHeight: 0 };
     } else {
-      const objectFit = this.effectiveObjectFit;
       const origW = this.effectiveOriginalWidth;
       const origH = this.effectiveOriginalHeight;
 
-      if (objectFit === 'none' || origW <= 0 || origH <= 0) {
+      if (origW <= 0 || origH <= 0) {
+        // 원본 크기 미설정 — 박스 영역으로 폴백(기존 동작 유지).
         result = content;
       } else {
         const fit = computeObjectFit({
@@ -340,14 +374,22 @@ export class ImageEngine {
   get extractData(): ImageData {
     if (this._dirty) throw createDirtyError('ImageEngine');
     const d = this._data;
+
+    // 엔진-우선: x/y/width/height는 displayRect(모드별 단일 소스)에서 산출.
+    // contentAbsRect가 있으면 박스 기준 상대 좌표로 변환.
+    const display = this.displayRect;
+    const content = this._contentAbsRect;
+    const x = content ? display.absLeft - content.absLeft : display.absLeft;
+    const y = content ? display.absTop - content.absTop : display.absTop;
+
     return {
       type: 'image',
       id: this._id,
       url: d.url,
-      x: this.effectiveX,
-      y: this.effectiveY,
-      width: this.effectiveWidth,
-      height: this.effectiveHeight,
+      x,
+      y,
+      width: display.absWidth,
+      height: display.absHeight,
       dpi: this.dpi,
       overlapPadding: d.overlapPadding,
       overlapMode: this.effectiveOverlapMode,
