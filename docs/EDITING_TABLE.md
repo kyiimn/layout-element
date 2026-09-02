@@ -417,12 +417,12 @@ colspan/rowspan이 있는 행/열도 리사이즈 가능하다. 이전에는 col
 
 | 키    | 조건                           | 동작                     |
 | ----- | ------------------------------ | ------------------------ |
-| F5    | table 내부 또는 TD 내부 box 선택 | 셀 블록 모드 진입/토글  |
-| F7    | table 내부 또는 TD 내부 box 선택 | 현재 열 전체 선택        |
-| F8    | table 내부 또는 TD 내부 box 선택 | 현재 행 전체 선택        |
+| F5    | table 내부 또는 TD 내부 box/빈 셀(TD 자체) 선택 | 셀 블록 모드 진입/토글  |
+| F7    | table 내부 또는 TD 내부 box/빈 셀(TD 자체) 선택 | 현재 열 전체 선택        |
+| F8    | table 내부 또는 TD 내부 box/빈 셀(TD 자체) 선택 | 현재 행 전체 선택        |
 | ESC   | 셀 블록 활성                   | 셀 블록 종료 + paragraph 포커스 |
 
-F5/F7/F8은 `_getCurrentCellCoord()`로 현재 셀을 결정한 후 처리한다. 셀 블록이 없어도 TD 내부 box가 선택되어 있으면 현재 셀을 찾을 수 있다.
+F5/F7/F8은 `_getCurrentCellCoord()`로 현재 셀을 결정한 후 처리한다. 셀 블록이 없어도 TD 내부 box가 선택되어 있으면 현재 셀을 찾을 수 있다. **빈 셀**은 `items[0]` box가 없어 TD 자체가 `selectedLayouts`에 들어가므로(`LayoutSelectionController._onMouseDown`이 `selectLayout(td)` 호출), `table.element.ts _onTableKeyDown`의 게이트(`hasSelectedLayoutInTd`)는 TD 자체 선택도 소유 표 판정에 포함한다. `_getCurrentCellCoord()`의 3단계 검색(`closest('x-layout-td')`는 TD 자신도 매칭)이 TD 선택에서 셀 좌표를 해석하므로, 빈 셀에서도 F5/F7/F8이 동작한다.
 
 ### 6.1a 텍스트 편집 모드에서 동작 (셀 블록 비활성)
 
@@ -817,7 +817,7 @@ window capture (document.element.ts _onWindowKeyDown)
   → Alt+arrow: hasSelectedBoxInTd → preventDefault (모든 table 순회)
   ↓
 document capture (table.element.ts _onTableKeyDown)
-  → inTable || hasSelectedBoxInTd → handleKeyDown → stopPropagation if handled
+  → inTable || hasSelectedLayoutInTd → handleKeyDown → stopPropagation if handled
   ↓
 target element (기본 동작 또는 무시)
 ```
@@ -828,7 +828,7 @@ target element (기본 동작 또는 무시)
 - table 외부에서는 브라우저 기본 동작이 차단되지 않는다
 
 **document keydown 핸들러** (`table.element.ts _onTableKeyDown`):
-- `inTable` (이벤트 target이 table 내부) 또는 `hasSelectedBoxInTd` (TD 내부 box 선택)인 경우만 `handleKeyDown` 호출
+- `inTable` (이벤트 target이 table 내부) 또는 `hasSelectedLayoutInTd` (TD 내부 box **또는 빈 셀의 TD 자체** 선택)인 경우만 `handleKeyDown` 호출. 빈 셀은 TD 자체가 선택 대상이므로 `LayoutBoxElement`뿐 아니라 `LayoutTableCellElement`도 게이트 검사에 포함한다 — box-only 검사는 빈 셀에서 F5/F7/F8을 차단한다.
 - `handleKeyDown`이 true를 반환하면 `stopPropagation()`으로 전파 중단
 
 ### 11.2 mousedown 이벤트 흐름
