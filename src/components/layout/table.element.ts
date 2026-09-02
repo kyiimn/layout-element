@@ -20,6 +20,7 @@ import { TableStructureEditor } from "@/edit/table-structure-editor";
 import { LayoutDocumentElement } from "./document.element";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutTableRowElement } from "./tr.element";
+import { LayoutTableCellElement } from "./td.element";
 import { TableCellEngine } from "@/engine";
 
 interface TableResizeState {
@@ -925,14 +926,16 @@ export class LayoutTableElement extends HTMLElement {
     const inTable = (target instanceof Element && target.closest?.('x-layout-table') === this)
       || target === this;
     const em = this.editManager;
-    const hasSelectedBoxInTd = em?.selectedLayouts.some(box => {
-      if (!(box instanceof LayoutBoxElement)) return false;
-      const td = box.closest('x-layout-td');
+    // 빈 셀은 items[0] box가 없어 LayoutSelectionController가 TD 자체를
+    // selectedLayouts에 넣는다. box-only 검사는 빈 셀에서 F5/F7/F8을 차단한다.
+    const hasSelectedLayoutInTd = em?.selectedLayouts.some(layout => {
+      if (!(layout instanceof LayoutBoxElement) && !(layout instanceof LayoutTableCellElement)) return false;
+      const td = layout.closest('x-layout-td');
       if (!td) return false;
       const owningTable = td.closest('x-layout-table');
       return owningTable === this;
     });
-    if (!inTable && !hasSelectedBoxInTd) return;
+    if (!inTable && !hasSelectedLayoutInTd) return;
     if (this._keyboardController) {
       const handled = this._keyboardController.handleKeyDown(event);
       if (handled) {
