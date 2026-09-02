@@ -130,9 +130,11 @@ diff /tmp/opencode/snapshot-before.json /tmp/opencode/snapshot-after.json
 
 **검증 방식**: DOM 가시 텍스트(라인별) === 엔진 가시 텍스트(strip 규칙 반영). **주의 — 오탐 교훈**: 엔진 `part.content`는 `string[]`(글자 배열)이므로 `join('')` 필요, 첫/마지막 파트의 leading/trailing space strip 규칙을 renderText와 동일하게 적용해야 한다.
 
+**dev server 방어 (포트 오인 사고 교훈)**: 포트만으로 서버를 판별하면 **다른 앱의 Vite 서버**(예: `apps/layout-ui`, 5173)를 layout-element 서버로 오인한다 — SPA fallback이 존재하지 않는 경로에도 앱 index를 200으로 반환하므로 `res.ok`로는 판별 불가 (실제 사고: BENCH_READY 타임아웃 30초, `x-layout-document` null TypeError). probe는 **HTML title까지 검증**(`Layout Element Benchmark`)하고, 어느 포트에도 정상 서버가 없으면 **자체 스폰**(포트 5198) 후 종료 시 정리한다.
+
 **실행**:
 ```bash
-npx tsx scripts/verify-dom-diff.mjs   # ALL PASS / exit 1
+npx tsx scripts/verify-dom-diff.mjs   # ALL PASS / exit 1 (서버 없으면 자동 기동)
 ```
 
 ### `verify-visual-render.mjs` — 실제 화면 렌더 검증 (브라우저)
@@ -149,9 +151,11 @@ npx tsx scripts/verify-dom-diff.mjs   # ALL PASS / exit 1
 
 **판별 원칙**: 스팬 존재가 아니라 **비어있지 않은 화면 사각형**이 기준 — 사용자가 "본다"는 것의 프로그래밍적 정의.
 
+**dev server 방어 (포트 오인 사고 교훈)**: `verify-dom-diff.mjs`와 동일한 2중 방어 — probe가 HTML title(`Layout Element Demo`)까지 검증해 타 앱 Vite 서버의 SPA fallback 200을 걸러내고, 정상 서버가 없으면 **자체 스폰**(포트 5197) 후 종료 시 정리한다. 실제 사고: layout-ui 서버(5173)를 잡아 A-D 시나리오가 "0개 요소"로 공허하게 통과하고 E 시나리오에서 `editManager` null으로 폭발 — 요소가 없으면 **통과가 아님**에 주의.
+
 **실행**:
 ```bash
-npx tsx scripts/verify-visual-render.mjs   # ALL PASS
+npx tsx scripts/verify-visual-render.mjs   # ALL PASS (서버 없으면 자동 기동)
 ```
 
 ### `verify-ime.mjs` — 한글 IME 조합 정합성 (브라우저)

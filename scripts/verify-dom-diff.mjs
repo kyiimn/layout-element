@@ -11,21 +11,77 @@
  * ```
  */
 import { chromium } from '@playwright/test';
+import { spawn } from 'node:child_process';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const BASE = await (async () => {
-  for (const port of [5175, 5173]) {
-    try {
-      const res = await fetch(`http://localhost:${port}/examples/bench.html`, { method: 'HEAD' });
-      if (res.ok) return `http://localhost:${port}`;
-    } catch { /* probe next */ }
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkgRoot = resolve(__dirname, '..');
+
+const BASE_PORT = 5198;
+
+// 라이브 서버 후보 (layout-element dev server 우선).
+// 주의 — 포트만으로는 다른 앱의 Vite 서버(apps/layout-ui, SPA fallback으로
+// 존재하지 않는 경로에도 200을 반환)와 구별되지 않으므로, probe는 반드시
+// 콘텐츠(title)까지 검증해야 한다.
+const BASE_URL_CANDIDATES = [
+  'http://localhost:5175',
+  'http://localhost:5173',
+];
+
+/**
+ * 후보 URL이 layout-element의 bench 페이지를 실제로 서빙하는지 검증한다.
+ *
+ * SPA fallback을 쓰는 타 앱 Vite 서버는 존재하지 않는 경로에도 앱 index를
+ * 200으로 반환하므로, `res.ok`만으로는 판별할 수 없다. HTML을 읽어
+ * bench.html의 title("Layout Element Benchmark")이 있는지 확인한다.
+ *
+ * @param {string} url - 후보 base URL
+ * @returns {Promise<boolean>} bench 페이지 서빙 여부
+ */
+async function probe(url) {
+  try {
+    const res = await fetch(`${url}/examples/bench.html`);
+    if (!res.ok) return false;
+    const html = await res.text();
+    return html.includes('<title>Layout Element Benchmark</title>');
+  } catch { return false; }
+}
+
+/** 스폰한 vite 서버가 응답할 때까지 폴링한다. 최대 30초. */
+async function waitForServer(url) {
+  for (let i = 0; i < 60; i++) {
+    if (await probe(url)) return true;
+    await new Promise(r => setTimeout(r, 500));
   }
-  throw new Error('dev server not found (5175/5173)');
-})();
+  return false;
+}
+
+let baseUrl = null;
+let server = null;
+for (const cand of BASE_URL_CANDIDATES) {
+  if (await probe(cand)) { baseUrl = cand; break; }
+}
+if (!baseUrl) {
+  // 자체 스폰 fallback — 어느 포트에도 layout-element 서버가 없으면 직접 기동한다.
+  server = spawn('npx', ['vite', 'dev', '--port', String(BASE_PORT), '--strictPort'], {
+    cwd: pkgRoot,
+    stdio: 'pipe',
+    shell: true,
+  });
+  const spawnedUrl = `http://localhost:${BASE_PORT}`;
+  if (await waitForServer(spawnedUrl)) {
+    baseUrl = spawnedUrl;
+  } else {
+    server.kill();
+    throw new Error(`vite dev server not ready on ${spawnedUrl}`);
+  }
+}
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
 page.on('pageerror', err => console.error('[pageerror]', err.message));
-await page.goto(`${BASE}/examples/bench.html`, { waitUntil: 'networkidle' });
+await page.goto(`${baseUrl}/examples/bench.html`, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => document.title === 'BENCH_READY', { timeout: 30_000 });
 
 const failures = [];
@@ -222,5 +278,7 @@ check('D. trailing \\n: extractData round-trip 보존', r.trailingNewline.roundT
 check('커서 rect 조회 전 경로 유효', r.cursorRects.every(c => c.found), JSON.stringify(r.cursorRects.filter(c => !c.found)));
 
 await browser.close();
+// 자체 스폰한 서버만 종료한다 (외부 라이브 서버는 건드리지 않음).
+if (server) server.kill();
 console.log(failures.length === 0 ? '\nALL PASS' : `\n${failures.length} FAILURES`);
 process.exit(failures.length === 0 ? 0 : 1);
