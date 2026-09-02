@@ -42,9 +42,14 @@ export function checkOverlapMm(a: AbsRect, b: AbsRect): boolean {
 /**
  * 라인 사각형과 오버랩 요소 사이의 겹침을 mm 단위로 계산한다.
  *
- * 기존 `getOverlapSizeMm()`의 순수 함수 버전.
- * `LayoutBoxElement` 대신 `OverlapInput`을 받으며,
- * 이미지 픽셀 검사는 `ImageEngineRef.rgbaData`를 통해 수행한다.
+ * 모든 오버랩 판정(이미지 `ImageEngine.computeOverlap`, 문단
+ * `ParagraphEngine._detectOverlapWithCache`)이 수렴하는 **단일 관문**이다.
+ *
+ * `overlapMode === 'none'`이면 오버랩 회피를 하지 않는다 — 라인이 요소와
+ * 기하학적으로 겹쳐도 텍스트가 요소 아래에 그대로 쓰여진다. 이 조기 반환은
+ * `BoxEngine.overlayElements`의 목록 제외와 독립적인 세이프티 넷이다:
+ * 개별 setter 경로에서 목록 캐시가 stale해 `'none'` 요소가
+ * `overlayEngines`에 남아 있어도 이 관문에서 NONE을 반환해 시맨틱이 유지된다.
  *
  * @param lineRectMm - 라인 사각형 (mm)
  * @param overlay - 오버랩 요소 입력 (절대 좌표 + 모드 + 이미지 참조)
@@ -58,8 +63,20 @@ export function checkOverlapMm(a: AbsRect, b: AbsRect): boolean {
  *   image: null,
  * });
  * // result.direction === 'PART'
+ *
+ * // 'none'이면 기하학적 교차와 무관하게 회피 없음
+ * computeOverlapSizeMm(lineRect, {
+ *   absRect: { absLeft: 50, absTop: 20, absWidth: 40, absHeight: 30 },
+ *   overlapMode: 'none',
+ *   contentType: 'image',
+ *   image: null,
+ * }).direction; // 'NONE'
  */
 export function computeOverlapSizeMm(lineRectMm: MmRect, overlay: OverlapInput): OverlapResult {
+  if (overlay.overlapMode === 'none') {
+    return { direction: 'NONE', parts: [] };
+  }
+
   const r1 = lineRectMm;
   const r2: MmRect = {
     left: overlay.absRect.absLeft,
