@@ -3006,14 +3006,15 @@ export class EditManager {
       return true;
     } else {
       // 레이아웃 편집 모드: 선택 가능한 box 평탄화 (위와 동일한 캐스트 사유).
-      const candidates: LayoutBoxElement[] = [];
+      // 빈 셀(TD 자체)도 후보에 포함된다 — _flattenTableBoxes가 TD를 넣는다.
+      const candidates: LayoutElement[] = [];
       this._flattenBoxes(this._docEl as unknown as LayoutElement, candidates);
       if (candidates.length === 0) return false;
 
       const current = this._selectedLayouts.length > 0
         ? this._selectedLayouts[this._selectedLayouts.length - 1]
         : null;
-      const currentIdx = current ? candidates.indexOf(current as LayoutBoxElement) : -1;
+      const currentIdx = current ? candidates.indexOf(current) : -1;
 
       const nextIdx = shiftKey
         ? (currentIdx <= 0 ? candidates.length - 1 : currentIdx - 1)
@@ -3040,7 +3041,7 @@ export class EditManager {
   }
 
   /**
-   * 컨테이너 하위의 모든 선택 가능한 box를 평탄화하여 수집한다.
+   * 컨테이너 하위의 모든 선택 가능한 box와 빈 셀 TD를 평탄화하여 수집한다.
    *
    * Pre-order DFS로 순회하며, 각 컨테이너의 자식을 `_sortSiblings`로 zIndex 정렬한다.
    * - `LayoutBoxElement`이고 `isBoxSelectable` 통과 시 result에 추가.
@@ -3053,7 +3054,7 @@ export class EditManager {
    * @param container - 순회할 컨테이너 (document 또는 box)
    * @param result - 수집 결과를 누적할 배열
    */
-  private _flattenBoxes(container: LayoutElement, result: LayoutBoxElement[]): void {
+  private _flattenBoxes(container: LayoutElement, result: LayoutElement[]): void {
     const sorted = this._sortSiblings(container.items);
     for (const child of sorted) {
       if (child instanceof LayoutBoxElement) {
@@ -3097,18 +3098,25 @@ export class EditManager {
   }
 
   /**
-   * 표 내부의 모든 선택 가능한 box를 평탄화하여 수집한다.
+   * 표 내부의 모든 선택 가능한 box와 빈 셀 TD를 평탄화하여 수집한다.
    *
    * `table.gridResolution`의 placements를 (gridRow, gridCol) 오름차순으로 정렬한 뒤,
    * 각 placement에 해당하는 TD를 찾아 첫 번째 box를 후보로 검사한다.
    * - box가 존재하고 `isBoxSelectable` 통과 시 result에 추가.
+   * - box가 없는 빈 셀이면 TD 자체를 result에 추가한다. 빈 셀은 TD 자체가
+   *   선택 대상이므로(클릭 시 `selectLayout(td)`), Tab 순환에서도 동일하게
+   *   TD를 후보로 포함해야 빈 셀로 이동할 수 있다.
    * - `_flattenBoxes(box, result)` 호출로 box 하위의 모든 box를 수집한다.
    *   (중첩 box 및 중첩 table은 `_flattenBoxes`가 내부적으로 처리한다.)
+   *
+   * @example
+   * // 2×2 표에서 (0,0)에만 box가 있는 경우 수집 순서:
+   * // [(0,0)의 box, (0,1)의 TD, (1,0)의 TD, (1,1)의 TD]
    *
    * @param table - 순회할 표 요소
    * @param result - 수집 결과를 누적할 배열
    */
-  private _flattenTableBoxes(table: LayoutTableElement, result: LayoutBoxElement[]): void {
+  private _flattenTableBoxes(table: LayoutTableElement, result: LayoutElement[]): void {
     const grid = table.gridResolution;
     if (!grid || grid.placements.length === 0) return;
 
@@ -3120,7 +3128,10 @@ export class EditManager {
       const td = this._findTdAt(table, placement.gridRow, placement.gridCol);
       if (!td) continue;
       const box = td.items[0];
-      if (!box) continue;
+      if (!box) {
+        if (this.isBoxSelectable(td)) result.push(td);
+        continue;
+      }
 
       if (this.isBoxSelectable(box)) {
         result.push(box);
