@@ -328,7 +328,7 @@ box 내의 image 요소가 있으면 `_applyImageToElement`로 이미지 데이�
 
 #### 주입 공통 동작
 
-이미지 주입은 `_applyImageToElement(imageEl, image, box)` 헬퍼를 사용한다. 이 헬퍼는 `imageEl.data`를 `{ ...data, dpi, url, originalWidth, originalHeight, objectFit: 'cover' }`로 갱신한다 — 단순히 `url` setter만 호출하는 것이 아니라 원본 이미지 픽셀 크기(`originalWidth`/`originalHeight`)와 `dpi`, `objectFit: 'cover'`를 함께 설정하여 `LayoutImageElement.render()`에서 `_computeObjectFit`이 자동으로 크롭 영역을 계산하도록 한다. 이후 `void imageEl.render()`로 렌더링을 트리거한다.
+이미지 주입은 `_applyImageToElement(imageEl, image, box)` 헬퍼를 사용한다. 이 헬퍼는 `imageEl.data`를 `{ ...data, dpi, url, originalWidth, originalHeight, objectFit: 'cover' }`로 갱신한다 — 단순히 `url` setter만 호출하는 것이 아니라 원본 이미지 픽셀 크기(`originalWidth`/`originalHeight`)와 `dpi`, `objectFit: 'cover'`를 함께 설정하여 엔진(`ImageEngine.displayRect`)이 자동으로 크롭 영역을 계산하도록 한다. 이후 `void imageEl.render()`로 렌더링을 트리거한다.
 
 paragraph 주입은 `_injectText` 헬퍼를 사용한다. 부모 box의 `requestRerenderAffectedParagraphs()`로 오버랩된 다른 paragraph를 갱신한다. 이미지 주입(`_applyImageToElement`) 자체는 EditManager 이벤트를 발생시키지 않지만, 호출부에서 `box.contentUid = uid`를 설정해 `boxPropertyChange` 이벤트가 발생하므로 호스트는 `documentData` 동기화와 undo/redo 히스토리 push를 수행할 수 있다.
 

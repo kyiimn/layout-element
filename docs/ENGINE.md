@@ -307,9 +307,15 @@ static createOrphan(data: BoxData): BoxEngine  // 부모 없이 생성. appendCh
 
 #### 엔진 우선 object-fit
 
-엔진이 object-fit 계산을 수행한다. `ImageEngine.contentAbsRect` (부모 box의 콘텐츠 영역)와
-`objectFit`/`originalWidth`/`originalHeight`로 `displayRect` (이미지 실제 표시 영역)를 계산한다.
+엔진이 object-fit 계산을 수행한다. `ImageEngine.displayRect`가 표시 위치/크기의 단일 소스다.
 브라우저는 엔진의 `displayRect` 결과를 사용하여 canvas에 표시한다.
+
+모드별 시맨틱:
+
+- `'cover'`/`'contain'`/`'fill'`: 입력 `x`/`y`/`width`/`height`를 **무시**하고
+  `contentAbsRect` + `objectFit` + `originalWidth`/`originalHeight`로 `computeObjectFit()` 계산.
+- `'none'`: 입력 `x`/`y`/`width`/`height`를 그대로 사용. 생략된 `width`/`height`는
+  `originalWidth`/`originalHeight`(1:1) 폴백.
 
 `computeOverlap()`은 `displayRect`를 기준으로 오버랩을 판정한다.
 `overlapMode: 'path'`일 때 원본 RGBA를 `displayRect`에 매핑하여 픽셀 단위 판정을 수행한다.
@@ -352,7 +358,7 @@ static create(data: ImageEngineData): ImageEngine
 | 게터 | 타입 | 설명 |
 |------|------|------|
 | `data` | `ImageEngineData` | 이미지 데이터 |
-| `extractData` | `ImageData` | 엔진 현재 상태에서 조립한 이미지 데이터. 모든 필드에 기본값 적용 (`dpi ?? DEFAULT_IMAGE_DPI`, `overlapMode ?? 'path'`, `objectFit ?? 'cover'`, `x/y/width/height ?? 0`, `zIndex ?? 0`). `id`/`zIndex`는 엔진 필드에서 가져옴 |
+| `extractData` | `ImageData` | 엔진 현재 상태에서 조립한 이미지 데이터. 기본값 적용 (`dpi ?? DEFAULT_IMAGE_DPI`, `overlapMode ?? 'path'`, `objectFit ?? 'cover'`, `zIndex ?? 0`). `x`/`y`/`width`/`height`는 `displayRect`에서 산출 (모드별 단일 소스). `id`/`zIndex`는 엔진 필드에서 가져옴 |
 | `id` | `string \| undefined` | 이미지 고유 식별자 (엔진 필드에서 관리, `ImageEngineData`에 포함되지 않음) |
 | `zIndex` | `number \| undefined` | 렌더링 순서 (엔진 필드에서 관리) |
 | `rgbaData` | `RgbaData \| null` | RGBA 픽셀 데이터 (원본 이미지) |
@@ -398,7 +404,7 @@ static create(data: ImageEngineData): ImageEngine
 
 #### 내부 메커니즘
 
-- `displayRect`: `contentAbsRect` + `objectFit` + `originalWidth/Height`로 `computeObjectFit()` 계산
+- `displayRect`: 모드별 단일 소스. `'cover'`/`'contain'`/`'fill'`이면 `contentAbsRect` + `objectFit` + `originalWidth/Height`로 `computeObjectFit()` 계산 (입력 x/y/w/h 무시). `'none'`이면 입력 `x`/`y`/`width`/`height` 그대로 사용 (`width`/`height` 생략 시 원본 크기 폴백). `contentAbsRect`가 없으면 `none`은 입력값을 절대 좌표로, 나머지 모드는 빈 rect.
 - `computeOverlap()`: `displayRect`를 `contentAbsRect`로 클램프한 영역을 `absRect`로 사용하여 `computeOverlapSizeMm()`에 위임. 원본 `displayRect`는 `image.displayRect`로 전달하여 픽셀 매핑 기준으로 사용
 - **박스 밖 잘린 부분 제외 (클램핑)**: `cover` 모드 등에서 `displayRect`가 `contentAbsRect` 밖으로 넘칠 때, 넘친 부분은 실제로 보이지 않으므로 오버랩 영역에서 제외. `displayRect ∩ contentAbsRect`를 오버랩 판정 영역으로 사용
 - `'path'` 모드 + RGBA 데이터: `image.displayRect`(원본 표시 영역)에 매핑된 픽셀 단위 투명도 판정을 수행하되, 클램프된 영역 내 픽셀만 샘플링
@@ -810,7 +816,7 @@ DocumentEngine (root, owns ppm + resources)
 - **Parent 구축**: `box.element.ts._findParentEngine()`이 부모 요소에서 `DocumentEngine`/`BoxEngine`/`TableCellEngine` 추출. 테이블 셀 내부 박스는 `TableCellEngine` 자체를 부모 엔진으로 받으며, `TableCellEngine.findBoxEngineById(id)`가 셀의 `boxEngine` 자체를 반환한다 (BoxEngine.findBoxEngineById는 자식만 검색하므로 셀 내부 박스를 찾지 못함).
 - **Overlay wiring**: `paragraph.element.ts`가 `overlayElements` 박스의 `BoxEngine`을 수집해 `ParagraphEngineData.overlayEngines`로 전달
 - **RGBA injection**: `image.element.ts._feedRgbaToEngine()`가 원본 이미지 픽셀을 임시 canvas에서 추출하여 `ImageEngine.rgbaData`에 주입. canvas 렌더링 결과가 아닌 원본 픽셀을 주입한다.
-- **object-fit**: 엔진의 `ImageEngine.displayRect`가 단일 소스. `image.element.ts._applyObjectFit()`는 엔진의 `displayRect`를 사용하여 `x/y/width/height`를 설정. 브라우저 canvas는 이 값으로 표시만 수행.
+- **object-fit**: 엔진의 `ImageEngine.displayRect`가 단일 소스. `cover`/`contain`/`fill`은 입력 `x/y/width/height`를 무시하고 자동 계산, `none`은 입력값을 그대로 사용. `image.element.ts._drawImage()`가 `displayRect` 결과로 canvas에 표시만 수행 (DOM은 `computeObjectFit`을 직접 호출하지 않음).
 
 ### `engine` 게터 (퍼블릭 API)
 
@@ -1050,7 +1056,7 @@ engine.printPostData;                      // ❌ throw: "DocumentEngine has pen
 | `DocumentEngine` | `width`, `height`, `paddingTop/Right/Bottom/Left`, `columns`, `gap`, `paragraphStyle`, `textStyle`, `childrenData` | `layout()` |
 | `BoxEngine` | `left`, `top`, `width`, `height`, `position`, `zIndex`, `role`, `paddingTop/Right/Bottom/Left`, `borderTop/Right/Bottom/LeftWidth`, `borderStyle`, `borderColor`, `backgroundColor`, `backgroundOpacity`, `priority`, `lock`, `contentUid`, `childrenData` | `layout()` |
 | `ParagraphEngine` | `textContent`, `paragraphStyle`, `textStyle`, `column`, `gap` | `layoutText()` |
-| `ImageEngine` | `x`, `y`, `width`, `height`, `dpi`, `url`, `overlapMode`, `overlapPadding`, `objectFit`, `originalWidth`, `originalHeight`, `zIndex`, `rgbaData`, `contentAbsRect` | `layout()` |
+| `ImageEngine` | `x`, `y`, `width`, `height` (`'none'` 모드 입력값), `dpi`, `url`, `overlapMode`, `overlapPadding`, `objectFit`, `originalWidth`, `originalHeight`, `zIndex`, `rgbaData`, `contentAbsRect` | `layout()` |
 | `TableEngine` | `colWidths`, `borders`, `childrenData` | `layout()` |
 | `TableCellEngine` | `cellData`, `colspan`, `rowspan`, `cellPaddingTop/Right/Bottom/Left`, `cellBackgroundColor`, `cellBackgroundOpacity` | `setCellMetrics()` |
 
