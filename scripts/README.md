@@ -18,6 +18,9 @@
 | `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/런/캐스케이드) | ALL PASS |
 | `verify-hangul-glyph-fallback.mjs` | 정합성 (엔진) | cmap 미등록 한글 음절 폭 폴백 (`가` 폭 대체) | ALL PASS |
 | `verify-overlap-inline-fontsize.mjs` | 정합성 (엔진) | 인라인 fontSize 오버라이드 컬럼의 오버랩 판정 rect — per-line 높이 기준 | ALL PASS |
+| `verify-image-displayrect-cache.mjs` | 정합성 (엔진) | 이미지 displayRect(objectFit/none x/y/w/h) 변화 시 오버랩 회피 재계산 — layout input hash 무효화 | ALL PASS |
+| `verify-overlap-none.mjs` | 정합성 (엔진) | overlapMode 'none' 시맨틱 — 단일 관문(computeOverlapSizeMm)에서 NONE 조기 반환, box/path 회피 유지 | ALL PASS |
+| `verify-print-image-overlap.mjs` | 정합성 (엔진) | 이미지/오버랩 수정의 printPostData 반영 — 모드별 print 좌표 === displayRect, objectFit 갱신, overlapMode none 관통 | ALL PASS |
 | `verify-right-indent-tab.mjs` | 정합성 (엔진) | 좌우 밀기 탭(`\t`) 배치·정렬·print 스킵 | ALL PASS |
 | `verify-right-indent-tab-browser.mjs` | 정합성 (브라우저) | Shift+Tab 키 삽입·DOM 렌더·커서 | ALL PASS |
 | `verify-right-indent-tab-composition.mjs` | 정합성 (브라우저) | 탭 라인 한글 조합 표시·우측 정렬·이탈 방지 | ALL PASS |
@@ -296,6 +299,51 @@ npx tsx scripts/verify-hangul-glyph-fallback.mjs   # 25항목 ALL PASS
 **실행**:
 ```bash
 npx tsx scripts/verify-overlap-inline-fontsize.mjs   # 22항목 ALL PASS
+```
+
+### `verify-image-displayrect-cache.mjs` — 이미지 displayRect 변화 시 오버랩 재계산 (엔진)
+
+**목적**: 이미지 오버랩 판정은 박스 rect가 아닌 **`displayRect`**(objectFit/none x/y/w/h 기반 실제 표시 영역)를 기준으로 수행하는데, `ParagraphEngine`의 `_layoutCache` 입력 해시가 displayRect를 포함하지 않으면 — objectFit 변경이나 `'none'` 모드 좌표 변경 시 박스 rect는 불변이므로 해시가 동일 → stale 캐시 히트로 **회피가 재계산되지 않는다**. 재현: displayRect가 `{20,20,60,30}` → `{30,25,40,20}`으로 변해도 레이아웃이 재사용됨.
+
+검증 항목 (4항목):
+1. objectFit cover→contain 변경 후 재레이아웃 결과 변화
+2. objectFit none + x/y/w/h 명시 변경 후 재레이아웃 결과 변화
+3. none 모드 개별 x setter 변경 후 재레이아웃 결과 변화 (split 라인 변화 실측)
+4. displayRect 변화 시 `_computeLayoutInputHash` 변화 (캐시 무효화 메커니즘 직접 확인)
+
+**해시 키 단일 소스**: `_computeLayoutInputHash`와 `_computePrefixHash`가 동일한 오버랩 키(`_overlayHashKey`)를 공유한다 — prefix 캐시와 전체 캐시가 일관되게 무효화되어야 하므로.
+
+**실행**:
+```bash
+npx tsx scripts/verify-image-displayrect-cache.mjs   # 4항목 ALL PASS
+```
+
+### `verify-overlap-none.mjs` — overlapMode 'none' 시맨틱 (엔진)
+
+**목적**: `computeOverlapSizeMm`는 이미지/문단 오버랩 판정이 모두 수렴하는 **단일 관문**인데, 여기에 `'none'` 분기가 없으면 `path`+RGBA가 아닌 모든 케이스가 box 기하학 판정으로 낙하한다 — `'none'`(회피 없음) 설정이 **box 처리**되는 버그. 재현: `overlapMode: 'none'` 이미지가 라인과 겹쳐도 PART 반환.
+
+수정: 관문에서 `'none'` → `{ direction: 'NONE', parts: [] }` 조기 반환. `BoxEngine.overlayElements`의 목록 제외와 독립적인 세이프티 넷 — 개별 setter 경로에서 목록 캐시가 stale해 `'none'` 요소가 `overlayEngines`에 남아 있어도 시맨틱이 유지된다.
+
+검증 항목 (7항목): 순수 함수 'none'→NONE/'box'→PART, `ImageEngine.computeOverlap` 동일, end-to-end 라인 수 왕복(box 41 → none 33 → box 41).
+
+**실행**:
+```bash
+npx tsx scripts/verify-overlap-none.mjs   # 7항목 ALL PASS
+```
+
+### `verify-print-image-overlap.mjs` — 이미지/오버랩 수정의 print 반영 (엔진)
+
+**목적**: 화면(엔진 `displayRect`/`columnContents`)과 인쇄(`printPostData`)가 동일한 좌표를 유지하는지 — 엔진-우선 원칙의 최종 목적을 이미지/오버랩 경로에서 검증한다. 기존 print 검증(`verify-right-indent-tab*.mjs`)은 문단 텍스트 좌표만 커버했고, 이미지 displayRect(objectFit/none 좌표)와 오버랩 회피의 print 반영은 검증 공백이었다.
+
+검증 항목 (18항목):
+1. **모드별 print 좌표 === displayRect** — cover/contain/fill/none(명시 좌표, w/h 생략 원본 폴백)의 print `data.x/y/w/h`가 objectFit 계산 결과와 일치 (print는 `buildPrintPostData`가 `displayRect`에서 산출하므로 모드 시맨틱이 그대로 반영되어야 함)
+2. **objectFit 변경 → print 갱신** — 개별 data setter 경로에서 print 좌표가 stale하지 않고 갱신
+3. **overlapMode 'none' → print chars 관통 반영** — box(회피)는 이미지 rect 내부 char ≈ 0, none(관통)은 이미지 rect 내부에 char 존재 (회피 결과가 print chars에 그대로 반영되는지)
+4. **print rect === 이미지 박스 contentAbsRect**
+
+**실행**:
+```bash
+npx tsx scripts/verify-print-image-overlap.mjs   # 18항목 ALL PASS
 ```
 
 ### `verify-obfuscated.mjs` — 난독화 빌드 무결성
