@@ -299,7 +299,8 @@ export class LayoutTableCellElement extends HTMLElement {
     return this._queryFace('top')?.color;
   }
   set borderTopColor(value: string | undefined) {
-    this._writeFace('top', { ...this._readFace('top'), color: value ?? 'black' });
+    if (value === undefined) return;
+    this._writeFace('top', { ...this._readFace('top'), color: value });
   }
 
   get borderTopStyle(): BoxBorderStyle | undefined {
@@ -320,7 +321,8 @@ export class LayoutTableCellElement extends HTMLElement {
     return this._queryFace('right')?.color;
   }
   set borderRightColor(value: string | undefined) {
-    this._writeFace('right', { ...this._readFace('right'), color: value ?? 'black' });
+    if (value === undefined) return;
+    this._writeFace('right', { ...this._readFace('right'), color: value });
   }
 
   get borderRightStyle(): BoxBorderStyle | undefined {
@@ -341,7 +343,8 @@ export class LayoutTableCellElement extends HTMLElement {
     return this._queryFace('bottom')?.color;
   }
   set borderBottomColor(value: string | undefined) {
-    this._writeFace('bottom', { ...this._readFace('bottom'), color: value ?? 'black' });
+    if (value === undefined) return;
+    this._writeFace('bottom', { ...this._readFace('bottom'), color: value });
   }
 
   get borderBottomStyle(): BoxBorderStyle | undefined {
@@ -362,7 +365,8 @@ export class LayoutTableCellElement extends HTMLElement {
     return this._queryFace('left')?.color;
   }
   set borderLeftColor(value: string | undefined) {
-    this._writeFace('left', { ...this._readFace('left'), color: value ?? 'black' });
+    if (value === undefined) return;
+    this._writeFace('left', { ...this._readFace('left'), color: value });
   }
 
   get borderLeftStyle(): BoxBorderStyle | undefined {
@@ -618,13 +622,15 @@ export class LayoutTableCellElement extends HTMLElement {
 
     if (!this._diagonals || this._diagonals.length === 0) return;
 
+    if (!this._diagonalColor) return;
+
     const ppm = this._getPpm();
     const width = this._cellEngine?.width ?? this._width;
     const height = this._cellEngine?.height ?? this._height;
     const widthPx = width * ppm;
     const heightPx = height * ppm;
 
-    const cssColor = ColorRegistry.getInstance().getCSSColor(this._diagonalColor ?? 'black');
+    const cssColor = ColorRegistry.getInstance().getCSSColor(this._diagonalColor);
     const widthPxBorder = Math.max(1, Math.ceil(this._diagonalWidth * ppm));
 
     for (const dir of this._diagonals) {

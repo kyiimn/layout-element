@@ -729,9 +729,9 @@ export class TableEngine {
         const cellAbsRect = cellEngine.absRect;
 
         const diagonals: PrintPostDiagonal[] = [];
-        if (cellData?.diagonals && cellData.diagonals.length > 0) {
+        if (cellData?.diagonals && cellData.diagonals.length > 0 && cellData.diagonalColor) {
           const diagColor = colorRegistry
-            ? colorRegistry.get(cellData.diagonalColor ?? 'black')
+            ? colorRegistry.get(cellData.diagonalColor)
             : { c: 0, m: 0, y: 0, k: 255 };
           const diagWidth = cellData.diagonalWidth ?? 0.1;
 
