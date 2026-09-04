@@ -273,7 +273,10 @@ function inlineStyleEqual(a: TextInlineStyle | undefined, b: TextInlineStyle | u
     a.fontSize === b.fontSize &&
     a.fontWeight === b.fontWeight &&
     a.fontStyle === b.fontStyle &&
-    a.color === b.color
+    a.color === b.color &&
+    a.letterSpacing === b.letterSpacing &&
+    a.widthRatio === b.widthRatio &&
+    a.spaceRatio === b.spaceRatio
   );
 }
 
@@ -326,6 +329,9 @@ function inlineStyleMatchesParagraph(
   if (style.fontWeight !== undefined && style.fontWeight !== paragraphTextStyle.fontWeight) return false;
   if (style.fontStyle !== undefined && style.fontStyle !== paragraphTextStyle.fontStyle) return false;
   if (style.color !== undefined && style.color !== paragraphTextStyle.color) return false;
+  if (style.letterSpacing !== undefined && style.letterSpacing !== paragraphTextStyle.letterSpacing) return false;
+  if (style.widthRatio !== undefined && style.widthRatio !== paragraphTextStyle.widthRatio) return false;
+  if (style.spaceRatio !== undefined && style.spaceRatio !== paragraphTextStyle.spaceRatio) return false;
   return true;
 }
 
