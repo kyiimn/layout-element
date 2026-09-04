@@ -457,15 +457,15 @@ static createOrphan(content: string | (string | TextInlineData)[], resources: En
 | `genLineStyle` | `(columnIndex?, lineIndex?): Partial<CSSStyleDeclaration>` | 라인 CSS 스타일 |
 | `genPartStyle` | `(): Partial<CSSStyleDeclaration>` | 파트 CSS 스타일 |
 | `genCharStyle` | `(char, inlineStyle?): Partial<CSSStyleDeclaration>` | 문자 외부 CSS 스타일 |
-| `genCharInnerStyle` | `(): Partial<CSSStyleDeclaration>` | 문자 내부 CSS 스타일 |
+| `genCharInnerStyle` | `(inlineStyle?): Partial<CSSStyleDeclaration>` | 문자 내부 CSS 스타일. 런 `widthRatio` 오버라이드 지원 |
 | `genCharStyleFlat` | `(char, inlineStyle?): Partial<CSSStyleDeclaration>` | 평탄화 문자 스타일 |
-| `getCharWidths` | `(char, inlineStyle?): { rawWidth, swidth, widthRatio }` | 문자 폭 정보 |
+| `getCharWidths` | `(char, inlineStyle?): { rawWidth, swidth, widthRatio }` | 문자 폭 정보 (런 letterSpacing/widthRatio/spaceRatio 오버라이드 반영) |
 | `getCharRect` | `(sourceOffset: number): MmRect \| null` | 특정 오프셋 문자의 mm 단위 rect |
 | `getOffsetFromPoint` | `(xMm, yMm): CursorPosition \| null` | 좌표→오프셋 매핑 |
 | `getCursorPlacement` | `(sourceOffset, preferLineEnd?): CursorPlacement \| null` | 커서 배치 정보 |
 | `getInlineStyleAt` | `(sourceOffset: number): TextInlineStyle \| undefined` | 소스 오프셋의 raw 인라인 스타일 (주입값만). `undefined`면 문단 기본. `\n` 포함 평문 오프셋 공간, `layoutText()` 무관 |
-| `getEffectiveStyleAt` | `(sourceOffset: number): TextStyle` | 소스 오프셋의 effective 스타일 (`effectiveTextStyle` + 런 인라인 5필드 오버라이드). 모든 필드 materialized |
-| `getCommonStyleInRange` | `(startOffset, endOffset): TextStyle` | `[start, end)` 범위에서 공통 필드만. 런 단위 비교(O(런 수)). 단락 수준 필드는 항상 `effectiveTextStyle`에서 |
+| `getEffectiveStyleAt` | `(sourceOffset: number): TextStyle` | 소스 오프셋의 effective 스타일 (`effectiveTextStyle` + 런 인라인 8필드 오버라이드: fontFamily/fontSize/fontWeight/fontStyle/color/letterSpacing/widthRatio/spaceRatio). 모든 필드 materialized |
+| `getCommonStyleInRange` | `(startOffset, endOffset): TextStyle` | `[start, end)` 범위에서 공통 필드만. 런 단위 비교(O(런 수)). 8개 인라인 필드 공통값 판정, `indent` 등 단락 수준 필드는 항상 `effectiveTextStyle`에서 |
 
 #### 퍼블릭 게터
 
@@ -496,7 +496,7 @@ static createOrphan(content: string | (string | TextInlineData)[], resources: En
 | `previousOverflow` | `number` | 이전 오버플로우 |
 | `scale` | `number` | 스케일 (현재 no-op) |
 | `overlapMode` | `ParagraphOverlapMode` | 단락 오버랩 모드 |
-| `printPostData` | `PrintPostData[]` | 문자별 printPostData (mm 단위). 후처리 시스템용 데이터 export. `verticalAlign`(top/center/bottom) 오프셋을 char rect.y에 반영. `letterSpacing`/`spaceRatio` 필드 포함. 내부 소비는 `effectiveParagraphStyle`/`effectiveTextStyle` getter 사용 |
+| `printPostData` | `PrintPostData[]` | 문자별 printPostData (mm 단위). 후처리 시스템용 데이터 export. `verticalAlign`(top/center/bottom) 오프셋을 char rect.y에 반영. `widthRatio`/`letterSpacing`/`spaceRatio` 필드 포함 — 모두 글자별 런 오버라이드(`inlineStyle → textStyle → inheritStyle → 기본값`)로 추출. 내부 소비는 `effectiveParagraphStyle`/`effectiveTextStyle` getter 사용 |
 | `column` | `number \| number[]` | 컬럼 정의 |
 | `gap` | `number \| number[]` | 컬럼 간격 정의 |
 | `dirty` | `boolean` | 커밋되지 않은 변경 여부 |
@@ -519,13 +519,13 @@ static createOrphan(content: string | (string | TextInlineData)[], resources: En
 
 - `_layoutTextIntoColumns()`: 문자 단위 래핑
 - **`data` setter column/gap 보정**: `parentBox`가 제공되고 `parentBox.parent`가 `TableCellEngine`(`isTableCellEngine === true`)인 경우, `parentBox.gridCalculator`의 `columnWidth`/`gaps`를 사용하여 column/gap을 보정한다. 테이블 셀 내부 paragraph는 명시적 `column`/`gap` 값과 무관하게 셀 크기에 맞춰진다. 보정된 값은 `_columnWidths`/`_gaps`에 저장되며 `extractData`에서 반환된다.
-- 스켈레톤 캐시: `_computeLayoutInputHash()`로 입력 해시 → 동일하면 재레이아웃 스킵
+- 스켈레톤 캐시: `_computeLayoutInputHash()`로 입력 해시 → 동일하면 재레이아웃 스킵. 런 인라인 스타일의 배치 영향 필드(fontFamily/fontSize/fontStyle/letterSpacing/widthRatio/spaceRatio)를 포함 — 오버라이드 변경 시 stale 캐시 없이 재래핑. `_computePrefixHash`도 동일 키 사용
 - LRU 캐시 (capacity 5000):
   - 문자 폭: key `${char}|${fontName}|${fontSize}`
-  - 문자 외부 스타일: key `${char}|${widthRatio}|${letterSpacing}|${spaceRatio}|${fontSize}`
+  - 문자 외부 스타일: key `${char}|${widthRatio}|${letterSpacing}|${spaceRatio}|${fontSize}|${lineMaxFontSize}|${fontName}` (per-run 오버라이드 값 기준)
 - 한글 금칙문자 규칙: `_applyLineBreakRules()` (`LINE_START_FORBIDDEN` / `LINE_END_FORBIDDEN`)
 - `_detectOverlapWithCache()`: 렌더 사이클별 오버레이 rect 캐싱
-- `_createLineWithParts()`: 오버랩 파트에서 자유 영역 계산, `minCharWidthMm = widthRatio * fontSize + letterSpacing`. `lineTopMm`에 `alignOffsetMm` 포함
+- `_createLineWithParts()`: 오버랩 파트에서 자유 영역 계산, `minCharWidthMm = widthRatio * fontSize + letterSpacing * fontSize` — fontSize/widthRatio/letterSpacing 모두 라인 시작 런의 인라인 오버라이드 값(미정의 시 문단 effective). 런 글자 폭보다 좁은 자유 영역은 제외되어 COVER 처리된다(오버랩 요소 위로 글자가 넘치는 강제 배치 방지). `lineTopMm`에 `alignOffsetMm` 포함
 - **verticalAlign 오버랩 판정 (2-pass)**: `verticalAlign: 'center'`/`'bottom'`인 경우, Pass 1(alignOffset=0)로 라인 수를 결정한 후 `_computeAlignOffsetMm()`로 오프셋을 계산하고 Pass 2로 오버랩 판정을 재수행. 라인 수가 안정될 때까지 최대 3회 반복. `verticalAlign: 'top'`이면 단일 pass.
 - 커서/오프셋 쿼리: `getCharRect`, `getOffsetFromPoint`, `getCursorPlacement`
 - `buildParagraphPrintPostData()`: 문자별 print data 생성. mm 단위 좌표를 후처리 시스템에 제공

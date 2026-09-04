@@ -149,7 +149,7 @@
 | 타입 | 단일 키 메모이제이션 (LRU 아님) |
 | 키 | `inner\|${widthRatio}` |
 
-모든 글자의 내부 span은 동일 스타일을 사용하므로(글자 무관, 장평에만 의존) 단일 키 메모이제이션으로 충분하다.
+글자 무관·장평에만 의존하므로 단일 키 메모이제이션으로 충분하다. `widthRatio`는 런 오버라이드 가능 필드이므로 키는 per-run 값(`inlineStyle.widthRatio ?? 문단 effective`)별로 구분되고, 서로 다른 장평 런이 섞여 있으면 값 수만큼 키가 존재한다 (값 종류는 통상 1~3개로 미미).
 
 ### 2.4 ppm 주입 및 캐시
 
@@ -438,7 +438,7 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 | 매개변수 | 설명 |
 |---|---|
 | `textContent` | 텍스트 내용 |
-| `textInlineStyle` (배열 블록별) | 인라인 런 스타일 중 **배치 영향 필드** (`fontFamily`/`fontSize`/`fontStyle`). `fontWeight`/`color`는 글자 폭/라인 높이에 무영향이므로 **해시에서 제외** — 굵게/색상 주입 시 캐시 히트 → 재래핑 생략. 캐시 히트 시 `_refreshInlineStylesOnly()` 경량 패스가 `inlineStyles`만 최신 `textContent`에서 재매핑 |
+| `textInlineStyle` (배열 블록별) | 인라인 런 스타일 중 **배치 영향 필드** (`fontFamily`/`fontSize`/`fontStyle`/`letterSpacing`/`widthRatio`/`spaceRatio`). `fontWeight`/`color`는 글자 폭/라인 높이에 무영향이므로 **해시에서 제외** — 굵게/색상 주입 시 캐시 히트 → 재래핑 생략. 캐시 히트 시 `_refreshInlineStylesOnly()` 경량 패스가 `inlineStyles`만 최신 `textContent`에서 재매핑 |
 | `_columnWidths` + `_gaps` | 컬럼 폭/간격 |
 | `_lineHeight` | 줄 높이 (fontSize × lineGap) |
 | `widthRatio` | 장평 |
@@ -504,7 +504,7 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 - `verticalAlign`이 `'top'` (`'center'`/`'bottom'`은 라인 수 의존적이므로 제외)
 - `_prefixCache`가 존재하고 해시가 동일
 
-**`_computePrefixHash`**: 캐럿 이전의 plain-text + 배치 영향 인라인 필드(`fontFamily`/`fontSize`/`fontStyle`) + 컬럼/스타일 파라미터(`textAlign`/`verticalAlign`/`indent` 포함) + 오버랩 상대 좌표를 해싱.
+**`_computePrefixHash`**: 캐럿 이전의 plain-text + 배치 영향 인라인 필드(`fontFamily`/`fontSize`/`fontStyle`/`letterSpacing`/`widthRatio`/`spaceRatio`) + 컬럼/스타일 파라미터(`textAlign`/`verticalAlign`/`indent` 포함) + 오버랩 상대 좌표를 해싱.
 
 **`_buildPrefixCache`**: 전체 재배치 후 호출. 캐럿 오프셋 이전에 해당하는 컬럼들을 prefix로 저장하고, 재배치 시작점(`startColumnIdx`/`startBlockIdx`/`startRunIdx`/`startCharIdx`)을 계산.
 
@@ -533,7 +533,9 @@ charOffsets 경로에서는 outer/inner 중첩 span 대신 **단일 span**을 �
 편집 모드(`editableText=true`)에서도 charOffsets가 활성화되어 단일 span + absolute 배치를 사용한다.
 임시 span(optimistic, IME 조합)은 `columnContents`에 포함되지 않으므로, 삽입 시 기준 span의
 `data-char-offset`과 `data-swidth`로부터 임시 span의 `left`를 동적 계산한다
-(`TextEditController._computeTempSpanLeft()`).
+(`TextEditController._computeTempSpanLeft()`). 임시 span의 폭/`scale`은 삽입 위치 런의
+인라인 스타일(`letterSpacing`/`widthRatio`/`spaceRatio`/`fontSize` 오버라이드 포함)로
+`genCharStyleFlat`/`getCharWidths`를 호출해 계산한다.
 
 flexbox 폴백 경로(`charOffsets === undefined`, 외부에서 임의로 `TextPartData`를 생성한 경우)에서만
 기존 outer/inner 중첩 span 구조를 유지한다.

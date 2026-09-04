@@ -432,7 +432,7 @@ type CurrentStyle = {
 
 1. **단락 수준 스타일 + 상속 스타일 병합**: `model.textStyle`의 각 필드와 `model.inheritStyle`의 같은 필드를 `??` 연산자로 병합한다. 단락 자체 스타일이 우선하고, 없으면 상속값을 사용한다.
 2. **런 스타일 찾기**: 컨트롤러가 보유한 `runMap`(`src/edit/run-map.ts`)에서 `getStyleAtOffset(runMap, cursorOffset)`으로 커서가 속한 런의 `TextInlineStyle`을 찾는다. `runMap`은 `model.textContent`(`string | (string \| TextInlineData)[]`)에서 `inlineToPlain()`으로 분해한 평문 오프셋 ↔ 런 매핑이다.
-3. **런 스타일로 오버라이드**: `TextInlineStyle`의 정의된 필드(`fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`)만 기본 스타일 위에 오버라이드한다. `undefined`인 필드는 무시한다. 인라인 런은 정렬(`textAlign`)을 오버라이드하지 않는다.
+3. **런 스타일로 오버라이드**: `TextInlineStyle`의 정의된 필드(`fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`, `letterSpacing`, `widthRatio`, `spaceRatio`)만 기본 스타일 위에 오버라이드한다. `undefined`인 필드는 무시한다. 인라인 런은 정렬(`textAlign`)을 오버라이드하지 않는다.
 
 ```ts
 // 사용 예시
@@ -484,7 +484,7 @@ InheritStyle (부모에서 상속)
 | `currentStyle` | `CurrentStyle \| null` get | 현재 커서 위치의 유효 스타일. 포커스된 단락이 없으면 `null`. |
 | `applyInlineStyle(style)` | `void` | 포커스된 단락의 현재 선택 영역에 인라인 스타일(`Partial<TextInlineStyle>`)을 적용한다. 선택 영역이 없거나 포커스된 단락이 없으면 무시. |
 | `toggleInlineStyle(field, value)` | `void` | 포커스된 단락의 현재 선택 영역에서 인라인 스타일 필드를 토글한다. 선택 영역 전체가 이미 해당 값이면 제거, 아니면 적용. |
-| `applyTextStyle(textPatch?, paragraphPatch?)` | `boolean` | 텍스트/문단 스타일 주입의 단일 진입점. 편집 상태에 따라 주입 대상을 판별한다: (1) 포커스 + selection → 선택 범위 인라인 주입, (2) 포커스 + 커서가 런 안 → 해당 런만 업데이트, (3) 포커스 + 커서가 런 밖 → paragraph 스타일 수정 + 명시 필드 전체 캐스케이드, (4) 포커스 없이 paragraph/paragraph-box(selected) → 대상 paragraph 스타일 + 전체 캐스케이드. 인라인 불가 필드(textAlign, lineGap, verticalAlign, letterSpacing, widthRatio)는 항상 paragraph로 라우팅. 처리 후 런 맵 정규화 + 커서/selection 보존. |
+| `applyTextStyle(textPatch?, paragraphPatch?)` | `boolean` | 텍스트/문단 스타일 주입의 단일 진입점. 편집 상태에 따라 주입 대상을 판별한다: (1) 포커스 + selection → 선택 범위 인라인 주입, (2) 포커스 + 커서가 런 안 → 해당 런만 업데이트, (3) 포커스 + 커서가 런 밖 → paragraph 스타일 수정 + 명시 필드 전체 캐스케이드, (4) 포커스 없이 paragraph/paragraph-box(selected) → 대상 paragraph 스타일 + 전체 캐스케이드. 인라인 불가 필드(textAlign, lineGap, verticalAlign, indent)는 항상 paragraph로 라우팅. 처리 후 런 맵 정규화 + 커서/selection 보존. |
 | `controllers` | `Set<TextEditController>` get | 등록된 모든 편집 컨트롤러. |
 | `focusParagraph(target, options?)` | `boolean` | 단락 요소 또는 ID로 포커스를 설정한다. 텍스트 편집 모드가 아니면 자동 활성화. `options.cursorOffset`으로 커서 위치, `options.selection`으로 선택 영역을 지정할 수 있다. 성공 시 `true`, 실패 시 `false`. |
 | `blurParagraph(target?)` | `boolean` | 단락 요소, ID, 또는 생략으로 포커스를 해제한다. 생략하면 현재 포커스된 단락을 blur. 성공 시 `true`, 실패 시 `false`. |
@@ -537,7 +537,7 @@ manager.addEventListener('cursorMove', (e) => {
 | selection 없음 (커서만) | 커서 위치의 **최종 스타일** — 상속값 + 문단 스타일 + 커서가 속한 런의 `TextInlineStyle`을 병합 |
 | selection 있음 | 영역 내 모든 오프셋의 유효 스타일을 비교해 **공통 필드만**. 영역 내에 상이한 값이 있는 필드는 생략 (`undefined` 처리와 동일) |
 
-selection 공통값 판정은 인라인 가능 필드(`color`, `fontFamily`, `fontWeight`, `fontStyle`, `fontSize`)에 대해 수행된다. `paragraphStyle`은 selection이 있어도 문단 단위 속성이므로 항상 현재 문단의 유효값을 반환한다.
+selection 공통값 판정은 인라인 가능 필드(`color`, `fontFamily`, `fontWeight`, `fontStyle`, `fontSize`, `letterSpacing`, `widthRatio`, `spaceRatio`)에 대해 수행된다. `paragraphStyle`은 selection이 있어도 문단 단위 속성이므로 항상 현재 문단의 유효값을 반환한다.
 
 ```ts
 type EditManagerEventType =
@@ -1026,7 +1026,7 @@ const handledReverse = manager.navigateByTab(true);
 - **오버랩 회피와의 상호작용**: 탭은 **현재 파트(자유 영역)의 오른쪽 끝**에 정렬된다. 이미지 오버랩으로 파트가 분할된 라인에서 탭은 컬럼 끝이 아니라 자유 영역의 끝을 기준으로 한다 — 오버랩 회피가 우선한다.
 - **다중 탭**: 한 파트에 탭이 여러 개면 첫 번째 탭 기준으로 collapse된다 (InDesign은 후속 탭을 다음 라인으로 밀지만, v1은 collapse로 단순화 — 의도된 편차).
 - **렌더링**: 탭은 `data-source-offset` diff 키를 유지하는 **0폭 + `visibility: hidden` span**으로 렌더링된다. span이 존재하므로 커서/선택/클릭 매핑(`TextEditCoordinateMapper`)이 오프셋 산술을 그대로 유지한다.
-- **탭 영역 점선 가이드 (편집 모드 전용)**: `editableText`가 활성화된 단락에서 탭 span에 얇은 **점선 배경**이 표시되어 좌/우 텍스트 사이의 탭 영역을 시각적으로 드러낸다 (`_applyTabGuideStyle`). 갭 폭은 탭 앞쪽 마지막 가시 span의 **시각 우측 끝**(`data-char-offset + data-swidth × flatScale`)부터 탭 위치(`data-char-offset` = 우측 세그먼트 시작)까지이며, `width` 확장 + `transform: translateX(-갭폭)`으로 표현한다 — `data-char-offset`/`style.left`는 건드리지 않아 diff 시스템(positionChanged 판정)과 충돌하지 않는다. 렌더링 함정 2가지: (1) 점선 색을 `currentColor`로 하면 `color: transparent`(글자 숨김)에 묻혀 점선도 투명해지므로 **fixed 색(#888)**을 쓴다. (2) `scale` 개별 프로퍼티(장평 스케일)를 **1로 리셋**한다 — 탭 span은 시각 글자가 없어 장평이 무의미하고 scale은 배경 폭을 압축해 갭을 다 덮지 못한다. 높이도 명시해야 한다(높이 0이면 배경이 안 보임). 점선은 라인 수직 중앙에 배치한다 — `backgroundPosition: calc(50% - 밴드절반)`. 비편집 모드로 전환 시 잔존 인라인 스타일을 원복하여 0폭+hidden으로 복귀한다. 인쇄(printPostData)에는 영향이 없다.
+- **탭 영역 점선 가이드 (편집 모드 전용)**: `editableText`가 활성화된 단락에서 탭 span에 얇은 **점선 배경**이 표시되어 좌/우 텍스트 사이의 탭 영역을 시각적으로 드러낸다 (`_applyTabGuideStyle`). 갭 폭은 탭 앞쪽 마지막 가시 span의 **시각 우측 끝**(`data-char-offset + data-swidth × scaleX`)부터 탭 위치(`data-char-offset` = 우측 세그먼트 시작)까지이며, `width` 확장 + `transform: translateX(-갭폭)`으로 표현한다 — `data-char-offset`/`style.left`는 건드리지 않아 diff 시스템(positionChanged 판정)과 충돌하지 않는다. `scaleX`는 기준 span의 **per-span 장평**(`data-dim-key`에서 `widthRatio` 파싱 → `× 0.88`, dimKey에 없으면 문단 effective 장평)이다 — 장평이 런 단위 오버라이드 가능해져 문단 값 고정이면 오버라이드 런 옆에서 점선이 글자를 침범한다. 렌더링 함정 2가지: (1) 점선 색을 `currentColor`로 하면 `color: transparent`(글자 숨김)에 묻혀 점선도 투명해지므로 **fixed 색(#888)**을 쓴다. (2) `scale` 개별 프로퍼티(장평 스케일)를 **1로 리셋**한다 — 탭 span은 시각 글자가 없어 장평이 무의미하고 scale은 배경 폭을 압축해 갭을 다 덮지 못한다. 높이도 명시해야 한다(높이 0이면 배경이 안 보임). 점선은 라인 수직 중앙에 배치한다 — `backgroundPosition: calc(50% - 밴드절반)`. 비편집 모드로 전환 시 잔존 인라인 스타일을 원복하여 0폭+hidden으로 복귀한다. 인쇄(printPostData)에는 영향이 없다.
 - **낙관적 span(optimistic) 스킵 + 탭 라인 조합의 엔진 렌더 반영**: 탭이 포함된 **라인**에서는 `_optimisticSpanUpdate`(일반 타이핑)와 `_optimisticCompositionUpdate`(IME 조합) 모두 임시 span을 생성하지 않는다. 우측 정렬은 새 글자가 파트 끝에 붙고 **기존 글자가 왼쪽으로 밀리지만**, `_shiftFollowingSpans`/`_computeTempSpanLeft`는 좌측 정렬 가정(오른쪽 밀어내기)으로 설계되어 방향이 반전된다. 좌측 세그먼트 타이핑도 같은 파트의 우측 세그먼트 span들을 밀어내므로, 라인에 탭이 있으면 optimistic을 아예 끈다.
   - **탭 라인 조합 표시**: optimistic이 없으면 조합 중 텍스트가 화면에 표시되지 않으므로(조합 중 렌더 지연 최적화가 표시를 optimistic에 위임하기 때문), `_onCompositionUpdate`는 탭 라인 조합 시(`_isTabLineComposition`) **`_debouncedRender()`로 조합 중 텍스트를 실제 엔진 렌더에 반영**한다. 엔진이 매 프레임 정확한 우측 정렬을 계산하므로 조합 글자가 항상 올바른 위치에 표시되고, 밑줄(`_applyCompositionUnderline`)도 정상 적용된다. 음절당 렌더는 rAF로 프레임당 1회로 병합되며, 바이라인은 짧아 렌더 비용이 미미하다.
   - **조합 중 커서 폴백**: 조합 중 커서가 stale mapper 범위 밖(조합 텍스트 끝 offset)을 가리키면 `_updateCursorPosition`의 placement-없음 폴백이 실패해 커서가 (0,0)(paragraph 좌상단)으로 이동하는 **화면 이탈**이 발생한다. 폴백에 **조합 중 분기**를 추가한다: `_isComposing && _compositionStartOffset > 0`이면 조합 시작 위치의 placement(phantom end 우선)로 커서를 배치한다 — 커서가 조합 텍스트가 표시될 지점에 머무르고, 조합 텍스트의 실제 위치는 compositionend의 flushRender 후 확정된다.
@@ -1546,8 +1546,8 @@ type RunMap = RunEntry[];
 | 텍스트편집모드, 포커스 + selection 없음 + **커서가 런 밖(평문)** | **paragraph 자체 스타일** 수정 + 명시 주입 필드를 **내부 모든 런에 캐스케이드** | paragraph |
 | 포커스 없음 + **paragraph / paragraph-box selected (단일·복수 모두)** | **선택된 모든 대상**의 paragraph 자체 스타일 수정 + 명시 주입 필드 전체 캐스케이드. lock된 대상은 스킵. 하나라도 성공하면 `true` | paragraph |
 
-> ※1 인라인 가능 필드: `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color` (TextInlineStyle에 존재)
-> ※2 인라인 불가 필드: `textAlign`, `lineGap`, `verticalAlign` (ParagraphStyle), `letterSpacing`, `widthRatio`, `spaceRatio`, `indent` (TextStyle 중 인라인 미지원) — **항상 paragraph에 적용**
+> ※1 인라인 가능 필드: `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`, `letterSpacing`, `widthRatio`, `spaceRatio` (TextInlineStyle에 존재)
+> ※2 인라인 불가 필드: `textAlign`, `lineGap`, `verticalAlign` (ParagraphStyle), `indent` (TextStyle 중 인라인 미지원) — **항상 paragraph에 적용**
 
 #### paragraph-box 선택 시 대상 결정 (단일·복수)
 
@@ -1864,9 +1864,11 @@ flowchart LR
 
 1. 이전 낙관적 span이 있으면 DOM에서 제거하고 `_optimisticSpan = null`로 초기화.
 2. `getCursorPlacement(sourceOffset)`로 커서 배치 정보를 얻는다.
-3. placement가 null인 경우(`\n` 바로 다음 위치 = 새 라인 시작): `_insertOptimisticSpanAtLineStart()`를 호출하여 새 라인의 line div 첫 자식으로 span 삽입.
-4. placement가 유효한 경우: `_computeTempSpanLeft()`로 기준 span의 `data-char-offset`/`data-swidth`로부터 임시 span의 `left`(mm)를 동적 계산하여 absolute 배치. `placement.atEndOfChar`가 true면 해당 span 뒤에, false면 앞에 새 span 삽입.
-5. `_optimisticSpan = newSpan`으로 참조 저장.
+3. 삽입된 글자의 런 스타일을 `getStyleAtOffset(this._runMap, sourceOffset)`으로 조회한다. 호출 시점에 `_runMap`이 삽입이 반영된 `model.textContent`에서 재추출되었으므로 `sourceOffset`이 삽입 글자 자신의 런을 가리킨다 — `letterSpacing`/`widthRatio`/`spaceRatio` 오버라이드가 임시 span 폭에 반영된다.
+4. placement가 null인 경우(`\n` 바로 다음 위치 = 새 라인 시작): `_insertOptimisticSpanAtLineStart()`를 호출하여 새 라인의 line div 첫 자식으로 span 삽입 (조회한 런 스타일 전달).
+5. placement가 유효한 경우: `_computeTempSpanLeft()`로 기준 span의 `data-char-offset`/`data-swidth`로부터 임시 span의 `left`(mm)를 동적 계산하여 absolute 배치. `placement.atEndOfChar`가 true면 해당 span 뒤에, false면 앞에 새 span 삽입.
+6. `_computeTempSpanWidthMm(char, 런 스타일)`로 임시 span 폭을 계산하고 `_shiftFollowingSpans()`로 후속 span 밀어내기.
+7. `_optimisticSpan = newSpan`으로 참조 저장.
 
 #### `_insertOptimisticSpanAtLineStart()` 내부 로직
 
@@ -1881,12 +1883,13 @@ flowchart LR
 
 ### 8.2 `_createOptimisticSpan()` 내부 로직
 
-1. `model.genCharStyleFlat()`로 단일 span용 통합 스타일(`scale`/`transformOrigin`/`display`)을 얻는다.
+1. `model.genCharStyleFlat(char, inlineStyle)`로 단일 span용 통합 스타일(`scale`/`transformOrigin`/`display`)을 얻는다. 런 스타일이 전달되면 `letterSpacing`/`widthRatio`/`spaceRatio`/`fontSize` 오버라이드가 `width`와 `scale`에 반영된다.
 2. `Object.assign`로 span의 style에 적용.
 3. `dataset.sourceOffset = String(sourceOffset)`: 소스 오프셋.
 4. `dataset.temporary = "true"`: 임시 span 표시. `TextEditCoordinateMapper`는 이 속성이 있는 span을 매핑 대상에서 제외.
-5. `textContent = char`: 단일 span에 직접 글자 설정 (outer/inner 중첩 없음).
-6. 호출자가 `_computeTempSpanLeft()`로 계산한 `left`值으로 `position: absolute; left: ${mm}mm; top: 0`를 추가 적용.
+5. `dataset.widthRatio = String(적용된 장평)`: span에 실제 적용된 장평(런 오버라이드 → 문단 effective → 1 폴백)을 기록한다 — §8.3의 커서 폭 복원이 이 값을 소비한다.
+6. `textContent = char`: 단일 span에 직접 글자 설정 (outer/inner 중첩 없음).
+7. 호출자가 `_computeTempSpanLeft()`로 계산한 `left`值으로 `position: absolute; left: ${mm}mm; top: 0`를 추가 적용.
 
 ### 8.3 낙관적 span이 있는 경우의 커서 위치 처리
 
@@ -1894,7 +1897,7 @@ flowchart LR
 
 1. `this._optimisticSpan.getBoundingClientRect()`로 span rect 획득.
 2. `cursorEl.top = spanRect.top - paragraphRect.top`.
-3. `cursorEl.left = spanRect.right - paragraphRect.left` (span 오른쪽 끝).
+3. `cursorEl.left = localLeft + layoutWidth` (span의 레이아웃 오른쪽 끝). span은 `scale: (widthRatio × 0.88), 1`을 가지므로 `spanRect.width`는 `레이아웃 폭 × widthRatio`이다 — `dataset.widthRatio`(§8.2에서 기록한 적용 장평)로 나누어 레이아웃 폭을 복원한다. 기록이 없으면 `paragraph.model?.widthRatio ?? 1` 폴백.
 4. `cursorEl.height = spanRect.height`.
 5. `textarea` 위치도 span rect 기준으로 동기화.
 6. 선택 영역이 있으면 커서를 숨긴다.
@@ -2162,8 +2165,8 @@ flowchart LR
 3. `scale = layoutDocEl.editManager.scale`.
 4. `localLeft = (spanRect.left - paragraphRect.left) / scale`.
 5. `visualWidth = spanRect.width / scale`.
-6. `widthRatio = paragraph.model?.widthRatio ?? 1`.
-7. `layoutWidth = widthRatio > 0 ? visualWidth / widthRatio : visualWidth`. span은 `transform: scale(widthRatio, 1)` 스타일을 가지므로, `getBoundingClientRect().width`는 `레이아웃 너비 × widthRatio`이다. `widthRatio < 1`(장평 축소)일 때 시각적 right가 레이아웃 right보다 작아 커서가 왼쪽으로 어긋나는 것을 방지하기 위해 레이아웃 너비를 복원한다.
+6. `widthRatio = span.dataset.widthRatio` (낙관적 span 생성 시점에 적용된 장평 — 런 `widthRatio` 오버라이드 포함. 기록 실패 시 `paragraph.model?.widthRatio ?? 1` 폴백).
+7. `layoutWidth = widthRatio > 0 ? visualWidth / widthRatio : visualWidth`. span은 `scale: (widthRatio × 0.88), 1` 스타일을 가지므로, `getBoundingClientRect().width`는 `레이아웃 너비 × widthRatio`이다. `widthRatio < 1`(장평 축소)일 때 시각적 right가 레이아웃 right보다 작아 커서가 왼쪽으로 어긋나는 것을 방지하기 위해 레이아웃 너비를 복원한다.
 8. `cursorEl.top = (spanRect.top - paragraphRect.top) / scale`.
 9. `cursorEl.left = localLeft + layoutWidth` (span의 레이아웃 right).
 10. `cursorEl.height = spanRect.height / scale`.

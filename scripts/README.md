@@ -15,6 +15,7 @@
 | `verify-visual-render.mjs` | 정합성 (화면) | 실제 렌더 검증 — rect 기반 표시성 (호스트 CSS rule stale/0폭/클립 감지) | ALL PASS |
 | `verify-ime.mjs` | 정합성 (IME) | 한글 조합 커밋/취소/혼합 | ALL PASS |
 | `verify-multicolumn.mjs` | 정합성 (멀티컬럼) | prefix 캐시 경로 === 전체 재래핑 | ALL PASS |
+| `verify-inline-metrics.mjs` | 정합성 (엔진) | 인라인 `letterSpacing`/`widthRatio`/`spaceRatio` 런 오버라이드 — 폭 공식/캐시 해시/printPostData/extractData/스타일 조회/런 맵 병합/오버랩 회피(파트 분할·좁은 영역 COVER) | ALL PASS |
 | `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/런/캐스케이드) | ALL PASS |
 | `verify-hangul-glyph-fallback.mjs` | 정합성 (엔진) | cmap 미등록 한글 음절 폭 폴백 (`가` 폭 대체) | ALL PASS |
 | `verify-overlap-inline-fontsize.mjs` | 정합성 (엔진) | 인라인 fontSize 오버라이드 컬럼의 오버랩 판정 rect — per-line 높이 기준 | ALL PASS |
@@ -195,11 +196,33 @@ npx tsx scripts/verify-ime.mjs   # 11항목 ALL PASS
 npx tsx scripts/verify-multicolumn.mjs   # 15항목 ALL PASS
 ```
 
+### `verify-inline-metrics.mjs` — 인라인 letterSpacing/widthRatio/spaceRatio 전 파이프라인 (엔진)
+
+**목적**: `TextInlineStyle`의 자간/장평/공백비율 런 오버라이드가 전 소비 경로에 반영되는지 — 폭 계산(`getCharWidths`), 배치(줄바꿈 위치), 레이아웃 캐시 해시 무효화, `printPostData` 글자별 추출, `extractData` round-trip, 커서 스타일 조회(`getEffectiveStyleAt`/`getCommonStyleInRange`), 런 맵 병합/해제 판정. 런 필드만 변경됐을 때 `_layoutCache` 해시가 stale 히트로 재래핑을 생략하면 print/화면이 옛 배치를 유지하는 버그 클래스를 방어한다.
+
+**검증 항목** (47항목):
+1. 폭 공식 — 오버라이드 `swidth === rawWidth × widthRatio + letterSpacing × fontSize`, 공백 `spaceRatio × fontSize × widthRatio + letterSpacing × fontSize`
+2. 배치 — 폭 증가 오버라이드 런이 더 많은 라인 생성 + 배치 폭 합계 ≤ 파트 폭
+3. 캐시 해시 — 런 widthRatio 변경 시 재래핑(라인 수 변화), 동일 입력 재주입은 캐시 히트
+4. printPostData — 오버라이드 런 글자의 widthRatio/letterSpacing/spaceRatio가 런 값, plain 런은 문단 기본
+5. extractData — 런 스타일 3개 필드 round-trip 보존
+6. 스타일 조회 — 커서/범위 공통 스타일이 per-run 값 오버라이드, 혼합 범위는 상이 필드 제외
+7. 런 맵 병합 — 3개 필드 값 상이 인접 런 미병합, 동일 스타일 병합
+8. normalizeRunMap — 문단 기본과 동일한 런 해제, 상이 필드 존재 시 유지
+9. **오버랩 파트 분할** — 오버랩 라인 자유 영역 좌/우 파트 분할 + 좌측 파트 배치 폭 ≤ 파트 폭
+10. **오버랩 × 런 widthRatio 확대** — 확대 폭으로 배치해도 모든 파트 폭 준수 + visible 글자 오버랩 영역 0교차
+11. **좁은 자유 영역 × 큰 런 폭** — 자유 영역 < 런 글자 폭이면 COVER 처리(오버랩 요소 위 글자 넘침 방지), 오버랩 밖 라인 정상 배치
+
+**실행**:
+```bash
+npx tsx scripts/verify-inline-metrics.mjs   # 47항목 ALL PASS
+```
+
 ### `verify-style-revert.mjs` — 인라인 스타일 회귀 주입 범위 (브라우저)
 
 **목적**: `_applyTextStyle`이 문단 상속값과 동일한 값을 주입받을 때(상속 회귀), **적용 범위가 편집 상태에 맞는지** 검증한다. 이력: 회귀 주입이 편집 분기와 무관하게 전체 런 맵에서 필드를 제거해, "문단 fontSize 4 + 런 fontSize 6" 상태에서 런 일부에 4를 주입하면 **런 전체는 물론 다른 런의 오버라이드까지 사라지는** 버그가 있었다.
 
-**시나리오** (4개 인라인 필드 × 7 assertion = 28항목):
+**시나리오** (7개 인라인 필드 × 7 assertion = 49항목 — fontSize, fontWeight, fontStyle, color, letterSpacing, widthRatio, spaceRatio):
 - **selection 경로**: 선택 영역만 회귀 — 선택 밖 런 오버라이드 보존
 - **커서가 런 안**: 그 런만 회귀 (런 단위 시맨틱) — 다른 런 보존
 - **캐스케이드**(커서가 런 밖): 전체 런 회귀 (기본 복원 — 의도적 동작)
@@ -209,7 +232,7 @@ npx tsx scripts/verify-multicolumn.mjs   # 15항목 ALL PASS
 
 **실행**:
 ```bash
-npx tsx scripts/verify-style-revert.mjs   # 28항목 ALL PASS
+npx tsx scripts/verify-style-revert.mjs   # 49항목 ALL PASS (7개 인라인 필드)
 ```
 
 ### `verify-right-indent-tab.mjs` / `verify-right-indent-tab-browser.mjs` — 좌우 밀기 탭 정합성

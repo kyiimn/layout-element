@@ -1091,7 +1091,7 @@ class ParagraphEngine {
   genLineStyle(columnIndex?: number, lineIndex?: number): Partial<CSSStyleDeclaration>;
   genPartStyle(): Partial<CSSStyleDeclaration>;
   genCharStyle: (char: string, inlineStyle?: TextInlineStyle) => Partial<CSSStyleDeclaration>;
-  genCharInnerStyle: () => Partial<CSSStyleDeclaration>;
+  genCharInnerStyle: (inlineStyle?: TextInlineStyle) => Partial<CSSStyleDeclaration>;
   genCharStyleFlat: (char: string, inlineStyle?: TextInlineStyle) => Partial<CSSStyleDeclaration>;
 
   // 문자 폭
@@ -1983,7 +1983,7 @@ toggleInlineStyle<K extends keyof TextInlineStyle>(
  *   선택된 모든 대상의 paragraph 수정 + 전체 캐스케이드. lock된 대상은 스킵.
  *
  * 인라인에 주입 불가한 필드(textAlign, lineGap, verticalAlign,
- * letterSpacing, widthRatio)는 항상 paragraph에 적용된다.
+ * indent)는 항상 paragraph에 적용된다.
  * 처리 후 런 맵을 정규화하고 커서/selection 위치를 보존한다.
  *
  * @param textPatch - TextStyle 부분 객체 (제공된 필드만 부분 업데이트)
@@ -2013,8 +2013,8 @@ applyTextStyle(
 | 포커스 + 커서가 런 밖 | paragraph + 전체 캐스케이드 | paragraph |
 | 포커스 없음 + paragraph/paragraph-box selected (단일·복수) | 선택된 모든 대상 + 전체 캐스케이드 (lock 스킵) | paragraph |
 
-> ※1 `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`
-> ※2 `textAlign`, `lineGap`, `verticalAlign`, `letterSpacing`, `widthRatio`
+> ※1 `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`, `letterSpacing`, `widthRatio`, `spaceRatio`
+> ※2 `textAlign`, `lineGap`, `verticalAlign`, `indent`
 
 **캐스케이드**: 커서가 런 밖이거나 selected 경로에서 paragraph 스타일을 수정하면, 명시 주입 필드가 내부 모든 인라인 런에 일괄 적용된다. 캐스케이드로 런 필드가 주입 후의 문단 기본과 동일해지면 그 필드는 런에서 제거되고, 모든 필드가 동일해진 런은 `normalizeRunMap`이 해제한다. 정규화는 포커스 획득/blur 시에도 자동 수행된다. 병합·해제 규칙의 상세는 `EDITING_TEXT.md` § 6A.5 참조.
 
@@ -3060,6 +3060,9 @@ type TextInlineStyle = {
   fontWeight?: number;
   fontStyle?: 'normal' | 'italic';
   color?: string;
+  letterSpacing?: number;  // 자간 (em 단위). 미정의 시 문단 effective 값
+  widthRatio?: number;     // 장평 비율. 미정의 시 문단 effective 값
+  spaceRatio?: number;     // 공백 최소 너비 비율 (em 단위). 미정의 시 문단 effective 값
 };
 ```
 
@@ -3105,9 +3108,9 @@ type PrintPostDataChar = {
   fontFamily: string;        // CSS font-family
   fontSize: number;          // 폰트 크기 (mm)
   fontWeight: number;        // 폰트 굵기 (예: 400, 700)
-  widthRatio: number;        // 장평 비율 (CSS scale에서 추출)
-  letterSpacing: number;     // 자간 (em 단위)
-  spaceRatio: number;        // 공백 너비 비율 (em 단위)
+  widthRatio: number;        // 장평 비율 — `inlineStyle → textStyle → inheritStyle → DEFAULT_WIDTH_RATIO` (글자별 런 오버라이드 가능)
+  letterSpacing: number;     // 자간 (em 단위) — 동일 폴백 체인 (글자별)
+  spaceRatio: number;        // 공백 너비 비율 (em 단위) — 동일 폴백 체인 (글자별)
   color: CMYKColor;           // CMYK 색상 (ColorRegistry에서 색상 명칭으로 조회)
 };
 ```
