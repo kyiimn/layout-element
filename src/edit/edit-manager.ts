@@ -837,7 +837,10 @@ export class EditManager {
       inheritStyle,
     ) as Partial<ParagraphStyle>;
 
-    const INLINE_FIELDS = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "color"] as const;
+    const INLINE_FIELDS = [
+      "fontFamily", "fontSize", "fontWeight", "fontStyle", "color",
+      "letterSpacing", "widthRatio", "spaceRatio",
+    ] as const;
     const PARAGRAPH_FIELDS = ["lineGap", "textAlign", "verticalAlign"] as const;
     const revertTextFields: string[] = [];
     const revertParagraphFields: string[] = [];
@@ -901,7 +904,9 @@ export class EditManager {
 
     if (resolvedTextPatch.fontFamily !== undefined || resolvedTextPatch.fontWeight !== undefined ||
         resolvedTextPatch.fontSize !== undefined || resolvedTextPatch.fontStyle !== undefined ||
-        resolvedTextPatch.color !== undefined) {
+        resolvedTextPatch.color !== undefined ||
+        resolvedTextPatch.letterSpacing !== undefined || resolvedTextPatch.widthRatio !== undefined ||
+        resolvedTextPatch.spaceRatio !== undefined) {
       for (const entry of runMap) {
         if (!entry.style) continue;
         entry.style = { ...entry.style, ...resolvedTextPatch };
