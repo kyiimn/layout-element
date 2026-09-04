@@ -410,8 +410,10 @@ export class ParagraphEngine {
    * `Math.round()`를 사용하지 않아 부동소수점 정밀도를 보존한다.
    *
    * **장평(`widthRatio`) 처리**: 호출자가 `rawWidth × widthRatio`로 장평을 반영한다.
+   * 런 오버라이드가 있으면 per-run `widthRatio`를 사용한다.
    *
    * **최소 폭(`minWidthMm`)**: 결함 글리프 방어. `spaceRatio × fontSize`를 바닥값으로 사용한다.
+   * 런 오버라이드가 있으면 per-run `spaceRatio`를 사용한다.
    *
    * @param char - 측정할 문자
    * @param inlineStyle - 인라인 스타일 오버라이드
@@ -419,7 +421,7 @@ export class ParagraphEngine {
    */
   private _charWidthMm(char: string, inlineStyle?: TextInlineStyle): number {
     const fontSize = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
-    const minWidthMm = this.spaceRatio * fontSize;
+    const minWidthMm = (inlineStyle?.spaceRatio ?? this.spaceRatio) * fontSize;
 
     if (char === RIGHT_INDENT_TAB_CHAR) {
       return 0;
@@ -602,9 +604,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const defaultTextAlign = this.effectiveParagraphStyle.textAlign!;
     const effTextStyle = this.effectiveTextStyle;
     const baseFontSizeMm = effTextStyle.fontSize!;
-    const wr = this.widthRatio;
-    const effSpaceRatio = this.spaceRatio;
-    const letterSpacingEm = effTextStyle.letterSpacing!;
+    const baseWr = this.widthRatio;
+    const baseSpaceRatio = this.spaceRatio;
+    const baseLetterSpacingEm = effTextStyle.letterSpacing!;
     const charWidthCache = this._charWidthCache;
     const charWidthByFont = this._charWidthByFontCache;
 
@@ -646,10 +648,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
           for (let i = 0; i < strippedCount; i++) {
             const ch = content[stripStart + i]!;
             const inlineStyle = part.inlineStyles?.[stripStart + i];
-            // getCharWidths 인라인: 객체 할당/중복 getter 제거, 2단 캐시 직조회
+            // getCharWidths 인라인: 객체 할당/중복 getter 제거, 2단 캐시 직조회.
+            // letterSpacing/widthRatio/spaceRatio는 런 오버라이드 가능 필드다.
             const fontSize = inlineStyle?.fontSize ?? baseFontSizeMm;
-            const lsMm = letterSpacingEm * fontSize;
-            const minWidthMm = effSpaceRatio * fontSize;
+            const lsMm = (inlineStyle?.letterSpacing ?? baseLetterSpacingEm) * fontSize;
+            const wr = inlineStyle?.widthRatio ?? baseWr;
+            const minWidthMm = (inlineStyle?.spaceRatio ?? baseSpaceRatio) * fontSize;
             if (ch === RIGHT_INDENT_TAB_CHAR && tabIdx === -1) tabIdx = i;
             let rawWidth: number;
             if (ch === RIGHT_INDENT_TAB_CHAR) {
@@ -850,6 +854,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * @param alignOffsetMm - verticalAlign 오프셋 (mm)
    * @param cumulativeTopMm - 이전 라인들의 확정 높이 누적합 (mm). 균일 경로에서는 `lineIndex × lineHeight`
    * @param pendingMaxFontSizeMm - 이번 라인 rect 높이 산출용 max fontSize 근사 (mm). 균일 경로에서는 문단 기본 fontSize
+   * @param startRunInlineStyle - 이번 라인에 먼저 배치될 런의 인라인 스타일 (자유 영역 필터 기준치 산출용)
    * @returns cover=true면 라인 전체가 덮임, overflow=true면 컬럼 높이 초과
    */
   private _createLineWithParts(
@@ -859,6 +864,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     alignOffsetMm: number,
     cumulativeTopMm: number,
     pendingMaxFontSizeMm: number,
+    startRunInlineStyle?: TextInlineStyle,
   ): {
     cover: boolean;
     overflow: boolean;
@@ -906,8 +912,16 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const adjustedFreeRegions =
       indentMm > 0 ? freeRegions.map((r, i) => (i === 0 ? { start: r.start + indentMm, end: r.end } : r)) : freeRegions;
 
-    const letterSpacingEm = this.effectiveTextStyle.letterSpacing!;
-    const minCharWidthMm = this.widthRatio * fontSize + letterSpacingEm * fontSize;
+    // 자유 영역 최소 폭 기준치: 라인 시작 런의 스타일(per-run fontSize/
+    // widthRatio/letterSpacing)을 반영한다. 배치 패스가 런 단위 per-run 폭을
+    // 사용하므로 문단 기본 폰트 크기로 임계치를 계산하면 큰 글자/넓은 장평 런이
+    // 좁은 자유 영역에 남아 무한 루프 가드가 글자를 강제 배치 → 오버랩 요소
+    // 위로 글자가 넘치는 현상이 발생한다. 런 글자 폭보다 좁은 영역은 제외되어
+    // 라인이 COVER 처리되고 글자는 다음 라인으로 흐른다.
+    const regionFilterFs = startRunInlineStyle?.fontSize ?? fontSize;
+    const regionFilterWr = startRunInlineStyle?.widthRatio ?? this.widthRatio;
+    const regionFilterLs = startRunInlineStyle?.letterSpacing ?? this.effectiveTextStyle.letterSpacing!;
+    const minCharWidthMm = regionFilterWr * regionFilterFs + regionFilterLs * regionFilterFs;
     const usableRegions = adjustedFreeRegions.filter((r) => r.end - r.start >= minCharWidthMm);
 
     if (usableRegions.length === 0) {
@@ -1168,7 +1182,10 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
             parts.push(
               "s:" + (s.fontFamily ?? "") + "," +
                     (s.fontSize ?? "") + "," +
-                    (s.fontStyle ?? ""),
+                    (s.fontStyle ?? "") + "," +
+                    (s.letterSpacing ?? "") + "," +
+                    (s.widthRatio ?? "") + "," +
+                    (s.spaceRatio ?? ""),
             );
           }
         }
@@ -1449,9 +1466,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   ): number {
     const baseFontSizeMm = this.fontSize;
     const effTextStyle = this.effectiveTextStyle;
-    const wr = this.widthRatio;
-    const effSpaceRatio = this.spaceRatio;
-    const letterSpacingEm = effTextStyle.letterSpacing!;
+    const baseWr = this.widthRatio;
+    const baseSpaceRatio = this.spaceRatio;
+    const baseLetterSpacingEm = effTextStyle.letterSpacing!;
     const charWidthByFont = this._charWidthByFontCache;
 
     let maxFs = baseFontSizeMm;
@@ -1467,8 +1484,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       const runFontSize = inlineStyle?.fontSize ?? baseFontSizeMm;
       if (runFontSize > maxFs) maxFs = runFontSize;
 
-      const letterSpacingMm = letterSpacingEm * runFontSize;
-      const minWidthMm = effSpaceRatio * runFontSize;
+      const runWr = inlineStyle?.widthRatio ?? baseWr;
+      const letterSpacingMm = (inlineStyle?.letterSpacing ?? baseLetterSpacingEm) * runFontSize;
+      const minWidthMm = (inlineStyle?.spaceRatio ?? baseSpaceRatio) * runFontSize;
       const fontKey = (inlineStyle?.fontFamily ?? '') + '|' + runFontSize;
       let fontWidthMap = charWidthByFont.get(fontKey);
       if (fontWidthMap === undefined) {
@@ -1497,7 +1515,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
           }
           rawWidth = cached > minWidthMm ? cached : minWidthMm;
         }
-        widthMm += rawWidth * wr + letterSpacingMm;
+        widthMm += rawWidth * runWr + letterSpacingMm;
         if (widthMm >= widthBudgetMm) return maxFs;
       }
     }
@@ -1652,6 +1670,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
               alignOffsetMm,
               cumulativeTopForRect,
               pendingMaxFontSizeMm,
+              runs[runIdx]?.textInlineStyle,
             );
             isColumnOverflow = result.overflow;
 
@@ -1699,8 +1718,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         const letterSpacingEm = this.effectiveTextStyle.letterSpacing!;
         const effTextStyle = this.effectiveTextStyle;
         const baseFontSizeMm = effTextStyle.fontSize!;
-        const wr = this.widthRatio;
-        const effSpaceRatio = this.spaceRatio;
+        const baseWr = this.widthRatio;
+        const baseSpaceRatio = this.spaceRatio;
         const lastColumnIdx = this._columnWidths.length - 1;
         const charWidthCache = this._charWidthCache;
         const charWidthByFont = this._charWidthByFontCache;
@@ -1711,8 +1730,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
           const content = run.content;
           const inlineFontSize = inlineStyle?.fontSize ?? baseFontSizeMm;
           const inlineFontName = inlineStyle?.fontFamily ?? "";
-          const letterSpacingMm = letterSpacingEm * inlineFontSize;
-          const minWidthMm = effSpaceRatio * inlineFontSize;
+          const inlineWr = inlineStyle?.widthRatio ?? baseWr;
+          const inlineLsMm = (inlineStyle?.letterSpacing ?? letterSpacingEm) * inlineFontSize;
+          const inlineSpaceRatio = inlineStyle?.spaceRatio ?? baseSpaceRatio;
+          const letterSpacingMm = inlineLsMm;
+          const minWidthMm = inlineSpaceRatio * inlineFontSize;
 
           const fontKey = inlineFontName + "|" + inlineFontSize;
           let fontWidthMap = charWidthByFont.get(fontKey);
@@ -1744,7 +1766,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
               }
               rawCharWidth = cached > minWidthMm ? cached : minWidthMm;
             }
-            const charWidth = char === RIGHT_INDENT_TAB_CHAR ? 0 : rawCharWidth * wr + letterSpacingMm;
+            const charWidth = char === RIGHT_INDENT_TAB_CHAR ? 0 : rawCharWidth * inlineWr + letterSpacingMm;
 
             const targetLine = columnContent[columnContent.length - 1];
             const targetPart = targetLine.parts[currentPartIdx];
@@ -1818,7 +1840,15 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
                 cumulativeTopForRect = columnContent.length * this._lineHeight;
                 pendingMaxFontSizeMm = baseFontSizeMmForPending;
               }
-              const result = this._createLineWithParts(curColumn, false, false, alignOffsetMm, cumulativeTopForRect, pendingMaxFontSizeMm);
+              const result = this._createLineWithParts(
+                curColumn,
+                false,
+                false,
+                alignOffsetMm,
+                cumulativeTopForRect,
+                pendingMaxFontSizeMm,
+                runs[runIdx]?.textInlineStyle,
+              );
               isColumnOverflow = result.overflow;
 
               if (result.cover) {
@@ -2023,11 +2053,15 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
             // fontWeight/color는 폭/높이에 무영향이므로 제외 — 스타일만 변경된
             // 주입(굵게/색상)에서 캐시 히트 → 재래핑 생략. inlineStyles는
             // _refreshInlineStylesOnly() 경량 패스로 최신화된다.
+            // letterSpacing/widthRatio/spaceRatio는 폭 계산에 개입하므로 포함.
             parts.push(
               "s:" +
                 (s.fontFamily ?? "") + "," +
                 (s.fontSize ?? "") + "," +
-                (s.fontStyle ?? ""),
+                (s.fontStyle ?? "") + "," +
+                (s.letterSpacing ?? "") + "," +
+                (s.widthRatio ?? "") + "," +
+                (s.spaceRatio ?? ""),
             );
           }
         }
@@ -2292,9 +2326,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * @returns 외부 span CSS 스타일 객체
    */
   public genCharStyle = (char: string, inlineStyle?: TextInlineStyle, lineMaxFontSize?: number): Partial<CSSStyleDeclaration> => {
-    const wr = this.widthRatio;
-    const lsEm = this.effectiveTextStyle.letterSpacing!;
-    const sr = this.spaceRatio;
+    const wr = inlineStyle?.widthRatio ?? this.widthRatio;
+    const lsEm = inlineStyle?.letterSpacing ?? this.effectiveTextStyle.letterSpacing!;
+    const sr = inlineStyle?.spaceRatio ?? this.spaceRatio;
     const fs = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
     const lmfs = lineMaxFontSize ?? fs;
     const fontName = inlineStyle?.fontFamily ?? "";
@@ -2307,7 +2341,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     if (char === RIGHT_INDENT_TAB_CHAR) {
       widthMm = 0;
     } else if (char === " ") {
-      widthMm = this.spaceRatio * fs * wr + lsMm;
+      widthMm = sr * fs * wr + lsMm;
     } else {
       const rawWidthMm = this._charWidthMm(char, inlineStyle);
       widthMm = rawWidthMm * wr + lsMm;
@@ -2317,7 +2351,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const style: Partial<CSSStyleDeclaration> = {
       display: "inline-block",
       width: widthCss,
-      minWidth: char === RIGHT_INDENT_TAB_CHAR ? "0mm" : `${this.spaceRatio * fs}mm`,
+      minWidth: char === RIGHT_INDENT_TAB_CHAR ? "0mm" : `${sr * fs}mm`,
       maxWidth: widthCss,
       textAlign: "center",
     };
@@ -2336,13 +2370,17 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * 내부 span 스타일 생성. `scale` transform으로 glyph 시각 축소.
    * 외부 span과 분리되어 레이아웃 박스 크기에 영향을 주지 않는다.
    *
+   * `inlineStyle.widthRatio` 오버라이드가 있으면 per-run 장평을 적용하고,
+   * 없으면 문단 effective `widthRatio`를 사용한다.
+   *
    * **보정 계수 `0.88`**: opentype.js advanceWidth와 브라우저 렌더링 간 격차를 보정.
    * 절대 변경하거나 제거해서는 안 된다.
    *
+   * @param inlineStyle - 인라인 스타일 오버라이드 (선택). `widthRatio`만 소비한다
    * @returns 내부 span CSS 스타일 객체
    */
-  public genCharInnerStyle = (): Partial<CSSStyleDeclaration> => {
-    const wr = this.widthRatio;
+  public genCharInnerStyle = (inlineStyle?: TextInlineStyle): Partial<CSSStyleDeclaration> => {
+    const wr = inlineStyle?.widthRatio ?? this.widthRatio;
     const key = `inner|${wr}`;
     if (key === this._charInnerStyleKey) return this._charInnerStyle;
     this._charInnerStyleKey = key;
@@ -2362,9 +2400,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * @returns 단일 span용 CSS 스타일 객체
    */
   public genCharStyleFlat = (char: string, inlineStyle?: TextInlineStyle, lineMaxFontSize?: number): Partial<CSSStyleDeclaration> => {
-    const wr = this.widthRatio;
-    const lsEm = this.effectiveTextStyle.letterSpacing!;
-    const sr = this.spaceRatio;
+    const wr = inlineStyle?.widthRatio ?? this.widthRatio;
+    const lsEm = inlineStyle?.letterSpacing ?? this.effectiveTextStyle.letterSpacing!;
+    const sr = inlineStyle?.spaceRatio ?? this.spaceRatio;
     const fs = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
     const lmfs = lineMaxFontSize ?? fs;
     const lsMm = lsEm * fs;
@@ -2404,15 +2442,16 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * @returns `{ rawWidth: 원본 폭 mm, swidth: 장평 적용 폭 mm, widthRatio: 현재 장평 }`
    */
   public getCharWidths = (char: string, inlineStyle?: TextInlineStyle): { rawWidth: number; swidth: number; widthRatio: number } => {
-    const wr = this.widthRatio;
+    const wr = inlineStyle?.widthRatio ?? this.widthRatio;
     const fontSize = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
-    const lsEm = this.effectiveTextStyle.letterSpacing!;
+    const lsEm = inlineStyle?.letterSpacing ?? this.effectiveTextStyle.letterSpacing!;
+    const spaceRatio = inlineStyle?.spaceRatio ?? this.spaceRatio;
     let rawWidth: number;
     if (char === RIGHT_INDENT_TAB_CHAR) {
       rawWidth = 0;
       return { rawWidth, swidth: 0, widthRatio: wr };
     } else if (char === " ") {
-      rawWidth = this.spaceRatio * fontSize;
+      rawWidth = spaceRatio * fontSize;
     } else {
       rawWidth = this._charWidthMm(char, inlineStyle);
     }
@@ -3206,9 +3245,10 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * 소스 오프셋의 유효(effective) 텍스트 스타일을 반환한다.
    *
    * `effectiveTextStyle`(기본값 + 상속값 + 문단 주입값 병합)에 해당 위치 런의
-   * 인라인 스타일 5개 필드(`fontFamily`, `fontSize`, `fontWeight`,
-   * `fontStyle`, `color`)를 오버라이드한다. 런 스타일의 `undefined` 필드는
-   * 무시한다 (명시적 `undefined` 키가 기본값을 덮어쓰지 않도록 조건부 spread).
+   * 인라인 스타일 8개 필드(`fontFamily`, `fontSize`, `fontWeight`,
+   * `fontStyle`, `color`, `letterSpacing`, `widthRatio`, `spaceRatio`)를
+   * 오버라이드한다. 런 스타일의 `undefined` 필드는 무시한다 (명시적
+   * `undefined` 키가 기본값을 덮어쓰지 않도록 조건부 spread).
    *
    * @param sourceOffset - 평문 오프셋 (`\n` 포함)
    * @returns 해당 위치의 유효 텍스트 스타일 (모든 필드 materialized)
@@ -3231,6 +3271,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       ...(inline.fontWeight !== undefined && { fontWeight: inline.fontWeight }),
       ...(inline.fontStyle !== undefined && { fontStyle: inline.fontStyle }),
       ...(inline.color !== undefined && { color: inline.color }),
+      ...(inline.letterSpacing !== undefined && { letterSpacing: inline.letterSpacing }),
+      ...(inline.widthRatio !== undefined && { widthRatio: inline.widthRatio }),
+      ...(inline.spaceRatio !== undefined && { spaceRatio: inline.spaceRatio }),
     };
   }
 
@@ -3238,9 +3281,10 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * 범위 내 모든 위치의 유효 스타일이 일치하는 필드만 반환한다.
    *
    * 인라인 오버라이드 가능 필드(`color`, `fontFamily`, `fontWeight`,
-   * `fontStyle`, `fontSize`)는 범위 내 런들을 순회하며 공통값만 유지한다.
-   * 단락 수준 필드(`letterSpacing`, `widthRatio`, `spaceRatio`, `indent`)는
-   * 런으로 오버라이드 불가능하므로 항상 `effectiveTextStyle`에서 가져온다.
+   * `fontStyle`, `fontSize`, `letterSpacing`, `widthRatio`, `spaceRatio`)는
+   * 범위 내 런들을 순회하며 공통값만 유지한다. 단락 수준 전용 필드
+   * (`indent`)는 런으로 오버라이드 불가능하므로 항상 `effectiveTextStyle`에서
+   * 가져온다.
    *
    * 런 단위로 비교하므로 O(범위 내 런 수)이다 — 문자 수에 비례하지 않는다.
    *
@@ -3260,7 +3304,10 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const base = this.effectiveTextStyle;
     if (endOffset <= startOffset) return { ...base };
 
-    const INLINE_FIELDS = ["color", "fontFamily", "fontWeight", "fontStyle", "fontSize"] as const;
+    const INLINE_FIELDS = [
+      "color", "fontFamily", "fontWeight", "fontStyle", "fontSize",
+      "letterSpacing", "widthRatio", "spaceRatio",
+    ] as const;
     const runs = this._styleRuns ?? (this._styleRuns = this._buildStyleRuns());
 
     let first = true;
@@ -3285,9 +3332,6 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 
     return {
       ...common,
-      letterSpacing: base.letterSpacing,
-      widthRatio: base.widthRatio,
-      spaceRatio: base.spaceRatio,
       indent: base.indent,
     } as TextStyle;
   }
@@ -3397,7 +3441,10 @@ function inlineStyleEqual(a: TextInlineStyle | undefined, b: TextInlineStyle | u
     a.fontSize === b.fontSize &&
     a.fontWeight === b.fontWeight &&
     a.fontStyle === b.fontStyle &&
-    a.color === b.color
+    a.color === b.color &&
+    a.letterSpacing === b.letterSpacing &&
+    a.widthRatio === b.widthRatio &&
+    a.spaceRatio === b.spaceRatio
   );
 }
 
@@ -3516,9 +3563,12 @@ export function buildParagraphPrintPostData(
           const { swidth } = engine.getCharWidths(char, inlineStyle);
           const charWidthMm = swidth;
 
-          const widthRatio = engine.widthRatio;
-          const letterSpacing = engine.effectiveTextStyle.letterSpacing!;
-          const spaceRatio = engine.spaceRatio;
+          const widthRatio = inlineStyle?.widthRatio
+            ?? engine.widthRatio;
+          const letterSpacing = inlineStyle?.letterSpacing
+            ?? engine.effectiveTextStyle.letterSpacing!;
+          const spaceRatio = inlineStyle?.spaceRatio
+            ?? engine.spaceRatio;
 
           const charFontFamilyName = inlineStyle?.fontFamily
             ?? textStyle?.fontFamily
