@@ -651,7 +651,10 @@ export class LayoutBoxElement extends HTMLElement {
           parentHeight: this.model!.editableTextHeight,
         }
       } else if (childEl.type === 'image') {
-        childEl.inheritStyle = childInheritStyle;
+        childEl.inheritStyle = {
+          ...childInheritStyle,
+          parentHeight: this.model!.contentHeight,
+        };
       }
     });
   }
