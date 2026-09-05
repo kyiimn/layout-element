@@ -2876,7 +2876,11 @@ export class TextEditController {
     }
 
     if (allMatch) {
-      this._runMap = applyStyleToRange(this._runMap, start.textOffset, end.textOffset, { [field]: undefined } as Partial<TextInlineStyle>);
+      // 토글 오프: 필드 제거. applyStyleToRange에 {[field]: undefined}를 넘기면
+      // 병합 결과에 undefined 값 키가 남아 content에
+      // `textInlineStyle: {fontWeight: undefined}` 셸이 저장되므로
+      // stripRunFields로 키 자체를 delete한다 — 다른 필드 오버라이드는 보존.
+      this._runMap = stripRunFields(this._runMap, [field]);
     } else {
       this._runMap = applyStyleToRange(this._runMap, start.textOffset, end.textOffset, { [field]: value } as Partial<TextInlineStyle>);
     }
