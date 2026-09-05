@@ -11,8 +11,10 @@ import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
 import { PlaceGunController } from "./place-gun-controller";
 import type { SelectionRange } from "@/types/edit";
-import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail, ContextMenuEventDetail, PlaceGunItem, PlaceGunChangeEventDetail, PlaceGunBeforeEventDetail, PlaceGunAfterEventDetail, TableCellSelectionChangeDetail, TableCellSelection } from "@/types/edit";
+import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail, ContextMenuEventDetail, PlaceGunItem, PlaceGunChangeEventDetail, PlaceGunBeforeEventDetail, PlaceGunAfterEventDetail, TableCellSelectionChangeDetail, TableCellSelection, ImagePropertyChangeEventDetail } from "@/types/edit";
 import type { BoxRole } from "@/types/layout";
+import { LayoutImageElement } from "@/components/layout/image.element";
+import { ImageEditController } from "./image-edit-controller";
 
 /** 레이아웃 편집 대상 요소 (box 및 TD) */
 export type LayoutElement = LayoutBoxElement | LayoutTableCellElement;
@@ -40,7 +42,10 @@ export type EditManagerEventType =
   | 'placeGunChange'
   | 'placeGunBefore'
   | 'placeGunAfter'
-  | 'cellSelectionChange';
+  | 'cellSelectionChange'
+  | 'imageMove'
+  | 'imageResize'
+  | 'imagePropertyChange';
 
 /**
  * 글로벌 편집 관리 이벤트.
@@ -120,6 +125,36 @@ export interface EditManagerEvent {
   placeGunAfterDetail?: PlaceGunAfterEventDetail;
   /** 셀 블록 선택 변경 상세 정보 (cellSelectionChange 이벤트에서만) */
   cellSelectionDetail?: TableCellSelectionChangeDetail;
+  /** 이미지 이동 이벤트 상세 정보 (imageMove 이벤트에서만) */
+  imageDetail?: ImageMoveResizeEventDetail;
+  /** 이미지 속성 변경 상세 정보 (imagePropertyChange 이벤트에서만) */
+  imagePropertyDetail?: ImagePropertyChangeEventDetail;
+}
+
+/**
+ * 이미지 이동/크기 조절 이벤트 상세 정보.
+ */
+export interface ImageMoveResizeEventDetail {
+  /** 이동/크기 조절된 이미지 요소 */
+  image: LayoutImageElement;
+  /** 변경 전 x (mm) */
+  previousX?: number;
+  /** 변경 전 y (mm) */
+  previousY?: number;
+  /** 변경 전 width (mm) */
+  previousWidth?: number;
+  /** 변경 전 height (mm) */
+  previousHeight?: number;
+  /** 변경 후 x (mm) */
+  x?: number;
+  /** 변경 후 y (mm) */
+  y?: number;
+  /** 변경 후 width (mm) */
+  width?: number;
+  /** 변경 후 height (mm) */
+  height?: number;
+  /** ESC 취소 여부 */
+  canceled?: boolean;
 }
 
 /**
@@ -175,6 +210,11 @@ export class EditManager {
   private _clickConsumeTimer: ReturnType<typeof setTimeout> | null = null;
   private _layoutEditMode: boolean = false;
   private _layoutEditType: LayoutEditType = 'move';
+  private _imageEditMode: boolean = false;
+  private _focusedImage: LayoutImageElement | null = null;
+  private _imageEditController: ImageEditController | null = null;
+  /** 이미지 편집 모드 진입 이전 모드. ESC/blur 시 복귀용. */
+  private _imageEditModeRestoreTarget: 'layout' | null = null;
   private _selectionController: LayoutSelectionController | null = null;
   private _layoutEditController: LayoutEditController | null = null;
   private _editableRoles: Set<BoxRole> | null = null;
@@ -271,6 +311,7 @@ export class EditManager {
       textEditMode: this._textEditMode,
       layoutEditMode: this._layoutEditMode,
       layoutEditType: this._layoutEditType,
+      imageEditMode: this._imageEditMode,
       insertMode: this._insertMode,
     };
   }
@@ -382,6 +423,9 @@ export class EditManager {
     this._modeChangeSuppressed = true;
     this.textEditMode = false;
     this.layoutEditMode = false;
+    this._imageEditMode = false;
+    this._releaseImageFocus();
+    this._imageEditModeRestoreTarget = null;
     this.insertMode = null;
     this._modeChangeSuppressed = false;
 
@@ -405,6 +449,10 @@ export class EditManager {
       this._layoutEditController.destroy();
       this._layoutEditController = null;
     }
+    if (this._imageEditController) {
+      this._imageEditController.destroy();
+      this._imageEditController = null;
+    }
     this._insertController = null;
     this._placeGunController = null;
 
@@ -419,6 +467,7 @@ export class EditManager {
       textEditMode: false,
       layoutEditMode: false,
       layoutEditType: 'move',
+      imageEditMode: false,
       insertMode: null,
     });
   }
@@ -1080,6 +1129,7 @@ export class EditManager {
     if (value) {
       this._modeChangeSuppressed = true;
       this.layoutEditMode = false;
+      this._deactivateImageEditMode();
       this.insertMode = null;
       this._modeChangeSuppressed = false;
       this._reduceSelectionToSingleForTextMode();
@@ -1399,6 +1449,7 @@ export class EditManager {
     if (nextActive) {
       this._modeChangeSuppressed = true;
       this.textEditMode = false;
+      this._deactivateImageEditMode();
       this.insertMode = null;
       this._modeChangeSuppressed = false;
     }
@@ -1419,6 +1470,268 @@ export class EditManager {
    * `layoutEditMode`가 `false`일 때도 이전 타입을 유지하여 반환한다.
    */
   get layoutEditType(): LayoutEditType { return this._layoutEditType; }
+
+  // ─── Image Edit Mode ──────────────────────────────────────────
+
+  /**
+   * 이미지 편집 모드 활성 여부.
+   *
+   * `true`이면 문서 내 모든 편집 가능한 이미지를 드래그(위치 이동)/휴(크기 조절)로
+   * 직접 조작할 수 있다. `focusImage()`로 포커스된 이미지가 조작 대상이 되며,
+   * 포커스 없이 이미지를 클릭하면 자동으로 포커스가 부여된다.
+   *
+   * 모드 진입/해제는 `focusImage()`/`blurImage()` 또는 이미지 더블클릭/ESC를
+   * 사용한다. 이 setter로 직접 `false`를 지정하면 포커스와 컨트롤러가 해제된다.
+   */
+  get imageEditMode(): boolean { return this._imageEditMode; }
+  set imageEditMode(value: boolean) {
+    if (this._imageEditMode === value) return;
+    const prevMode = this._getModeState();
+    if (value) {
+      this._modeChangeSuppressed = true;
+      this.textEditMode = false;
+      this.layoutEditMode = false;
+      this.insertMode = null;
+      this._modeChangeSuppressed = false;
+    } else {
+      this._releaseImageFocus();
+      this._imageEditModeRestoreTarget = null;
+    }
+    this._imageEditMode = value;
+    this._updateImageEditController();
+    this._dispatchModeChange(prevMode);
+  }
+
+  /**
+   * 현재 이미지 편집 포커스가 있는 이미지 요소.
+   * 포커스가 없으면 `null`이다.
+   */
+  get focusedImage(): LayoutImageElement | null {
+    return this._focusedImage;
+  }
+
+  /**
+   * 이미지 편집 모드를 활성화하고 이미지에 포커스를 부여한다.
+   *
+   * 다른 편집 모드(text/layout/insert)가 활성 상태면 해제하고 진입한다.
+   * 이미지 편집 모드 진입 시 **레이아웃 편집 모드였다면** ESC로 이미지 편집을
+   * 종료할 때 레이아웃 편집 모드로 복귀하기 위해 이전 모드를 기록한다.
+   *
+   * `isImageEditable()`과 달리 모드 활성 여부는 검사하지 않는다 — 이 메서드가
+   * 모드 진입 자체를 수행하기 때문이다. lock/편집 루트만 검사한다.
+   *
+   * @param target - 포커스할 이미지 요소 또는 이미지 요소의 ID
+   * @param options.fromLayoutEditMode - 레이아웃 편집 모드에서 진입했음을 명시.
+   *   `true`면 ESC 종료 시 레이아웃 편집 모드로 복귀한다.
+   * @returns 포커스 설정 성공 여부
+   */
+  focusImage(
+    target: LayoutImageElement | string,
+    options?: { fromLayoutEditMode?: boolean },
+  ): boolean {
+    let image: LayoutImageElement | null;
+    if (typeof target === 'string') {
+      const element = this._docEl.querySelector('#' + CSS.escape(target));
+      image = element instanceof LayoutImageElement ? element : null;
+    } else {
+      image = target;
+    }
+    if (!image || !image.isConnected) return false;
+    if (this._isAncestorBoxLocked(image)) return false;
+    if (!this._isWithinEditableRoot(image)) return false;
+
+    const wasLayoutEditMode = options?.fromLayoutEditMode ?? this._layoutEditMode;
+
+    if (this._imageEditMode && this._focusedImage === image) return true;
+
+    const prevFocused = this._focusedImage;
+    if (prevFocused && prevFocused !== image) {
+      this._clearBoxSelectionForImage(prevFocused);
+    }
+
+    const prevMode = this._getModeState();
+    if (!this._imageEditMode) {
+      this._modeChangeSuppressed = true;
+      this.textEditMode = false;
+      this.layoutEditMode = false;
+      this.insertMode = null;
+      this._modeChangeSuppressed = false;
+      this._imageEditMode = true;
+    }
+
+    this._focusedImage = image;
+    this._imageEditModeRestoreTarget = wasLayoutEditMode ? 'layout' : null;
+    image.setAttribute('image-edit-focus', '');
+    this._selectBoxForImage(image);
+    this._updateImageEditController();
+    this._dispatchModeChange(prevMode);
+    return true;
+  }
+
+  /**
+   * 이미지 편집 포커스가 들어온 이미지의 부모 box를 레이아웃 선택한다.
+   *
+   * 텍스트 포커스(`_selectBoxForParagraph`)와 동일한 패턴으로
+   * 부모 box에 `selected`(빨간 테두리) + `text-focused`(타입 라벨 숨김)를
+   * 설정한다. 시각적으로 "기본 빨간 테두리 + 라벨 숨김" 상태가 된다.
+   *
+   * @param image - 포커스를 얻은 이미지
+   */
+  private _selectBoxForImage(image: LayoutImageElement): void {
+    const parentBox = image.parentElement;
+    if (!(parentBox instanceof LayoutBoxElement)) return;
+
+    const previousLayouts = [...this._selectedLayouts];
+    const isAlreadySelected = this._selectedLayouts.length === 1 && this._selectedLayouts[0] === parentBox;
+
+    if (!isAlreadySelected) {
+      for (const prev of this._selectedLayouts) {
+        prev.removeAttribute('selected');
+        prev.removeAttribute('text-focused');
+      }
+      this._selectedLayouts = [parentBox];
+      parentBox.setAttribute('selected', '');
+    }
+    parentBox.setAttribute('text-focused', '');
+    this._dispatchLayoutSelection(previousLayouts);
+  }
+
+  /**
+   * 이미지 편집 포커스가 해제된 이미지의 부모 box에서 `text-focused` 속성을 제거한다.
+   *
+   * 텍스트 포커스 해제(`_clearBoxSelectionForParagraph`)와 동일하게
+   * 레이아웃 선택(selected)은 유지하고 text-focused만 제거하여
+   * 타입 라벨이 다시 표시되게 한다.
+   *
+   * @param image - 포커스를 잃은 이미지
+   */
+  private _clearBoxSelectionForImage(image: LayoutImageElement): void {
+    const parentBox = image.parentElement;
+    if (parentBox instanceof LayoutBoxElement) {
+      parentBox.removeAttribute('text-focused');
+    }
+  }
+
+  /**
+   * 이미지 편집 포커스를 해제한다.
+   *
+   * 이미지 편집 모드 자체는 유지된다 (다른 이미지를 클릭해 계속 편집 가능).
+   * 모드까지 완전히 종료하려면 `imageEditMode = false` 또는 ESC를 사용한다.
+   *
+   * @param target - 해제할 이미지. 생략 시 현재 포커스된 이미지
+   * @returns 포커스 해제 성공 여부
+   */
+  blurImage(target?: LayoutImageElement | string): boolean {
+    if (!this._focusedImage) return false;
+    if (target === undefined) {
+      this._focusedImage.removeAttribute('image-edit-focus');
+      this._clearBoxSelectionForImage(this._focusedImage);
+      this._focusedImage = null;
+      return true;
+    }
+    let image: LayoutImageElement | null;
+    if (typeof target === 'string') {
+      const element = this._docEl.querySelector('#' + CSS.escape(target));
+      image = element instanceof LayoutImageElement ? element : null;
+    } else {
+      image = target;
+    }
+    if (!image || this._focusedImage !== image) return false;
+    this._focusedImage.removeAttribute('image-edit-focus');
+    this._clearBoxSelectionForImage(image);
+    this._focusedImage = null;
+    return true;
+  }
+
+  /**
+   * 특정 이미지가 이미지 편집 가능한지 판별한다.
+   *
+   * 판별 규칙:
+   * 1. 이미지 편집 모드가 활성 상태여야 함
+   * 2. 조상 box 중 lock이 없어야 함
+   * 3. 편집 루트(`_editableRootId`) 내부에 있어야 함
+   *
+   * @param image - 판별할 이미지 요소
+   * @returns 편집 가능 여부
+   */
+  isImageEditable(image: LayoutImageElement): boolean {
+    if (!this._imageEditMode) return false;
+    if (this._isAncestorBoxLocked(image)) return false;
+    if (!this._isWithinEditableRoot(image)) return false;
+    return true;
+  }
+
+  /**
+   * 이미지 편집 모드 컨트롤러의 attach/detach를 모드 상태에 동기화한다.
+   */
+  private _updateImageEditController(): void {
+    if (this._imageEditMode) {
+      if (!this._imageEditController) {
+        this._imageEditController = new ImageEditController(this._docEl, this);
+      }
+      this._imageEditController.attach();
+    } else if (this._imageEditController) {
+      this._imageEditController.detach();
+    }
+  }
+
+  /**
+   * 이미지 편집 포커스가 있을 때, 레이아웃 선택이 포커스된 이미지의 부모 box를
+   * 포함하지 않으면 이미지 편집 포커스를 해제한다.
+   *
+   * "다른 요소를 클릭하여 selection이 이동하면 포커스를 잃어야 한다"는
+   * 요구사항의 구현이다. 텍스트 편집 포커스와 달리 이미지 편집 포커스는
+   * selection이 다른 box로 이동하면 유지될 이유가 없다 (드래그/휠 조작이
+   * selection이 아닌 포커스에 결합되어 있기 때문).
+   *
+   * @param newSelections - 갱신된 선택 요소 배열
+   */
+  private _releaseImageFocusIfBoxDeselected(newSelections: LayoutElement[]): void {
+    if (!this._focusedImage) return;
+    const focusBox = this._focusedImage.parentElement;
+    if (focusBox instanceof LayoutBoxElement && newSelections.includes(focusBox)) return;
+    this.blurImage();
+  }
+
+  /**
+   * 모드 상태만 비활성화한다 (modeChange 이벤트/포커스 해제 없음).
+   * 다른 모드 setter의 상호 배타 처리 내부에서 호출된다.
+   */
+  private _deactivateImageEditMode(): void {
+    if (!this._imageEditMode) return;
+    this._imageEditMode = false;
+    this._releaseImageFocus();
+    this._imageEditModeRestoreTarget = null;
+    this._updateImageEditController();
+  }
+
+  /**
+   * 이미지 편집 포커스를 해제한다 (image-edit-focus 속성 + 부모 box text-focused 제거).
+   * 레이아웃 선택(selected)은 유지한다.
+   */
+  private _releaseImageFocus(): void {
+    if (!this._focusedImage) return;
+    this._focusedImage.removeAttribute('image-edit-focus');
+    this._clearBoxSelectionForImage(this._focusedImage);
+    this._focusedImage = null;
+  }
+
+  /**
+   * 이미지 편집 모드를 종료하고 이전 모드(레이아웃 편집)로 복귀한다.
+   *
+   * ImageEditController의 ESC 처리에서 호출된다. 진입 시 레이아웃 편집 모드였다면
+   * 레이아웃 편집 모드로 복귀하고, 아니면 모든 모드를 끈다.
+   *
+   * @internal
+   */
+  _exitImageEditModeWithRestore(): void {
+    if (!this._imageEditMode) return;
+    const restoreLayout = this._imageEditModeRestoreTarget === 'layout';
+    this.imageEditMode = false;
+    if (restoreLayout) {
+      this.layoutEditMode = true;
+    }
+  }
 
   private _updateControllers(): void {
     if (this._selectionController) {
@@ -1810,6 +2123,9 @@ export class EditManager {
       }
     }
 
+    // 이미지 편집 포커스가 있고 새 선택이 포커스 box가 아니면 포커스를 해제한다.
+    this._releaseImageFocusIfBoxDeselected(newSelections);
+
     this._dispatchLayoutSelection(previousLayouts);
     return true;
   }
@@ -1845,6 +2161,8 @@ export class EditManager {
 
     this._selectedLayouts = [element];
     element.setAttribute('selected', '');
+
+    this._releaseImageFocusIfBoxDeselected([element]);
 
     this._dispatchLayoutSelection(previousLayouts);
     return true;
@@ -1887,6 +2205,7 @@ export class EditManager {
       }
       this._selectedLayouts = [];
     }
+    this._releaseImageFocusIfBoxDeselected(this._selectedLayouts);
     this._dispatchLayoutSelection(previousLayouts);
   }
 
@@ -1937,6 +2256,7 @@ export class EditManager {
       this._modeChangeSuppressed = true;
       this.layoutEditMode = false;
       this.textEditMode = false;
+      this._deactivateImageEditMode();
       this._modeChangeSuppressed = false;
 
       if (!isDragging) {
@@ -2424,6 +2744,123 @@ export class EditManager {
             width,
             height,
             canceled,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
+
+  /**
+   * 이미지 위치 이동 완료/취소 이벤트를 발생시킨다.
+   *
+   * @param image - 이동된 이미지 요소
+   * @param previous - 이동 전 x/y (mm)
+   * @param current - 이동 후 x/y (mm)
+   * @param canceled - ESC 취소 여부
+   * @internal
+   */
+  _dispatchImageMove(
+    image: LayoutImageElement,
+    previous: { x: number; y: number },
+    current: { x: number; y: number },
+    canceled: boolean,
+  ): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('imageMove');
+    if (!listeners || listeners.size === 0) return;
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'imageMove',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null,
+            imageDetail: {
+              image,
+              previousX: previous.x,
+              previousY: previous.y,
+              x: current.x,
+              y: current.y,
+              canceled,
+            },
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
+
+  /**
+   * 이미지 크기 조절 완료 이벤트를 발생시킨다.
+   *
+   * @param image - 크기가 조절된 이미지 요소
+   * @param previous - 조절 전 width/height (mm)
+   * @param current - 조절 후 width/height (mm)
+   * @internal
+   */
+  _dispatchImageResize(
+    image: LayoutImageElement,
+    previous: { width: number; height: number },
+    current: { width: number; height: number },
+  ): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('imageResize');
+    if (!listeners || listeners.size === 0) return;
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'imageResize',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null,
+            imageDetail: {
+              image,
+              previousWidth: previous.width,
+              previousHeight: previous.height,
+              width: current.width,
+              height: current.height,
+            },
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } finally {
+      this._dispatching = false;
+    }
+  }
+
+  /**
+   * 이미지 속성 변경 이벤트를 발생시킨다.
+   *
+   * @param detail - 변경 상세 정보
+   * @internal
+   */
+  _dispatchImagePropertyChange(detail: ImagePropertyChangeEventDetail): void {
+    if (this._dispatching) return;
+    const listeners = this._listeners.get('imagePropertyChange');
+    if (!listeners || listeners.size === 0) return;
+
+    this._dispatching = true;
+    try {
+      for (const listener of listeners) {
+        try {
+          listener({
+            type: 'imagePropertyChange',
+            paragraph: null as unknown as LayoutParagraphElement,
+            controller: null,
+            imagePropertyDetail: detail,
           });
         } catch (e) {
           console.error(e);
@@ -2966,6 +3403,7 @@ export class EditManager {
     if (this._insertMode !== null) return false;
 
     const isTextMode = this._textEditMode;
+    const isImageMode = this._imageEditMode;
 
     let clearedCellSelection = false;
     for (const t of (this._docEl as HTMLElement).querySelectorAll('x-layout-table')) {
@@ -2982,6 +3420,23 @@ export class EditManager {
         selectedCells: [],
         source: 'keyboard',
       });
+    }
+
+    if (isImageMode) {
+      // 이미지 편집 모드: 편집 가능한 이미지를 순회하며 포커스를 이동한다.
+      const candidates: LayoutImageElement[] = [];
+      this._flattenImages(this._docEl as unknown as LayoutElement, candidates);
+      if (candidates.length === 0) return false;
+
+      const current = this._focusedImage;
+      const currentIdx = current ? candidates.indexOf(current) : -1;
+
+      const nextIdx = shiftKey
+        ? (currentIdx <= 0 ? candidates.length - 1 : currentIdx - 1)
+        : (currentIdx < 0 ? 0 : (currentIdx + 1) % candidates.length);
+
+      this.focusImage(candidates[nextIdx]);
+      return true;
     }
 
     if (isTextMode) {
@@ -3099,6 +3554,56 @@ export class EditManager {
       } else if (child instanceof LayoutTableElement) {
         this._flattenTableParagraphs(child, result);
       }
+    }
+  }
+
+  /**
+   * 컨테이너 하위의 모든 편집 가능한 이미지를 평탄화하여 수집한다.
+   *
+   * `_flattenParagraphs`와 동일한 Pre-order DFS + zIndex 정렬 순회를 따른다.
+   * Tab/Shift+Tab으로 이미지 편집 포커스를 순회할 때 사용된다.
+   *
+   * @param container - 순회할 컨테이너 (document 또는 box)
+   * @param result - 수집 결과를 누적할 배열
+   */
+  private _flattenImages(container: LayoutElement, result: LayoutImageElement[]): void {
+    const sorted = this._sortSiblings(container.items);
+    for (const child of sorted) {
+      if (child instanceof LayoutImageElement) {
+        if (this.isImageEditable(child)) {
+          result.push(child);
+        }
+      } else if (child instanceof LayoutBoxElement) {
+        this._flattenImages(child, result);
+      } else if (child instanceof LayoutTableElement) {
+        this._flattenTableImages(child, result);
+      }
+    }
+  }
+
+  /**
+   * 표 내부의 모든 편집 가능한 이미지를 평탄화하여 수집한다.
+   *
+   * `_flattenTableParagraphs`와 동일하게 `table.gridResolution`의 placements를
+   * (gridRow, gridCol) 오름차순으로 정렬하여 각 셀 box 하위의 이미지를 수집한다.
+   *
+   * @param table - 순회할 표 요소
+   * @param result - 수집 결과를 누적할 배열
+   */
+  private _flattenTableImages(table: LayoutTableElement, result: LayoutImageElement[]): void {
+    const grid = table.gridResolution;
+    if (!grid || grid.placements.length === 0) return;
+
+    const sortedPlacements = [...grid.placements].sort(
+      (a, b) => a.gridRow - b.gridRow || a.gridCol - b.gridCol,
+    );
+
+    for (const placement of sortedPlacements) {
+      const td = this._findTdAt(table, placement.gridRow, placement.gridCol);
+      if (!td) continue;
+      const box = td.items[0];
+      if (!box) continue;
+      this._flattenImages(box, result);
     }
   }
 

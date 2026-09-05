@@ -3,6 +3,8 @@ import type { BoxRole } from "@/types/layout";
 import type { LayoutBoxElement } from "@/components/layout/box.element";
 import type { LayoutDocumentElement } from "@/components/layout/document.element";
 import type { LayoutTableCellElement } from "@/components/layout/td.element";
+import type { LayoutImageElement } from "@/components/layout/image.element";
+import type { ImageObjectFit } from "@/types/layout/image.type";
 
 /**
  * 레이아웃 편집 모드의 동작 타입.
@@ -39,7 +41,7 @@ export type LayoutEditModeInput = boolean | LayoutEditModeConfig;
  * 편집 모드 상태 스냅샷.
  *
  * `modeChange` 이벤트의 payload로 전달되며, 전환 전후의 모드 상태를 담는다.
- * 세 모드(text/layout/insert)는 동시에 하나만 활성화될 수 있으며,
+ * 네 모드(text/layout/image/insert)는 동시에 하나만 활성화될 수 있으며,
  * 나머지는 항상 비활성화 상태이다.
  */
 export interface EditModeState {
@@ -49,6 +51,8 @@ export interface EditModeState {
   layoutEditMode: boolean;
   /** 레이아웃 편집 모드의 동작 타입 (layoutEditMode가 false여도 유지됨) */
   layoutEditType: LayoutEditType;
+  /** 이미지 편집 모드 활성 여부 */
+  imageEditMode: boolean;
   /** 삽입 모드. `null`이면 비활성화 */
   insertMode: InsertMode | null;
 }
@@ -142,4 +146,45 @@ export interface BoxPropertyChangeEventDetail {
   oldValue: BoxRole | string[] | number | string | undefined;
   /** 변경 후 값 */
   newValue: BoxRole | string[] | number | string | undefined;
+}
+
+/**
+ * 이미지 속성 변경 이벤트에서 변경된 속성을 식별하는 타입.
+ *
+ * `imagePropertyChange` 이벤트의 `property` 필드로 사용되며,
+ * 어떤 속성이 변경되었는지 리스너에 알려준다.
+ */
+export type ImagePropertyName = 'x' | 'y' | 'width' | 'height' | 'objectFit';
+
+/**
+ * 이미지 속성 변경 이벤트 상세 정보.
+ *
+ * `imagePropertyChange` 이벤트는 이미지 편집 모드(ImageEditController)의
+ * 드래그/휠 조작으로 이미지의 위치(x/y), 크기(width/height), objectFit이
+ * 변경될 때 발생한다.
+ *
+ * @example
+ * ```ts
+ * layoutDocEl.editManager.addEventListener('imagePropertyChange', (event) => {
+ *   const detail = event.imagePropertyDetail!;
+ *   console.log(`${detail.property}: ${detail.oldValue} → ${detail.newValue}`);
+ * });
+ * ```
+ */
+export interface ImagePropertyChangeEventDetail {
+  /** 속성이 변경된 이미지 요소 */
+  image: LayoutImageElement;
+  /** 변경된 속성명 */
+  property: ImagePropertyName;
+  /** 변경 전 값 */
+  oldValue: number | ImageObjectFit | undefined;
+  /** 변경 후 값 */
+  newValue: number | ImageObjectFit | undefined;
+  /**
+   * 변경 원인.
+   * - `'drag'`: 이미지 편집 모드 드래그 (x/y)
+   * - `'wheel'`: 이미지 편집 모드 휠 (width/height)
+   * - `'programmatic'`: 프로그래밍 방식 setter 호출
+   */
+  source: 'drag' | 'wheel' | 'programmatic';
 }
