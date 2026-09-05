@@ -154,20 +154,23 @@ paragraph.editableText = false;
 
 ### 2.2 더블클릭으로 텍스트 편집 모드 전환
 
-현재 모드(읽기 모드, 레이아웃 편집 모드 등)에 상관없이 paragraph를 더블클릭하면 텍스트 편집 모드로 전환되고 해당 paragraph에 포커스가 부여된다. `LayoutSelectionController`가 `document.documentElement` capture phase에 `dblclick` 리스너를 등록하여 처리한다.
+현재 모드(읽기 모드, 레이아웃 편집 모드 등)에 상관없이 paragraph를 더블클릭하면 텍스트 편집 모드로 전환되고 해당 paragraph에 포커스가 부여된다. `LayoutSelectionController`가 문서 요소 capture phase에 `dblclick` 리스너를 등록하여 처리한다.
 
 **동작 순서:**
 
-1. `LayoutSelectionController._onDblClick`가 `composedPath()`에서 `LayoutParagraphElement`를 찾는다. 부모 box가 `isBoxSelectable()`을 통과해야 한다 (lock된 box 내부의 paragraph는 무시된다).
-2. `EditManager.textEditMode = true`로 설정하여 다른 모드를 모두 끄고 문서 전체의 paragraph 편집 가능 여부를 갱신한다. 이때 `modeChange` 이벤트가 발생한다.
-3. `EditManager.focusParagraph(paragraph)`로 해당 paragraph에 포커스를 부여한다. 이 호출은 `editableText = true` 설정과 `TextEditController` 생성을 내부적으로 수행한다.
-4. `TextEditController.getOffsetFromPoint(event.clientX, event.clientY)`로 더블클릭한 위치의 소스 오프셋을 구한다.
-5. `controller.setCursor({ textOffset: offset })`로 커서를 더블클릭한 위치로 이동한다.
+1. `LayoutSelectionController._onDblClick`가 `composedPath()`에서 `LayoutImageElement`를 먼저 찾는다. 이미지가 있으면 이미지 편집 모드로 전환한다 (`EDITING_IMAGE.md` 참조).
+2. `composedPath()`에서 `LayoutParagraphElement`를 찾는다. 부모 box가 `isBoxSelectable()`을 통과해야 한다 (lock된 box 내부의 paragraph는 무시된다).
+3. `EditManager.textEditMode = true`로 설정하여 다른 모드(레이아웃 편집 포함)를 모두 끄고 문서 전체의 paragraph 편집 가능 여부를 갱신한다. 이때 `modeChange` 이벤트가 발생한다.
+4. `EditManager.focusParagraph(paragraph)`로 해당 paragraph에 포커스를 부여한다. 이 호출은 `editableText = true` 설정과 `TextEditController` 생성을 내부적으로 수행한다.
+5. `TextEditController.getOffsetFromPoint(event.clientX, event.clientY)`로 더블클릭한 위치의 소스 오프셋을 구한다.
+6. `controller.setCursor({ textOffset: offset })`로 커서를 더블클릭한 위치로 이동한다.
 
 **제약:**
 
 - **삽입 모드**: 삽입 모드(`insertMode !== null`)에서는 더블클릭이 무시된다.
 - **lock**: 조상 box 중 하나라도 `lock`이 `true`이면 더블클릭이 무시된다.
+
+> **히스토리 — 레이아웃 편집 모드에서의 더블클릭 차단/해제**: 과거(커밋 34c3670)에는 레이아웃 편집 모드에서 더블클릭이 텍스트 편집 모드로 잘못 진입하는 비일관성(일반 box는 mousedown `preventDefault`로 차단, 테이블 내부 box는 통과)을 막기 위해 `layoutEditMode` 가드가 있었다. 당시 전제는 "mousedown `preventDefault()`가 브라우저의 click/dblclick 생성을 억제한다"는 것이었는데, 현재 Chromium에서는 `preventDefault()`와 무관하게 click/dblclick이 정상 생성됨을 실측으로 확인했다(합성 이벤트가 아닌 CDP 신뢰 이벤트로 검증). 따라서 가드를 제거하고 레이아웃 편집 모드에서도 paragraph 더블클릭으로 텍스트 편집 모드 진입이 가능하다. 텍스트 편집 진입 시 `textEditMode = true`가 `layoutEditMode = false`를 자동 수행하므로 모드 상호 배타는 유지된다.
 
 ```ts
 // 사용자가 paragraph를 더블클릭하면:

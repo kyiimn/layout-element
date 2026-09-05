@@ -34,6 +34,7 @@ npx tsx scripts/verify-visual-render.mjs # 실제 화면 렌더 검증 (호스�
 npx tsx scripts/verify-ime.mjs          # 한글 IME 조합 정합성 (커밋/취소/혼합)
 npx tsx scripts/verify-multicolumn.mjs  # 멀티컬럼 타이핑 정합성 (prefix 캐시 경로)
 npx tsx scripts/verify-inline-metrics.mjs # 인라인 letterSpacing/widthRatio/spaceRatio 오버라이드 전 파이프라인 정합성
+npx tsx scripts/verify-image-edit-mode.mjs # 이미지 편집 모드 전 동작 (진입/드래그/휠/ESC/Tab/selection 연동)
 npx tsx scripts/verify-engine-node.mjs  # 엔진 계층 Node.js 호환성 (DOM-free 검증)
 ```
 
@@ -50,6 +51,7 @@ Before working on any feature, you **must** read the corresponding documentation
 | Text editing mode | `docs/EDITING_TEXT.md` | TextEditController, TextEditCoordinateMapper, EditManager text-mode API, cursor, selection, IME composition, keyboard shortcuts |
 | Layout editing mode | `docs/EDITING_LAYOUT.md` | LayoutEditController, LayoutSelectionController, box positioning, drag/resize, selection |
 | Insert mode | `docs/EDITING_INSERT.md` | InsertController, insert mode activation, drag-to-insert, target container selection |
+| Image editing mode | `docs/EDITING_IMAGE.md` | ImageEditController, imageEditMode, focusImage/blurImage, image drag move, wheel resize, objectFit auto-switch to none |
 | EditManager events | `docs/EDITING_EVENTS.md` | EditManager event types, payload fields, event dispatch, reentrancy guard |
 | Place Gun | `docs/EDITING_PLACE_GUN.md` | PlaceGunController, item loading/unloading, click-to-place, pause, reorder |
 | Table editing | `docs/EDITING_TABLE.md` | Table element, cell block selection, cell merge/split, table keyboard shortcuts, TableStructureEditor |
@@ -128,7 +130,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 
 - **`ColorRegistry`**: Loads `color.json` → CMYK→RGB→hex. `getCSSColor(name)` returns hex. **`'default'` name is prohibited** — throws `Error`. Fallback: `_defaultColor` (K100 black).
 - **`FontLoader`**: Loads `fonts.json` → registers `FontFace` objects. `base64Data` takes precedence over `ttfFilename`. Uses `opentype.js` for char width measurement. `getFontFamily(fontName?)` returns dynamic `FontFace.family`.
-- **`EditManager`**: Per-document instance created in `LayoutDocumentElement` constructor. Dispatches events: `focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`, `layoutSelectionChange`, `layoutMove`, `layoutResize`, `layoutAdd`, `layoutRemove`, `insert`, `insertCancel`, `modeChange`, `boxPropertyChange`, `contextMenu`, `placeGunChange`, `placeGunBefore`, `placeGunAfter`, `cellSelectionChange`. Provides `focusParagraph()` / `blurParagraph()` API. `reset()` clears all edit state (not event listeners).
+- **`EditManager`**: Per-document instance created in `LayoutDocumentElement` constructor. Dispatches events: `focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`, `layoutSelectionChange`, `layoutMove`, `layoutResize`, `layoutAdd`, `layoutRemove`, `insert`, `insertCancel`, `modeChange`, `boxPropertyChange`, `contextMenu`, `placeGunChange`, `placeGunBefore`, `placeGunAfter`, `cellSelectionChange`, `imageMove`, `imageResize`, `imagePropertyChange`. Provides `focusParagraph()` / `blurParagraph()` and `focusImage()` / `blurImage()` API. `reset()` clears all edit state (not event listeners).
 
 ## Important Constraints
 
@@ -406,6 +408,7 @@ src/
     text-edit-controller.ts
     text-edit-coordinate-mapper.ts
     edit-manager.ts
+    image-edit-controller.ts
     layout-edit-controller.ts
     layout-selection-controller.ts
     insert-controller.ts

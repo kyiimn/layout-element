@@ -166,7 +166,10 @@ export type EditManagerEventType =
   | 'placeGunChange'
   | 'placeGunBefore'
   | 'placeGunAfter'
-  | 'cellSelectionChange';
+  | 'cellSelectionChange'
+  | 'imageMove'
+  | 'imageResize'
+  | 'imagePropertyChange';
 ```
 
 ### 3.2 `EditManagerEvent`
@@ -905,6 +908,7 @@ interface EditModeState {
   textEditMode: boolean;
   layoutEditMode: boolean;
   layoutEditType: LayoutEditType; // 'move' | 'reparent'
+  imageEditMode: boolean;
   insertMode: InsertMode | null;
 }
 ```
@@ -1167,6 +1171,9 @@ window capture 리스너가 click 소비 (stopPropagation + preventDefault)
 | `placeGunBefore` | Place Gun | `placeGunBeforeDetail.item`, `placeGunBeforeDetail.box` | Place Gun 항목 주입 직전 (클릭 배치 시작) |
 | `placeGunAfter` | Place Gun | `placeGunAfterDetail.item`, `placeGunAfterDetail.box`, `placeGunAfterDetail.success` | Place Gun 항목 주입 완료 직후 |
 | `cellSelectionChange` | 셀 블록 | `cellSelectionDetail.selection`, `cellSelectionDetail.selectedCells`, `cellSelectionDetail.source` | 셀 블록(F5/F7/F8) 선택 변경 |
+| `imageMove` | 이미지 편집 | `imageDetail.image`, `imageDetail.previousX/Y`, `imageDetail.x/y`, `imageDetail.canceled` | 이미지 드래그 완료/ESC 취소 |
+| `imageResize` | 이미지 편집 | `imageDetail.image`, `imageDetail.previousWidth/Height`, `imageDetail.width/height` | 이미지 휠 크기 조절 |
+| `imagePropertyChange` | 이미지 편집 | `imagePropertyDetail.image`, `imagePropertyDetail.property`, `imagePropertyDetail.oldValue`, `imagePropertyDetail.newValue`, `imagePropertyDetail.source` | 이미지 x/y/width/height/objectFit 개별 변경 |
 
 ---
 
