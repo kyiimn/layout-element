@@ -546,8 +546,30 @@ export class TableStructureEditor {
     this._applyNewData({ ...currentData, colWidths: newColWidths, children: newRows });
   }
 
+  /**
+   * 구조 편집 결과를 테이블에 반영하고 undo 스냅샷 경계 이벤트를 발행한다.
+   *
+   * `table.data = newData`는 ID 기반 reconciliation으로 TR을 재구축한다.
+   * 병합/분할/행·열 삽입·삭제는 어떤 EditManager 이벤트도 자동 발생시키지
+   * 않으므로, 여기서 `notifyTablePropertyChange()`(→ `boxPropertyChange`)를
+   * 발행하지 않으면 키보드 단축키(M, Ctrl+Alt+화살표)로 실행한 구조 편집이
+   * undo 스택에 수집되지 않는다. 편집 완료 시 1회만 발행한다 (drag 중
+   * 매 프레임 발행하는 리사이즈 핸들과 달리 undo 경계가 명확하다).
+   *
+   * @param newData - 구조 편집이 적용된 새 테이블 데이터
+   * @throws 없음 — 데이터 설정 및 이벤트 발행은 예외를 던지지 않는다
+   * @returns void
+   *
+   * @example
+   * ```ts
+   * editor.mergeCells(selection);
+   * // → _applyNewData(...) → notifyTablePropertyChange()
+   * // → EditManager 'boxPropertyChange' → LayoutEditor pushSnapshot()
+   * ```
+   */
   private _applyNewData(newData: TableData): void {
     this._tableEl.data = newData;
+    this._tableEl.notifyTablePropertyChange();
   }
 
   private _getPhysicalCell(coord: CellCoord, rows: TableRowData[]): {

@@ -618,7 +618,7 @@ tableEl.structureEditor.deleteCol();
 
 ### 7.7 데이터 갱신 (_applyNewData)
 
-`_applyNewData(newData)`: 기존 TR을 모두 제거한 후 `table.data = newData`를 설정. 이 방식은 ID 기반 reconciliation으로 인한 box shadow DOM 손상을 방지한다.
+`_applyNewData(newData)`: 기존 TR을 모두 제거한 후 `table.data = newData`를 설정한 뒤 `notifyTablePropertyChange()`를 발행한다. 이 방식은 ID 기반 reconciliation으로 인한 box shadow DOM 손상을 방지한다. 구조 편집(병합/분할/행·열 삽입·삭제)은 어떤 EditManager 이벤트도 자동 발생시키지 않으므로, `notifyTablePropertyChange()`(→ 부모 box `boxPropertyChange`) 발행이 undo 스냅샷 경계가 된다. 이 발행이 없으면 키보드 단축키(M, Ctrl+Alt+화살표)로 실행한 구조 편집이 undo 스택에 수집되지 않는다.
 
 `data` setter → `_layoutStructure()` → `TableEngine.layout()` 흐름에서 `layout()`은 `_rowEngines`와 `TableCellEngine`을 재구축하지만, **셀 내부 박스 엔진(`TableCellEngine.boxEngine`)은 재구축하지 않는다.** 셀 박스 엔진은 부모 `BoxEngine._buildTableEngine()`에서만 생성되기 때문이다.
 
@@ -947,7 +947,7 @@ cellLabel은 `{행 알파벳}{열 번호}` 형식이어야 한다 (예: `A1`, `B
 
 ### 12.11 _applyNewData에서 TR 전체 재생성
 
-`_applyNewData`는 기존 TR을 모두 제거한 후 `table.data = newData`를 설정한다. 이는 ID 기반 reconciliation으로 인한 box shadow DOM style sheet 손상을 방지하기 위함이다. 병합/분할/삽입/삭제 후 항상 이 방식으로 데이터를 갱신한다.
+`_applyNewData`는 기존 TR을 모두 제거한 후 `table.data = newData`를 설정하고 `notifyTablePropertyChange()`를 1회 발행한다. TR 전체 재생성은 ID 기반 reconciliation으로 인한 box shadow DOM style sheet 손상을 방지하기 위함이고, 이벤트 발행은 구조 편집의 undo 스냅샷 경계 역할을 한다. 병합/분할/삽입/삭제 후 항상 이 방식으로 데이터를 갱신한다.
 
 ### 12.12 shadow DOM styleEl stale 참조 방지
 
@@ -1054,7 +1054,8 @@ class TableKeyboardController {
 
 ```typescript
 class TableStructureEditor {
-  // 병합/해제
+  // 병합/해제 — 모든 구조 편집 메서드는 _applyNewData()로 데이터를 갱신하며,
+  // 갱신 시 notifyTablePropertyChange()를 발행하여 undo 스냅샷 경계가 된다 (§7.7).
   mergeCells(selection: TableCellSelection): void;
   unmergeCell(cellCoord: CellCoord): void;
 
