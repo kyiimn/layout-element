@@ -817,6 +817,7 @@ export class TextEditController {
 
     if (hasShortcut && event.key.toLowerCase() === "a") {
       event.preventDefault();
+      event.stopPropagation();
       this._selectAll();
       this._manager._notifyCursorMove(this);
       return;
@@ -824,6 +825,7 @@ export class TextEditController {
 
     if (hasShortcut && (event.key.toLowerCase() === "c" || event.key.toLowerCase() === "x")) {
       event.preventDefault();
+      event.stopPropagation();
       this._copySelection();
       if (event.key.toLowerCase() === "x") {
         this._deleteSelection();
@@ -2894,11 +2896,13 @@ export class TextEditController {
     if (!alt && !shift) {
       if (key === "b") {
         event.preventDefault();
+        event.stopPropagation();
         this._toggleInlineStyle("fontWeight", SHORTCUT_BOLD_WEIGHT);
         return true;
       }
       if (key === "i") {
         event.preventDefault();
+        event.stopPropagation();
         this._toggleInlineStyle("fontStyle", "italic");
         return true;
       }
@@ -2911,10 +2915,12 @@ export class TextEditController {
         switch (event.code) {
           case "BracketLeft":
             event.preventDefault();
+            event.stopPropagation();
             this._adjustSelectionMetric("widthRatio", SHORTCUT_METRIC_STEP);
             return true;
           case "BracketRight":
             event.preventDefault();
+            event.stopPropagation();
             this._adjustSelectionMetric("widthRatio", -SHORTCUT_METRIC_STEP);
             return true;
         }
@@ -2924,18 +2930,22 @@ export class TextEditController {
       switch (event.code) {
         case "BracketLeft":
           event.preventDefault();
+          event.stopPropagation();
           this._adjustSelectionMetric("letterSpacing", SHORTCUT_METRIC_STEP);
           return true;
         case "BracketRight":
           event.preventDefault();
+          event.stopPropagation();
           this._adjustSelectionMetric("letterSpacing", -SHORTCUT_METRIC_STEP);
           return true;
         case "Comma":
           event.preventDefault();
+          event.stopPropagation();
           this._adjustSelectionMetric("spaceRatio", SHORTCUT_METRIC_STEP);
           return true;
         case "Period":
           event.preventDefault();
+          event.stopPropagation();
           this._adjustSelectionMetric("spaceRatio", -SHORTCUT_METRIC_STEP);
           return true;
       }
@@ -2947,10 +2957,12 @@ export class TextEditController {
       switch (event.code) {
         case "Period":
           event.preventDefault();
+          event.stopPropagation();
           this._adjustSelectionMetric("fontSize", SHORTCUT_FONT_SIZE_STEP);
           return true;
         case "Comma":
           event.preventDefault();
+          event.stopPropagation();
           this._adjustSelectionMetric("fontSize", -SHORTCUT_FONT_SIZE_STEP);
           return true;
       }

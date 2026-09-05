@@ -953,7 +953,7 @@ flowchart TD
 | 인쇄 가능한 모든 문자 | 없음 | `textarea`의 `input` 이벤트를 통해 문자 삽입 |
 | `Escape` | IME 조합 중 | 조합을 취소 |
 
-`Ctrl`/`Cmd` 단축키는 `event.ctrlKey || event.metaKey` 조건으로 감지한다.
+`Ctrl`/`Cmd` 단축키는 `event.ctrlKey || event.metaKey` 조건으로 감지한다. `_onKeydown`에서 매칭되는 모든 단축키(ESC, Ctrl+A/C/X, 스타일 단축키)는 `event.preventDefault()`와 함께 `event.stopPropagation()`도 호출하여 `window` bubble 단계의 호스트 단축키 핸들러(`useEditorKeyboard`)로의 전파를 차단한다.
 
 ### 4.1 Tab / Shift+Tab: 단락 간 포커스 이동
 
@@ -1067,6 +1067,7 @@ const handledReverse = manager.navigateByTab(true);
 4. **런 언랩 정리**: 주입 후 `normalizeRunMap`으로 문단 effective와 동일해진 필드를 제거한다 — 문단 기본 자간 −0.1에서 10회 감소 후 다시 10회 증가하면 run이 자동으로 언랩되어 인접 런과 병합된다. 데이터는 항상 최소 런 형태를 유지한다.
 5. **selection 가드**: `_adjustSelectionMetric`은 selection이 없거나 빈 selection(`start >= end`)이면 즉시 반환한다. `_toggleInlineStyle`도 동일한 가드를 가진다 — selection 없는 커서 상태의 스타일 변경은 API로도 열어두지 않는다는 설계 원칙 (§6A.5.1의 `applyTextStyle`은 예외적으로 커서 위치 런/캐스케이드 경로를 지원한다).
 6. **커서/selection 보존**: 증감은 텍스트 길이를 변경하지 않으므로 오프셋은 불변이고, selection은 그대로 유지된다. 주입 후 `model.textContent = plainToInline(...)` → `flushRender()` → `styleChange`/`textChange` 이벤트가 기존 스타일 주입 경로와 동일하게 발생한다.
+7. **이벤트 전파 차단**: `_tryHandleTextStyleShortcut`은 매칭 시 `event.preventDefault()`와 함께 `event.stopPropagation()`도 호출한다. 이로 인해 `window` bubble 단계의 `useEditorKeyboard` 핸들러로 키 이벤트가 전파되지 않아, 텍스트 편집 중 스타일 단축키가 LayoutEditor의 줌/Z-index 등 외부 단축키와 충돌하지 않는다. ESC 및 Ctrl+A/C/X도 동일하게 `stopPropagation()`을 호출한다.
 
 #### 관련 constants (`src/constants/defaults.ts`)
 
