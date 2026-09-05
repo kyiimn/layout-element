@@ -7,8 +7,8 @@ import type { TextLineData } from "@/types/layout/text/text-line.type";
 import type { TextInlineData } from "@/types/layout/text/text-inline.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
-import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
-import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, normalizeInlineContent, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent } from "./run-map";
+import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA, SHORTCUT_BOLD_WEIGHT, SHORTCUT_FONT_SIZE_STEP, SHORTCUT_METRIC_STEP, SHORTCUT_MIN_FONT_SIZE, SHORTCUT_MIN_SPACE_RATIO } from "@/constants";
+import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, normalizeInlineContent, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent, adjustStyleInRange, NumericInlineMetricField } from "./run-map";
 
 /**
  * postRender의 커서/선택 rect 읽기를 rAF로 지연할 span 재적용 수 임계값.
@@ -828,6 +828,10 @@ export class TextEditController {
       if (event.key.toLowerCase() === "x") {
         this._deleteSelection();
       }
+      return;
+    }
+
+    if (this._tryHandleTextStyleShortcut(event)) {
       return;
     }
 
@@ -2846,6 +2850,168 @@ export class TextEditController {
 
     const model = this._paragraph.model;
     if (!model) return;
+
+    const plainText = this._textarea.value;
+    model.textContent = plainToInline(plainText, this._runMap);
+    this._paragraph.flushRender();
+    this._emitStyleChange();
+    this._manager._notifyTextChange(this);
+  }
+
+  /**
+   * 텍스트 스타일 단축키를 처리한다. 단축키를 소비했으면 `true`를 반환한다.
+   *
+   * 모든 스타일 단축키는 **선택 영역이 있을 때만** 동작한다 — 커서만 있는
+   * 상태에서의 스타일 변경(pending style)은 의도적으로 지원하지 않는다
+   * (§EDITING_TEXT 4.1.6). `Ctrl/Cmd` 조합만 소비하며, 매핑에 없는 조합은
+   * `false`로 반환해 이후 키 처리로 전파한다.
+   *
+   * 문자 키(b/i)는 기존 a/c/x 단축키와 동일하게 `event.key`로 판별한다.
+   * 브래킷·콤마·피리오드는 `event.code`(물리 키)로 판별한다 — Shift/Alt
+   * 조합에서 `event.key`가 레이아웃 의존 문자(`Shift+.` → `">"`, macOS
+   * `⌥+[` → `"‘"`)로 변하기 때문이다. Chrome DevTools의 `Cmd+Option+[`
+   * 탭 전환과 동일한 물리 키 기준 관례다.
+   *
+   * | 기능 | 키 (물리 키 기준) |
+   * |------|----|
+   * | 볼드 토글 (700 ↔ 문단 기본) | `Ctrl/⌘+B` |
+   * | 이탤릭 토글 ('italic' ↔ 문단 기본) | `Ctrl/⌘+I` |
+   * | 글자 크기 ±0.1mm | `Ctrl/⌘+Shift+.` (확대) / `Ctrl/⌘+Shift+,` (축소) |
+   * | 자간 ±0.01em | `Ctrl/⌘+Alt+Shift+[` (증가) / `Ctrl/⌘+Alt+Shift+]` (감소) |
+   * | 장평 ±0.01 | `Ctrl/⌘+Alt+[` (증가) / `Ctrl/⌘+Alt+]` (감소) |
+   * | 공백비율 ±0.01em | `Ctrl/⌘+Alt+Shift+,` (증가) / `Ctrl/⌘+Alt+Shift+.` (감소) |
+   *
+   * @param event - textarea의 keydown 이벤트
+   * @returns 단축키를 소비했으면 `true`, 아니면 `false`
+   */
+  _tryHandleTextStyleShortcut(event: KeyboardEvent): boolean {
+    if (!event.ctrlKey && !event.metaKey) return false;
+
+    const key = event.key.toLowerCase();
+    const alt = event.altKey;
+    const shift = event.shiftKey;
+
+    if (!alt && !shift) {
+      if (key === "b") {
+        event.preventDefault();
+        this._toggleInlineStyle("fontWeight", SHORTCUT_BOLD_WEIGHT);
+        return true;
+      }
+      if (key === "i") {
+        event.preventDefault();
+        this._toggleInlineStyle("fontStyle", "italic");
+        return true;
+      }
+      return false;
+    }
+
+    if (alt) {
+      if (!shift) {
+        // Ctrl/⌘+Alt+[ / ] — 장평
+        switch (event.code) {
+          case "BracketLeft":
+            event.preventDefault();
+            this._adjustSelectionMetric("widthRatio", SHORTCUT_METRIC_STEP);
+            return true;
+          case "BracketRight":
+            event.preventDefault();
+            this._adjustSelectionMetric("widthRatio", -SHORTCUT_METRIC_STEP);
+            return true;
+        }
+        return false;
+      }
+      // Ctrl/⌘+Alt+Shift — 자간([/]) / 공백비율(,/.)
+      switch (event.code) {
+        case "BracketLeft":
+          event.preventDefault();
+          this._adjustSelectionMetric("letterSpacing", SHORTCUT_METRIC_STEP);
+          return true;
+        case "BracketRight":
+          event.preventDefault();
+          this._adjustSelectionMetric("letterSpacing", -SHORTCUT_METRIC_STEP);
+          return true;
+        case "Comma":
+          event.preventDefault();
+          this._adjustSelectionMetric("spaceRatio", SHORTCUT_METRIC_STEP);
+          return true;
+        case "Period":
+          event.preventDefault();
+          this._adjustSelectionMetric("spaceRatio", -SHORTCUT_METRIC_STEP);
+          return true;
+      }
+      return false;
+    }
+
+    if (shift) {
+      // Ctrl/⌘+Shift+. / , — 글자 크기
+      switch (event.code) {
+        case "Period":
+          event.preventDefault();
+          this._adjustSelectionMetric("fontSize", SHORTCUT_FONT_SIZE_STEP);
+          return true;
+        case "Comma":
+          event.preventDefault();
+          this._adjustSelectionMetric("fontSize", -SHORTCUT_FONT_SIZE_STEP);
+          return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * 선택 영역의 수치형 인라인 스타일 필드를 **per-run 상대 증감**한다 (옵션 B).
+   *
+   * `adjustStyleInRange`로 선택 범위 안의 각 런의 현재값(런 오버라이드가
+   * 없으면 문단 effective 값)에 개별 `delta`를 적용한다 — 혼합 선택에서도
+   * 런 간 상대 차이가 보존된다. 부동소수점 오차 누적을 막기 위해 결과값을
+   * step 정밀도(step×100)로 반올림하고, 엔진 폭 계산이 음수가 되지 않도록
+   * 필드별 하한(`SHORTCUT_MIN_FONT_SIZE`, `SHORTCUT_MIN_SPACE_RATIO`)으로
+   * 클램프한다. `widthRatio`/`letterSpacing` 상한은 엔진이 이미 감당하는
+   * 영역이므로 두지 않는다.
+   *
+   * 주입 후 문단 effective와 동일해진 필드는 제거하고(`normalizeRunMap`이
+   * 런을 언랩/병합), `model.textContent`를 재구축해 렌더링을 트리거한다.
+   * 선택 영역/커서 오프셋은 텍스트 길이가 불변이므로 그대로 보존한다.
+   *
+   * @example
+   * ```ts
+   * // 문단 fontSize 4, 선택 영역이 [0,6), 런 [2,4)에 fontSize 5 오버라이드
+   * _adjustSelectionMetric("fontSize", 0.1);
+   * // → 런 [0,2): 4.1, 런 [2,4): 5.1, 런 [4,6): 4.1 주입 후 정규화
+   * //   (4.1 ≠ 문단 4 이므로 세 run 모두 유지, 상대 차이 보존)
+   * ```
+   *
+   * @param field - 증감할 수치형 필드
+   * @param delta - 증감량 (양수: 증가, 음수: 감소)
+   */
+  private _adjustSelectionMetric(field: NumericInlineMetricField, delta: number): void {
+    const sel = this._cursorModel.selection;
+    if (!sel) return;
+
+    const { start, end } = sel.normalized();
+    if (start.textOffset >= end.textOffset) return;
+
+    const model = this._paragraph.model;
+    if (!model) return;
+
+    const precision = field === "fontSize" ? 10 : 100;
+    const min = field === "fontSize" ? SHORTCUT_MIN_FONT_SIZE
+      : field === "spaceRatio" ? SHORTCUT_MIN_SPACE_RATIO
+      : Number.NEGATIVE_INFINITY;
+
+    this._runMap = adjustStyleInRange(
+      this._runMap,
+      start.textOffset,
+      end.textOffset,
+      model.effectiveTextStyle,
+      field,
+      (current) => {
+        const base = current ?? 0;
+        return Math.max(min, Math.round((base + delta) * precision) / precision);
+      },
+    );
+    this._runMap = normalizeRunMap(this._runMap, model.effectiveTextStyle);
 
     const plainText = this._textarea.value;
     model.textContent = plainToInline(plainText, this._runMap);

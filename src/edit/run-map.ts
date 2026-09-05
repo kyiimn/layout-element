@@ -217,6 +217,82 @@ export function applyStyleToRange(
 }
 
 /**
+ * per-run 상대 증감이 가능한 `TextInlineStyle` 수치 필드.
+ * 텍스트 스타일 단축키(크기/자간/장평/공백비율 조절)가 사용한다.
+ */
+export type NumericInlineMetricField = "fontSize" | "letterSpacing" | "widthRatio" | "spaceRatio";
+
+/**
+ * 런 맵의 특정 범위에 수치형 인라인 스타일 필드를 **per-run 상대 증감**한다.
+ *
+ * `applyStyleToRange`가 균일 절대값을 주입해 선택 영역의 런 간 상대 차이를
+ * 소실하는 것과 달리, 범위 안의 각 런의 현재값(런 오버라이드가 없으면 문단
+ * effective 값)을 `adjust`에 전달하고 run별 결과값을 주입한다. 범위가 기존
+ * 런 경계를 가로지르면 분할하고, 적용 후 인접한 같은 스타일 런은 병합한다.
+ *
+ * 주입 결과에서 문단 effective와 동일해진 필드의 제거(런 언랩 정리)는
+ * 호출부(edit 레이어)의 책임이다 — `TextEditController._adjustSelectionMetric` 참조.
+ *
+ * @param runMap - 원본 런 맵 (변경하지 않음)
+ * @param start - 적용 시작 오프셋 (포함)
+ * @param end - 적용 종료 오프셋 (미포함)
+ * @param paragraphTextStyle - 문단 유효 텍스트 스타일 (런 오버라이드 없는 구간의 기준값)
+ * @param field - 증감할 수치형 필드
+ * @param adjust - 런의 현재값을 받아 새 값을 반환하는 함수. `undefined`는
+ *   문단 effective에도 값이 없는 비정상 데이터를 의미하며 호출부가 기본값으로 대체한다
+ * @returns 증감 반영된 새 런 맵
+ * @example
+ * ```ts
+ * // 문단 fontSize 4, 런 [2,4)에 fontSize 5 오버라이드가 있는 상태에서
+ * adjustStyleInRange(runMap, 0, 6, effectiveTs, "fontSize", (cur) => cur + 0.1);
+ * // → 런 [0,2): fontSize 4.1, 런 [2,4): fontSize 5.1, 런 [4,6): fontSize 4.1
+ * //   (각 런의 상대 차이가 보존된다)
+ * ```
+ */
+export function adjustStyleInRange(
+  runMap: RunMap,
+  start: number,
+  end: number,
+  paragraphTextStyle: TextStyle,
+  field: NumericInlineMetricField,
+  adjust: (current: number | undefined) => number,
+): RunMap {
+  if (start >= end) return runMap;
+
+  const result: RunMap = [];
+
+  for (const entry of runMap) {
+    if (entry.end <= start || entry.start >= end) {
+      result.push(entry);
+      continue;
+    }
+
+    if (entry.start < start) {
+      result.push({ start: entry.start, end: start, style: entry.style });
+    }
+
+    const segStart = Math.max(entry.start, start);
+    const segEnd = Math.min(entry.end, end);
+    const current = entry.style?.[field] ?? paragraphTextStyle[field];
+    const patch: Partial<TextInlineStyle> = { [field]: adjust(current) };
+    const mergedStyle = entry.style
+      ? { ...entry.style, ...patch }
+      : { ...patch } as TextInlineStyle | undefined;
+    result.push({
+      start: segStart,
+      end: segEnd,
+      style: mergedStyle && Object.keys(mergedStyle).length > 0 ? mergedStyle : undefined,
+    });
+
+    if (entry.end > end) {
+      result.push({ start: end, end: entry.end, style: entry.style });
+    }
+  }
+
+  return mergeAdjacentSameStyle(result);
+}
+
+/**
  * 런 맵의 특정 위치에 텍스트가 삽입되거나 삭제될 때 offset을 조정한다.
  *
  * `at` 위치 이후의 모든 런의 `start`/`end`를 `delta`만큼 이동한다.
