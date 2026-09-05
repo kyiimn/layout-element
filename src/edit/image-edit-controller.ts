@@ -242,8 +242,8 @@ export class ImageEditController {
       const dxMm = manager.screenDeltaToMm(state.lastClientX - state.startMouseX);
       const dyMm = manager.screenDeltaToMm(state.lastClientY - state.startMouseY);
 
-      const nextX = this._clampX(image, state.startX + dxMm);
-      const nextY = this._clampY(image, state.startY + dyMm);
+      const nextX = this._clampX(state.startX + dxMm);
+      const nextY = this._clampY(state.startY + dyMm);
       if (image.x !== nextX) image.x = nextX;
       if (image.y !== nextY) image.y = nextY;
     });
@@ -396,10 +396,10 @@ export class ImageEditController {
     let nextWidth: number;
     let nextHeight: number;
     if (event.shiftKey) {
-      nextWidth = this._clampDimension(currentWidth * factor, image);
+      nextWidth = this._clampDimension(currentWidth * factor);
       nextHeight = currentHeight * (nextWidth / currentWidth);
     } else {
-      nextWidth = this._clampDimension(currentWidth * factor, image);
+      nextWidth = this._clampDimension(currentWidth * factor);
       nextHeight = nextWidth / ratio;
     }
 
@@ -479,63 +479,43 @@ export class ImageEditController {
   }
 
   /**
-   * 부모 박스 contentAbsRect 내부로 x를 클램핑한다.
-   * 이미지가 최소 절반은 박스 안에 남도록 제한한다.
+   * 드래그 x 좌표를 그대로 반환한다 (제한 없음).
    *
-   * @param image - 대상 이미지
-   * @param x - 클램핑 전 x (mm)
-   * @returns 클램핑된 x (mm)
+   * InDesign 시맨틱: 박스는 크롭 윈도우일 뿐 이미지 이동 범위를 제한하지
+   * 않는다. 이미지가 박스 밖으로 나간 부분은 캔버스가 contentAbsRect로
+   * 클리핑하고(`_drawImage`), 오버랩 판정도 displayRect를 contentAbsRect로
+   * 클램핑하므로(`ImageEngine.computeOverlap`) 데이터 정합성은 이동 범위와
+   * 무관하게 유지된다.
+   *
+   * @param x - 드래그로 계산된 x (mm)
+   * @returns 클램핑 없는 x (mm)
    */
-  private _clampX(image: LayoutImageElement, x: number): number {
-    const bounds = this._getContentBounds(image);
-    if (!bounds) return x;
-    const width = num(image.width);
-    const minX = -width / 2;
-    const maxX = bounds.width - width / 2;
-    return Math.max(minX, Math.min(maxX, x));
+  private _clampX(x: number): number {
+    return x;
   }
 
   /**
-   * 부모 박스 contentAbsRect 내부로 y를 클램핑한다.
-   * 이미지가 최소 절반은 박스 안에 남도록 제한한다.
+   * 드래그 y 좌표를 그대로 반환한다 (제한 없음).
+   * {@link _clampX}와 동일한 InDesign 시맨틱 — 박스 밖 이동 허용.
    *
-   * @param image - 대상 이미지
-   * @param y - 클램핑 전 y (mm)
-   * @returns 클램핑된 y (mm)
+   * @param y - 드래그로 계산된 y (mm)
+   * @returns 클램핑 없는 y (mm)
    */
-  private _clampY(image: LayoutImageElement, y: number): number {
-    const bounds = this._getContentBounds(image);
-    if (!bounds) return y;
-    const height = num(image.height);
-    const minY = -height / 2;
-    const maxY = bounds.height - height / 2;
-    return Math.max(minY, Math.min(maxY, y));
+  private _clampY(y: number): number {
+    return y;
   }
 
   /**
-   * width/height를 최소 크기(1mm) 이상, 부모 박스 크기의 3배 이하로 클램핑한다.
+   * width/height를 최소 크기(1mm) 이상으로만 클램핑한다.
+   *
+   * 상한은 없다 (InDesign 시맨틱 — 크기 제한 없음). 1mm 하한은 0/음수로
+   * 수렴해 이미지를 되돌릴 수 없게 되는 것만 방지한다.
    *
    * @param value - 클램핑 전 값 (mm)
-   * @param image - 대상 이미지
-   * @returns 클램핑된 값 (mm)
+   * @returns 최소 1mm가 보장된 값 (mm)
    */
-  private _clampDimension(value: number, image: LayoutImageElement): number {
-    const bounds = this._getContentBounds(image);
-    const min = 1;
-    const max = bounds ? Math.max(bounds.width * 3, bounds.height * 3) : 1000;
-    return Math.max(min, Math.min(max, value));
-  }
-
-  /**
-   * 이미지가 속한 부모 박스의 contentAbsRect 크기를 반환한다.
-   *
-   * @param image - 대상 이미지
-   * @returns 부모 contentAbsRect 크기. 부모 박스/엔진이 없으면 null
-   */
-  private _getContentBounds(image: LayoutImageElement): { width: number; height: number } | null {
-    const contentAbsRect = image.parentElement?.engine?.contentAbsRect;
-    if (!contentAbsRect) return null;
-    return { width: contentAbsRect.absWidth, height: contentAbsRect.absHeight };
+  private _clampDimension(value: number): number {
+    return Math.max(1, value);
   }
 
   /**
