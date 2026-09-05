@@ -185,6 +185,15 @@ export class LayoutImageElement extends HTMLElement {
 
       styleEl.sheet.insertRule(":host {}", 0);
 
+      // 이미지 편집 모드 포커스 표시. EditManager.focusImage()가 설정하는
+      // image-edit-focus 속성에 반응한다. 시각 테두리는 부모 box의
+      // selected(빨간 테두리) + text-focused(라벨 숨김)로 표현하므로
+      // 여기서는 커서만 변경한다.
+      styleEl.sheet.insertRule(
+        ":host([image-edit-focus]) { cursor: move; }",
+        1,
+      );
+
       this._shadowRoot.appendChild(document.createElement('slot'));
     }
 

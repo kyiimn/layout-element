@@ -1,5 +1,6 @@
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
+import { LayoutImageElement } from "@/components/layout/image.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { LayoutTableElement } from "@/components/layout/table.element";
@@ -667,6 +668,24 @@ export class LayoutSelectionController {
     return null;
   }
 
+  /**
+   * 이벤트 경로에서 `LayoutImageElement`를 찾는다.
+   *
+   * `composedPath()`를 순회하며 shadow DOM 내부의 이미지까지 추적한다.
+   * lock/편집 루트 검사는 `EditManager.isImageEditable()`이 담당한다.
+   *
+   * @param event - 마우스 이벤트
+   * @returns 경로상의 이미지 요소. 없으면 `null`
+   */
+  private _findImageFromEvent(event: MouseEvent): LayoutImageElement | null {
+    for (const el of event.composedPath()) {
+      if (el instanceof LayoutImageElement) {
+        return el;
+      }
+    }
+    return null;
+  }
+
   // ─── Click Handling ───────────────────────────────────────────
 
   /**
@@ -739,14 +758,21 @@ export class LayoutSelectionController {
   /**
    * 더블클릭 이벤트 핸들러.
    *
-   * paragraph 위에서 더블클릭 시 현재 모드에 상관없이 텍스트 편집 모드로 전환하고
-   * 해당 paragraph에 포커스를 부여한다. 삽입 모드이거나 편집 가능하지 않은
-   * paragraph(예: lock된 box 내부)에서는 무시한다.
+   * 이미지 위에서 더블클릭 시 이미지 편집 모드로, paragraph 위에서 더블클릭 시
+   * 텍스트 편집 모드로 전환한다. 일반(읽기) 모드와 레이아웃 편집 모드 모두에서
+   * 진입 가능하다. 삽입 모드이거나 편집 가능하지 않은 요소(lock된 box 내부 등)에서는
+   * 무시한다.
+   *
+   * 레이아웃 편집 모드에서 이미지/paragraph 더블클릭 시 `layoutEditMode`는 자동으로
+   * 해제된다 (모드 상호 배타). 이미지 편집 모드의 ESC 종료 시 레이아웃 편집 모드로
+   * 복귀한다 (`fromLayoutEditMode` 옵션).
    *
    * 동작 순서:
    * 1. 삽입 모드(`insertMode`)이면 무시한다.
-   * 2. `composedPath()`에서 `LayoutParagraphElement`를 찾는다.
-   * 3. `EditManager.textEditMode = true`로 설정하여 다른 모드를 모두 끄고
+   * 2. `composedPath()`에서 `LayoutImageElement`를 찾으면 이미지 편집 모드로
+   *    전환한다 (`EditManager.focusImage`).
+   * 3. `composedPath()`에서 `LayoutParagraphElement`를 찾으면 텍스트 편집 모드로
+   *    전환한다. `EditManager.textEditMode = true`가 다른 모드를 모두 끄고
    *    문서 전체의 paragraph 편집 가능 여부를 갱신한다.
    * 4. `EditManager.focusParagraph(paragraph)`로 해당 paragraph에 포커스를 준다.
    *    이 호출은 `editableText = true` 설정과 `TextEditController` 생성을
@@ -760,7 +786,14 @@ export class LayoutSelectionController {
   private _onDblClick = (event: MouseEvent): void => {
     const manager = this._manager;
     if (manager.insertMode) return;
-    if (manager.layoutEditMode) return;
+
+    const image = this._findImageFromEvent(event);
+    if (image) {
+      event.stopPropagation();
+      event.preventDefault();
+      manager.focusImage(image, { fromLayoutEditMode: manager.layoutEditMode });
+      return;
+    }
 
     const paragraph = this._findParagraphFromEvent(event);
     if (!paragraph) return;
