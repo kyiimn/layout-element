@@ -64,6 +64,10 @@ export class LayoutGuideColumnElement extends HTMLElement {
         height: `${this._height}mm`,
         left: `${this._left}mm`,
         overflow: 'hidden',
+        // 디버그 그리드 오버레이는 시각 표시 전용 — 마우스 이벤트(wheel/클릭)가
+        // 가이드에 가로채여 아래 콘텐츠(이미지 휠 리사이즈 등)에 도달하지
+        // 못하는 것을 방지한다.
+        pointerEvents: 'none',
         position: 'absolute',
         top: `${this._top}mm`,
         width: `${this._width}mm`,
