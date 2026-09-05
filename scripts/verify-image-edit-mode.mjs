@@ -17,7 +17,8 @@
  *  7. Tab/Shift+Tab — 편집 가능한 이미지 순회 (포커스 + 부모 box 선택 이동)
  *  8. selection 이동 → 포커스 상실 — 다른 box 클릭 시 focusedImage 해제.
  *     단 이미지 편집 모드 자체는 유지 (다른 이미지 클릭으로 재포커스 가능)
- *  9. 클램핑 — 부모 contentAbsRect 밖으로 드래그 시 이미지 절반 이상 남게 제한
+ *  9. 이동/크기 제한 시맨틱 (InDesign) — 드래그 이동 범위 제한 없음
+ *     (박스는 크롭 윈도우), 박스 밖 이동 상태의 3소스 정합성, 휠 하한 1mm
  * 10. 데이터 정합성 — 드래그+휼 후 DOM getter === engine.extractData ===
  *     printPostData.data === document.data (3소스 일치 + dirty 가드 계약)
  * 11. ESC 취소 복원값의 3소스 일치
@@ -280,7 +281,7 @@ await resetModes();
   check('드래그 → y 이동 (y 증가)', after.y > before.y, `y: ${before.y.toFixed(2)} → ${after.y.toFixed(2)}`);
   check('전환 시 표시 영역 스냅샷 유지 (크기 점프 없음)', near(after.w, before.w, 0.5) && near(after.h, before.h, 0.5), `w: ${before.w.toFixed(2)} → ${after.w.toFixed(2)}, h: ${before.h.toFixed(2)} → ${after.h.toFixed(2)}`);
 
-  // 극단 드래그 → 클램핑 (이미지 절반이 박스 안에 남는 위치)
+  // 극단 드래그 → InDesign 시맨틱: 이동 제한 없음 + 밖으로 나간 부분의 정합성
   const c2 = await imgCenter('img-1');
   await page.mouse.move(c2.x, c2.y);
   await page.mouse.down();
@@ -288,19 +289,56 @@ await resetModes();
   await page.mouse.up();
   await page.waitForTimeout(200);
 
-  const clamped = await page.evaluate(() => {
+  const moved = await page.evaluate(() => {
     const img = document.getElementById('img-1');
     const box = document.getElementById('box-img-1');
     const content = box.engine.contentAbsRect;
     return {
       x: img.x, y: img.y, w: img.width, h: img.height,
-      maxX: content.absWidth - img.width / 2,
-      maxY: content.absHeight - img.height / 2,
-      minX: -img.width / 2, minY: -img.height / 2,
+      contentW: content.absWidth, contentH: content.absHeight,
+      // 이전 상홧 값 (이동 전 근사 위치)
+      prevX: 88.88, prevY: 17.55,
     };
   });
-  check('클램핑 — x 상한 (content.width - w/2)', near(clamped.x, clamped.maxX, 0.01), `x=${clamped.x.toFixed(2)}, max=${clamped.maxX.toFixed(2)}`);
-  check('클램핑 — y 상한 (content.height - h/2)', near(clamped.y, clamped.maxY, 0.01), `y=${clamped.y.toFixed(2)}, max=${clamped.maxY.toFixed(2)}`);
+  // 제한 없음: x가 박스 밖(contentW - w/2)을 크게 넘었는지 확인
+  check('이동 제한 없음 — x가 박스 경계 밖으로 이동 가능 (InDesign 시맨틱)',
+    moved.x > moved.contentW, `x=${moved.x.toFixed(2)} > contentW=${moved.contentW}`);
+  check('이동 제한 없음 — y도 박스 경계 밖 이동',
+    moved.y > moved.contentH, `y=${moved.y.toFixed(2)} > contentH=${moved.contentH}`);
+
+  // 밖으로 나간 상태의 3소스 정합성 — 캔버스 클리핑/오버랩 클램핑과 무관하게
+  // DOM/extractData/printPostData가 동일한 자유 좌표를 유지하는지
+  const outside = await page.evaluate(() => {
+    const doc = document.querySelector('x-layout-document');
+    const img = document.getElementById('img-1');
+    doc.engine.ensureCommitted();
+    const extract = img.engine.extractData;
+    const posts = doc.engine.printPostData;
+    const imgPost = posts.find((p) => p.data?.type === 'image' && p.data?.id === 'img-1');
+    return {
+      dom: { x: img.x, y: img.y, w: img.width, h: img.height },
+      extract: { x: extract.x, y: extract.y, w: extract.width, h: extract.height },
+      print: imgPost ? { x: imgPost.data.x, y: imgPost.data.y, w: imgPost.data.width, h: imgPost.data.height } : null,
+      displayRect: (() => {
+        const d = img.engine.displayRect;
+        return { l: d.absLeft, t: d.absTop, w: d.absWidth, h: d.absHeight };
+      })(),
+      contentRect: (() => {
+        const c = document.getElementById('box-img-1').engine.contentAbsRect;
+        return { l: c.absLeft, t: c.absTop, w: c.absWidth, h: c.absHeight };
+      })(),
+    };
+  });
+  const eq2 = (a, b) => Math.abs(a - b) < 1e-6;
+  check('박스 밖 이동 상태의 3소스 일치 (DOM === extractData === printPostData)',
+    eq2(outside.dom.x, outside.extract.x) && eq2(outside.dom.x, outside.print.x)
+    && eq2(outside.dom.w, outside.extract.w) && eq2(outside.dom.w, outside.print.w),
+    `dom.x=${outside.dom.x.toFixed(2)}, print.x=${outside.print.x.toFixed(2)}`);
+  // 오버랩 판정 유효 영역(displayRect ∩ contentRect)이 소멸했는지 —
+  // computeOverlap의 클램핑 시맨틱이 밖으로 나간 이미지를 회피 대상에서 제외
+  const clipW = Math.min(outside.displayRect.l + outside.displayRect.w, outside.contentRect.l + outside.contentRect.w) - Math.max(outside.displayRect.l, outside.contentRect.l);
+  check('완전히 밖으로 나간 이미지의 오버랩 유효 영역 소멸 (clip ≤ 0)',
+    clipW <= 0, `clipWidth=${clipW.toFixed(2)}mm`);
 
   // ESC로 이미지 편집 종료 후 원복 (다음 시나리오 격리)
   await page.keyboard.press('Escape');
@@ -352,6 +390,41 @@ await resetModes();
   check('휠 → objectFit 자동 none 전환', after.fit === 'none', `fit=${after.fit}`);
   check('휠 → imageResize 이벤트 발생', events.some((e) => e.t === 'resize'), JSON.stringify(events));
   check('휠 → imagePropertyChange(width/height) 이벤트 발생', events.some((e) => e.t === 'prop' && (e.p === 'width' || e.p === 'height')), JSON.stringify(events));
+
+  // 크기 상한 없음 (InDesign 시맨틱) — 부모 박스 3배를 넘어도 확대 가능
+  const boxSize = await page.evaluate(() => {
+    const content = document.getElementById('box-img-1').engine.contentAbsRect;
+    return { w: content.absWidth, h: content.absHeight };
+  });
+  // 3배 상한이 있었다면 이 시점(1.1배 확대 후)이 3배 이내일 수 있으므로
+  // 충분히 넘을 때까지 반복 확대
+  let current = after;
+  for (let i = 0; i < 12 && current.w < boxSize.w * 3.2; i++) {
+    const cc = await imgCenter('img-1');
+    await page.mouse.move(cc.x, cc.y);
+    await page.mouse.wheel(0, -100);
+    await page.waitForTimeout(80);
+    current = await page.evaluate(() => {
+      const img = document.getElementById('img-1');
+      return { w: img.width, h: img.height };
+    });
+  }
+  check('휠 → 크기 상한 없음 (부모 박스 3배 초과 확대 가능)',
+    current.w > boxSize.w * 3, `w=${current.w.toFixed(1)} > 3×box=${boxSize.w * 3}`);
+
+  // 하한 1mm — 축소는 1mm에서 멈춤 (0/음수 방지)
+  for (let i = 0; i < 30; i++) {
+    const cc = await imgCenter('img-1');
+    await page.mouse.move(cc.x, cc.y);
+    await page.mouse.wheel(0, 100);
+    await page.waitForTimeout(40);
+  }
+  const shrunk = await page.evaluate(() => {
+    const img = document.getElementById('img-1');
+    return { w: img.width, h: img.height };
+  });
+  check('휠 → 하한 1mm 유지 (0/음수 수렴 방지)', shrunk.w >= 1 && shrunk.h >= 1,
+    `w=${shrunk.w.toFixed(2)}, h=${shrunk.h.toFixed(2)}`);
 
   await page.keyboard.press('Escape');
   await page.waitForTimeout(100);

@@ -73,8 +73,11 @@ manager.imageEditMode = false;
 - **rAF 스로틀링**: `requestAnimationFrame`으로 각 프레임당 1회 갱신 (60fps).
 - **3px 임계값**: 임계값 미만 이동은 클릭으로 간주해 드래그를 시작하지 않는다 (`LayoutEditController`와 동일 기준).
 - **임계값 통과 시 objectFit 자동 전환**: `_ensureObjectFitNone()`이 전환 직전 displayRect를 x/y/width/height에 고정한 뒤 `none`으로 전환한다.
-- **클램핑**: 부모 박스 `contentAbsRect` 기준으로 이미지가 최소 절반은 박스 안에 남도록 제한한다.
-  - `minX = -width/2`, `maxX = contentWidth - width/2` (y도 동일)
+- **이동 범위 제한 없음 (InDesign 시맨틱)**: 박스는 크롭 윈도우일 뿐 이미지
+  이동을 제한하지 않는다. 이미지를 박스 밖으로 완전히 밀어낼 수도 있다.
+  밖으로 나간 부분은 렌더링에서 캔버스가 contentAbsRect로 클리핑하고,
+  오버랩 판정도 `displayRect ∩ contentAbsRect`만 사용하므로(`computeOverlap`
+  클램핑) 데이터 정합성은 이동 범위와 무관하게 유지된다.
 - **mm 변환**: `EditManager.screenDeltaToMm()`으로 픽셀 델타를 mm로 환산 (`transform: scale` 보정 포함).
 - **종료**: `mouseup` 시 `imageMove` 커밋 이벤트. `_suppressLayoutClick()`으로 후속 click이 레이아웃 선택을 건드리지 않게 차단.
 - **ESC 취소**: 시작 위치/objectFit으로 복원 후 `imageMove(canceled: true)` 이벤트.
@@ -93,7 +96,8 @@ manager.imageEditMode = false;
 | 기본 | 원본 비율(`originalWidth/originalHeight`) 유지. 미설정 시 현재 비율 사용 |
 
 - **objectFit 자동 전환**: 휠 조작 시작 시점에도 `_ensureObjectFitNone()`이 적용된다.
-- **클램핑**: 최소 1mm, 최대 부모 박스 크기의 3배.
+- **크기 상한 없음 (InDesign 시맨틱)**, **하한 1mm** (0/음수로 수렴해 되돌릴 수
+  없게 되는 것만 방지).
 - **이벤트**: `width`/`height` 각각 `imagePropertyChange`, 완료 시 `imageResize` 커밋 이벤트.
 
 ## 5. EditManager API
