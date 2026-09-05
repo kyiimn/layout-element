@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Image Edit Verify</title>
+  <style>
+    body { margin: 16px; font-family: sans-serif; }
+    x-layout-document { display: block; border: 1px solid #ccc; }
+    #ready-flag { position: fixed; top: 4px; right: 4px; font-size: 11px; color: #888; }
+  </style>
+</head>
+<body>
+  <div id="ready-flag">LOADING</div>
+  <x-layout-document id="doc" style="width: 400mm; height: 220mm;"></x-layout-document>
+
+  <script type="module">
+    import { FontLoader, ColorRegistry } from '/src/index.ts';
+
+    const doc = document.getElementById('doc');
+    const flag = document.getElementById('ready-flag');
+
+    async function init() {
+      await FontLoader.getInstance().init();
+      await ColorRegistry.getInstance().init();
+
+      doc.data = {
+        type: 'document',
+        id: 'img-verify-doc',
+        width: 400, height: 220,
+        columns: 4, gap: 5,
+        paragraphStyle: { lineGap: 1.25, textAlign: 'justify', verticalAlign: 'top' },
+        textStyle: {
+          color: '', fontSize: 4, fontStyle: 'normal', fontFamily: '중앙신문명조',
+          fontWeight: 400, spaceRatio: 0.25, widthRatio: 0.8, letterSpacing: -0.1,
+        },
+        children: [
+          {
+            type: 'box', id: 'box-text',
+            left: 0, top: 0, width: 2, height: 16, position: 'static',
+            children: {
+              type: 'paragraph', id: 'para-1', column: 1, gap: 0,
+              content: '가나다라마바사아자차카타파하abcdefghijklmnopqrstuvwxyz0123456789가나다라마바사아자차카타파하',
+            },
+          },
+          {
+            type: 'box', id: 'box-img-1',
+            left: 2, top: 0, width: 2, height: 8, position: 'static',
+            children: {
+              type: 'image', id: 'img-1',
+              url: '/examples/test/g10506uf.png',
+              dpi: 72, objectFit: 'cover', overlapPadding: 5,
+            },
+          },
+          {
+            type: 'box', id: 'box-img-2',
+            left: 2, top: 8, width: 2, height: 8, position: 'static',
+            children: {
+              type: 'image', id: 'img-2',
+              url: '/examples/test/g10506uf.png',
+              dpi: 72, objectFit: 'cover', overlapPadding: 5,
+            },
+          },
+          {
+            // 오버랩 회피 검증용: 이미지(zIndex 2)가 첫 2컬럼을 덮어 단락
+            // 라인이 파트 분할된다 (회피 발생). 이후 wheel 축소 + 아래 드래그로
+            // 회피가 해제되면 첫 라인이 단일 파트로 회복되는지 검증한다.
+            type: 'box', id: 'box-overlap',
+            left: 0, top: 16, width: 4, height: 20, position: 'static',
+            children: [
+              {
+                type: 'box', id: 'box-overlap-para',
+                left: 0, top: 0, width: 4, height: 20, position: 'static',
+                children: {
+                  type: 'paragraph', id: 'para-overlap', column: 4, gap: 2,
+                  content: '오버랩회피검증텍스트입니다'.repeat(12),
+                },
+              },
+              {
+                type: 'box', id: 'box-overlap-img',
+                left: 0, top: 0, width: 2, height: 20, position: 'static',
+                zIndex: 2,
+                children: {
+                  type: 'image', id: 'img-overlap',
+                  url: '/examples/test/g10506uf.png',
+                  dpi: 72, objectFit: 'cover', overlapPadding: 5, zIndex: 2,
+                },
+              },
+            ],
+          },
+        ],
+      };
+      await doc.render();
+      flag.textContent = 'IMG_VERIFY_READY';
+    }
+
+    init().catch((e) => { flag.textContent = 'INIT_ERROR: ' + e.message; });
+  </script>
+</body>
+</html>

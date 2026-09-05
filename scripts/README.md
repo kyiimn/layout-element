@@ -20,6 +20,7 @@
 | `verify-hangul-glyph-fallback.mjs` | 정합성 (엔진) | cmap 미등록 한글 음절 폭 폴백 (`가` 폭 대체) | ALL PASS |
 | `verify-overlap-inline-fontsize.mjs` | 정합성 (엔진) | 인라인 fontSize 오버라이드 컬럼의 오버랩 판정 rect — per-line 높이 기준 | ALL PASS |
 | `verify-image-displayrect-cache.mjs` | 정합성 (엔진) | 이미지 displayRect(objectFit/none x/y/w/h) 변화 시 오버랩 회피 재계산 — layout input hash 무효화 | ALL PASS |
+| `verify-image-edit-mode.mjs` | 정합성 (브라우저) | 이미지 편집 모드 전 동작 — dblclick 진입(일반/레이아웃 모드), 부모 box 빨간테두리+라벨 숨김, 드래그/objectFit 자동전환, 휠 비율 유지, ESC 취소/복귀, Tab 순회, selection 이동 시 포커스 상실, 클램핑, **extractData/printPostData 3소스 일치, 오버랩 회피 갱신 A/B** | ALL PASS |
 | `verify-overlap-none.mjs` | 정합성 (엔진) | overlapMode 'none' 시맨틱 — 단일 관문(computeOverlapSizeMm)에서 NONE 조기 반환, box/path 회피 유지 | ALL PASS |
 | `verify-print-image-overlap.mjs` | 정합성 (엔진) | 이미지/오버랩 수정의 printPostData 반영 — 모드별 print 좌표 === displayRect, objectFit 갱신, overlapMode none 관통 | ALL PASS |
 | `verify-right-indent-tab.mjs` | 정합성 (엔진) | 좌우 밀기 탭(`\t`) 배치·정렬·print 스킵 | ALL PASS |
@@ -339,6 +340,36 @@ npx tsx scripts/verify-overlap-inline-fontsize.mjs   # 22항목 ALL PASS
 **실행**:
 ```bash
 npx tsx scripts/verify-image-displayrect-cache.mjs   # 4항목 ALL PASS
+```
+
+### `verify-image-edit-mode.mjs` — 이미지 편집 모드 전 동작 정합성 (브라우저)
+
+**목적**: `ImageEditController` + `EditManager` 이미지 편집 API가 전 요구사항대로 동작하는지 — 이미지 편집 관련 모든 변경(모드 시스템, 시각 피드백, Tab 순회, selection 연동)의 회귀를 방어한다. 전용 검증 페이지(`examples/image-edit-verify.html`, 이미지 2개 + 텍스트 박스 통제 환경)에서 **CDP 신뢰 이벤트**로 검증한다.
+
+**검증 항목** (60항목, 12 시나리오):
+1. **일반 모드 dblclick 진입 + 시각 피드백** — 이미지 dblclick → imageEditMode 진입, 부모 box `outline: red` + `.type-label display: none` (텍스트 포커스와 동일 패턴), 이미지 자체 파란 outline 없음/커서 move
+2. **ESC 종료** — 일반 모드 진입이면 완전 종료, 레이아웃 모드 진입이면 레이아웃 복귀. 종료 시 `text-focused` 제거 + `selected` 유지
+3. **드래그** — objectFit cover→none 자동 전환 (전환 시 표시 영역 스냅샷 고정, 크기 점프 없음), x/y 갱신
+4. **클램핑** — 부모 contentAbsRect 밖 드래그 시 `content - w/2` 상한으로 제한
+5. **휠** — 1.1배 확대 + 원본 비율 유지 + `imageResize`/`imagePropertyChange` 이벤트
+6. **드래그 중 ESC 취소** — 시작 위치 복원 + `imageMove(canceled=true)` + 모드 유지
+7. **Tab/Shift+Tab** — 편집 가능 이미지 순회 (포커스 + 부모 box 선택 이동)
+8. **selection 이동 → 포커스 상실** — 다른 box 클릭 시 `focusedImage` 해제, 단 이미지 편집 모드는 유지 (다른 이미지 클릭으로 재포커스)
+9. **텍스트 편집과 상호 전환** — 텍스트 편집 중 이미지 dblclick → 텍스트 blur + 이미지 편집 전환
+10. **데이터 정합성 (3소스 일치)** — 드래그+휼 후 `DOM getter === engine.extractData === printPostData.data === document.data`의 x/y/w/h/objectFit. dirty 가드(`DirtyPendingError`)는 `ensureCommitted()` 후 읽는 계약대로. print rect가 이미지 박스 contentAbsRect 유지(크롭 컨텍스트)도 확인
+11. **ESC 취소 복원값의 3소스 일치** — 취소 후 복원값이 DOM/extractData/printPostData 모두 동일
+12. **오버랩 회피 갱신 (비-공허 A/B)** — 이미지가 단락을 덮으면 첫 라인이 다중 파트로 분할(회피 발생), 휼 축소+드래그로 치우면 단일 파트 회복 + 해제 영역에 print chars 복귀. **path 모드 시맨틱 주의**: 불투명 픽셀 윤곽만 회피하므로 "이미지 rect 내 char=0"은 box 모드에만 성립하는 잘못된 기대치다 (실측: 첫 라인이 이미지 왼쪽 자유 영역 0~37.6mm + 내부 틈으로 파트 분할). 모드 무관 기준으로 **파트 분할 구조**를 검증한다.
+
+**이 스크립트가 잡은 실제 버그들 (작성 과정)**:
+- **가이드 컬럼 wheel 가로채기** — `x-layout-guide-column`이 `pointer-events: auto`여서 신뢰 wheel 히트 테스트가 이미지 대신 가이드를 잡음 → `pointer-events: none` 수정. 합성 이벤트 검증으로는 발견 불가 (target을 직접 지정하므로).
+- **휠 폴백 비율 역방향** — `originalWidth` 미설정 이미지의 폴백 ratio가 `h/w`였는데 `nextHeight = nextWidth / ratio`에 넣어 역수가 두 번 적용 → height 폭주 (197.5mm 폭 이미지가 height 1100mm). `w/h`로 수정.
+- **Playwright `mouse.wheel` 좌표 옵션 부재** — 시그니처는 `wheel(deltaX, deltaY)`이고 **현재 커서 위치**에서 굴러간다. `{x, y}` 전달은 무시되므로 반드시 `mouse.move()` 후 호출한다.
+- **path 모드 회피 오탐 (검증기 작성 교훈)** — "이미지 rect 내 char=0" 기대는 box 모드에만 성립. path 모드는 불투명 픽셀만 회피하므로 이미지 내부 투명 영역에 글자가 올 수 있다 (실측: 첫 라인이 0~37.6mm 자유 영역 + 내부 틈 2파트로 분할). 오버랩 검증은 모드 무관한 **파트 분할 구조** 기준으로 한다.
+- **chars 좌표계 오탐** — `buildParagraphPrintPostData`의 char rect는 **문서 절대 mm**(`parentAbsRect.absLeft/absTop` 기준 산출). para rect를 한 번 더 더하면 2배 오프셋이 된다.
+
+**실행**:
+```bash
+npx tsx scripts/verify-image-edit-mode.mjs   # 46항목 ALL PASS (서버 없으면 자동 스폰)
 ```
 
 ### `verify-overlap-none.mjs` — overlapMode 'none' 시맨틱 (엔진)
