@@ -164,19 +164,41 @@ export class LayoutSelectionController {
           if (manager.layoutEditType === 'reparent') {
             const box = tdElForDrag.items[0];
             if (box) {
+              manager._setMultiSelect(event.ctrlKey || event.metaKey);
               manager.selectLayout(box);
+              manager._setMultiSelect(false);
             } else {
-              // 빈 TD: TD 자체를 선택한다 (테두리 등 속성 주입 대상).
+              manager._setMultiSelect(event.ctrlKey || event.metaKey);
               manager.selectLayout(tdElForDrag);
+              manager._setMultiSelect(false);
             }
+            event.preventDefault();
+            manager._suppressLayoutClick();
             return;
           }
           const box = tdElForDrag.items[0];
+          const isMultiSelect = event.ctrlKey || event.metaKey;
           if (box) {
+            if (isMultiSelect) {
+              const tdsToRemove = manager.selectedLayouts.filter(
+                (el) => el instanceof LayoutTableCellElement,
+              );
+              if (tdsToRemove.length > 0) {
+                manager._setMultiSelect(true);
+                manager.selectLayout(tdsToRemove);
+                manager._setMultiSelect(false);
+              }
+            }
+            manager._setMultiSelect(isMultiSelect);
             manager.selectLayout(box);
+            manager._setMultiSelect(false);
           } else {
-            // 빈 TD: TD 자체를 선택하고 single 셀 블록을 설정한다.
-            // box가 없으므로 셀 블록 overlay가 유일한 시각적 피드백이다.
+            if (isMultiSelect) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              manager._suppressLayoutClick();
+              return;
+            }
             manager.selectLayout(tdElForDrag);
             kc.selection = {
               mode: 'single',
@@ -198,6 +220,7 @@ export class LayoutSelectionController {
           window.addEventListener('pointercancel', this._onCellDragUp, true);
           event.preventDefault();
           event.stopImmediatePropagation();
+          manager._suppressLayoutClick();
           return;
         }
       }

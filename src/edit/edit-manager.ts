@@ -2108,6 +2108,7 @@ export class EditManager {
         } else {
           this._selectedLayouts.push(el);
           el.setAttribute('selected', '');
+          el.removeAttribute('hovered');
         }
       }
     } else {
@@ -2120,6 +2121,7 @@ export class EditManager {
       this._selectedLayouts = newSelections;
       for (const el of newSelections) {
         el.setAttribute('selected', '');
+        el.removeAttribute('hovered');
       }
     }
 

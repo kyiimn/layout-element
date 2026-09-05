@@ -437,7 +437,9 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule('@media screen { :host([hovered]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); cursor: grab; } }', 22);
       styleEl.sheet.insertRule('@media screen { :host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); cursor: grab; } }', 23);
       styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .type-label:active, :host([editable-layout][hovered]) .type-label:active { cursor: grabbing; } }', 24);
-      styleEl.sheet.insertRule('@media screen { :host([text-focused]) .type-label { display: none; } }', 25);
+      styleEl.sheet.insertRule('@media screen { :host([td-static]) .type-label { cursor: default; } }', 25);
+      styleEl.sheet.insertRule('@media screen { :host([td-static][selected]) .type-label { background: rgba(255, 0, 0, 0.85); cursor: default; } }', 26);
+      styleEl.sheet.insertRule('@media screen { :host([text-focused]) .type-label { display: none; } }', 27);
       styleEl.sheet.insertRule('@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }', 26);
       styleEl.sheet.insertRule('@media screen { .type-label .parent-btn:hover { opacity: 1; } }', 27);
 
@@ -1432,8 +1434,10 @@ export class LayoutBoxElement extends HTMLElement {
     }
     if (this.parentElement instanceof LayoutTableCellElement && this._position === 'static') {
       this.setAttribute('td-static', '');
+      this.style.cursor = 'default';
     } else {
       this.removeAttribute('td-static');
+      this.style.cursor = 'grab';
     }
   }
 
