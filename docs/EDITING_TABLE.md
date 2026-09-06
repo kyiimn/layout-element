@@ -747,7 +747,15 @@ TD 내부 static box는 `[td-static]` 속성이 설정된다:
 - 호출 시점: `connectedCallback`, `position` setter, `editableLayout` setter
 - CSS rule: `:host([td-static]) .resize-handle { display: none !important; }`
 - CSS rule: `:host([td-static]) .type-label { display: none !important; }`
+- CSS rule: `:host([td-static])` — `cursor: default` 적용 (비 `td-static` box의 `grab` 커서와 구분)
 - CSS rule: `:host([td-static][selected])` / `:host([td-static][hovered])` — selected/hovered box-shadow는 유지 (시각적 선택 상태는 표시)
+
+**드래그 불가**: TD 내부 static box(`td-static`)는 레이아웃 편집 모드에서 **드래그로 이동할 수 없다**.
+`LayoutEditController._findEditableBoxFromEvent()`가 `td-static` 박스를 드래그 대상에서 제외한다 —
+경로(composedPath)에서 만난 `td-static` box는 `continue`로 건너뛰고, TD 자체를 클릭한 경우 편집 가능한
+부모 box로 폴백하며(없으면 null), TD 내부 box를 클릭한 경우에도 static이면 마찬가지로 부모 box로 폴백한다.
+static box는 TD content 영역에 100%로 자동 맞춤되므로 이동이 무의미하고, 셀 블록 drag와의 경합을 방지한다.
+빈 TD는 멀티선택 처리에서 제외된다 (`_onMouseDown` TD 클릭 시 `_setMultiSelect` 처리).
 
 ### 10.3 absolute box
 
@@ -765,6 +773,7 @@ TD 내부 `position: 'absolute'` box는 `[td-static]` 속성이 설정되지 않
 - **속성 주입**: 테두리, 배경색, padding 등 TD 속성은 `selectedLayouts`에 포함된 TD 요소에 직접 주입된다.
 - **하위 box가 있는 TD**: TD 자체가 선택되지 않음. `_findSelectableBoxFromEvent`와 `_findEditableBoxFromEvent`는 하위 box가 있는 TD를 만나면 TD가 아닌 내부 box를 반환.
 - **요소 추가 시 selection 이동**: 빈 TD가 선택된 상태에서 `appendChildData`로 box가 추가되면, TD 선택을 해제하고 새 box를 선택 (`clearLayoutSelection` + `selectLayout(newBox)`).
+- **빈 셀 멀티선택 제약 (일반/캡처 모드 `_onMouseDown`)**: `Ctrl+클릭` 멀티선택에서 **빈 셀(TD)은 추가 선택에서 거부**된다 — 빈 TD는 단일 선택 대상으로만 의미가 있고, 박스 속성 일괄 주입 대상이 아니므로 멀티선택에 넣지 않는다. 일반 셀(내부 box가 있는 TD)을 `Ctrl+클릭`하면 **기존 선택에 포함된 빈 TD가 있으면 해당 TD만 선택 해제**된다. TD 클릭 경로는 `_setMultiSelect` 처리 후 `_suppressLayoutClick()`으로 후속 클릭이 레이아웃 선택을 덮어쓰지 않게 차단한다 (reparent 모드 동일).
 
 ### 10.4 상위 요소 선택 화살표 (_selectParent)
 
