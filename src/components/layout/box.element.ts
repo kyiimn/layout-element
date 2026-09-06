@@ -743,7 +743,10 @@ export class LayoutBoxElement extends HTMLElement {
         }
       } else if (node.nodeName === 'X-LAYOUT-IMAGE') {
         const layoutEl = node as unknown as LayoutImageElement;
-        layoutEl.inheritStyle = childInheritStyle;
+        layoutEl.inheritStyle = {
+          ...childInheritStyle,
+          parentHeight: this.model.contentHeight,
+        };
       }
     }
     return super.appendChild(node);

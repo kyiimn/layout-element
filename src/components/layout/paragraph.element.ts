@@ -130,6 +130,9 @@ export class LayoutParagraphElement extends HTMLElement {
       this._editController = null;
     }
     this._editManagerRef = null;
+    // 부모 변경(DOM 이동, data setter reconcile 등) 시 이전 부모의 폭 스냅샷이
+    // 새 부모에서 오탐지되어 column/gap이 잘못 리셋되는 것을 방지한다.
+    this._lastParentWidthForColumn = undefined;
     // 엔진을 부모 childEngines에서 splice하지 않는다 — box.element.ts 참조.
     // DocumentEngine._buildTree()가 전체 트리를 재구축하므로 불필요하며,
     // 기존 엔진을 유지하는 편이 재사용 측면에서 더 효율적이다.
@@ -1006,6 +1009,7 @@ export class LayoutParagraphElement extends HTMLElement {
     if (this._overlapMode === value) return;
     this._overlapMode = value;
     this.markStructureChangedAndRender();
+    this.parentElement?.requestRerenderAffectedParagraphs();
   }
 
   get overlapMode(): ParagraphOverlapMode {
