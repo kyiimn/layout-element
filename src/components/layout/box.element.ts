@@ -345,13 +345,39 @@ export class LayoutBoxElement extends HTMLElement {
     if (!parentModel) return;
     const { columnWidth, gaps } = parentModel;
     if (this._model) {
+      let gcColumns: number | number[];
+      let gcGap: number | number[];
+
+      if (this.position !== 'absolute') {
+        gcColumns = columnWidth.slice(this.left, this.left + this.width);
+        gcGap = gaps.slice(this.left, this.left + this.width - 1);
+      } else {
+        // absolute box: 리사이즈 시 _savedColumns/_savedGap을 absWidth에 맞게
+        // 비례 스케일링하여 내부 paragraph column 너비가 box 크기에 맞게 갱신된다.
+        // _savedColumns이 number(컬럼 개수)이면 GC가 width/N으로 자동 계산하므로
+        // 스케일링이 불필요하다. number[]인 경우에만 비례 스케일링을 적용한다.
+        const currentAbsWidth = this.absWidth;
+        if (typeof this._savedColumns === 'number') {
+          gcColumns = this._savedColumns;
+        } else {
+          const savedTotalWidth = (this._savedColumns as number[]).reduce((sum, w) => sum + w, 0);
+          if (savedTotalWidth > 0 && currentAbsWidth > 0) {
+            const scale = currentAbsWidth / savedTotalWidth;
+            gcColumns = (this._savedColumns as number[]).map(w => w * scale);
+          } else {
+            gcColumns = this._savedColumns;
+          }
+        }
+        gcGap = this._savedGap;
+      }
+
       this._model.data = {
         paddingTop: this.paddingTop,
         paddingRight: this.paddingRight,
         paddingBottom: this.paddingBottom,
         paddingLeft: this.paddingLeft,
-        columns: this.position !== 'absolute' ? columnWidth.slice(this.left, this.left + this.width) : this._savedColumns,
-        gap: this.position !== 'absolute' ? gaps.slice(this.left, this.left + this.width - 1) : this._savedGap,
+        columns: gcColumns,
+        gap: gcGap,
         paragraphStyle: this.paragraphStyle,
         textStyle: this.textStyle,
         height: this.absHeight,
