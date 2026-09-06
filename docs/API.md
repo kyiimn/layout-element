@@ -276,6 +276,13 @@ class LayoutBoxElement extends HTMLElement
 | `borderLeftWidth` | `number` | mm | 좌측 테두리 두께. |
 | `borderStyle` | `'solid' \| 'dotted' \| 'dashed'` | — | 테두리 스타일. |
 | `borderColor` | `string \| undefined` | — | 테두리 색상. `ColorRegistry`에 등록된 CMYK 색상 이름만 사용 가능. |
+
+> **스타일 setter의 엔진 동기화**: 스타일 관련 setter(`borderTopWidth` 등 4종, `borderStyle`,
+> `borderColor`, `backgroundColor`, `backgroundOpacity`)는 변경 시 `layout()`을 호출한다.
+> `layout()`이 `_layoutStructure()`를 거쳐 `BoxEngine` data에 값을 전달하므로 **저장 시 값이 누락되지
+> 않는다**. (과거 일부 setter가 `_renderBorder()`만 호출하던 시기에는 shadow DOM만 갱신되고 엔진
+> data가 동기화되지 않아 저장 누락 버그가 있었다. `borderColor`를 `undefined`로 설정하면 테두리
+> 렌더링이 스킵된다.)
 | `paddingTop` | `number` | mm | 내부 상단 여백. |
 | `paddingRight` | `number` | mm | 내부 우측 여백. |
 | `paddingBottom` | `number` | mm | 내부 하단 여백. |
@@ -580,6 +587,12 @@ class LayoutImageElement extends HTMLElement
 | `objectFit` setter | `render()` + 부모 `requestRerenderAffectedParagraphs()` | 엔진 `_updateEngine`으로 `objectFit` 전달 → 엔진 `displayRect` 재계산 → DOM은 결과를 canvas에 표시 |
 | `zIndex`, `overlapPadding`, `overlapMode` setter | `layout()` + `render()` + 부모 `requestRerenderAffectedParagraphs()` | 형제 단락 텍스트 회피 재계산 |
 | `inheritStyle` setter | `layout()` + `render()` | 상위 box의 크기/여백 변경 시. `absWidth`/`absHeight`가 `inheritStyle.parentWidth`/`parentHeight`에 의존하므로 캔버스 픽셀을 다시 그려야 함. `_updateEngine()`이 `contentAbsRect`를 재주입하여 엔진 `displayRect` 재계산 |
+
+> **image 자식의 `parentHeight`는 `contentHeight`**: 부모 box의 `_propagateInheritStyle()`은
+> image 자식에 `parentHeight: model.contentHeight`(실제 콘텐츠 높이)를 주입한다. 과거의
+> `editableHeight`(static box의 라인 버림 계산)를 사용할 때 absolute 박스 내 이미지가 박스를
+> 꽉 채우지 못하는 버그가 있었다 — `contentHeight`가 정확한 실측값이다. paragraph 자식은
+> `parentHeight: editableTextHeight`(텍스트 라인 계산 기준)를 사용한다.
 
 **상위 box 크기/여백 변경 경로**:
 
@@ -889,6 +902,10 @@ class LayoutColumnElement extends HTMLElement
 오차가 라인이 아래로 갈수록 누적되어 static box의 수학적 `top` 계산(`lineHeight * top`)과
 어긋나는 문제가 있었다. absolute positioning으로 변경하여 계산식과 정확히 일치하도록
 수정했다.
+
+> **`pointer-events: none`**: 가이드 컬럼 오버레이 전체는 마우스 이벤트를 받지 않는다.
+> 문서 캔버스 위에 겹쳐 렌더링되지만 wheel 스크롤·클릭·드래그를 가로채지 않아
+> 아래 레이어의 편집 조작이 그대로 통과된다.
 
 #### Class: `LayoutGuideColumnElement`
 
@@ -1743,13 +1760,11 @@ FontLoader.getInstance().getFontFamily('serif'); // → 등록된 첫 폰트
 
 ### `EditManager`
 
-전역 편집 상태를 관리하는 **싱글톤**. 포커스, 선택, 편집 모드, 레이아웃 선택, 삽입 모드
-모두를 이 매니저로 제어합니다.
+편집 상태를 관리하는 **문서(document)별 인스턴스**. 포커스, 선택, 편집 모드, 레이아웃 선택, 삽입 모드
+모두를 이 매니저로 제어합니다. `LayoutDocumentElement.editManager`로 접근한다.
 
 ```ts
 class EditManager {
-  static getInstance(): EditManager;
-
   // 이벤트
   addEventListener(type: EditManagerEventType, listener: EditManagerEventListener): void;
   removeEventListener(type: EditManagerEventType, listener: EditManagerEventListener): void;
@@ -1782,6 +1797,14 @@ class EditManager {
   removeEditableBox(id: string): void;
   setEditableRootId(id: string | null): void;
   get editableRootId: string | null;
+
+  // 이미지 편집 모드
+  get imageEditMode: boolean;
+  set imageEditMode(value: boolean): void;
+  focusImage(target: LayoutImageElement | string, options?: { fromLayoutEditMode?: boolean }): boolean;
+  blurImage(target?: LayoutImageElement): boolean;
+  get focusedImage: LayoutImageElement | null;
+  isImageEditable(image: LayoutImageElement): boolean;
 
   // 레이아웃 선택
   selectLayout(target): boolean;
@@ -1831,7 +1854,7 @@ class EditManager {
   isBoxEditable(box: LayoutBoxElement): boolean;
 
   // 라이프사이클
-  /** 모든 편집 상태를 초기화. LayoutEditor unmount 시 호출하여 싱글톤의 잔류 상태를 제거. */
+  /** 모든 편집 상태를 초기화. LayoutEditor unmount 시 호출하여 문서 매니저의 잔류 상태를 제거. */
   reset(): void;
 }
 ```
@@ -1863,11 +1886,20 @@ type EditManagerEventType =
   | 'layoutSelectionChange' // 레이아웃 선택 변경
   | 'layoutMove'            // 레이아웃 이동
   | 'layoutResize'          // 레이아웃 리사이즈
+  | 'layoutAdd'             // 레이아웃 요소 추가
+  | 'layoutRemove'          // 레이아웃 요소 제거
   | 'insert'                // 삽입 완료
-  | 'insertCancel';         // 삽입 취소
+  | 'insertCancel'          // 삽입 취소
   | 'modeChange'            // 모드 전환
-  | 'boxPropertyChange'    // Box 속성 변경
-  | 'placeGunChange';       // Place Gun 상태 변경
+  | 'boxPropertyChange'     // Box 속성 변경
+  | 'contextMenu'           // 컨텍스트 메뉴 요청
+  | 'placeGunChange'        // Place Gun 상태 변경
+  | 'placeGunBefore'        // Place Gun 배치 직전 (취소 가능)
+  | 'placeGunAfter'         // Place Gun 배치 직후
+  | 'cellSelectionChange'   // 테이블 셀 블록 선택 변경
+  | 'imageMove'             // 이미지 드래그 이동 완료/취소
+  | 'imageResize'           // 이미지 휠 크기 조절
+  | 'imagePropertyChange';  // 이미지 개별 속성 변경
 
 interface EditManagerEvent {
   type: EditManagerEventType;
