@@ -971,7 +971,7 @@ export class LayoutParagraphElement extends HTMLElement {
   set overlapMode(value: ParagraphOverlapMode) {
     if (this._overlapMode === value) return;
     this._overlapMode = value;
-    this.parentElement?.requestRerenderAffectedParagraphs();
+    this.markStructureChangedAndRender();
   }
 
   get overlapMode(): ParagraphOverlapMode {

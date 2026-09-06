@@ -1097,10 +1097,22 @@ export class LayoutBoxElement extends HTMLElement {
       position: this._position,
       zIndex: this._zIndex,
       role: this._role,
+      backgroundColor: this._backgroundColor,
+      backgroundOpacity: this._backgroundOpacity,
+      borderTopWidth: this._borderTopWidth,
+      borderBottomWidth: this._borderBottomWidth,
+      borderLeftWidth: this._borderLeftWidth,
+      borderRightWidth: this._borderRightWidth,
+      borderStyle: this._borderStyle,
+      borderColor: this._borderColor,
       paddingTop: this._paddingTop,
       paddingRight: this._paddingRight,
       paddingBottom: this._paddingBottom,
       paddingLeft: this._paddingLeft,
+      contentUid: this._contentUid,
+      groupMember: this._groupMember,
+      priority: this._priority,
+      lock: this._lock || undefined,
     };
     this._engine.data = boxData;
   }
@@ -1221,6 +1233,7 @@ export class LayoutBoxElement extends HTMLElement {
       this._contentUid = normalized;
       this.setAttribute('content-uid', normalized);
     }
+    this._syncEngineBoxData();
     this.editManager?._dispatchBoxPropertyChange({
       box: this,
       property: 'contentUid',
@@ -1245,6 +1258,7 @@ export class LayoutBoxElement extends HTMLElement {
     }
     const newValue = this._groupMember ? this._groupMember.split(',').filter(s => s.length > 0) : [];
     if (oldValue.length !== newValue.length || oldValue.some((v, i) => v !== newValue[i])) {
+      this._syncEngineBoxData();
       this.editManager?._dispatchBoxPropertyChange({
         box: this,
         property: 'groupMember',
@@ -1260,6 +1274,7 @@ export class LayoutBoxElement extends HTMLElement {
     if (value === oldValue) return;
     this._priority = value;
     this.setAttribute('priority', String(value));
+    this._syncEngineBoxData();
     this.editManager?._dispatchBoxPropertyChange({
       box: this,
       property: 'priority',
@@ -1276,6 +1291,7 @@ export class LayoutBoxElement extends HTMLElement {
     } else {
       this.removeAttribute('lock');
     }
+    this._syncEngineBoxData();
   }
 
   get inheritStyle() { return this._inheritStyle; }
