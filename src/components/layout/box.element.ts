@@ -993,37 +993,37 @@ export class LayoutBoxElement extends HTMLElement {
   set borderTopWidth(value: number) {
     if (this._borderTopWidth === value) return;
     this._borderTopWidth = value;
-    this._renderBorder();
+    this.layout();
   }
 
   set borderBottomWidth(value: number) {
     if (this._borderBottomWidth === value) return;
     this._borderBottomWidth = value;
-    this._renderBorder();
+    this.layout();
   }
 
   set borderLeftWidth(value: number) {
     if (this._borderLeftWidth === value) return;
     this._borderLeftWidth = value;
-    this._renderBorder();
+    this.layout();
   }
 
   set borderRightWidth(value: number) {
     if (this._borderRightWidth === value) return;
     this._borderRightWidth = value;
-    this._renderBorder();
+    this.layout();
   }
 
   set borderStyle(value: BoxBorderStyle) {
     if (this._borderStyle === value) return;
     this._borderStyle = value;
-    this._renderBorder();
+    this.layout();
   }
 
   set borderColor(value: string | undefined) {
     if (this._borderColor === value) return;
     this._borderColor = value;
-    this._renderBorder();
+    this.layout();
   }
 
   set paddingTop(value: number) {
