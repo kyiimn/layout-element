@@ -313,6 +313,13 @@ flowchart LR
 7. 조합 중이면 `_applyCompositionUnderline()`로 엔진 렌더링 결과의 조합 범위 span에 밑줄 적용. 조합이 종료된 직후면 `_clearCompositionUnderline()`로 밑줄 제거.
 8. `_wasFocused`가 true면 `textarea.focus({ preventScroll: true })`로 포커스 복원. `preventScroll: true`로 스크롤 컨테이너의 좌상단 점프를 방지한다.
 
+> **조합 중 인라인 스타일 유지**: 낙관적 조합 span(`_createOptimisticCompositionSpan`) 생성 시
+> `genCharStyleFlat`이 치수/레이아웃 스타일만 반환하므로, 폰트·색상 계열 인라인 필드는
+> `_applyOptimisticInlineOverrides()`로 별도 적용한다(런 오버라이드 → 문단 effective 순서 —
+> `column.element.ts`의 `_applyInlineOverrides`와 동일 로직). 이것이 없으면 조합 중 텍스트가
+> 문단 기본 스타일로 렌더링되어 **굵게/기울임/글자색/글꼴/글자 크기 인라인 주입이 조합 span에서
+> 누락**된다. 조합이 종료되면 flushRender가 엔진 렌더로 대체하므로 이후에는 엔진의 런 스타일이 그대로 표시된다.
+
 #### `setCursor()`
 
 `_cursorModel.offset`을 주어진 `textOffset`로 설정하고 `_updateCursorPosition()`을 호출한다. 그러나 커서를 시각적으로 표시하려면 별도로 `focus()`를 호출해야 한다.
@@ -1586,6 +1593,12 @@ type RunMap = RunEntry[];
 | 텍스트편집모드, 포커스 + selection 없음 + **커서가 런 안** | **해당 런만** 업데이트. paragraph는 무변경 | paragraph |
 | 텍스트편집모드, 포커스 + selection 없음 + **커서가 런 밖(평문)** | **paragraph 자체 스타일** 수정 + 명시 주입 필드를 **내부 모든 런에 캐스케이드** | paragraph |
 | 포커스 없음 + **paragraph / paragraph-box selected (단일·복수 모두)** | **선택된 모든 대상**의 paragraph 자체 스타일 수정 + 명시 주입 필드 전체 캐스케이드. lock된 대상은 스킵. 하나라도 성공하면 `true` | paragraph |
+
+> **"커서가 런 안"의 end 경계 포함**: `getStyleAtOffset`은 `offset === 마지막 런.end`(문단 맨 뒤)에서도
+> 마지막 런의 스타일을 반환하므로 이 경계도 런-안 경로로 판정한다. 이에 따라 런 탐색 조건도
+> `r.end > offset`뿐 아니라 `(r.end === offset && 마지막 런)`을 포함해 판정과 대칭을 맞춘다 —
+> 탐색이 end 경계를 누락하면 커서가 문단 맨 뒤에 있을 때 인라인 주입이 **조용히 무시**된다
+> (판정/탐색 경계 비대칭 버그).
 
 > ※1 인라인 가능 필드: `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`, `letterSpacing`, `widthRatio`, `spaceRatio` (TextInlineStyle에 존재)
 > ※2 인라인 불가 필드: `textAlign`, `lineGap`, `verticalAlign` (ParagraphStyle), `indent` (TextStyle 중 인라인 미지원) — **항상 paragraph에 적용**
