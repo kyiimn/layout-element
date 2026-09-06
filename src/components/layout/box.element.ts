@@ -674,13 +674,10 @@ export class LayoutBoxElement extends HTMLElement {
       if (childEl.type === 'box' || childEl.type === 'table') {
         childEl.inheritStyle = childInheritStyle;
       } else if (childEl.type === 'paragraph') {
-        // extractData round-trip 후 column/gap이 number[]로 고정되어
-        // 부모 GC 너비 변경을 무시하는 현상을 방지한다.
-        // inheritStyle setter가 layout()을 호출하므로 리셋이
-        // _layoutStructure()에 반영된다.
+        // column/gap 리셋은 부모 편집 폭이 실제로 변경됐을 때만 수행한다
+        // (resetColumnIfParentResized 문서 참조 — 무조건 리셋 시 단설정 롤백 버그).
         const paragraph = childEl as LayoutParagraphElement;
-        paragraph.column = undefined;
-        paragraph.gap = undefined;
+        paragraph.resetColumnIfParentResized(this.model!.editableWidth);
         paragraph.inheritStyle = {
           ...childInheritStyle,
           parentHeight: this.model!.editableTextHeight,

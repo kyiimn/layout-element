@@ -399,8 +399,8 @@ class LayoutParagraphElement extends HTMLElement
 |---|---|---|---|
 | `data` | `ParagraphData` | — | 한 번에 갱신. `content` 필드는 렌더링된 실제 텍스트를 반환 (편집 반영). |
 | `content` | `string \| (string \| TextInlineData)[]` | — | 텍스트 콘텐츠 단독 갱신/조회. setter는 `_sourceContent`와 `model.textContent`를 동시에 동기화한 뒤 `markStructureChangedAndRender()`로 재렌더링까지 수행. `data` setter는 이 setter를 거치지 않고 내부 필드를 직접 갱신 후 `layout()` + `scheduleRender()` 호출 (중복 렌더링 방지). |
-| `column` | `number \| number[]` (via `data`) | — | 하위 컬럼 그리드 (생략 시 부모 상속). |
-| `gap` | `number \| number[]` (via `data`) | mm | 하위 컬럼 간격. |
+| `column` | `number \| number[]` (via `data`) | — | 하위 컬럼 그리드 (생략 시 부모 상속). 명시 지정값은 부모 `layout()` 경유 시 보존되며(박스 추가/undo/저장 응답 재주입 포함), 부모 편집 폭이 실제로 변경될 때만 상속 리셋 (`resetColumnIfParentResized` 참조). |
+| `gap` | `number \| number[]` (via `data`) | mm | 하위 컬럼 간격. `column`과 동일한 보존/리셋 규칙을 따른다. |
 | `zIndex` | `number` (via `data`) | — | 렌더링 순서. |
 | `overlapMode` (set) | `ParagraphOverlapMode` | — | 다른 paragraph가 이 paragraph를 감싼 박스를 텍스트 회피 대상으로 취급할지 제어 (`'box'` \| `'none'`). 기본값 `'box'`. `'none'`으로 설정하면 다른 paragraph가 이 박스와 겹쳐도 텍스트를 회피하지 않는다. 변경 시 부모 `requestRerenderAffectedParagraphs()` 호출. 본문과 시각적으로 겹치되 텍스트 회피가 필요 없는 영역에 사용. |
 | `textStyle` (set) | `TextStyle` | — | 글자 스타일. 변경 시 구조 재계산 + 재렌더링. 기존 값과 같으면 no-op. |
@@ -434,6 +434,7 @@ class LayoutParagraphElement extends HTMLElement
 | 메서드 | 시그니처 | 설명 |
 |---|---|---|
 | `getVisibleLineCount()` | `(): { columnIndex: number; visibleLineCount: number } \| null` | 단락의 모든 단(column)을 순회하며 텍스트가 실제로 끝나는 단 인덱스(0-base)와 그 단의 보이는 라인 수를 반환. 각 단의 `visibleLineCount`는 paragraph 자체 `textStyle.fontSize` × `paragraphStyle.lineGap`으로 계산된 `lineHeight`(mm)로 렌더링된 line div 중 `display: none`이 아닌 것의 수. 보이는 라인이 있는 가장 마지막 단을 반환하며, 단이 없거나 보이는 라인이 하나도 없으면 `null`. 외부 코드가 컬럼의 shadow DOM 내부 구조를 직접 순회할 필요를 제거하는 캡슐화 API. |
+| `resetColumnIfParentResized()` | `(parentEditableWidth: number): void` | 부모 box의 `_propagateInheritStyle`이 `layout()`마다 호출하는 column/gap 상속 리셋 판정기. 부모 편집 폭이 직전 스냅샷과 실제로 변경된 경우에만 `column`/`gap`을 `undefined`로 리셋해 새 부모 그리드를 상속받게 한다. 폭이 불변한 `layout()`(박스 추가, undo/저장 응답 재주입 등)에서는 명시 지정값을 보존한다. 부모 엔진 초기화 중 관측되는 `0`(미확정 폭)은 스냅샷 비교에서 제외한다 — 기록하면 엔진 완성 후 실제 폭이 "변경"으로 오탐되어 생성 시 주입된 `column: 1` 기본값과 단설정 값이 유실된다. 외부 코드가 직접 호출할 일은 없다 (box 전용). |
 
 #### `render-error` 이벤트
 

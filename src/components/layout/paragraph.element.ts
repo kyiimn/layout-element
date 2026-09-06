@@ -36,6 +36,9 @@ export class LayoutParagraphElement extends HTMLElement {
   private _column?: number | number[];
   private _gap?: number | number[];
 
+  /** 부모 편집 폭(mm) 스냅샷 — {@link resetColumnIfParentResized} 판정용. */
+  private _lastParentWidthForColumn: number | undefined;
+
   private _paragraphStyle: ParagraphStyle;
   private _textStyle: TextStyle;
 
@@ -767,6 +770,37 @@ export class LayoutParagraphElement extends HTMLElement {
 
   get inheritStyle() {
     return this._inheritStyle;
+  }
+
+  /**
+   * 부모 편집 폭 변경 여부에 따라 명시 `column`/`gap` 상속값 리셋을 판정한다.
+   *
+   * `_propagateInheritStyle`이 layout()마다 호출하지만, 리셋은 부모 편집 폭이
+   * 실제로 변경된 경우에만 수행한다. 무조건 리셋하면 단설정으로 명시 지정한
+   * column/gap과 생성 시 주입된 `column: 1` 기본값이 박스 추가/undo/저장 응답
+   * 재주입 등 부모 layout() 경유 시마다 유실되어 상속값으로 롤백된다.
+   *
+   * @param parentEditableWidth - 부모 box의 현재 편집 폭 (mm)
+   * @example
+   * ```ts
+   * // box._propagateInheritStyle 내부
+   * paragraph.resetColumnIfParentResized(this.model.editableWidth);
+   * ```
+   */
+  resetColumnIfParentResized(parentEditableWidth: number): void {
+    // 부모 엔진 초기화 중 editableWidth가 아직 0(미확정)으로 관측될 수 있다.
+    // 0을 스냅샷으로 기록하면 엔진 완성 후 실제 폭이 "변경"으로 오탐되어
+    // 생성 시 주입된 column: 1과 단설정 값이 리셋된다. 0은 기록하지 않는다.
+    const widthResolved = parentEditableWidth > 0;
+    if (widthResolved
+      && this._lastParentWidthForColumn !== undefined
+      && this._lastParentWidthForColumn !== parentEditableWidth) {
+      this._column = undefined;
+      this._gap = undefined;
+    }
+    if (widthResolved) {
+      this._lastParentWidthForColumn = parentEditableWidth;
+    }
   }
 
   /**
