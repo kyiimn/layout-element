@@ -35,7 +35,7 @@ EditManager.focusImage()
     ├── lock/편집 루트 검사
     ├── 다른 모드(text/layout/insert) 비활성화
     ├── _imageEditMode = true
-    ├── image-edit-focus 속성 설정 (시각 피드백: 파란 outline + move 커서)
+    ├── image-edit-focus 속성 설정 (시각 피드백: 부모 box 빨간 테두리 + 라벨 숨김 + move 커서 — §7 참고)
     ├── ImageEditController.attach() (mousedown/wheel capture 리스너 등록)
     └── modeChange 이벤트 (imageEditMode: true)
     │
@@ -179,5 +179,5 @@ Tab/Shift+Tab으로 이미지를 순회한다 (`EditManager.navigateByTab`).
 | `src/edit/image-edit-controller.ts` | `ImageEditController`: mousedown/wheel capture 위임, 드래그 세션 상태, rAF 스로틀링, 클램핑, ESC 취소, objectFit 자동 전환 |
 | `src/edit/edit-manager.ts` | `imageEditMode`/`focusedImage`/`focusImage`/`blurImage`/`isImageEditable`, `_dispatchImageMove`/`_dispatchImageResize`/`_dispatchImagePropertyChange`, 모드 상호 배타 처리 |
 | `src/edit/layout-selection-controller.ts` | `_onDblClick` 이미지 경로: layoutEditMode에서 이미지 더블클릭 → `focusImage` |
-| `src/components/layout/image.element.ts` | `image-edit-focus` 속성 스타일 (파란 outline + move 커서) |
+| `src/components/layout/image.element.ts` | `image-edit-focus` 속성 스타일 (move 커서 — 테두리는 부모 box의 selected/text-focused로 표현, §7 참고) |
 | `src/types/edit/layout.type.ts` | `EditModeState.imageEditMode`, `ImagePropertyChangeEventDetail`, `ImagePropertyName` |
