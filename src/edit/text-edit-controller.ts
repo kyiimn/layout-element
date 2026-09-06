@@ -1075,6 +1075,7 @@ export class TextEditController {
         this._replaceSelection("");
       } else if (offset > 0) {
         model.textContent = deleteTextFromInline(model.textContent, offset - 1, 1);
+        this._runMap = runMapFromContent(model.textContent);
         this._textarea.value = content.slice(0, offset - 1) + content.slice(offset);
         this._cursorModel.offset = offset - 1;
         this._textarea.setSelectionRange(offset - 1, offset - 1);
@@ -1091,6 +1092,7 @@ export class TextEditController {
         this._replaceSelection("");
       } else if (offset < content.length) {
         model.textContent = deleteTextFromInline(model.textContent, offset, 1);
+        this._runMap = runMapFromContent(model.textContent);
         this._textarea.value = content.slice(0, offset) + content.slice(offset + 1);
         this._textarea.setSelectionRange(offset, offset);
         this._debouncedRender();
@@ -1229,6 +1231,7 @@ export class TextEditController {
     const newContent = content.slice(0, start.textOffset) + content.slice(end.textOffset);
 
     model.textContent = deleteTextFromInline(model.textContent, start.textOffset, end.textOffset - start.textOffset);
+    this._runMap = runMapFromContent(model.textContent);
     this._textarea.value = newContent;
     this._cursorModel.offset = start.textOffset;
     this._cursorModel.selection = null;
@@ -1269,6 +1272,7 @@ export class TextEditController {
       startOffset,
       pastedText,
     );
+    this._runMap = runMapFromContent(model.textContent);
     this._textarea.value = newContent;
     this._cursorModel.offset = newOffset;
     this._cursorModel.selection = null;
