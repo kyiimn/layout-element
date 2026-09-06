@@ -2448,6 +2448,24 @@ top handle:
   left unchanged
 ```
 
+#### 11.4.3 리사이즈 시 내부 paragraph column/gap 갱신 (box.element.ts)
+
+리사이즈로 박스 폭이 변하면 내부 paragraph의 column 너비가 새 박스 폭에 맞게 갱신된다
+(`box.element.ts` `_layoutStructure`의 column/gap 판정):
+
+- **absolute box**: `_savedColumns`가 `number[]`(명시 단 너비)이면 **비례 스케일링** —
+  `scale = 현재 absWidth / 저장된 단 너비 합계`를 곱해 각 단 너비를 재계산한다.
+  `_savedColumns`이 `number`(단 개수)이면 GC가 `width / N`으로 자동 계산하므로 스케일링이 불필요하다.
+- **paragraph column/gap 리셋**: `_propagateInheritStyle()`은 자식 paragraph마다
+  `resetColumnIfParentResized(부모 편집 폭)`를 호출한다 — **부모 편집 폭이 직전 스냅샷과
+  실제로 변경된 경우에만** `column`/`gap`을 `undefined`로 리셋해 새 부모 그리드를 상속받게 한다.
+  박스 리사이즈는 편집 폭을 실제로 변경하므로 이 판정을 통과해 리셋이 수행된다.
+  폭이 불변한 `layout()` 경유(박스 추가, undo/저장 응답 재주입 등)에서는 리셋이 일어나지 않아
+  사용자의 단설정과 생성 시 주입된 `column: 1` 기본값이 보존된다 (API.md `resetColumnIfParentResized` 참조).
+- **static text-box**: 리셋 시 paragraph의 `column`/`gap`이 `undefined`로 전환되어
+  `_layoutStructure()`가 `parentModel.columnWidth`/`gaps`를 사용한다 —
+  extractData round-trip 후 `number[]`로 고정되어 부모 GC 너비 변경을 무시하는 현상을 방지한다.
+
 ### 11.5 `layoutResize` 이벤트
 
 `EditManager`에서 발생하는 이벤트로, 리사이즈 완료 또는 취소 시 발생한다. 단일 요소에만 적용된다 (다중 선택 리사이즈 없음).

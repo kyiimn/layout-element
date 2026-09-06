@@ -27,13 +27,17 @@ function _inlineStyleKey(style: TextInlineStyle | undefined): string {
   if (style.fontWeight !== undefined) parts.push(`fontWeight=${style.fontWeight}`);
   if (style.fontStyle !== undefined) parts.push(`fontStyle=${style.fontStyle}`);
   if (style.color !== undefined) parts.push(`color=${style.color}`);
+  if (style.letterSpacing !== undefined) parts.push(`letterSpacing=${style.letterSpacing}`);
+  if (style.widthRatio !== undefined) parts.push(`widthRatio=${style.widthRatio}`);
+  if (style.spaceRatio !== undefined) parts.push(`spaceRatio=${style.spaceRatio}`);
   return parts.join('|');
 }
 
 /**
  * 치수(width/height/top)에 영향을 주는 인라인 필드만 직렬화한 키.
- * `fontFamily`/`fontSize`만 포함 — `fontWeight`/`fontStyle`/`color`는
- * `genCharStyleFlat`의 치수 계산에 무영향이므로 델타 판별에서 제외한다.
+ * `fontFamily`/`fontSize`/`letterSpacing`/`widthRatio`/`spaceRatio` 포함 —
+ * 모두 `genCharStyleFlat`의 치수 계산에 개입한다. `fontWeight`/`fontStyle`/
+ * `color`는 무영향이므로 델타 판별에서 제외한다.
  *
  * @param style - 직렬화할 인라인 스타일 (선택)
  * @returns 치수 영향 필드 키. fontWeight 등만 변경 시 기존 키와 동일
@@ -43,6 +47,9 @@ function _dimensionKey(style: TextInlineStyle | undefined): string {
   const parts: string[] = [];
   if (style.fontFamily !== undefined) parts.push(`fontFamily=${style.fontFamily}`);
   if (style.fontSize !== undefined) parts.push(`fontSize=${style.fontSize}`);
+  if (style.letterSpacing !== undefined) parts.push(`letterSpacing=${style.letterSpacing}`);
+  if (style.widthRatio !== undefined) parts.push(`widthRatio=${style.widthRatio}`);
+  if (style.spaceRatio !== undefined) parts.push(`spaceRatio=${style.spaceRatio}`);
   return parts.join('|');
 }
 
@@ -334,7 +341,7 @@ export class LayoutColumnElement extends HTMLElement {
         inner.dataset.charInner = 'true';
         charEl.appendChild(inner);
       }
-      const innerStyle = this.model!.genCharInnerStyle();
+      const innerStyle = this.model!.genCharInnerStyle(inlineStyle);
       inner.style.cssText = '';
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(inner.style, innerStyle);
       inner.textContent = char;
@@ -404,7 +411,7 @@ export class LayoutColumnElement extends HTMLElement {
     // 스트리핑된 공백/`\n` span은 charOffset dataset이 없어 자동으로 건너뛴다.
     // swidth에 장평 스케일(widthRatio × 0.88)을 곱한다 — dataset.swidth는 장평 미적용
     // 배치 폭이고 실제 시각 우측 끝은 스케일 적용 후이므로, 점선이 이전 글자에 침범하지 않는다.
-    const flatScaleX = this.model ? this.model.widthRatio * 0.88 : 1;
+    // 장평은 런별 오버라이드 가능하므로 형제 span의 dimKey에서 per-span 값을 파싱한다.
     const siblings = Array.from(tabEl.parentElement?.children ?? []) as HTMLElement[];
     const tabIdxInDom = siblings.indexOf(tabEl);
     let gapStartMm: number | null = null;
@@ -413,7 +420,12 @@ export class LayoutColumnElement extends HTMLElement {
       if (!(el instanceof HTMLSpanElement)) continue;
       const off = el.dataset.charOffset;
       if (off === undefined) continue;
-      gapStartMm = parseFloat(off) + parseFloat(el.dataset.swidth ?? '0') * flatScaleX;
+      const dimKey = el.dataset.dimKey ?? '';
+      const m = /(?:^|\|)widthRatio=([\d.eE+-]+)/.exec(dimKey);
+      // dimKey에 widthRatio가 없는 plain 런은 문단 effective 장평을 쓴다.
+      // model 미제공(연결 해제 등) 시 원본 동작대로 무축소(1)로 폴백한다.
+      const scaleX = m ? Number(m[1]) * 0.88 : (this.model ? this.model.widthRatio * 0.88 : 1);
+      gapStartMm = parseFloat(off) + parseFloat(el.dataset.swidth ?? '0') * scaleX;
       break;
     }
     if (gapStartMm === null) {

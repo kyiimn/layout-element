@@ -15,10 +15,12 @@
 | `verify-visual-render.mjs` | 정합성 (화면) | 실제 렌더 검증 — rect 기반 표시성 (호스트 CSS rule stale/0폭/클립 감지) | ALL PASS |
 | `verify-ime.mjs` | 정합성 (IME) | 한글 조합 커밋/취소/혼합 | ALL PASS |
 | `verify-multicolumn.mjs` | 정합성 (멀티컬럼) | prefix 캐시 경로 === 전체 재래핑 | ALL PASS |
+| `verify-inline-metrics.mjs` | 정합성 (엔진) | 인라인 `letterSpacing`/`widthRatio`/`spaceRatio` 런 오버라이드 — 폭 공식/캐시 해시/printPostData/extractData/스타일 조회/런 맵 병합/오버랩 회피(파트 분할·좁은 영역 COVER) | ALL PASS |
 | `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/런/캐스케이드) | ALL PASS |
 | `verify-hangul-glyph-fallback.mjs` | 정합성 (엔진) | cmap 미등록 한글 음절 폭 폴백 (`가` 폭 대체) | ALL PASS |
 | `verify-overlap-inline-fontsize.mjs` | 정합성 (엔진) | 인라인 fontSize 오버라이드 컬럼의 오버랩 판정 rect — per-line 높이 기준 | ALL PASS |
 | `verify-image-displayrect-cache.mjs` | 정합성 (엔진) | 이미지 displayRect(objectFit/none x/y/w/h) 변화 시 오버랩 회피 재계산 — layout input hash 무효화 | ALL PASS |
+| `verify-image-edit-mode.mjs` | 정합성 (브라우저) | 이미지 편집 모드 전 동작 — dblclick 진입(일반/레이아웃 모드), 부모 box 빨간테두리+라벨 숨김, 드래그/objectFit 자동전환, 휠 비율 유지, ESC 취소/복귀, Tab 순회, selection 이동 시 포커스 상실, 클램핑, **extractData/printPostData 3소스 일치, 오버랩 회피 갱신 A/B** | ALL PASS |
 | `verify-overlap-none.mjs` | 정합성 (엔진) | overlapMode 'none' 시맨틱 — 단일 관문(computeOverlapSizeMm)에서 NONE 조기 반환, box/path 회피 유지 | ALL PASS |
 | `verify-print-image-overlap.mjs` | 정합성 (엔진) | 이미지/오버랩 수정의 printPostData 반영 — 모드별 print 좌표 === displayRect, objectFit 갱신, overlapMode none 관통 | ALL PASS |
 | `verify-right-indent-tab.mjs` | 정합성 (엔진) | 좌우 밀기 탭(`\t`) 배치·정렬·print 스킵 | ALL PASS |
@@ -195,11 +197,33 @@ npx tsx scripts/verify-ime.mjs   # 11항목 ALL PASS
 npx tsx scripts/verify-multicolumn.mjs   # 15항목 ALL PASS
 ```
 
+### `verify-inline-metrics.mjs` — 인라인 letterSpacing/widthRatio/spaceRatio 전 파이프라인 (엔진)
+
+**목적**: `TextInlineStyle`의 자간/장평/공백비율 런 오버라이드가 전 소비 경로에 반영되는지 — 폭 계산(`getCharWidths`), 배치(줄바꿈 위치), 레이아웃 캐시 해시 무효화, `printPostData` 글자별 추출, `extractData` round-trip, 커서 스타일 조회(`getEffectiveStyleAt`/`getCommonStyleInRange`), 런 맵 병합/해제 판정. 런 필드만 변경됐을 때 `_layoutCache` 해시가 stale 히트로 재래핑을 생략하면 print/화면이 옛 배치를 유지하는 버그 클래스를 방어한다.
+
+**검증 항목** (47항목):
+1. 폭 공식 — 오버라이드 `swidth === rawWidth × widthRatio + letterSpacing × fontSize`, 공백 `spaceRatio × fontSize × widthRatio + letterSpacing × fontSize`
+2. 배치 — 폭 증가 오버라이드 런이 더 많은 라인 생성 + 배치 폭 합계 ≤ 파트 폭
+3. 캐시 해시 — 런 widthRatio 변경 시 재래핑(라인 수 변화), 동일 입력 재주입은 캐시 히트
+4. printPostData — 오버라이드 런 글자의 widthRatio/letterSpacing/spaceRatio가 런 값, plain 런은 문단 기본
+5. extractData — 런 스타일 3개 필드 round-trip 보존
+6. 스타일 조회 — 커서/범위 공통 스타일이 per-run 값 오버라이드, 혼합 범위는 상이 필드 제외
+7. 런 맵 병합 — 3개 필드 값 상이 인접 런 미병합, 동일 스타일 병합
+8. normalizeRunMap — 문단 기본과 동일한 런 해제, 상이 필드 존재 시 유지
+9. **오버랩 파트 분할** — 오버랩 라인 자유 영역 좌/우 파트 분할 + 좌측 파트 배치 폭 ≤ 파트 폭
+10. **오버랩 × 런 widthRatio 확대** — 확대 폭으로 배치해도 모든 파트 폭 준수 + visible 글자 오버랩 영역 0교차
+11. **좁은 자유 영역 × 큰 런 폭** — 자유 영역 < 런 글자 폭이면 COVER 처리(오버랩 요소 위 글자 넘침 방지), 오버랩 밖 라인 정상 배치
+
+**실행**:
+```bash
+npx tsx scripts/verify-inline-metrics.mjs   # 47항목 ALL PASS
+```
+
 ### `verify-style-revert.mjs` — 인라인 스타일 회귀 주입 범위 (브라우저)
 
 **목적**: `_applyTextStyle`이 문단 상속값과 동일한 값을 주입받을 때(상속 회귀), **적용 범위가 편집 상태에 맞는지** 검증한다. 이력: 회귀 주입이 편집 분기와 무관하게 전체 런 맵에서 필드를 제거해, "문단 fontSize 4 + 런 fontSize 6" 상태에서 런 일부에 4를 주입하면 **런 전체는 물론 다른 런의 오버라이드까지 사라지는** 버그가 있었다.
 
-**시나리오** (4개 인라인 필드 × 7 assertion = 28항목):
+**시나리오** (7개 인라인 필드 × 7 assertion = 49항목 — fontSize, fontWeight, fontStyle, color, letterSpacing, widthRatio, spaceRatio):
 - **selection 경로**: 선택 영역만 회귀 — 선택 밖 런 오버라이드 보존
 - **커서가 런 안**: 그 런만 회귀 (런 단위 시맨틱) — 다른 런 보존
 - **캐스케이드**(커서가 런 밖): 전체 런 회귀 (기본 복원 — 의도적 동작)
@@ -209,7 +233,7 @@ npx tsx scripts/verify-multicolumn.mjs   # 15항목 ALL PASS
 
 **실행**:
 ```bash
-npx tsx scripts/verify-style-revert.mjs   # 28항목 ALL PASS
+npx tsx scripts/verify-style-revert.mjs   # 49항목 ALL PASS (7개 인라인 필드)
 ```
 
 ### `verify-right-indent-tab.mjs` / `verify-right-indent-tab-browser.mjs` — 좌우 밀기 탭 정합성
@@ -316,6 +340,36 @@ npx tsx scripts/verify-overlap-inline-fontsize.mjs   # 22항목 ALL PASS
 **실행**:
 ```bash
 npx tsx scripts/verify-image-displayrect-cache.mjs   # 4항목 ALL PASS
+```
+
+### `verify-image-edit-mode.mjs` — 이미지 편집 모드 전 동작 정합성 (브라우저)
+
+**목적**: `ImageEditController` + `EditManager` 이미지 편집 API가 전 요구사항대로 동작하는지 — 이미지 편집 관련 모든 변경(모드 시스템, 시각 피드백, Tab 순회, selection 연동)의 회귀를 방어한다. 전용 검증 페이지(`examples/image-edit-verify.html`, 이미지 2개 + 텍스트 박스 통제 환경)에서 **CDP 신뢰 이벤트**로 검증한다.
+
+**검증 항목** (60항목, 12 시나리오):
+1. **일반 모드 dblclick 진입 + 시각 피드백** — 이미지 dblclick → imageEditMode 진입, 부모 box `outline: red` + `.type-label display: none` (텍스트 포커스와 동일 패턴), 이미지 자체 파란 outline 없음/커서 move
+2. **ESC 종료** — 일반 모드 진입이면 완전 종료, 레이아웃 모드 진입이면 레이아웃 복귀. 종료 시 `text-focused` 제거 + `selected` 유지
+3. **드래그** — objectFit cover→none 자동 전환 (전환 시 표시 영역 스냅샷 고정, 크기 점프 없음), x/y 갱신
+4. **클램핑** — 부모 contentAbsRect 밖 드래그 시 `content - w/2` 상한으로 제한
+5. **휠** — 1.1배 확대 + 원본 비율 유지 + `imageResize`/`imagePropertyChange` 이벤트
+6. **드래그 중 ESC 취소** — 시작 위치 복원 + `imageMove(canceled=true)` + 모드 유지
+7. **Tab/Shift+Tab** — 편집 가능 이미지 순회 (포커스 + 부모 box 선택 이동)
+8. **selection 이동 → 포커스 상실** — 다른 box 클릭 시 `focusedImage` 해제, 단 이미지 편집 모드는 유지 (다른 이미지 클릭으로 재포커스)
+9. **텍스트 편집과 상호 전환** — 텍스트 편집 중 이미지 dblclick → 텍스트 blur + 이미지 편집 전환
+10. **데이터 정합성 (3소스 일치)** — 드래그+휼 후 `DOM getter === engine.extractData === printPostData.data === document.data`의 x/y/w/h/objectFit. dirty 가드(`DirtyPendingError`)는 `ensureCommitted()` 후 읽는 계약대로. print rect가 이미지 박스 contentAbsRect 유지(크롭 컨텍스트)도 확인
+11. **ESC 취소 복원값의 3소스 일치** — 취소 후 복원값이 DOM/extractData/printPostData 모두 동일
+12. **오버랩 회피 갱신 (비-공허 A/B)** — 이미지가 단락을 덮으면 첫 라인이 다중 파트로 분할(회피 발생), 휼 축소+드래그로 치우면 단일 파트 회복 + 해제 영역에 print chars 복귀. **path 모드 시맨틱 주의**: 불투명 픽셀 윤곽만 회피하므로 "이미지 rect 내 char=0"은 box 모드에만 성립하는 잘못된 기대치다 (실측: 첫 라인이 이미지 왼쪽 자유 영역 0~37.6mm + 내부 틈으로 파트 분할). 모드 무관 기준으로 **파트 분할 구조**를 검증한다.
+
+**이 스크립트가 잡은 실제 버그들 (작성 과정)**:
+- **가이드 컬럼 wheel 가로채기** — `x-layout-guide-column`이 `pointer-events: auto`여서 신뢰 wheel 히트 테스트가 이미지 대신 가이드를 잡음 → `pointer-events: none` 수정. 합성 이벤트 검증으로는 발견 불가 (target을 직접 지정하므로).
+- **휠 폴백 비율 역방향** — `originalWidth` 미설정 이미지의 폴백 ratio가 `h/w`였는데 `nextHeight = nextWidth / ratio`에 넣어 역수가 두 번 적용 → height 폭주 (197.5mm 폭 이미지가 height 1100mm). `w/h`로 수정.
+- **Playwright `mouse.wheel` 좌표 옵션 부재** — 시그니처는 `wheel(deltaX, deltaY)`이고 **현재 커서 위치**에서 굴러간다. `{x, y}` 전달은 무시되므로 반드시 `mouse.move()` 후 호출한다.
+- **path 모드 회피 오탐 (검증기 작성 교훈)** — "이미지 rect 내 char=0" 기대는 box 모드에만 성립. path 모드는 불투명 픽셀만 회피하므로 이미지 내부 투명 영역에 글자가 올 수 있다 (실측: 첫 라인이 0~37.6mm 자유 영역 + 내부 틈 2파트로 분할). 오버랩 검증은 모드 무관한 **파트 분할 구조** 기준으로 한다.
+- **chars 좌표계 오탐** — `buildParagraphPrintPostData`의 char rect는 **문서 절대 mm**(`parentAbsRect.absLeft/absTop` 기준 산출). para rect를 한 번 더 더하면 2배 오프셋이 된다.
+
+**실행**:
+```bash
+npx tsx scripts/verify-image-edit-mode.mjs   # 46항목 ALL PASS (서버 없으면 자동 스폰)
 ```
 
 ### `verify-overlap-none.mjs` — overlapMode 'none' 시맨틱 (엔진)

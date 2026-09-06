@@ -276,6 +276,13 @@ class LayoutBoxElement extends HTMLElement
 | `borderLeftWidth` | `number` | mm | 좌측 테두리 두께. |
 | `borderStyle` | `'solid' \| 'dotted' \| 'dashed'` | — | 테두리 스타일. |
 | `borderColor` | `string \| undefined` | — | 테두리 색상. `ColorRegistry`에 등록된 CMYK 색상 이름만 사용 가능. |
+
+> **스타일 setter의 엔진 동기화**: 스타일 관련 setter(`borderTopWidth` 등 4종, `borderStyle`,
+> `borderColor`, `backgroundColor`, `backgroundOpacity`)는 변경 시 `layout()`을 호출한다.
+> `layout()`이 `_layoutStructure()`를 거쳐 `BoxEngine` data에 값을 전달하므로 **저장 시 값이 누락되지
+> 않는다**. (과거 일부 setter가 `_renderBorder()`만 호출하던 시기에는 shadow DOM만 갱신되고 엔진
+> data가 동기화되지 않아 저장 누락 버그가 있었다. `borderColor`를 `undefined`로 설정하면 테두리
+> 렌더링이 스킵된다.)
 | `paddingTop` | `number` | mm | 내부 상단 여백. |
 | `paddingRight` | `number` | mm | 내부 우측 여백. |
 | `paddingBottom` | `number` | mm | 내부 하단 여백. |
@@ -399,8 +406,8 @@ class LayoutParagraphElement extends HTMLElement
 |---|---|---|---|
 | `data` | `ParagraphData` | — | 한 번에 갱신. `content` 필드는 렌더링된 실제 텍스트를 반환 (편집 반영). |
 | `content` | `string \| (string \| TextInlineData)[]` | — | 텍스트 콘텐츠 단독 갱신/조회. setter는 `_sourceContent`와 `model.textContent`를 동시에 동기화한 뒤 `markStructureChangedAndRender()`로 재렌더링까지 수행. `data` setter는 이 setter를 거치지 않고 내부 필드를 직접 갱신 후 `layout()` + `scheduleRender()` 호출 (중복 렌더링 방지). |
-| `column` | `number \| number[]` (via `data`) | — | 하위 컬럼 그리드 (생략 시 부모 상속). |
-| `gap` | `number \| number[]` (via `data`) | mm | 하위 컬럼 간격. |
+| `column` | `number \| number[]` (via `data`) | — | 하위 컬럼 그리드 (생략 시 부모 상속). 명시 지정값은 부모 `layout()` 경유 시 보존되며(박스 추가/undo/저장 응답 재주입 포함), 부모 편집 폭이 실제로 변경될 때만 상속 리셋 (`resetColumnIfParentResized` 참조). |
+| `gap` | `number \| number[]` (via `data`) | mm | 하위 컬럼 간격. `column`과 동일한 보존/리셋 규칙을 따른다. |
 | `zIndex` | `number` (via `data`) | — | 렌더링 순서. |
 | `overlapMode` (set) | `ParagraphOverlapMode` | — | 다른 paragraph가 이 paragraph를 감싼 박스를 텍스트 회피 대상으로 취급할지 제어 (`'box'` \| `'none'`). 기본값 `'box'`. `'none'`으로 설정하면 다른 paragraph가 이 박스와 겹쳐도 텍스트를 회피하지 않는다. 변경 시 부모 `requestRerenderAffectedParagraphs()` 호출. 본문과 시각적으로 겹치되 텍스트 회피가 필요 없는 영역에 사용. |
 | `textStyle` (set) | `TextStyle` | — | 글자 스타일. 변경 시 구조 재계산 + 재렌더링. 기존 값과 같으면 no-op. |
@@ -434,6 +441,7 @@ class LayoutParagraphElement extends HTMLElement
 | 메서드 | 시그니처 | 설명 |
 |---|---|---|
 | `getVisibleLineCount()` | `(): { columnIndex: number; visibleLineCount: number } \| null` | 단락의 모든 단(column)을 순회하며 텍스트가 실제로 끝나는 단 인덱스(0-base)와 그 단의 보이는 라인 수를 반환. 각 단의 `visibleLineCount`는 paragraph 자체 `textStyle.fontSize` × `paragraphStyle.lineGap`으로 계산된 `lineHeight`(mm)로 렌더링된 line div 중 `display: none`이 아닌 것의 수. 보이는 라인이 있는 가장 마지막 단을 반환하며, 단이 없거나 보이는 라인이 하나도 없으면 `null`. 외부 코드가 컬럼의 shadow DOM 내부 구조를 직접 순회할 필요를 제거하는 캡슐화 API. |
+| `resetColumnIfParentResized()` | `(parentEditableWidth: number): void` | 부모 box의 `_propagateInheritStyle`이 `layout()`마다 호출하는 column/gap 상속 리셋 판정기. 부모 편집 폭이 직전 스냅샷과 실제로 변경된 경우에만 `column`/`gap`을 `undefined`로 리셋해 새 부모 그리드를 상속받게 한다. 폭이 불변한 `layout()`(박스 추가, undo/저장 응답 재주입 등)에서는 명시 지정값을 보존한다. 부모 엔진 초기화 중 관측되는 `0`(미확정 폭)은 스냅샷 비교에서 제외한다 — 기록하면 엔진 완성 후 실제 폭이 "변경"으로 오탐되어 생성 시 주입된 `column: 1` 기본값과 단설정 값이 유실된다. 외부 코드가 직접 호출할 일은 없다 (box 전용). |
 
 #### `render-error` 이벤트
 
@@ -579,6 +587,12 @@ class LayoutImageElement extends HTMLElement
 | `objectFit` setter | `render()` + 부모 `requestRerenderAffectedParagraphs()` | 엔진 `_updateEngine`으로 `objectFit` 전달 → 엔진 `displayRect` 재계산 → DOM은 결과를 canvas에 표시 |
 | `zIndex`, `overlapPadding`, `overlapMode` setter | `layout()` + `render()` + 부모 `requestRerenderAffectedParagraphs()` | 형제 단락 텍스트 회피 재계산 |
 | `inheritStyle` setter | `layout()` + `render()` | 상위 box의 크기/여백 변경 시. `absWidth`/`absHeight`가 `inheritStyle.parentWidth`/`parentHeight`에 의존하므로 캔버스 픽셀을 다시 그려야 함. `_updateEngine()`이 `contentAbsRect`를 재주입하여 엔진 `displayRect` 재계산 |
+
+> **image 자식의 `parentHeight`는 `contentHeight`**: 부모 box의 `_propagateInheritStyle()`은
+> image 자식에 `parentHeight: model.contentHeight`(실제 콘텐츠 높이)를 주입한다. 과거의
+> `editableHeight`(static box의 라인 버림 계산)를 사용할 때 absolute 박스 내 이미지가 박스를
+> 꽉 채우지 못하는 버그가 있었다 — `contentHeight`가 정확한 실측값이다. paragraph 자식은
+> `parentHeight: editableTextHeight`(텍스트 라인 계산 기준)를 사용한다.
 
 **상위 box 크기/여백 변경 경로**:
 
@@ -889,6 +903,10 @@ class LayoutColumnElement extends HTMLElement
 어긋나는 문제가 있었다. absolute positioning으로 변경하여 계산식과 정확히 일치하도록
 수정했다.
 
+> **`pointer-events: none`**: 가이드 컬럼 오버레이 전체는 마우스 이벤트를 받지 않는다.
+> 문서 캔버스 위에 겹쳐 렌더링되지만 wheel 스크롤·클릭·드래그를 가로채지 않아
+> 아래 레이어의 편집 조작이 그대로 통과된다.
+
 #### Class: `LayoutGuideColumnElement`
 
 ```ts
@@ -1091,7 +1109,7 @@ class ParagraphEngine {
   genLineStyle(columnIndex?: number, lineIndex?: number): Partial<CSSStyleDeclaration>;
   genPartStyle(): Partial<CSSStyleDeclaration>;
   genCharStyle: (char: string, inlineStyle?: TextInlineStyle) => Partial<CSSStyleDeclaration>;
-  genCharInnerStyle: () => Partial<CSSStyleDeclaration>;
+  genCharInnerStyle: (inlineStyle?: TextInlineStyle) => Partial<CSSStyleDeclaration>;
   genCharStyleFlat: (char: string, inlineStyle?: TextInlineStyle) => Partial<CSSStyleDeclaration>;
 
   // 문자 폭
@@ -1742,13 +1760,11 @@ FontLoader.getInstance().getFontFamily('serif'); // → 등록된 첫 폰트
 
 ### `EditManager`
 
-전역 편집 상태를 관리하는 **싱글톤**. 포커스, 선택, 편집 모드, 레이아웃 선택, 삽입 모드
-모두를 이 매니저로 제어합니다.
+편집 상태를 관리하는 **문서(document)별 인스턴스**. 포커스, 선택, 편집 모드, 레이아웃 선택, 삽입 모드
+모두를 이 매니저로 제어합니다. `LayoutDocumentElement.editManager`로 접근한다.
 
 ```ts
 class EditManager {
-  static getInstance(): EditManager;
-
   // 이벤트
   addEventListener(type: EditManagerEventType, listener: EditManagerEventListener): void;
   removeEventListener(type: EditManagerEventType, listener: EditManagerEventListener): void;
@@ -1781,6 +1797,14 @@ class EditManager {
   removeEditableBox(id: string): void;
   setEditableRootId(id: string | null): void;
   get editableRootId: string | null;
+
+  // 이미지 편집 모드
+  get imageEditMode: boolean;
+  set imageEditMode(value: boolean): void;
+  focusImage(target: LayoutImageElement | string, options?: { fromLayoutEditMode?: boolean }): boolean;
+  blurImage(target?: LayoutImageElement): boolean;
+  get focusedImage: LayoutImageElement | null;
+  isImageEditable(image: LayoutImageElement): boolean;
 
   // 레이아웃 선택
   selectLayout(target): boolean;
@@ -1830,7 +1854,7 @@ class EditManager {
   isBoxEditable(box: LayoutBoxElement): boolean;
 
   // 라이프사이클
-  /** 모든 편집 상태를 초기화. LayoutEditor unmount 시 호출하여 싱글톤의 잔류 상태를 제거. */
+  /** 모든 편집 상태를 초기화. LayoutEditor unmount 시 호출하여 문서 매니저의 잔류 상태를 제거. */
   reset(): void;
 }
 ```
@@ -1862,11 +1886,20 @@ type EditManagerEventType =
   | 'layoutSelectionChange' // 레이아웃 선택 변경
   | 'layoutMove'            // 레이아웃 이동
   | 'layoutResize'          // 레이아웃 리사이즈
+  | 'layoutAdd'             // 레이아웃 요소 추가
+  | 'layoutRemove'          // 레이아웃 요소 제거
   | 'insert'                // 삽입 완료
-  | 'insertCancel';         // 삽입 취소
+  | 'insertCancel'          // 삽입 취소
   | 'modeChange'            // 모드 전환
-  | 'boxPropertyChange'    // Box 속성 변경
-  | 'placeGunChange';       // Place Gun 상태 변경
+  | 'boxPropertyChange'     // Box 속성 변경
+  | 'contextMenu'           // 컨텍스트 메뉴 요청
+  | 'placeGunChange'        // Place Gun 상태 변경
+  | 'placeGunBefore'        // Place Gun 배치 직전 (취소 가능)
+  | 'placeGunAfter'         // Place Gun 배치 직후
+  | 'cellSelectionChange'   // 테이블 셀 블록 선택 변경
+  | 'imageMove'             // 이미지 드래그 이동 완료/취소
+  | 'imageResize'           // 이미지 휠 크기 조절
+  | 'imagePropertyChange';  // 이미지 개별 속성 변경
 
 interface EditManagerEvent {
   type: EditManagerEventType;
@@ -1983,7 +2016,7 @@ toggleInlineStyle<K extends keyof TextInlineStyle>(
  *   선택된 모든 대상의 paragraph 수정 + 전체 캐스케이드. lock된 대상은 스킵.
  *
  * 인라인에 주입 불가한 필드(textAlign, lineGap, verticalAlign,
- * letterSpacing, widthRatio)는 항상 paragraph에 적용된다.
+ * indent)는 항상 paragraph에 적용된다.
  * 처리 후 런 맵을 정규화하고 커서/selection 위치를 보존한다.
  *
  * @param textPatch - TextStyle 부분 객체 (제공된 필드만 부분 업데이트)
@@ -2013,8 +2046,8 @@ applyTextStyle(
 | 포커스 + 커서가 런 밖 | paragraph + 전체 캐스케이드 | paragraph |
 | 포커스 없음 + paragraph/paragraph-box selected (단일·복수) | 선택된 모든 대상 + 전체 캐스케이드 (lock 스킵) | paragraph |
 
-> ※1 `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`
-> ※2 `textAlign`, `lineGap`, `verticalAlign`, `letterSpacing`, `widthRatio`
+> ※1 `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`, `letterSpacing`, `widthRatio`, `spaceRatio`
+> ※2 `textAlign`, `lineGap`, `verticalAlign`, `indent`
 
 **캐스케이드**: 커서가 런 밖이거나 selected 경로에서 paragraph 스타일을 수정하면, 명시 주입 필드가 내부 모든 인라인 런에 일괄 적용된다. 캐스케이드로 런 필드가 주입 후의 문단 기본과 동일해지면 그 필드는 런에서 제거되고, 모든 필드가 동일해진 런은 `normalizeRunMap`이 해제한다. 정규화는 포커스 획득/blur 시에도 자동 수행된다. 병합·해제 규칙의 상세는 `EDITING_TEXT.md` § 6A.5 참조.
 
@@ -3060,6 +3093,9 @@ type TextInlineStyle = {
   fontWeight?: number;
   fontStyle?: 'normal' | 'italic';
   color?: string;
+  letterSpacing?: number;  // 자간 (em 단위). 미정의 시 문단 effective 값
+  widthRatio?: number;     // 장평 비율. 미정의 시 문단 effective 값
+  spaceRatio?: number;     // 공백 최소 너비 비율 (em 단위). 미정의 시 문단 effective 값
 };
 ```
 
@@ -3105,9 +3141,9 @@ type PrintPostDataChar = {
   fontFamily: string;        // CSS font-family
   fontSize: number;          // 폰트 크기 (mm)
   fontWeight: number;        // 폰트 굵기 (예: 400, 700)
-  widthRatio: number;        // 장평 비율 (CSS scale에서 추출)
-  letterSpacing: number;     // 자간 (em 단위)
-  spaceRatio: number;        // 공백 너비 비율 (em 단위)
+  widthRatio: number;        // 장평 비율 — `inlineStyle → textStyle → inheritStyle → DEFAULT_WIDTH_RATIO` (글자별 런 오버라이드 가능)
+  letterSpacing: number;     // 자간 (em 단위) — 동일 폴백 체인 (글자별)
+  spaceRatio: number;        // 공백 너비 비율 (em 단위) — 동일 폴백 체인 (글자별)
   color: CMYKColor;           // CMYK 색상 (ColorRegistry에서 색상 명칭으로 조회)
 };
 ```

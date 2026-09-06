@@ -9,8 +9,8 @@
  *   - 커서가 런 안: 그 런만 회귀.
  *   - 캐스케이드(커서가 런 밖): 전체 런 회귀 (기본 복원 — 의도적 동작).
  *
- * 모든 인라인 필드(fontFamily/fontSize/fontWeight/fontStyle/color)에 대해
- * 동일 결함이 없는지 확인한다.
+ * 모든 인라인 필드(fontFamily/fontSize/fontWeight/fontStyle/color/
+ * letterSpacing/widthRatio/spaceRatio)에 대해 동일 결함이 없는지 확인한다.
  *
  * @example
  * ```bash
@@ -155,6 +155,12 @@ const r = await page.evaluate(async () => {
   out.tests.push(await scenario('fontStyle', 'italic', inheritStyle.fontStyle));
   // color: inherit는 빈값일 수 있음 — 문단에 명시 후 런에 다른 값, 회귀는 그 값
   out.tests.push(await scenario('color', 'red', inheritStyle.color ?? ''));
+  // letterSpacing: inherit -0.1 → run 0.2, paragraph -0.1 (인라인 오버라이드 가능 필드)
+  out.tests.push(await scenario('letterSpacing', 0.2, inheritStyle.letterSpacing ?? -0.1));
+  // widthRatio: inherit 0.8 → run 1.0, paragraph 0.8
+  out.tests.push(await scenario('widthRatio', 1.0, inheritStyle.widthRatio ?? 0.8));
+  // spaceRatio: inherit 0.5 → run 0.25, paragraph 0.5
+  out.tests.push(await scenario('spaceRatio', 0.25, inheritStyle.spaceRatio ?? 0.5));
 
   // 원상 복원
   p.textStyle = {};

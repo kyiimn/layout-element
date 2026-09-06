@@ -12,6 +12,24 @@ export const DEFAULT_INDENT = 0;
 export const DEFAULT_TEXT_ALIGN = 'justify';
 export const DEFAULT_VERTICAL_ALIGN = 'top';
 
+/**
+ * 텍스트 스타일 단축키가 주입하는 볼드 굵기 값.
+ * 문단 기본값으로 복귀는 런의 fontWeight 필드 제거(`_toggleInlineStyle`)로 수행한다.
+ */
+export const SHORTCUT_BOLD_WEIGHT = 700;
+
+/** 텍스트 스타일 단축키의 글자 크기 조절 step (mm). */
+export const SHORTCUT_FONT_SIZE_STEP = 0.1;
+
+/** 텍스트 스타일 단축키의 자간/장평/공백비율 조절 step (em·ratio 1%). */
+export const SHORTCUT_METRIC_STEP = 0.01;
+
+/** 텍스트 스타일 단축키로 축소 가능한 최소 글자 크기 (mm). 폭 계산 음수 방지. */
+export const SHORTCUT_MIN_FONT_SIZE = 0.1;
+
+/** 텍스트 스타일 단축키로 축소 가능한 최소 공백비율 (em). 폭 계산 음수 방지. */
+export const SHORTCUT_MIN_SPACE_RATIO = 0;
+
 /** 레이아웃 요소 zIndex 최댓값. 90001 이상은 예약 범위이므로 사용 불가 */
 export const Z_INDEX_MAX_LAYOUT = 90000;
 

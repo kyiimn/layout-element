@@ -154,20 +154,23 @@ paragraph.editableText = false;
 
 ### 2.2 더블클릭으로 텍스트 편집 모드 전환
 
-현재 모드(읽기 모드, 레이아웃 편집 모드 등)에 상관없이 paragraph를 더블클릭하면 텍스트 편집 모드로 전환되고 해당 paragraph에 포커스가 부여된다. `LayoutSelectionController`가 `document.documentElement` capture phase에 `dblclick` 리스너를 등록하여 처리한다.
+현재 모드(읽기 모드, 레이아웃 편집 모드 등)에 상관없이 paragraph를 더블클릭하면 텍스트 편집 모드로 전환되고 해당 paragraph에 포커스가 부여된다. `LayoutSelectionController`가 문서 요소 capture phase에 `dblclick` 리스너를 등록하여 처리한다.
 
 **동작 순서:**
 
-1. `LayoutSelectionController._onDblClick`가 `composedPath()`에서 `LayoutParagraphElement`를 찾는다. 부모 box가 `isBoxSelectable()`을 통과해야 한다 (lock된 box 내부의 paragraph는 무시된다).
-2. `EditManager.textEditMode = true`로 설정하여 다른 모드를 모두 끄고 문서 전체의 paragraph 편집 가능 여부를 갱신한다. 이때 `modeChange` 이벤트가 발생한다.
-3. `EditManager.focusParagraph(paragraph)`로 해당 paragraph에 포커스를 부여한다. 이 호출은 `editableText = true` 설정과 `TextEditController` 생성을 내부적으로 수행한다.
-4. `TextEditController.getOffsetFromPoint(event.clientX, event.clientY)`로 더블클릭한 위치의 소스 오프셋을 구한다.
-5. `controller.setCursor({ textOffset: offset })`로 커서를 더블클릭한 위치로 이동한다.
+1. `LayoutSelectionController._onDblClick`가 `composedPath()`에서 `LayoutImageElement`를 먼저 찾는다. 이미지가 있으면 이미지 편집 모드로 전환한다 (`EDITING_IMAGE.md` 참조).
+2. `composedPath()`에서 `LayoutParagraphElement`를 찾는다. 부모 box가 `isBoxSelectable()`을 통과해야 한다 (lock된 box 내부의 paragraph는 무시된다).
+3. `EditManager.textEditMode = true`로 설정하여 다른 모드(레이아웃 편집 포함)를 모두 끄고 문서 전체의 paragraph 편집 가능 여부를 갱신한다. 이때 `modeChange` 이벤트가 발생한다.
+4. `EditManager.focusParagraph(paragraph)`로 해당 paragraph에 포커스를 부여한다. 이 호출은 `editableText = true` 설정과 `TextEditController` 생성을 내부적으로 수행한다.
+5. `TextEditController.getOffsetFromPoint(event.clientX, event.clientY)`로 더블클릭한 위치의 소스 오프셋을 구한다.
+6. `controller.setCursor({ textOffset: offset })`로 커서를 더블클릭한 위치로 이동한다.
 
 **제약:**
 
 - **삽입 모드**: 삽입 모드(`insertMode !== null`)에서는 더블클릭이 무시된다.
 - **lock**: 조상 box 중 하나라도 `lock`이 `true`이면 더블클릭이 무시된다.
+
+> **히스토리 — 레이아웃 편집 모드에서의 더블클릭 차단/해제**: 과거(커밋 34c3670)에는 레이아웃 편집 모드에서 더블클릭이 텍스트 편집 모드로 잘못 진입하는 비일관성(일반 box는 mousedown `preventDefault`로 차단, 테이블 내부 box는 통과)을 막기 위해 `layoutEditMode` 가드가 있었다. 당시 전제는 "mousedown `preventDefault()`가 브라우저의 click/dblclick 생성을 억제한다"는 것이었는데, 현재 Chromium에서는 `preventDefault()`와 무관하게 click/dblclick이 정상 생성됨을 실측으로 확인했다(합성 이벤트가 아닌 CDP 신뢰 이벤트로 검증). 따라서 가드를 제거하고 레이아웃 편집 모드에서도 paragraph 더블클릭으로 텍스트 편집 모드 진입이 가능하다. 텍스트 편집 진입 시 `textEditMode = true`가 `layoutEditMode = false`를 자동 수행하므로 모드 상호 배타는 유지된다.
 
 ```ts
 // 사용자가 paragraph를 더블클릭하면:
@@ -310,6 +313,13 @@ flowchart LR
 7. 조합 중이면 `_applyCompositionUnderline()`로 엔진 렌더링 결과의 조합 범위 span에 밑줄 적용. 조합이 종료된 직후면 `_clearCompositionUnderline()`로 밑줄 제거.
 8. `_wasFocused`가 true면 `textarea.focus({ preventScroll: true })`로 포커스 복원. `preventScroll: true`로 스크롤 컨테이너의 좌상단 점프를 방지한다.
 
+> **조합 중 인라인 스타일 유지**: 낙관적 조합 span(`_createOptimisticCompositionSpan`) 생성 시
+> `genCharStyleFlat`이 치수/레이아웃 스타일만 반환하므로, 폰트·색상 계열 인라인 필드는
+> `_applyOptimisticInlineOverrides()`로 별도 적용한다(런 오버라이드 → 문단 effective 순서 —
+> `column.element.ts`의 `_applyInlineOverrides`와 동일 로직). 이것이 없으면 조합 중 텍스트가
+> 문단 기본 스타일로 렌더링되어 **굵게/기울임/글자색/글꼴/글자 크기 인라인 주입이 조합 span에서
+> 누락**된다. 조합이 종료되면 flushRender가 엔진 렌더로 대체하므로 이후에는 엔진의 런 스타일이 그대로 표시된다.
+
 #### `setCursor()`
 
 `_cursorModel.offset`을 주어진 `textOffset`로 설정하고 `_updateCursorPosition()`을 호출한다. 그러나 커서를 시각적으로 표시하려면 별도로 `focus()`를 호출해야 한다.
@@ -432,7 +442,7 @@ type CurrentStyle = {
 
 1. **단락 수준 스타일 + 상속 스타일 병합**: `model.textStyle`의 각 필드와 `model.inheritStyle`의 같은 필드를 `??` 연산자로 병합한다. 단락 자체 스타일이 우선하고, 없으면 상속값을 사용한다.
 2. **런 스타일 찾기**: 컨트롤러가 보유한 `runMap`(`src/edit/run-map.ts`)에서 `getStyleAtOffset(runMap, cursorOffset)`으로 커서가 속한 런의 `TextInlineStyle`을 찾는다. `runMap`은 `model.textContent`(`string | (string \| TextInlineData)[]`)에서 `inlineToPlain()`으로 분해한 평문 오프셋 ↔ 런 매핑이다.
-3. **런 스타일로 오버라이드**: `TextInlineStyle`의 정의된 필드(`fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`)만 기본 스타일 위에 오버라이드한다. `undefined`인 필드는 무시한다. 인라인 런은 정렬(`textAlign`)을 오버라이드하지 않는다.
+3. **런 스타일로 오버라이드**: `TextInlineStyle`의 정의된 필드(`fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`, `letterSpacing`, `widthRatio`, `spaceRatio`)만 기본 스타일 위에 오버라이드한다. `undefined`인 필드는 무시한다. 인라인 런은 정렬(`textAlign`)을 오버라이드하지 않는다.
 
 ```ts
 // 사용 예시
@@ -484,7 +494,7 @@ InheritStyle (부모에서 상속)
 | `currentStyle` | `CurrentStyle \| null` get | 현재 커서 위치의 유효 스타일. 포커스된 단락이 없으면 `null`. |
 | `applyInlineStyle(style)` | `void` | 포커스된 단락의 현재 선택 영역에 인라인 스타일(`Partial<TextInlineStyle>`)을 적용한다. 선택 영역이 없거나 포커스된 단락이 없으면 무시. |
 | `toggleInlineStyle(field, value)` | `void` | 포커스된 단락의 현재 선택 영역에서 인라인 스타일 필드를 토글한다. 선택 영역 전체가 이미 해당 값이면 제거, 아니면 적용. |
-| `applyTextStyle(textPatch?, paragraphPatch?)` | `boolean` | 텍스트/문단 스타일 주입의 단일 진입점. 편집 상태에 따라 주입 대상을 판별한다: (1) 포커스 + selection → 선택 범위 인라인 주입, (2) 포커스 + 커서가 런 안 → 해당 런만 업데이트, (3) 포커스 + 커서가 런 밖 → paragraph 스타일 수정 + 명시 필드 전체 캐스케이드, (4) 포커스 없이 paragraph/paragraph-box(selected) → 대상 paragraph 스타일 + 전체 캐스케이드. 인라인 불가 필드(textAlign, lineGap, verticalAlign, letterSpacing, widthRatio)는 항상 paragraph로 라우팅. 처리 후 런 맵 정규화 + 커서/selection 보존. |
+| `applyTextStyle(textPatch?, paragraphPatch?)` | `boolean` | 텍스트/문단 스타일 주입의 단일 진입점. 편집 상태에 따라 주입 대상을 판별한다: (1) 포커스 + selection → 선택 범위 인라인 주입, (2) 포커스 + 커서가 런 안 → 해당 런만 업데이트, (3) 포커스 + 커서가 런 밖 → paragraph 스타일 수정 + 명시 필드 전체 캐스케이드, (4) 포커스 없이 paragraph/paragraph-box(selected) → 대상 paragraph 스타일 + 전체 캐스케이드. 인라인 불가 필드(textAlign, lineGap, verticalAlign, indent)는 항상 paragraph로 라우팅. 처리 후 런 맵 정규화 + 커서/selection 보존. |
 | `controllers` | `Set<TextEditController>` get | 등록된 모든 편집 컨트롤러. |
 | `focusParagraph(target, options?)` | `boolean` | 단락 요소 또는 ID로 포커스를 설정한다. 텍스트 편집 모드가 아니면 자동 활성화. `options.cursorOffset`으로 커서 위치, `options.selection`으로 선택 영역을 지정할 수 있다. 성공 시 `true`, 실패 시 `false`. |
 | `blurParagraph(target?)` | `boolean` | 단락 요소, ID, 또는 생략으로 포커스를 해제한다. 생략하면 현재 포커스된 단락을 blur. 성공 시 `true`, 실패 시 `false`. |
@@ -537,7 +547,7 @@ manager.addEventListener('cursorMove', (e) => {
 | selection 없음 (커서만) | 커서 위치의 **최종 스타일** — 상속값 + 문단 스타일 + 커서가 속한 런의 `TextInlineStyle`을 병합 |
 | selection 있음 | 영역 내 모든 오프셋의 유효 스타일을 비교해 **공통 필드만**. 영역 내에 상이한 값이 있는 필드는 생략 (`undefined` 처리와 동일) |
 
-selection 공통값 판정은 인라인 가능 필드(`color`, `fontFamily`, `fontWeight`, `fontStyle`, `fontSize`)에 대해 수행된다. `paragraphStyle`은 selection이 있어도 문단 단위 속성이므로 항상 현재 문단의 유효값을 반환한다.
+selection 공통값 판정은 인라인 가능 필드(`color`, `fontFamily`, `fontWeight`, `fontStyle`, `fontSize`, `letterSpacing`, `widthRatio`, `spaceRatio`)에 대해 수행된다. `paragraphStyle`은 selection이 있어도 문단 단위 속성이므로 항상 현재 문단의 유효값을 반환한다.
 
 ```ts
 type EditManagerEventType =
@@ -939,13 +949,21 @@ flowchart TD
 | `a` | `Ctrl` 또는 `Cmd` | 전체 선택 |
 | `b` | `Ctrl` 또는 `Cmd` | 선택 영역에 굵게(`fontWeight: 700`) 토글 적용 |
 | `i` | `Ctrl` 또는 `Cmd` | 선택 영역에 기울임(`fontStyle: 'italic'`) 토글 적용 |
+| `.` (물리 키 `Period`) | `Ctrl`/`Cmd`+`Shift` | 선택 영역 글자 크기 **확대** (+0.1mm, per-run 상대 증감) |
+| `,` (물리 키 `Comma`) | `Ctrl`/`Cmd`+`Shift` | 선택 영역 글자 크기 **축소** (−0.1mm, 하한 0.1mm) |
+| `[` (물리 키 `BracketLeft`) | `Ctrl`/`Cmd`+`Alt`+`Shift` | 선택 영역 자간 **증가** (+0.01em, per-run 상대 증감) |
+| `]` (물리 키 `BracketRight`) | `Ctrl`/`Cmd`+`Alt`+`Shift` | 선택 영역 자간 **감소** (−0.01em) |
+| `[` (물리 키 `BracketLeft`) | `Ctrl`/`Cmd`+`Alt` | 선택 영역 장평 **증가** (+0.01, per-run 상대 증감) |
+| `]` (물리 키 `BracketRight`) | `Ctrl`/`Cmd`+`Alt` | 선택 영역 장평 **감소** (−0.01) |
+| `,` (물리 키 `Comma`) | `Ctrl`/`Cmd`+`Alt`+`Shift` | 선택 영역 공백비율 **증가** (+0.01em, per-run 상대 증감) |
+| `.` (물리 키 `Period`) | `Ctrl`/`Cmd`+`Alt`+`Shift` | 선택 영역 공백비율 **감소** (−0.01em, 하한 0) |
 | `c` | `Ctrl` 또는 `Cmd` | 선택 영역을 클립보드에 복사 |
 | `x` | `Ctrl` 또는 `Cmd` | 선택 영역을 잘라내기(클립보드 복사 + 삭제) |
 | `v` | `Ctrl` 또는 `Cmd` | 클립보드에서 평문 붙여넣기 |
 | 인쇄 가능한 모든 문자 | 없음 | `textarea`의 `input` 이벤트를 통해 문자 삽입 |
 | `Escape` | IME 조합 중 | 조합을 취소 |
 
-`Ctrl`/`Cmd` 단축키는 `event.ctrlKey || event.metaKey` 조건으로 감지한다.
+`Ctrl`/`Cmd` 단축키는 `event.ctrlKey || event.metaKey` 조건으로 감지한다. `_onKeydown`에서 매칭되는 모든 단축키(ESC, Ctrl+A/C/X, 스타일 단축키)는 `event.preventDefault()`와 함께 `event.stopPropagation()`도 호출하여 `window` bubble 단계의 호스트 단축키 핸들러(`useEditorKeyboard`)로의 전파를 차단한다.
 
 ### 4.1 Tab / Shift+Tab: 단락 간 포커스 이동
 
@@ -1026,7 +1044,7 @@ const handledReverse = manager.navigateByTab(true);
 - **오버랩 회피와의 상호작용**: 탭은 **현재 파트(자유 영역)의 오른쪽 끝**에 정렬된다. 이미지 오버랩으로 파트가 분할된 라인에서 탭은 컬럼 끝이 아니라 자유 영역의 끝을 기준으로 한다 — 오버랩 회피가 우선한다.
 - **다중 탭**: 한 파트에 탭이 여러 개면 첫 번째 탭 기준으로 collapse된다 (InDesign은 후속 탭을 다음 라인으로 밀지만, v1은 collapse로 단순화 — 의도된 편차).
 - **렌더링**: 탭은 `data-source-offset` diff 키를 유지하는 **0폭 + `visibility: hidden` span**으로 렌더링된다. span이 존재하므로 커서/선택/클릭 매핑(`TextEditCoordinateMapper`)이 오프셋 산술을 그대로 유지한다.
-- **탭 영역 점선 가이드 (편집 모드 전용)**: `editableText`가 활성화된 단락에서 탭 span에 얇은 **점선 배경**이 표시되어 좌/우 텍스트 사이의 탭 영역을 시각적으로 드러낸다 (`_applyTabGuideStyle`). 갭 폭은 탭 앞쪽 마지막 가시 span의 **시각 우측 끝**(`data-char-offset + data-swidth × flatScale`)부터 탭 위치(`data-char-offset` = 우측 세그먼트 시작)까지이며, `width` 확장 + `transform: translateX(-갭폭)`으로 표현한다 — `data-char-offset`/`style.left`는 건드리지 않아 diff 시스템(positionChanged 판정)과 충돌하지 않는다. 렌더링 함정 2가지: (1) 점선 색을 `currentColor`로 하면 `color: transparent`(글자 숨김)에 묻혀 점선도 투명해지므로 **fixed 색(#888)**을 쓴다. (2) `scale` 개별 프로퍼티(장평 스케일)를 **1로 리셋**한다 — 탭 span은 시각 글자가 없어 장평이 무의미하고 scale은 배경 폭을 압축해 갭을 다 덮지 못한다. 높이도 명시해야 한다(높이 0이면 배경이 안 보임). 점선은 라인 수직 중앙에 배치한다 — `backgroundPosition: calc(50% - 밴드절반)`. 비편집 모드로 전환 시 잔존 인라인 스타일을 원복하여 0폭+hidden으로 복귀한다. 인쇄(printPostData)에는 영향이 없다.
+- **탭 영역 점선 가이드 (편집 모드 전용)**: `editableText`가 활성화된 단락에서 탭 span에 얇은 **점선 배경**이 표시되어 좌/우 텍스트 사이의 탭 영역을 시각적으로 드러낸다 (`_applyTabGuideStyle`). 갭 폭은 탭 앞쪽 마지막 가시 span의 **시각 우측 끝**(`data-char-offset + data-swidth × scaleX`)부터 탭 위치(`data-char-offset` = 우측 세그먼트 시작)까지이며, `width` 확장 + `transform: translateX(-갭폭)`으로 표현한다 — `data-char-offset`/`style.left`는 건드리지 않아 diff 시스템(positionChanged 판정)과 충돌하지 않는다. `scaleX`는 기준 span의 **per-span 장평**(`data-dim-key`에서 `widthRatio` 파싱 → `× 0.88`, dimKey에 없으면 문단 effective 장평)이다 — 장평이 런 단위 오버라이드 가능해져 문단 값 고정이면 오버라이드 런 옆에서 점선이 글자를 침범한다. 렌더링 함정 2가지: (1) 점선 색을 `currentColor`로 하면 `color: transparent`(글자 숨김)에 묻혀 점선도 투명해지므로 **fixed 색(#888)**을 쓴다. (2) `scale` 개별 프로퍼티(장평 스케일)를 **1로 리셋**한다 — 탭 span은 시각 글자가 없어 장평이 무의미하고 scale은 배경 폭을 압축해 갭을 다 덮지 못한다. 높이도 명시해야 한다(높이 0이면 배경이 안 보임). 점선은 라인 수직 중앙에 배치한다 — `backgroundPosition: calc(50% - 밴드절반)`. 비편집 모드로 전환 시 잔존 인라인 스타일을 원복하여 0폭+hidden으로 복귀한다. 인쇄(printPostData)에는 영향이 없다.
 - **낙관적 span(optimistic) 스킵 + 탭 라인 조합의 엔진 렌더 반영**: 탭이 포함된 **라인**에서는 `_optimisticSpanUpdate`(일반 타이핑)와 `_optimisticCompositionUpdate`(IME 조합) 모두 임시 span을 생성하지 않는다. 우측 정렬은 새 글자가 파트 끝에 붙고 **기존 글자가 왼쪽으로 밀리지만**, `_shiftFollowingSpans`/`_computeTempSpanLeft`는 좌측 정렬 가정(오른쪽 밀어내기)으로 설계되어 방향이 반전된다. 좌측 세그먼트 타이핑도 같은 파트의 우측 세그먼트 span들을 밀어내므로, 라인에 탭이 있으면 optimistic을 아예 끈다.
   - **탭 라인 조합 표시**: optimistic이 없으면 조합 중 텍스트가 화면에 표시되지 않으므로(조합 중 렌더 지연 최적화가 표시를 optimistic에 위임하기 때문), `_onCompositionUpdate`는 탭 라인 조합 시(`_isTabLineComposition`) **`_debouncedRender()`로 조합 중 텍스트를 실제 엔진 렌더에 반영**한다. 엔진이 매 프레임 정확한 우측 정렬을 계산하므로 조합 글자가 항상 올바른 위치에 표시되고, 밑줄(`_applyCompositionUnderline`)도 정상 적용된다. 음절당 렌더는 rAF로 프레임당 1회로 병합되며, 바이라인은 짧아 렌더 비용이 미미하다.
   - **조합 중 커서 폴백**: 조합 중 커서가 stale mapper 범위 밖(조합 텍스트 끝 offset)을 가리키면 `_updateCursorPosition`의 placement-없음 폴백이 실패해 커서가 (0,0)(paragraph 좌상단)으로 이동하는 **화면 이탈**이 발생한다. 폴백에 **조합 중 분기**를 추가한다: `_isComposing && _compositionStartOffset > 0`이면 조합 시작 위치의 placement(phantom end 우선)로 커서를 배치한다 — 커서가 조합 텍스트가 표시될 지점에 머무르고, 조합 텍스트의 실제 위치는 compositionend의 flushRender 후 확정된다.
@@ -1037,6 +1055,35 @@ const handledReverse = manager.navigateByTab(true);
 
 - `scripts/verify-right-indent-tab.mjs` (Node, 엔진 32항목): 파트 보존, 우측 정렬 수식, justify 비분산, 다중 탭 collapse, trailing tab, 폭 0, printPostData 제외, 오버랩 파트 내 정렬, 멀티컬럼.
 - `scripts/verify-right-indent-tab-browser.mjs` (브라우저 E2E 10항목): Shift+Tab 키 삽입, DOM span 0폭/hidden, 커서 위치, textarea 동기화.
+
+### 4.1.6 텍스트 스타일 단축키 — 토글과 per-run 상대 증감
+
+텍스트 편집 중 선택 영역이 있을 때만 동작하는 스타일 단축키. `TextEditController._tryHandleTextStyleShortcut`이 처리하며, 모두 **선택 영역 필수** — 커서만 있는 상태에서의 스타일 변경(이후 입력에 적용되는 pending style)은 **의도적으로 지원하지 않는다**. selection이 없으면 무음 무시한다.
+
+| 기능 | 키 (물리 키 `event.code` 기준) | 동작 |
+|------|------|------|
+| 볼드 토글 | `Ctrl/⌘+B` | `_toggleInlineStyle("fontWeight", 700)`. 선택 영역 전체가 700이면 **문단 기본으로 복귀**(런의 `fontWeight` 필드 제거 → `normalizeRunMap`이 런 언랩/병합), 아니면 700 주입. 문단 기본이 600(타이틀)이면 600↔700로 동작 |
+| 이탤릭 토글 | `Ctrl/⌘+I` | `_toggleInlineStyle("fontStyle", "italic")`. 볼드와 동일한 이진 토글. 해제 = `'normal'` 주입이 아니라 **필드 제거** |
+| 글자 크기 ± | `Ctrl/⌘+Shift+.` 확대 / `Ctrl/⌘+Shift+,` 축소 | **per-run 상대 증감** +0.1mm/−0.1mm. 하한 0.1mm (`SHORTCUT_MIN_FONT_SIZE`) — 엔진 폭 계산이 음수가 되는 것을 방지 |
+| 자간 ± | `Ctrl/⌘+Alt+Shift+[` 증가 / `Ctrl/⌘+Alt+Shift+]` 감소 | per-run 상대 증감 ±0.01em |
+| 장평 ± | `Ctrl/⌘+Alt+[` 증가 / `Ctrl/⌘+Alt+]` 감소 | per-run 상대 증감 ±0.01 (1%p). `scale: ${widthRatio × 0.88} 1` 렌더링에 그대로 반영 |
+| 공백비율 ± | `Ctrl/⌘+Alt+Shift+,` 증가 / `Ctrl/⌘+Alt+Shift+.` 감소 | per-run 상대 증감 ±0.01em. 하한 0 (`SHORTCUT_MIN_SPACE_RATIO`) |
+
+#### 동작 상세
+
+1. **물리 키 판별**: 브래킷·콤마·피리오드 계열은 `event.code`(`BracketLeft`/`BracketRight`/`Comma`/`Period`)로 판별한다. Shift/Alt 조합에서 `event.key`가 레이아웃 의존 문자로 변하기 때문이다 (`Shift+.` → `">"`, macOS `⌥+[` → `"‘"`). Chrome DevTools의 `Cmd+Option+[` 탭 전환과 동일한 관례. 문자 키(b/i)는 기존 a/c/x와 동일하게 `event.key`로 판별한다.
+2. **per-run 상대 증감 (옵션 B)**: `adjustStyleInRange(runMap, start, end, paragraphEffectiveTextStyle, field, adjust)`가 선택 범위 안의 **각 런의 현재값**(런 오버라이드가 없으면 문단 effective 값)을 `adjust` 콜백에 전달하고, run별 결과값을 주입한다. 혼합 선택(5.0mm run과 4.0mm run이 섞인 선택)에서도 런 간 **상대 차이가 보존**된다 — `applyStyleToRange`의 균일 절대값 주입과의 차이점.
+3. **부동소수점 정규화**: `adjust` 콜백이 결과값을 step 정밀도로 반올림한다 (fontSize: ×10, 자간/장평/공백: ×100). 연타 시 `4.0999999...` 같은 오차가 누적되어 `normalizeRunMap`의 문단 기본값 비교(정확 비교)와 `_computeLayoutInputHash`가 어긋나는 것을 방지한다.
+4. **런 언랩 정리**: 주입 후 `normalizeRunMap`으로 문단 effective와 동일해진 필드를 제거한다 — 문단 기본 자간 −0.1에서 10회 감소 후 다시 10회 증가하면 run이 자동으로 언랩되어 인접 런과 병합된다. 데이터는 항상 최소 런 형태를 유지한다.
+5. **selection 가드**: `_adjustSelectionMetric`은 selection이 없거나 빈 selection(`start >= end`)이면 즉시 반환한다. `_toggleInlineStyle`도 동일한 가드를 가진다 — selection 없는 커서 상태의 스타일 변경은 API로도 열어두지 않는다는 설계 원칙 (§6A.5.1의 `applyTextStyle`은 예외적으로 커서 위치 런/캐스케이드 경로를 지원한다).
+6. **커서/selection 보존**: 증감은 텍스트 길이를 변경하지 않으므로 오프셋은 불변이고, selection은 그대로 유지된다. 주입 후 `model.textContent = plainToInline(...)` → `flushRender()` → `styleChange`/`textChange` 이벤트가 기존 스타일 주입 경로와 동일하게 발생한다.
+7. **이벤트 전파 차단**: `_tryHandleTextStyleShortcut`은 매칭 시 `event.preventDefault()`와 함께 `event.stopPropagation()`도 호출한다. 이로 인해 `window` bubble 단계의 `useEditorKeyboard` 핸들러로 키 이벤트가 전파되지 않아, 텍스트 편집 중 스타일 단축키가 LayoutEditor의 줌/Z-index 등 외부 단축키와 충돌하지 않는다. ESC 및 Ctrl+A/C/X도 동일하게 `stopPropagation()`을 호출한다.
+
+#### 관련 constants (`src/constants/defaults.ts`)
+
+- `SHORTCUT_BOLD_WEIGHT = 700` — 볼드 토글이 주입하는 굵기. 400~900 사이의 다른 굵기는 단축키 영역 밖(UI 패널의 `applyInlineStyle({ fontWeight })`)이다.
+- `SHORTCUT_FONT_SIZE_STEP = 0.1` (mm), `SHORTCUT_METRIC_STEP = 0.01` (자간/장평/공백 공용)
+- `SHORTCUT_MIN_FONT_SIZE = 0.1`, `SHORTCUT_MIN_SPACE_RATIO = 0` — 폭 계산 음수 방지 하한. `widthRatio`/`letterSpacing`의 극값은 엔진이 이미 감당하는 영역이므로 클램프하지 않는다.
 
 ### 4.2 각 키의 내부 처리 과정
 
@@ -1470,6 +1517,7 @@ type RunMap = RunEntry[];
 | `runMapFromContent(content)` | 엔진 content → `RunMap` (평문 문자열 생성 생략). 모든 텍스트 입력/삭제/IME 확정 후 `model.textContent` 갱신 직후 호출하여 런 맵을 content에서 재추출한다. `model.textContent`가 단일 소스이고 런 맵은 그 투영(projection)이다 — delta-sync(`shiftRunMap`)가 런 경계에서 발생시키던 불일치를 회피한다. |
 | `getStyleAtOffset(runMap, offset)` | 오프셋이 속한 런의 스타일 반환. `currentStyle`이 커서 위치의 유효 스타일을 계산할 때 사용. |
 | `applyStyleToRange(runMap, start, end, style)` | 범위에 스타일 적용. 기존 런 경계를 가로지르면 분할하고, 인접 동일 스타일 런은 병합. `applyInlineStyle`/`toggleInlineStyle`이 사용. |
+| `adjustStyleInRange(runMap, start, end, paragraphTextStyle, field, adjust)` | 범위에 수치형 필드를 **per-run 상대 증감**. 각 런의 현재값(오버라이드 없으면 문단 effective)을 `adjust`에 전달해 run별 결과 주입 — 혼합 선택의 런 간 상대 차이 보존. 스타일 단축키(§4.1.6)의 크기/자간/장평/공백 조절이 사용. |
 | `shiftRunMap(runMap, at, delta)` | `at` 위치 이후의 런 offset을 `delta`만큼 이동. 걸친 런은 `end`만 이동(삽입 시 연장, 삭제 시 단축). **더 이상 편집 핫패스에서 사용하지 않는다** — `runMapFromContent` 재추출이 동기화 단일 경로다. 런 경계(`at === entry.end`)에서 갭을 만들어 삽입 텍스트가 plain으로 처리되는 불일치가 있었다. |
 | `mergeAdjacentSameStyle(runMap)` | 인접 동일 스타일 런 병합 + 빈 런 제거 (정규화). |
 | `normalizeRunMap(runMap, paragraphTextStyle)` | 문단 유효 텍스트 스타일 기준 정규화. 상세는 § 6A.5. |
@@ -1546,8 +1594,14 @@ type RunMap = RunEntry[];
 | 텍스트편집모드, 포커스 + selection 없음 + **커서가 런 밖(평문)** | **paragraph 자체 스타일** 수정 + 명시 주입 필드를 **내부 모든 런에 캐스케이드** | paragraph |
 | 포커스 없음 + **paragraph / paragraph-box selected (단일·복수 모두)** | **선택된 모든 대상**의 paragraph 자체 스타일 수정 + 명시 주입 필드 전체 캐스케이드. lock된 대상은 스킵. 하나라도 성공하면 `true` | paragraph |
 
-> ※1 인라인 가능 필드: `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color` (TextInlineStyle에 존재)
-> ※2 인라인 불가 필드: `textAlign`, `lineGap`, `verticalAlign` (ParagraphStyle), `letterSpacing`, `widthRatio`, `spaceRatio`, `indent` (TextStyle 중 인라인 미지원) — **항상 paragraph에 적용**
+> **"커서가 런 안"의 end 경계 포함**: `getStyleAtOffset`은 `offset === 마지막 런.end`(문단 맨 뒤)에서도
+> 마지막 런의 스타일을 반환하므로 이 경계도 런-안 경로로 판정한다. 이에 따라 런 탐색 조건도
+> `r.end > offset`뿐 아니라 `(r.end === offset && 마지막 런)`을 포함해 판정과 대칭을 맞춘다 —
+> 탐색이 end 경계를 누락하면 커서가 문단 맨 뒤에 있을 때 인라인 주입이 **조용히 무시**된다
+> (판정/탐색 경계 비대칭 버그).
+
+> ※1 인라인 가능 필드: `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`, `letterSpacing`, `widthRatio`, `spaceRatio` (TextInlineStyle에 존재)
+> ※2 인라인 불가 필드: `textAlign`, `lineGap`, `verticalAlign` (ParagraphStyle), `indent` (TextStyle 중 인라인 미지원) — **항상 paragraph에 적용**
 
 #### paragraph-box 선택 시 대상 결정 (단일·복수)
 
@@ -1864,9 +1918,11 @@ flowchart LR
 
 1. 이전 낙관적 span이 있으면 DOM에서 제거하고 `_optimisticSpan = null`로 초기화.
 2. `getCursorPlacement(sourceOffset)`로 커서 배치 정보를 얻는다.
-3. placement가 null인 경우(`\n` 바로 다음 위치 = 새 라인 시작): `_insertOptimisticSpanAtLineStart()`를 호출하여 새 라인의 line div 첫 자식으로 span 삽입.
-4. placement가 유효한 경우: `_computeTempSpanLeft()`로 기준 span의 `data-char-offset`/`data-swidth`로부터 임시 span의 `left`(mm)를 동적 계산하여 absolute 배치. `placement.atEndOfChar`가 true면 해당 span 뒤에, false면 앞에 새 span 삽입.
-5. `_optimisticSpan = newSpan`으로 참조 저장.
+3. 삽입된 글자의 런 스타일을 `getStyleAtOffset(this._runMap, sourceOffset)`으로 조회한다. 호출 시점에 `_runMap`이 삽입이 반영된 `model.textContent`에서 재추출되었으므로 `sourceOffset`이 삽입 글자 자신의 런을 가리킨다 — `letterSpacing`/`widthRatio`/`spaceRatio` 오버라이드가 임시 span 폭에 반영된다.
+4. placement가 null인 경우(`\n` 바로 다음 위치 = 새 라인 시작): `_insertOptimisticSpanAtLineStart()`를 호출하여 새 라인의 line div 첫 자식으로 span 삽입 (조회한 런 스타일 전달).
+5. placement가 유효한 경우: `_computeTempSpanLeft()`로 기준 span의 `data-char-offset`/`data-swidth`로부터 임시 span의 `left`(mm)를 동적 계산하여 absolute 배치. `placement.atEndOfChar`가 true면 해당 span 뒤에, false면 앞에 새 span 삽입.
+6. `_computeTempSpanWidthMm(char, 런 스타일)`로 임시 span 폭을 계산하고 `_shiftFollowingSpans()`로 후속 span 밀어내기.
+7. `_optimisticSpan = newSpan`으로 참조 저장.
 
 #### `_insertOptimisticSpanAtLineStart()` 내부 로직
 
@@ -1881,12 +1937,13 @@ flowchart LR
 
 ### 8.2 `_createOptimisticSpan()` 내부 로직
 
-1. `model.genCharStyleFlat()`로 단일 span용 통합 스타일(`scale`/`transformOrigin`/`display`)을 얻는다.
+1. `model.genCharStyleFlat(char, inlineStyle)`로 단일 span용 통합 스타일(`scale`/`transformOrigin`/`display`)을 얻는다. 런 스타일이 전달되면 `letterSpacing`/`widthRatio`/`spaceRatio`/`fontSize` 오버라이드가 `width`와 `scale`에 반영된다.
 2. `Object.assign`로 span의 style에 적용.
 3. `dataset.sourceOffset = String(sourceOffset)`: 소스 오프셋.
 4. `dataset.temporary = "true"`: 임시 span 표시. `TextEditCoordinateMapper`는 이 속성이 있는 span을 매핑 대상에서 제외.
-5. `textContent = char`: 단일 span에 직접 글자 설정 (outer/inner 중첩 없음).
-6. 호출자가 `_computeTempSpanLeft()`로 계산한 `left`值으로 `position: absolute; left: ${mm}mm; top: 0`를 추가 적용.
+5. `dataset.widthRatio = String(적용된 장평)`: span에 실제 적용된 장평(런 오버라이드 → 문단 effective → 1 폴백)을 기록한다 — §8.3의 커서 폭 복원이 이 값을 소비한다.
+6. `textContent = char`: 단일 span에 직접 글자 설정 (outer/inner 중첩 없음).
+7. 호출자가 `_computeTempSpanLeft()`로 계산한 `left`值으로 `position: absolute; left: ${mm}mm; top: 0`를 추가 적용.
 
 ### 8.3 낙관적 span이 있는 경우의 커서 위치 처리
 
@@ -1894,7 +1951,7 @@ flowchart LR
 
 1. `this._optimisticSpan.getBoundingClientRect()`로 span rect 획득.
 2. `cursorEl.top = spanRect.top - paragraphRect.top`.
-3. `cursorEl.left = spanRect.right - paragraphRect.left` (span 오른쪽 끝).
+3. `cursorEl.left = localLeft + layoutWidth` (span의 레이아웃 오른쪽 끝). span은 `scale: (widthRatio × 0.88), 1`을 가지므로 `spanRect.width`는 `레이아웃 폭 × widthRatio`이다 — `dataset.widthRatio`(§8.2에서 기록한 적용 장평)로 나누어 레이아웃 폭을 복원한다. 기록이 없으면 `paragraph.model?.widthRatio ?? 1` 폴백.
 4. `cursorEl.height = spanRect.height`.
 5. `textarea` 위치도 span rect 기준으로 동기화.
 6. 선택 영역이 있으면 커서를 숨긴다.
@@ -2162,8 +2219,8 @@ flowchart LR
 3. `scale = layoutDocEl.editManager.scale`.
 4. `localLeft = (spanRect.left - paragraphRect.left) / scale`.
 5. `visualWidth = spanRect.width / scale`.
-6. `widthRatio = paragraph.model?.widthRatio ?? 1`.
-7. `layoutWidth = widthRatio > 0 ? visualWidth / widthRatio : visualWidth`. span은 `transform: scale(widthRatio, 1)` 스타일을 가지므로, `getBoundingClientRect().width`는 `레이아웃 너비 × widthRatio`이다. `widthRatio < 1`(장평 축소)일 때 시각적 right가 레이아웃 right보다 작아 커서가 왼쪽으로 어긋나는 것을 방지하기 위해 레이아웃 너비를 복원한다.
+6. `widthRatio = span.dataset.widthRatio` (낙관적 span 생성 시점에 적용된 장평 — 런 `widthRatio` 오버라이드 포함. 기록 실패 시 `paragraph.model?.widthRatio ?? 1` 폴백).
+7. `layoutWidth = widthRatio > 0 ? visualWidth / widthRatio : visualWidth`. span은 `scale: (widthRatio × 0.88), 1` 스타일을 가지므로, `getBoundingClientRect().width`는 `레이아웃 너비 × widthRatio`이다. `widthRatio < 1`(장평 축소)일 때 시각적 right가 레이아웃 right보다 작아 커서가 왼쪽으로 어긋나는 것을 방지하기 위해 레이아웃 너비를 복원한다.
 8. `cursorEl.top = (spanRect.top - paragraphRect.top) / scale`.
 9. `cursorEl.left = localLeft + layoutWidth` (span의 레이아웃 right).
 10. `cursorEl.height = spanRect.height / scale`.

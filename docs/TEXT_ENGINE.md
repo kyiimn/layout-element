@@ -265,7 +265,7 @@ private _createLineWithParts(
 4. overflow 판정: `cumulativeTopMm + pendingHeight > effectiveColumnHeight` (per-line 누적 — DOM `renderText`의 visible 판정과 동일 공식)
 5. `_computeFreeRegions()`로 자유 영역 계산 (mm 단위)
 6. **문단 첫 줄 들여쓰기**: `isFirstOfBlock`이 `true`이면(`\n`으로 시작하는 라인의 첫 줄) 첫 자유 영역의 `start`를 `fontSize × indent`만큼 오른쪽으로 밀어준다. `indent`는 `TextStyle.indent`(0.0~1.0)이며 `fontSize`에 대한 비율이다.
-7. **좁은 자유 영역 필터링**: 글자 하나가 들어갈 수 없는 좁은 자유 영역은 제외한다. 기준은 전각 문자 폭 상한(`widthRatio × fontSize + letterSpacing × fontSize`). 이 필터링이 없으면 무한 루프 가드가 좁은 틈에 글자를 강제 배치하여 파트 폭을 넘어 렌더링되는 현상이 발생한다. 필터링 후 남은 자유 영역이 없으면 COVER로 처리된다.
+7. **좁은 자유 영역 필터링**: 글자 하나가 들어갈 수 없는 좁은 자유 영역은 제외한다. 기준은 전각 문자 폭 상한(`widthRatio × fontSize + letterSpacing × fontSize`)이며, 세 값 모두 **라인 시작 런의 인라인 오버라이드 값**(미정의 시 문단 effective)을 사용한다 — 배치 패스가 런 단위 폭을 사용하므로 필터 기준치도 같은 폴백 체인을 따라야 한다. 런 글자 폭보다 좁은 영역은 제외되어 라인이 COVER 처리되고 글자는 다음 라인으로 흐른다(문단 기본 폰트 크기 기준이면 큰 글자 런이 좁은 영역에 강제 배치되어 오버랩 요소 위로 넘친다). 이 필터링이 없으면 무한 루프 가드가 좁은 틈에 글자를 강제 배치하여 파트 폭을 넘어 렌더링되는 현상이 발생한다. 필터링 후 남은 자유 영역이 없으면 COVER로 처리된다.
 8. 자유 영역별 `TextPartData`, `partWidths` 생성 (모두 mm 단위)
 
 #### 5.4.1 per-line 라인 rect — 오버랩 판정과 렌더링 위치의 일치
@@ -462,16 +462,28 @@ if (idxLine !== beforeIdxLine) idxContentOfLine = 0;
 
 라인이 바뀌면 `idxContentOfLine`를 0으로 재설정한다. 라인의 마지막 문자가 배치되면 `endOfBlock = true`를 설정한다. `firstOfBlock`/`endOfBlock` 플래그는 독립 블록이 아니라 `\n`으로 구분되는 라인의 시작/끝을 표시하며, 문단 indent 트리거로 사용된다.
 
-### 7.3 letterSpacing 처리
+### 7.3 letterSpacing / widthRatio / spaceRatio 처리 (인라인 오버라이드)
 
 ```ts
-const letterSpacingEm = this._textStyle?.letterSpacing || this._inheritStyle?.letterSpacing || 0;
-const letterSpacingFontSize = run.textInlineStyle?.fontSize || this._textStyle?.fontSize || this._inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
-const letterSpacingMm = letterSpacingEm * letterSpacingFontSize;
+// 런 단위 폴백 체인 — _layoutColumnsPass / _computeCharOffsets 등 배치 폭 루프 공통
+const wr = inlineStyle?.widthRatio ?? this.widthRatio;                       // 문단 effective 폴백
+const letterSpacingEm = inlineStyle?.letterSpacing ?? this.effectiveTextStyle.letterSpacing!;
+const spaceRatio = inlineStyle?.spaceRatio ?? this.spaceRatio;
+const letterSpacingMm = letterSpacingEm * runFontSize;
+// swidth = rawWidth × widthRatio + letterSpacing × fontSize
 ```
 
 `letterSpacing`은 em 단위로 지정되며, 실제 mm 폭은 `letterSpacing * fontSize`로 계산된다 (mm 단위).
-각 문자 폭에 `letterSpacingMm`를 더해 파트 가용 폭(mm)과 비교한다.
+각 문자 폭에 `letterSpacingMm`를 더해 파트 가용 폭(mm)과 비교한다. `widthRatio`는 문자 원본 폭에
+곱하고, `spaceRatio`는 공백 폭(`spaceRatio × fontSize`)과 결함 글리프 최소 폭 바닥값으로 쓰인다.
+
+세 필드는 모두 `TextInlineStyle`로 **런 단위 오버라이드 가능**하다. 미정의 시 문단 effective
+값(`TextStyle` → `InheritStyle` → 기본값)을 따른다. 배치(`_layoutColumnsPass`,
+`_computeCharOffsets`, `_computePendingMaxFontSize`), 렌더링(`genCharStyle`,
+`genCharStyleFlat`, `genCharInnerStyle`, `getCharWidths`), `getCharRect`,
+`buildParagraphPrintPostData`가 모두 동일한 per-run 폴백 체인을 사용한다 — 화면/인쇄 좌표
+일치는 엔진 단일 소스로 보장된다. 레이아웃 캐시 해시(`_computeLayoutInputHash`,
+`_computePrefixHash`)도 런의 세 필드를 포함하므로 오버라이드 변경 시 stale 캐시 없이 재래핑된다.
 
 ### 7.3.1 좌우 밀기 탭 (`\t`) 처리
 
@@ -671,9 +683,9 @@ flexbox `justify-content`에 의존하지 않고 렌더링 시 글자 위치를 
   중간 간격 `(partWidth - Σ charWidth) / (n - 1)` 균등 분배.
   마지막 줄(`endOfBlock`) 또는 글자 1개 → `left`와 동일.
 
-글자 폭은 `getCharWidths(char).swidth`를 사용하며, 여기에는 장평(`widthRatio`)과
-`letterSpacing`이 이미 포함되어 있다. 따라서 `charOffsets` 산출 시 이들을
-별도로 더하지 않는다.
+글자 폭은 `getCharWidths(char, inlineStyle).swidth`를 사용하며, 여기에는 장평(`widthRatio`)과
+`letterSpacing`이 이미 포함되어 있다 (모두 per-run 오버라이드 값 — 미정의 시 문단 effective).
+따라서 `charOffsets` 산출 시 이들을 별도로 더하지 않는다.
 
 `undefined`인 경우 레거시 호환 — `LayoutColumnElement.renderText()`는
 기존 flexbox `justify-content` 경로로 폴백한다.
@@ -793,14 +805,13 @@ public genPartStyle(): Partial<CSSStyleDeclaration>
 ```
 
 - `display: 'inline-flex'`, `flexDirection: 'row'`, `alignItems: 'baseline'`
-- `letterSpacing`: em 단위
 - `textAlign` → `justify-content` 매핑
   - `'left'` → `flex-start`
   - `'right'` → `flex-end`
   - `'center'` → `center`
   - `'justify'` → `space-between`
 
-인라인 런 스타일(fontFamily, fontSize, fontWeight, fontStyle, color)은 파트 수준이 아니라 글자 span 수준에서 적용된다 (`LayoutColumnElement._applyInlineOverrides()` 참조).
+인라인 런 스타일(fontFamily, fontSize, fontWeight, fontStyle, color, letterSpacing, widthRatio, spaceRatio)은 파트 수준이 아니라 글자 span 수준에서 적용된다 (`LayoutColumnElement._applyInlineOverrides()`와 `genCharStyle`/`genCharStyleFlat` 참조). `letterSpacing`/`widthRatio`/`spaceRatio`는 span의 `width`/`scale` 계산에 per-run 값으로 반영된다.
 
 > **`charOffsets` 오버라이드**: `LayoutColumnElement._applyPartStyle()`는
 > `part.charOffsets`가 정의되어 있으면 이 매핑을 무시하고 `justify-content: flex-start` +
@@ -808,13 +819,15 @@ public genPartStyle(): Partial<CSSStyleDeclaration>
 > 절대 좌표에 직접 배치된다 (§11.5 참조). `genPartStyle()` 자체는 레거시 호환을 위해
 > 기존 매핑을 그대로 반환한다.
 
-### 11.4 `genCharStyle(char)`
+### 11.4 `genCharStyle(char, inlineStyle?)`
 
 글자(char) 요소의 외부 span 스타일을 생성한다. 이중 span 구조에서 외부 span을 담당한다.
 
 ```ts
-public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
+public genCharStyle = (char: string, inlineStyle?: TextInlineStyle, lineMaxFontSize?: number): Partial<CSSStyleDeclaration>
 ```
+
+`inlineStyle`이 제공되면 `letterSpacing`/`widthRatio`/`spaceRatio`/`fontSize`의 런 오버라이드가 `width` 계산에 반영되고, 캐시 키도 per-run 값으로 구분된다.
 
 외부 span과 내부 span의 이중 구조를 사용한다:
 
@@ -828,7 +841,7 @@ public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
 
 **외부 span** (`genCharStyle` 반환):
 - `display: 'inline-block'`
-- `width`: `${rawWidth × widthRatio}mm` (정확한 폭 고정)
+- `width`: `${rawWidth × widthRatio + letterSpacing × fontSize}mm` (정확한 폭 고정 — widthRatio/letterSpacing 모두 per-run 오버라이드 반영)
 - `overflow: 'hidden'` (glyph 넘침 방지)
 - `textAlign`: `'center'`
 
@@ -842,7 +855,7 @@ public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
 
 **내부 span** (`genCharInnerStyle` 반환):
 - `display: 'inline-block'`
-- `scale`: `${widthRatio * 0.88} 1` (glyph 모양 수평 축소 — 장평)
+- `scale`: `${widthRatio * 0.88} 1` (glyph 모양 수평 축소 — 장평. 런 `widthRatio` 오버라이드가 있으면 per-run 값)
 - `transformOrigin`: `'0 center'`
 
 > **보정 계수 `0.88`**: opentype.js의 `advanceWidth`(레이아웃 폭, side bearing 포함)와 브라우저 실제 렌더링 glyph 너비(hinting/subpixel 등으로 약간 좁음) 간의 미세한 차이를 보정하는 경험적 값. 이 보정이 없으면 외부 span의 `width`보다 내부 glyph가 약간 넓게 렌더링되어 글자가 오버플로우하거나 인접 글자와 살짝 겹치는 현상이 발생한다. **절대 변경하거나 제거해서는 안 된다.** 제거 시 시각적 정렬이 깨진다.
@@ -857,8 +870,8 @@ public genCharStyle = (char: string): Partial<CSSStyleDeclaration>
 #### 산출 공식
 
 `_stripSpaces()`로 선행/후행 공백이 제거된 스트리핑된 글자들에 대해
-`getCharWidths(char).swidth`를 사용하여 각 글자의 폭을 구한다
-(장평 `widthRatio`와 `letterSpacing`이 이미 포함된 값).
+`getCharWidths(char, inlineStyle).swidth`를 사용하여 각 글자의 폭을 구한다
+(장평 `widthRatio`와 `letterSpacing`이 이미 포함된 값 — 런 오버라이드 포함).
 
 여기서 `totalWidth = Σ charWidth[i]`, `remaining = max(0, partWidth - totalWidth)`일 때:
 
@@ -945,16 +958,16 @@ flexbox 정렬에 사용되고 inner의 `scale`이 glyph 축소를 담당한다.
 - `rect`: 글자별 위치·크기 (mm). 높이는 항상 `lineHeight`(고정)
 - `fontFamily`: `inlineStyle → textStyle → inheritStyle` 폴백 체인으로 해결 (글자별)
 - `fontSize`, `fontWeight`, `fontStyle`: `inlineStyle → textStyle → inheritStyle → default` 폴백 (글자별)
-- `widthRatio`: `textStyle → inheritStyle → DEFAULT_WIDTH_RATIO`
-- `letterSpacing`: `textStyle → inheritStyle → DEFAULT_LETTER_SPACING` (em 단위)
-- `spaceRatio`: `textStyle → inheritStyle → DEFAULT_SPACE_RATIO` (em 단위)
+- `widthRatio`: `inlineStyle → textStyle → inheritStyle → DEFAULT_WIDTH_RATIO` (글자별 — 런 오버라이드 가능)
+- `letterSpacing`: `inlineStyle → textStyle → inheritStyle → DEFAULT_LETTER_SPACING` (em 단위, 글자별 — 런 오버라이드 가능)
+- `spaceRatio`: `inlineStyle → textStyle → inheritStyle → DEFAULT_SPACE_RATIO` (em 단위, 글자별 — 런 오버라이드 가능)
 - `color`: `inlineStyle → textStyle → inheritStyle` 폴백 후 CMYK 변환 (글자별). 모두 undefined면 K100 검정 `{ c:0, m:0, y:0, k:255 }`
 
 `width`와 `scale`은 분리되어 작동한다:
-- 외부 span의 `width`는 `_charWidthMm(char)`으로 측정한 원본 폭에 장평을 곱해 정확히 고정한다. 측정값과 DOM 렌더링이 결정론적으로 일치하며, 마지막 글자가 틀을 넘어가는 현상을 방지한다.
-- 내부 span의 `scale`은 glyph 모양을 수평으로 `wr × 0.88`배 축소한다. 시각적 장평 효과.
-- 공백은 `fontSize × spaceRatio`로 고정한다 (폰트 메트릭 무시).
-- 문자별 LRU 캐시(`_charOuterStyleCache`, 키 `${char}|${widthRatio}|${letterSpacing}|${spaceRatio}`, 용량 5000)로 재계산을 생략한다. 이전에는 `Map` + `size > 5000 → clear()` 전체 삭제 정책을 사용했으나, LRU eviction으로 변경하여 대형 문서에서 성능 급감(cliff)을 방지한다. 자세한 내용은 `docs/PERFORMANCE.md` 참조.
+- 외부 span의 `width`는 `_charWidthMm(char, inlineStyle)`으로 측정한 원본 폭에 장평을 곱해 정확히 고정한다. 측정값과 DOM 렌더링이 결정론적으로 일치하며, 마지막 글자가 틀을 넘어가는 현상을 방지한다.
+- 내부 span의 `scale`은 glyph 모양을 수평으로 `wr × 0.88`배 축소한다. 시각적 장평 효과. `wr`은 런 `widthRatio` 오버라이드가 있으면 per-run 값이다.
+- 공백은 `fontSize × spaceRatio`로 고정한다 (폰트 메트릭 무시, per-run spaceRatio 오버라이드 반영).
+- 문자별 LRU 캐시(`_charOuterStyleCache`, 키 `${char}|${widthRatio}|${letterSpacing}|${spaceRatio}|${fontSize}|${lineMaxFontSize}|${fontName}` — per-run 오버라이드 값 기준, 용량 5000)로 재계산을 생략한다. 이전에는 `Map` + `size > 5000 → clear()` 전체 삭제 정책을 사용했으나, LRU eviction으로 변경하여 대형 문서에서 성능 급감(cliff)을 방지한다. 자세한 내용은 `docs/PERFORMANCE.md` 참조.
 
 ---
 

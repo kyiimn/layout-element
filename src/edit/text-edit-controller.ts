@@ -7,8 +7,9 @@ import type { TextLineData } from "@/types/layout/text/text-line.type";
 import type { TextInlineData } from "@/types/layout/text/text-inline.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
-import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA } from "@/constants";
-import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, normalizeInlineContent, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent } from "./run-map";
+import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA, SHORTCUT_BOLD_WEIGHT, SHORTCUT_FONT_SIZE_STEP, SHORTCUT_METRIC_STEP, SHORTCUT_MIN_FONT_SIZE, SHORTCUT_MIN_SPACE_RATIO } from "@/constants";
+import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, normalizeInlineContent, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent, adjustStyleInRange, NumericInlineMetricField } from "./run-map";
+import { ColorRegistry } from "@/resource/color-registry";
 
 /**
  * postRender의 커서/선택 rect 읽기를 rAF로 지연할 span 재적용 수 임계값.
@@ -817,6 +818,7 @@ export class TextEditController {
 
     if (hasShortcut && event.key.toLowerCase() === "a") {
       event.preventDefault();
+      event.stopPropagation();
       this._selectAll();
       this._manager._notifyCursorMove(this);
       return;
@@ -824,10 +826,15 @@ export class TextEditController {
 
     if (hasShortcut && (event.key.toLowerCase() === "c" || event.key.toLowerCase() === "x")) {
       event.preventDefault();
+      event.stopPropagation();
       this._copySelection();
       if (event.key.toLowerCase() === "x") {
         this._deleteSelection();
       }
+      return;
+    }
+
+    if (this._tryHandleTextStyleShortcut(event)) {
       return;
     }
 
@@ -1069,6 +1076,7 @@ export class TextEditController {
         this._replaceSelection("");
       } else if (offset > 0) {
         model.textContent = deleteTextFromInline(model.textContent, offset - 1, 1);
+        this._runMap = runMapFromContent(model.textContent);
         this._textarea.value = content.slice(0, offset - 1) + content.slice(offset);
         this._cursorModel.offset = offset - 1;
         this._textarea.setSelectionRange(offset - 1, offset - 1);
@@ -1085,6 +1093,7 @@ export class TextEditController {
         this._replaceSelection("");
       } else if (offset < content.length) {
         model.textContent = deleteTextFromInline(model.textContent, offset, 1);
+        this._runMap = runMapFromContent(model.textContent);
         this._textarea.value = content.slice(0, offset) + content.slice(offset + 1);
         this._textarea.setSelectionRange(offset, offset);
         this._debouncedRender();
@@ -1223,6 +1232,7 @@ export class TextEditController {
     const newContent = content.slice(0, start.textOffset) + content.slice(end.textOffset);
 
     model.textContent = deleteTextFromInline(model.textContent, start.textOffset, end.textOffset - start.textOffset);
+    this._runMap = runMapFromContent(model.textContent);
     this._textarea.value = newContent;
     this._cursorModel.offset = start.textOffset;
     this._cursorModel.selection = null;
@@ -1263,6 +1273,7 @@ export class TextEditController {
       startOffset,
       pastedText,
     );
+    this._runMap = runMapFromContent(model.textContent);
     this._textarea.value = newContent;
     this._cursorModel.offset = newOffset;
     this._cursorModel.selection = null;
@@ -1789,8 +1800,11 @@ export class TextEditController {
       this._optimisticSpan.textContent = data;
       this._optimisticSpan.dataset.sourceOffset = String(startOffset);
       // 폭 변화(ㅎ→하→한) 반영: 새 음절 폭으로 재계산하여 후속 span 밀기 조정.
+      // 조합 텍스트는 조합 시작 위치의 런 스타일을 사용한다 — _onCompositionUpdate가
+      // runMap을 model.textContent(조합 반영됨)에서 재추출한 직후이므로 직접 조회가
+      // 항상 최신이며, 타이핑 span을 재사용한 경우에도 정확하다.
       const prevWidthMm = this._optimisticSpanWidthMm;
-      const widthMm = this._computeTempSpanWidthMm(data[data.length - 1] ?? '');
+      const widthMm = this._computeTempSpanWidthMm(data[data.length - 1] ?? '', getStyleAtOffset(this._runMap, startOffset));
       if (widthMm !== prevWidthMm) {
         this._shiftFollowingSpans(this._optimisticSpan, prevWidthMm - widthMm);
         this._optimisticSpanWidthMm = widthMm;
@@ -1819,7 +1833,9 @@ export class TextEditController {
     if (placement) {
       const span = this._mapper.getSpanByOffset(placement.sourceOffset);
       if (span) {
-        const newSpan = this._createOptimisticSpan(data, startOffset);
+        // 조합 텍스트는 조합 시작 위치의 런 스타일을 이어받는다 (타이핑 연속성).
+        const compositionStyle = getStyleAtOffset(this._runMap, startOffset);
+        const newSpan = this._createOptimisticSpan(data, startOffset, compositionStyle);
         const leftMm = this._computeTempSpanLeft(span, placement.atEndOfChar);
         if (leftMm !== undefined) {
           newSpan.style.position = 'absolute';
@@ -1831,7 +1847,7 @@ export class TextEditController {
         } else {
           span.before(newSpan);
         }
-        const widthMm = this._computeTempSpanWidthMm(data[data.length - 1] ?? '');
+        const widthMm = this._computeTempSpanWidthMm(data[data.length - 1] ?? '', compositionStyle);
         this._shiftFollowingSpans(newSpan, widthMm);
         this._optimisticSpanWidthMm = widthMm;
         this._optimisticSpan = newSpan;
@@ -2013,11 +2029,17 @@ export class TextEditController {
 
     const placement = this._mapper.getCursorPlacement(sourceOffset);
 
+    // 낙관적 span은 삽입된 글자의 런 스타일을 사용한다. 호출 시점에 runMap이
+    // model.textContent(삽입 반영됨)에서 재추출되었으므로 sourceOffset이
+    // 삽입된 글자 자신의 런을 가리킨다 (insertTextIntoInline의 타이핑 연속성
+    // 규칙상 직전 런 스타일을 이어받지만, 선택 영역 교체 등에서는 상이할 수 있다).
+    const optimisticStyle = getStyleAtOffset(this._runMap, sourceOffset);
+
     // placement가 null: \n 바로 다음(새 라인 시작)이거나 빈 줄 시작.
     // 새 라인 시작인 경우 line div 첫 자식으로 삽입.
     if (!placement) {
       if (sourceOffset > 0 && plainText[sourceOffset - 1] === '\n') {
-        this._insertOptimisticSpanAtLineStart(char, sourceOffset);
+        this._insertOptimisticSpanAtLineStart(char, sourceOffset, optimisticStyle);
       }
       return;
     }
@@ -2037,7 +2059,7 @@ export class TextEditController {
       : null;
     if (cursorLine?.parts.some((part) => part.content.includes("\t"))) return;
 
-    const newSpan = this._createOptimisticSpan(char, sourceOffset);
+    const newSpan = this._createOptimisticSpan(char, sourceOffset, optimisticStyle);
     const leftMm = this._computeTempSpanLeft(span, placement.atEndOfChar);
     if (leftMm !== undefined) {
       newSpan.style.position = 'absolute';
@@ -2050,7 +2072,7 @@ export class TextEditController {
       span.before(newSpan);
     }
     // 후속 span들을 임시 span 폭만큼 밀어냄
-    const widthMm = this._computeTempSpanWidthMm(char);
+    const widthMm = this._computeTempSpanWidthMm(char, optimisticStyle);
     this._shiftFollowingSpans(newSpan, widthMm);
     this._optimisticSpanWidthMm = widthMm;
     this._optimisticSpan = newSpan;
@@ -2118,32 +2140,94 @@ export class TextEditController {
    * 임시 span의 폭(mm)을 계산한다.
    * 조합 중인 텍스트의 각 글자에 대해 `getCharWidths().swidth`를 합산.
    *
+   * `inlineStyle`을 전달하면 letterSpacing/widthRatio/spaceRatio/fontSize의
+   * 런 오버라이드가 폭에 반영된다. 미전달 시 문단 기본 폭을 사용한다
+   * (기존 동작 — 스타일 없는 낙관적 렌더).
+   *
    * @param text - 임시 span에 표시되는 텍스트 (조합 중인 문자열)
+   * @param inlineStyle - 삽입 위치 런의 인라인 스타일 (선택)
    * @returns 폭(mm). 빈 문자열이면 0.
    */
-  private _computeTempSpanWidthMm(text: string): number {
+  private _computeTempSpanWidthMm(text: string, inlineStyle?: TextInlineStyle): number {
     if (!text) return 0;
     const model = this._paragraph.model;
     if (!model) return 0;
     let total = 0;
     for (const ch of text) {
-      const { swidth } = model.getCharWidths(ch);
+      const { swidth } = model.getCharWidths(ch, inlineStyle);
       total += swidth;
     }
     return total;
   }
 
-  private _createOptimisticSpan(char: string, sourceOffset: number): HTMLSpanElement {
+  /**
+   * 낙관적(optimistic) 임시 span을 생성한다.
+   *
+   * `inlineStyle`이 있으면 `genCharStyleFlat`에 전달하여 런 폭
+   * (letterSpacing/widthRatio/spaceRatio/fontSize 오버라이드)을 span에
+   * 반영한다. 타이핑 연속성 규칙상 삽입 텍스트는 커서 직전 런 스타일을
+   * 이어받으므로, 호출자가 `getStyleAtOffset`으로 조회해 전달한다.
+   *
+   * @param char - 표시할 문자(열)
+   * @param sourceOffset - 새 문자의 소스 오프셋
+   * @param inlineStyle - 삽입 위치 런의 인라인 스타일 (선택)
+   * @returns 생성된 span 요소
+   */
+  private _createOptimisticSpan(char: string, sourceOffset: number, inlineStyle?: TextInlineStyle): HTMLSpanElement {
     const model = this._paragraph.model;
     const span = document.createElement('span');
     span.dataset.sourceOffset = String(sourceOffset);
     span.dataset.temporary = "true";
-    const charStyle = model?.genCharStyleFlat(char);
+    const charStyle = model?.genCharStyleFlat(char, inlineStyle);
     if (charStyle) {
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(span.style, charStyle);
     }
+    // 인라인 런 스타일 오버라이드: genCharStyleFlat은 치수/레이아웃 스타일만 반환하므로,
+    // 폰트·색상 필드는 별도로 적용해야 한다. 이것이 없으면 조합 중 텍스트가
+    // 문단 기본 스타일로 렌더링되어 인라인 스타일(굵게·색상 등)이 무시된다.
+    this._applyOptimisticInlineOverrides(span, inlineStyle, model ?? null);
+    // span에 실제 적용된 장평을 기록한다 — _updateCursorPosition가 시각 폭에서
+    // 레이아웃 폭을 복원할 때 파싱한다. genCharStyleFlat과 동일 폴백 체인
+    // (런 오버라이드 → 문단 effective → 1)이므로 적용값과 항상 일치한다.
+    span.dataset.widthRatio = String(inlineStyle?.widthRatio ?? model?.widthRatio ?? 1);
     span.textContent = char;
     return span;
+  }
+
+  /**
+   * 낙관적 span에 인라인 스타일 오버라이드 필드를 적용한다.
+   * column.element.ts의 `_applyInlineOverrides`와 동일한 로직이지만,
+   * optimistic span은 column의 렌더 경로를 거치지 않으므로 여기서 직접 적용한다.
+   *
+   * @param span - 스타일을 적용할 낙관적 span 요소
+   * @param inlineStyle - 인라인 런 스타일 (undefined면 문단 기본값 사용)
+   * @param model - ParagraphEngine 인스턴스 (fontSize 기본값 확인용)
+   */
+  private _applyOptimisticInlineOverrides(
+    span: HTMLSpanElement,
+    inlineStyle: TextInlineStyle | undefined,
+    model: import('@/engine/paragraph-engine').ParagraphEngine | null,
+  ): void {
+    if (!inlineStyle) return;
+
+    if (inlineStyle.fontFamily) {
+      span.style.fontFamily = inlineStyle.fontFamily;
+    }
+    if (inlineStyle.fontWeight !== undefined) {
+      span.style.fontWeight = String(inlineStyle.fontWeight);
+    }
+    if (inlineStyle.fontStyle !== undefined) {
+      span.style.fontStyle = inlineStyle.fontStyle;
+    }
+    if (inlineStyle.color) {
+      span.style.color = ColorRegistry.getInstance().getCSSColor(inlineStyle.color);
+    }
+    if (inlineStyle.fontSize !== undefined && inlineStyle.fontSize !== model?.fontSize) {
+      span.style.fontSize = `${inlineStyle.fontSize}mm`;
+      span.style.lineHeight = `${inlineStyle.fontSize}mm`;
+      span.style.display = 'inline-block';
+      span.style.height = `${inlineStyle.fontSize}mm`;
+    }
   }
 
   /**
@@ -2155,6 +2239,7 @@ export class TextEditController {
    *
    * @param char - 삽입할 문자
    * @param sourceOffset - 새 문자의 소스 오프셋 (\n 바로 다음)
+   * @param inlineStyle - 삽입 위치 런의 인라인 스타일 (선택)
    * @throws - model이 없으면 아무 동작도 하지 않음
    * @returns - 없음 (void)
    *
@@ -2163,7 +2248,7 @@ export class TextEditController {
    * // '다' 입력 → _insertOptimisticSpanAtLineStart('다', 3)
    * // → 새 라인의 line div 첫 자식으로 '다' span 삽입
    */
-  private _insertOptimisticSpanAtLineStart(char: string, sourceOffset: number): void {
+  private _insertOptimisticSpanAtLineStart(char: string, sourceOffset: number, inlineStyle?: TextInlineStyle): void {
     const lineInfo = this._mapper.getLineInfoBySourceOffset(sourceOffset);
     if (!lineInfo) return;
 
@@ -2178,14 +2263,14 @@ export class TextEditController {
     if (lineDiv) {
       const partDiv = lineDiv.querySelector('div');
       const container = partDiv instanceof HTMLElement ? partDiv : lineDiv;
-      const newSpan = this._createOptimisticSpan(char, sourceOffset);
+      const newSpan = this._createOptimisticSpan(char, sourceOffset, inlineStyle);
       // 라인 시작 삽입 — 파트 첫 자식이므로 offset 0
       newSpan.style.position = 'absolute';
       newSpan.style.left = '0mm';
       newSpan.style.top = '0';
       container.insertBefore(newSpan, container.firstChild);
       // 후속 span들을 임시 span 폭만큼 밀어냄
-      const widthMm = this._computeTempSpanWidthMm(char);
+      const widthMm = this._computeTempSpanWidthMm(char, inlineStyle);
       this._shiftFollowingSpans(newSpan, widthMm);
       this._optimisticSpanWidthMm = widthMm;
       this._optimisticSpan = newSpan;
@@ -2255,7 +2340,12 @@ export class TextEditController {
       const paragraphRect = this._paragraph.getBoundingClientRect();
       const localLeft = (spanRect.left - paragraphRect.left) / scale;
       const visualWidth = spanRect.width / scale;
-      const widthRatio = this._paragraph.model?.widthRatio ?? 1;
+      // 낙관적 span은 런 widthRatio 오버라이드가 적용된 scale을 가진다.
+      // 생성 시점에 기록된 dataset.widthRatio(적용된 장평)로 레이아웃 폭을 복원한다.
+      const wrApplied = Number(this._optimisticSpan.dataset.widthRatio);
+      const widthRatio = Number.isFinite(wrApplied) && wrApplied > 0
+        ? wrApplied
+        : (this._paragraph.model?.widthRatio ?? 1);
       const layoutWidth = widthRatio > 0 ? visualWidth / widthRatio : visualWidth;
       const layoutRight = localLeft + layoutWidth;
       this._cursorEl.top = (spanRect.top - paragraphRect.top) / scale;
@@ -2535,7 +2625,7 @@ export class TextEditController {
    *
    * 커서/선택 상태에 따라 주입 대상을 라우팅한다:
    * 1. selection 있음 → 선택 범위에 인라인 가능 필드를 주입 (`applyStyleToRange`,
-   *    기존 런은 필드 오버라이드). 인라인 불가 필드는 paragraph에 적용.
+   *    기존 런은 필드 오버라이드). 인라인 불가 필드(indent, ParagraphStyle)는 paragraph에 적용.
    * 2. selection 없음 + 커서가 인라인 런 안 → 해당 런만 업데이트.
    * 3. selection 없음 + 커서가 런 밖(평문) → paragraph 자체 스타일 수정
    *    + 명시 주입 필드를 모든 인라인 런에 캐스케이드.
@@ -2550,7 +2640,10 @@ export class TextEditController {
     const model = this._paragraph.model;
     if (!model) return;
 
-    const INLINE_FIELDS = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "color"] as const;
+    const INLINE_FIELDS = [
+      "fontFamily", "fontSize", "fontWeight", "fontStyle", "color",
+      "letterSpacing", "widthRatio", "spaceRatio",
+    ] as const;
 
     // 상속 회귀(inherit revert) 규칙:
     // - patch 필드 값 === inheritStyle 같은 필드 → 오버라이드를 만들지 않고 기존 오버라이드 제거
@@ -2579,11 +2672,9 @@ export class TextEditController {
       }
     }
 
-    // 인라인 불가 텍스트 필드(letterSpacing, widthRatio, spaceRatio, indent)와
-    // ParagraphStyle 필드(lineGap, textAlign, verticalAlign)도 상속 회귀 대상이다.
-    // resolvePatchAgainstInherit이 이 필드들을 제거하면 paragraph.textStyle/paragraphStyle
-    // setter 호출이 스킵되어 기존 override가 남는 버그를 방지한다.
-    const PARAGRAPH_TEXT_FIELDS = ["letterSpacing", "widthRatio", "spaceRatio", "indent"] as const;
+    // letterSpacing/widthRatio/spaceRatio는 인라인 런 오버라이드 가능 필드이므로
+    // INLINE_FIELDS로 주입된다. 문단 전용 비인라인 텍스트 필드는 indent뿐이다.
+    const PARAGRAPH_TEXT_FIELDS = ["indent"] as const;
     const revertParagraphTextFields: string[] = [];
     for (const field of PARAGRAPH_TEXT_FIELDS) {
       const isExplicitlyPassed = Object.prototype.hasOwnProperty.call(textPatch, field);
@@ -2630,8 +2721,8 @@ export class TextEditController {
     // 중요: 인라인 가능 필드(fontFamily 등)의 paragraph 반영은 런 밖(캐스케이드) 경로에서만
     // 수행한다. selection/런-안 경로의 의미는 "그 영역에만 적용"이므로 paragraph 기본을
     // 바꾸면 effectiveTextStyle이 런 값과 동일해져 normalizeRunMap이 런을 해제해버린다.
-    // 인라인 불가 필드(textAlign/lineGap/verticalAlign/letterSpacing/widthRatio)는
-    // 항상 paragraph 소속이므로 selection이 있어도 paragraph에 반영한다.
+    // 인라인 불가 필드(textAlign/lineGap/verticalAlign/indent)는 항상 paragraph
+    // 소속이므로 selection이 있어도 paragraph에 반영한다.
     //
     // revertParagraphTextFields는 인라인 불가 필드이므로 항상 paragraph에 반영한다.
     // revertTextFields(인라인 가능 필드)는 런 밖(캐스케이드) 경로에서만 paragraph에서 제거한다.
@@ -2707,8 +2798,15 @@ export class TextEditController {
         }
       }
     } else if (!hasSelection && cursorRunStyle !== undefined && hasInlinePatch) {
-      // 2. 커서가 인라인 런 안 → 해당 런만 업데이트
-      const run = this._runMap.find(r => r.start <= offset && r.end > offset && r.style === cursorRunStyle);
+      // 2. 커서가 인라인 런 안 → 해당 런만 업데이트.
+      // 커서가 런의 end 경계(문단 끝 등)에 있어도 getStyleAtOffset가 마지막
+      // 런의 스타일을 반환하므로 런-안 경로로 진입한다. 이때 런 탐색도
+      // end 경계를 포함해야 한다 — r.end > offset 조건만으로는 offset === r.end인
+      // 마지막 런을 못 찾아 주입이 조용히 무시된다 (커서가 문단 맨 뒤에 있을 때
+      // 스타일 조정이 반영되지 않는 버그).
+      const run = this._runMap.find(r => r.start <= offset
+        && (r.end > offset || (r.end === offset && r === this._runMap[this._runMap.length - 1]))
+        && r.style === cursorRunStyle);
       if (run && run.style) {
         run.style = { ...run.style, ...inlinePatch };
         this._runMap = mergeAdjacentSameStyle(this._runMap);
@@ -2815,6 +2913,178 @@ export class TextEditController {
   }
 
   /**
+   * 텍스트 스타일 단축키를 처리한다. 단축키를 소비했으면 `true`를 반환한다.
+   *
+   * 모든 스타일 단축키는 **선택 영역이 있을 때만** 동작한다 — 커서만 있는
+   * 상태에서의 스타일 변경(pending style)은 의도적으로 지원하지 않는다
+   * (§EDITING_TEXT 4.1.6). `Ctrl/Cmd` 조합만 소비하며, 매핑에 없는 조합은
+   * `false`로 반환해 이후 키 처리로 전파한다.
+   *
+   * 문자 키(b/i)는 기존 a/c/x 단축키와 동일하게 `event.key`로 판별한다.
+   * 브래킷·콤마·피리오드는 `event.code`(물리 키)로 판별한다 — Shift/Alt
+   * 조합에서 `event.key`가 레이아웃 의존 문자(`Shift+.` → `">"`, macOS
+   * `⌥+[` → `"‘"`)로 변하기 때문이다. Chrome DevTools의 `Cmd+Option+[`
+   * 탭 전환과 동일한 물리 키 기준 관례다.
+   *
+   * | 기능 | 키 (물리 키 기준) |
+   * |------|----|
+   * | 볼드 토글 (700 ↔ 문단 기본) | `Ctrl/⌘+B` |
+   * | 이탤릭 토글 ('italic' ↔ 문단 기본) | `Ctrl/⌘+I` |
+   * | 글자 크기 ±0.1mm | `Ctrl/⌘+Shift+.` (확대) / `Ctrl/⌘+Shift+,` (축소) |
+   * | 자간 ±0.01em | `Ctrl/⌘+Alt+Shift+[` (증가) / `Ctrl/⌘+Alt+Shift+]` (감소) |
+   * | 장평 ±0.01 | `Ctrl/⌘+Alt+[` (증가) / `Ctrl/⌘+Alt+]` (감소) |
+   * | 공백비율 ±0.01em | `Ctrl/⌘+Alt+Shift+,` (증가) / `Ctrl/⌘+Alt+Shift+.` (감소) |
+   *
+   * @param event - textarea의 keydown 이벤트
+   * @returns 단축키를 소비했으면 `true`, 아니면 `false`
+   */
+  _tryHandleTextStyleShortcut(event: KeyboardEvent): boolean {
+    if (!event.ctrlKey && !event.metaKey) return false;
+
+    const key = event.key.toLowerCase();
+    const alt = event.altKey;
+    const shift = event.shiftKey;
+
+    if (!alt && !shift) {
+      if (key === "b") {
+        event.preventDefault();
+        event.stopPropagation();
+        this._toggleInlineStyle("fontWeight", SHORTCUT_BOLD_WEIGHT);
+        return true;
+      }
+      if (key === "i") {
+        event.preventDefault();
+        event.stopPropagation();
+        this._toggleInlineStyle("fontStyle", "italic");
+        return true;
+      }
+      return false;
+    }
+
+    if (alt) {
+      if (!shift) {
+        // Ctrl/⌘+Alt+[ / ] — 장평
+        switch (event.code) {
+          case "BracketLeft":
+            event.preventDefault();
+            event.stopPropagation();
+            this._adjustSelectionMetric("widthRatio", SHORTCUT_METRIC_STEP);
+            return true;
+          case "BracketRight":
+            event.preventDefault();
+            event.stopPropagation();
+            this._adjustSelectionMetric("widthRatio", -SHORTCUT_METRIC_STEP);
+            return true;
+        }
+        return false;
+      }
+      // Ctrl/⌘+Alt+Shift — 자간([/]) / 공백비율(,/.)
+      switch (event.code) {
+        case "BracketLeft":
+          event.preventDefault();
+          event.stopPropagation();
+          this._adjustSelectionMetric("letterSpacing", SHORTCUT_METRIC_STEP);
+          return true;
+        case "BracketRight":
+          event.preventDefault();
+          event.stopPropagation();
+          this._adjustSelectionMetric("letterSpacing", -SHORTCUT_METRIC_STEP);
+          return true;
+        case "Comma":
+          event.preventDefault();
+          event.stopPropagation();
+          this._adjustSelectionMetric("spaceRatio", SHORTCUT_METRIC_STEP);
+          return true;
+        case "Period":
+          event.preventDefault();
+          event.stopPropagation();
+          this._adjustSelectionMetric("spaceRatio", -SHORTCUT_METRIC_STEP);
+          return true;
+      }
+      return false;
+    }
+
+    if (shift) {
+      // Ctrl/⌘+Shift+. / , — 글자 크기
+      switch (event.code) {
+        case "Period":
+          event.preventDefault();
+          event.stopPropagation();
+          this._adjustSelectionMetric("fontSize", SHORTCUT_FONT_SIZE_STEP);
+          return true;
+        case "Comma":
+          event.preventDefault();
+          event.stopPropagation();
+          this._adjustSelectionMetric("fontSize", -SHORTCUT_FONT_SIZE_STEP);
+          return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * 선택 영역의 수치형 인라인 스타일 필드를 **per-run 상대 증감**한다 (옵션 B).
+   *
+   * `adjustStyleInRange`로 선택 범위 안의 각 런의 현재값(런 오버라이드가
+   * 없으면 문단 effective 값)에 개별 `delta`를 적용한다 — 혼합 선택에서도
+   * 런 간 상대 차이가 보존된다. 부동소수점 오차 누적을 막기 위해 결과값을
+   * step 정밀도(step×100)로 반올림하고, 엔진 폭 계산이 음수가 되지 않도록
+   * 필드별 하한(`SHORTCUT_MIN_FONT_SIZE`, `SHORTCUT_MIN_SPACE_RATIO`)으로
+   * 클램프한다. `widthRatio`/`letterSpacing` 상한은 엔진이 이미 감당하는
+   * 영역이므로 두지 않는다.
+   *
+   * 주입 후 문단 effective와 동일해진 필드는 제거하고(`normalizeRunMap`이
+   * 런을 언랩/병합), `model.textContent`를 재구축해 렌더링을 트리거한다.
+   * 선택 영역/커서 오프셋은 텍스트 길이가 불변이므로 그대로 보존한다.
+   *
+   * @example
+   * ```ts
+   * // 문단 fontSize 4, 선택 영역이 [0,6), 런 [2,4)에 fontSize 5 오버라이드
+   * _adjustSelectionMetric("fontSize", 0.1);
+   * // → 런 [0,2): 4.1, 런 [2,4): 5.1, 런 [4,6): 4.1 주입 후 정규화
+   * //   (4.1 ≠ 문단 4 이므로 세 run 모두 유지, 상대 차이 보존)
+   * ```
+   *
+   * @param field - 증감할 수치형 필드
+   * @param delta - 증감량 (양수: 증가, 음수: 감소)
+   */
+  private _adjustSelectionMetric(field: NumericInlineMetricField, delta: number): void {
+    const sel = this._cursorModel.selection;
+    if (!sel) return;
+
+    const { start, end } = sel.normalized();
+    if (start.textOffset >= end.textOffset) return;
+
+    const model = this._paragraph.model;
+    if (!model) return;
+
+    const precision = field === "fontSize" ? 10 : 100;
+    const min = field === "fontSize" ? SHORTCUT_MIN_FONT_SIZE
+      : field === "spaceRatio" ? SHORTCUT_MIN_SPACE_RATIO
+      : Number.NEGATIVE_INFINITY;
+
+    this._runMap = adjustStyleInRange(
+      this._runMap,
+      start.textOffset,
+      end.textOffset,
+      model.effectiveTextStyle,
+      field,
+      (current) => {
+        const base = current ?? 0;
+        return Math.max(min, Math.round((base + delta) * precision) / precision);
+      },
+    );
+    this._runMap = normalizeRunMap(this._runMap, model.effectiveTextStyle);
+
+    const plainText = this._textarea.value;
+    model.textContent = plainToInline(plainText, this._runMap);
+    this._paragraph.flushRender();
+    this._emitStyleChange();
+    this._manager._notifyTextChange(this);
+  }
+
+  /**
    * 현재 선택 영역의 인라인 스타일 필드를 토글한다.
    *
    * 선택 영역 전체가 이미 해당 값이면 제거(기본 복귀), 아니면 적용한다.
@@ -2836,7 +3106,11 @@ export class TextEditController {
     }
 
     if (allMatch) {
-      this._runMap = applyStyleToRange(this._runMap, start.textOffset, end.textOffset, { [field]: undefined } as Partial<TextInlineStyle>);
+      // 토글 오프: 필드 제거. applyStyleToRange에 {[field]: undefined}를 넘기면
+      // 병합 결과에 undefined 값 키가 남아 content에
+      // `textInlineStyle: {fontWeight: undefined}` 셸이 저장되므로
+      // stripRunFields로 키 자체를 delete한다 — 다른 필드 오버라이드는 보존.
+      this._runMap = stripRunFields(this._runMap, [field]);
     } else {
       this._runMap = applyStyleToRange(this._runMap, start.textOffset, end.textOffset, { [field]: value } as Partial<TextInlineStyle>);
     }

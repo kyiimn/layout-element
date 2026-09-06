@@ -2575,12 +2575,25 @@ export class LayoutEditController {
    * @param event - 마우스 이벤트
    * @returns 편집 가능한 box 요소. 없으면 `null`
    */
+  /**
+   * 이벤트 경로에서 편집 가능한(드래그/이동 대상) box를 찾는다.
+   *
+   * TD 내부의 static box는 드래그(일반 이동, reparent)가 불가하므로 제외한다.
+   * TD 내부의 absolute box는 여전히 드래그 가능하다.
+   */
   private _findEditableBoxFromEvent(event: MouseEvent): LayoutBoxElement | null {
     const path = event.composedPath();
     for (const el of path) {
       if (el instanceof LayoutTableCellElement) {
         const innerBox = el.items[0];
         if (innerBox && this._isBoxEditable(innerBox)) {
+          if (innerBox.position !== 'absolute') {
+            const parentBox = el.closest('x-layout-box') as LayoutBoxElement | null;
+            if (parentBox && this._isBoxEditable(parentBox)) {
+              return parentBox;
+            }
+            return null;
+          }
           return innerBox;
         }
         const parentBox = el.closest('x-layout-box') as LayoutBoxElement | null;
@@ -2589,6 +2602,10 @@ export class LayoutEditController {
         }
       }
       if (el instanceof LayoutBoxElement && this._isBoxEditable(el)) {
+        // td-static box는 드래그 불가 → 경로의 다음 box로 계속
+        if (el.parentElement instanceof LayoutTableCellElement && el.position !== 'absolute') {
+          continue;
+        }
         return el;
       }
     }

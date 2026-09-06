@@ -345,13 +345,39 @@ export class LayoutBoxElement extends HTMLElement {
     if (!parentModel) return;
     const { columnWidth, gaps } = parentModel;
     if (this._model) {
+      let gcColumns: number | number[];
+      let gcGap: number | number[];
+
+      if (this.position !== 'absolute') {
+        gcColumns = columnWidth.slice(this.left, this.left + this.width);
+        gcGap = gaps.slice(this.left, this.left + this.width - 1);
+      } else {
+        // absolute box: 리사이즈 시 _savedColumns/_savedGap을 absWidth에 맞게
+        // 비례 스케일링하여 내부 paragraph column 너비가 box 크기에 맞게 갱신된다.
+        // _savedColumns이 number(컬럼 개수)이면 GC가 width/N으로 자동 계산하므로
+        // 스케일링이 불필요하다. number[]인 경우에만 비례 스케일링을 적용한다.
+        const currentAbsWidth = this.absWidth;
+        if (typeof this._savedColumns === 'number') {
+          gcColumns = this._savedColumns;
+        } else {
+          const savedTotalWidth = (this._savedColumns as number[]).reduce((sum, w) => sum + w, 0);
+          if (savedTotalWidth > 0 && currentAbsWidth > 0) {
+            const scale = currentAbsWidth / savedTotalWidth;
+            gcColumns = (this._savedColumns as number[]).map(w => w * scale);
+          } else {
+            gcColumns = this._savedColumns;
+          }
+        }
+        gcGap = this._savedGap;
+      }
+
       this._model.data = {
         paddingTop: this.paddingTop,
         paddingRight: this.paddingRight,
         paddingBottom: this.paddingBottom,
         paddingLeft: this.paddingLeft,
-        columns: this.position !== 'absolute' ? columnWidth.slice(this.left, this.left + this.width) : this._savedColumns,
-        gap: this.position !== 'absolute' ? gaps.slice(this.left, this.left + this.width - 1) : this._savedGap,
+        columns: gcColumns,
+        gap: gcGap,
         paragraphStyle: this.paragraphStyle,
         textStyle: this.textStyle,
         height: this.absHeight,
@@ -437,7 +463,9 @@ export class LayoutBoxElement extends HTMLElement {
       styleEl.sheet.insertRule('@media screen { :host([hovered]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(74, 144, 217, 0.85); cursor: grab; } }', 22);
       styleEl.sheet.insertRule('@media screen { :host([reparent-target]) .type-label { display: flex; align-items: center; gap: 4px; background: rgba(255, 152, 0, 0.85); cursor: grab; } }', 23);
       styleEl.sheet.insertRule('@media screen { :host([editable-layout][selected]) .type-label:active, :host([editable-layout][hovered]) .type-label:active { cursor: grabbing; } }', 24);
-      styleEl.sheet.insertRule('@media screen { :host([text-focused]) .type-label { display: none; } }', 25);
+      styleEl.sheet.insertRule('@media screen { :host([td-static]) .type-label { cursor: default; } }', 25);
+      styleEl.sheet.insertRule('@media screen { :host([td-static][selected]) .type-label { background: rgba(255, 0, 0, 0.85); cursor: default; } }', 26);
+      styleEl.sheet.insertRule('@media screen { :host([text-focused]) .type-label { display: none; } }', 27);
       styleEl.sheet.insertRule('@media screen { .type-label .parent-btn { pointer-events: auto; cursor: pointer; padding: 1px 8px 3px 0px; user-select: none; opacity: 0.85; } }', 26);
       styleEl.sheet.insertRule('@media screen { .type-label .parent-btn:hover { opacity: 1; } }', 27);
 
@@ -646,12 +674,19 @@ export class LayoutBoxElement extends HTMLElement {
       if (childEl.type === 'box' || childEl.type === 'table') {
         childEl.inheritStyle = childInheritStyle;
       } else if (childEl.type === 'paragraph') {
-        childEl.inheritStyle = {
+        // column/gap 리셋은 부모 편집 폭이 실제로 변경됐을 때만 수행한다
+        // (resetColumnIfParentResized 문서 참조 — 무조건 리셋 시 단설정 롤백 버그).
+        const paragraph = childEl as LayoutParagraphElement;
+        paragraph.resetColumnIfParentResized(this.model!.editableWidth);
+        paragraph.inheritStyle = {
           ...childInheritStyle,
           parentHeight: this.model!.editableTextHeight,
         }
       } else if (childEl.type === 'image') {
-        childEl.inheritStyle = childInheritStyle;
+        childEl.inheritStyle = {
+          ...childInheritStyle,
+          parentHeight: this.model!.contentHeight,
+        };
       }
     });
   }
@@ -988,37 +1023,37 @@ export class LayoutBoxElement extends HTMLElement {
   set borderTopWidth(value: number) {
     if (this._borderTopWidth === value) return;
     this._borderTopWidth = value;
-    this._renderBorder();
+    this.layout();
   }
 
   set borderBottomWidth(value: number) {
     if (this._borderBottomWidth === value) return;
     this._borderBottomWidth = value;
-    this._renderBorder();
+    this.layout();
   }
 
   set borderLeftWidth(value: number) {
     if (this._borderLeftWidth === value) return;
     this._borderLeftWidth = value;
-    this._renderBorder();
+    this.layout();
   }
 
   set borderRightWidth(value: number) {
     if (this._borderRightWidth === value) return;
     this._borderRightWidth = value;
-    this._renderBorder();
+    this.layout();
   }
 
   set borderStyle(value: BoxBorderStyle) {
     if (this._borderStyle === value) return;
     this._borderStyle = value;
-    this._renderBorder();
+    this.layout();
   }
 
   set borderColor(value: string | undefined) {
     if (this._borderColor === value) return;
     this._borderColor = value;
-    this._renderBorder();
+    this.layout();
   }
 
   set paddingTop(value: number) {
@@ -1092,10 +1127,22 @@ export class LayoutBoxElement extends HTMLElement {
       position: this._position,
       zIndex: this._zIndex,
       role: this._role,
+      backgroundColor: this._backgroundColor,
+      backgroundOpacity: this._backgroundOpacity,
+      borderTopWidth: this._borderTopWidth,
+      borderBottomWidth: this._borderBottomWidth,
+      borderLeftWidth: this._borderLeftWidth,
+      borderRightWidth: this._borderRightWidth,
+      borderStyle: this._borderStyle,
+      borderColor: this._borderColor,
       paddingTop: this._paddingTop,
       paddingRight: this._paddingRight,
       paddingBottom: this._paddingBottom,
       paddingLeft: this._paddingLeft,
+      contentUid: this._contentUid,
+      groupMember: this._groupMember,
+      priority: this._priority,
+      lock: this._lock || undefined,
     };
     this._engine.data = boxData;
   }
@@ -1216,6 +1263,7 @@ export class LayoutBoxElement extends HTMLElement {
       this._contentUid = normalized;
       this.setAttribute('content-uid', normalized);
     }
+    this._syncEngineBoxData();
     this.editManager?._dispatchBoxPropertyChange({
       box: this,
       property: 'contentUid',
@@ -1240,6 +1288,7 @@ export class LayoutBoxElement extends HTMLElement {
     }
     const newValue = this._groupMember ? this._groupMember.split(',').filter(s => s.length > 0) : [];
     if (oldValue.length !== newValue.length || oldValue.some((v, i) => v !== newValue[i])) {
+      this._syncEngineBoxData();
       this.editManager?._dispatchBoxPropertyChange({
         box: this,
         property: 'groupMember',
@@ -1255,6 +1304,7 @@ export class LayoutBoxElement extends HTMLElement {
     if (value === oldValue) return;
     this._priority = value;
     this.setAttribute('priority', String(value));
+    this._syncEngineBoxData();
     this.editManager?._dispatchBoxPropertyChange({
       box: this,
       property: 'priority',
@@ -1271,6 +1321,7 @@ export class LayoutBoxElement extends HTMLElement {
     } else {
       this.removeAttribute('lock');
     }
+    this._syncEngineBoxData();
   }
 
   get inheritStyle() { return this._inheritStyle; }
@@ -1429,8 +1480,10 @@ export class LayoutBoxElement extends HTMLElement {
     }
     if (this.parentElement instanceof LayoutTableCellElement && this._position === 'static') {
       this.setAttribute('td-static', '');
+      this.style.cursor = 'default';
     } else {
       this.removeAttribute('td-static');
+      this.style.cursor = 'grab';
     }
   }
 
