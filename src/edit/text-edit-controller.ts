@@ -9,6 +9,7 @@ import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
 import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA, SHORTCUT_BOLD_WEIGHT, SHORTCUT_FONT_SIZE_STEP, SHORTCUT_METRIC_STEP, SHORTCUT_MIN_FONT_SIZE, SHORTCUT_MIN_SPACE_RATIO } from "@/constants";
 import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, normalizeInlineContent, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent, adjustStyleInRange, NumericInlineMetricField } from "./run-map";
+import { ColorRegistry } from "@/resource/color-registry";
 
 /**
  * postRender의 커서/선택 rect 읽기를 rAF로 지연할 span 재적용 수 임계값.
@@ -2181,12 +2182,52 @@ export class TextEditController {
     if (charStyle) {
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(span.style, charStyle);
     }
+    // 인라인 런 스타일 오버라이드: genCharStyleFlat은 치수/레이아웃 스타일만 반환하므로,
+    // 폰트·색상 필드는 별도로 적용해야 한다. 이것이 없으면 조합 중 텍스트가
+    // 문단 기본 스타일로 렌더링되어 인라인 스타일(굵게·색상 등)이 무시된다.
+    this._applyOptimisticInlineOverrides(span, inlineStyle, model ?? null);
     // span에 실제 적용된 장평을 기록한다 — _updateCursorPosition가 시각 폭에서
     // 레이아웃 폭을 복원할 때 파싱한다. genCharStyleFlat과 동일 폴백 체인
     // (런 오버라이드 → 문단 effective → 1)이므로 적용값과 항상 일치한다.
     span.dataset.widthRatio = String(inlineStyle?.widthRatio ?? model?.widthRatio ?? 1);
     span.textContent = char;
     return span;
+  }
+
+  /**
+   * 낙관적 span에 인라인 스타일 오버라이드 필드를 적용한다.
+   * column.element.ts의 `_applyInlineOverrides`와 동일한 로직이지만,
+   * optimistic span은 column의 렌더 경로를 거치지 않으므로 여기서 직접 적용한다.
+   *
+   * @param span - 스타일을 적용할 낙관적 span 요소
+   * @param inlineStyle - 인라인 런 스타일 (undefined면 문단 기본값 사용)
+   * @param model - ParagraphEngine 인스턴스 (fontSize 기본값 확인용)
+   */
+  private _applyOptimisticInlineOverrides(
+    span: HTMLSpanElement,
+    inlineStyle: TextInlineStyle | undefined,
+    model: import('@/engine/paragraph-engine').ParagraphEngine | null,
+  ): void {
+    if (!inlineStyle) return;
+
+    if (inlineStyle.fontFamily) {
+      span.style.fontFamily = inlineStyle.fontFamily;
+    }
+    if (inlineStyle.fontWeight !== undefined) {
+      span.style.fontWeight = String(inlineStyle.fontWeight);
+    }
+    if (inlineStyle.fontStyle !== undefined) {
+      span.style.fontStyle = inlineStyle.fontStyle;
+    }
+    if (inlineStyle.color) {
+      span.style.color = ColorRegistry.getInstance().getCSSColor(inlineStyle.color);
+    }
+    if (inlineStyle.fontSize !== undefined && inlineStyle.fontSize !== model?.fontSize) {
+      span.style.fontSize = `${inlineStyle.fontSize}mm`;
+      span.style.lineHeight = `${inlineStyle.fontSize}mm`;
+      span.style.display = 'inline-block';
+      span.style.height = `${inlineStyle.fontSize}mm`;
+    }
   }
 
   /**
