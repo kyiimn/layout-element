@@ -2798,8 +2798,15 @@ export class TextEditController {
         }
       }
     } else if (!hasSelection && cursorRunStyle !== undefined && hasInlinePatch) {
-      // 2. 커서가 인라인 런 안 → 해당 런만 업데이트
-      const run = this._runMap.find(r => r.start <= offset && r.end > offset && r.style === cursorRunStyle);
+      // 2. 커서가 인라인 런 안 → 해당 런만 업데이트.
+      // 커서가 런의 end 경계(문단 끝 등)에 있어도 getStyleAtOffset가 마지막
+      // 런의 스타일을 반환하므로 런-안 경로로 진입한다. 이때 런 탐색도
+      // end 경계를 포함해야 한다 — r.end > offset 조건만으로는 offset === r.end인
+      // 마지막 런을 못 찾아 주입이 조용히 무시된다 (커서가 문단 맨 뒤에 있을 때
+      // 스타일 조정이 반영되지 않는 버그).
+      const run = this._runMap.find(r => r.start <= offset
+        && (r.end > offset || (r.end === offset && r === this._runMap[this._runMap.length - 1]))
+        && r.style === cursorRunStyle);
       if (run && run.style) {
         run.style = { ...run.style, ...inlinePatch };
         this._runMap = mergeAdjacentSameStyle(this._runMap);
