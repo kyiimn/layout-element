@@ -674,7 +674,14 @@ export class LayoutBoxElement extends HTMLElement {
       if (childEl.type === 'box' || childEl.type === 'table') {
         childEl.inheritStyle = childInheritStyle;
       } else if (childEl.type === 'paragraph') {
-        childEl.inheritStyle = {
+        // extractData round-trip 후 column/gap이 number[]로 고정되어
+        // 부모 GC 너비 변경을 무시하는 현상을 방지한다.
+        // inheritStyle setter가 layout()을 호출하므로 리셋이
+        // _layoutStructure()에 반영된다.
+        const paragraph = childEl as LayoutParagraphElement;
+        paragraph.column = undefined;
+        paragraph.gap = undefined;
+        paragraph.inheritStyle = {
           ...childInheritStyle,
           parentHeight: this.model!.editableTextHeight,
         }
