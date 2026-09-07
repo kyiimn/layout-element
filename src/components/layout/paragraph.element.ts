@@ -290,6 +290,10 @@ export class LayoutParagraphElement extends HTMLElement {
     const colorRegistry = ColorRegistry.getInstance();
     const fontLoader = FontLoader.getInstance();
 
+    const hp = this._paragraphStyle?.hangingPunctuation ?? this._inheritStyle.hangingPunctuation;
+    const hangOn = hp === true
+      || (typeof hp === 'object' && hp !== null && (hp.lineEnd === true || hp.lineStart === true));
+
     let styleEl = this._shadowRoot.querySelector<HTMLStyleElement>(`style#${HOST_STYLE_ID}`);
     let needsInit = !styleEl
       || !styleEl.sheet
@@ -331,6 +335,7 @@ export class LayoutParagraphElement extends HTMLElement {
         top: `${paddingTop}mm`,
         width: `${this.absWidth}mm`,
         zIndex: `${this.zIndex}`,
+        overflow: hangOn ? 'visible' : 'hidden',
         boxShadow: this._hasOverflow
           ? 'inset 0 -8px 0 0 #ff0000'
           : '',
