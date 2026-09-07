@@ -247,6 +247,16 @@
         <option value="">문서 전체</option>
       </select>
     </div>
+    <div style="
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          justify-content: center;
+          width: 100%;
+          margin-top: 8px;
+        ">
+      <button id="btn-hang-toggle">🪝 걸침표: 켬</button>
+    </div>
   </div>
 
   <div id="hint"></div>
@@ -1161,10 +1171,10 @@
                    ],
                  },
                },
-             ],
-           },
-         ],
-       };
+              ],
+            },
+          ],
+        };
 
       await doc.render();
 
@@ -1745,6 +1755,21 @@
       btnFlipH.addEventListener("click", () => doFlip("horizontal"));
       btnFlipV.addEventListener("click", () => doFlip("vertical"));
       btnFlipBoth.addEventListener("click", () => doFlip("both"));
+
+      // 걸침표 토글: 문서 레벨 paragraphStyle로 전체 문단 ON/OFF
+      // (InheritStyle 캐스케이드로 모든 하위 문단에 전파됨)
+      const btnHangToggle = document.getElementById("btn-hang-toggle");
+      let hangOn = true;
+      doc.paragraphStyle = { ...doc.paragraphStyle, hangingPunctuation: true };
+      btnHangToggle.addEventListener("click", () => {
+        hangOn = !hangOn;
+        doc.paragraphStyle = { ...doc.paragraphStyle, hangingPunctuation: hangOn };
+        btnHangToggle.textContent = hangOn ? "🪝 걸침표: 켬" : "🪝 걸침표: 끔";
+        btnHangToggle.classList.toggle("active", hangOn);
+        hint.textContent = hangOn
+          ? "걸침표 ON — 문장부호가 틀 밖으로 걸립니다."
+          : "걸침표 OFF — 기존 금칙 교정만 적용됩니다.";
+      });
 
       refreshFlipTargetOptions();
 
