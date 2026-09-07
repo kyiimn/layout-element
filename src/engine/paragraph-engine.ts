@@ -21,6 +21,8 @@ import {
   DEFAULT_TEXT_ALIGN,
   DEFAULT_VERTICAL_ALIGN,
   DEFAULT_WIDTH_RATIO,
+  isHangableLineEnd,
+  isHangableLineStart,
   isLineEndForbidden,
   isLineStartForbidden,
 } from "@/constants";
@@ -58,6 +60,7 @@ const DEFAULT_PARAGRAPH_STYLE: Required<ParagraphStyle> = {
   lineGap: DEFAULT_LINE_GAP,
   verticalAlign: DEFAULT_VERTICAL_ALIGN,
   textAlign: DEFAULT_TEXT_ALIGN,
+  hangingPunctuation: false,
 };
 
 const DEFAULT_TEXT_STYLE: Required<TextStyle> = {
@@ -539,18 +542,221 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   }
 
   /**
+   * 걸침표(hanging punctuation) 방향별 설정을 정규화한다.
+   *
+   * `hangingPunctuation` 스타일 값(`true`/`false`/객체)을 방향별 boolean으로
+   * 변환한다. effective 체인(주입값 → 상속값 → 기본값 `false`)을 따른다.
+   *
+   * @returns `{ lineEnd, lineStart }` — 각 방향 걸침 ON 여부
+   * @throws 없음
+   */
+  private _hangingConfig(): { lineEnd: boolean; lineStart: boolean } {
+    const v = this.effectiveParagraphStyle.hangingPunctuation;
+    if (v === true) return { lineEnd: true, lineStart: true };
+    if (typeof v === "object" && v !== null) {
+      return { lineEnd: v.lineEnd === true, lineStart: v.lineStart === true };
+    }
+    return { lineEnd: false, lineStart: false };
+  }
+
+  /**
+   * 라인의 마지막 파트가 컬럼 우측 끝까지 도달하는지 확인한다 (걸침 엣지 게이트).
+   *
+   * `part.left`는 첫 파트에서 절대 start, 이후 파트에서는 이전 파트 끝에서의
+   * 갭이므로, 절대 우측 끝은 `Σ(모든 파트 left) + Σ(모든 파트 width)`로
+   * 누적 계산해야 한다.
+   *
+   * @param line - 검사할 라인
+   * @param columnWidth - 컬럼 폭 (mm)
+   * @returns 마지막 파트의 절대 우측 끝이 컬럼 폭과 일치하면 `true`
+   *
+   * @example
+   * // 파트 left/width가 [{left: 10, width: 20}, {left: 10, width: 20}]이고
+   * // 컬럼 폭 60mm: (10+10)+(20+20) = 60 → true
+   * @throws 없음
+   */
+  private _isLastPartAtColumnRightEdge(line: TextLineData, columnWidth: number): boolean {
+    let absRight = 0;
+    for (const part of line.parts) absRight += part.left + part.width;
+    return Math.abs(absRight - columnWidth) < 1e-6;
+  }
+
+  /**
+   * 라인의 첫 파트가 컬럼 좌측 끝에서 시작하는지 확인한다 (걸침 엣지 게이트).
+   *
+   * 문단 indent가 적용된 첫 줄은 `parts[0].left`가 indentMm(> 0)이므로
+   * 게이트가 실패한다 — 들여쓴 줄의 왼쪽은 컬럼 밖이 아니기 때문이다.
+   *
+   * @param line - 검사할 라인
+   * @returns 첫 파트의 left가 0이면 `true`
+   * @throws 없음
+   */
+  private _isFirstPartAtColumnLeftEdge(line: TextLineData): boolean {
+    return Math.abs(line.parts[0].left) < 1e-6;
+  }
+
+  /**
+   * 걸침표(hanging punctuation) 규칙을 적용한다.
+   *
+   * 폭 기준 배치 후 금칙 패스(`_applyLineBreakRules`) **직전에** 실행되는
+   * 후처리 패스다. 금칙 교정(push-down/pull-up) 대신 문장부호를 틀 밖으로
+   * 내보내 위반 자체를 해소한다 (hang-first).
+   *
+   * 페어(인접 두 줄)별 결정 순서 — 한 페어에 최대 1회 교정:
+   * 1. **행두 걸침**: 위 줄 마지막 글자가 열기 부호(행말 금지)면 아래 줄
+   *    앞으로 내보내 왼쪽 밖에 건다. 두 위반(행말 금지 + 아래 줄 행두가
+   *    닫기 부호인 충돌 케이스)을 동시에 해소한다.
+   * 2. **행말 걸침**: 아래 줄 첫 글자가 닫기 부호(행두 금지)면 아래 줄의
+   *    선행 닫기 부호 run 전체를 위 줄 끝으로 당겨 우측 밖에 건다.
+   * 3. 둘 다 해당 없으면 금칙 패스가 기존대로 교정한다.
+   *
+   * 가드:
+   * - 엣지 게이트: 걸침 방향이 컬럼 경계를 벗어나야 한다 (마지막 파트
+   *   우측 끝 === 컬럼 폭 / 첫 파트 left === 0). 오버랩 파트 옆 틈으로는
+   *   걸치지 않는다.
+   * - `curLastPart.content.length >= 2` (행두 걸침): 내보낸 뒤 파트가
+   *   빈 상자로 남아 파트 간 갭이 생기는 것을 방지.
+   * - `run < nextFirstPart.content.length` (행말 걸침): 아래 줄 첫 파트에
+   *   최소 1자 잔존. 전체를 당기면 빈 줄이 된다.
+   * - 탭(`\t`) 파트는 걸침하지 않는다 — 좌우 밀기 탭 정렬과 충돌.
+   * - 블록 경계 쌍(`curLine.endOfBlock`/`nextLine.firstOfBlock`)은
+   *   걸침하지 않는다 — `\n`으로 끊기는 흐름에서 글자를 이동하면
+   *   읽기 순서가 훼손된다. 금칙 패스와 정렬 순서를 맞추기 위한
+   *   의도된 차이다 (금칙은 기존 동작 보존을 위해 손대지 않는다).
+   *
+   * 걸침 글자 마킹은 `TextPartData.hangs`(raw content 인덱스 평행 배열)에
+   * 기록되고, `_computeCharOffsets`가 정렬 산출 시 이를 소비한다.
+   *
+   * @returns 교정을 적용한 페어 키(`${col}:${lineIdx}`) 집합. 금칙 패스가
+   *   같은 페어를 재교정해 걸침을 훼손하지 않도록 스킵 목록으로 전달한다.
+   *   걸침 기능이 완전 OFF면 빈 집합을 반환한다 (스캔 없음).
+   * @throws 없음
+   *
+   * @example
+   * ```ts
+   * // "가나다."에서 '.'가 폭 초과로 아래 줄에 내려간 경우 (행말 걸침 ON):
+   * // 위 줄: [가, 나, 다, .(hangs='end')] — '.'는 파트 우측 밖에 배치
+   * // 아래 줄: [마, 바, ...] — 행두 금칙 위반이 사라짐
+   *
+   * // "가나다("에서 '('가 위 줄 끝에 남은 경우 (행두 걸침 ON):
+   * // 위 줄: [가, 나, 다]
+   * // 아래 줄: [(hangs='start'), 가, 나, ...] — '('는 파트 좌측 밖에 배치
+   * ```
+   */
+  private _applyHangingPunctuation(): ReadonlySet<string> {
+    const cfg = this._hangingConfig();
+    const corrected = new Set<string>();
+    if (!cfg.lineEnd && !cfg.lineStart) return corrected;
+
+    for (let col = 0; col < this._columnContents.length; col++) {
+      const columnContent = this._columnContents[col];
+      const columnWidth = this._columnWidths[col] ?? 0;
+      for (let i = 0; i < columnContent.length - 1; i++) {
+        const curLine = columnContent[i];
+        const nextLine = columnContent[i + 1];
+
+        if (curLine.parts.length === 0) continue;
+        if (nextLine.parts.length === 0) continue;
+
+        const curLastPart = curLine.parts[curLine.parts.length - 1];
+        const nextFirstPart = nextLine.parts[0];
+        if (curLastPart.content.length === 0 || nextFirstPart.content.length === 0) continue;
+
+        if (curLine.endOfBlock === true || nextLine.firstOfBlock === true) continue;
+
+        const key = `${col}:${i}`;
+        const curLastChar = curLastPart.content[curLastPart.content.length - 1]!;
+
+        const curHasTab = curLastPart.content.includes(RIGHT_INDENT_TAB_CHAR);
+        const nextHasTab = nextFirstPart.content.includes(RIGHT_INDENT_TAB_CHAR);
+
+        // 1) 행두 걸침: 열기 부호를 아래 줄 앞으로 내보내 왼쪽 밖에 건다.
+        if (
+          cfg.lineStart &&
+          isHangableLineStart(curLastChar) &&
+          curLastPart.content.length >= 2 &&
+          !curHasTab &&
+          !nextHasTab &&
+          this._isFirstPartAtColumnLeftEdge(nextLine)
+        ) {
+          const movedStyle = curLastPart.inlineStyles?.pop();
+          curLastPart.hangs?.pop();
+          curLastPart.content.pop();
+
+          nextFirstPart.content.unshift(curLastChar);
+          if (nextFirstPart.inlineStyles) {
+            nextFirstPart.inlineStyles.unshift(movedStyle);
+          } else if (movedStyle !== undefined) {
+            nextFirstPart.inlineStyles = new Array(nextFirstPart.content.length).fill(undefined);
+            nextFirstPart.inlineStyles[0] = movedStyle;
+          }
+          nextFirstPart.hangs ??= new Array(nextFirstPart.content.length - 1).fill(undefined);
+          nextFirstPart.hangs.unshift('start');
+
+          corrected.add(key);
+          continue;
+        }
+
+        // 2) 행말 걸침: 아래 줄 선행 닫기 부호 run을 위 줄 끝으로 당겨
+        //    우측 밖에 건다 (스택형 — 각 글자 전체 폭이 파트 밖으로).
+        if (
+          cfg.lineEnd &&
+          isHangableLineEnd(nextFirstPart.content[0]!) &&
+          !curHasTab &&
+          !nextHasTab &&
+          this._isLastPartAtColumnRightEdge(curLine, columnWidth)
+        ) {
+          let run = 0;
+          while (
+            run < nextFirstPart.content.length &&
+            isHangableLineEnd(nextFirstPart.content[run]!)
+          ) {
+            run++;
+          }
+          if (run > 0 && run < nextFirstPart.content.length) {
+            for (let r = 0; r < run; r++) {
+              const movedChar = nextFirstPart.content[0]!;
+              const movedStyle = nextFirstPart.inlineStyles?.shift();
+              nextFirstPart.hangs?.shift();
+              nextFirstPart.content.shift();
+
+              curLastPart.content.push(movedChar);
+              if (curLastPart.inlineStyles) {
+                curLastPart.inlineStyles.push(movedStyle);
+              } else if (movedStyle !== undefined) {
+                curLastPart.inlineStyles = new Array(curLastPart.content.length - 1).fill(undefined);
+                curLastPart.inlineStyles.push(movedStyle);
+              }
+              curLastPart.hangs ??= new Array(curLastPart.content.length - 1).fill(undefined);
+              curLastPart.hangs.push('end');
+            }
+            corrected.add(key);
+          }
+        }
+      }
+    }
+    return corrected;
+  }
+
+  /**
    * 한글 조판 금칙문자 규칙을 적용한다.
    *
    * `_layoutTextIntoColumns()`가 글자를 폭 기준으로 배치한 뒤 호출되는
    * 후처리 패스이다. 인접한 두 줄(같은 컬럼 내)의 경계에서 발생한
    * 행두/행말 금칙 위반을 교정한다.
    *
+   * @param skipPairs - 걸침 패스(`_applyHangingPunctuation`)가 이미 교정한
+   *   페어 키(`${col}:${lineIdx}`) 집합. 이 페어들은 금칙 교정이 걸침
+   *   마킹을 훼손할 수 있으므로 스킵한다. 생략 시 전체 페어를 처리한다.
    * @returns 반환값 없음. `_columnContents`를 제자리에서 변형한다.
+   * @throws 없음
    */
-  private _applyLineBreakRules(): void {
+  private _applyLineBreakRules(skipPairs?: ReadonlySet<string>): void {
     for (let col = 0; col < this._columnContents.length; col++) {
       const columnContent = this._columnContents[col];
       for (let i = 0; i < columnContent.length - 1; i++) {
+        if (skipPairs !== undefined && skipPairs.has(`${col}:${i}`)) continue;
+
         const curLine = columnContent[i];
         const nextLine = columnContent[i + 1];
 
@@ -567,12 +773,14 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         if (isLineStartForbidden(nextFirstChar)) {
           if (!isLineEndForbidden(curLastChar)) {
             const movedStyle = nextFirstPart.inlineStyles?.shift();
+            const movedHang = nextFirstPart.hangs?.shift();
             curLastPart.content.push(nextFirstChar);
             if (curLastPart.inlineStyles) curLastPart.inlineStyles.push(movedStyle);
             else if (movedStyle !== undefined) {
               curLastPart.inlineStyles = new Array(curLastPart.content.length - 1).fill(undefined);
               curLastPart.inlineStyles.push(movedStyle);
             }
+            if (curLastPart.hangs) curLastPart.hangs.push(movedHang);
             nextFirstPart.content.shift();
           }
           continue;
@@ -581,12 +789,14 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         if (isLineEndForbidden(curLastChar)) {
           if (!isLineStartForbidden(nextFirstChar)) {
             const movedStyle = curLastPart.inlineStyles?.pop();
+            const movedHang = curLastPart.hangs?.pop();
             nextFirstPart.content.unshift(curLastChar);
             if (nextFirstPart.inlineStyles) nextFirstPart.inlineStyles.unshift(movedStyle);
             else if (movedStyle !== undefined) {
               nextFirstPart.inlineStyles = new Array(nextFirstPart.content.length).fill(undefined);
               nextFirstPart.inlineStyles[0] = movedStyle;
             }
+            if (nextFirstPart.hangs) nextFirstPart.hangs.unshift(movedHang);
             curLastPart.content.pop();
           }
         }
@@ -597,8 +807,16 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   /**
    * 각 파트의 글자별 x 오프셋(mm)을 `textAlign`에 따라 산출한다.
    *
-   * `_layoutTextIntoColumns()`와 `_applyLineBreakRules()` 이후에 호출되어
-   * `TextPartData.charOffsets`를 채운다.
+   * `_layoutTextIntoColumns()`와 걸침/금칙 패스(`_applyHangingPunctuation()`/
+   * `_applyLineBreakRules()`) 이후에 호출되어 `TextPartData.charOffsets`를 채운다.
+   *
+   * 걸침 글자(`TextPartData.hangs` 마킹)는 정렬 폭 합계와 justify 분모에서
+   * 제외하고 파트 경계 밖에 배치한다 — 행말: `partWidth + Σ(선행 걸침 폭)`,
+   * 행두: `-swidth` (이후 글자는 0부터). 탭(`\t`) 파트에는 걸침이 없으므로
+   * 기존 탭 정렬 경로를 그대로 사용한다.
+   *
+   * @returns 반환값 없음. `TextPartData.charOffsets`를 제자리에서 채운다.
+   * @throws 없음
    */
   private _computeCharOffsets(): void {
     const defaultTextAlign = this.effectiveParagraphStyle.textAlign!;
@@ -715,6 +933,59 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
             for (let i = tabIdx + 1; i < strippedCount; i++) {
               offsets[i] = cursor;
               cursor += charWidths[i]!;
+            }
+
+            part.charOffsets = offsets;
+            continue;
+          }
+
+          // 걸침 글자 식별 — 탭 파트에는 걸침이 없다(걸침 패스 가드).
+          // 행두 걸침은 stripped index 0, 행말 걸침 run은 stripped 접미사다.
+          const partHangs = part.hangs;
+          let startHangIdx = -1;
+          let endHangStart = strippedCount;
+          if (partHangs !== undefined && tabIdx === -1) {
+            if (partHangs[stripStart] === "start") startHangIdx = 0;
+            let k = strippedCount - 1;
+            while (k >= 0 && partHangs[stripStart + k] === "end") k--;
+            endHangStart = k + 1;
+          }
+          if (startHangIdx !== -1 || endHangStart < strippedCount) {
+            // 정렬 대상은 걸침 글자를 제외한 visible 글자만이다. 폭 합계와
+            // justify 분모 모두 visible 기준으로 산출하고, 걸침 글자는
+            // 파트 경계 밖(행말: partWidth + 선행 걸침 폭 누적, 행두: -swidth)에
+            // 배치한다.
+            let visibleWidth = 0;
+            let visibleCount = 0;
+            for (let i = 0; i < strippedCount; i++) {
+              if (i === startHangIdx || (i >= endHangStart && i < strippedCount)) continue;
+              visibleWidth += charWidths[i]!;
+              visibleCount++;
+            }
+            const visibleRemaining = Math.max(0, partWidth - visibleWidth);
+
+            let hangAlign: "left" | "right" | "center" | "justify";
+            if (textAlign === "center") hangAlign = "center";
+            else if (textAlign === "right") hangAlign = "right";
+            else if (textAlign === "justify") hangAlign = isLastLineOfBlock || visibleCount === 1 ? "left" : "justify";
+            else hangAlign = "left";
+
+            let cursor = 0;
+            if (hangAlign === "right") cursor = visibleRemaining;
+            else if (hangAlign === "center") cursor = visibleRemaining / 2;
+            const hangGap = hangAlign === "justify" && visibleCount > 1 ? visibleRemaining / (visibleCount - 1) : 0;
+
+            for (let i = 0; i < strippedCount; i++) {
+              if (i === startHangIdx || (i >= endHangStart && i < strippedCount)) continue;
+              offsets[i] = cursor;
+              cursor += charWidths[i]! + hangGap;
+            }
+
+            if (startHangIdx !== -1) offsets[startHangIdx] = -charWidths[startHangIdx]!;
+            let hangCursor = partWidth;
+            for (let i = endHangStart; i < strippedCount; i++) {
+              offsets[i] = hangCursor;
+              hangCursor += charWidths[i]!;
             }
 
             part.charOffsets = offsets;
@@ -1073,7 +1344,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       }
     }
 
-    this._applyLineBreakRules();
+    const hangPairs = this._applyHangingPunctuation();
+    this._applyLineBreakRules(hangPairs);
     this._computeCharOffsets();
     this._computePerLineHeights();
 
@@ -1212,6 +1484,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       "ta:" + this.effectiveParagraphStyle.textAlign!,
       "va:" + this.effectiveParagraphStyle.verticalAlign!,
       "in:" + this.indent,
+      "hp:" + JSON.stringify(this.effectiveParagraphStyle.hangingPunctuation ?? false),
     );
 
     return parts.join("|");
@@ -1319,7 +1592,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       startCharIdx,
     );
 
-    this._applyLineBreakRules();
+    const hangPairs = this._applyHangingPunctuation();
+    this._applyLineBreakRules(hangPairs);
     this._computeCharOffsets();
     this._computePerLineHeights();
 
@@ -2093,6 +2367,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       "ta:" + this.effectiveParagraphStyle.textAlign!,
       "va:" + this.effectiveParagraphStyle.verticalAlign!,
       "in:" + this.indent,
+      // 걸침 여부는 라인 경계 교정(걸침/금칙)과 charOffsets에 직접 개입하므로
+      // 해시에 포함해야 한다.
+      "hp:" + JSON.stringify(this.effectiveParagraphStyle.hangingPunctuation ?? false),
     );
 
     return parts.join("|");
@@ -2201,11 +2478,22 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     };
   }
 
-  /** 컬럼 스타일 생성 (라인 절대 위치 기반 컨테이너) */
+  /**
+   * 컬럼 스타일 생성 (라인 절대 위치 기반 컨테이너).
+   *
+   * `overflow`는 걸침표 설정에 따라 조건화된다 — 걸침 ON이면 걸침 글자가
+   * 컬럼 밖으로 페인트되어야 하므로 `'visible'`, OFF면 기존 방어 동작인
+   * `'hidden'`을 유지한다 (기존 렌더링과 byte 동일).
+   *
+   * @param idx - 컬럼 인덱스 (0-based)
+   * @returns 컬럼 CSS 스타일 객체
+   * @throws 없음
+   */
   public genColumnStyle(idx: number): Partial<CSSStyleDeclaration> {
     const left = this._columnWidths.slice(0, idx).reduce((a, b) => a + b, 0) + this._gaps.slice(0, idx).reduce((a, b) => a + b, 0);
     const height = this._inheritStyle.parentHeight;
     const width = this._columnWidths[idx];
+    const hang = this._hangingConfig();
 
     return {
       boxSizing: "border-box",
@@ -2217,7 +2505,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       maxWidth: `${width}mm`,
       minHeight: `${height}mm`,
       minWidth: `${width}mm`,
-      overflow: "hidden",
+      // 걸침 ON: 걸침 글자가 컬럼 밖으로 렌더링되므로 클리핑을 해제한다.
+      // OFF: 기존 방어 동작(hidden) 유지 — byte-identical.
+      overflow: hang.lineEnd || hang.lineStart ? "visible" : "hidden",
       position: "absolute",
       top: "0",
       width: `${width}mm`,
@@ -2582,10 +2872,14 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
                 strippedIdx = localIdx - stripStart;
               }
               charLeftInPart = charOffsets[strippedIdx];
-              charWidth =
-                strippedIdx + 1 < charOffsets.length
-                  ? charOffsets[strippedIdx + 1] - charOffsets[strippedIdx]
-                  : part.width - charOffsets[strippedIdx];
+              const hang = part.hangs?.[localIdx];
+              if (hang !== undefined) {
+                charWidth = this.getCharWidths(part.content[localIdx]!, part.inlineStyles?.[localIdx]).swidth;
+              } else if (strippedIdx + 1 < charOffsets.length) {
+                charWidth = charOffsets[strippedIdx + 1] - charOffsets[strippedIdx];
+              } else {
+                charWidth = part.width - charOffsets[strippedIdx];
+              }
             }
             // part.left는 첫 파트의 절대 start, 이후 파트는 이전 파트 끝에서의
             // 갭이므로 파트 시작 절대 오프셋을 누적한다 (buildParagraphPrintPostData의
@@ -2630,6 +2924,45 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   }
 
   /**
+   * 컬럼별 걸침 돌출 폭(mm)을 산출한다.
+   *
+   * 걸침 글자는 컬럼 경계 밖(좌측 여백/컬럼 간 갭/문서 우측 여백)에
+   * 렌더링되므로, 클릭 히트테스트(`getOffsetFromPoint`)의 컬럼 탐색
+   * 게이트도 이 돌출 폭만큼 확장해야 한다. 돌출 폭은 라인 배치
+   * 결과(`columnContents`의 `hangs` 마킹)에서 온디맨드로 계산한다 —
+   * 레이아웃 캐시/프리픽스 캐시 어느 경로로 `_columnContents`가
+   * 채워졌든 항상 현재 상태를 반영한다.
+   *
+   * @returns 컬럼 인덱스별 `{ left, right }` 돌출 폭 (mm). 걸침 없는
+   *   컬럼은 `{ left: 0, right: 0 }`
+   * @throws 없음
+   */
+  private _computeHangExtents(): { left: number; right: number }[] {
+    const extents = this._columnWidths.map(() => ({ left: 0, right: 0 }));
+    for (let c = 0; c < this._columnContents.length; c++) {
+      const column = this._columnContents[c];
+      const ext = extents[c];
+      if (!column || !ext) continue;
+      for (const line of column) {
+        for (const part of line.parts) {
+          const hangs = part.hangs;
+          if (hangs === undefined) continue;
+          if (hangs[0] === "start") {
+            const w = this.getCharWidths(part.content[0]!, part.inlineStyles?.[0]).swidth;
+            if (w > ext.left) ext.left = w;
+          }
+          let runRight = 0;
+          for (let k = part.content.length - 1; k >= 0 && hangs[k] === "end"; k--) {
+            runRight += this.getCharWidths(part.content[k]!, part.inlineStyles?.[k]).swidth;
+          }
+          if (runRight > ext.right) ext.right = runRight;
+        }
+      }
+    }
+    return extents;
+  }
+
+  /**
    * mm 좌표에 가장 가까운 source offset을 반환한다.
    *
    * @param xMm - 지면 기준 절대 X (mm)
@@ -2640,13 +2973,15 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const relX = xMm - this._data.parentAbsRect.absLeft;
     const relY = yMm - this._data.parentAbsRect.absTop;
 
+    const hangExtents = this._computeHangExtents();
     let columnIdx = -1;
     let columnLeftMm = 0;
     for (let c = 0; c < this._columnWidths.length; c++) {
       const xStart = this.columnLeftOffset(c);
       const xEnd = xStart + this._columnWidths[c];
       const isLastColumn = c === this._columnWidths.length - 1;
-      if (relX >= xStart && (isLastColumn ? relX <= xEnd : relX < xEnd)) {
+      const ext = hangExtents[c] ?? { left: 0, right: 0 };
+      if (relX >= xStart - ext.left && (isLastColumn ? relX <= xEnd + ext.right : relX < xEnd + ext.right)) {
         columnIdx = c;
         columnLeftMm = xStart;
         break;
@@ -2691,16 +3026,35 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
           if (part.content.length === 0) continue;
 
           if (isTargetLine) {
-            const partRight = part.left + part.width;
-            if (relLineX >= part.left && relLineX <= partRight) {
+            const { stripStart, stripEnd } = this._computeStripRange(part, ln, p);
+            const hangs = part.hangs;
+            // 걸침 글자는 파트 경계 밖에 렌더링되므로 히트 범위도 그만큼 확장한다.
+            let hangLeftMm = 0;
+            let hangRightMm = 0;
+            if (hangs !== undefined) {
+              if (hangs[stripStart] === "start") {
+                hangLeftMm = this.getCharWidths(part.content[stripStart]!, part.inlineStyles?.[stripStart]).swidth;
+              }
+              for (let k = stripEnd - 1; k >= stripStart && hangs[k] === "end"; k--) {
+                hangRightMm += this.getCharWidths(part.content[k]!, part.inlineStyles?.[k]).swidth;
+              }
+            }
+            const partLeft = part.left - hangLeftMm;
+            const partRight = part.left + part.width + hangRightMm;
+            if (relLineX >= partLeft && relLineX <= partRight) {
               const charOffsets = part.charOffsets;
               if (!charOffsets || charOffsets.length === 0) return null;
 
-              const { stripStart } = this._computeStripRange(part, ln, p);
               const partRelX = relLineX - part.left;
               let offsetInPart = 0;
               for (let i = 0; i < charOffsets.length; i++) {
-                const charRight = i + 1 < charOffsets.length ? charOffsets[i + 1] : part.width;
+                const rawIdx = stripStart + i;
+                const hang = hangs?.[rawIdx];
+                const charRight = hang !== undefined
+                  ? charOffsets[i] + this.getCharWidths(part.content[rawIdx]!, part.inlineStyles?.[rawIdx]).swidth
+                  : i + 1 < charOffsets.length
+                    ? charOffsets[i + 1]
+                    : part.width;
                 const charCenter = (charOffsets[i] + charRight) / 2;
                 if (partRelX < charCenter) {
                   offsetInPart = i;
