@@ -524,6 +524,7 @@ static createOrphan(content: string | (string | TextInlineData)[], resources: En
   - 문자 폭: key `${char}|${fontName}|${fontSize}`
   - 문자 외부 스타일: key `${char}|${widthRatio}|${letterSpacing}|${spaceRatio}|${fontSize}|${lineMaxFontSize}|${fontName}` (per-run 오버라이드 값 기준)
 - 한글 금칙문자 규칙: `_applyLineBreakRules()` (`LINE_START_FORBIDDEN` / `LINE_END_FORBIDDEN`)
+- 걸침표(hanging punctuation): `_applyHangingPunctuation()` — `ParagraphStyle.hangingPunctuation`가 ON이면 금칙 패스 직전에 실행되어 문장부호를 컬럼 밖에 배치(`TextPartData.hangs` 마킹). 교정한 페어는 skip set으로 금칙 패스가 재교정하지 않는다. OFF면 no-op (byte-identical). `docs/TEXT_ENGINE.md` §23 참조
 - `_detectOverlapWithCache()`: 렌더 사이클별 오버레이 rect 캐싱
 - `_createLineWithParts()`: 오버랩 파트에서 자유 영역 계산, `minCharWidthMm = widthRatio * fontSize + letterSpacing * fontSize` — fontSize/widthRatio/letterSpacing 모두 라인 시작 런의 인라인 오버라이드 값(미정의 시 문단 effective). 런 글자 폭보다 좁은 자유 영역은 제외되어 COVER 처리된다(오버랩 요소 위로 글자가 넘치는 강제 배치 방지). `lineTopMm`에 `alignOffsetMm` 포함
 - **verticalAlign 오버랩 판정 (2-pass)**: `verticalAlign: 'center'`/`'bottom'`인 경우, Pass 1(alignOffset=0)로 라인 수를 결정한 후 `_computeAlignOffsetMm()`로 오프셋을 계산하고 Pass 2로 오버랩 판정을 재수행. 라인 수가 안정될 때까지 최대 3회 반복. `verticalAlign: 'top'`이면 단일 pass.

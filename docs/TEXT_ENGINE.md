@@ -442,11 +442,14 @@ KS X 1001 완성형 위주로 제작된 한글 폰트는 현대 한글 11,172자
    - 새 라인에서도 안 되면 무한 루프 방지 처리
 5. 컬럼이 꽉 차면 다음 컬럼으로 이동. 마지막 컬럼이면 `_overflow` 증가
 6. 마지막 컬럼 처리 후 `endOfText` 플래그 설정
-7. **`_applyLineBreakRules()` 후처리** — 한글 조판 금칙문자 규칙 적용 (§22 참조)
-8. **`_computeCharOffsets()` 후처리** — 각 파트의 글자별 x 오프셋을 `textAlign`에 따라 산출.
-   `_applyLineBreakRules()`가 글자를 이동시킨 후 최종 배치를 기준으로 정렬 위치를 계산한다.
+7. **`_applyHangingPunctuation()` 후처리** — 걸침표(행말/행두) 교정. 금칙 패스 직전에
+   실행되며 교정한 라인 쌍 키 집합을 반환한다 (§23 참조). 걸침 OFF 시 no-op.
+8. **`_applyLineBreakRules()` 후처리** — 한글 조판 금칙문자 규칙 적용 (§22 참조).
+   걸침 패스가 교정한 페어는 스킵한다 (`skipPairs` 파라미터).
+9. **`_computeCharOffsets()` 후처리** — 각 파트의 글자별 x 오프셋을 `textAlign`에 따라 산출.
+   걸침 패스/`_applyLineBreakRules()`가 글자를 이동시킨 후 최종 배치를 기준으로 정렬 위치를 계산한다.
    결과는 `TextPartData.charOffsets`에 저장되며, flexbox `justify-content`에 의존하지 않고
-   렌더링 시 글자 위치를 결정론적으로 결정한다 (§9.3, §11.5 참조).
+   렌더링 시 글자 위치를 결정론적으로 결정한다 (§9.3, §11.5, §23.4 참조).
 
 ### 7.2 라인 × 런 흐름 처리
 
@@ -1099,7 +1102,8 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `_charWidthMmFromFont(char, inlineStyle?, fontSize)` | `FontLoader.getParsedFont()`로 폰트 객체 조회 후 글리프 advance width 계산. 폰트/글리프 누락 시 `null` |
 | `_createPartElement(widthMm, marginLeftMm)` | 파트 DOM 요소 생성. mm 단위 CSS 적용 |
 | `_removeTrailingEmptyLine(columnContent)` | 빈 파트만 있는 마지막 줄 제거 |
-| `_applyLineBreakRules()` | 한글 조판 금칙문자(행두/행말 금지) 후처리. 인접 줄 경계의 금칙 위반 교정 (§22 참조) |
+| `_applyHangingPunctuation()` | 걸침표(행말/행두) 후처리. 금칙 패스 직전에 실행되며, 교정한 페어 키 집합을 반환한다 (§23 참조) |
+| `_applyLineBreakRules()` | 한글 조판 금칙문자(행두/행말 금지) 후처리. 인접 줄 경계의 금칙 위반 교정. 걸침 패스가 교정한 페어는 `skipPairs`로 스킵한다 (§22 참조) |
 | `_computeCharOffsets()` | 각 파트의 글자별 x 오프셋(mm)을 `textAlign`에 따라 산출. `_applyLineBreakRules()` 이후에 호출되어 `TextPartData.charOffsets`를 채움. flexbox `justify-content`에 의존하지 않고 렌더링 시 글자 위치를 결정론적으로 결정 (§9.3 참조) |
 
 ---
@@ -1723,3 +1727,103 @@ flowchart TD
 - **블록 경계 미처리**: `\n`으로 분리된 블록 경계에서는 금칙을 검사하지 않는다. 블록은 독립적인 단락이므로, 블록 끝의 행말 금지 문자는 의도된 것이다.
 - **넘침 허용**: 이동한 글자가 파트 폭을 초과해도 허용한다. 래핑 재계산을 하지 않으므로 시각적으로 1글자 정도 넘칠 수 있다.
 - **동일 문자 양쪽 포함**: 따옴표(`'` `"`)는 행두·행말 양쪽에 포함된다. 이 경우 충돌 회피 규칙이 적용되어 이동하지 않는다.
+
+---
+
+## 23. 걸침표 (Hanging Punctuation) 줄바꿈 규칙
+
+걸침표는 금칙(§22) 교정에 우선하는 라인 경계 후처리다. 금칙 패스가 위반 부호를 **같은 이동**으로 교정하되 in-flow(파트 폭 내부)에 배치하는 것과 달리, 걸침은 부호를 **틀 밖**에 배치해 visible 글자가 파트 전체 폭을 활용하도록 한다. 한국 신문 조판의 걸침표 관례(문장부호가 단 끝/시작 밖으로 나감)를 따른다.
+
+### 23.1 스타일 설정
+
+`ParagraphStyle.hangingPunctuation` (비인라인 문단 필드):
+
+```ts
+type HangingPunctuationConfig = {
+  lineEnd?: boolean;   // 행말 걸침: 닫기 부호를 줄 우측 밖으로
+  lineStart?: boolean; // 행두 걸침: 열기 부호를 다음 줄 시작 왼쪽 밖으로
+};
+hangingPunctuation?: boolean | HangingPunctuationConfig;
+```
+
+| 값 | 의미 |
+|---|---|
+| `undefined` / `false` | OFF — 기존 배치와 byte 단위로 동일 (기본값) |
+| `true` | 행말 + 행두 모두 ON |
+| `{ lineEnd: true }` 등 | 방향별 설정 (생략 필드 = OFF) |
+
+effective 체인(주입값 → 상속값 → 기본값 `false`)을 따르며, 문단 스타일이므로 InheritStyle 캐스케이드로 전파된다. 캐시 해시(`_computeLayoutInputHash`, `_computePrefixHash`)에 `hp:` 키로 포함되어 토글 시 stale 캐시 없이 재래핑된다.
+
+### 23.2 걸침 대상 문자 테이블
+
+`src/constants/line-break.ts`의 별칭 세트 — 기존 금칙 테이블과 미러 관계다:
+
+| 세트 | 정의 | 대상 | 문자 |
+|---|---|---|---|
+| `HANG_LINE_END` | `= LINE_START_FORBIDDEN` | 닫기 문장부호 (행말 걸침) | `. , ) ] } ） ］ ｝ 〕 』 」 】 》 ’ ”` |
+| `HANG_LINE_START` | `= LINE_END_FORBIDDEN` | 열기 문장부호 (행두 걸침) | `( [ { （ ［ ｛ 〔 『 「 【 《 ‘ “` |
+
+닫기 부호가 다음 줄 행두에 놓이는 위반이 행말 걸침의 대상이므로 두 세트는 행두/행말 금지 테이블과 각각 동일하다. 직선 따옴표(`'` `"`)는 금칙 테이블에서 제외되어 있으므로 걸침 대상에도 없다 (곡선 `’ “ ‘ ”`만 해당).
+
+### 23.3 후처리 알고리즘 (`_applyHangingPunctuation`)
+
+`_layoutTextIntoColumns()`에서 vertical-align 반복 뒤, `_applyLineBreakRules()` 직전에 실행된다 (prefix 캐시 경로 `_applyPrefixCache`에도 동일 배선). 교정을 적용한 페어(인접 두 줄) 키(`${col}:${lineIdx}`)의 `ReadonlySet<string>`을 반환하고, 금칙 패스는 이 집합을 `skipPairs` 파라미터로 받아 **같은 페어를 재교정하지 않는다** — 걸침 마킹을 금칙 이동이 훼손하는 것을 원천 차단한다.
+
+페어별 결정 순서 (한 페어에 최대 1회 교정):
+
+```mermaid
+flowchart TD
+    Pair([인접 줄 쌍 cur, next]) --> Guard{COVER/빈 파트/블록 경계/탭?}
+    Guard -->|Yes| Kinjang[금칙 패스에 위임]
+    Guard -->|No| S1{1) cur 끝이 열기 부호 + lineStart ON}
+    S1 -->|Yes| PushDown[열기 부호 → next 앞 + hangs='start']
+    S1 -->|No| S2{2) next 시작이 닫기 부호 + lineEnd ON}
+    S2 -->|Yes| PullUp[선행 닫기 run 전체 → cur 끝 + hangs='end']
+    S2 -->|No| Kinjang
+```
+
+1. **행두 걸침** (cur 마지막 글자가 열기 부호): 부호를 cur에서 pop해 next 첫 파트 앞에 unshift하고 `hangs[0] = 'start'`로 마킹. 두 위반(cur 행말 금지 + next 행두가 닫기 부호인 충돌 케이스)을 동시에 해소한다. 가드: `curLastPart.content.length >= 2` (내보낸 뒤 빈 파트 박스로 인한 파트 갭 방지), next 첫 파트가 컬럼 좌측 끝에서 시작 (`part.left === 0` — indent가 적용된 줄은 게이트 실패).
+2. **행말 걸침** (next 첫 글자가 닫기 부호): next 첫 파트의 선행 닫기 부호 run **전체**를 cur 마지막 파트 끝으로 이동하고 각 글자에 `hangs = 'end'`로 마킹. 가드: `run < nextFirstPart.content.length` (next 첫 파트에 최소 1자 잔존 — 전체를 당기면 빈 줄), cur 마지막 파트의 절대 우측 끝이 컬럼 폭과 일치 (`Σ(모든 파트 left) + Σ(모든 파트 width) === columnWidth` — 오버랩 파트 옆 틈으로는 걸치지 않는다. `part.left`는 이후 파트에서 갭 상대값이므로 누적 공식 필수).
+3. **금칙 폴백**: 어느 걸침도 적용 안 되면 금칙 패스가 기존대로 교정한다.
+
+**엣지 게이트의 의미**: 걸침 방향이 실제로 컬럼 경계를 벗어나야 한다. 마지막 파트가 이미지 옆 좁은 자유 영역(컬럼 중간)으로 끝나는 라인에서 걸치면 부호가 이미지 위로 덮이므로, 이 경우 걸침을 스킵해 금칙 폴백(in-flow)으로 안전하게 처리한다.
+
+**가드 (전체)**:
+- COVER 라인 / 빈 경계 파트 — 금칙 패스와 동일한 스킵 조건
+- 블록 경계 쌍 (`curLine.endOfBlock || nextLine.firstOfBlock`) — `\n`으로 끊기는 흐름에서는 걸침 마킹만 스킵한다. 글자 이동 자체는 기존 금칙 동작이 경계 쌍에서도 수행하므로, 이 쌍은 OFF와 deep equal로 유지된다
+- 탭(`\t`) 포함 파트 — 좌우 밀기 탭 정렬(§7.3.1)과 충돌하므로 걸침하지 않는다
+- 걸침 OFF — 스캔 없이 빈 집합 반환 (no-op)
+
+### 23.4 걸침 글자의 charOffsets 산출
+
+`TextPartData.hangs?: ('start' | 'end' | undefined)[]`는 `content`/`inlineStyles`와 평행한 raw 인덱스 배열로 걸침 글자를 마킹한다. `_computeCharOffsets()`는 이를 소비한다:
+
+- **정렬 산출**: 걸침 글자를 폭 합계(`totalWidth`)와 justify 분모에서 **제외**하고, visible 글자만으로 정렬(left/right/center/justify)을 계산한다. justify의 균등 간격은 `remaining / (visibleCount - 1)` — 걸침 글자가 없을 때와 공식이 연속된다.
+- **행말 걸침 배치**: `charOffsets[k] = partWidth + Σ(선행 걸침 글자 폭)` — 첫 걸침 글자의 왼쪽 끝이 정확히 파트 우측 경계에 붙고, run이면 스택형으로 이어진다. 각 글자의 **전체 폭**이 파트 밖으로 나간다 (전각 걸침).
+- **행두 걸침 배치**: `charOffsets[0] = -swidth` — 부호의 오른쪽 끝이 파트 좌측 경계(0)에 붙고, 이후 글자는 0부터 시작한다 (걸침 글자가 파트 내 자리를 차지하지 않는다).
+
+걸침 글자는 문장부호이므로 공백이 아니며, 항상 strip 범위(`_computeStripRange`) 안에 있다.
+
+### 23.5 소비처와 클리핑
+
+걸침 좌표는 기존 단일 소스 파이프라인을 그대로 흐른다:
+
+| 소비처 | 걸침 반영 |
+|---|---|
+| DOM 렌더링 (`renderText`) | `charOffsets[j]`를 `left`로 절대 배치하므로 자동 — 파트 밖 좌표도 그대로 페인트된다. `data-char-offset`에 음수/초과값이 기록된다 |
+| `getCharRect` | 걸침 글자(`hangs[rawIdx]` 정의)의 폭을 offset 차분이 아닌 `getCharWidths().swidth`로 계산 — `part.width - offset`이 음수가 되는 것을 방어 |
+| `buildParagraphPrintPostData` | 이미 `charOffsets[k]` + `getCharWidths().swidth`를 소비하므로 **변경 없이** print 패리티 성립 |
+| `getOffsetFromPoint` | 컬럼 탐색 게이트를 컬럼별 걸침 돌출 폭(`_computeHangExtents`: 좌측 = 행두 걸침 최대 폭, 우측 = 행말 걸침 run 폭 합의 최대)만큼 확장하고, 파트 히트 범위도 확장한다. 걸침 글자의 클릭 중점은 `offset + swidth` 기준 |
+| `genColumnStyle` | 걸침 ON 시 `overflow: 'visible'` (OFF 시 기존 `'hidden'` 유지) |
+
+**클리핑 해제**: 걸침 글자는 컬럼/문단 호스트 밖으로 렌더링되므로, 걸침 ON 시 `genColumnStyle`의 컬럼 `overflow`와 `LayoutParagraphElement._applyStyle`의 `:host` `overflow`가 모두 `'visible'`로 전환된다. OFF 시 기존 `'hidden'` 방어 동작이 byte 동일하게 유지된다. 걸침 글자는 기본적으로 컬럼 간 갭/문서 여백으로 나가며, 갭이 걸침 폭보다 좁으면 인접 컬럼 텍스트와 시각적으로 겹칠 수 있다 (신문 조판 관례상 갭 ≥ 전각 1자이므로 드물다 — 알려진 동작, 클램프 없음).
+
+### 23.6 한계
+
+- **라인 수 불변**: 걸침 교정은 글자를 줄 사이로 이동만 하므로 총 라인 수는 ON/OFF와 무관하다. overflow 카운트도 변하지 않는다.
+- **컬럼 경계**: 마지막 컬럼의 마지막 줄 다음 줄은 없으므로 페어가 형성되지 않는다 (금칙과 동일).
+- **파트 경계 run 제한**: 행말 걸침의 당김 run은 next 첫 파트 내로 한정된다. run이 파트를 가로질러 이어지는 경우 첫 파트 분만 당겨진다.
+- **단일 패스**: 한 번의 순회로 처리한다. 걸침 이동으로 새로 발생하는 위반은 추가 패스 없이 허용한다 (금칙 §22.2 규칙 4와 동일 철학).
+- **인라인 스타일 이동**: 걸침 이동은 `inlineStyles` 평행 배열을 함께 이동하므로 런 오버라이드가 유지된다 (금칙 이동과 동일 패턴).
+
+검증: `npx tsx scripts/verify-hanging-punctuation.mjs` (55항목 — OFF 기준선/행말·행두/trailing run/justify/getCharRect/print 패리티/히트테스트/엣지 게이트/블록 경계/prefix 캐시/API), `npx tsx scripts/verify-hanging-punctuation-browser.mjs` (11항목 — 실제 화면 페인트: 파트 밖 span rect, overflow 해제, shadowRoot 히트테스트, 원상 복구).

@@ -494,7 +494,7 @@ InheritStyle (부모에서 상속)
 | `currentStyle` | `CurrentStyle \| null` get | 현재 커서 위치의 유효 스타일. 포커스된 단락이 없으면 `null`. |
 | `applyInlineStyle(style)` | `void` | 포커스된 단락의 현재 선택 영역에 인라인 스타일(`Partial<TextInlineStyle>`)을 적용한다. 선택 영역이 없거나 포커스된 단락이 없으면 무시. |
 | `toggleInlineStyle(field, value)` | `void` | 포커스된 단락의 현재 선택 영역에서 인라인 스타일 필드를 토글한다. 선택 영역 전체가 이미 해당 값이면 제거, 아니면 적용. |
-| `applyTextStyle(textPatch?, paragraphPatch?)` | `boolean` | 텍스트/문단 스타일 주입의 단일 진입점. 편집 상태에 따라 주입 대상을 판별한다: (1) 포커스 + selection → 선택 범위 인라인 주입, (2) 포커스 + 커서가 런 안 → 해당 런만 업데이트, (3) 포커스 + 커서가 런 밖 → paragraph 스타일 수정 + 명시 필드 전체 캐스케이드, (4) 포커스 없이 paragraph/paragraph-box(selected) → 대상 paragraph 스타일 + 전체 캐스케이드. 인라인 불가 필드(textAlign, lineGap, verticalAlign, indent)는 항상 paragraph로 라우팅. 처리 후 런 맵 정규화 + 커서/selection 보존. |
+| `applyTextStyle(textPatch?, paragraphPatch?)` | `boolean` | 텍스트/문단 스타일 주입의 단일 진입점. 편집 상태에 따라 주입 대상을 판별한다: (1) 포커스 + selection → 선택 범위 인라인 주입, (2) 포커스 + 커서가 런 안 → 해당 런만 업데이트, (3) 포커스 + 커서가 런 밖 → paragraph 스타일 수정 + 명시 필드 전체 캐스케이드, (4) 포커스 없이 paragraph/paragraph-box(selected) → 대상 paragraph 스타일 + 전체 캐스케이드. 인라인 불가 필드(textAlign, lineGap, verticalAlign, indent, hangingPunctuation)는 항상 paragraph로 라우팅. 처리 후 런 맵 정규화 + 커서/selection 보존. |
 | `controllers` | `Set<TextEditController>` get | 등록된 모든 편집 컨트롤러. |
 | `focusParagraph(target, options?)` | `boolean` | 단락 요소 또는 ID로 포커스를 설정한다. 텍스트 편집 모드가 아니면 자동 활성화. `options.cursorOffset`으로 커서 위치, `options.selection`으로 선택 영역을 지정할 수 있다. 성공 시 `true`, 실패 시 `false`. |
 | `blurParagraph(target?)` | `boolean` | 단락 요소, ID, 또는 생략으로 포커스를 해제한다. 생략하면 현재 포커스된 단락을 blur. 성공 시 `true`, 실패 시 `false`. |
@@ -1601,7 +1601,7 @@ type RunMap = RunEntry[];
 > (판정/탐색 경계 비대칭 버그).
 
 > ※1 인라인 가능 필드: `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`, `letterSpacing`, `widthRatio`, `spaceRatio` (TextInlineStyle에 존재)
-> ※2 인라인 불가 필드: `textAlign`, `lineGap`, `verticalAlign` (ParagraphStyle), `indent` (TextStyle 중 인라인 미지원) — **항상 paragraph에 적용**
+> ※2 인라인 불가 필드: `textAlign`, `lineGap`, `verticalAlign`, `hangingPunctuation` (ParagraphStyle), `indent` (TextStyle 중 인라인 미지원) — **항상 paragraph에 적용**
 
 #### paragraph-box 선택 시 대상 결정 (단일·복수)
 

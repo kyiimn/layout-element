@@ -18,6 +18,8 @@
 | `verify-inline-metrics.mjs` | 정합성 (엔진) | 인라인 `letterSpacing`/`widthRatio`/`spaceRatio` 런 오버라이드 — 폭 공식/캐시 해시/printPostData/extractData/스타일 조회/런 맵 병합/오버랩 회피(파트 분할·좁은 영역 COVER) | ALL PASS |
 | `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/런/캐스케이드) | ALL PASS |
 | `verify-hangul-glyph-fallback.mjs` | 정합성 (엔진) | cmap 미등록 한글 음절 폭 폴백 (`가` 폭 대체) | ALL PASS |
+| `verify-hanging-punctuation.mjs` | 정합성 (엔진) | 걸침표(행말/행두) — OFF 기준선 byte 동일/금칙 대체 배치/trailing run/justify/getCharRect/print 패리티/히트테스트/엣지 게이트/블록 경계/prefix 캐시/API | ALL PASS |
+| `verify-hanging-punctuation-browser.mjs` | 정합성 (브라우저) | 걸침표 ON 실제 화면 페인트 — 파트 밖 span rect/overflow 해제/원상 복구 | ALL PASS |
 | `verify-overlap-inline-fontsize.mjs` | 정합성 (엔진) | 인라인 fontSize 오버라이드 컬럼의 오버랩 판정 rect — per-line 높이 기준 | ALL PASS |
 | `verify-image-displayrect-cache.mjs` | 정합성 (엔진) | 이미지 displayRect(objectFit/none x/y/w/h) 변화 시 오버랩 회피 재계산 — layout input hash 무효화 | ALL PASS |
 | `verify-image-edit-mode.mjs` | 정합성 (브라우저) | 이미지 편집 모드 전 동작 — dblclick 진입(일반/레이아웃 모드), 부모 box 빨간테두리+라벨 숨김, 드래그/objectFit 자동전환, 휠 비율 유지, ESC 취소/복귀, Tab 순회, selection 이동 시 포커스 상실, 클램핑, **extractData/printPostData 3소스 일치, 오버랩 회피 갱신 A/B** | ALL PASS |
@@ -305,6 +307,44 @@ npx tsx scripts/verify-engine-node.mjs
 **실행**:
 ```bash
 npx tsx scripts/verify-hangul-glyph-fallback.mjs   # 25항목 ALL PASS
+```
+
+### `verify-hanging-punctuation.mjs` — 걸침표 엔진 전 파이프라인 (엔진)
+
+**목적**: `ParagraphStyle.hangingPunctuation`(행말/행두 걸침)이 금칙 교정에 우선하는 라인 경계 후처리로서 전 소비 경로에 정확히 반영되는지. 걸침은 문장부호를 **컬럼 밖**에 배치하므로 파트 밖 좌표를 다루는 최초의 기능이다 — 기대값은 모두 `getCharWidths` 런타임 실측 폭으로 구성한다 (폭 공식이 들어간 값이므로 사전 계산하면 오탐).
+
+**검증 항목** (55항목):
+1. OFF 기준선 — `undefined`/`false`/빈 객체 모두 deep equal (byte-identical 보장)
+2. 행말 걸침 — 닫기 부호가 위 줄 끝으로 당겨지고 `charOffset === partWidth`. OFF(금칙)는 같은 이동을 in-flow로 수행
+3. 행두 걸침 — 열기 부호가 아래 줄 앞으로 내려가고 `charOffset === -swidth`, 이후 글자 0부터. OFF(금칙)는 같은 이동을 in-flow로
+4. justify — 걸침 글자를 분산에서 제외, visibleCount 기준 균등 분산
+5. trailing run — 연속 닫기 부호(`).`) 전체 당겨짐 + 스택형 오프셋
+6. 캐시 해시 — `hp:` 키로 토글 시 재래핑, 재토글 시 원본 복원 (stale 캐시 방어)
+7-9. 소비처 — `getCharRect` 폭(swidth, 음수 방어)/printPostData 패리티/`getOffsetFromPoint` 히트 범위 확장
+10. 엣지 게이트 — 오버랩 파트 라인은 걸침 스킵 + 금칙 폴백 (OFF와 deep equal)
+11. 블록 경계 — `\n` 경계 쌍은 걸침 마킹만 스킵 (OFF와 deep equal)
+12. prefix 캐시 — 2단계 타이핑으로 캐시 적용 경로가 전체 재래핑과 deep equal + 걸침 마킹 보존
+13. API — `genColumnStyle` overflow 조건화 / `extractData` round-trip
+14. 방향별 설정 — `lineEnd`만 ON이면 행두 교정은 금칙 폴백
+
+**금칙 의미론 주의**: 금칙 패스는 위반 **부호 자체**를 이동한다 (닫기 부호를 위 줄 끝으로 in-flow 당김 / 열기 부호를 아래 줄 앞으로 내림). 계획 단계의 "이웃 글자 push-down/pull-up" 서술과 다르므로 기대값 작성 시 실제 코드(`_applyLineBreakRules`) 기준으로 검증한다.
+
+**실행**:
+```bash
+npx tsx scripts/verify-hanging-punctuation.mjs   # 55항목 ALL PASS
+```
+
+### `verify-hanging-punctuation-browser.mjs` — 걸침표 ON 실제 화면 페인트 (브라우저)
+
+**목적**: 기존 브라우저 검증(dom-diff/visual-render/...)은 걸침 OFF 상태로 동작하므로(회귀 방어), 걸침 ON의 **화면 결과** — 파트 밖 span 페인트, 컬럼/호스트 overflow 해제 — 는 별도 검증이 필요하다.
+
+**핵심 함정**: `overflow: hidden`은 `getBoundingClientRect()`(레이아웃 기하)에 영향 없이 **페인트만 클립**한다. rect 비교로는 클리핑을 감지할 수 없고, 실제 hit-test로 확인해야 한다. 또한 `document.elementFromPoint`는 오픈 섀도우 루트 내부 히트를 **호스트로 리타기팅**한다 — 컬럼 밖 지점에서 `X-LAYOUT-COLUMN`이 반환된 것 자체가 걸침 span이 페인트되었다는 방증(클립되면 뒤의 문단/바디가 나옴)이며, 확정 검증은 `shadowRoot.elementFromPoint`로 섀도우 내부 요소를 직접 조회한다.
+
+**검증 항목** (11항목): OFF 기준(hangs 없음 + overflow hidden) → ON 토글(부호 run 당겨짐 + 스택형 오프셋) → computed overflow visible → 걸침 span DOM(`data-char-offset === partWidth`) → 화면 rect 컬럼 밖 연장 → shadowRoot 히트 도달 → OFF 재토글 원상 복구.
+
+**실행**:
+```bash
+npx tsx scripts/verify-hanging-punctuation-browser.mjs   # 11항목 ALL PASS (서버 없으면 자체 스폰 — 포트 5198)
 ```
 
 ### `verify-overlap-inline-fontsize.mjs` — 인라인 fontSize 오버라이드 + 오버랩 판정 rect (엔진)

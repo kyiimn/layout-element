@@ -95,6 +95,15 @@ containerLineCount = floor(editableHeight / lineHeight) + 1
 - [ ] `editableTextHeight`를 사용하고 있는가? (`editableHeight`가 아님 — 전자는 padding 제외 전체 높이, 후자는 lineHeight 배수로 버림된 값)
 - [ ] 드래그/리사이즈/containment/삽입/재배치(reparent) 중 하나라도 static 좌표를 다룬다면 위 표의 공식을 적용했는가?
 
+### 1.9 걸침표(hanging punctuation) 패스 불변식
+
+- **걸침 패스 → 금칙 패스 순서와 skip set**: `_applyHangingPunctuation()`는 `_applyLineBreakRules()` **직전에** 실행되고, 교정한 페어 키(`${col}:${lineIdx}`) 집합을 반환한다. 금칙 패스는 이 집합(`skipPairs`)의 페어를 재교정하지 않는다. 이 순서/위임을 깨면 금칙 이동이 걸침 마킹(`hangs`)을 훼손하거나 같은 페어를 두 번 교정한다. prefix 캐시 경로(`_applyPrefixCache`)에도 동일 배선이 필요하다.
+- **엣지 게이트는 컬럼 경계로**: 걸침은 마지막 파트의 절대 우측 끝 === 컬럼 폭(행말)/첫 파트 `left === 0`(행두)일 때만 허용한다. `part.left`는 이후 파트에서 **갭 상대값**이므로, 우측 끝 판정은 반드시 `Σ(모든 파트 left) + Σ(모든 파트 width)` 누적 공식으로 한다 — 마지막 파트만 더하면 오버랩 파트 라인에서 오탐.
+- **`hangs`는 raw content 인덱스 평행 배열**: `inlineStyles`와 동일한 인덱싱. 라인 경계 후처리(걸침/금칙)에서 `content`를 `push`/`pop`/`shift`/`unshift`할 때 `hangs`와 `inlineStyles`를 항상 함께 이동해야 한다. 하나라도 빠지면 걸침 마킹이 한 칸 어긋나고 `_computeCharOffsets`/`getCharRect`가 잘못된 글자를 걸침으로 처리한다.
+- **걸침 글자의 폭은 offset 차분 금지**: 걸침 글자의 `charOffsets[k]`는 파트 경계 밖(partWidth 이상 또는 음수)이므로 `part.width - offset`류 차분은 음수가 된다. 폭 소비처(`getCharRect`, `getOffsetFromPoint`)는 걸침 글자를 `hangs`로 판별해 `getCharWidths().swidth`로 계산한다. `buildParagraphPrintPostData`는 이미 swidth 기반이므로 변경 금지.
+- **OFF는 byte-identical**: `hangingPunctuation` 미설정/`false`/빈 객체 모두 기존 배치와 byte 단위로 동일해야 한다. 걸침 관련 코드를 건드릴 때마다 `snapshot-layout.mjs` byte 비교로 회귀를 확인한다. 검증: `scripts/verify-hanging-punctuation.mjs` (Test 1), 스냅샷 전후 비교.
+- **클리핑 해제는 조건부**: 걸침 ON 시에만 `genColumnStyle`의 컬럼 overflow와 paragraph `:host` overflow가 `'visible'`로 전환된다. OFF 시 기존 `'hidden'` 방어 동작을 절대 제거하지 않는다.
+
 ---
 
 ## 2. 편집 컨트롤러 규칙

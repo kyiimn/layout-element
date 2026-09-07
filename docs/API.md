@@ -2014,8 +2014,8 @@ toggleInlineStyle<K extends keyof TextInlineStyle>(
  * - 포커스 없음 + paragraph / content-type='paragraph' box가 selected (단일·복수 모두) →
  *   선택된 모든 대상의 paragraph 수정 + 전체 캐스케이드. lock된 대상은 스킵.
  *
- * 인라인에 주입 불가한 필드(textAlign, lineGap, verticalAlign,
- * indent)는 항상 paragraph에 적용된다.
+  * 인라인에 주입 불가한 필드(textAlign, lineGap, verticalAlign,
+  * indent, hangingPunctuation)는 항상 paragraph에 적용된다.
  * 처리 후 런 맵을 정규화하고 커서/selection 위치를 보존한다.
  *
  * @param textPatch - TextStyle 부분 객체 (제공된 필드만 부분 업데이트)
@@ -2046,7 +2046,7 @@ applyTextStyle(
 | 포커스 없음 + paragraph/paragraph-box selected (단일·복수) | 선택된 모든 대상 + 전체 캐스케이드 (lock 스킵) | paragraph |
 
 > ※1 `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`, `letterSpacing`, `widthRatio`, `spaceRatio`
-> ※2 `textAlign`, `lineGap`, `verticalAlign`, `indent`
+> ※2 `textAlign`, `lineGap`, `verticalAlign`, `indent`, `hangingPunctuation`
 
 **캐스케이드**: 커서가 런 밖이거나 selected 경로에서 paragraph 스타일을 수정하면, 명시 주입 필드가 내부 모든 인라인 런에 일괄 적용된다. 캐스케이드로 런 필드가 주입 후의 문단 기본과 동일해지면 그 필드는 런에서 제거되고, 모든 필드가 동일해진 런은 `normalizeRunMap`이 해제한다. 정규화는 포커스 획득/blur 시에도 자동 수행된다. 병합·해제 규칙의 상세는 `EDITING_TEXT.md` § 6A.5 참조.
 
@@ -3076,12 +3076,20 @@ type TextStyle = {
 #### `ParagraphStyle`
 
 ```ts
+type HangingPunctuationConfig = {
+  lineEnd?: boolean;   // 행말 걸침: 닫기 부호를 줄 우측 밖으로. 기본 false
+  lineStart?: boolean; // 행두 걸침: 열기 부호를 다음 줄 시작 왼쪽 밖으로. 기본 false
+};
+
 type ParagraphStyle = {
   lineGap?: number;        // lineHeight = fontSize × lineGap, 기본 1.25
   verticalAlign?: 'top' | 'center' | 'bottom';  // 기본 'top'
   textAlign?: 'left' | 'right' | 'center' | 'justify';  // 기본 'justify'
+  hangingPunctuation?: boolean | HangingPunctuationConfig;  // 걸침표. 기본 false
 };
 ```
+
+`hangingPunctuation`: 걸침표(행말/행두 걸침) 설정. `true`면 양방향 ON, 객체면 방향별 설정. `false`/`undefined`(기본)면 기존 배치와 byte 단위로 동일하다. 걸침은 금칙 교정에 우선하며, 걸침 ON 시 컬럼/문단 `overflow`가 `visible`로 전환되어 부호가 틀 밖으로 렌더링된다. 상세는 `TEXT_ENGINE.md` §23 참조.
 
 #### `TextInlineStyle`
 
