@@ -58,10 +58,33 @@ export type TextPartData = {
    * `undefined`인 경우 레거시 호환 — `LayoutColumnElement.renderText()`는
    * 기존 flexbox `justify-content` 경로로 폴백한다.
    *
+   * 걸침표(hanging punctuation) 글자의 오프셋은 파트 경계 밖이다:
+   * 행말 걸침은 `partWidth + Σ(선행 걸침 글자 폭)`, 행두 걸침은 `-swidth`.
+   *
    * 글자 폭에는 `letterSpacingMm`이 포함되어 있으므로(see `_charWidthMm` 호출부),
    * `charOffsets` 산출 시 letter-spacing을 별도로 더하지 않는다.
    */
   charOffsets?: number[];
+
+  /**
+   * 걸침표(hanging punctuation) 글자 마킹.
+   *
+   * `content[i]`에 평행한 배열(원시 content 인덱스 기준 — `inlineStyles`와
+   * 동일한 인덱싱)로, 걸침 글자 위치에만 값이 있고 나머지는 `undefined`이다.
+   *
+   * - `'end'`: 행말 걸침 — 파트 우측 밖으로 걸침
+   *   (`charOffsets[k] = partWidth + Σ(선행 걸침 글자 폭)`)
+   * - `'start'`: 행두 걸침 — 파트 좌측 밖으로 걸침
+   *   (`charOffsets[0] = -swidth`, 이후 글자는 0부터 시작)
+   *
+   * `_applyHangingPunctuation()` 후처리 패스가 채운다. 걸침 글자는
+   * 정렬(align) 폭 합계에서 제외되고, 소비처(`getCharRect`,
+   * `getOffsetFromPoint`, `buildParagraphPrintPostData`)는 이 마킹으로
+   * 걸침 글자의 실제 폭/클릭 범위를 계산한다.
+   *
+   * `undefined`이거나 해당 인덱스가 `undefined`이면 걸침 아님.
+   */
+  hangs?: ('start' | 'end' | undefined)[];
 };
 
 export type TextLineData = {
