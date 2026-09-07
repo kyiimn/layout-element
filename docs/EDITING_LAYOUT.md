@@ -2456,12 +2456,9 @@ top handle:
 - **absolute box**: `_savedColumns`가 `number[]`(명시 단 너비)이면 **비례 스케일링** —
   `scale = 현재 absWidth / 저장된 단 너비 합계`를 곱해 각 단 너비를 재계산한다.
   `_savedColumns`이 `number`(단 개수)이면 GC가 `width / N`으로 자동 계산하므로 스케일링이 불필요하다.
-- **paragraph column/gap 리셋**: `_propagateInheritStyle()`은 자식 paragraph마다
-  `resetColumnIfParentResized(부모 편집 폭)`를 호출한다 — **부모 편집 폭이 직전 스냅샷과
-  실제로 변경된 경우에만** `column`/`gap`을 `undefined`로 리셋해 새 부모 그리드를 상속받게 한다.
-  박스 리사이즈는 편집 폭을 실제로 변경하므로 이 판정을 통과해 리셋이 수행된다.
-  폭이 불변한 `layout()` 경유(박스 추가, undo/저장 응답 재주입 등)에서는 리셋이 일어나지 않아
-  사용자의 단설정과 생성 시 주입된 `column: 1` 기본값이 보존된다 (API.md `resetColumnIfParentResized` 참조).
+- **paragraph column/gap**: `column`이 `undefined`면 부모 상속. `number`(단수)면 GC가 균등 분할.
+  `number[]`(명시 너비)는 부모 box width 변경 시 기존 비율을 유지하며 비례 조정된다.
+  `gap`은 명시 설정 시 고정, 생략 시 부모 상속.
 - **static text-box**: 리셋 시 paragraph의 `column`/`gap`이 `undefined`로 전환되어
   `_layoutStructure()`가 `parentModel.columnWidth`/`gaps`를 사용한다 —
   extractData round-trip 후 `number[]`로 고정되어 부모 GC 너비 변경을 무시하는 현상을 방지한다.

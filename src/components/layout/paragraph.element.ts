@@ -36,9 +36,6 @@ export class LayoutParagraphElement extends HTMLElement {
   private _column?: number | number[];
   private _gap?: number | number[];
 
-  /** 부모 편집 폭(mm) 스냅샷 — {@link resetColumnIfParentResized} 판정용. */
-  private _lastParentWidthForColumn: number | undefined;
-
   private _paragraphStyle: ParagraphStyle;
   private _textStyle: TextStyle;
 
@@ -130,9 +127,6 @@ export class LayoutParagraphElement extends HTMLElement {
       this._editController = null;
     }
     this._editManagerRef = null;
-    // 부모 변경(DOM 이동, data setter reconcile 등) 시 이전 부모의 폭 스냅샷이
-    // 새 부모에서 오탐지되어 column/gap이 잘못 리셋되는 것을 방지한다.
-    this._lastParentWidthForColumn = undefined;
     // 엔진을 부모 childEngines에서 splice하지 않는다 — box.element.ts 참조.
     // DocumentEngine._buildTree()가 전체 트리를 재구축하므로 불필요하며,
     // 기존 엔진을 유지하는 편이 재사용 측면에서 더 효율적이다.
@@ -181,8 +175,38 @@ export class LayoutParagraphElement extends HTMLElement {
       absHeight: parentBox.absHeight,
     };
     const newContent = this._model?.textContent ?? this._sourceContent;
-    const newColumn = this._column !== undefined ? this._column : this.parentModel.columnWidth;
-    const newGap = this._gap !== undefined ? this._gap : this.parentModel.gaps;
+    const parentColumnWidths = this.parentModel.columnWidth;
+    const parentGaps = this.parentModel.gaps;
+
+    let newColumn: number | number[];
+    let newGap: number | number[];
+
+    if (this._column === undefined) {
+      newColumn = parentColumnWidths;
+      newGap = parentGaps;
+    } else {
+      const totalParentWidth = parentColumnWidths.reduce((a, b) => a + b, 0)
+        + parentGaps.reduce((a, b) => a + b, 0);
+      const newGapResolved = this._gap !== undefined ? this._gap : parentGaps;
+      const gapTotal = Array.isArray(newGapResolved)
+        ? newGapResolved.reduce((a, b) => a + b, 0)
+        : (typeof this._column === 'number'
+          ? (this._column - 1) * (newGapResolved as number)
+          : ((this._column as number[]).length - 1) * (newGapResolved as number));
+      const availableForColumns = totalParentWidth - gapTotal;
+      const savedColTotal = typeof this._column === 'number'
+        ? availableForColumns
+        : (this._column as number[]).reduce((a, b) => a + b, 0);
+      if (typeof this._column === 'number') {
+        newColumn = this._column;
+      } else if (savedColTotal > 0 && availableForColumns > 0 && Math.abs(savedColTotal - availableForColumns) > 0.01) {
+        const scale = availableForColumns / savedColTotal;
+        newColumn = (this._column as number[]).map(w => w * scale);
+      } else {
+        newColumn = this._column;
+      }
+      newGap = newGapResolved;
+    }
 
     if (!this._model) {
       const engineData: ParagraphEngineData = {
@@ -773,37 +797,6 @@ export class LayoutParagraphElement extends HTMLElement {
 
   get inheritStyle() {
     return this._inheritStyle;
-  }
-
-  /**
-   * 부모 편집 폭 변경 여부에 따라 명시 `column`/`gap` 상속값 리셋을 판정한다.
-   *
-   * `_propagateInheritStyle`이 layout()마다 호출하지만, 리셋은 부모 편집 폭이
-   * 실제로 변경된 경우에만 수행한다. 무조건 리셋하면 단설정으로 명시 지정한
-   * column/gap과 생성 시 주입된 `column: 1` 기본값이 박스 추가/undo/저장 응답
-   * 재주입 등 부모 layout() 경유 시마다 유실되어 상속값으로 롤백된다.
-   *
-   * @param parentEditableWidth - 부모 box의 현재 편집 폭 (mm)
-   * @example
-   * ```ts
-   * // box._propagateInheritStyle 내부
-   * paragraph.resetColumnIfParentResized(this.model.editableWidth);
-   * ```
-   */
-  resetColumnIfParentResized(parentEditableWidth: number): void {
-    // 부모 엔진 초기화 중 editableWidth가 아직 0(미확정)으로 관측될 수 있다.
-    // 0을 스냅샷으로 기록하면 엔진 완성 후 실제 폭이 "변경"으로 오탐되어
-    // 생성 시 주입된 column: 1과 단설정 값이 리셋된다. 0은 기록하지 않는다.
-    const widthResolved = parentEditableWidth > 0;
-    if (widthResolved
-      && this._lastParentWidthForColumn !== undefined
-      && this._lastParentWidthForColumn !== parentEditableWidth) {
-      this._column = undefined;
-      this._gap = undefined;
-    }
-    if (widthResolved) {
-      this._lastParentWidthForColumn = parentEditableWidth;
-    }
   }
 
   /**

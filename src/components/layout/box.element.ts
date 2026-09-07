@@ -352,17 +352,17 @@ export class LayoutBoxElement extends HTMLElement {
         gcColumns = columnWidth.slice(this.left, this.left + this.width);
         gcGap = gaps.slice(this.left, this.left + this.width - 1);
       } else {
-        // absolute box: 리사이즈 시 _savedColumns/_savedGap을 absWidth에 맞게
-        // 비례 스케일링하여 내부 paragraph column 너비가 box 크기에 맞게 갱신된다.
-        // _savedColumns이 number(컬럼 개수)이면 GC가 width/N으로 자동 계산하므로
-        // 스케일링이 불필요하다. number[]인 경우에만 비례 스케일링을 적용한다.
         const currentAbsWidth = this.absWidth;
         if (typeof this._savedColumns === 'number') {
           gcColumns = this._savedColumns;
         } else {
-          const savedTotalWidth = (this._savedColumns as number[]).reduce((sum, w) => sum + w, 0);
-          if (savedTotalWidth > 0 && currentAbsWidth > 0) {
-            const scale = currentAbsWidth / savedTotalWidth;
+          const savedColTotal = (this._savedColumns as number[]).reduce((sum, w) => sum + w, 0);
+          const gapTotal = Array.isArray(this._savedGap)
+            ? this._savedGap.reduce((sum, g) => sum + g, 0)
+            : ((this._savedColumns as number[]).length - 1) * (this._savedGap as number);
+          const availableForColumns = currentAbsWidth - gapTotal;
+          if (savedColTotal > 0 && availableForColumns > 0) {
+            const scale = availableForColumns / savedColTotal;
             gcColumns = (this._savedColumns as number[]).map(w => w * scale);
           } else {
             gcColumns = this._savedColumns;
@@ -674,14 +674,10 @@ export class LayoutBoxElement extends HTMLElement {
       if (childEl.type === 'box' || childEl.type === 'table') {
         childEl.inheritStyle = childInheritStyle;
       } else if (childEl.type === 'paragraph') {
-        // column/gap 리셋은 부모 편집 폭이 실제로 변경됐을 때만 수행한다
-        // (resetColumnIfParentResized 문서 참조 — 무조건 리셋 시 단설정 롤백 버그).
-        const paragraph = childEl as LayoutParagraphElement;
-        paragraph.resetColumnIfParentResized(this.model!.editableWidth);
-        paragraph.inheritStyle = {
+        childEl.inheritStyle = {
           ...childInheritStyle,
           parentHeight: this.model!.editableTextHeight,
-        }
+        };
       } else if (childEl.type === 'image') {
         childEl.inheritStyle = {
           ...childInheritStyle,

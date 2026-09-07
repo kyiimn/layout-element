@@ -90,7 +90,7 @@ export class TextEditController {
    * 조합 중 텍스트를 엔진 렌더에 반영한다 — 우측 정렬은 엔진이 계산하므로
    * 조합 글자가 항상 올바른 위치에 표시된다.
    */
-  private _isTabLineComposition: boolean = false;
+  private _isRightAlignedComposition: boolean = false;
   private _debounceTimer: number | null = null;
   private _wasFocused: boolean = false;
   private _optimisticSpan: HTMLSpanElement | null = null;
@@ -1766,7 +1766,7 @@ export class TextEditController {
       // 디바운스 렌더(rAF 병합)로 조합 중 텍스트를 실제 엔진 렌더에 반영한다 —
       // 엔진이 우측 정렬을 정확히 계산하므로 흔들림/이탈 없이 표시된다.
       // 음절당 렌더는 rAF로 프레임당 1회로 병합된다.
-      if (this._isTabLineComposition) {
+      if (this._isRightAlignedComposition) {
         this._debouncedRender();
       }
       this._updateCursorPosition();
@@ -1818,16 +1818,20 @@ export class TextEditController {
     this._optimisticSpanWidthMm = 0;
     if (!this._paragraph.model) return;
 
-    // Right Indent Tab이 포함된 라인에서는 조합 optimistic을 생성하지 않는다 —
-    // 우측 정렬과 optimistic의 밀어내기 방향이 반전된다. 대신 _onCompositionUpdate가
-    // _debouncedRender로 조합 중 텍스트를 실제 엔진 렌더에 반영하여 표시한다
-    // (엔진이 정확한 우측 정렬을 계산하므로 흔들림/이탈 없음).
+    // 우측/중앙 정렬 또는 Right Indent Tab이 포함된 라인에서는 조합 optimistic을
+    // 생성하지 않는다 — _shiftFollowingSpans/_computeTempSpanLeft은 좌측 정렬 가정
+    // (오른쪽 밀어내기)으로 설계되어, 우측 정렬에서는 밀어내기 방향이 반전된다.
+    // 대신 _onCompositionUpdate가 _debouncedRender로 조합 중 텍스트를 실제 엔진
+    // 렌더에 반영하여 표시한다 (엔진이 정확한 정렬을 계산하므로 흔들림/이탈 없음).
     const lineInfo = this._mapper.getLineInfoBySourceOffset(startOffset);
     const cursorLine = lineInfo
       ? this._paragraph.model.columnContents[lineInfo.columnIndex]?.[lineInfo.lineIndex]
       : null;
-    this._isTabLineComposition = cursorLine?.parts.some((part) => part.content.includes("\t")) ?? false;
-    if (this._isTabLineComposition) return;
+    const textAlign = this._paragraph.paragraphStyle?.textAlign || DEFAULT_TEXT_ALIGN;
+    const isRightOrCenter = textAlign === 'right' || textAlign === 'center';
+    this._isRightAlignedComposition = isRightOrCenter
+      || (cursorLine?.parts.some((part) => part.content.includes("\t")) ?? false);
+    if (this._isRightAlignedComposition) return;
 
     const placement = this._mapper.getCursorPlacement(startOffset);
     if (placement) {
@@ -1865,7 +1869,7 @@ export class TextEditController {
   private _onCompositionCancel(): void {
     this._isComposing = false;
     this._compositionData = "";
-    this._isTabLineComposition = false;
+    this._isRightAlignedComposition = false;
 
     const model = this._paragraph.model;
     if (model) {
@@ -1888,7 +1892,7 @@ export class TextEditController {
   private _onCompositionEnd(_event: CompositionEvent): void {
     this._isComposing = false;
     this._compositionData = "";
-    this._isTabLineComposition = false;
+    this._isRightAlignedComposition = false;
 
     if (this._debounceTimer !== null) {
       cancelAnimationFrame(this._debounceTimer);
@@ -2047,17 +2051,17 @@ export class TextEditController {
     const span = this._mapper.getSpanByOffset(placement.sourceOffset);
     if (!span) return;
 
-    // Right Indent Tab이 포함된 라인에서는 optimistic span을 생성하지 않는다.
-    // 우측 정렬은 새 글자가 파트 끝에 붙고 기존 글자가 왼쪽으로 밀리지만,
-    // _shiftFollowingSpans/_computeTempSpanLeft는 좌측 정렬 가정(오른쪽 밀어내기)으로
-    // 설계되어 방향이 반전된다. 좌측 세그먼트 타이핑도 같은 파트의 우측 세그먼트
-    // span들을 밀어내므로, 라인에 탭이 있으면 optimistic을 아예 끄고
-    // 디바운스 렌더(같은 rAF 프레임)에 맡긴다.
+    // 우측/중앙 정렬 또는 Right Indent Tab이 포함된 라인에서는 optimistic span을
+    // 생성하지 않는다. _shiftFollowingSpans/_computeTempSpanLeft은 좌측 정렬 가정
+    // (오른쪽 밀어내기)으로 설계되어 방향이 반전된다. 대신 디바운스 렌더(같은 rAF
+    // 프레임)에 맡긴다.
     const lineInfo = this._mapper.getLineInfoBySourceOffset(placement.sourceOffset);
     const cursorLine = lineInfo
       ? this._paragraph.model.columnContents[lineInfo.columnIndex]?.[lineInfo.lineIndex]
       : null;
-    if (cursorLine?.parts.some((part) => part.content.includes("\t"))) return;
+    const textAlign = this._paragraph.paragraphStyle?.textAlign || DEFAULT_TEXT_ALIGN;
+    if ((textAlign === 'right' || textAlign === 'center')
+      || cursorLine?.parts.some((part) => part.content.includes("\t"))) return;
 
     const newSpan = this._createOptimisticSpan(char, sourceOffset, optimisticStyle);
     const leftMm = this._computeTempSpanLeft(span, placement.atEndOfChar);
