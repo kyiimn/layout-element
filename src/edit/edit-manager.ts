@@ -15,6 +15,7 @@ import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, Lay
 import type { BoxRole } from "@/types/layout";
 import { LayoutImageElement } from "@/components/layout/image.element";
 import { ImageEditController } from "./image-edit-controller";
+import { DEFAULT_SHORTCUT_METRIC_STEPS, type ShortcutMetricSteps } from "@/constants";
 
 /** 레이아웃 편집 대상 요소 (box 및 TD) */
 export type LayoutElement = LayoutBoxElement | LayoutTableCellElement;
@@ -257,6 +258,15 @@ export class EditManager {
 
   /** 스페이스 키 누름 여부. 팬 모드에서 마키/드래그를 억제한다. 외부에서 설정. */
   private _spacePressed = false;
+
+  /**
+   * 텍스트 스타일 단축키의 증감량 (엔진 저장 단위).
+   *
+   * 호스트가 업체 표시 단위(Q·pt·U 등)에 맞춰 교체한다 — 단축키 1회가
+   * 표시값 1만큼 움직이게 한다. 기본값은 `DEFAULT_SHORTCUT_METRIC_STEPS`
+   * (기존 상수와 동일)이므로 주입하지 않으면 기존 동작을 유지한다.
+   */
+  shortcutSteps: ShortcutMetricSteps = { ...DEFAULT_SHORTCUT_METRIC_STEPS };
 
   /**
    * 이 EditManager가 관리하는 문서 요소.

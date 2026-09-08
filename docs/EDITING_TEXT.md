@@ -949,14 +949,14 @@ flowchart TD
 | `a` | `Ctrl` 또는 `Cmd` | 전체 선택 |
 | `b` | `Ctrl` 또는 `Cmd` | 선택 영역에 굵게(`fontWeight: 700`) 토글 적용 |
 | `i` | `Ctrl` 또는 `Cmd` | 선택 영역에 기울임(`fontStyle: 'italic'`) 토글 적용 |
-| `.` (물리 키 `Period`) | `Ctrl`/`Cmd`+`Shift` | 선택 영역 글자 크기 **확대** (+0.1mm, per-run 상대 증감) |
-| `,` (물리 키 `Comma`) | `Ctrl`/`Cmd`+`Shift` | 선택 영역 글자 크기 **축소** (−0.1mm, 하한 0.1mm) |
-| `[` (물리 키 `BracketLeft`) | `Ctrl`/`Cmd`+`Alt`+`Shift` | 선택 영역 자간 **증가** (+0.01em, per-run 상대 증감) |
-| `]` (물리 키 `BracketRight`) | `Ctrl`/`Cmd`+`Alt`+`Shift` | 선택 영역 자간 **감소** (−0.01em) |
-| `[` (물리 키 `BracketLeft`) | `Ctrl`/`Cmd`+`Alt` | 선택 영역 장평 **증가** (+0.01, per-run 상대 증감) |
-| `]` (물리 키 `BracketRight`) | `Ctrl`/`Cmd`+`Alt` | 선택 영역 장평 **감소** (−0.01) |
-| `,` (물리 키 `Comma`) | `Ctrl`/`Cmd`+`Alt`+`Shift` | 선택 영역 공백비율 **증가** (+0.01em, per-run 상대 증감) |
-| `.` (물리 키 `Period`) | `Ctrl`/`Cmd`+`Alt`+`Shift` | 선택 영역 공백비율 **감소** (−0.01em, 하한 0) |
+| `.` (물리 키 `Period`) | `Ctrl`/`Cmd`+`Shift` | 선택 영역 글자 크기 **확대** (+`shortcutSteps.fontSize`, 기본 0.1mm, per-run 상대 증감) |
+| `,` (물리 키 `Comma`) | `Ctrl`/`Cmd`+`Shift` | 선택 영역 글자 크기 **축소** (−`shortcutSteps.fontSize`, 하한 0.1mm) |
+| `[` (물리 키 `BracketLeft`) | `Ctrl`/`Cmd`+`Alt`+`Shift` | 선택 영역 자간 **증가** (+`shortcutSteps.letterSpacing`, 기본 0.01em, per-run 상대 증감) |
+| `]` (물리 키 `BracketRight`) | `Ctrl`/`Cmd`+`Alt`+`Shift` | 선택 영역 자간 **감소** (−`shortcutSteps.letterSpacing`) |
+| `[` (물리 키 `BracketLeft`) | `Ctrl`/`Cmd`+`Alt` | 선택 영역 장평 **증가** (+`shortcutSteps.widthRatio`, 기본 0.01, per-run 상대 증감) |
+| `]` (물리 키 `BracketRight`) | `Ctrl`/`Cmd`+`Alt` | 선택 영역 장평 **감소** (−`shortcutSteps.widthRatio`) |
+| `,` (물리 키 `Comma`) | `Ctrl`/`Cmd`+`Alt`+`Shift` | 선택 영역 공백비율 **증가** (+`shortcutSteps.spaceRatio`, 기본 0.01em, per-run 상대 증감) |
+| `.` (물리 키 `Period`) | `Ctrl`/`Cmd`+`Alt`+`Shift` | 선택 영역 공백비율 **감소** (−`shortcutSteps.spaceRatio`, 하한 0) |
 | `c` | `Ctrl` 또는 `Cmd` | 선택 영역을 클립보드에 복사 |
 | `x` | `Ctrl` 또는 `Cmd` | 선택 영역을 잘라내기(클립보드 복사 + 삭제) |
 | `v` | `Ctrl` 또는 `Cmd` | 클립보드에서 평문 붙여넣기 |
@@ -1064,16 +1064,16 @@ const handledReverse = manager.navigateByTab(true);
 |------|------|------|
 | 볼드 토글 | `Ctrl/⌘+B` | `_toggleInlineStyle("fontWeight", 700)`. 선택 영역 전체가 700이면 **문단 기본으로 복귀**(런의 `fontWeight` 필드 제거 → `normalizeRunMap`이 런 언랩/병합), 아니면 700 주입. 문단 기본이 600(타이틀)이면 600↔700로 동작 |
 | 이탤릭 토글 | `Ctrl/⌘+I` | `_toggleInlineStyle("fontStyle", "italic")`. 볼드와 동일한 이진 토글. 해제 = `'normal'` 주입이 아니라 **필드 제거** |
-| 글자 크기 ± | `Ctrl/⌘+Shift+.` 확대 / `Ctrl/⌘+Shift+,` 축소 | **per-run 상대 증감** +0.1mm/−0.1mm. 하한 0.1mm (`SHORTCUT_MIN_FONT_SIZE`) — 엔진 폭 계산이 음수가 되는 것을 방지 |
-| 자간 ± | `Ctrl/⌘+Alt+Shift+[` 증가 / `Ctrl/⌘+Alt+Shift+]` 감소 | per-run 상대 증감 ±0.01em |
-| 장평 ± | `Ctrl/⌘+Alt+[` 증가 / `Ctrl/⌘+Alt+]` 감소 | per-run 상대 증감 ±0.01 (1%p). `scale: ${widthRatio × 0.88} 1` 렌더링에 그대로 반영 |
-| 공백비율 ± | `Ctrl/⌘+Alt+Shift+,` 증가 / `Ctrl/⌘+Alt+Shift+.` 감소 | per-run 상대 증감 ±0.01em. 하한 0 (`SHORTCUT_MIN_SPACE_RATIO`) |
+| 글자 크기 ± | `Ctrl/⌘+Shift+.` 확대 / `Ctrl/⌘+Shift+,` 축소 | **per-run 상대 증감** `shortcutSteps.fontSize`(기본 +0.1mm/−0.1mm). 하한 0.1mm (`SHORTCUT_MIN_FONT_SIZE`) — 엔진 폭 계산이 음수가 되는 것을 방지 |
+| 자간 ± | `Ctrl/⌘+Alt+Shift+[` 증가 / `Ctrl/⌘+Alt+Shift+]` 감소 | per-run 상대 증감 ±`shortcutSteps.letterSpacing` (기본 0.01em) |
+| 장평 ± | `Ctrl/⌘+Alt+[` 증가 / `Ctrl/⌘+Alt+]` 감소 | per-run 상대 증감 ±`shortcutSteps.widthRatio` (기본 0.01, 1%p). `scale: ${widthRatio × 0.88} 1` 렌더링에 그대로 반영 |
+| 공백비율 ± | `Ctrl/⌘+Alt+Shift+,` 증가 / `Ctrl/⌘+Alt+Shift+.` 감소 | per-run 상대 증감 ±`shortcutSteps.spaceRatio` (기본 0.01em). 하한 0 (`SHORTCUT_MIN_SPACE_RATIO`) |
 
 #### 동작 상세
 
 1. **물리 키 판별**: 브래킷·콤마·피리오드 계열은 `event.code`(`BracketLeft`/`BracketRight`/`Comma`/`Period`)로 판별한다. Shift/Alt 조합에서 `event.key`가 레이아웃 의존 문자로 변하기 때문이다 (`Shift+.` → `">"`, macOS `⌥+[` → `"‘"`). Chrome DevTools의 `Cmd+Option+[` 탭 전환과 동일한 관례. 문자 키(b/i)는 기존 a/c/x와 동일하게 `event.key`로 판별한다.
 2. **per-run 상대 증감 (옵션 B)**: `adjustStyleInRange(runMap, start, end, paragraphEffectiveTextStyle, field, adjust)`가 선택 범위 안의 **각 런의 현재값**(런 오버라이드가 없으면 문단 effective 값)을 `adjust` 콜백에 전달하고, run별 결과값을 주입한다. 혼합 선택(5.0mm run과 4.0mm run이 섞인 선택)에서도 런 간 **상대 차이가 보존**된다 — `applyStyleToRange`의 균일 절대값 주입과의 차이점.
-3. **부동소수점 정규화**: `adjust` 콜백이 결과값을 step 정밀도로 반올림한다 (fontSize: ×10, 자간/장평/공백: ×100). 연타 시 `4.0999999...` 같은 오차가 누적되어 `normalizeRunMap`의 문단 기본값 비교(정확 비교)와 `_computeLayoutInputHash`가 어긋나는 것을 방지한다.
+3. **부동소수점 정규화**: `adjust` 콜백이 결과값을 1e-9 정밀도로 반올림한다. 연타 시 `4.0999999...` 같은 오차가 누적되어 `normalizeRunMap`의 문단 기본값 비교(정확 비교)와 `_computeLayoutInputHash`가 어긋나는 것을 방지한다. 호스트가 비십진 스텝(1U = 0.03125em, 0.5pt)을 주입해도 왕복이 안정적이다.
 4. **런 언랩 정리**: 주입 후 `normalizeRunMap`으로 문단 effective와 동일해진 필드를 제거한다 — 문단 기본 자간 −0.1에서 10회 감소 후 다시 10회 증가하면 run이 자동으로 언랩되어 인접 런과 병합된다. 데이터는 항상 최소 런 형태를 유지한다.
 5. **selection 가드**: `_adjustSelectionMetric`은 selection이 없거나 빈 selection(`start >= end`)이면 즉시 반환한다. `_toggleInlineStyle`도 동일한 가드를 가진다 — selection 없는 커서 상태의 스타일 변경은 API로도 열어두지 않는다는 설계 원칙 (§6A.5.1의 `applyTextStyle`은 예외적으로 커서 위치 런/캐스케이드 경로를 지원한다).
 6. **커서/selection 보존**: 증감은 텍스트 길이를 변경하지 않으므로 오프셋은 불변이고, selection은 그대로 유지된다. 주입 후 `model.textContent = plainToInline(...)` → `flushRender()` → `styleChange`/`textChange` 이벤트가 기존 스타일 주입 경로와 동일하게 발생한다.
@@ -1082,7 +1082,7 @@ const handledReverse = manager.navigateByTab(true);
 #### 관련 constants (`src/constants/defaults.ts`)
 
 - `SHORTCUT_BOLD_WEIGHT = 700` — 볼드 토글이 주입하는 굵기. 400~900 사이의 다른 굵기는 단축키 영역 밖(UI 패널의 `applyInlineStyle({ fontWeight })`)이다.
-- `SHORTCUT_FONT_SIZE_STEP = 0.1` (mm), `SHORTCUT_METRIC_STEP = 0.01` (자간/장평/공백 공용)
+- `SHORTCUT_FONT_SIZE_STEP = 0.1` (mm), `SHORTCUT_METRIC_STEP = 0.01` (자간/장평/공백 공용) — **기본 증감량**. 실제 증감은 `EditManager.shortcutSteps`(`ShortcutMetricSteps` 타입, 기본값 `DEFAULT_SHORTCUT_METRIC_STEPS`)를 따른다. 호스트가 업체 표시 단위에 맞춰 이 필드를 교체하면 단축키 1회가 표시값 1만큼 움직는다 — 예: layout-ui의 급(Q) 업체는 fontSize 0.25mm(=1Q), U 업체는 letterSpacing 0.03125em(=1U)를 주입한다.
 - `SHORTCUT_MIN_FONT_SIZE = 0.1`, `SHORTCUT_MIN_SPACE_RATIO = 0` — 폭 계산 음수 방지 하한. `widthRatio`/`letterSpacing`의 극값은 엔진이 이미 감당하는 영역이므로 클램프하지 않는다.
 
 ### 4.2 각 키의 내부 처리 과정

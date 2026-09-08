@@ -19,7 +19,7 @@ export const DEFAULT_PPM = 96 / 25.4;
 export const DEFAULT_IMAGE_DPI = 72;
 export const DEFAULT_SPACE_RATIO = 0.5;
 export const DEFAULT_LETTER_SPACING = -0.1;
-export const DEFAULT_WIDTH_RATIO = 0.8;
+export const DEFAULT_WIDTH_RATIO = 1;
 export const DEFAULT_INDENT = 0;
 export const DEFAULT_TEXT_ALIGN = 'justify';
 export const DEFAULT_VERTICAL_ALIGN = 'top';
@@ -44,6 +44,32 @@ export const SHORTCUT_MIN_FONT_SIZE = 0.1;
 
 /** 텍스트 스타일 단축키로 축소 가능한 최소 공백비율 (em). 폭 계산 음수 방지. */
 export const SHORTCUT_MIN_SPACE_RATIO = 0;
+
+/**
+ * 텍스트 스타일 단축키의 증감량 세트 (엔진 저장 단위).
+ *
+ * 기본값은 위 개별 상수와 동일하다. 호스트(예: layout-ui)가 업체 표시
+ * 단위에 맞춰 `EditManager.shortcutSteps`로 교체한다 — 예: 급(Q) 표시 업체는
+ * fontSize step을 0.25mm(=1Q)로 교체해 단축키 1회가 표시값 1만큼 움직이게 한다.
+ */
+export type ShortcutMetricSteps = {
+  /** 글자 크기 증감량 (mm) */
+  fontSize: number;
+  /** 자간 증감량 (em) */
+  letterSpacing: number;
+  /** 장평 증감량 (ratio) */
+  widthRatio: number;
+  /** 공백비율 증감량 (em) */
+  spaceRatio: number;
+};
+
+/** 단축키 증감량 기본값 — `SHORTCUT_*_STEP` 상수와 동일 (주입 없을 때의 동작). */
+export const DEFAULT_SHORTCUT_METRIC_STEPS: ShortcutMetricSteps = {
+  fontSize: SHORTCUT_FONT_SIZE_STEP,
+  letterSpacing: SHORTCUT_METRIC_STEP,
+  widthRatio: SHORTCUT_METRIC_STEP,
+  spaceRatio: SHORTCUT_METRIC_STEP,
+};
 
 /** 레이아웃 요소 zIndex 최댓값. 90001 이상은 예약 범위이므로 사용 불가 */
 export const Z_INDEX_MAX_LAYOUT = 90000;

@@ -7,7 +7,7 @@ import type { TextLineData } from "@/types/layout/text/text-line.type";
 import type { TextInlineData } from "@/types/layout/text/text-inline.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
-import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA, SHORTCUT_BOLD_WEIGHT, SHORTCUT_FONT_SIZE_STEP, SHORTCUT_METRIC_STEP, SHORTCUT_MIN_FONT_SIZE, SHORTCUT_MIN_SPACE_RATIO } from "@/constants";
+import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA, SHORTCUT_BOLD_WEIGHT, SHORTCUT_MIN_FONT_SIZE, SHORTCUT_MIN_SPACE_RATIO } from "@/constants";
 import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, normalizeInlineContent, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent, adjustStyleInRange, NumericInlineMetricField } from "./run-map";
 import { ColorRegistry } from "@/resource/color-registry";
 
@@ -2972,12 +2972,12 @@ export class TextEditController {
           case "BracketLeft":
             event.preventDefault();
             event.stopPropagation();
-            this._adjustSelectionMetric("widthRatio", SHORTCUT_METRIC_STEP);
+            this._adjustSelectionMetric("widthRatio", this._manager.shortcutSteps.widthRatio);
             return true;
           case "BracketRight":
             event.preventDefault();
             event.stopPropagation();
-            this._adjustSelectionMetric("widthRatio", -SHORTCUT_METRIC_STEP);
+            this._adjustSelectionMetric("widthRatio", -this._manager.shortcutSteps.widthRatio);
             return true;
         }
         return false;
@@ -2987,22 +2987,22 @@ export class TextEditController {
         case "BracketLeft":
           event.preventDefault();
           event.stopPropagation();
-          this._adjustSelectionMetric("letterSpacing", SHORTCUT_METRIC_STEP);
+          this._adjustSelectionMetric("letterSpacing", this._manager.shortcutSteps.letterSpacing);
           return true;
         case "BracketRight":
           event.preventDefault();
           event.stopPropagation();
-          this._adjustSelectionMetric("letterSpacing", -SHORTCUT_METRIC_STEP);
+          this._adjustSelectionMetric("letterSpacing", -this._manager.shortcutSteps.letterSpacing);
           return true;
         case "Comma":
           event.preventDefault();
           event.stopPropagation();
-          this._adjustSelectionMetric("spaceRatio", SHORTCUT_METRIC_STEP);
+          this._adjustSelectionMetric("spaceRatio", this._manager.shortcutSteps.spaceRatio);
           return true;
         case "Period":
           event.preventDefault();
           event.stopPropagation();
-          this._adjustSelectionMetric("spaceRatio", -SHORTCUT_METRIC_STEP);
+          this._adjustSelectionMetric("spaceRatio", -this._manager.shortcutSteps.spaceRatio);
           return true;
       }
       return false;
@@ -3014,12 +3014,12 @@ export class TextEditController {
         case "Period":
           event.preventDefault();
           event.stopPropagation();
-          this._adjustSelectionMetric("fontSize", SHORTCUT_FONT_SIZE_STEP);
+          this._adjustSelectionMetric("fontSize", this._manager.shortcutSteps.fontSize);
           return true;
         case "Comma":
           event.preventDefault();
           event.stopPropagation();
-          this._adjustSelectionMetric("fontSize", -SHORTCUT_FONT_SIZE_STEP);
+          this._adjustSelectionMetric("fontSize", -this._manager.shortcutSteps.fontSize);
           return true;
       }
     }
@@ -3032,8 +3032,11 @@ export class TextEditController {
    *
    * `adjustStyleInRange`로 선택 범위 안의 각 런의 현재값(런 오버라이드가
    * 없으면 문단 effective 값)에 개별 `delta`를 적용한다 — 혼합 선택에서도
-   * 런 간 상대 차이가 보존된다. 부동소수점 오차 누적을 막기 위해 결과값을
-   * step 정밀도(step×100)로 반올림하고, 엔진 폭 계산이 음수가 되지 않도록
+   * 런 간 상대 차이가 보존된다. `delta`는 `EditManager.shortcutSteps`
+   * (호스트가 업체 표시 단위에 맞게 주입)에서 온다. 부동소수점 오차 누적을
+   * 막기 위해 결과값을 1e-9 정밀도로 반올림한다 — 기존 0.1/0.01 스텝뿐 아니라
+   * 호스트가 주입하는 비십진 스텝(1U = 0.03125em, 0.5pt ≈ 0.17639mm)까지
+   * 왕복 안정성을 보장한다 — 엔진 폭 계산이 음수가 되지 않도록
    * 필드별 하한(`SHORTCUT_MIN_FONT_SIZE`, `SHORTCUT_MIN_SPACE_RATIO`)으로
    * 클램프한다. `widthRatio`/`letterSpacing` 상한은 엔진이 이미 감당하는
    * 영역이므로 두지 않는다.
@@ -3063,7 +3066,7 @@ export class TextEditController {
     const model = this._paragraph.model;
     if (!model) return;
 
-    const precision = field === "fontSize" ? 10 : 100;
+    const precision = 1_000_000_000;
     const min = field === "fontSize" ? SHORTCUT_MIN_FONT_SIZE
       : field === "spaceRatio" ? SHORTCUT_MIN_SPACE_RATIO
       : Number.NEGATIVE_INFINITY;
