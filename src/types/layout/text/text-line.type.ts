@@ -58,8 +58,9 @@ export type TextPartData = {
    * `undefined`인 경우 레거시 호환 — `LayoutColumnElement.renderText()`는
    * 기존 flexbox `justify-content` 경로로 폴백한다.
    *
-   * 걸침표(hanging punctuation) 글자의 오프셋은 파트 경계 밖이다:
-   * 행말 걸침은 `partWidth + Σ(선행 걸침 글자 폭)`, 행두 걸침은 `-swidth`.
+   * 걸침표(hanging punctuation) 글자의 오프셋은 파트 경계 부근/밖이다:
+   * 행말 걸침은 첫 부호가 `partWidth - 0.5×w` (반각 돌출 — 폭의 50%만
+   * 밖으로), 이후 run은 전체 폭 스택형. 행두 걸침은 `-swidth`.
    *
    * 글자 폭에는 `letterSpacingMm`이 포함되어 있으므로(see `_charWidthMm` 호출부),
    * `charOffsets` 산출 시 letter-spacing을 별도로 더하지 않는다.
@@ -72,8 +73,8 @@ export type TextPartData = {
    * `content[i]`에 평행한 배열(원시 content 인덱스 기준 — `inlineStyles`와
    * 동일한 인덱싱)로, 걸침 글자 위치에만 값이 있고 나머지는 `undefined`이다.
    *
-   * - `'end'`: 행말 걸침 — 파트 우측 밖으로 걸침
-   *   (`charOffsets[k] = partWidth + Σ(선행 걸침 글자 폭)`)
+   * - `'end'`: 행말 걸침 — 첫 부호가 파트 우측 경계에 폭의 50%만 걸침
+   *   (`charOffsets[k] = partWidth - 0.5×w`, 이후 run은 전체 폭 스택형)
    * - `'start'`: 행두 걸침 — 파트 좌측 밖으로 걸침
    *   (`charOffsets[0] = -swidth`, 이후 글자는 0부터 시작)
    *

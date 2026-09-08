@@ -10,14 +10,27 @@ export type VerticalAlign = 'top' | 'center' | 'bottom';
  * 필드를 생략하면 해당 방향은 OFF이다.
  *
  * @example
- * // 행말 걸침만 켜기
+ * // 행말 걸침만 켜기 (표준 — 오버플로우 시에만 걸침)
  * { lineEnd: true }
  * // 행말 + 행두 걸침 모두 켜기
  * { lineEnd: true, lineStart: true }
+ * // 행말 강제 걸침 — 줄 안에 들어맞아도 항상 컬럼 밖으로 걸침
+ * { lineEnd: 'always' }
  */
 export type HangingPunctuationConfig = {
-  /** 행말 걸침: 닫기 문장부호(`. , ) ] }` 등)가 줄 우측 밖으로 걸침 */
-  lineEnd?: boolean;
+  /**
+   * 행말 걸침: 닫기 문장부호(`. , ) ] }` 등)를 줄 우측 밖으로 걸침.
+   *
+   * - `true` — **표준 걸침** (InDesign ぶら下げ「標準」/ CSS `allow-end`):
+   *   부호가 다음 줄 행두로 넘어갈 위기(오버플로우)일 때만 위 줄 끝으로
+   *   당겨와 걸친다. 줄 안에 들어맞으면 그대로 둔다.
+   * - `'always'` — **강제 걸침** (InDesign ぶら下げ「強制」/ CSS `force-end`):
+   *   줄 끝의 닫기 부호가 이미 컬럼 폭 안에 들어맞아도 컬럼 우측 밖으로
+   *   내보내 걸친다. 나머지 글자가 정렬을 다시 채워 텍스트 가장자리를
+   *   맞춘다. 블록 마지막 줄(`\n` 직전)과 텍스트 마지막 줄은 좌측 정렬
+   *   대상이 아니므로 제외된다.
+   */
+  lineEnd?: boolean | 'always';
 
   /** 행두 걸침: 열기 문장부호(`( [ {` 등)가 다음 줄 시작 왼쪽 밖으로 걸침 */
   lineStart?: boolean;
