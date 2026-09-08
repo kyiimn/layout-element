@@ -1690,6 +1690,7 @@ flowchart TD
    - 위 줄의 마지막 글자를 아래 줄 앞으로 이동
    - 단, 위 줄 마지막 글자 자체가 행말 금지면 **이동하지 않음** (두 금칙 충돌 시 안전 쪽 택함)
    - 단, 위 줄 마지막 파트에 글자가 2개 이상 있어야 함 (1개면 이동 후 빈 줄 방지)
+   - **폭 게이트** (배치 단계 追い出し 통합 후 잔여 위반 폴백): 아래 줄 첫 글자를 위 줄에 합쳤을 때 파트 폭을 초과하면 합치지 않는다. 대신 위 줄의 마지막 글자를 아래 줄로 내보내 금칙 글자와 함께 배치한다(후술 追い出し). 위 줄 파트에 잔여 1자뿐이면 내보낼 수 없으므로 기존 pull-up(넘침 허용)으로 폴백한다.
 
 2. **행말 금지 위반** (위 줄의 마지막 글자가 행말 금지):
    - 아래 줄의 첫 글자를 위 줄 뒤로 이동
@@ -1702,30 +1703,34 @@ flowchart TD
 
 4. **단일 패스**: 한 번의 순회로 처리. 이동으로 인해 새로 발생하는 위반은 추가 패스 없이 허용한다. 시각적으로 1글자 어긋남이 전체 깨짐보다 낫기 때문이다.
 
-### 22.3 설계 결정: 후처리 방식 채택 이유
+### 22.2.1 배치 단계 行頭금칙 追い出し (2026-09 개정)
 
-`_layoutTextIntoColumns()`는 이미 매우 복잡한 문자 배치 로직을 가진다:
+행두 금지 위반의 **1차 해소는 배치 단계에서 이루어진다** — `_layoutColumnsPass`가 새 라인을 생성할 때 적재할 글자가 행두 금지 부호이면, 직전 라인의 마지막 글자들을 그 글자와 함께 새 라인 앞으로 내보낸다 (전통 追い出し/おいだし).
+
+- **가드**: 컬럼/블록 첫 라인 제외, 직전 파트 잔여 2자 이상, 직전 마지막 글자가 행말금칙이면 후처리 위임, 연쇄 pop은 최대 2자(`.”` 같은 연속 부호; 잔여 위반은 후처리 금칙 패스가 폴백)
+- **효과**: 배치 시점에 해소되므로 후속 글자들이 자연 재배치된다. 후처리 지역 교정(이후 줄에 초과 전이)이 원천 차단되고, **라인 폭 위반이 발생하지 않는다** — "라인을 넘어간다면 다음 라인으로" 불변식.
+- **후처리 금칙 패스의 역할 변화**: 배치 追い出し 가드가 스킵한 잔여 위반(블록 경계, 잔여 1자 등)만 후처리에서 교정하며, 폭 게이트(위 규칙 1)로 라인 폭 위반을 만들지 않는다.
+
+### 22.3 설계 결정: 후처리 방식 + 배치 追い出し 통합
+
+`_layoutTextIntoColumns()`는 매우 복잡한 문자 배치 로직을 가진다:
 
 - 3곳에서 줄바꿈 발생 (첫 라인, 다음 파트 시도, 새 라인 생성)
 - 무한 루프 방지 가드 (charWidth > maxPartWidth 시 강제 배치)
 - COVER/PART/오버플로우 분기 처리
 - `endOfBlock`/`endOfText` 플래그 설정
 
-이 로직에 직접 금칙 검사를 끼워넣으면:
-- 분기가 기하급수적으로 늘어남
-- 무한 루프 가드와 금칙 이동이 충돌할 위험
-- 기존 동작 회귀 가능성
+행두 금지 위반은 **새 라인 생성 지점에서만 발생**하므로 배치에 追い出し를 통합해도 분기가 늘지 않는다 (새 라인 생성 직후 1곳). 나머지 위반(행말 금지, 배치 가드가 스킵한 잔여 위반)은 기존 후처리 `_applyLineBreakRules()`가 그대로 담당한다:
 
-후처리 방식은:
-- 기존 배치 로직 변경 없음 (회귀 위험 최소)
-- 금칙 검사 로직 독립 (테스트/수정 용이)
-- 단일 패스로 성능 영향 미미 (O(라인 수))
+- 배치: 行頭금칙 1차 해소 (폭 위반 없음 보장)
+- 후처리: 행말 금지 + 잔여 行頭금칙 (폭 게이트 + 追い出し 폴백)
+- 금칙 검사 로직 독립 유지 (테스트/수정 용이), 단일 패스 성능 영향 미미 (O(라인 수))
 
 ### 22.4 한계
 
 - **컬럼 경계 미처리**: 마지막 컬럼의 마지막 줄과 첫 컬럼의 첫 줄은 다른 컬럼이므로 검사하지 않는다. (컬럼 간 텍스트 흐름은 없으므로 올바름)
-- **블록 경계 미처리**: `\n`으로 분리된 블록 경계에서는 금칙을 검사하지 않는다. 블록은 독립적인 단락이므로, 블록 끝의 행말 금지 문자는 의도된 것이다.
-- **넘침 허용**: 이동한 글자가 파트 폭을 초과해도 허용한다. 래핑 재계산을 하지 않으므로 시각적으로 1글자 정도 넘칠 수 있다.
+- **블록 경계**: 배치 追い出し는 블록 첫 라인을 스킵한다(읽기 순서 보존). 후처리 금칙은 블록 경계 쌍에서도 이동한다 — 기존 동작.
+- **폴백 넘침**: 후처리 폴백(잔여 1자 파트의 pull-up)에서만 시각적 1글자 넘침이 남을 수 있다. 배치 단계 追い出し 경로는 라인 폭 위반을 만들지 않는다.
 - **동일 문자 양쪽 포함**: 따옴표(`'` `"`)는 행두·행말 양쪽에 포함된다. 이 경우 충돌 회피 규칙이 적용되어 이동하지 않는다.
 
 ---
@@ -1740,8 +1745,8 @@ flowchart TD
 
 ```ts
 type HangingPunctuationConfig = {
-  lineEnd?: boolean;   // 행말 걸침: 닫기 부호를 줄 우측 밖으로
-  lineStart?: boolean; // 행두 걸침: 열기 부호를 다음 줄 시작 왼쪽 밖으로
+  lineEnd?: boolean | 'always'; // 행말 걸침: 닫기 부호를 줄 우측 밖으로
+  lineStart?: boolean;          // 행두 걸침: 열기 부호를 다음 줄 시작 왼쪽 밖으로
 };
 hangingPunctuation?: boolean | HangingPunctuationConfig;
 ```
@@ -1751,6 +1756,9 @@ hangingPunctuation?: boolean | HangingPunctuationConfig;
 | `undefined` / `false` | OFF — 기존 배치와 byte 단위로 동일 (기본값) |
 | `true` | 행말 + 행두 모두 ON |
 | `{ lineEnd: true }` 등 | 방향별 설정 (생략 필드 = OFF) |
+| `{ lineEnd: 'always' }` | **행말 강제 걸침** — 표준 걸침 동작을 포함하되, 컬럼 폭 안에 들어맞은 닫기 부호도 우측 밖으로 내보낸다 |
+
+`lineEnd: 'always'`는 InDesign ぶら下げ「強制」/ CSS `hanging-punctuation: force-end`에 대응하고, `true`는 InDesign「標準」/ CSS `allow-end`(전통 burasagari — 오버플로우 시에만 걸침)에 대응한다. `'always'`는 행말 방향 전용 확장이며 `lineStart`에는 없다.
 
 effective 체인(주입값 → 상속값 → 기본값 `false`)을 따르며, 문단 스타일이므로 InheritStyle 캐스케이드로 전파된다. 캐시 해시(`_computeLayoutInputHash`, `_computePrefixHash`)에 `hp:` 키로 포함되어 토글 시 stale 캐시 없이 재래핑된다.
 
@@ -1786,6 +1794,14 @@ flowchart TD
 2. **행말 걸침** (next 첫 글자가 닫기 부호): next 첫 파트의 선행 닫기 부호 run **전체**를 cur 마지막 파트 끝으로 이동하고 각 글자에 `hangs = 'end'`로 마킹. 가드: `run < nextFirstPart.content.length` (next 첫 파트에 최소 1자 잔존 — 전체를 당기면 빈 줄), cur 마지막 파트의 절대 우측 끝이 컬럼 폭과 일치 (`Σ(모든 파트 left) + Σ(모든 파트 width) === columnWidth` — 오버랩 파트 옆 틈으로는 걸치지 않는다. `part.left`는 이후 파트에서 갭 상대값이므로 누적 공식 필수).
 3. **금칙 폴백**: 어느 걸침도 적용 안 되면 금칙 패스가 기존대로 교정한다.
 
+`lineEnd: 'always'`(강제 걸침)에서는 페어 패스 후 **per-line 패스**가 추가 실행된다:
+
+4. **행말 강제 걸침**: 블록의 마지막 줄이 아닌 줄(`endOfBlock`/`endOfText` 없음)의 마지막 파트가 컬럼 우측 끝에 닿고 닫기 부호 run으로 끝나면, 그 run 전체에 `hangs = 'end'`를 마킹한다. **글자 이동은 없다** — 줄 구성/글자 배치는 표준 걸침과 동일하고 마킹만 추가된다. `_computeCharOffsets`(§23.4)가 마킹된 부호를 정렬에서 제외하고 visible 글자로 첫 부호의 안쪽 절반을 제외한 폭까지 다시 채우므로, 텍스트 가장자리(부호 직전 글자)가 부호의 왼쪽 끝에 맞닿고 부호는 폭의 50%만 컬럼 밖으로 나간다. 뒤에서 앞으로 스캔하며 기존 `hangs` 슬롯(케이스 2가 채운 것) 위에서 멈추므로 두 패스의 마킹이 자연 병합된다. 가드: 탭 파트 제외, `runStart > 0`(최소 1자 visible 잔존), 블록 마지막 줄 제외(좌측 정렬 줄은 우측 끝을 채우지 않아 강제 걸침하면 가장자리가 어긋남).
+
+`lineStart` ON에서는 케이스 4와 함께 **per-line 패스**가 하나 더 실행된다:
+
+5. **라인 첫 글자 열기 부호 행두 걸침**: 라인 시작 파트의 첫 글자가 열기 부호면 `hangs[0] = 'start'`로 마킹해 파트 좌측 밖(`-swidth`)으로 내보낸다 (CSS `hanging-punctuation: first`의 전 라인 확장 — 신문 조판 관례상 블록/컬럼 첫 라인 포함). **글자 이동은 없다.** 열기 부호는 행두가 **허용**되므로(행두금칙 아님) 배치·금칙으로는 움직이지 않고, 케이스 1(위 줄 끝 열기 부호를 내보내는 이동형)과 달리 이미 라인 첫 글자로 내려온 부호를 다룬다. 가드: 첫 파트 `left === 0` (컬럼 좌측 끝 엣지 게이트), 탭 파트 제외, 첫 파트 잔여 2자 이상(마킹 시 visible 글자 잔존), 케이스 1이 이미 마킹한 슬롯은 스킵(중복 방지).
+
 **엣지 게이트의 의미**: 걸침 방향이 실제로 컬럼 경계를 벗어나야 한다. 마지막 파트가 이미지 옆 좁은 자유 영역(컬럼 중간)으로 끝나는 라인에서 걸치면 부호가 이미지 위로 덮이므로, 이 경우 걸침을 스킵해 금칙 폴백(in-flow)으로 안전하게 처리한다.
 
 **가드 (전체)**:
@@ -1798,8 +1814,8 @@ flowchart TD
 
 `TextPartData.hangs?: ('start' | 'end' | undefined)[]`는 `content`/`inlineStyles`와 평행한 raw 인덱스 배열로 걸침 글자를 마킹한다. `_computeCharOffsets()`는 이를 소비한다:
 
-- **정렬 산출**: 걸침 글자를 폭 합계(`totalWidth`)와 justify 분모에서 **제외**하고, visible 글자만으로 정렬(left/right/center/justify)을 계산한다. justify의 균등 간격은 `remaining / (visibleCount - 1)` — 걸침 글자가 없을 때와 공식이 연속된다.
-- **행말 걸침 배치**: `charOffsets[k] = partWidth + Σ(선행 걸침 글자 폭)` — 첫 걸침 글자의 왼쪽 끝이 정확히 파트 우측 경계에 붙고, run이면 스택형으로 이어진다. 각 글자의 **전체 폭**이 파트 밖으로 나간다 (전각 걸침).
+- **정렬 산출**: 걸침 글자를 폭 합계(`totalWidth`)와 justify 분모에서 **제외**하고, visible 글자만으로 정렬(left/right/center/justify)을 계산한다. justify의 균등 간격은 `remaining / (visibleCount - 1)` — 걸침 글자가 없을 때와 공식이 연속된다. 행말 걸침 시 visible이 채우는 기준 폭은 첫 부호의 안쪽 절반만큼 줄어든다(아래).
+- **행말 걸침 배치 (반각 돌출, InDesign ぶら下げ二分 방식)**: 첫 걸침 글자는 `charOffsets[k] = partWidth - 0.5 × w₀` — 부호 폭의 **50%만** 파트 우측 밖으로 나가고 나머지 절반은 파트 안쪽에 걸친다. run이면 이후 글자는 전체 폭만큼 스택형으로 밀린다 (`+ w` 누적). visible 글자의 정렬 기준 폭도 첫 부호의 안쪽 절반만큼 줄어든다(`partWidth - 0.5 × w₀`) — visible 텍스트 가장자리와 부호의 왼쪽 끝이 맞닿는다.
 - **행두 걸침 배치**: `charOffsets[0] = -swidth` — 부호의 오른쪽 끝이 파트 좌측 경계(0)에 붙고, 이후 글자는 0부터 시작한다 (걸침 글자가 파트 내 자리를 차지하지 않는다).
 
 걸침 글자는 문장부호이므로 공백이 아니며, 항상 strip 범위(`_computeStripRange`) 안에 있다.
@@ -1813,7 +1829,7 @@ flowchart TD
 | DOM 렌더링 (`renderText`) | `charOffsets[j]`를 `left`로 절대 배치하므로 자동 — 파트 밖 좌표도 그대로 페인트된다. `data-char-offset`에 음수/초과값이 기록된다 |
 | `getCharRect` | 걸침 글자(`hangs[rawIdx]` 정의)의 폭을 offset 차분이 아닌 `getCharWidths().swidth`로 계산 — `part.width - offset`이 음수가 되는 것을 방어 |
 | `buildParagraphPrintPostData` | 이미 `charOffsets[k]` + `getCharWidths().swidth`를 소비하므로 **변경 없이** print 패리티 성립 |
-| `getOffsetFromPoint` | 컬럼 탐색 게이트를 컬럼별 걸침 돌출 폭(`_computeHangExtents`: 좌측 = 행두 걸침 최대 폭, 우측 = 행말 걸침 run 폭 합의 최대)만큼 확장하고, 파트 히트 범위도 확장한다. 걸침 글자의 클릭 중점은 `offset + swidth` 기준 |
+| `getOffsetFromPoint` | 컬럼 탐색 게이트를 컬럼별 걸침 돌출 폭(`_computeHangExtents`: 좌측 = 행두 걸침 최대 폭, 우측 = 행말 걸침 run 폭 합 − 첫 부호 폭의 50%)만큼 확장하고, 파트 히트 범위도 확장한다. 걸침 글자의 클릭 중점은 `offset + swidth` 기준 |
 | `genColumnStyle` | 걸침 ON 시 `overflow: 'visible'` (OFF 시 기존 `'hidden'` 유지) |
 
 **클리핑 해제**: 걸침 글자는 컬럼/문단 호스트 밖으로 렌더링되므로, 걸침 ON 시 `genColumnStyle`의 컬럼 `overflow`와 `LayoutParagraphElement._applyStyle`의 `:host` `overflow`가 모두 `'visible'`로 전환된다. OFF 시 기존 `'hidden'` 방어 동작이 byte 동일하게 유지된다. 걸침 글자는 기본적으로 컬럼 간 갭/문서 여백으로 나가며, 갭이 걸침 폭보다 좁으면 인접 컬럼 텍스트와 시각적으로 겹칠 수 있다 (신문 조판 관례상 갭 ≥ 전각 1자이므로 드물다 — 알려진 동작, 클램프 없음).
@@ -1826,4 +1842,4 @@ flowchart TD
 - **단일 패스**: 한 번의 순회로 처리한다. 걸침 이동으로 새로 발생하는 위반은 추가 패스 없이 허용한다 (금칙 §22.2 규칙 4와 동일 철학).
 - **인라인 스타일 이동**: 걸침 이동은 `inlineStyles` 평행 배열을 함께 이동하므로 런 오버라이드가 유지된다 (금칙 이동과 동일 패턴).
 
-검증: `npx tsx scripts/verify-hanging-punctuation.mjs` (55항목 — OFF 기준선/행말·행두/trailing run/justify/getCharRect/print 패리티/히트테스트/엣지 게이트/블록 경계/prefix 캐시/API), `npx tsx scripts/verify-hanging-punctuation-browser.mjs` (11항목 — 실제 화면 페인트: 파트 밖 span rect, overflow 해제, shadowRoot 히트테스트, 원상 복구).
+검증: `npx tsx scripts/verify-hanging-punctuation.mjs` (82항목 — OFF 기준선/행말·행두/trailing run/justify/getCharRect/print 패리티/히트테스트/엣지 게이트/블록 경계/prefix 캐시/API/강제 걸침), `npx tsx scripts/verify-hanging-punctuation-browser.mjs` (11항목 — 실제 화면 페인트: 파트 밖 span rect, overflow 해제, shadowRoot 히트테스트, 원상 복구).
