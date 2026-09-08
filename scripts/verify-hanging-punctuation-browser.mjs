@@ -157,12 +157,14 @@ const r = await page.evaluate(async () => {
   out.onColOverflow = getComputedStyle(p.querySelector('x-layout-column')).overflow;
   out.onHostOverflow = getComputedStyle(p).overflow;
 
-  // 걸침 span DOM — data-char-offset(엔진 산출 mm)가 partWidth 이상
+  // 걸침 span DOM — 반각 돌출: 첫 걸침 span의 data-char-offset은
+  // partWidth - 0.5×첫부호폭 (경계 50% 돌출). firstHungIdx로 span을 직접 찾는다.
   const col0 = p.querySelector('x-layout-column');
   const spans = [...col0.shadowRoot.querySelectorAll('span[data-source-offset]')];
+  const firstHangDotW = engine.getCharWidths(onPart.content[firstHung] ?? '.').swidth;
   const hungSpan = spans.find(s => {
     const off = parseFloat(s.dataset.charOffset);
-    return Number.isFinite(off) && off >= onPart.width - 1e-6;
+    return Number.isFinite(off) && off >= onPart.width - 0.5 * firstHangDotW - 1e-6;
   });
   out.hungSpanExists = hungSpan !== undefined;
   if (hungSpan) {
@@ -224,17 +226,20 @@ check('B2: OFF 상태 overflow hidden (기존 동작)', r.offColOverflow === 'hi
 check('B3: ON 토글 — 닫기 부호 run이 위 줄 끝으로 당겨짐', r.onHangCount >= 1 && r.onLine0Len === r.perLine + 6,
   `hang=${r.onHangCount}, 라인0 ${r.onLine0Len}자 (기대 ${r.perLine + 6})`);
 check('B4: 아래 줄이 부호로 시작하지 않음', r.onLine1First === '바', `first='${r.onLine1First}'`);
-check('B5: 첫 걸침 offset === partWidth', r.firstHungIdx >= 0 && approx(r.firstHungOffset, r.partWidth),
-  `offset=${r.firstHungOffset?.toFixed(3)} vs partWidth=${r.partWidth?.toFixed(3)}`);
+check('B5: 첫 걸침 offset === partWidth - 반각 (50% 돌출)',
+  r.firstHungIdx >= 0 && approx(r.partWidth - r.firstHungOffset, 0.5 * r.dotW),
+  `offset=${r.firstHungOffset?.toFixed(3)} vs partWidth=${r.partWidth?.toFixed(3)} (돌출 ${(r.partWidth - r.firstHungOffset).toFixed(3)}mm = 50%)`);
 check('B6: 걸침 run 스택형 오프셋', r.hungOffsets.length >= 2 && r.hungOffsets.slice(1).every((v, i) => approx(v - r.hungOffsets[i], r.dotW)),
   `offsets=[${r.hungOffsets.map(v => v.toFixed(2)).join(', ')}]`);
 check('B7: ON 상태 overflow visible (클리핑 해제)', r.onColOverflow === 'visible' && r.onHostOverflow === 'visible',
   `col=${r.onColOverflow}, host=${r.onHostOverflow}`);
-check('B8: 걸침 span DOM 존재 + 엔진 좌표 반영', r.hungSpanExists && approx(r.hungSpanOffsetAttr, r.partWidth),
-  `data-char-offset=${r.hungSpanOffsetAttr?.toFixed(3)}`);
-check('B9: 걸침 span 화면 rect가 컬럼 밖으로 연장',
-  r.hungRect && r.hungRect.left >= r.colRect.right - 1.0 && r.hungRect.right > r.colRect.right + 1.0 && r.hungRect.width > 0 && r.hungRect.height > 0,
-  `span[${r.hungRect?.left.toFixed(1)},${r.hungRect?.right.toFixed(1)}]px, col right=${r.colRect?.right.toFixed(1)}px`);
+check('B8: 걸침 span DOM 존재 + 엔진 좌표 반영', r.hungSpanExists && approx(r.hungSpanOffsetAttr, r.firstHungOffset),
+  `data-char-offset=${r.hungSpanOffsetAttr?.toFixed(3)} === 엔진 첫 걸침 offset ${r.firstHungOffset?.toFixed(3)}`);
+check('B9: 걸침 span 화면 rect가 컬럼 경계를 넘어 50% 돌출',
+  r.hungRect && r.hungRect.left < r.colRect.right && r.hungRect.right > r.colRect.right + 1.0
+    && (r.colRect.right - r.hungRect.left) / r.hungRect.width > 0.25
+    && r.hungRect.width > 0 && r.hungRect.height > 0,
+  `span[${r.hungRect?.left.toFixed(1)},${r.hungRect?.right.toFixed(1)}]px, col right=${r.colRect?.right.toFixed(1)}px — 안쪽 ${((r.colRect.right - r.hungRect.left) / r.hungRect.width * 100).toFixed(0)}%`);
 check('B10: 걸침 span 실제 페인트 — document 히트가 컬럼 호스트로 리타기팅 + shadowRoot 히트가 span 도달',
   r.hitEl !== null
     && r.hitEl.docHitTag === 'X-LAYOUT-COLUMN'
