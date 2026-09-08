@@ -544,19 +544,34 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   /**
    * 걸침표(hanging punctuation) 방향별 설정을 정규화한다.
    *
-   * `hangingPunctuation` 스타일 값(`true`/`false`/객체)을 방향별 boolean으로
-   * 변환한다. effective 체인(주입값 → 상속값 → 기본값 `false`)을 따른다.
+   * `hangingPunctuation` 스타일 값(`true`/`false`/객체)을 방향별 boolean과
+   * 강제 걸침 여부로 변환한다. effective 체인(주입값 → 상속값 → 기본값
+   * `false`)을 따른다.
    *
-   * @returns `{ lineEnd, lineStart }` — 각 방향 걸침 ON 여부
+   * `lineEnd: 'always'`는 **강제 걸침**(InDesign ぶら下げ「強制」/ CSS
+   * `force-end`) — `lineEnd: true`(표준 걸침)의 동작을 포함하되, 줄 안에
+   * 들어맞는 닫기 부호도 컬럼 밖으로 내보낸다.
+   *
+   * @returns `{ lineEnd, lineStart, lineEndAlways }` — 각 방향 걸침 ON 여부와
+   *   행말 강제 걸침 여부. `lineEndAlways`가 `true`이면 `lineEnd`도 `true`다.
    * @throws 없음
+   *
+   * @example
+   * ```ts
+   * // hangingPunctuation: { lineEnd: 'always' } →
+   * // { lineEnd: true, lineStart: false, lineEndAlways: true }
+   * // hangingPunctuation: true →
+   * // { lineEnd: true, lineStart: true, lineEndAlways: false }
+   * ```
    */
-  private _hangingConfig(): { lineEnd: boolean; lineStart: boolean } {
+  private _hangingConfig(): { lineEnd: boolean; lineStart: boolean; lineEndAlways: boolean } {
     const v = this.effectiveParagraphStyle.hangingPunctuation;
-    if (v === true) return { lineEnd: true, lineStart: true };
+    if (v === true) return { lineEnd: true, lineStart: true, lineEndAlways: false };
     if (typeof v === "object" && v !== null) {
-      return { lineEnd: v.lineEnd === true, lineStart: v.lineStart === true };
+      const lineEndAlways = v.lineEnd === "always";
+      return { lineEnd: v.lineEnd === true || lineEndAlways, lineStart: v.lineStart === true, lineEndAlways };
     }
-    return { lineEnd: false, lineStart: false };
+    return { lineEnd: false, lineStart: false, lineEndAlways: false };
   }
 
   /**
@@ -609,6 +624,15 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * 2. **행말 걸침**: 아래 줄 첫 글자가 닫기 부호(행두 금지)면 아래 줄의
    *    선행 닫기 부호 run 전체를 위 줄 끝으로 당겨 우측 밖에 건다.
    * 3. 둘 다 해당 없으면 금칙 패스가 기존대로 교정한다.
+   *
+   * `lineEnd: 'always'`(강제 걸침)에서는 위 페어 패스 후 **per-line 패스**가
+   * 추가로 실행된다 (InDesign ぶら下げ「強制」/ CSS `force-end` 대응):
+   * 4. **행말 강제 걸침**: 블록의 마지막 줄이 아닌 줄의 끝에서, 이미 컬럼
+   *    폭 안에 들어맞은 닫기 부호 run도 `hangs='end'`로 마킹해 컬럼 우측
+   *    밖으로 내보낸다. 글자 이동은 없다 — 줄 구성은 그대로 두고 마킹만
+   *    추가하며, `_computeCharOffsets`가 나머지 글자로 정렬 폭을 다시
+   *    채운다. 결과적으로 텍스트 가장자리(부호 직전 글자)가 컬럼 끝에
+   *    맞고 부호만 밖으로 튀어나온다.
    *
    * 가드:
    * - 엣지 게이트: 걸침 방향이 컬럼 경계를 벗어나야 한다 (마지막 파트
@@ -698,7 +722,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         }
 
         // 2) 행말 걸침: 아래 줄 선행 닫기 부호 run을 위 줄 끝으로 당겨
-        //    우측 밖에 건다 (스택형 — 각 글자 전체 폭이 파트 밖으로).
+        //    파트 우측 경계에 건다 — 렌더링 시 첫 부호는 폭의 50%만 밖으로
+        //    돌출되고(반각 돌출, _computeCharOffsets), 이후 run은 스택형.
         if (
           cfg.lineEnd &&
           isHangableLineEnd(nextFirstPart.content[0]!) &&
@@ -735,7 +760,95 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         }
       }
     }
+
+    // 4) 행말 강제 걸침 (lineEnd: 'always'): 블록의 마지막 줄이 아닌 줄의
+    //    끝에서, 이미 들어맞은 닫기 부호 run도 컬럼 우측 밖으로 내보낸다.
+    //    글자 이동 없이 hangs 마킹만 추가한다. 페어 패스(케이스 2)가 당겨온
+    //    run과 자연 병합된다 — 뒤에서 앞으로 스캔하며 연속 닫기 부호를
+    //    한 번에 마킹한다.
+    if (cfg.lineEndAlways) {
+      for (let col = 0; col < this._columnContents.length; col++) {
+        const columnContent = this._columnContents[col];
+        const columnWidth = this._columnWidths[col] ?? 0;
+        for (let i = 0; i < columnContent.length; i++) {
+          const line = columnContent[i];
+          // 블록의 마지막 줄(endOfBlock/endOfText)은 좌측 정렬로 렌더링되어
+          // 우측 끝을 채우지 않는다 — 강제 걸침하면 텍스트 가장자리가
+          // 어긋나므로 제외한다.
+          if (line.endOfBlock === true || line.endOfText === true) continue;
+          if (!this._isLastPartAtColumnRightEdge(line, columnWidth)) continue;
+
+          const lastPart = line.parts[line.parts.length - 1];
+          if (lastPart.content.includes(RIGHT_INDENT_TAB_CHAR)) continue;
+
+          // 뒤에서 앞으로 연속 닫기 부호 run을 찾아 마킹한다.
+          // 기존 hangs='end' 슬롯(케이스 2가 채운 것) 위에서 자연히
+          // 멈춘다 — 마킹된 run은 이미 걸침 상태이므로 중복 마킹하지
+          // 않고, 그 앞의 미마킹 부호만 추가로 걸친다.
+          let k = lastPart.content.length - 1;
+          while (k >= 0 && isHangableLineEnd(lastPart.content[k]!)) {
+            if (lastPart.hangs?.[k] !== undefined) break;
+            k--;
+          }
+          const runStart = k + 1;
+          if (runStart === lastPart.content.length) continue;
+          // 최소 1자의 visible 글자가 남아야 한다.
+          if (runStart === 0) continue;
+
+          lastPart.hangs ??= new Array(lastPart.content.length).fill(undefined);
+          for (let m = runStart; m < lastPart.content.length; m++) {
+            lastPart.hangs[m] = 'end';
+          }
+          corrected.add(`${col}:${i}`);
+        }
+      }
+    }
+
+    // 5) 행두 걸침 (라인 첫 글자 열기 부호): 라인 시작 파트의 첫 글자가
+    //    열기 부호면 좌측 밖으로 내보내 마킹한다 (CSS hanging-punctuation:
+    //    first의 전 라인 확장 — 신문 조판 관례). 글자 이동은 없다.
+    //    케이스 1이 이미 마킹한 슬롯은 건드리지 않는다. 가드: 첫 파트가
+    //    컬럼 좌측 끝(left === 0)에서 시작, 탭 파트 제외, 잔여 1자 파트는
+    //    마킹하면 visible 글자가 없어지므로 제외.
+    if (cfg.lineStart) {
+      for (let col = 0; col < this._columnContents.length; col++) {
+        const columnContent = this._columnContents[col];
+        for (let i = 0; i < columnContent.length; i++) {
+          const line = columnContent[i];
+          const firstPart = line.parts[0];
+          if (firstPart === undefined || firstPart.content.length < 2) continue;
+          if (firstPart.content[0] === RIGHT_INDENT_TAB_CHAR) continue;
+          if (firstPart.content.includes(RIGHT_INDENT_TAB_CHAR)) continue;
+          if (firstPart.left !== 0) continue;
+          if (!isHangableLineStart(firstPart.content[0]!)) continue;
+          if (firstPart.hangs?.[0] !== undefined) continue;
+
+          firstPart.hangs ??= new Array(firstPart.content.length).fill(undefined);
+          firstPart.hangs[0] = 'start';
+          corrected.add(`${col}:${i}`);
+        }
+      }
+    }
     return corrected;
+  }
+
+  /**
+   * 파트에 적재된 글자들의 배치 폭 합계(mm)를 계산한다.
+   *
+   * 금칙 패스의 폭 게이트가 pull-up 전후의 파트 폭 위반을 판정할 때
+   * 사용한다. 배치 패스와 동일한 폭 공식(`_charWidthMm`)을 글자별로
+   * 누적한다 — `charOffsets`는 아직 산출 전이므로 쓰지 않는다.
+   *
+   * @param part - 폭을 계산할 파트
+   * @returns 글자 폭 합계 (mm). 빈 파트는 0.
+   * @throws 없음
+   */
+  private _partContentWidthMm(part: TextPartData): number {
+    let sum = 0;
+    for (let i = 0; i < part.content.length; i++) {
+      sum += this._charWidthMm(part.content[i]!, part.inlineStyles?.[i]);
+    }
+    return sum;
   }
 
   /**
@@ -772,16 +885,53 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 
         if (isLineStartForbidden(nextFirstChar)) {
           if (!isLineEndForbidden(curLastChar)) {
+            // 폭 게이트: 금칙 글자를 cur 끝에 올렸을 때 파트 폭을 초과하는지
+            // 미리 계산한다. 초과하면 넘겨받지 않고 追い出시(おいだし)로
+            // 전환한다 — cur의 마지막 글자를 next 앞으로 내려 금칙 글자와
+            // 함께 배치함으로써 cur의 폭 위반을 만들지 않는다.
+            const nextCharWidth = this._charWidthMm(nextFirstChar, nextFirstPart.inlineStyles?.[0]);
+            const curUsedWidth = this._partContentWidthMm(curLastPart);
+            const fits = curUsedWidth + nextCharWidth <= curLastPart.width + 1e-6;
+
             const movedStyle = nextFirstPart.inlineStyles?.shift();
             const movedHang = nextFirstPart.hangs?.shift();
-            curLastPart.content.push(nextFirstChar);
-            if (curLastPart.inlineStyles) curLastPart.inlineStyles.push(movedStyle);
-            else if (movedStyle !== undefined) {
-              curLastPart.inlineStyles = new Array(curLastPart.content.length - 1).fill(undefined);
-              curLastPart.inlineStyles.push(movedStyle);
-            }
-            if (curLastPart.hangs) curLastPart.hangs.push(movedHang);
             nextFirstPart.content.shift();
+            if (fits) {
+              curLastPart.content.push(nextFirstChar);
+              if (curLastPart.inlineStyles) curLastPart.inlineStyles.push(movedStyle);
+              else if (movedStyle !== undefined) {
+                curLastPart.inlineStyles = new Array(curLastPart.content.length - 1).fill(undefined);
+                curLastPart.inlineStyles.push(movedStyle);
+              }
+              if (curLastPart.hangs) curLastPart.hangs.push(movedHang);
+            } else {
+              // 追い出시: cur의 마지막 글자를 next 앞으로 내보낸 뒤 금칙 글자를
+              // 그 뒤에 붙인다 — next 행두가 일반 글자가 되고 cur은 폭 이내로
+              // 줄어든다. cur 파트가 빌 수 있으므로 잔여 1자 미만이면 금칙
+              // 글자만 유지하는 기존 동작(넘침)으로 폴백한다.
+              const outStyle = curLastPart.inlineStyles?.pop();
+              const outHang = curLastPart.hangs?.pop();
+              const outChar = curLastPart.content.pop();
+              if (curLastPart.content.length > 0) {
+                nextFirstPart.content.unshift(nextFirstChar);
+                nextFirstPart.content.unshift(outChar!);
+                if (nextFirstPart.inlineStyles) {
+                  nextFirstPart.inlineStyles.unshift(movedStyle);
+                  nextFirstPart.inlineStyles.unshift(outStyle);
+                } else {
+                  nextFirstPart.inlineStyles = new Array(nextFirstPart.content.length - 2).fill(undefined);
+                  nextFirstPart.inlineStyles.unshift(outStyle);
+                  nextFirstPart.inlineStyles.unshift(movedStyle);
+                }
+                nextFirstPart.hangs ??= new Array(nextFirstPart.content.length - 2).fill(undefined);
+                nextFirstPart.hangs.unshift(movedHang);
+                nextFirstPart.hangs.unshift(outHang);
+              } else {
+                curLastPart.content.push(nextFirstChar);
+                if (curLastPart.inlineStyles) curLastPart.inlineStyles.push(movedStyle);
+                if (curLastPart.hangs) curLastPart.hangs.push(movedHang);
+              }
+            }
           }
           continue;
         }
@@ -811,9 +961,10 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * `_applyLineBreakRules()`) 이후에 호출되어 `TextPartData.charOffsets`를 채운다.
    *
    * 걸침 글자(`TextPartData.hangs` 마킹)는 정렬 폭 합계와 justify 분모에서
-   * 제외하고 파트 경계 밖에 배치한다 — 행말: `partWidth + Σ(선행 걸침 폭)`,
-   * 행두: `-swidth` (이후 글자는 0부터). 탭(`\t`) 파트에는 걸침이 없으므로
-   * 기존 탭 정렬 경로를 그대로 사용한다.
+   * 제외한다 — 행말: 첫 걸침 부호를 `partWidth - 0.5×w` (반각 돌출)에
+   * 배치하고 이후 run은 전체 폭 스택형, 행두: `-swidth` (이후 글자는
+   * 0부터). 탭(`\t`) 파트에는 걸침이 없으므로 기존 탭 정렬 경로를
+   * 그대로 사용한다.
    *
    * @returns 반환값 없음. `TextPartData.charOffsets`를 제자리에서 채운다.
    * @throws 없음
@@ -952,9 +1103,18 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
           }
           if (startHangIdx !== -1 || endHangStart < strippedCount) {
             // 정렬 대상은 걸침 글자를 제외한 visible 글자만이다. 폭 합계와
-            // justify 분모 모두 visible 기준으로 산출하고, 걸침 글자는
-            // 파트 경계 밖(행말: partWidth + 선행 걸침 폭 누적, 행두: -swidth)에
-            // 배치한다.
+            // justify 분모 모두 visible 기준으로 산출한다.
+            //
+            // 행말 걸침('end')은 **반각 돌출**이다 (InDesign ぶら下げ二分 방식):
+            // 걸침 run의 첫 부호가 파트 우측 경계에 폭의 50%만 걸치도록
+            // 배치한다 (`offset₀ = partWidth - 0.5 × w₀`) — 부호의 안쪽
+            // 절반은 파트 안, 바깥 절반은 컬럼 밖. visible 글자는 첫 부호의
+            // 안쪽 절반을 제외한 폭(`partWidth - 0.5 × w₀`)까지만 채워
+            // 정렬하므로 visible 끝과 부호 시작이 맞닿는다. run이 이어지면
+            // 둘째 부호부터 전체 폭만큼 밖으로 스택된다.
+            // 행두 걸침('start')은 부호 전체를 파트 좌측 밖(-swidth)에
+            // 둔다 — 열기 부호는 안쪽 절반만 남기면 자간이 시각적으로
+            // 트이므로 기존 전각 방식을 유지한다.
             let visibleWidth = 0;
             let visibleCount = 0;
             for (let i = 0; i < strippedCount; i++) {
@@ -962,7 +1122,13 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
               visibleWidth += charWidths[i]!;
               visibleCount++;
             }
-            const visibleRemaining = Math.max(0, partWidth - visibleWidth);
+            // 행말 걸침 시 visible이 채우는 파트 폭: 첫 걸침 부호의 안쪽
+            // 절반(파트 안에 남는 몫)만큼 줄어든다.
+            let visiblePartWidth = partWidth;
+            if (endHangStart < strippedCount) {
+              visiblePartWidth -= charWidths[endHangStart]! * 0.5;
+            }
+            const visibleRemaining = Math.max(0, visiblePartWidth - visibleWidth);
 
             let hangAlign: "left" | "right" | "center" | "justify";
             if (textAlign === "center") hangAlign = "center";
@@ -982,7 +1148,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
             }
 
             if (startHangIdx !== -1) offsets[startHangIdx] = -charWidths[startHangIdx]!;
-            let hangCursor = partWidth;
+            // 행말 걸침 run: 첫 부호는 반각만 밖으로(경계에 걸침), 이후
+            // 전체 폭 스택형 누적.
+            let hangCursor = partWidth - charWidths[endHangStart]! * 0.5;
             for (let i = endHangStart; i < strippedCount; i++) {
               offsets[i] = hangCursor;
               hangCursor += charWidths[i]!;
@@ -2162,6 +2330,60 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
               cumulativeWidths = new Array(partWidths.length).fill(0);
 
               const newLine = columnContent[columnContent.length - 1];
+
+              // 행두금칙 追い出し (배치 단계 통합): 새 라인의 첫 글자가 행두에
+              // 올 수 없는 부호이면, 직전 라인의 마지막 글자들을 함께 새 라인
+              // 앞으로 내보낸다. 배치 시점에 해소하므로 후속 글자들이 자연
+              // 재배치되어 후처리 지역 교정의 초과 전이(다음 줄 폭 위반)가
+              // 원천 차단된다. 가드: 컬럼/블록 첫 라인 제외, 직전 파트 잔여
+              // 2자 이상, 직전 마지막 글자가 행말금칙이면 기존 후처리 위임,
+              // 연쇄 pop은 최대 2자(잔여 위반은 후처리 금칙 패스가 폴백).
+              if (
+                columnContent.length >= 2 &&
+                newLine.parts.length > 0 &&
+                isLineStartForbidden(char)
+              ) {
+                const prevLine = columnContent[columnContent.length - 2];
+                const prevLastPart = prevLine?.parts[prevLine.parts.length - 1];
+                const prevLastChar = prevLastPart?.content[prevLastPart.content.length - 1];
+                const prevIsBlockStart = prevLine?.firstOfBlock === true || prevLine === undefined;
+                if (
+                  prevLastPart !== undefined &&
+                  prevLastPart.content.length >= 2 &&
+                  prevLastChar !== undefined &&
+                  !isLineEndForbidden(prevLastChar) &&
+                  !prevIsBlockStart
+                ) {
+                  const pushed: string[] = [];
+                  const pushedStyles: (TextInlineStyle | undefined)[] = [];
+                  let popped = 0;
+                  let from = prevLastPart.content[prevLastPart.content.length - 1]!;
+                  while (
+                    popped < 2 &&
+                    prevLastPart.content.length - pushed.length >= 2 &&
+                    (popped === 0 || isLineStartForbidden(from))
+                  ) {
+                    pushed.unshift(from);
+                    pushedStyles.unshift(prevLastPart.inlineStyles?.pop());
+                    const poppedWidth = this._charWidthMm(from, prevLastPart.inlineStyles?.[prevLastPart.inlineStyles.length - 1]);
+                    prevLastPart.content.pop();
+                    cumulativeWidths[partWidths.length - 1] = Math.max(0, cumulativeWidths[partWidths.length - 1] - poppedWidth);
+                    from = prevLastPart.content[prevLastPart.content.length - 1]!;
+                    popped++;
+                    if (!isLineStartForbidden(from)) break;
+                  }
+                  const firstPart = newLine.parts[0];
+                  if (firstPart !== undefined && pushed.length > 0) {
+                    for (let pk = pushed.length - 1; pk >= 0; pk--) {
+                      firstPart.content.unshift(pushed[pk]!);
+                      (firstPart.inlineStyles ??= []).length = firstPart.content.length;
+                      firstPart.inlineStyles.unshift(pushedStyles[pk]);
+                    }
+                    cumulativeWidths[0] = pushed.reduce((s, c) => s + this._charWidthMm(c, undefined), 0);
+                  }
+                }
+              }
+
               if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
                 cumulativeWidths[currentPartIdx] += charWidth;
                 const part = newLine.parts[currentPartIdx];
@@ -2952,8 +3174,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
             if (w > ext.left) ext.left = w;
           }
           let runRight = 0;
+          let firstHangOfRun = true;
           for (let k = part.content.length - 1; k >= 0 && hangs[k] === "end"; k--) {
-            runRight += this.getCharWidths(part.content[k]!, part.inlineStyles?.[k]).swidth;
+            const w = this.getCharWidths(part.content[k]!, part.inlineStyles?.[k]).swidth;
+            // 반각 돌출: 첫 부호는 폭의 50%만 밖으로 나가므로 나머지 절반 제외
+            runRight += firstHangOfRun ? w * 0.5 : w;
+            firstHangOfRun = false;
           }
           if (runRight > ext.right) ext.right = runRight;
         }
@@ -3029,14 +3255,19 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
             const { stripStart, stripEnd } = this._computeStripRange(part, ln, p);
             const hangs = part.hangs;
             // 걸침 글자는 파트 경계 밖에 렌더링되므로 히트 범위도 그만큼 확장한다.
+            // 행말 걸침은 반각 돌출 — 첫 부호의 안쪽 절반은 파트 안이므로
+            // 밖 돌출량은 run 전체 폭에서 첫 부호 폭의 절반을 뺀 몫이다.
             let hangLeftMm = 0;
             let hangRightMm = 0;
             if (hangs !== undefined) {
               if (hangs[stripStart] === "start") {
                 hangLeftMm = this.getCharWidths(part.content[stripStart]!, part.inlineStyles?.[stripStart]).swidth;
               }
+              let firstHangOfRun = true;
               for (let k = stripEnd - 1; k >= stripStart && hangs[k] === "end"; k--) {
-                hangRightMm += this.getCharWidths(part.content[k]!, part.inlineStyles?.[k]).swidth;
+                const w = this.getCharWidths(part.content[k]!, part.inlineStyles?.[k]).swidth;
+                hangRightMm += firstHangOfRun ? w * 0.5 : w;
+                firstHangOfRun = false;
               }
             }
             const partLeft = part.left - hangLeftMm;

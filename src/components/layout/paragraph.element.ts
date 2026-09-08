@@ -292,7 +292,9 @@ export class LayoutParagraphElement extends HTMLElement {
 
     const hp = this._paragraphStyle?.hangingPunctuation ?? this._inheritStyle.hangingPunctuation;
     const hangOn = hp === true
-      || (typeof hp === 'object' && hp !== null && (hp.lineEnd === true || hp.lineStart === true));
+      || (typeof hp === 'object' && hp !== null && (
+        hp.lineEnd === true || hp.lineEnd === 'always' || hp.lineStart === true
+      ));
 
     let styleEl = this._shadowRoot.querySelector<HTMLStyleElement>(`style#${HOST_STYLE_ID}`);
     let needsInit = !styleEl
