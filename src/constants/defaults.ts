@@ -3,6 +3,18 @@ export const DEFAULT_FONT_SIZE = 4;
 export const DEFAULT_FONT_STYLE = 'normal';
 export const DEFAULT_FONT_WEIGHT = 400;
 export const DEFAULT_LINE_GAP = 1.25;
+
+/** 행간 계산 모드 기본값. 'ratio' = 기존 동작 (fontSize 배율)과 byte-identical. */
+export const DEFAULT_LINE_GAP_MODE: 'ratio' | 'fixed' | 'fixed-min' = 'ratio';
+
+/**
+ * fixed/fixed-min 모드에서 lineGap이 생략될 때의 기본 행 높이 (mm).
+ *
+ * DEFAULT_LINE_GAP(1.25, 배율)이 그대로 mm로 재해석되는 footgun을 방지한다:
+ * `lineGapMode: 'fixed'`만 주입하면 lineGap이 DEFAULT_LINE_GAP_FIXED로
+ * 해석된다 (기존 lineGap이 명시되어 있으면 그 값을 유지).
+ */
+export const DEFAULT_LINE_GAP_FIXED = 6;
 export const DEFAULT_PPM = 96 / 25.4;
 export const DEFAULT_IMAGE_DPI = 72;
 export const DEFAULT_SPACE_RATIO = 0.5;

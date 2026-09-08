@@ -21,6 +21,8 @@ import { ImageEngine } from "./image-engine";
 import { ParagraphEngine } from "./paragraph-engine";
 import { TableEngine, TableCellEngine } from "./table-engine";
 import { prepareImageDecoder } from "./image-decoder";
+import { computeLineHeightMm, resolveLineGap } from "./line-height";
+import { DEFAULT_LINE_GAP_MODE } from "@/constants";
 
 let _engineIdCounter = 0;
 
@@ -572,8 +574,9 @@ export class DocumentEngine {
     const innerWidth = this._data.width - (this._data.paddingLeft ?? 0) - (this._data.paddingRight ?? 0);
     const innerHeight = this._data.height - (this._data.paddingTop ?? 0) - (this._data.paddingBottom ?? 0);
     const fontSize = this._data.textStyle?.fontSize ?? 4;
-    const lineGap = this._data.paragraphStyle?.lineGap ?? 1.25;
-    const lineHeight = fontSize * lineGap;
+    const lineGap = resolveLineGap(this._data.paragraphStyle ?? {});
+    const lineGapMode = this._data.paragraphStyle?.lineGapMode ?? DEFAULT_LINE_GAP_MODE;
+    const lineHeight = computeLineHeightMm(lineGap, lineGapMode, fontSize);
     const heightLines = innerHeight / lineHeight;
     return {
       columns,

@@ -19,6 +19,7 @@
 | `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/런/캐스케이드) | ALL PASS |
 | `verify-hangul-glyph-fallback.mjs` | 정합성 (엔진) | cmap 미등록 한글 음절 폭 폴백 (`가` 폭 대체) | ALL PASS |
 | `verify-hanging-punctuation.mjs` | 정합성 (엔진) | 걸침표(행말/행두) — OFF 기준선 byte 동일/금칙 대체 배치/trailing run/justify/getCharRect/print 패리티/히트테스트/엣지 게이트/블록 경계/prefix 캐시/API | ALL PASS |
+| `verify-line-gap-mode.mjs` | 정합성 (엔진) | 행간 고정값 모드 (`lineGapMode` ratio/fixed/fixed-min) — 기본값 byte 동일/fixed 균일 라인+absHeight/fixed-min 스케일업/오버랩 근사 방향/오버플로우↔absHeight/verticalAlign/해시 충돌(lgm:·lg:)/개별 setter/GC 정합/두 층위/flipLayout/prefix 캐시/extractData | ALL PASS |
 | `verify-hanging-punctuation-browser.mjs` | 정합성 (브라우저) | 걸침표 ON 실제 화면 페인트 — 파트 밖 span rect/overflow 해제/원상 복구 | ALL PASS |
 | `verify-overlap-inline-fontsize.mjs` | 정합성 (엔진) | 인라인 fontSize 오버라이드 컬럼의 오버랩 판정 rect — per-line 높이 기준 | ALL PASS |
 | `verify-image-displayrect-cache.mjs` | 정합성 (엔진) | 이미지 displayRect(objectFit/none x/y/w/h) 변화 시 오버랩 회피 재계산 — layout input hash 무효화 | ALL PASS |

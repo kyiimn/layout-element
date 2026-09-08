@@ -890,7 +890,7 @@ export class EditManager {
       "fontFamily", "fontSize", "fontWeight", "fontStyle", "color",
       "letterSpacing", "widthRatio", "spaceRatio",
     ] as const;
-    const PARAGRAPH_FIELDS = ["lineGap", "textAlign", "verticalAlign", "hangingPunctuation"] as const;
+    const PARAGRAPH_FIELDS = ["lineGap", "lineGapMode", "textAlign", "verticalAlign", "hangingPunctuation"] as const;
     const revertTextFields: string[] = [];
     const revertParagraphFields: string[] = [];
     for (const field of INLINE_FIELDS) {

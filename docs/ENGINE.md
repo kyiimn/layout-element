@@ -706,6 +706,15 @@ static create(): ColorRegistryEngineImpl
 
 `OverlapInput` = `{ absRect, overlapMode, overlapPadding?, image?, contentType }`
 
+### 2.9a 행간 높이 순수 함수 (`line-height.ts`)
+
+| 함수 | 시그니처 | 설명 |
+|------|----------|------|
+| `computeLineHeightMm` | `(lineGap: number, mode: LineGapMode, maxFontSizeMm: number): number` | `ParagraphStyle.lineGapMode`별 lineHeight 단일 소스. `'ratio'` → `maxFontSizeMm × lineGap`, `'fixed'` → `lineGap`, `'fixed-min'` → `max(lineGap, maxFontSizeMm)` |
+| `resolveLineGap` | `(paragraphStyle: { lineGap?, lineGapMode? }): number` | 모드별 lineGap 기본값 보정 단일 소스. 주입/상속값이 있으면 항상 그 값, 생략 시 `'ratio'` → `DEFAULT_LINE_GAP`(1.25), `'fixed'`/`'fixed-min'` → `DEFAULT_LINE_GAP_FIXED`(6mm) |
+
+소비처: `computeLineHeightMm` — `ParagraphEngine._initLayoutMetrics`/`_createLineWithParts`/`_computePerLineHeights`/`_confirmLineHeight`, `GridCalculatorEngine._calcColumnGridCoords`, `DocumentEngine._documentContainerMetrics`. `'ratio'` 분기는 기존 `maxFontSizeMm × lineGap` 공식과 byte-identical. `resolveLineGap` — `ParagraphEngine.effectiveParagraphStyle`(병합 후 보정), `GridCalculatorEngine.lineGap` getter, `DocumentEngine._documentContainerMetrics`.
+
 ---
 
 ### 2.10 공유 타입 (`types.ts`)
@@ -940,7 +949,7 @@ npm run build           # IIFE + React ESM + Engine ESM 빌드
 vanilla 진입점에서 명시적 engine보내기:
 
 **값**:
-`GridCalculatorEngine`, `ImageEngine`, `checkOverlapMm`, `computeOverlapSizeMm`, `engineMergeOverlapParts` (alias), `BoxEngine`, `TableEngine`, `TableRowEngine`, `TableCellEngine`, `ParagraphEngine`, `DocumentEngine`, `FontLoaderEngineImpl`, `ColorRegistryEngineImpl`, `computeObjectFit`, `prepareImageDecoder`, `decodeBase64ImageToRgba`, `decodeBase64ImageToRgbaSync`, `isNodeJs`, `parseDataUri`
+`GridCalculatorEngine`, `ImageEngine`, `checkOverlapMm`, `computeOverlapSizeMm`, `engineMergeOverlapParts` (alias), `BoxEngine`, `TableEngine`, `TableRowEngine`, `TableCellEngine`, `ParagraphEngine`, `DocumentEngine`, `FontLoaderEngineImpl`, `ColorRegistryEngineImpl`, `computeObjectFit`, `computeLineHeightMm`, `prepareImageDecoder`, `decodeBase64ImageToRgba`, `decodeBase64ImageToRgbaSync`, `isNodeJs`, `parseDataUri`
 
 **타입**:
 `GridRect`, `AbsRect`, `EngineMmRect` (alias), `OverlapDirection`, `OverlapResult`, `OverlapInput`, `ImageEngineRef`, `BoxContentType`, `FontLoaderEngine`, `ParsedFont`, `ColorRegistryEngine`, `EngineResources`, `GridCalculatorEngineOptions`, `ImageEngineData`, `ImageLayoutResult`, `BoxLayoutResult`, `TableLayoutResult`, `ParagraphLayoutResult`, `DocumentLayoutResult`, `LayoutResult`, `EngineCursorPlacement` (alias), `RgbaData`, `ObjectFitRect`, `ObjectFitInput`
@@ -958,6 +967,7 @@ vanilla 진입점에서 명시적 engine보내기:
 ```
 src/engine/
   types.ts                    # 공유 타입 (AbsRect, MmRect, OverlapResult, EngineResources, CursorPlacement, FlipLayoutOptions, BoxMetricsById, createDirtyError, createNoParentError, removeBoxDataFromChildren 등)
+  line-height.ts              # 행간 모드 lineHeight 순수 계산 (computeLineHeightMm)
   grid-calculator-engine.ts   # 컬럼 그리드 계산 (ppm 옵셔널)
   image-engine.ts             # 이미지 오버랩 (RGBA 데이터 기반, object-fit displayRect 계산)
   image-decoder.ts            # Node.js base64 → RGBA 디코딩 (pngjs, module.createRequire)
@@ -983,6 +993,8 @@ src/engine/
 | `DEFAULT_BORDER_STYLE` | `'solid'` | 기본 보더 스타일 |
 | `DEFAULT_FONT_SIZE` | `4` | 기본 폰트 크기 (mm) |
 | `DEFAULT_LINE_GAP` | `1.25` | 기본 라인 갭 |
+| `DEFAULT_LINE_GAP_MODE` | `'ratio'` | 기본 행간 모드 (기존 동작 byte-identical) |
+| `DEFAULT_LINE_GAP_FIXED` | `6` | fixed/fixed-min 모드에서 lineGap 생략 시 기본 행 높이 (mm) |
 | `DEFAULT_PPM` | `96 / 25.4` | 기본 ppm (96 DPI) |
 | `DEFAULT_IMAGE_DPI` | `72` | 기본 이미지 DPI |
 | `DEFAULT_SPACE_RATIO` | `0.5` | 기본 스페이스 비율 |

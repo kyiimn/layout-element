@@ -11,9 +11,10 @@
  * @file src/engine/grid-calculator-engine.ts
  */
 
-import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP } from "@/constants";
-import type { ParagraphStyle, TextStyle } from "@/types";
+import { DEFAULT_FONT_SIZE, DEFAULT_LINE_GAP_MODE } from "@/constants";
+import type { LineGapMode, ParagraphStyle, TextStyle } from "@/types";
 import type { GridRect, GridCalculatorEngineOptions } from "./types";
+import { computeLineHeightMm, resolveLineGap } from "./line-height";
 
 /**
  * 컬럼 그리드 좌표와 행 높이를 계산하는 순수 엔진.
@@ -84,7 +85,7 @@ export class GridCalculatorEngine {
    * `instanceof LayoutBoxElement` 체크를 `this._isBox` 불리언으로 대체.
    */
   private _calcColumnGridCoords(): void {
-    this._lineHeight = this.fontSize * this.lineGap;
+    this._lineHeight = computeLineHeightMm(this.lineGap, this.lineGapMode, this.fontSize);
 
     const paddingTop = this._paddingTop || 0;
     const paddingRight = this._paddingRight || 0;
@@ -223,6 +224,10 @@ export class GridCalculatorEngine {
   }
 
   get lineGap(): number {
-    return this.paragraphStyle.lineGap ?? DEFAULT_LINE_GAP;
+    return resolveLineGap(this.paragraphStyle);
+  }
+
+  get lineGapMode(): LineGapMode {
+    return this.paragraphStyle.lineGapMode ?? DEFAULT_LINE_GAP_MODE;
   }
 }

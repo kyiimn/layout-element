@@ -9,6 +9,7 @@
  */
 
 export * from "./types";
+export * from "./line-height";
 export * from "./table-grid-resolver";
 export * from "./border-store";
 export * from "./grid-calculator-engine";

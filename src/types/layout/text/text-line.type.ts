@@ -115,7 +115,9 @@ export type TextLineData = {
   maxFontSize?: number;
 
   /**
-   * 이 줄의 높이 (mm). `maxFontSize × lineGap`으로 계산된다.
+   * 이 줄의 높이 (mm). `computeLineHeightMm(lineGap, lineGapMode, maxFontSize)`로
+   * 계산된다 — `ParagraphStyle.lineGapMode`에 따라 `maxFontSize × lineGap`
+   * ('ratio'), `lineGap` ('fixed'), `max(lineGap, maxFontSize)` ('fixed-min').
    *
    * 레이아웃 후(post-layout) `_computePerLineHeights()`가 산출한다.
    * 라인 배치/오버플로우 판정 중(레이아웃 과정)에는 아직 채워지지 않는다.

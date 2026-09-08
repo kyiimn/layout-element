@@ -1115,20 +1115,40 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | 상수 | 값 | 설명 |
 | ------ | ----- | ------ |
 | `DEFAULT_FONT_SIZE` | `4` | 기본 글자 크기 (mm) |
-| `DEFAULT_LINE_GAP` | `1` | 기본 행간 배율 |
+| `DEFAULT_LINE_GAP` | `1.25` | 기본 행간 배율 (ratio 모드) |
+| `DEFAULT_LINE_GAP_MODE` | `'ratio'` | 기본 행간 모드 (기존 동작과 byte-identical) |
 | `DEFAULT_FONT_STYLE` | `'normal'` | 기본 폰트 스타일 |
 | `DEFAULT_FONT_WEIGHT` | `400` | 기본 폰트 굵기 |
 | `DEFAULT_PPM` | `96 / 25.4` | 기본 pixels-per-mm |
 | `DEFAULT_IMAGE_DPI` | `72` | 기본 이미지 DPI |
 | `DEFAULT_SPACE_RATIO` | `0.5` | 기본 공백 너비 비율 (em) |
 
-`_lineHeight` 계산:
+`_lineHeight` 계산 — `computeLineHeightMm()`(`src/engine/line-height.ts`) 단일 소스:
 
 ```ts
 const fontSize = this.textStyle?.fontSize || this.inheritStyle?.fontSize || DEFAULT_FONT_SIZE;
 const lineGap = this.paragraphStyle?.lineGap || this.inheritStyle?.lineGap || DEFAULT_LINE_GAP;
-this._lineHeight = fontSize * lineGap;
+const lineGapMode = this.paragraphStyle?.lineGapMode ?? this.inheritStyle?.lineGapMode ?? DEFAULT_LINE_GAP_MODE;
+this._lineHeight = computeLineHeightMm(lineGap, lineGapMode, fontSize);
 ```
+
+### 15.x 행간 고정값 모드 (`ParagraphStyle.lineGapMode`)
+
+`lineGapMode`는 `lineGap`의 해석을 제어하는 문단 스타일(비인라인 필드)이다:
+
+| mode | lineGap 해석 | lineHeight 공식 | 용도 |
+|------|------------|----------------|------|
+| `'ratio'` (기본) | fontSize 배율 | `maxFontSize × lineGap` | 기존 동작 (byte-identical) |
+| `'fixed'` | 고정 mm | `lineGap` (fontSize 무시) | InDesign 고정 행간 |
+| `'fixed-min'` | 최소 보장 mm | `max(lineGap, maxFontSize)` | 최소 행간 + 인라인 큰 글자 스케일업 |
+
+- **스케일업 규칙**(`'fixed-min'`): 라인의 `maxFontSize`가 고정값보다 크면 그 값(maxFontSize 자체)으로 라인이 커진다. 배율을 재적용하지 않는다.
+- **`'fixed'` + `lineGap < fontSize`**: 글자의 행 간 겹침을 허용한다 (InDesign 패리티). 이때 오버랩 회피 rect도 고정 높이를 사용하므로, 고정값을 초과하는 큰 글리프의 시각적 돌출부는 회피 계산에 반영되지 않는다.
+- **`'fixed'` 균일 경로**: 인라인 fontSize 오버라이드가 있어도 모든 라인 높이가 균일(lineGap)하므로 `_layoutColumnsPass`가 항상 균일 경로로 배치한다 (fast-path).
+- **캐시 해시**: `_computeLayoutInputHash`/`_computePrefixHash`에 원시 `lg:`(lineGap)·`lgm:`(mode) 키를 포함한다 — fixed/fixed-min에서 base lineHeight가 결정적이지 않으므로 모드·값 변경 시 stale 캐시 히트를 방어한다. 검증: `scripts/verify-line-gap-mode.mjs` (58항목).
+- **두 층위 소스**: static box 그리드(`GridCalculatorEngine.lineHeight` — `absHeight`, containment, insert 스냅, 가이드 컬럼)는 **문서 수준** `DocumentData.paragraphStyle`의 모드를 따르고, 문단 텍스트 라인 높이는 문단 effective 스타일의 모드를 따른다 (기존 `lineGap`과 동일 구조).
+- **모드별 lineGap 기본값**: `resolveLineGap()`(`src/engine/line-height.ts`)이 effective 병합 후 기본값을 채운다 — `'ratio'` 생략 시 `DEFAULT_LINE_GAP`(1.25 배율), `'fixed'`/`'fixed-min'` 생략 시 `DEFAULT_LINE_GAP_FIXED`(6mm). 주입/상속값이 있으면 항상 그 값이 모드로 해석된다 (카스케이드 우선). `effectiveParagraphStyle`은 `DEFAULT_PARAGRAPH_STYLE_NO_LINE_GAP` 스키마로 병합(기본값이 먼저 채워지면 생략 판정 불가) 후 보정한다. 검증: `scripts/verify-line-gap-mode.mjs` (69항목).
+- **개별 setter 계약**: `ParagraphEngine.textStyle`/`paragraphStyle` 개별 setter는 `_initLayoutMetrics()`를 호출해 `_lineHeight`를 즉시 재계산한다 (Node.js 엔진 직접 경로에서 stale `_lineHeight` + stale 캐시 히트 방어).
 
 ---
 

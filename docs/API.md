@@ -3082,7 +3082,8 @@ type HangingPunctuationConfig = {
 };
 
 type ParagraphStyle = {
-  lineGap?: number;        // lineHeight = fontSize × lineGap, 기본 1.25
+  lineGap?: number;        // mode에 따라 배율('ratio') 또는 mm('fixed'/'fixed-min'), 기본 1.25
+  lineGapMode?: 'ratio' | 'fixed' | 'fixed-min';  // 행간 계산 모드, 기본 'ratio'
   verticalAlign?: 'top' | 'center' | 'bottom';  // 기본 'top'
   textAlign?: 'left' | 'right' | 'center' | 'justify';  // 기본 'justify'
   hangingPunctuation?: boolean | HangingPunctuationConfig;  // 걸침표. 기본 false
@@ -3090,6 +3091,18 @@ type ParagraphStyle = {
 ```
 
 `hangingPunctuation`: 걸침표(행말/행두 걸침) 설정. `true`면 양방향 ON, 객체면 방향별 설정. `false`/`undefined`(기본)면 기존 배치와 byte 단위로 동일하다. 걸침은 금칙 교정에 우선하며, 걸침 ON 시 컬럼/문단 `overflow`가 `visible`로 전환되어 부호가 틀 밖으로 렌더링된다. 상세는 `TEXT_ENGINE.md` §23 참조.
+
+`lineGapMode`: `lineGap`의 해석을 제어하는 문단 스타일(비인라인 필드)이다. 검증: `scripts/verify-line-gap-mode.mjs`.
+
+- **`'ratio'` (기본)** — `lineGap`을 fontSize 배율로 해석. 기존 동작과 byte-identical. (`lineHeight = maxFontSize × lineGap`)
+- **`'fixed'`** — `lineGap`을 **고정 mm** 행 높이로 해석 (InDesign 고정 행간). `lineGap < fontSize`이면 글자가 행 간 겹친다 (의도된 동작).
+- **`'fixed-min'`** — `lineGap`을 **최소 보장 mm**로 해석. 라인의 `maxFontSize`(인라인 오버라이드 포함)가 고정값보다 크면 그 값(maxFontSize 자체, 배율 재적용 없음)으로 스케일업.
+
+`lineGap` 생략 시 모드별 기본값이 적용된다 (`resolveLineGap` 단일 소스): `'ratio'` → `DEFAULT_LINE_GAP`(1.25, 배율), `'fixed'`/`'fixed-min'` → `DEFAULT_LINE_GAP_FIXED`(6mm). `lineGap`이 명시(또는 상속)되어 있으면 항상 그 값이 모드로 해석된다.
+
+> **UI 권고 — 모드 전환 시 값 단위 변환**: `lineGapMode`만 전환하고 `lineGap`을 그대로 두면 상속/명시 값이 새 모드로 재해석된다 (예: 1.2 배율 → 1.2mm 고정). UI에서 모드를 전환할 때는 값을 함께 변환해야 한다 (ratio → fixed: 현재 fontSize 곱셈, fixed → ratio: 나눗셈 — 호스트 앱 책임).
+>
+> **두 층위 소스**: static box 그리드 좌표·`absHeight`·insert 스냅·가이드 컬럼은 **문서 수준** `DocumentData.paragraphStyle`의 모드를 따르고, 문단 텍스트 라인 높이는 문단 자체 effective 스타일의 모드를 따른다. 두 층위가 다른 모드이면 그리드 단위와 텍스트 행간이 어긋날 수 있다 (기존 `lineGap`과 동일한 구조).
 
 #### `TextInlineStyle`
 

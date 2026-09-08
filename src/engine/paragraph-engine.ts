@@ -16,7 +16,7 @@ import {
   DEFAULT_FONT_WEIGHT,
   DEFAULT_INDENT,
   DEFAULT_LETTER_SPACING,
-  DEFAULT_LINE_GAP,
+  DEFAULT_LINE_GAP_MODE,
   DEFAULT_SPACE_RATIO,
   DEFAULT_TEXT_ALIGN,
   DEFAULT_VERTICAL_ALIGN,
@@ -26,6 +26,7 @@ import {
   isLineEndForbidden,
   isLineStartForbidden,
 } from "@/constants";
+import { computeLineHeightMm, resolveLineGap } from "./line-height";
 import {
   InheritStyle,
   TextInlineData,
@@ -56,8 +57,16 @@ import {
 import { computeOverlapSizeMm, mergeOverlapParts } from "./overlap-engine";
 import type { ImageEngine } from "./image-engine";
 
-const DEFAULT_PARAGRAPH_STYLE: Required<ParagraphStyle> = {
-  lineGap: DEFAULT_LINE_GAP,
+/**
+ * effective 스타일 병합 시 lineGap의 "주입/상속 생략"을 판정하기 위한
+ * 기본값 없는 스타일. `DEFAULT_PARAGRAPH_STYLE`은 lineGap 기본값(1.25)을
+ * 포함하므로 병합 후 resolveLineGap이 생략을 감지할 수 없다 — 이 스키마로
+ * 병합 후 모드별 기본값을 단일 소스(resolveLineGap)로 보정한다.
+ * @throws 없음
+ */
+const DEFAULT_PARAGRAPH_STYLE_NO_LINE_GAP: Required<ParagraphStyle> = {
+  lineGap: undefined as unknown as number,
+  lineGapMode: DEFAULT_LINE_GAP_MODE,
   verticalAlign: DEFAULT_VERTICAL_ALIGN,
   textAlign: DEFAULT_TEXT_ALIGN,
   hangingPunctuation: false,
@@ -368,11 +377,12 @@ export class ParagraphEngine {
   private _initLayoutMetrics(): void {
     const fontSize = this.effectiveTextStyle.fontSize!;
     const lineGap = this.effectiveParagraphStyle.lineGap!;
+    const lineGapMode = this.effectiveParagraphStyle.lineGapMode ?? DEFAULT_LINE_GAP_MODE;
 
     this._columnContents = [];
     this._overflow = 0;
 
-    this._lineHeight = fontSize * lineGap;
+    this._lineHeight = computeLineHeightMm(lineGap, lineGapMode, fontSize);
   }
 
   /**
@@ -1315,7 +1325,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const lineTopMm = this._data.parentAbsRect.absTop + alignOffsetMm + cumulativeTopMm;
     const lineWidthMm = this._columnWidths[columnIndex];
     const lineGap = this.effectiveParagraphStyle.lineGap!;
-    const lineHeightMm = pendingMaxFontSizeMm * lineGap;
+    const lineGapMode = this.effectiveParagraphStyle.lineGapMode ?? DEFAULT_LINE_GAP_MODE;
+    const lineHeightMm = computeLineHeightMm(lineGap, lineGapMode, pendingMaxFontSizeMm);
 
     const lineRectMm: MmRect = {
       left: lineLeftMm,
@@ -1644,6 +1655,10 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       "cw:" + this._columnWidths.join(","),
       "g:" + this._gaps.join(","),
       "lh:" + this._lineHeight,
+      // lineGap/lineGapMode 원시 키 — _computeLayoutInputHash와 동일 키.
+      // fixed/fixed-min에서 base lineHeight가 결정적이지 않으므로 원시 값 필수.
+      "lg:" + this.effectiveParagraphStyle.lineGap!,
+      "lgm:" + (this.effectiveParagraphStyle.lineGapMode ?? DEFAULT_LINE_GAP_MODE),
       "wr:" + this.widthRatio,
       "ls:" + this.effectiveTextStyle.letterSpacing!,
       "sr:" + this.spaceRatio,
@@ -1794,12 +1809,13 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    */
   private _computePerLineHeights(): void {
     const lineGap = this.effectiveParagraphStyle.lineGap!;
+    const lineGapMode = this.effectiveParagraphStyle.lineGapMode ?? DEFAULT_LINE_GAP_MODE;
 
     for (const column of this._columnContents) {
       for (const line of column) {
         const maxFs = this._computeLineMaxFontSize(line);
         line.maxFontSize = maxFs;
-        line.lineHeight = maxFs * lineGap;
+        line.lineHeight = computeLineHeightMm(lineGap, lineGapMode, maxFs);
       }
     }
   }
@@ -1867,8 +1883,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     if (line && line.lineHeight === undefined) {
       const maxFs = this._computeLineMaxFontSize(line);
       const lineGap = this.effectiveParagraphStyle.lineGap!;
+      const lineGapMode = this.effectiveParagraphStyle.lineGapMode ?? DEFAULT_LINE_GAP_MODE;
       line.maxFontSize = maxFs;
-      line.lineHeight = maxFs * lineGap;
+      line.lineHeight = computeLineHeightMm(lineGap, lineGapMode, maxFs);
       return cumulativeTopMm + line.lineHeight;
     }
     return cumulativeTopMm;
@@ -2054,9 +2071,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     // 인라인 fontSize 오버라이드가 있으면 라인 rect를 per-line 높이로 계산한다
     // (오버랩 판정/overflow 판정을 실제 렌더링 위치와 일치시킨다). 오버라이드가
     // 없으면 모든 라인 높이가 균일(base)하므로 기존 균일 경로를 쓴다 — 성능과
-    // 결과를 그대로 보존한다.
+    // 결과를 그대로 보존한다. 'fixed' 모드는 인라인 fontSize 오버라이드가 있어도
+    // 모든 라인 높이가 lineGap으로 균일하므로 항상 균일 경로를 쓴다.
     const baseFontSizeMmForPending = this.fontSize;
-    const hasInlineFontSizeOverride = this._contents.some(
+    const effLineGapMode = this.effectiveParagraphStyle.lineGapMode ?? DEFAULT_LINE_GAP_MODE;
+    const hasInlineFontSizeOverride = effLineGapMode !== 'fixed' && this._contents.some(
       (line) => line.some((run) => (run.textInlineStyle?.fontSize ?? baseFontSizeMmForPending) > baseFontSizeMmForPending),
     );
 
@@ -2576,6 +2595,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       "cw:" + this._columnWidths.join(","),
       "g:" + this._gaps.join(","),
       "lh:" + this._lineHeight,
+      // lineGap/lineGapMode 원시 키 — fixed/fixed-min에서 base lineHeight가
+      // 결정적이지 않다. (fixed-min, 3) vs (fixed-min, 3.5)는 base 동일(=fs)이지만
+      // 인라인 maxFs < lineGap 라인의 per-line 높이가 다르므로 원시 값도 키에
+      // 포함해 stale 캐시 히트를 방지한다. _computePrefixHash와 동일 키를 유지한다.
+      "lg:" + this.effectiveParagraphStyle.lineGap!,
+      "lgm:" + (this.effectiveParagraphStyle.lineGapMode ?? DEFAULT_LINE_GAP_MODE),
       "wr:" + this.widthRatio,
       "ls:" + this.effectiveTextStyle.letterSpacing!,
       "sr:" + this.spaceRatio,
@@ -3460,6 +3485,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     if (this._textStyle === value) return;
     this._textStyle = value;
     this._effectiveTsDirty = true;
+    this._initLayoutMetrics();
     this._dirty = true;
   }
 
@@ -3471,6 +3497,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     if (this._paragraphStyle === value) return;
     this._paragraphStyle = value;
     this._effectivePsDirty = true;
+    this._initLayoutMetrics();
     this._dirty = true;
   }
 
@@ -3744,7 +3771,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     if (this._effectivePsCache !== null && !this._effectivePsDirty) {
       return this._effectivePsCache;
     }
-    this._effectivePsCache = { ...DEFAULT_PARAGRAPH_STYLE, ...this._inheritStyle, ...this._paragraphStyle };
+    // lineGap은 기본값 없이 병합한다 — DEFAULT_PARAGRAPH_STYLE의 배율 기본값이
+    // 먼저 채워지면 fixed 계열 모드에서 mm 재해석 footgun이 생긴다. 병합 후
+    // resolveLineGap(단일 소스)이 모드별 기본값(ratio 1.25 / fixed·fixed-min 6mm)을
+    // 채운다. 주입/상속값이 있으면 항상 그 값을 유지한다.
+    this._effectivePsCache = { ...DEFAULT_PARAGRAPH_STYLE_NO_LINE_GAP, ...this._inheritStyle, ...this._paragraphStyle };
+    this._effectivePsCache = { ...this._effectivePsCache, lineGap: resolveLineGap(this._effectivePsCache) };
     this._effectivePsDirty = false;
     return this._effectivePsCache;
   }

@@ -37,20 +37,58 @@ export type HangingPunctuationConfig = {
 };
 
 /**
+ * 행간 계산 모드.
+ *
+ * - `'ratio'` — `lineGap`을 fontSize 배율로 해석 (기본값, 기존 동작과 byte-identical)
+ * - `'fixed'` — `lineGap`을 **고정 mm** 행 높이로 해석 (InDesign 고정 행간)
+ * - `'fixed-min'` — `lineGap`을 **최소 보장 mm** 행 높이로 해석. 라인의
+ *   `maxFontSize`가 고정값보다 크면 그 값(maxFontSize 자체, 배율 재적용 없음)으로 스케일업
+ */
+export type LineGapMode = 'ratio' | 'fixed' | 'fixed-min';
+
+/**
  * 문단 수준의 레이아웃 속성을 정의.
  *
- * `lineGap`은 `fontSize`에 대한 **배율**이다. 실제 행 높이(lineHeight)는 다음과 같이 계산된다:
- * `lineHeight = fontSize × lineGap`
+ * `lineGap`의 해석은 `lineGapMode`에 따른다. 기본 모드(`'ratio'`)에서는
+ * `lineGap`이 `fontSize`에 대한 **배율**이며, 실제 행 높이(lineHeight)는
+ * `computeLineHeightMm()`(src/engine/line-height.ts) 단일 소스로 계산된다.
  *
- * | lineGap | fontSize (mm) | lineHeight (mm) | 설명 |
- * |---------|---------------|-----------------|------|
- * | 1 | 4 | 4 | 글자 크기와 행 높이 동일 (빽빽함) |
- * | 1.5 | 4 | 6 | 150% 행간 |
- * | 2 | 4 | 8 | 200% 행간 (더블 스페이싱) |
+ * | mode | lineGap | fontSize (mm) | lineHeight (mm) | 설명 |
+ * |------|---------|---------------|-----------------|------|
+ * | ratio | 1.5 | 4 | 6 | 150% 행간 (배율) |
+ * | fixed | 6 | 4 | 6 | 고정 6mm (fontSize 무시) |
+ * | fixed-min | 5 | 4 | 5 | 최소 보장 5mm |
+ * | fixed-min | 5 | 8 | 8 | 8mm 인라인 글자 → max(5, 8) 스케일업 |
  */
 export type ParagraphStyle = {
-  /** 행간 배율. `lineHeight = fontSize × lineGap`. 기본값: 1 */
+  /**
+   * 행간 값. `lineGapMode`에 따라 해석이 달라진다 (기본 모드 'ratio': 배율).
+   *
+   * 생략 시 모드별 기본값이 적용된다 — 'ratio': `DEFAULT_LINE_GAP`(1.25 배율),
+   * 'fixed'/'fixed-min': `DEFAULT_LINE_GAP_FIXED`(6mm). 명시하면 항상 그 값을 유지한다.
+   */
   lineGap?: number;
+
+  /**
+   * 행간 계산 모드. 기본값: `'ratio'` (생략 시 기존 동작과 byte-identical).
+   *
+   * 비인라인(non-inlinable) 문단 필드 — 런에 적용되지 않고 항상 문단 소속이다.
+   * 그리드(static box 그리드 좌표·`absHeight`·insert 스냅·가이드 컬럼)는
+   * **문서 수준** `DocumentData.paragraphStyle`의 모드를 따르고, 문단 자체의
+   * 텍스트 라인 높이는 문단 effective 스타일의 모드를 따른다 (기존 `lineGap`과
+   * 동일한 두 층위 구조).
+   *
+   * @example
+   * ```ts
+   * // 고정 6mm 행간
+   * paragraph.paragraphStyle = { lineGap: 6, lineGapMode: 'fixed' };
+   * // 최소 5mm — 8mm 인라인 글자가 있는 줄만 8mm로 스케일업
+   * paragraph.paragraphStyle = { lineGap: 5, lineGapMode: 'fixed-min' };
+   * // lineGap 생략 — fixed 계열은 기본 6mm (DEFAULT_LINE_GAP_FIXED)
+   * paragraph.paragraphStyle = { lineGapMode: 'fixed' };
+   * ```
+   */
+  lineGapMode?: LineGapMode;
 
   /** 수직 정렬. 기본값: 'top' */
   verticalAlign?: VerticalAlign;
