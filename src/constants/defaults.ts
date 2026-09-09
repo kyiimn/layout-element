@@ -30,6 +30,24 @@ export const DEFAULT_HANGING_PUNCTUATION: boolean = false;
 /** 워드 래핑 기본값. false = OFF (기존 글자 단위 줄바꿈과 byte-identical) */
 export const DEFAULT_WORD_WRAP: boolean = false;
 
+/** 밑줄 기본값. false = OFF */
+export const DEFAULT_UNDERLINE: boolean = false;
+
+/** 취소선(중앙선) 기본값. false = OFF */
+export const DEFAULT_BREAKLINE: boolean = false;
+
+/** 글자 외곽선(outline) 두께 기본값 (em). 0 = 외곽선 없음 */
+export const DEFAULT_OUTLINE: number = 0;
+
+/** 밑줄 색상 기본값. 빈 문자열 = 글자 색상을 따름 */
+export const DEFAULT_UNDERLINE_COLOR: string = '';
+
+/** 취소선 색상 기본값. 빈 문자열 = 글자 색상을 따름 */
+export const DEFAULT_BREAKLINE_COLOR: string = '';
+
+/** 외곽선 색상 기본값. 빈 문자열 = 글자 색상을 따름 */
+export const DEFAULT_OUTLINE_COLOR: string = '';
+
 /**
  * 텍스트 스타일 단축키가 주입하는 볼드 굵기 값.
  * 문단 기본값으로 복귀는 런의 fontWeight 필드 제거(`_toggleInlineStyle`)로 수행한다.
