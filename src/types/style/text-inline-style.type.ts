@@ -71,4 +71,48 @@ export type TextInlineStyle = {
    * 최소 폭 바닥값으로도 사용된다.
    */
   spaceRatio?: number;
+
+  /**
+   * 밑줄 활성화.
+   *
+   * CSS `text-decoration`이 아닌 엔진 산출 mm 좌표의 실제 선(rect)으로
+   * 그려진다. `underlineColor` 미지정 시 글자 색상을 따른다.
+   * 미정의 시 문단 effective `underline`을 따른다.
+   */
+  underline?: boolean;
+
+  /**
+   * 취소선(중앙선) 활성화.
+   *
+   * 글자 em box 수직 중앙에 엔진 산출 mm 좌표의 실제 선으로 그려진다.
+   * `breaklineColor` 미지정 시 글자 색상을 따른다.
+   * 미정의 시 문단 effective `breakline`을 따른다.
+   */
+  breakline?: boolean;
+
+  /**
+   * 글자 외곽선(outline) 두께 (em 단위).
+   *
+   * 화면은 `-webkit-text-stroke`, 인쇄는 mm 두께 + CMYK 색상으로 구현된다.
+   * `0`이면 외곽선 없음. 미정의 시 문단 effective `outline`을 따른다.
+   */
+  outline?: number;
+
+  /**
+   * 밑줄 색상. `ColorRegistry` 등록 CMYK 색상 이름.
+   * 미지정 시 글자 `color`를 따른다.
+   */
+  underlineColor?: string;
+
+  /**
+   * 취소선 색상. `ColorRegistry` 등록 CMYK 색상 이름.
+   * 미지정 시 글자 `color`를 따른다.
+   */
+  breaklineColor?: string;
+
+  /**
+   * 외곽선 색상. `ColorRegistry` 등록 CMYK 색상 이름.
+   * 미지정 시 글자 `color`를 따른다.
+   */
+  outlineColor?: string;
 }

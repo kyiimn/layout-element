@@ -121,3 +121,9 @@ export const MIN_TABLE_ROW_HEIGHT = 5;
 
 /** 키보드 셀 크기 조절 단위 (mm per key press). */
 export const TABLE_KEYBOARD_RESIZE_STEP = 1;
+
+/** 밑줄/취소선 두께 비율 (fontSize에 대한 em 배수). */
+export const DECORATION_THICKNESS_RATIO = 0.06;
+
+/** 밑줄/취소선 최소 두께 (mm). 작은 글자에서도 보이는 두께 보장. */
+export const DECORATION_MIN_THICKNESS_MM = 0.12;

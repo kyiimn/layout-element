@@ -1,6 +1,43 @@
 import { TextInlineStyle } from "../../style";
 
 /**
+ * 장식선(밑줄/취소선) 구간 rect. 파트 로컬 mm 좌표.
+ *
+ * `_computeDecorations()` 후처리 패스가 같은 스타일(활성 필드 + 색상)의
+ * 인접 글자를 하나의 run으로 묶어 산출한다. `x`/`width`는 파트 왼쪽 끝
+ * 기준, `y`/`height`는 라인 top 기준이다.
+ */
+export type TextDecorationRect = {
+  /** 선 종류 */
+  kind: 'underline' | 'breakline';
+
+  /** 파트 기준 좌측 x (mm) */
+  x: number;
+
+  /** 라인 top 기준 y (mm) */
+  y: number;
+
+  /** 선 폭 (mm) */
+  width: number;
+
+  /** 선 두께 (mm) */
+  height: number;
+
+  /**
+   * 선 색상 (CSS hex). `ColorRegistry.getCSSColor()`로 변환된 값.
+   * 지정 색상이 없으면 글자 색상(`color`)을 따른다.
+   */
+  color: string;
+
+  /**
+   * 선 색상의 원본 이름. `ColorRegistry` 등록 CMYK 색상 이름.
+   * print export(`buildParagraphPrintPostData`)가 CMYK로 재변환할 때
+   * hex 역변환 없이 이 이름으로 `colorRegistry.get()`을 수행한다.
+   */
+  colorName: string;
+};
+
+/**
  * `TextLayoutEngine.layoutText()`의 출력물. 텍스트 래핑 후 **한 줄**에 해당하는 데이터.
  *
  * **내부 전용 타입**: 외부에서 직접 생성하지 않는다.
@@ -83,9 +120,24 @@ export type TextPartData = {
    * `getOffsetFromPoint`, `buildParagraphPrintPostData`)는 이 마킹으로
    * 걸침 글자의 실제 폭/클릭 범위를 계산한다.
    *
-   * `undefined`이거나 해당 인덱스가 `undefined`이면 걸침 아님.
-   */
+  * `undefined`이거나 해당 인덱스가 `undefined`이면 걸침 아님.
+  */
   hangs?: ('start' | 'end' | undefined)[];
+
+  /**
+   * 장식선(밑줄/취소선) 구간 rect 목록.
+   *
+   * `_computeDecorations()` 후처리 패스가 채운다. 같은 스타일(활성 필드 +
+   * 색상)의 인접 글자는 하나의 run으로 묶인다. `content`와 길이·순서가
+   * 동기화되는 `hangs`/`inlineStyles`와 달리, 장식선은 글자와 1:1 대응이
+   * 아니라 **구간** 단위이므로 별도 배열로 둔다.
+   *
+   * `undefined`이면 이 파트에 장식선이 없다.
+   *
+   * 소비처: `LayoutColumnElement.renderText()`(실제 선 div 렌더링),
+   * `buildParagraphPrintPostData`(인쇄 export).
+   */
+  decorationRects?: TextDecorationRect[];
 };
 
 export type TextLineData = {

@@ -85,4 +85,54 @@ export type TextStyle = {
    * `0.0`이면 들여쓰기 없음. 기본값: 0
    */
   indent?: number;
+
+  /**
+   * 밑줄 활성화.
+   *
+   * CSS `text-decoration`을 사용하지 않고 엔진이 산출한 mm 좌표에
+   ** 실제 선(rect)을 그린다. `underlineColor` 미지정 시 글자 색상을 따른다.
+   * `undefined`/`false`면 밑줄 없음. 기본값: false
+   */
+  underline?: boolean;
+
+  /**
+   * 취소선(중앙선) 활성화.
+   *
+   * 글자 em box 수직 중앙에 엔진이 산출한 mm 좌표로 실제 선을 그린다.
+   * `breaklineColor` 미지정 시 글자 색상을 따른다.
+   * `undefined`/`false`면 취소선 없음. 기본값: false
+   */
+  breakline?: boolean;
+
+  /**
+   * 글자 외곽선(outline) 두께 (em 단위).
+   *
+   * 화면 렌더링은 `-webkit-text-stroke`로 구현되며, 인쇄(printPostData)에는
+   * mm 두께 + CMYK 색상으로 export된다. `0`이면 외곽선 없음. 기본값: 0
+   */
+  outline?: number;
+
+  /**
+   * 밑줄 색상.
+   *
+   * `color`와 동일하게 `ColorRegistry`에 등록된 CMYK 색상 이름만 사용
+   * 가능하다. 미지정(`undefined`) 시 글자 `color`를 따른다.
+   */
+  underlineColor?: string;
+
+  /**
+   * 취소선 색상.
+   *
+   * `color`와 동일하게 `ColorRegistry`에 등록된 CMYK 색상 이름만 사용
+   * 가능하다. 미지정(`undefined`) 시 글자 `color`를 따른다.
+   */
+  breaklineColor?: string;
+
+  /**
+   * 외곽선 색상.
+   *
+   * `color`와 동일하게 `ColorRegistry`에 등록된 CMYK 색상 이름만 사용
+   * 가능하다. 미지정(`undefined`) 시 글자 `color`를 따른다.
+   */
+  outlineColor?: string;
 };

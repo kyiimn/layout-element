@@ -60,6 +60,44 @@ export type PrintPostDataChar = {
    * 원본 CMYK 색상을 반환한다.
    */
   color: CMYKColor;
+
+  /**
+   * 글자 외곽선(outline) 두께 (mm).
+   * 화면은 em 단위이지만 인쇄에서는 mm로 정규화된다. `0`이면 외곽선 없음.
+   */
+  outline: number;
+
+  /**
+   * 외곽선 색상 (CMYK).
+   * `underlineColor`/`outlineColor` 미지정 시 글자 색상을 따른다.
+   */
+  outlineColor: CMYKColor;
+};
+
+/**
+ * 인쇄용 장식선(밑줄/취소선) 세그먼트. 절대 mm 좌표.
+ *
+ * `ParagraphEngine`의 `_computeDecorations()` 결과를 문서 절대 좌표로
+ * 변환한 것이다. 화면에서 그려지는 실제 선 div와 동일한 엔진 좌표를 소비한다.
+ */
+export type PrintPostDecoration = {
+  /** 선 종류 */
+  kind: 'underline' | 'breakline';
+
+  /** 지면 기준 절대 X (mm) */
+  x: number;
+
+  /** 지면 기준 절대 Y (mm) */
+  y: number;
+
+  /** 선 폭 (mm) */
+  width: number;
+
+  /** 선 두께 (mm) */
+  height: number;
+
+  /** 선 색상 (CMYK) */
+  color: CMYKColor;
 };
 
 /**
@@ -112,6 +150,13 @@ export type PrintPostData<T = BoxData | ImageData | ParagraphData | TableData | 
    * box/image/table/tr/td는 이 필드를 생략한다.
    */
   chars?: PrintPostDataChar[];
+
+  /**
+   * 장식선(밑줄/취소선) 세그먼트 목록.
+   * `data.type === 'paragraph'`인 경우에만 사용한다.
+   * 밑줄/취소선이 활성화된 문단에서 실제 선의 절대 mm 좌표를 제공한다.
+   */
+  decorations?: PrintPostDecoration[];
 
   /**
    * 테이블 보더 엣지 정보.
