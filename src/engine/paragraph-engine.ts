@@ -22,6 +22,8 @@ import {
   DEFAULT_VERTICAL_ALIGN,
   DEFAULT_WIDTH_RATIO,
   DEFAULT_WORD_WRAP,
+  DECORATION_MIN_THICKNESS_MM,
+  DECORATION_THICKNESS_RATIO,
   isHangableLineEnd,
   isHangableLineStart,
   isLineEndForbidden,
@@ -38,10 +40,12 @@ import {
   TextStyle,
   TextPartData,
   TextLineData,
+  TextDecorationRect,
   OverlapParts,
   ParagraphData,
   PrintPostData,
   PrintPostDataChar,
+  PrintPostDecoration,
 } from "@/types";
 import type { BoxEngine } from "./box-engine";
 import {
@@ -86,6 +90,12 @@ const DEFAULT_TEXT_STYLE: Required<TextStyle> = {
   widthRatio: DEFAULT_WIDTH_RATIO,
   spaceRatio: DEFAULT_SPACE_RATIO,
   indent: DEFAULT_INDENT,
+  underline: false,
+  breakline: false,
+  outline: 0,
+  underlineColor: '',
+  breaklineColor: '',
+  outlineColor: '',
 };
 
 /** 엔진 생성 옵션. */
@@ -1661,6 +1671,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     this._applyLineBreakRules(hangPairs);
     this._computeCharOffsets();
     this._computePerLineHeights();
+    this._computeDecorations();
 
     this._previousLineCount = this._columnContents.reduce((sum, col) => sum + col.length, 0);
     this._previousOverflow = this._overflow;
@@ -1738,6 +1749,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     }
 
     this._computePerLineHeights();
+    this._computeDecorations();
   }
 
   /**
@@ -1916,6 +1928,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     this._applyLineBreakRules(hangPairs);
     this._computeCharOffsets();
     this._computePerLineHeights();
+    this._computeDecorations();
 
     this._previousLineCount = this._columnContents.reduce((sum, col) => sum + col.length, 0);
     this._previousOverflow = this._overflow;
@@ -1957,6 +1970,174 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     }
   }
 
+  /**
+   * 장식선(밑줄/취소선) 구간 rect를 산출해 `TextPartData.decorationRects`를 채운다.
+   *
+   * 레이아웃 후처리 패스로, `charOffsets`(수평)과 `line.maxFontSize`/`lineHeight`(수직)가
+   * 확정된 뒤에 호출되어야 한다. 각 글자의 밑줄/취소선 속성과 색상이 같은 인접
+   * 글자(run 경계를 관통해도)는 하나의 선 구간으로 묶는다. 속성이 없거나
+   * `false`인 글자는 구간을 끊는다.
+   *
+   * 수직 기준(모두 mm):
+   * - 밑줄 y = 라인의 베이스라인 하단 부근 — `alignOffset + (li+1) × lineHeight - 두께`
+   *   (마지막 라인은 line gap 제외 규칙에 따라 `maxFontSize` 하단 기준)
+   * - 취소선 y = 라인 top 기준 글자 em box 중앙 — `alignOffset + li × lineHeight + maxFontSize/2 - 두께/2`
+   * - 두께 = `fontSize × 0.06` (최소 0.12mm), 밑줄 오프셋 = `fontSize × 0.1`
+   *
+   * 수평 기준: 파트 로컬 x = `charOffsets[strippedIdx]`, 폭 = 글자 배치 폭(`getCharWidths().swidth`).
+   * 걸침 글자(`hangs`)는 선 구간에서 제외한다 — 컬럼 밖으로 돌출된 부호에 밑줄이
+   * 따라가면 교정 전 배치와 어긋난다.
+   *
+   * @example
+   * // 'abc'에 밑줄, 'd'는 취소선 런 → 'abc'가 하나의 밑줄 rect로 묶인다
+   * engine._computeDecorations();
+   * // part.decorationRects === [{ kind: 'underline', x: 0, y: ..., width: Σswidth, ... }]
+   */
+  private _computeDecorations(): void {
+    const eff = this.effectiveTextStyle;
+    const baseFontSizeMm = eff.fontSize!;
+    const colorRegistry = this._resources.colorRegistry;
+    const lineGap = this.effectiveParagraphStyle.lineGap!;
+    const lineGapMode = this.effectiveParagraphStyle.lineGapMode ?? DEFAULT_LINE_GAP_MODE;
+
+    for (let c = 0; c < this._columnContents.length; c++) {
+      const column = this._columnContents[c];
+      let cumulativeTopMm = 0;
+      for (let li = 0; li < column.length; li++) {
+        const line = column[li];
+        if (!line) continue;
+
+        const lineHeightMm = line.lineHeight ?? computeLineHeightMm(lineGap, lineGapMode, line.maxFontSize ?? baseFontSizeMm);
+        const isLastLine = li === column.length - 1;
+
+        for (let pi = 0; pi < line.parts.length; pi++) {
+          const part = line.parts[pi];
+          if (!part || part.content.length === 0) {
+            part.decorationRects = undefined;
+            continue;
+          }
+
+          const { stripStart, stripEnd } = this._computeStripRange(part, line, pi);
+          if (stripEnd <= stripStart) {
+            part.decorationRects = undefined;
+            continue;
+          }
+          const rects: TextDecorationRect[] = [];
+          // 밑줄/취소선 트랙을 독립 유지 — 한 글자에 둘 다 활성이면 두 rect가 모두 산출된다.
+          const runs: Record<'underline' | 'breakline', {
+            active: boolean; color: string; colorName: string; thickness: number; startMm: number; endMm: number;
+          }> = {
+            underline: { active: false, color: '', colorName: '', thickness: 0, startMm: 0, endMm: 0 },
+            breakline: { active: false, color: '', colorName: '', thickness: 0, startMm: 0, endMm: 0 },
+          };
+          type Track = typeof runs['underline'];
+
+          const flushTrack = (track: Track, kind: 'underline' | 'breakline'): void => {
+            if (!track.active) return;
+            const lineBottomMm = isLastLine
+              ? cumulativeTopMm + (line.maxFontSize ?? baseFontSizeMm)
+              : cumulativeTopMm + lineHeightMm;
+            const emCenterMm = cumulativeTopMm + (line.maxFontSize ?? baseFontSizeMm) / 2;
+            rects.push({
+              kind,
+              x: track.startMm,
+              y: kind === 'underline'
+                ? lineBottomMm - track.thickness
+                : emCenterMm - track.thickness / 2,
+              width: track.endMm - track.startMm,
+              height: track.thickness,
+              color: track.color,
+              colorName: track.colorName,
+            });
+            track.active = false;
+          };
+
+          for (let i = stripStart; i < stripEnd; i++) {
+            const char = part.content[i]!;
+            if (char === RIGHT_INDENT_TAB_CHAR || char === '\t') {
+              flushTrack(runs.underline, 'underline');
+              flushTrack(runs.breakline, 'breakline');
+              continue;
+            }
+
+            const inlineStyle = part.inlineStyles?.[i];
+            const fs = inlineStyle?.fontSize ?? baseFontSizeMm;
+            const thickness = Math.max(fs * DECORATION_THICKNESS_RATIO, DECORATION_MIN_THICKNESS_MM);
+
+            // 색상 폴백 체인: 런 장식색상 → 문단 장식색상 → 런 글자색상 → 문단 글자색상.
+            // DEFAULT_TEXT_STYLE이 ''이므로 ?? 대신 빈 문자열을 건너뛴다.
+            const ulColorName = firstNonEmpty(
+              inlineStyle?.underlineColor,
+              eff.underlineColor,
+              inlineStyle?.color,
+              eff.color,
+            );
+            const blColorName = firstNonEmpty(
+              inlineStyle?.breaklineColor,
+              eff.breaklineColor,
+              inlineStyle?.color,
+              eff.color,
+            );
+            const ulOn = (inlineStyle?.underline ?? eff.underline!) === true;
+            const blOn = (inlineStyle?.breakline ?? eff.breakline!) === true;
+
+            const charStartMm = this._charOffsetMmAt(part, i, stripStart);
+            const charEndMm = charStartMm + this._charSwidthAt(part, i, inlineStyle);
+
+            for (const kind of ['underline', 'breakline'] as const) {
+              const track = runs[kind];
+              const on = kind === 'underline' ? ulOn : blOn;
+              const colorNameForKind = kind === 'underline' ? ulColorName : blColorName;
+              if (!on) {
+                flushTrack(track, kind);
+                continue;
+              }
+              if (track.active && colorNameForKind === track.colorName) {
+                track.endMm = charEndMm;
+                track.thickness = Math.max(track.thickness, thickness);
+              } else {
+                flushTrack(track, kind);
+                track.active = true;
+                track.color = colorNameForKind !== '' ? colorRegistry.getCSSColor(colorNameForKind) : '';
+                track.colorName = colorNameForKind;
+                track.thickness = thickness;
+                track.startMm = charStartMm;
+                track.endMm = charEndMm;
+              }
+            }
+          }
+          flushTrack(runs.underline, 'underline');
+          flushTrack(runs.breakline, 'breakline');
+
+          part.decorationRects = rects.length > 0 ? rects : undefined;
+        }
+
+        cumulativeTopMm += lineHeightMm;
+      }
+    }
+  }
+
+  /**
+   * 파트의 stripped 글자 인덱스에 대한 charOffset(mm)를 반환한다.
+   * `charOffsets` 미산출 시 0으로 폴백한다.
+   */
+  private _charOffsetMmAt(part: TextPartData, strippedIdx: number, _stripStart: number): number {
+    return part.charOffsets !== undefined && strippedIdx < part.charOffsets.length
+      ? part.charOffsets[strippedIdx]!
+      : 0;
+  }
+
+  /**
+   * 파트의 stripped 글자 인덱스에 대한 배치 폭(swidth, mm)을 반환한다.
+   * 걸침 글자는 0을 반환한다(선 구간 제외).
+   */
+  private _charSwidthAt(part: TextPartData, strippedIdx: number, inlineStyle: TextInlineStyle | undefined): number {
+    const char = part.content[strippedIdx]!;
+    if (part.hangs !== undefined && (part.hangs[strippedIdx] === 'start' || part.hangs[strippedIdx] === 'end')) {
+      return 0;
+    }
+    return this.getCharWidths(char, inlineStyle).swidth;
+  }
   /**
    * 라인에 실제 배치된 글자들의 최대 폰트 크기를 계산한다.
    *
@@ -3087,7 +3268,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const fs = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
     const lmfs = lineMaxFontSize ?? fs;
     const fontName = inlineStyle?.fontFamily ?? "";
-    const cacheKey = `${char}|${wr}|${lsEm}|${sr}|${fs}|${lmfs}|${fontName}`;
+    const ol = inlineStyle?.outline ?? this.effectiveTextStyle.outline!;
+    const cacheKey = `${char}|${wr}|${lsEm}|${sr}|${fs}|${lmfs}|${fontName}|${ol}`;
     const cached = this._charOuterStyleCache.get(cacheKey);
     if (cached) return cached;
 
@@ -3110,6 +3292,13 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       maxWidth: widthCss,
       textAlign: "center",
     };
+
+    if (ol > 0) {
+      const colorRegistry = this._resources.colorRegistry;
+      const outlineColorName = inlineStyle?.outlineColor ?? inlineStyle?.color ?? this.effectiveTextStyle.color!;
+      const outlineCssColor = outlineColorName !== '' ? colorRegistry.getCSSColor(outlineColorName) : '';
+      style.webkitTextStroke = `${ol * fs}mm ${outlineCssColor}`;
+    }
 
     const topMm = this._getCharVerticalOffset(lmfs, fs);
     if (topMm !== 0) {
@@ -3180,6 +3369,13 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       transformOrigin: "0 center",
       visibility: char === RIGHT_INDENT_TAB_CHAR ? "hidden" : undefined,
     };
+
+    const ol = inlineStyle?.outline ?? this.effectiveTextStyle.outline!;
+    if (ol > 0) {
+      const outlineColorName = inlineStyle?.outlineColor ?? inlineStyle?.color ?? this.effectiveTextStyle.color!;
+      const outlineCssColor = outlineColorName !== '' ? this._resources.colorRegistry.getCSSColor(outlineColorName) : '';
+      style.webkitTextStroke = `${ol * fs}mm ${outlineCssColor}`;
+    }
 
     const topMm = this._getCharVerticalOffset(lmfs, fs);
     if (topMm !== 0) {
@@ -4114,6 +4310,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       ...(inline.letterSpacing !== undefined && { letterSpacing: inline.letterSpacing }),
       ...(inline.widthRatio !== undefined && { widthRatio: inline.widthRatio }),
       ...(inline.spaceRatio !== undefined && { spaceRatio: inline.spaceRatio }),
+      ...(inline.underline !== undefined && { underline: inline.underline }),
+      ...(inline.breakline !== undefined && { breakline: inline.breakline }),
+      ...(inline.outline !== undefined && { outline: inline.outline }),
+      ...(inline.underlineColor !== undefined && { underlineColor: inline.underlineColor }),
+      ...(inline.breaklineColor !== undefined && { breaklineColor: inline.breaklineColor }),
+      ...(inline.outlineColor !== undefined && { outlineColor: inline.outlineColor }),
     };
   }
 
@@ -4147,11 +4349,13 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const INLINE_FIELDS = [
       "color", "fontFamily", "fontWeight", "fontStyle", "fontSize",
       "letterSpacing", "widthRatio", "spaceRatio",
+      "underline", "breakline", "outline",
+      "underlineColor", "breaklineColor", "outlineColor",
     ] as const;
     const runs = this._styleRuns ?? (this._styleRuns = this._buildStyleRuns());
 
     let first = true;
-    const common: Partial<Record<string, string | number | undefined>> = {};
+    const common: Partial<Record<string, string | number | boolean | undefined>> = {};
 
     for (const run of runs) {
       if (run.end <= startOffset) continue;
@@ -4284,7 +4488,13 @@ function inlineStyleEqual(a: TextInlineStyle | undefined, b: TextInlineStyle | u
     a.color === b.color &&
     a.letterSpacing === b.letterSpacing &&
     a.widthRatio === b.widthRatio &&
-    a.spaceRatio === b.spaceRatio
+    a.spaceRatio === b.spaceRatio &&
+    a.underline === b.underline &&
+    a.breakline === b.breakline &&
+    a.outline === b.outline &&
+    a.underlineColor === b.underlineColor &&
+    a.breaklineColor === b.breaklineColor &&
+    a.outlineColor === b.outlineColor
   );
 }
 
@@ -4318,6 +4528,23 @@ function computeStripRange(part: TextPartData, line: TextLineData, partIdx: numb
     while (stripEnd > stripStart && content[stripEnd - 1] === " ") stripEnd--;
   }
   return { stripStart, stripEnd };
+}
+
+/**
+ * 인자 중 첫 번째 비-빈 문자열을 반환한다.
+ *
+ * 스타일 색상 필드는 `undefined`(미지정)와 `''`(DEFAULT_TEXT_STYLE 기본값)가
+ * 모두 "값 없음"이므로 `??` 체인으로는 폴백할 수 없다 — `''`가 nullish가
+ * 아니기 때문이다.
+ *
+ * @param values - 우선순위 순 문자열들 (undefined 허용)
+ * @returns 첫 번째 비-빈 문자열. 모두 비었으면 `''`
+ */
+function firstNonEmpty(...values: (string | undefined)[]): string {
+  for (const v of values) {
+    if (v !== undefined && v !== '') return v;
+  }
+  return '';
 }
 
 export function buildParagraphPrintPostData(
@@ -4433,6 +4660,18 @@ export function buildParagraphPrintPostData(
             ? colorRegistry.get(colorName)
             : { c: 0, m: 0, y: 0, k: 255 };
 
+          const outlineEm = inlineStyle?.outline
+            ?? textStyle?.outline
+            ?? inheritStyle?.outline
+            ?? 0;
+          const outlineColorName = inlineStyle?.outlineColor
+            ?? textStyle?.outlineColor
+            ?? inheritStyle?.outlineColor
+            ?? colorName;
+          const outlineCmyk = outlineColorName !== undefined
+            ? colorRegistry.get(outlineColorName)
+            : { c: 0, m: 0, y: 0, k: 255 };
+
           chars.push({
             char,
             rect: {
@@ -4449,11 +4688,53 @@ export function buildParagraphPrintPostData(
             letterSpacing,
             spaceRatio,
             color: cmyk,
+            outline: outlineEm * charFontSize,
+            outlineColor: outlineCmyk,
           });
         }
         partStartMm += part.width;
       }
 
+      cumulativeTopMm += lineH;
+    }
+  }
+
+  const decorations: PrintPostDecoration[] = [];
+  for (let colIdx = 0; colIdx < columnContents.length; colIdx++) {
+    const col = columnContents[colIdx];
+    if (!col) continue;
+
+    let colLeftMm = absLeftMm;
+    for (let i = 0; i < colIdx; i++) {
+      colLeftMm += (columnWidths[i] ?? 0) + (gaps[i] ?? 0);
+    }
+
+    const baseFontSizeMm2 = engine.fontSize;
+    const effectiveColumnHeightMm2 = parentHeightMm > 0
+      ? parentHeightMm + (defaultLineHeightMm - baseFontSizeMm2)
+      : 0;
+    const alignOffsetMm2 = engine._computeAlignOffsetMm(col, effectiveColumnHeightMm2, baseFontSizeMm2, parentHeightMm);
+
+    let cumulativeTopMm = 0;
+    for (const lineData of col) {
+      if (!lineData) continue;
+      const lineH = lineData.lineHeight ?? defaultLineHeightMm;
+      for (const part of lineData.parts) {
+        if (!part || part.content.length === 0) continue;
+        for (const deco of part.decorationRects ?? []) {
+          const decoCmyk = deco.colorName !== ''
+            ? colorRegistry.get(deco.colorName)
+            : { c: 0, m: 0, y: 0, k: 255 };
+          decorations.push({
+            kind: deco.kind,
+            x: colLeftMm + part.left + deco.x,
+            y: absTopMm + alignOffsetMm2 + cumulativeTopMm + deco.y,
+            width: deco.width,
+            height: deco.height,
+            color: decoCmyk,
+          });
+        }
+      }
       cumulativeTopMm += lineH;
     }
   }
@@ -4467,5 +4748,6 @@ export function buildParagraphPrintPostData(
       height: parentHeightMm,
     },
     chars,
+    decorations,
   }];
 }
