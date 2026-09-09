@@ -104,7 +104,7 @@ function buildPara(content, siblingBoxes = [], opts = {}) {
 }
 
 // ── 실측 기반 레이아웃 상수 (getCharWidths로 사전 측정) ──
-// '가' swidth: fontSize 4 → 2.544mm, fontSize 6 → 3.816mm (widthRatio/letterSpacing 반영값)
+// '가' swidth: fontSize 4 → 3.28mm, fontSize 6 → 4.92mm (기본 widthRatio 1, 반영값)
 const BASE_FS = 4;
 const BIG_FS = 6;
 const LINE_GAP = 1.2;
@@ -118,8 +118,8 @@ const probe = buildPara('가', [], {});
 const baseCharW = probe.getCharWidths('가').swidth;
 const bigProbe = buildPara('가', [], { fontSize: BIG_FS });
 const bigCharW = bigProbe.getCharWidths('가').swidth;
-const BASE_PER_LINE = Math.floor((COL_W + 1e-6) / baseCharW);  // 13
-const BIG_PER_LINE = Math.floor((COL_W + 1e-6) / bigCharW);    // 8
+const BASE_PER_LINE = Math.floor((COL_W + 1e-6) / baseCharW);  // 10
+const BIG_PER_LINE = Math.floor((COL_W + 1e-6) / bigCharW);    // 6
 
 /**
  * 지정 rect(x1~x2, y1~y2, 문서 절대좌표)와 교차하는 visible 글자 수를 센다.
@@ -174,7 +174,7 @@ console.log('Test 1: 인라인 오버라이드 없는 오버랩 문단 — 균�
 // ═══ Test 2: 사용자 버그 직접 재현 — 2단 big 런 + 중단 오버랩 ═══
 console.log('\nTest 2: 2단 인라인 큰 글자 + 오버랩 — 회피가 per-line 렌더링 위치에서 발생');
 {
-  // 1단: base 156자 (12라인 × 13자, 컬럼 가득). 2단: big 런이 흐름.
+  // 1단: base 120자 (12라인 × 10자, 컬럼 가득). 2단: big 런이 흐름.
   // 2단 라인 top = 10 + i×7.2 (per-line BIG_LH):
   //   line0: 10.0~17.2  line1: 17.2~24.4  line2: 24.4~31.6  line3: 31.6~38.8
   // 오버랩: abs x 51~61 (2단 로컬 4.5~14.5 → 자유 [0,4.5]+[14.5,33.5], 파트 2개),
@@ -182,8 +182,8 @@ console.log('\nTest 2: 2단 인라인 큰 글자 + 오버랩 — 회피가 per-l
   // 레거시(균일 4.8 가정)였다면 2단 라인 top = 10+i×4.8: line3 (24.4~29.2)이
   // 교차로 판정되고 line2는 미교차 → 실제 렌더링(line2가 24.4~31.6에 있음)과
   // 어긋나 텍스트가 오버랩 위로 덮임 — 본 버그.
-  const col1Chars = BASE_PER_LINE * 12; // 156자 — 1단 가득
-  const bigChars = BIG_PER_LINE * 5;    // 40자 — 2단 5라인
+  const col1Chars = BASE_PER_LINE * 12; // 120자 — 1단 가득
+  const bigChars = BIG_PER_LINE * 5;    // 30자 — 2단 5라인
   const overlayBox = {
     type: 'box', id: 'ovl2', position: 'absolute',
     left: 51, top: 26, width: 10, height: 4, zIndex: 10,
@@ -196,18 +196,23 @@ console.log('\nTest 2: 2단 인라인 큰 글자 + 오버랩 — 회피가 per-l
 
   const c0 = para.columnContents[0];
   const c1 = para.columnContents[1] ?? [];
-  assert(c0.length === 12, `1단 base 156자 → 12라인 가득 (got ${c0.length})`);
-  // line2가 파트 분할([0~4.5]에 1자 + [14.5~33.5]에 4자)되어 라인당 글자 수가
-  // 줄어듦 → 40자는 6라인에 배치됨 (파트 분할 전이라면 5라인).
-  assert(c1.length === 6, `2단 big 40자 → 6라인 (line2 파트 분할 반영, got ${c1.length})`);
+  assert(c0.length === 12, `1단 base 120자 → 12라인 가득 (got ${c0.length})`);
+  // line2가 파트 분할되어 라인당 글자 수가 줄어듦 → 30자는 6라인에 배치됨
+  // (파트 분할 전이라면 5라인). 오버랩 좌측 폭 4.5mm < big 글자 폭이면 좌측
+  // 파트가 COVER(0자)가 되어 5라인 유지 — 분할 여부는 실측 좌표로 판정.
+  assert(c1.length === 6, `2단 big 30자 → 6라인 (line2 파트 분할 반영, got ${c1.length})`);
   assert(c1.every(line => approx(line.lineHeight ?? 0, BIG_LH)),
     `2단 모든 라인 높이 === ${BIG_LH}mm (인라인 ${BIG_FS}mm 런)`);
 
-  // 핵심: 2단 line2 (24.4~31.6)만 오버랩(26~30)과 교차 → 파트 2개
+  // 핵심: 2단 line2 (24.4~31.6)만 오버랩(26~30)과 교차 → 파트 1개 left=14.5.
+  // 오버랩 좌측 자유 폭 4.5mm < big 글자 폭 4.92mm → 좌측 영역은 COVER로 소멸,
+  // 우측 자유 영역 [14.5, 33.5]만 단일 파트로 남는다 (COVER 판정이 좌측 파트를
+  // 아예 생성하지 않는 동작). 레거시(균일 4.8 가정)였다면 line3이 교차 판정되어
+  // 실제 렌더링과 어긋나 텍스트가 오버랩 위로 덮였다 — 본 버그.
   const l2 = c1[2];
-  const l2Split = l2 && l2.parts.length === 2 && approx(l2.parts[0].left, 0) && approx(l2.parts[0].width, 4.5);
+  const l2Split = l2 && l2.parts.length === 1 && approx(l2.parts[0].left, 14.5) && approx(l2.parts[0].width, 19);
   assert(l2Split,
-    `2단 line2 (per-line top 24.4~31.6) 오버랩 교차 → 파트 2개 [0~4.5]+[14.5~33.5] (got ${l2 ? l2.parts.map(p => p.left.toFixed(1) + '~' + (p.left + p.width).toFixed(1)).join(' ') : 'n/a'})`);
+    `2단 line2 (per-line top 24.4~31.6) 오버랩 교차 → 좌측 COVER 소멸, 우측 파트 1개 left=14.5 (got ${l2 ? l2.parts.map(p => p.left.toFixed(1) + '~' + (p.left + p.width).toFixed(1)).join(' ') : 'n/a'})`);
 
   // line0/1/3은 오버랩 밖 → 단일 파트 left=0
   const [l0, l1, l3] = [c1[0], c1[1], c1[3]];
@@ -228,10 +233,10 @@ console.log('\nTest 2: 2단 인라인 큰 글자 + 오버랩 — 회피가 per-l
 // ═══ Test 3: overflow 판정 per-line화 ═══
 console.log('\nTest 3: 큰 글자 컬럼의 overflow 판정 — per-line 높이 누적');
 {
-  // base 99자: 8라인(13×7=91 + 8자). 균일/둘 다 1단에 전부.
+  // base 99자: 10라인(10×9=90 + 9자). 균일/둘 다 1단에 전부.
   const para = buildPara(makeText(99), [], {});
-  assert(para.columnContents[0].length === 8 && (para.columnContents[1] ?? []).length === 0,
-    `base 99자: 1단 8라인, 2단 0라인 (got ${para.columnContents[0].length}/${(para.columnContents[1] ?? []).length})`);
+  assert(para.columnContents[0].length === 10 && (para.columnContents[1] ?? []).length === 0,
+    `base 99자: 1단 10라인, 2단 0라인 (got ${para.columnContents[0].length}/${(para.columnContents[1] ?? []).length})`);
 
   // big 99자: 라인 7.2mm. 컬럼 수용 60.8 → 8 visible (cum 57.6), 9번째 64.8 초과 → 2단 흐름.
   // 균일 가정이었다면 12라인까지 1단에 들어감 — per-line 판정이 4라인 일찍 넘김.
@@ -239,18 +244,18 @@ console.log('\nTest 3: 큰 글자 컬럼의 overflow 판정 — per-line 높이 
   const paraBig = buildPara([bigRun], [], {});
   const b0 = paraBig.columnContents[0].length;
   const b1 = (paraBig.columnContents[1] ?? []).length;
-  assert(b0 === 8 && b1 === 5,
-    `big 99자: 1단 8라인(per-line overflow) + 2단 5라인 (got ${b0}/${b1})`);
+  assert(b0 === 8 && b1 === 9,
+    `big 99자: 1단 8라인(per-line overflow) + 2단 9라인 (got ${b0}/${b1})`);
   assert(b0 < 12, `1단 라인 수(${b0}) < 균일 가정(12) — per-line overflow 판정 작동 증명`);
 }
 
 // ═══ Test 4: 혼합 라인 누적 top — base 라인 다음 big 라인 ═══
 console.log('\nTest 4: base→big 라인 전환 — 누적 top 정확성');
 {
-  // 단일 컬럼 33.5mm. run1 base 18자 → line0 13자(가득), line1에 base 5자.
-  // run2 big 런이 line1에 이어짐 (base 5자 + big 글자들).
+  // 단일 컬럼 33.5mm. run1 base 18자 → line0 10자(가득), line1에 base 8자.
+  // run2 big 런이 line1에 이어짐 (base 8자 + big 글자들).
   // line0 높이 4.8 (base만), line1 높이 7.2 (big 포함 max).
-  // line1 첫 글자(전체 13번째) rect top = 10 + 4.8 = 14.8
+  // line1 첫 글자(전체 10번째) rect top = 10 + 4.8 = 14.8
   const para = buildPara(
     [makeText(18), { content: makeText(18), textInlineStyle: { fontSize: BIG_FS } }],
     [],
@@ -260,16 +265,16 @@ console.log('\nTest 4: base→big 라인 전환 — 누적 top 정확성');
   assert(approx(col[0].lineHeight ?? 0, BASE_LH), `라인0 높이 === ${BASE_LH} (base만)`);
   assert(approx(col[1].lineHeight ?? 0, BIG_LH), `라인1 높이 === ${BIG_LH} (base+big 혼합, big max)`);
 
-  const r = para.getCharRect(13);
+  const r = para.getCharRect(10);
   // 라인1 첫 글자는 base(4mm) 글자 — 하단 앵커 원칙에 따라 라인의 max fontSize(6)
   // 영역 하단에 맞추기 위해 verticalOffset = 6-4 = 2mm 내려감.
   assert(r && approx(r.top, BOX_TOP + BASE_LH + (BIG_FS - BASE_FS)),
     `라인1 첫 (base) 글자 rect top === ${BOX_TOP + BASE_LH + (BIG_FS - BASE_FS)}mm (누적 top + 하단 앵커 offset 2mm, got ${r?.top.toFixed(2)})`);
 
-  // line1: base 5자(offset 13~17) + big 글자. line1의 base 5자 폭 = 5×2.544=12.72
-  // big 글자가 (33.5-12.72)/3.816 ≈ 5.4 → 5자 들어감 → line1 총 10자 (offset 13~22)
-  // line2 첫 글자 = offset 23 → top = 10 + 4.8 + 7.2 = 22 (line2는 big 전체 → offset 0)
-  const rLine2 = para.getCharRect(23);
+  // line1: base 8자(offset 10~17) + big 글자. line1의 base 8자 폭 = 8×3.28=26.24.
+  // big 글자가 (33.5-26.24)/4.92 ≈ 1.47 → 1자 들어감 → line1 총 9자 (offset 10~18)
+  // line2 첫 글자 = offset 19 → top = 10 + 4.8 + 7.2 = 22 (line2는 big 전체)
+  const rLine2 = para.getCharRect(19);
   assert(rLine2 && approx(rLine2.top, BOX_TOP + BASE_LH + BIG_LH),
     `라인2 첫 글자 rect top === ${BOX_TOP + BASE_LH + BIG_LH}mm (4.8+7.2 누적, got ${rLine2?.top.toFixed(2)})`);
 }
@@ -277,7 +282,7 @@ console.log('\nTest 4: base→big 라인 전환 — 누적 top 정확성');
 // ═══ Test 5: 오버랩 + 큰 글자 혼합 — 하단 COVER ═══
 console.log('\nTest 5: 오버랩 + 큰 글자 혼합 — 전 visible 글자가 오버랩 밖 (단일 소스)');
 {
-  // 2단. 1단 base 12라인(156자) + 2단 big 5라인(40자).
+  // 2단. 1단 base 12라인(120자) + 2단 big 라인들.
   // 오버랩: x 46~81 (2단 전폭 덮음), y 40~46 → 2단 line4 (38.8~46) 교차 → COVER
   // → line4는 cover 라인 (빈 파트). line3 (31.6~38.8) 미교차.
   const col1Chars = BASE_PER_LINE * 12;

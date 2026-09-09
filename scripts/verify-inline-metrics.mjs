@@ -128,10 +128,10 @@ console.log('\n[1] getCharWidths 폭 공식 — per-run 오버라이드');
   const { paraEngine } = buildPara('가');
   const engine = paraEngine;
 
-  // 기본값: 문단 effective (letterSpacing -0.1, widthRatio 0.8, spaceRatio 0.5)
+  // 기본값: 문단 effective (letterSpacing -0.1, widthRatio 1, spaceRatio 0.5)
   const base = engine.getCharWidths('가');
-  const manualBase = base.rawWidth * 0.8 + -0.1 * 4;
-  assert(approx(base.swidth, manualBase), `기본 swidth === raw×0.8 + (-0.1×4) (${base.swidth.toFixed(6)} vs ${manualBase.toFixed(6)})`);
+  const manualBase = base.rawWidth * 1 + -0.1 * 4;
+  assert(approx(base.swidth, manualBase), `기본 swidth === raw×1 + (-0.1×4) (${base.swidth.toFixed(6)} vs ${manualBase.toFixed(6)})`);
 
   // 런 오버라이드: widthRatio 1.0, letterSpacing 0.2, spaceRatio 0.25
   const ov = { widthRatio: 1.0, letterSpacing: 0.2, spaceRatio: 0.25 };
@@ -222,7 +222,7 @@ console.log('\n[4] printPostData — per-char 런 값 추출');
   assert(approx(charNa.spaceRatio, 0.25), `오버라이드 런 print spaceRatio === 0.25 (${charNa.spaceRatio})`);
 
   const charGa = chars[0]; // '가' — plain 런 (문단 기본)
-  assert(approx(charGa.widthRatio, 0.8), `plain 런 print widthRatio === 문단 기본 0.8 (${charGa.widthRatio})`);
+  assert(approx(charGa.widthRatio, 1), `plain 런 print widthRatio === 문단 기본 1 (${charGa.widthRatio})`);
   assert(approx(charGa.letterSpacing, -0.1), `plain 런 print letterSpacing === 문단 기본 -0.1 (${charGa.letterSpacing})`);
   assert(approx(charGa.spaceRatio, 0.5), `plain 런 print spaceRatio === 문단 기본 0.5 (${charGa.spaceRatio})`);
 }
@@ -257,24 +257,30 @@ console.log('\n[6] 커서 스타일 조회 — per-run 오버라이드');
   );
 
   const plainEff = paraEngine.getEffectiveStyleAt(0); // '가'
-  assert(approx(plainEff.widthRatio, 0.8), `plain 위치 effective widthRatio === 0.8 (${plainEff.widthRatio})`);
+  assert(approx(plainEff.widthRatio, 1), `plain 위치 effective widthRatio === 1 (${plainEff.widthRatio})`);
   assert(approx(plainEff.letterSpacing, -0.1), `plain 위치 effective letterSpacing === -0.1 (${plainEff.letterSpacing})`);
 
   const styledEff = paraEngine.getEffectiveStyleAt(3); // '다'
   assert(styledEff.widthRatio === 1.0, `오버라이드 위치 effective widthRatio === 1.0 (${styledEff.widthRatio})`);
   assert(approx(styledEff.letterSpacing, 0.05), `오버라이드 위치 effective letterSpacing === 0.05 (${styledEff.letterSpacing})`);
 
-  // 범위 공통 스타일: [0,2)는 전부 plain → widthRatio 0.8
+  // 범위 공통 스타일: [0,2)는 전부 plain → widthRatio 1
   const commonPlain = paraEngine.getCommonStyleInRange(0, 2);
-  assert(approx(commonPlain.widthRatio, 0.8), `plain 범위 공통 widthRatio === 0.8 (${commonPlain.widthRatio})`);
+  assert(approx(commonPlain.widthRatio, 1), `plain 범위 공통 widthRatio === 1 (${commonPlain.widthRatio})`);
 
   // 범위 [2,4)는 전부 오버라이드 → widthRatio 1.0
   const commonStyled = paraEngine.getCommonStyleInRange(2, 4);
   assert(commonStyled.widthRatio === 1.0, `오버라이드 범위 공통 widthRatio === 1.0 (${commonStyled.widthRatio})`);
   assert(approx(commonStyled.letterSpacing, 0.05), `오버라이드 범위 공통 letterSpacing === 0.05 (${commonStyled.letterSpacing})`);
 
-  // 범위가 두 런에 걸치면 상이 필드는 제외됨
-  const commonMixed = paraEngine.getCommonStyleInRange(1, 3);
+  // 범위가 두 런에 걸치면 상이 필드는 제외됨 — plain(기본 1)과 오버라이드 런의
+  // widthRatio가 달라야 제외 의미가 있으므로 오버라이드를 1.2로 주입한다.
+  const mixedPara = buildPara(
+    ['가나', { content: '다라', textInlineStyle: { widthRatio: 1.2, letterSpacing: 0.05 } }, '마바'],
+    [],
+    { boxWidth: 60, boxHeight: 100 },
+  );
+  const commonMixed = mixedPara.paraEngine.getCommonStyleInRange(1, 3);
   assert(commonMixed.widthRatio === undefined, '혼합 범위 공통 widthRatio 제외 (undefined)');
 }
 
@@ -309,15 +315,15 @@ console.log('\n[7] 런 맵 병합 — 신규 필드 판정');
 console.log('\n[8] normalizeRunMap — 문단 기본 동일값 런 해제');
 {
   const { normalizeRunMap } = await import('../src/edit/run-map.ts');
-  const paragraphStyle = { widthRatio: 0.8, letterSpacing: -0.1, spaceRatio: 0.5, fontSize: 4 };
+  const paragraphStyle = { widthRatio: 1, letterSpacing: -0.1, spaceRatio: 0.5, fontSize: 4 };
 
   // 문단 기본과 동일한 값 → 해제 (undefined)
-  const runMapSame = [{ start: 0, end: 2, style: { widthRatio: 0.8, letterSpacing: -0.1, spaceRatio: 0.5 } }];
+  const runMapSame = [{ start: 0, end: 2, style: { widthRatio: 1, letterSpacing: -0.1, spaceRatio: 0.5 } }];
   const normSame = normalizeRunMap(runMapSame, paragraphStyle);
   assert(normSame[0].style === undefined, '문단 기본과 동일한 런은 해제 (undefined)');
 
   // 하나라도 다르면 유지
-  const runMapDiff = [{ start: 0, end: 2, style: { widthRatio: 0.8, letterSpacing: 0.0 } }];
+  const runMapDiff = [{ start: 0, end: 2, style: { widthRatio: 1, letterSpacing: 0.0 } }];
   const normDiff = normalizeRunMap(runMapDiff, paragraphStyle);
   assert(normDiff[0].style !== undefined && normDiff[0].style.letterSpacing === 0.0, '상이 필드가 있으면 런 유지');
 }
@@ -325,14 +331,14 @@ console.log('\n[8] normalizeRunMap — 문단 기본 동일값 런 해제');
 // ── 9. 오버랩 회피 × per-run 폭 필드 — 파트 분할/자유 영역 필터 ──
 console.log('\n[9] 오버랩 회피 — per-run widthRatio/letterSpacing 폭으로 파트 분할');
 {
-  // 문단 박스: abs (10,10) ~ (50,70). 1단 40mm. base '가' swidth = 2.544mm.
+  // 문단 박스: abs (10,10) ~ (50,70). 1단 40mm. base '가' swidth = 3.28mm (기본 widthRatio 1).
   // 오버랩 박스: abs x 20~30 (컬럼 로컬 10~20), y 14.8~24.4 → 라인1/2 교차.
   // → 라인1/2 자유 영역 [0,10] + [20,40] → 파트 2개 (left=0, left=10(갭)).
   const SYLLABLES = '가나다라마바사아자차카타파하';
   const makeText = (n) => Array.from({ length: n }, (_, i) => SYLLABLES[i % 14]).join('');
 
   const probe = buildPara('가', [], { boxWidth: 40, boxHeight: 60 });
-  const baseW = probe.paraEngine.getCharWidths('가').swidth; // 2.544
+  const baseW = probe.paraEngine.getCharWidths('가').swidth; // 3.28
   const basePerLine = Math.floor((10 + 1e-6) / baseW); // 좌측 파트 [0,10]에 3자
 
   const overlayBox = {
@@ -353,7 +359,7 @@ console.log('\n[9] 오버랩 회피 — per-run widthRatio/letterSpacing 폭으�
   assert(l1 && approx(l1.parts[1].left, 10) && approx(l1.parts[1].width, 20),
     `우측 파트 left=10(갭), w=20 (got left=${l1?.parts[1].left.toFixed(2)}, w=${l1?.parts[1].width.toFixed(2)})`);
 
-  // 좌측 파트 [0,10]의 배치 폭 합계는 base 글자 3자 × 2.544 = 7.632 ≤ 10
+  // 좌측 파트 [0,10]의 배치 폭 합계는 base 글자 3자 × 3.28 = 9.84 ≤ 10
   let leftSum = 0;
   for (let i = 0; i < l1.parts[0].content.length; i++) {
     const { swidth } = paraEngine.getCharWidths(l1.parts[0].content[i], l1.parts[0].inlineStyles[i]);
@@ -363,14 +369,16 @@ console.log('\n[9] 오버랩 회피 — per-run widthRatio/letterSpacing 폭으�
 }
 
 // ── 10. 오버랩 회피 × 런 widthRatio 확대 — 파트 폭 준수 ──
-console.log('\n[10] 오버랩 + 런 widthRatio 1.0 — 확대 폭으로 파트 분할, 오버랩 영역 0교차');
+console.log('\n[10] 오버랩 + 런 widthRatio 확대 — 확대 폭으로 파트 분할, 오버랩 영역 0교차');
 {
   const SYLLABLES = '가나다라마바사아자차카타파하';
   const makeText = (n) => Array.from({ length: n }, (_, i) => SYLLABLES[i % 14]).join('');
 
-  // 문단 기본 widthRatio 0.8 (swidth 2.544). 런 오버라이드 widthRatio 1.0 → 3.28mm.
-  const probe = buildPara([{ content: '가', textInlineStyle: { widthRatio: 1.0 } }], [], { boxWidth: 40, boxHeight: 60 });
-  const wideW = probe.paraEngine.getCharWidths('가', { widthRatio: 1.0 }).swidth; // 3.28
+  // 문단 기본 widthRatio 1 (swidth 3.28). 런 오버라이드 widthRatio는 기본값과 동일한
+  // 1.0이면 폭 변화가 없으므로, [10]의 "확대 폭" 전제를 유지하기 위해 오버라이드를
+  // 1.2로 확대하고 기준 폭은 런타임 실측으로 구한다.
+  const probe = buildPara([{ content: '가', textInlineStyle: { widthRatio: 1.2 } }], [], { boxWidth: 40, boxHeight: 60 });
+  const wideW = probe.paraEngine.getCharWidths('가', { widthRatio: 1.2 }).swidth;
 
   const overlayBox = {
     type: 'box', id: 'ovl2', position: 'absolute',
@@ -379,7 +387,7 @@ console.log('\n[10] 오버랩 + 런 widthRatio 1.0 — 확대 폭으로 파트 �
   };
   const runChars = Math.ceil(40 / wideW) * 6; // 파트 없이 계산한 여유분
   const { paraEngine } = buildPara(
-    [{ content: makeText(runChars), textInlineStyle: { widthRatio: 1.0 } }],
+    [{ content: makeText(runChars), textInlineStyle: { widthRatio: 1.2 } }],
     [overlayBox],
     { boxWidth: 40, boxHeight: 60 },
   );
