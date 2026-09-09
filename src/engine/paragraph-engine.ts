@@ -21,10 +21,13 @@ import {
   DEFAULT_TEXT_ALIGN,
   DEFAULT_VERTICAL_ALIGN,
   DEFAULT_WIDTH_RATIO,
+  DEFAULT_WORD_WRAP,
   isHangableLineEnd,
   isHangableLineStart,
   isLineEndForbidden,
   isLineStartForbidden,
+  isWordChar,
+  isAlnumCode,
 } from "@/constants";
 import { computeLineHeightMm, resolveLineGap } from "./line-height";
 import {
@@ -70,6 +73,7 @@ const DEFAULT_PARAGRAPH_STYLE_NO_LINE_GAP: Required<ParagraphStyle> = {
   verticalAlign: DEFAULT_VERTICAL_ALIGN,
   textAlign: DEFAULT_TEXT_ALIGN,
   hangingPunctuation: false,
+  wordWrap: DEFAULT_WORD_WRAP,
 };
 
 const DEFAULT_TEXT_STYLE: Required<TextStyle> = {
@@ -737,6 +741,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         if (
           cfg.lineEnd &&
           isHangableLineEnd(nextFirstPart.content[0]!) &&
+          // word-wrap: 당겨올 글자가 워드 글자(조인터 포함)면 걸침 교정을
+          // 하지 않는다 — 강제 분할 잔여(".14159" 등)가 걸침으로 컬럼 밖에
+          // 배치되고 워드가 다시 쪼개지는 것을 막는다.
+          !(this.wordWrap &&
+            isWordChar(undefined, nextFirstPart.content[0]!, nextFirstPart.content[1])) &&
           !curHasTab &&
           !nextHasTab &&
           this._isLastPartAtColumnRightEdge(curLine, columnWidth)
@@ -804,6 +813,17 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
           if (runStart === lastPart.content.length) continue;
           // 최소 1자의 visible 글자가 남아야 한다.
           if (runStart === 0) continue;
+          // word-wrap: 마킹 대상 마지막 글자가 워드 글자면 skip — 강제
+          // 분할로 인해 라인이 워드 글자로 끝나는 경우, 그 글자를 컬럼
+          // 밖으로 내보내면 워드가 시각적으로 쪼개진다.
+          if (this.wordWrap &&
+            isWordChar(
+              lastPart.content[runStart - 1],
+              lastPart.content[lastPart.content.length - 1]!,
+              undefined,
+            )) {
+            continue;
+          }
 
           lastPart.hangs ??= new Array(lastPart.content.length).fill(undefined);
           for (let m = runStart; m < lastPart.content.length; m++) {
@@ -862,6 +882,109 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   }
 
   /**
+   * 워드 시작 지점에서 워드 전체 폭(mm)을 측정한다 (word-wrap 전용).
+   *
+   * `_layoutColumnsPass`의 charLoop가 글자 하나를 배치할 때 쓰는 것과
+   * 동일한 폭 공식(`_charWidthMm` raw 폭 × widthRatio + letterSpacing)과
+   * 동일 캐시(`_charWidthCache`)를 사용하므로, lookahead 측정값과 실제
+   * 배치 판정값이 부동소수점 수준에서 일치한다 — 이 일치가 "워드를
+   * 통째로 배치했는데 중간에서 넘치는" 상황이 구조적으로 발생하지
+   * 않음을 보장한다.
+   *
+   * 스캔은 run 경계를 관통한다(각 글자는 소속 run의 inlineStyle로 측정)
+   * — 인라인 스타일 변경이 워드를 쪼개지 않는다. 블록(`\n`) 경계에서는
+   * 반드시 종료한다(워드는 블록을 넘지 않는다).
+   *
+   * @param runs - 현재 블록의 런 배열 (`this.contents[idxBlock]`)
+   * @param startRunIdx - 워드 시작 글자의 런 인덱스
+   * @param startCharIdx - 워드 시작 글자의 런 내 글자 인덱스
+   * @returns 워드 전체 폭 (mm). 시작 글자가 워드 글자가 아니면 0
+   * @throws 없음
+   *
+   * @example
+   * ```ts
+   * // runs = [{ content: "비용 " }, { content: "3.14", textInlineStyle: {fontSize:5} }]
+   * // runIdx=1, charIdx=0 → "3.14" 폭 (run1 스타일 기준)
+   * const w = this._measureWordWidthAt(runs, 1, 0);
+   * ```
+   */
+  private _measureWordWidthAt(runs: TextInlineData[], startRunIdx: number, startCharIdx: number): number {
+    const letterSpacingEm = this.effectiveTextStyle.letterSpacing!;
+    const baseFontSizeMm = this.effectiveTextStyle.fontSize!;
+    const baseWr = this.widthRatio;
+
+    let total = 0;
+    let r = startRunIdx;
+    let c = startCharIdx;
+    while (r < runs.length) {
+      const run = runs[r]!;
+      const inlineStyle = run.textInlineStyle;
+      const content = run.content;
+      const inlineFontSize = inlineStyle?.fontSize ?? baseFontSizeMm;
+      const inlineWr = inlineStyle?.widthRatio ?? baseWr;
+      const inlineLsMm = (inlineStyle?.letterSpacing ?? letterSpacingEm) * inlineFontSize;
+
+      for (; c < content.length; c++) {
+        const char = content[c]!;
+        // 조인터 판정에는 실제 prev/next 컨텍스트가 필요하다 —
+        // `.`/`,`는 앞뒤가 모두 alnum일 때만 워드 소속이다.
+        const nextInRun = c + 1 < content.length ? content[c + 1] : undefined;
+        if (!isWordChar(c > 0 ? content[c - 1] : undefined, char, nextInRun)) return total;
+        total += this._charWidthMm(char, inlineStyle) * inlineWr + inlineLsMm;
+      }
+      // run 경계 관통: 다음 run의 첫 글자가 워드에 이어지는지 isWordChar가 판정
+      const nextRun = r + 1 < runs.length ? runs[r + 1]! : undefined;
+      if (nextRun === undefined) return total;
+      const prevChar = content[content.length - 1];
+      const nextChar = nextRun.content[0];
+      if (nextChar === undefined || !isWordChar(prevChar, nextChar, nextRun.content[1])) return total;
+      r++;
+      c = 0;
+    }
+    return total;
+  }
+
+  /**
+   * 지정 위치가 워드의 시작인지 판정한다 (word-wrap 전용).
+   *
+   * 현재 글자가 워드 글자이면서, plain-text 흐름상 바로 앞 글자가
+   * 워드 글자가 아닐 때 워드 시작이다. prev 조회는 run 경계를 관통한다
+   * — 인라인 스타일 변경(별도 런)으로 갈라진 워드("3" + ".14")도 한
+   * 워드로 이어진다. 블록 경계(`\n`) 직후는 항상 워드 시작 후보다.
+   *
+   * @param runs - 현재 블록의 런 배열
+   * @param runIdx - 현재 글자의 런 인덱스
+   * @param charIdx - 현재 글자의 런 내 글자 인덱스
+   * @returns 워드 시작이면 `true`
+   * @throws 없음
+   */
+  private _isWordStartAt(runs: TextInlineData[], runIdx: number, charIdx: number): boolean {
+    const char = runs[runIdx]?.content[charIdx];
+    if (char === undefined) return false;
+    const nextChar = charIdx + 1 < runs[runIdx]!.content.length
+      ? runs[runIdx]!.content[charIdx + 1]
+      : runIdx + 1 < runs.length
+        ? runs[runIdx + 1]!.content[0]
+        : undefined;
+
+    // prev 탐색 — run 경계를 역방향으로 관통한다.
+    let prevRunIdx = runIdx;
+    let prevCharIdx = charIdx - 1;
+    while (prevCharIdx < 0) {
+      if (prevRunIdx === 0) {
+        // 블록 시작 — prev 없음. char 판정만으로 워드 시작 여부가 결정된다.
+        return isWordChar(undefined, char, nextChar);
+      }
+      prevRunIdx--;
+      const prevRunContent = runs[prevRunIdx]!.content;
+      prevCharIdx = prevRunContent.length - 1;
+    }
+    const prevChar = runs[prevRunIdx]!.content[prevCharIdx]!;
+    const prevPrev = prevCharIdx > 0 ? runs[prevRunIdx]!.content[prevCharIdx - 1] : undefined;
+    return isWordChar(prevPrev, char, nextChar) && !isWordChar(prevPrev, prevChar, char);
+  }
+
+  /**
    * 한글 조판 금칙문자 규칙을 적용한다.
    *
    * `_layoutTextIntoColumns()`가 글자를 폭 기준으로 배치한 뒤 호출되는
@@ -894,6 +1017,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         const nextFirstChar = nextFirstPart.content[0];
 
         if (isLineStartForbidden(nextFirstChar)) {
+          // word-wrap: pull-up 대상이 워드 글자(조인터 포함)면 건드리지
+          // 않는다 — 워드 무결성 > 금칙 교정. 강제 분할 잔여가 "."나 ","
+          // 로 시작하는 경우가 이에 해당한다.
+          if (this.wordWrap && isWordChar(undefined, nextFirstChar, nextFirstPart.content[1])) {
+            continue;
+          }
           if (!isLineEndForbidden(curLastChar)) {
             // 폭 게이트: 금칙 글자를 cur 끝에 올렸을 때 파트 폭을 초과하는지
             // 미리 계산한다. 초과하면 넘겨받지 않고 追い出시(おいだし)로
@@ -919,6 +1048,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
               // 그 뒤에 붙인다 — next 행두가 일반 글자가 되고 cur은 폭 이내로
               // 줄어든다. cur 파트가 빌 수 있으므로 잔여 1자 미만이면 금칙
               // 글자만 유지하는 기존 동작(넘침)으로 폴백한다.
+              // word-wrap: 내보낼 글자(outChar)가 워드 글자면 교정 포기 —
+              // 후처리에는 폭 재검증이 없어 워드를 안전하게 옮길 수 없다.
+              if (this.wordWrap && isWordChar(undefined, curLastChar, nextFirstChar)) {
+                continue;
+              }
               const outStyle = curLastPart.inlineStyles?.pop();
               const outHang = curLastPart.hangs?.pop();
               const outChar = curLastPart.content.pop();
@@ -1668,6 +1802,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       "va:" + this.effectiveParagraphStyle.verticalAlign!,
       "in:" + this.indent,
       "hp:" + JSON.stringify(this.effectiveParagraphStyle.hangingPunctuation ?? false),
+      // word-wrap 여부는 워드 단위 라인 브레이크(래핑)에 직접 개입하므로
+      // 해시에 포함해야 한다. _computeLayoutInputHash와 동일 키.
+      "ww:" + (this.effectiveParagraphStyle.wordWrap ?? false),
     );
 
     return parts.join("|");
@@ -2184,6 +2321,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         const lastColumnIdx = this._columnWidths.length - 1;
         const charWidthCache = this._charWidthCache;
         const charWidthByFont = this._charWidthByFontCache;
+        // word-wrap 게이트 — 블록당 1회 읽어 글자당 getter 체인을 피한다.
+        const ww = this.wordWrap;
 
         charLoop: while (runIdx < runs.length) {
           const run = runs[runIdx];
@@ -2233,6 +2372,72 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
             const targetPart = targetLine.parts[currentPartIdx];
 
             const isLastCharInBlock = flatIdxInBlock >= blockTotalChars - 1;
+
+            // word-wrap: 워드 시작에서 미리 측정(eager lookahead)해 통째로
+            // 배치한다. 측정이 charLoop 폭 공식·캐시·epsilon과 동일하므로 통째
+            // 배치 후 mid-word 넘침은 구조적으로 발생하지 않고, 되돌리기도
+            // 필요 없다. OFF면 이 블록 전체가 스킵된다(기존 경로와 동일).
+            // currentPartIdx가 파트 범위 밖이면 (d) 라인 브레이크 직후의
+            // 재시도 중이다 — lookahead를 건너뛰어 무한 재진입을 막는다
+            // (새 라인 생성 시 currentPartIdx=0으로 리셋되며 재활성화).
+            // 저비용 프리필터: 비-alnum 글자(한글·공백·부호 — 대부분의
+            // 글자)는 워드 시작 후보가 아니므로 즉시 스킵한다. alnum이어도
+            // 직전 글자가 alnum이면 워드 중간이므로 스킵한다 — 정규식·함수
+            // 호출 없이 코드 포인트 비교로 처리하는 것이 타이핑 핫 루프에서
+            // 유의미하다 (조인터 엣지는 _isWordStartAt가 정밀 판정한다).
+            if (ww) {
+              const charCode = char.charCodeAt(0);
+              const charIsAlnum =
+                (charCode >= 48 && charCode <= 57) ||
+                (charCode >= 65 && charCode <= 90) ||
+                (charCode >= 97 && charCode <= 122);
+              if (
+                charIsAlnum &&
+                currentPartIdx < partWidths.length &&
+                (charIdx === 0 || !isAlnumCode(content[charIdx - 1]!)) &&
+                this._isWordStartAt(runs, runIdx, charIdx)
+              ) {
+                const wordWidth = this._measureWordWidthAt(runs, runIdx, charIdx);
+                const partRemaining = partWidths[currentPartIdx] - cumulativeWidths[currentPartIdx];
+                if (wordWidth > partRemaining + 1e-6) {
+                  // (b) 라인 내 이후 파트가 워드 전체를 품으면 그 파트로 이동.
+                  //     워드가 파트를 건너뛴 구간(이미지 위)은 비워 둔다.
+                  let jumped = false;
+                  for (let pj = currentPartIdx + 1; pj < partWidths.length; pj++) {
+                    if (wordWidth <= partWidths[pj] + 1e-6) {
+                      currentPartIdx = pj;
+                      jumped = true;
+                      break;
+                    }
+                  }
+                  if (!jumped) {
+                    // (c) 강제 분할 vs (d) 라인 브레이크 판정: 워드가 현재 라인의
+                    //     어떤 파트에도 통째로 못 들면(폭 초과) 강제 분할이다 —
+                    //     기존 char-by-char 경로가 잔여를 채우고 넘치는 시점에
+                    //     다음 파트/라인/컬럼에서 이어받는다(이 워드는 분할
+                    //     확정 — mid-word 넘침 허용).
+                    //     반대로 워드 폭이 라인 내 최대 파트 폭 이하라면 이번
+                    //     라인의 잔여 부족일 뿐이므로 라인 브레이크가 정답이다.
+                    const maxPartWidth = partWidths.length > 0 ? Math.max(...partWidths) : 0;
+                    if (wordWidth <= maxPartWidth + 1e-6) {
+                      // (d) 라인 브레이크: currentPartIdx를 파트 범위 밖으로
+                      //     밀어 1차 fitting과 part-hop을 모두 실패시킨다 —
+                      //     기존 넘침 경로(라인 생성 while(true))가 즉시
+                      //     트리거되고, 새 라인의 currentPartIdx=0 리셋 후 이
+                      //     글자부터 배치된다. 워드 시작 글자는 아직 배치 전이므로
+                      //     charIdx도 되돌려 재시도 대상으로 만든다(생략 시 이
+                      //     글자가 스킵된다). 재시도 중에는 currentPartIdx가
+                      //     범위 밖이라 lookahead가 재진입하지 않는다.
+                      currentPartIdx = partWidths.length;
+                      charIdx--;
+                      flatIdxInBlock--;
+                      continue;
+                    }
+                  }
+                }
+                // (a) 잔여에 들어감 → 기존 경로 그대로.
+              }
+            }
 
             if (cumulativeWidths[currentPartIdx] + charWidth <= partWidths[currentPartIdx] + 1e-6) {
               cumulativeWidths[currentPartIdx] += charWidth;
@@ -2371,7 +2576,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
                   prevLastPart.content.length >= 2 &&
                   prevLastChar !== undefined &&
                   !isLineEndForbidden(prevLastChar) &&
-                  !prevIsBlockStart
+                  !prevIsBlockStart &&
+                  // word-wrap: pop 후보가 워드 글자면 교정 포기 — 워드를
+                  // 쪼개는 것보다 행두 위반을 남기는 것이 우선이다.
+                  // pop 1 후보(prevLastChar)와 pop 2 후보 모두 매 이터레이션
+                  // from으로 재검사한다.
+                  !(this.wordWrap && isWordChar(undefined, prevLastChar, char))
                 ) {
                   const pushed: string[] = [];
                   const pushedStyles: (TextInlineStyle | undefined)[] = [];
@@ -2380,7 +2590,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
                   while (
                     popped < 2 &&
                     prevLastPart.content.length - pushed.length >= 2 &&
-                    (popped === 0 || isLineStartForbidden(from))
+                    (popped === 0 || isLineStartForbidden(from)) &&
+                    // word-wrap: pop 2 후보(from — pop 후 남은 마지막 글자)가
+                    // 워드 글자면 그 글자는 직전 글자와 같은 워드 소속이다.
+                    // pop하면 워드가 쪼개지므로 중단한다.
+                    !(this.wordWrap && popped > 0 &&
+                      isWordChar(prevLastPart.content[prevLastPart.content.length - 2], from, undefined))
                   ) {
                     pushed.unshift(from);
                     pushedStyles.unshift(prevLastPart.inlineStyles?.pop());
@@ -2617,6 +2832,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       // 걸침 여부는 라인 경계 교정(걸침/금칙)과 charOffsets에 직접 개입하므로
       // 해시에 포함해야 한다.
       "hp:" + JSON.stringify(this.effectiveParagraphStyle.hangingPunctuation ?? false),
+      // 워드 래핑 여부는 배치(워드 단위 라인 브레이크)에 직접 개입하므로
+      // 해시에 포함해야 한다. _computePrefixHash와 동일 키.
+      "ww:" + (this.effectiveParagraphStyle.wordWrap ?? false),
     );
 
     return parts.join("|");
@@ -3655,6 +3873,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 
   public get indent(): number {
     return this.effectiveTextStyle.indent!;
+  }
+
+  /** 워드 래핑 여부 (ParagraphStyle.wordWrap — 기본 false) */
+  public get wordWrap(): boolean {
+    return this.effectiveParagraphStyle.wordWrap ?? DEFAULT_WORD_WRAP;
   }
 
   /** 컬럼 너비 배열 (mm) */
