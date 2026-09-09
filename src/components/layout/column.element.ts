@@ -30,6 +30,12 @@ function _inlineStyleKey(style: TextInlineStyle | undefined): string {
   if (style.letterSpacing !== undefined) parts.push(`letterSpacing=${style.letterSpacing}`);
   if (style.widthRatio !== undefined) parts.push(`widthRatio=${style.widthRatio}`);
   if (style.spaceRatio !== undefined) parts.push(`spaceRatio=${style.spaceRatio}`);
+  if (style.underline !== undefined) parts.push(`underline=${style.underline}`);
+  if (style.breakline !== undefined) parts.push(`breakline=${style.breakline}`);
+  if (style.outline !== undefined) parts.push(`outline=${style.outline}`);
+  if (style.underlineColor !== undefined) parts.push(`underlineColor=${style.underlineColor}`);
+  if (style.breaklineColor !== undefined) parts.push(`breaklineColor=${style.breaklineColor}`);
+  if (style.outlineColor !== undefined) parts.push(`outlineColor=${style.outlineColor}`);
   return parts.join('|');
 }
 
@@ -210,12 +216,15 @@ export class LayoutColumnElement extends HTMLElement {
     partEl.style.cssText = '';
     const useCharOffsets = part.charOffsets !== undefined;
     const effectiveJustify = useCharOffsets ? 'flex-start' : (partJustify || curPartStyle.justifyContent);
+    // 장식선 rect는 파트 기준 절대 좌표이므로 파트가 relative여야 한다.
+    const hasDecorations = part.decorationRects !== undefined && part.decorationRects.length > 0;
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(partEl.style, {
       ...curPartStyle,
       width: `${part.width}mm`,
       marginLeft: `${part.left}mm`,
       justifyContent: effectiveJustify,
       ...(useCharOffsets && { position: 'relative', height: '100%' }),
+      ...(!useCharOffsets && hasDecorations && { position: 'relative' }),
     });
   }
 
@@ -366,6 +375,69 @@ export class LayoutColumnElement extends HTMLElement {
 
     // 인라인 스타일: 문단 기본 대비 오버라이드 필드만 span에 직접 적용
     this._applyInlineOverrides(charEl, inlineStyle);
+  }
+
+  /**
+   * 파트의 장식선(밑줄/취소선) rect div를 diff 렌더링한다.
+   *
+   * 엔진 `_computeDecorations()`가 산출한 mm 좌표를 그대로 소비한다 —
+   * CSS `text-decoration`을 사용하지 않고 실제 선 요소를 그린다. 선 div는
+   * 파트 내부에 `position: absolute; left/top`으로 배치되며, `data-deco-key`
+   * (kind+x+y+w+h+color 직렬화)로 기존 요소를 재사용한다. 엔진 rect가
+   * 없어지면 제거한다.
+   *
+   * 걸침 글자는 엔진이 선 구간에서 제외하므로 여기서도 걸침 돌출 영역에
+   * 선이 그려지지 않는다.
+   *
+   * @param partEl - 선을 배치할 파트 div (position: relative 필요 — charOffsets 경로에서 보장)
+   * @param part - 장식선 rect가 담긴 파트 데이터
+   * @returns void
+   *
+   * @example
+   * // renderText 파트 루프 말미에서 호출
+   * this._renderDecorationRects(partEl, part);
+   * // → partEl.appendChild(deco div: left=2mm top=5.9mm width=12.3mm height=0.24mm background=#000000)
+   */
+  private _renderDecorationRects(partEl: HTMLDivElement, part: TextPartData): void {
+    const rects = part.decorationRects;
+    if (!rects || rects.length === 0) {
+      for (const el of Array.from(partEl.querySelectorAll(':scope > div[data-deco-key]'))) {
+        el.remove();
+      }
+      return;
+    }
+
+    const usedKeys = new Set<string>();
+    for (const rect of rects) {
+      const key = `${rect.kind}|${rect.x}|${rect.y}|${rect.width}|${rect.height}|${rect.color}`;
+      usedKeys.add(key);
+      let decoEl = partEl.querySelector<HTMLDivElement>(`& > div[data-deco-key="${CSS.escape(key)}"]`);
+      if (!decoEl) {
+        decoEl = document.createElement('div');
+        decoEl.dataset.decoKey = key;
+        decoEl.style.position = 'absolute';
+        decoEl.style.pointerEvents = 'none';
+        partEl.appendChild(decoEl);
+      }
+      const needLeft = `${rect.x}mm`;
+      const needTop = `${rect.y}mm`;
+      const needWidth = `${rect.width}mm`;
+      const needHeight = `${rect.height}mm`;
+      if (decoEl.style.left !== needLeft) decoEl.style.left = needLeft;
+      if (decoEl.style.top !== needTop) decoEl.style.top = needTop;
+      if (decoEl.style.width !== needWidth) decoEl.style.width = needWidth;
+      if (decoEl.style.height !== needHeight) decoEl.style.height = needHeight;
+      // 색상 미지정(color === '')이면 currentColor(글자 색상)를 따른다 —
+      // backgroundColor를 비워두면 부모의 color가 선에 상속된다.
+      if (decoEl.style.backgroundColor !== rect.color) decoEl.style.backgroundColor = rect.color;
+      decoEl.style.display = '';
+    }
+
+    for (const el of Array.from(partEl.querySelectorAll(':scope > div[data-deco-key]'))) {
+      if (el instanceof HTMLDivElement && el.dataset.decoKey !== undefined && !usedKeys.has(el.dataset.decoKey)) {
+        el.remove();
+      }
+    }
   }
 
   /**
@@ -534,6 +606,16 @@ export class LayoutColumnElement extends HTMLElement {
       charEl.style.lineHeight = `${inlineStyle.fontSize}mm`;
       charEl.style.display = 'inline-block';
       charEl.style.height = `${inlineStyle.fontSize}mm`;
+    }
+    if (inlineStyle.outline !== undefined) {
+      const fs = inlineStyle.fontSize ?? this.model!.fontSize;
+      if (inlineStyle.outline > 0) {
+        const outlineColorName = inlineStyle.outlineColor ?? inlineStyle.color ?? this.model!.effectiveTextStyle.color!;
+        const outlineCssColor = outlineColorName !== '' ? ColorRegistry.getInstance().getCSSColor(outlineColorName) : '';
+        charEl.style.webkitTextStroke = `${inlineStyle.outline * fs}mm ${outlineCssColor}`;
+      } else {
+        charEl.style.webkitTextStroke = '';
+      }
     }
   }
 
@@ -819,6 +901,8 @@ export class LayoutColumnElement extends HTMLElement {
         for (const unusedSpan of existingSpans.values()) {
           unusedSpan.remove();
         }
+
+        this._renderDecorationRects(partEl, part);
 
         if (isLast && line.endOfBlock !== true) {
           const afterLeading: string[] = isFirst ? original.slice(leadingSpaces) : original;

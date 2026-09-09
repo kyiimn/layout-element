@@ -2647,6 +2647,8 @@ export class TextEditController {
     const INLINE_FIELDS = [
       "fontFamily", "fontSize", "fontWeight", "fontStyle", "color",
       "letterSpacing", "widthRatio", "spaceRatio",
+      "underline", "breakline", "outline",
+      "underlineColor", "breaklineColor", "outlineColor",
     ] as const;
 
     // 상속 회귀(inherit revert) 규칙:

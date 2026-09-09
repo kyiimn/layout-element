@@ -352,7 +352,13 @@ function inlineStyleEqual(a: TextInlineStyle | undefined, b: TextInlineStyle | u
     a.color === b.color &&
     a.letterSpacing === b.letterSpacing &&
     a.widthRatio === b.widthRatio &&
-    a.spaceRatio === b.spaceRatio
+    a.spaceRatio === b.spaceRatio &&
+    a.underline === b.underline &&
+    a.breakline === b.breakline &&
+    a.outline === b.outline &&
+    a.underlineColor === b.underlineColor &&
+    a.breaklineColor === b.breaklineColor &&
+    a.outlineColor === b.outlineColor
   );
 }
 
@@ -408,6 +414,12 @@ function inlineStyleMatchesParagraph(
   if (style.letterSpacing !== undefined && style.letterSpacing !== paragraphTextStyle.letterSpacing) return false;
   if (style.widthRatio !== undefined && style.widthRatio !== paragraphTextStyle.widthRatio) return false;
   if (style.spaceRatio !== undefined && style.spaceRatio !== paragraphTextStyle.spaceRatio) return false;
+  if (style.underline !== undefined && style.underline !== paragraphTextStyle.underline) return false;
+  if (style.breakline !== undefined && style.breakline !== paragraphTextStyle.breakline) return false;
+  if (style.outline !== undefined && style.outline !== paragraphTextStyle.outline) return false;
+  if (style.underlineColor !== undefined && style.underlineColor !== paragraphTextStyle.underlineColor) return false;
+  if (style.breaklineColor !== undefined && style.breaklineColor !== paragraphTextStyle.breaklineColor) return false;
+  if (style.outlineColor !== undefined && style.outlineColor !== paragraphTextStyle.outlineColor) return false;
   return true;
 }
 

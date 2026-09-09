@@ -899,6 +899,8 @@ export class EditManager {
     const INLINE_FIELDS = [
       "fontFamily", "fontSize", "fontWeight", "fontStyle", "color",
       "letterSpacing", "widthRatio", "spaceRatio",
+      "underline", "breakline", "outline",
+      "underlineColor", "breaklineColor", "outlineColor",
     ] as const;
     const PARAGRAPH_FIELDS = ["lineGap", "lineGapMode", "textAlign", "verticalAlign", "hangingPunctuation", "wordWrap"] as const;
     const revertTextFields: string[] = [];
