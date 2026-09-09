@@ -140,13 +140,11 @@ console.log('\n[1] 밑줄 rect — run 병합 + 폭/두께 규칙');
     const expectedThickness = Math.max(fs * 0.06, 0.12);
     assert(approx(deco.height, expectedThickness), `height === max(fs×0.06, 0.12) (${deco.height})`);
 
-    // 라인 0이 유일 라인(마지막 라인)이면 line gap 제외 규칙: y = maxFontSize - 두께
+    // rect.y 계약: 라인 top 기준(누적 top 미포함) — 글자 em box 하단 앵커.
+    // 마지막(유일) 라인: y = maxFontSize - 두께
     const line0 = paraEngine.columnContents[0][0];
-    const isOnlyLine = paraEngine.columnContents[0].length === 1;
-    const expectedY = isOnlyLine
-      ? (line0.maxFontSize ?? 4) - deco.height
-      : line0.lineHeight - deco.height;
-    assert(approx(deco.y, expectedY), `y === 라인 하단 - 두께 (${deco.y.toFixed(6)} vs ${expectedY.toFixed(6)})`);
+    const expectedY = (line0.maxFontSize ?? 4) - deco.height;
+    assert(approx(deco.y, expectedY), `y === em box 하단 - 두께, 라인 top 기준 (${deco.y.toFixed(6)} vs ${expectedY.toFixed(6)})`);
 
     // 색상 미지정: hex가 빈 값 → DOM에서 글자 색상(currentColor)을 따른다
     assert(deco.color === '', `색상 미지정 시 hex 빈 값 — 글자 색상 상속 (${deco.color})`);
@@ -166,8 +164,8 @@ console.log('\n[2] 취소선 rect — em box 중앙 + kind 분리');
     const { deco } = decos[0];
     assert(deco.kind === 'breakline', `kind === 'breakline'`);
     const line0 = paraEngine.columnContents[0][0];
-    const expectedCenter = line0.maxFontSize / 2;
-    assert(approx(deco.y + deco.height / 2, expectedCenter), `선 중심 y === em box 중앙 (${(deco.y + deco.height / 2).toFixed(6)} vs ${expectedCenter})`);
+    const expectedCenter = (line0.maxFontSize ?? 4) / 2;
+    assert(approx(deco.y + deco.height / 2, expectedCenter), `선 중심 y === 글자 em box 중앙, 라인 top 기준 (${(deco.y + deco.height / 2).toFixed(6)} vs ${expectedCenter})`);
   }
 }
 
@@ -267,6 +265,43 @@ console.log('\n[7] printPostData — decorations 절대 mm export');
     assert(approx(d.height, engineDeco.height), `print height === engine height`);
     assert(d.color.c === 0 && d.color.m === 255 && d.color.y === 255 && d.color.k === 0, `밑줄 CMYK red (c0 m255 y255 k0) — got c${d.color.c} m${d.color.m} y${d.color.y} k${d.color.k}`);
   }
+}
+
+// ── 7b. 복수 라인 누적 top — deco.y는 라인 top 기준, 누적은 소비처가 1회만 더한다 ──
+console.log('\n[7b] 복수 라인 — print y === box absTop + align + Σ이전 lineH + deco.y (이중 누적 방지)');
+{
+  const { docEngine, paraEngine } = buildPara(
+    '가나다라마바사아자차'.split('').map(ch => ({ content: ch, textInlineStyle: { underline: true } })),
+    { boxWidth: 24, boxHeight: 100 }, // 좁은 폭 → 복수 라인
+  );
+
+  const print = paraEngine.printPostData[0];
+  const boxAbs = docEngine.findEngineById('para-box').absRect;
+
+  // 엔진 기대 좌표 재구성 (chars 루프와 동일 공식)
+  const defaultLineHeightMm = paraEngine.baseLineHeight;
+  const baseFontSizeMm = paraEngine.fontSize;
+  const effectiveColumnHeightMm = 100 + (defaultLineHeightMm - baseFontSizeMm);
+  const alignOffsetMm = paraEngine._computeAlignOffsetMm(
+    paraEngine.columnContents[0], effectiveColumnHeightMm, baseFontSizeMm, 100,
+  );
+
+  let cumulativeTopMm = 0;
+  let checked = 0;
+  for (const lineData of paraEngine.columnContents[0]) {
+    const lineH = lineData.lineHeight ?? defaultLineHeightMm;
+    for (const part of lineData.parts) {
+      for (const deco of part.decorationRects ?? []) {
+        const pd = print.decorations[checked];
+        const expectedY = boxAbs.absTop + alignOffsetMm + cumulativeTopMm + deco.y;
+        assert(pd !== undefined && approx(pd.y, expectedY, 1e-6),
+          `라인${checked} y === absTop + align + 누적(${cumulativeTopMm.toFixed(2)}) + deco.y(${deco.y.toFixed(2)}) — got ${pd?.y?.toFixed(6)}`);
+        checked++;
+      }
+    }
+    cumulativeTopMm += lineH;
+  }
+  assert(checked >= 2, `복수 라인에서 검증 (${checked}개 rect)`);
 }
 
 // ── 8. printPostData outline ──

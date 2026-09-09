@@ -1978,11 +1978,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * 글자(run 경계를 관통해도)는 하나의 선 구간으로 묶는다. 속성이 없거나
    * `false`인 글자는 구간을 끊는다.
    *
-   * 수직 기준(모두 mm):
-   * - 밑줄 y = 라인의 베이스라인 하단 부근 — `alignOffset + (li+1) × lineHeight - 두께`
-   *   (마지막 라인은 line gap 제외 규칙에 따라 `maxFontSize` 하단 기준)
-   * - 취소선 y = 라인 top 기준 글자 em box 중앙 — `alignOffset + li × lineHeight + maxFontSize/2 - 두께/2`
-   * - 두께 = `fontSize × 0.06` (최소 0.12mm), 밑줄 오프셋 = `fontSize × 0.1`
+   * 수직 기준(모두 mm, **라인 top 기준** — 누적 top 미포함, 소비처가 라인 위치를 더한다):
+   * - 밑줄 y = 글자 em box 하단(바닥 고정 규칙: lineTop + lineMaxFontSize)에서 두께만큼 위 — `line.maxFontSize - 두께`
+   * - 취소선 y = 글자 em box 중앙 — `line.maxFontSize/2 - 두께/2`
+   * - 두께 = `fontSize × 0.06` (최소 0.12mm)
+   * - 인라인 큰 글자와 섞인 라인에서도 `maxFontSize` 하단 앵커 덕분에 모든 글자 em box 안에 선이 유지된다
+   *   (베이스라인이 아니라 em box 하단 기준 — 글자 아래 바로 붙는 신문 조판 밑줄 위치)
    *
    * 수평 기준: 파트 로컬 x = `charOffsets[strippedIdx]`, 폭 = 글자 배치 폭(`getCharWidths().swidth`).
    * 걸침 글자(`hangs`)는 선 구간에서 제외한다 — 컬럼 밖으로 돌출된 부호에 밑줄이
@@ -1997,18 +1998,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const eff = this.effectiveTextStyle;
     const baseFontSizeMm = eff.fontSize!;
     const colorRegistry = this._resources.colorRegistry;
-    const lineGap = this.effectiveParagraphStyle.lineGap!;
-    const lineGapMode = this.effectiveParagraphStyle.lineGapMode ?? DEFAULT_LINE_GAP_MODE;
 
     for (let c = 0; c < this._columnContents.length; c++) {
       const column = this._columnContents[c];
-      let cumulativeTopMm = 0;
       for (let li = 0; li < column.length; li++) {
         const line = column[li];
         if (!line) continue;
-
-        const lineHeightMm = line.lineHeight ?? computeLineHeightMm(lineGap, lineGapMode, line.maxFontSize ?? baseFontSizeMm);
-        const isLastLine = li === column.length - 1;
 
         for (let pi = 0; pi < line.parts.length; pi++) {
           const part = line.parts[pi];
@@ -2034,16 +2029,17 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 
           const flushTrack = (track: Track, kind: 'underline' | 'breakline'): void => {
             if (!track.active) return;
-            const lineBottomMm = isLastLine
-              ? cumulativeTopMm + (line.maxFontSize ?? baseFontSizeMm)
-              : cumulativeTopMm + lineHeightMm;
-            const emCenterMm = cumulativeTopMm + (line.maxFontSize ?? baseFontSizeMm) / 2;
+            // rect.y는 **라인 top 기준**(누적 top 미포함 — DOM이 파트를 라인에
+            // 배치하므로 라인 누적은 소비처가 추가한다). 수직 앵커는 getCharRect/
+            // genCharStyle의 검증된 규칙(글자 하단 고정: lineTop + lineMaxFontSize)을 따른다.
+            const charBottomMm = line.maxFontSize ?? baseFontSizeMm;
+            const yForKind = kind === 'underline'
+              ? charBottomMm - track.thickness
+              : charBottomMm / 2 - track.thickness / 2;
             rects.push({
               kind,
               x: track.startMm,
-              y: kind === 'underline'
-                ? lineBottomMm - track.thickness
-                : emCenterMm - track.thickness / 2,
+              y: yForKind,
               width: track.endMm - track.startMm,
               height: track.thickness,
               color: track.color,
@@ -2111,8 +2107,6 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 
           part.decorationRects = rects.length > 0 ? rects : undefined;
         }
-
-        cumulativeTopMm += lineHeightMm;
       }
     }
   }
