@@ -118,3 +118,78 @@ export function isHangableLineEnd(char: string): boolean {
 export function isHangableLineStart(char: string): boolean {
   return HANG_LINE_START.has(char);
 }
+
+/**
+ * 워드(영문·숫자) 구성 글자 집합.
+ *
+ * 영문 대소문자와 숫자는 항상 워드 글자이고, `.` `,`는 앞/뒤가 모두
+ * alnum일 때만 워드 내부 조인터로 취급한다 — 소수("3.14")와 천단위
+ * 구분("1,000")이 줄 끝에서 분리되지 않도록 한다.
+ *
+ * 문장 끝의 `.` (다음 글자가 비-alnum)는 조인터가 아니므로 워드에
+ * 속하지 않고, 기존 금칙·걸침 교정의 대상으로 남는다.
+ *
+ * @see isWordChar
+ */
+
+/**
+ * 알파벳·숫자 코드 범위 비교 — 배치 핫 루프의 글자당 호출 비용을 위해
+ * 정규식 대신 코드 포인트 비교를 사용한다 (`[0-9A-Za-z]` 정규식의 동치 구현).
+ *
+ * @param char - 검사할 단일 문자
+ * @returns `[0-9A-Za-z]`이면 `true`
+ * @throws 없음
+ */
+export function isAlnumCode(char: string): boolean {
+  const code = char.charCodeAt(0);
+  return (
+    (code >= 48 && code <= 57) || // 0-9
+    (code >= 65 && code <= 90) || // A-Z
+    (code >= 97 && code <= 122) // a-z
+  );
+}
+
+/**
+ * 주어진 글자가 워드(영문·숫자 토큰)를 구성하는 글자인지 판정한다.
+ *
+ * word-wrap(`ParagraphStyle.wordWrap`)이 활성화된 배치 루프에서
+ * 워드의 시작/끝을 찾는 단일 소스다. 한글·공백·부호는 워드 글자가
+ * 아니므로 기존 글자 단위 줄바꿈이 유지된다.
+ *
+ * @param prev - 바로 앞 글자 (블록 시작이면 `undefined`).
+ *   run 경계를 관통한 plain-text 흐름상의 인접 글자다.
+ * @param char - 판정할 글자
+ * @param next - 바로 다음 글자 (블록 끝이면 `undefined`).
+ *   run 경계를 관통한 plain-text 흐름상의 인접 글자다.
+ * @returns 워드 구성 글자면 `true`
+ * @throws 없음
+ *
+ * @example
+ * // 숫자 내부 조인터 — 묶임
+ * isWordChar('3', '.', '1')   // true  ("3.14" 한 단위)
+ * isWordChar('0', ',', '0')   // true  ("1,000" 한 단위)
+ * // 문장 끝 부호 — 조인터 아님
+ * isWordChar('4', '.', undefined)  // false
+ * isWordChar(undefined, '.', '5')  // false (선행 alnum 없음)
+ * // 일반 워드 글자
+ * isWordChar(undefined, 'H', 'i')  // true
+ * // 한글·공백·제어문자
+ * isWordChar('가', '나', '다')     // false
+ * isWordChar('o', ' ', 'w')        // false
+ */
+export function isWordChar(
+  prev: string | undefined,
+  char: string,
+  next: string | undefined,
+): boolean {
+  if (isAlnumCode(char)) return true;
+  if (char === '.' || char === ',') {
+    return (
+      prev !== undefined &&
+      isAlnumCode(prev) &&
+      next !== undefined &&
+      isAlnumCode(next)
+    );
+  }
+  return false;
+}

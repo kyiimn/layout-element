@@ -27,6 +27,9 @@ export const DEFAULT_VERTICAL_ALIGN = 'top';
 /** 걸침표 기본값. false = OFF (기존 레이아웃과 byte-identical) */
 export const DEFAULT_HANGING_PUNCTUATION: boolean = false;
 
+/** 워드 래핑 기본값. false = OFF (기존 글자 단위 줄바꿈과 byte-identical) */
+export const DEFAULT_WORD_WRAP: boolean = false;
+
 /**
  * 텍스트 스타일 단축키가 주입하는 볼드 굵기 값.
  * 문단 기본값으로 복귀는 런의 fontWeight 필드 제거(`_toggleInlineStyle`)로 수행한다.

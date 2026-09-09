@@ -118,4 +118,35 @@ export type ParagraphStyle = {
    * ```
    */
   hangingPunctuation?: boolean | HangingPunctuationConfig;
+
+  /**
+   * 워드 래핑 (영문·숫자 단위 줄바꿈). 기본값: false (OFF).
+   *
+   * `true`일 때 영문 대소문자·숫자로 이루어진 토큰은 줄 끝에서
+   * 분리되지 않고 통째로 다음 줄(또는 다음 파트/컬럼)로 이동한다.
+   * 숫자 내부 조인터 `.`/`,`(앞뒤가 모두 alnum)도 워드에 포함되어
+   * "3.14", "1,000"이 분리되지 않는다.
+   *
+   * 단어 자체가 파트 폭보다 길면 `overflow-wrap: break-word` 방식으로
+   * 파트 폭에 맞춰 강제 분할한다 (최소 1자 보장).
+   *
+   * OFF(`false`/`undefined`)일 때는 기존 글자 단위 줄바꿈과 byte 단위로
+   * 동일하다. 한글은 워드 글자가 아니므로 ON 상태에서도 기존 글자 단위
+   * 줄바꿈이 유지된다.
+   *
+   * 워드 무결성은 금칙·걸침 교정보다 우선한다 — 워드 글자를 이동시켜야
+   * 하는 교정은 건너뛴다 (행두 금칙 위반이 남을 수 있다).
+   *
+   * 비인라인(non-inlinable) 문단 필드 — 런에 적용되지 않고 항상 문단
+   * 소속이다.
+   *
+   * @example
+   * ```ts
+   * // 문단에 워드 래핑 ON
+   * paragraph.paragraphStyle = { ...paragraph.paragraphStyle, wordWrap: true };
+   * // 문서 레벨 상속 — document.paragraphStyle을 통해 전 문단에 적용
+   * document.paragraphStyle = { wordWrap: true };
+   * ```
+   */
+  wordWrap?: boolean;
 }
