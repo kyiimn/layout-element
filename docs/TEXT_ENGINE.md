@@ -836,7 +836,7 @@ public genCharStyle = (char: string, inlineStyle?: TextInlineStyle, lineMaxFontS
 
 ```html
 <span data-source-offset="N" style="width: 3.2mm; overflow: hidden; display: inline-block;">
-  <span data-char-inner style="scale: 0.8 1; display: inline-block;">
+  <span data-char-inner style="scale: 1 1; display: inline-block;">
     한
   </span>
 </span>

@@ -3067,7 +3067,7 @@ type TextStyle = {
   fontStyle?: 'normal' | 'italic';
   fontSize?: number;       // mm, 기본 4
   letterSpacing?: number;  // em
-  widthRatio?: number;     // 장평, 기본 0.8
+  widthRatio?: number;     // 장평, 기본 1
   spaceRatio?: number;     // 공백 최소 너비 (em), 기본 0.5
   indent?: number;         // 문단 첫 줄 들여쓰기 (fontSize 대비 비율, 0.0~1.0), 기본 0
 };
@@ -3307,7 +3307,7 @@ type PlaceGunChangeEventDetail = {
 | `DEFAULT_IMAGE_DPI` | `72` | DPI | 이미지 기본 해상도. |
 | `DEFAULT_SPACE_RATIO` | `0.5` | em | 공백 최소 너비. |
 | `DEFAULT_LETTER_SPACING` | `-0.1` | em | 자간. |
-| `DEFAULT_WIDTH_RATIO` | `0.8` | — | 장평 (글자 가로폭 비율). |
+| `DEFAULT_WIDTH_RATIO` | `1` | — | 장평 (글자 가로폭 비율). |
 | `DEFAULT_TEXT_ALIGN` | `'justify'` | — | 양쪽 정렬. |
 | `DEFAULT_VERTICAL_ALIGN` | `'top'` | — | 상단 정렬. |
 | `Z_INDEX_MAX_LAYOUT` | `90000` | — | 레이아웃 요소 zIndex 최댓값. 90001 이상은 예약 범위. |

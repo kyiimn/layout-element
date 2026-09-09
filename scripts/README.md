@@ -195,9 +195,11 @@ npx tsx scripts/verify-ime.mjs   # 11항목 ALL PASS
 
 **중요 — 벤치마크 맹점 교훈**: 기존 bench 문단(높이 500mm)은 텍스트가 **1단에만** 들어가 멀티컬럼 흐름을 테스트하지 못했다. 이 스크립트는 `paraBox.height = 18`(라인 수)으로 축소해 실제 3단 흐름을 만든다. 멀티컬럼 관련 검증은 반드시 이 재현 환경을 사용할 것.
 
+**dev server 방어 (포트 오인 사고 교훈)**: `verify-hanging-punctuation-browser.mjs`와 동일한 2중 방어 — probe가 HTML title(`Layout Element Benchmark`)까지 검증해 타 앱 Vite 서버의 SPA fallback 200을 걸러내고, 정상 서버가 없으면 **자체 스폰**(포트 5198) 후 종료 시 정리한다. 실제 사고: layout-ui 서버(5173)를 잡아 BENCH_READY 타임아웃 30초.
+
 **실행**:
 ```bash
-npx tsx scripts/verify-multicolumn.mjs   # 15항목 ALL PASS
+npx tsx scripts/verify-multicolumn.mjs   # 15항목 ALL PASS (서버 없으면 자동 기동)
 ```
 
 ### `verify-inline-metrics.mjs` — 인라인 letterSpacing/widthRatio/spaceRatio 전 파이프라인 (엔진)
@@ -359,7 +361,7 @@ npx tsx scripts/verify-hanging-punctuation-browser.mjs   # 11항목 ALL PASS (�
 4. 혼합 라인 누적 top — base→big 전환 라인의 `getCharRect` top (하단 앵커 vertical offset 포함)
 5. 하단 COVER + 전 visible 글자 오버랩 영역 밖 (렌더링 관점 최종)
 
-**재현 환경 주의**: 문단은 박스 children이 **단일 객체**일 때만 ParagraphEngine으로 생성되므로 (배열이면 BoxEngine 취급), 오버랩 박스는 문단 박스와 **document 형제 박스**로 둔다. 기대값은 `getCharWidths` 실측 폭('가' 4mm→2.544mm, 6mm→3.816mm) 기반으로 계산한다 — 폭 공식(장평/letterSpacing)이 들어간 값이므로 `advanceWidth` 직접 계산으로 기대값을 만들면 오탐된다.
+**재현 환경 주의**: 문단은 박스 children이 **단일 객체**일 때만 ParagraphEngine으로 생성되므로 (배열이면 BoxEngine 취급), 오버랩 박스는 문단 박스와 **document 형제 박스**로 둔다. 기대값은 `getCharWidths` 실측 폭('가' 4mm→3.28mm, 6mm→4.92mm, 기본 widthRatio 1) 기반으로 계산한다 — 폭 공식(장평/letterSpacing)이 들어간 값이므로 `advanceWidth` 직접 계산으로 기대값을 만들면 오탐된다.
 
 **실행**:
 ```bash

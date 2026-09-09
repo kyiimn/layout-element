@@ -999,7 +999,7 @@ src/engine/
 | `DEFAULT_IMAGE_DPI` | `72` | 기본 이미지 DPI |
 | `DEFAULT_SPACE_RATIO` | `0.5` | 기본 스페이스 비율 |
 | `DEFAULT_LETTER_SPACING` | `-0.1` | 기본 자간 |
-| `DEFAULT_WIDTH_RATIO` | `0.8` | 기본 장평 |
+| `DEFAULT_WIDTH_RATIO` | `1` | 기본 장평 |
 | `DEFAULT_INDENT` | `0` | 기본 들여쓰기 |
 | `DEFAULT_TEXT_ALIGN` | `'justify'` | 기본 정렬 |
 | `DEFAULT_VERTICAL_ALIGN` | `'top'` | 기본 수직 정렬 |
