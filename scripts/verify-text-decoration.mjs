@@ -421,5 +421,44 @@ console.log('\n[13] OFF 기준선 — 기존 배치 보존');
   }
 }
 
+// ── 14. 인라인 런 줄바꿈 strip 인덱싱 — deco x는 stripped 인덱스로 읽는다 ──
+console.log('\n[14] 인라인 영역 줄바꿈 — stripStart>0 라인의 deco x 정합 (이중 오프셋 방지)');
+{
+  const { paraEngine } = buildPara(
+    [
+      { content: '일반 abc defghijklmnop 워드래핑테스트입니다' },
+      { content: '밑줄영역 word wrap 테스트 긴 라인 관통 영역', textInlineStyle: { underline: true } },
+    ],
+    { boxWidth: 24, boxHeight: 100, wordWrap: true },
+  );
+
+  const lines = paraEngine.columnContents[0];
+  let checked = 0;
+  let mismatches = 0;
+  for (const line of lines) {
+    for (const part of line.parts) {
+      const co = part.charOffsets ?? [];
+      let stripStart = 0, stripEnd = part.content.length;
+      if (part === line.parts[0] && line.firstOfBlock !== true) { while (stripStart < stripEnd && part.content[stripStart] === ' ') stripStart++; }
+      if (part === line.parts[line.parts.length - 1] && line.endOfBlock !== true) { while (stripEnd > stripStart && part.content[stripEnd - 1] === ' ') stripEnd--; }
+      const ulIdx = [];
+      part.inlineStyles?.forEach((s, i) => { if (s?.underline === true) ulIdx.push(i); });
+      const visUl = ulIdx.filter(i => i >= stripStart && i < stripEnd);
+      for (const deco of part.decorationRects ?? []) {
+        if (deco.kind !== 'underline') continue;
+        if (visUl.length === 0) { mismatches++; continue; }
+        const expectedX = co[visUl[0] - stripStart];
+        const lastLocal = visUl[visUl.length - 1] - stripStart;
+        const swLast = paraEngine.getCharWidths(part.content[visUl[visUl.length - 1]], part.inlineStyles?.[visUl[visUl.length - 1]]).swidth;
+        const expectedW = (co[lastLocal] + swLast) - expectedX;
+        if (!(Math.abs(deco.x - expectedX) < 1e-6 && Math.abs(deco.width - expectedW) < 1e-6)) mismatches++;
+      }
+    }
+  }
+  const totalDecos = lines.reduce((s, l) => s + l.parts.reduce((ss, p) => ss + (p.decorationRects?.filter(d => d.kind === 'underline').length ?? 0), 0), 0);
+  assert(totalDecos >= 3, `밑줄 rect ${totalDecos}개 산출`);
+  assert(mismatches === 0, `stripped 인덱싱 정합 (mismatch ${mismatches}건)`);
+}
+
 console.log(`\n=== Results: ${passCount} passed, ${failCount} failed ===`);
 if (failCount > 0) process.exit(1);

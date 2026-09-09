@@ -2077,7 +2077,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
             const ulOn = (inlineStyle?.underline ?? eff.underline!) === true;
             const blOn = (inlineStyle?.breakline ?? eff.breakline!) === true;
 
-            const charStartMm = this._charOffsetMmAt(part, i, stripStart);
+            const charStartMm = this._charOffsetMmAt(part, i - stripStart, stripStart);
             const charEndMm = charStartMm + this._charSwidthAt(part, i, inlineStyle);
 
             for (const kind of ['underline', 'breakline'] as const) {
