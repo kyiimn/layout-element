@@ -2687,7 +2687,7 @@ export class TextEditController {
         revertParagraphTextFields.push(field);
       }
     }
-    const PARAGRAPH_FIELDS = ["lineGap", "lineGapMode", "textAlign", "verticalAlign", "hangingPunctuation"] as const;
+    const PARAGRAPH_FIELDS = ["lineGap", "lineGapMode", "textAlign", "verticalAlign", "hangingPunctuation", "wordWrap"] as const;
     const revertParagraphFields: string[] = [];
     for (const field of PARAGRAPH_FIELDS) {
       const isExplicitlyPassed = Object.prototype.hasOwnProperty.call(paragraphPatch, field);
