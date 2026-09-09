@@ -1926,3 +1926,104 @@ flowchart TD
 - 강제 분할 지점의 행두 위반은 남을 수 있다 (24.3).
 
 검증: `npx tsx scripts/verify-word-wrap.mjs`.
+
+## 25. 텍스트 장식 (`TextStyle.underline` / `breakline` / `outline`)
+
+### 25.1 개요
+
+`TextStyle`과 `TextInlineStyle`(런 오버라이드)에 텍스트 장식 필드 3종이 추가되었다.
+
+| 필드 | 타입 | 기본값 | 의미 |
+|---|---|---|---|
+| `underline` | `boolean` | `false` | 밑줄 — **CSS `text-decoration`이 아닌 실제 선(rect)** |
+| `breakline` | `boolean` | `false` | 취소선(중앙선) — 실제 선(rect) |
+| `outline` | `number` (em) | `0` | 글자 외곽선 두께 — 화면은 `-webkit-text-stroke`, 인쇄는 mm |
+| `underlineColor` | `string` | 미지정 시 글자 `color` | 밑줄 색상 (ColorRegistry CMYK 이름) |
+| `breaklineColor` | `string` | 미지정 시 글자 `color` | 취소선 색상 |
+| `outlineColor` | `string` | 미지정 시 글자 `color` | 외곽선 색상 |
+
+**엔진-우선 원칙 준수**: 밑줄/취소선의 좌표는 엔진이 mm로 산출하는 단일 소스다.
+DOM(`LayoutColumnElement`)은 엔진 rect를 표시만 하고, 인쇄(`buildParagraphPrintPostData`)
+도 동일한 엔진 rect를 절대 mm로 export한다 — 화면과 출력이 항상 일치한다.
+
+### 25.2 엔진 — `_computeDecorations()` 후처리 패스
+
+`_computeCharOffsets()` → `_computePerLineHeights()` 이후에 실행되는 후처리 패스다.
+세 경로(전체 재래핑, `_refreshInlineStylesOnly` 캐시 히트, `_applyPrefixCache`)에서 모두 호출되어
+`TextPartData.decorationRects: TextDecorationRect[]`를 채운다.
+
+**`TextDecorationRect`** (파트 로컬 mm 좌표):
+
+```ts
+{
+  kind: 'underline' | 'breakline',
+  x: number,        // 파트 기준 좌측 x (charOffsets 기반)
+  y: number,        // 라인 top 기준 y
+  width: number,    // 구간 폭 (Σ swidth)
+  height: number,   // 선 두께
+  color: string,    // CSS hex (''이면 글자 색상 상속 — DOM currentColor)
+  colorName: string, // 원본 CMYK 색상 이름 (print export용)
+}
+```
+
+**구간 병합 규칙**:
+
+- 밑줄/취소선은 **독립 트랙**으로 추적한다 — 한 글자에 둘 다 활성이면 두 rect가 모두 산출된다.
+- 같은 kind + 같은 색상의 인접 글자는 하나의 구간으로 묶인다 (런 경계 관통).
+- OFF 글자, 색상이 다른 글자, 탭(`\t`), 걸침 글자(`hangs` 마킹)는 구간을 끊는다.
+- 걸침 글자는 폭 기여가 0이다 (`_charSwidthAt`이 0 반환) — 컬럼 밖 돌출 부호에 선이 따라가지 않는다.
+
+**수직 좌표 공식** (mm, 라인 top 기준):
+
+- 밑줄 y = 라인 하단 - 두께 (마지막 라인은 line gap 제외 규칙: `maxFontSize - 두께`)
+- 취소선 y = em box 중앙 - 두께/2 (`line.maxFontSize / 2 기준`)
+- 두께 = `max(fontSize × DECORATION_THICKNESS_RATIO(0.06), DECORATION_MIN_THICKNESS_MM(0.12))`
+
+**색상 폴백 체인**: 런 장식색상 → 문단 장식색상 → 런 글자색상 → 문단 글자색상.
+`DEFAULT_TEXT_STYLE`이 `''`이므로 `??` 대신 `firstNonEmpty()`(빈 문자열 스킵)를 사용한다.
+
+### 25.3 DOM 렌더링 — 실제 선 div
+
+`LayoutColumnElement.renderText()`의 파트 루프 말미에서 `_renderDecorationRects(partEl, part)`가
+호출된다. 엔진 rect를 그대로 소비해 파트 내부에 `position: absolute` 선 div를 배치한다:
+
+- `left: ${rect.x}mm`, `top: ${rect.y}mm`, `width: ${rect.width}mm`, `height: ${rect.height}mm`
+- `background-color: ${rect.color}` — 빈 값이면 미지정(부모 `color`가 currentColor로 상속)
+- `pointer-events: none` — 히트테스트 방해 없음
+- `data-deco-key` (kind|x|y|w|h|color 직렬화)로 기존 요소 재사용 (diff 렌더링)
+- rect가 없어지면 제거
+
+레거시 flexbox 경로(charOffsets undefined)에서도 파트가 `position: relative`를 갖도록
+`_applyPartStyle`이 `decorationRects` 존재 시 relative를 강제한다.
+
+**outline**은 `genCharStyle`/`genCharStyleFlat`이 `-webkit-text-stroke: ${outline × fontSize}mm ${color}`를
+span에 적용한다. 캐시 키(`_charOuterStyleCache`)에 outline 값이 포함된다.
+
+### 25.4 인쇄 — printPostData
+
+- **`PrintPostData.decorations: PrintPostDecoration[]`** (paragraph만): 엔진 rect를
+  문서 절대 mm로 변환 — `x = colLeft + part.left + rect.x`, `y = absTop + alignOffset + 라인 누적 top + rect.y`.
+  색상은 `rect.colorName`으로 `colorRegistry.get()` 재조회 (hex 역변환 없이 원본 CMYK 정합).
+- **`PrintPostDataChar.outline: number`** (mm): `outline(em) × fontSize`로 정규화.
+  `outlineColor: CMYK` 동반. 미지정 시 `0` + 글자 색상.
+
+### 25.5 편집 레이어
+
+- 런 맵(`run-map.ts`): `inlineStyleEqual`/`inlineStyleMatchesParagraph`가 6개 신규 필드 비교.
+- 주입(`TextEditController._applyTextStyle` / `EditManager._applyParagraphLevelStyle`):
+  `INLINE_FIELDS` 화이트리스트에 6개 필드 추가 — selection/커서/캐스케이드 라우팅과
+  상속 회귀(inherit revert) 규칙이 기존 인라인 필드와 동일하게 적용된다.
+- 스타일 조회: `getEffectiveStyleAt`/`getCommonStyleInRange`가 런 값을 반영하며,
+  혼합 범위에서 상이 필드는 제외된다.
+
+### 25.6 주의사항
+
+- **캐시**: `underline`/`breakline` 토글은 `inlineStyleEqual`이 다르므로 `_parseContents`의
+  런 병합이 달라져 자연 재래핑된다. `outline`은 배치에 무영향이므로 해시에서 제외된다
+  (`_refreshInlineStylesOnly` 경량 패스로 rect는 최신화된다).
+- ** 걸침 상호작용**: 걸침 글자는 선 구간에서 제외된다 — 행말 걸침된 닫기 괄호에 밑줄이
+  컬럼 밖까지 그려지지 않는다.
+- **CJK 글리프 하단**: 밑줄 y는 라인 하단 기준(베이스라인이 아님)이다 — 한글 폰트의
+  descender 영역을 피하는 신문 조판 관례값이다.
+
+검증: `npx tsx scripts/verify-text-decoration.mjs` (55항목).
