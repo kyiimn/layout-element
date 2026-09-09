@@ -1863,3 +1863,66 @@ flowchart TD
 - **인라인 스타일 이동**: 걸침 이동은 `inlineStyles` 평행 배열을 함께 이동하므로 런 오버라이드가 유지된다 (금칙 이동과 동일 패턴).
 
 검증: `npx tsx scripts/verify-hanging-punctuation.mjs` (82항목 — OFF 기준선/행말·행두/trailing run/justify/getCharRect/print 패리티/히트테스트/엣지 게이트/블록 경계/prefix 캐시/API/강제 걸침), `npx tsx scripts/verify-hanging-punctuation-browser.mjs` (11항목 — 실제 화면 페인트: 파트 밖 span rect, overflow 해제, shadowRoot 히트테스트, 원상 복구).
+
+## 24. 워드 래핑 (Word Wrap, `ParagraphStyle.wordWrap`)
+
+영문 대소문자·숫자 토큰을 줄 끝에서 분리하지 않는 줄바꿈 규칙이다. 기본값 `false`(OFF) — OFF일 때는 기존 글자 단위 배치와 **byte 단위로 동일**하다. 한글은 워드 글자가 아니므로 ON 상태에서도 기존 글자 단위 줄바꿈이 유지된다.
+
+### 24.1 워드 글자 집합
+
+- 워드 글자: `[0-9A-Za-z]` (항상 워드 소속)
+- 조인터: `.` `,` — **앞/뒤가 모두 alnum일 때만** 워드 소속. 소수("3.14")와 천단위 구분("1,000")이 분리되지 않는다.
+- 문장 끝 부호("word."의 `.`)는 조인터가 아니므로 워드에 속하지 않고 기존 금칙·걸침 교정 대상으로 남는다.
+- 한글·공백·부호·탭(`\t`)은 워드 글자가 아니다 — 탭은 워드를 종결한다.
+- 단일 소스: `src/constants/line-break.ts`의 `isWordChar(prev, char, next)`.
+
+### 24.2 배치 알고리즘 (eager lookahead)
+
+`_layoutColumnsPass`의 charLoop에서 워드 시작(현재 글자가 워드 글자 && 직전 글자가 비-워드, plain-text 흐름 판정, run 경계 관통)을 감지하면 워드 전체 폭을 미리 측정한다:
+
+- **측정 일치 보장**: lookahead 측정은 charLoop와 동일 공식(`_charWidthMm` raw 폭 × widthRatio + letterSpacing), 동일 캐시(`_charWidthCache`), 동일 epsilon(1e-6)을 쓴다 → 통째 배치 후 mid-word 넘침이 구조적으로 발생하지 않는다. 되돌리기(un-place)는 존재하지 않는다.
+- **run 경계 관통**: 워드 중간에 인라인 스타일 변경("3"(기본)+".14"(굵게))이 있어도 한 워드로 취급하며, 각 글자는 소속 run의 스타일로 측정·배치된다.
+- **block(`\n`) 경계**: 워드는 블록을 넘지 않는다 — 스캔이 블록 끝에서 반드시 종료된다.
+
+분기:
+
+| 조건 | 동작 |
+|---|---|
+| (a) 현재 파트 잔여 폭 ≥ 워드 전체 폭 | 기존 char-by-char 경로 그대로 |
+| (b) 잔여 폭 부족 && 라인 내 이후 파트가 워드 전체를 품음 | 워드를 그 파트 시작점에 배치 (건너뛴 파트 구간 — 이미지 위 — 은 비워 둠) |
+| (c) 어느 파트에도 통째로 못 들어감 | **강제 분할** — 현재 파트 잔여에 들어가는 만큼 배치(최소 1자, 기존 wider-than-part 가드 보장), 나머지는 기존 넘침 경로가 다음 파트/라인/컬럼에서 이어받음 |
+
+강제 분할은 `overflow-wrap: break-word` 방식이다. "라인 시작에서 워드가 파트 폭보다 크지만 라인 전체 폭 이하"인 경우도 (c)로 처리한다(빈 라인 적층 방지 — 라인 전체 폭 기준 판정은 하지 않는다).
+
+컬럼 경계: 워드가 컬럼 마지막 라인에 들어가지 못하면 기존 컬럼 넘침 경로로 다음 컬럼 첫 라인에서 재평가된다 — 워드는 컬럼을 가로질러 분리되지 않는다(강제 분할 제외).
+
+### 24.3 교정 패스와의 우선순위
+
+**워드 무결성 > 금칙·걸침 교정** — 워드 글자를 이동시켜야 하는 교정은 모두 건너뛴다(행두 금칙 위반이 남을 수 있다. 의도된 동작).
+
+| 교정 통로 | 가드 |
+|---|---|
+| 배치 단계 追い出し (`_layoutColumnsPass` 내) | pop 후보(`from`)가 워드 글자면 pop 중단 — pop 1·pop 2 모두 매 이터레이션 검사 |
+| 금칙 pull-up (`_applyLineBreakRules`) | 이동 대상 `nextFirstChar`가 워드 글자(조인터 포함)면 skip |
+| 금칙 追い出し 폴백 | 내보낼 `outChar`가 워드 글자면 교정 포기 (후처리에는 폭 재검증이 없다) |
+| 금칙 push-down | 무가드 — 이동 글자가 열기 부호(워드 글자 아님) |
+| 걸침 행말 pull-up (`_applyHangingPunctuation` 케이스 2) | 당겨올 런의 첫 글자가 워드 글자면 skip |
+| 걸침 행말 강제 마킹 (케이스 4, `lineEnd: 'always'`) | 마킹 대상 라인 마지막 글자가 워드 글자면 skip |
+| 걸침 행두 (케이스 5) | 무가드 — 열기 부호는 워드 글자가 아님 |
+
+주요 발동 시나리오는 강제 분할(24.2)이다 — 분할 지점이 `.`/`,` 바로 뒤면 잔여가 금칙·걸침 대상 글자로 시작하지만, 모든 교정이 워드 보호를 우선해 그대로 둔다.
+
+### 24.4 정렬·소비처
+
+- **trailing 공백**: 워드를 내리고 앞 공백이 구 라인 끝에 남는 것은 기존 글자 단위 배치와 동일한 관례다 — justify 잔여 분산은 `_computeCharOffsets` 기존 루틴(§ strip 범위)이 그대로 처리한다. 워드가 파트를 건너뛴 구간은 빈 파트와 동일 취급된다.
+- **데이터 구조 불변**: `_columnContents` 모양이 그대로이므로 `_computeCharOffsets`, `getCharRect`, `buildParagraphPrintPostData`, `getOffsetFromPoint`, 편집 좌표 매핑은 변경 없이 소비한다.
+- **캐시**: `_computeLayoutInputHash`·`_computePrefixHash`에 `ww:` 키가 포함된다(양쪽 동일). 토글 시 전체 재래핑된다. prefix 캐시 재개 지점이 강제 분할 잔여 중간이어도 fragment 시작이 greedy 배치와 동치라 정합한다.
+- **overflow**: wordWrap ON은 같은 컨텐츠에서 라인 수·`render-error` overflow 카운트를 증가시킬 수 있다(워드가 통째로 내려가므로) — 의도된 동작이다.
+
+### 24.5 한계
+
+- 하이픈(`-`)·아포스트로피(`'`)는 조인터가 아니다 — "e-mail"은 `-` 앞뒤로 분리될 수 있고, "don't"는 `'` 앞뒤로 분리될 수 있다. 조인터 확장은 추후 과제다.
+- 다국어(한자·가나 등)는 워드 글자가 아니다 — alnum+`.`/`,`만 묶인다.
+- 강제 분할 지점의 행두 위반은 남을 수 있다 (24.3).
+
+검증: `npx tsx scripts/verify-word-wrap.mjs`.

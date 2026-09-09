@@ -2015,7 +2015,7 @@ toggleInlineStyle<K extends keyof TextInlineStyle>(
  *   선택된 모든 대상의 paragraph 수정 + 전체 캐스케이드. lock된 대상은 스킵.
  *
   * 인라인에 주입 불가한 필드(textAlign, lineGap, verticalAlign,
-  * indent, hangingPunctuation)는 항상 paragraph에 적용된다.
+  * indent, hangingPunctuation, wordWrap)는 항상 paragraph에 적용된다.
  * 처리 후 런 맵을 정규화하고 커서/selection 위치를 보존한다.
  *
  * @param textPatch - TextStyle 부분 객체 (제공된 필드만 부분 업데이트)
@@ -2046,7 +2046,7 @@ applyTextStyle(
 | 포커스 없음 + paragraph/paragraph-box selected (단일·복수) | 선택된 모든 대상 + 전체 캐스케이드 (lock 스킵) | paragraph |
 
 > ※1 `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`, `letterSpacing`, `widthRatio`, `spaceRatio`
-> ※2 `textAlign`, `lineGap`, `verticalAlign`, `indent`, `hangingPunctuation`
+> ※2 `textAlign`, `lineGap`, `verticalAlign`, `indent`, `hangingPunctuation`, `wordWrap`
 
 **캐스케이드**: 커서가 런 밖이거나 selected 경로에서 paragraph 스타일을 수정하면, 명시 주입 필드가 내부 모든 인라인 런에 일괄 적용된다. 캐스케이드로 런 필드가 주입 후의 문단 기본과 동일해지면 그 필드는 런에서 제거되고, 모든 필드가 동일해진 런은 `normalizeRunMap`이 해제한다. 정규화는 포커스 획득/blur 시에도 자동 수행된다. 병합·해제 규칙의 상세는 `EDITING_TEXT.md` § 6A.5 참조.
 
@@ -3087,10 +3087,13 @@ type ParagraphStyle = {
   verticalAlign?: 'top' | 'center' | 'bottom';  // 기본 'top'
   textAlign?: 'left' | 'right' | 'center' | 'justify';  // 기본 'justify'
   hangingPunctuation?: boolean | HangingPunctuationConfig;  // 걸침표. 기본 false
+  wordWrap?: boolean;      // 워드 래핑 (영문·숫자 단위 줄바꿈). 기본 false
 };
 ```
 
 `hangingPunctuation`: 걸침표(행말/행두 걸침) 설정. `true`면 양방향 ON, 객체면 방향별 설정. `false`/`undefined`(기본)면 기존 배치와 byte 단위로 동일하다. 걸침은 금칙 교정에 우선하며, 걸침 ON 시 컬럼/문단 `overflow`가 `visible`로 전환되어 부호가 틀 밖으로 렌더링된다. 상세는 `TEXT_ENGINE.md` §23 참조.
+
+`wordWrap`: 워드 래핑(영문·숫자 단위 줄바꿈) 설정(비인라인 필드). `true`면 영문 대소문자·숫자 토큰이 줄 끝에서 분리되지 않고 통째로 다음 줄(또는 다음 파트·컬럼)로 이동한다. 숫자 내부 `.`/`,`(앞뒤가 모두 alnum)도 워드에 포함되어 "3.14", "1,000"이 분리되지 않는다. 단어가 파트 폭보다 길면 `overflow-wrap: break-word` 방식으로 파트 폭에 맞춰 강제 분할한다(최소 1자 보장). `false`/`undefined`(기본)면 기존 글자 단위 배치와 byte 단위로 동일하다. 한글은 워드 글자가 아니므로 ON 상태에서도 기존 글자 단위 줄바꿈이 유지된다. 워드 무결성은 금칙·걸침 교정보다 우선한다 — 워드 글자를 이동시켜야 하는 교정은 건너뛴다(행두 금칙 위반이 남을 수 있다). 상세는 `TEXT_ENGINE.md` §24 참조. 검증: `scripts/verify-word-wrap.mjs`.
 
 `lineGapMode`: `lineGap`의 해석을 제어하는 문단 스타일(비인라인 필드)이다. 검증: `scripts/verify-line-gap-mode.mjs`.
 
