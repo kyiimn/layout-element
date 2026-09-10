@@ -6,8 +6,9 @@
  *   - selection 경로: 선택 범위만 회귀 — 선택 밖 런의 오버라이드는 보존되어야 한다.
  *     (버그 이력: 전체 런 맵에서 필드가 제거되어 "문단 fontSize 4, 런 fontSize 6"
  *     상태에서 런 일부에 4를 주입하면 런 전체가 기본으로 되돌려졌음)
- *   - 커서가 런 안: 그 런만 회귀.
- *   - 캐스케이드(커서가 런 밖): 전체 런 회귀 (기본 복원 — 의도적 동작).
+ *   - selection 없음 (커서 위치와 무관, 캐스케이드 통일): 전체 런 회귀
+ *     (기본 복원 — 의도적 동작). 구 규칙(커서가 런 안이면 그 런만)은 제거되었다 —
+ *     `isCascadePath = !hasSelection`로 통일되었다 (docs/EDITING_TEXT.md §6A).
  *
  * 모든 인라인 필드(fontFamily/fontSize/fontWeight/fontStyle/color/
  * letterSpacing/widthRatio/spaceRatio)에 대해 동일 결함이 없는지 확인한다.
@@ -94,7 +95,10 @@ const r = await page.evaluate(async () => {
       runBKept: afterSel.some(r => r.style?.fontWeight === 700),
     };
 
-    // ── 시나리오 2: 커서가 런 안 [4)에서 회귀 주입 ──
+    // ── 시나리오 2: selection 없음 (캐스케이드 통일) — 커서가 런 안 [4)에 있어도 ──
+    // 구 규칙(런 단위 "그 런만" 회귀)은 제거되었다 — selection 없으면 커서 위치와
+    // 무관하게 paragraph 전역 적용(캐스케이드)이 의도적 동작이다
+    // (docs/EDITING_TEXT.md §6A: isCascadePath = !hasSelection).
     // setCursor는 selection을 clear하지 않으므로, 실사용(키보드 커서 이동)과
     // 동일하게 selection을 먼저 clear한다 — clear 없이는 분기 1(selection 경로)이
     // 우선 실행되어 시나리오 2의 전제가 깨진다.
@@ -108,16 +112,21 @@ const r = await page.evaluate(async () => {
     em.applyTextStyle({ [field]: paragraphValue });
     await wait2();
     const afterCursor = runs();
+    // field === 'fontWeight'이면 회귀 주입 대상 필드와 런 B 마커가 동일 필드이므로
+    // 전체 캐스케이드 회귀가 런 B까지 정리하는 것은 의도적 동작이다 — 보존 기대를
+    // 적용할 수 없다 (이 경우 마커 검증은 다른 필드 테스트가 커버한다).
     const cursorResult = {
-      // 런 단위 시맨틱("그 런만"): 커서 런 [3,5) 전체 회귀 — 필드 제거 확인
-      cursorRunReverted: !afterCursor.some(r => r.style?.[field] === runValue && r.start < 5 && r.end > 3),
-      // 다른 런 [0,1)의 runValue 보존
-      otherRunKept: afterCursor.some(r => r.style?.[field] === runValue && r.end <= 1),
-      runBKept: afterCursor.some(r => r.style?.fontWeight === 700),
+      // 캐스케이드 회귀: 전체 런에서 필드 제거 (의도적 기본 복원 — 커서가 런 안이어도 동일)
+      allReverted: !afterCursor.some(r => r.style?.[field] === runValue),
+      // 무관 필드 런 B fontWeight 보존 — 회귀 주입은 명시된 필드만 건드린다
+      // (field === fontWeight 제외: 마커 자체가 회귀 대상 필드이므로)
+      runBKept: field === 'fontWeight'
+        ? !afterCursor.some(r => r.style?.fontWeight === 700)
+        : afterCursor.some(r => r.style?.fontWeight === 700),
     };
 
     // ── 시나리오 3: 캐스케이드 (커서 런 밖) 회귀 주입 — 전체 회귀 (의도) ──
-    // 런 재구성 후 — 커서 시나리오와 상태를 공유하지 않는다 (runValue 런 잔존이
+    // 런 재구성 후 — 시나리오 2와 상태를 공유하지 않는다 (runValue 런 잔존이
     // allReverted 검사를 오염시킨다). selection을 clear하고 커서를 런 밖에 둔다.
     p.content = '가나다라마바사아자차카타파하';
     p.textStyle = { [field]: paragraphValue };
@@ -174,12 +183,11 @@ for (const t of r.tests) {
   check(`${t.field}: selection 회귀 — 선택 밖 런 오버라이드 보존`, t.selResult.runARestKept);
   check(`${t.field}: selection 회귀 — 선택 영역만 기본 복원`, t.selResult.selectedReverted);
   check(`${t.field}: selection 회귀 — 무관 필드(fontWeight) 런 보존`, t.selResult.runBKept);
-  check(`${t.field}: 커서-런-안 회귀 — 커서 런만 복원`, t.cursorResult.cursorRunReverted);
-  check(`${t.field}: 커서-런-안 회귀 — 다른 런 보존`, t.cursorResult.otherRunKept);
-  check(`${t.field}: 커서-런-안 회귀 — 무관 필드 런 보존`, t.cursorResult.runBKept);
+  check(`${t.field}: 캐스케이드(커서 런 안) 회귀 — 전체 기본 복원 (의도적)`, t.cursorResult.allReverted);
+  check(`${t.field}: 캐스케이드(커서 런 안) 회귀 — 무관 필드 런 보존`, t.cursorResult.runBKept);
   check(`${t.field}: 캐스케이드 회귀 — 전체 기본 복원 (의도적)`, t.cascadeResult.allReverted);
 }
 
 await browser.close();
-console.log(failures.length === 0 ? `\nALL PASS (${r.tests.length} fields × 7 assertions)` : `\n${failures.length} FAILURES`);
+console.log(failures.length === 0 ? `\nALL PASS (${r.tests.length} fields × 6 assertions)` : `\n${failures.length} FAILURES`);
 process.exit(failures.length === 0 ? 0 : 1);
