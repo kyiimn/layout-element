@@ -19,16 +19,60 @@
  * ```
  */
 import { chromium } from '@playwright/test';
+import { spawn } from 'node:child_process';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const BASE = await (async () => {
-  for (const port of [5175, 5173]) {
-    try {
-      const res = await fetch(`http://localhost:${port}/examples/bench.html`, { method: 'HEAD' });
-      if (res.ok) return `http://localhost:${port}`;
-    } catch { /* probe next */ }
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkgRoot = resolve(__dirname, '..');
+const BASE_PORT = 5201;
+
+/**
+ * 후보 URL이 layout-element의 bench 페이지를 실제로 서빙하는지 검증한다.
+ *
+ * probe는 HTML title까지 검증해야 한다 — 타 앱 Vite 서버(SPA fallback)는
+ * 존재하지 않는 경로에도 200을 반환한다 (실제 사고: layout-ui 서버를
+ * 잡아 BENCH_READY 타임아웃).
+ *
+ * @param {string} url - 후보 base URL
+ * @returns {Promise<boolean>} bench 페이지 서빙 여부
+ */
+async function probe(url) {
+  try {
+    const res = await fetch(`${url}/examples/bench.html`);
+    if (!res.ok) return false;
+    const html = await res.text();
+    return html.includes('<title>Layout Element Benchmark</title>');
+  } catch { return false; }
+}
+
+/**
+ * 스폰한 vite 서버가 응답할 때까지 폴링한다. 최대 30초.
+ *
+ * @param {string} url - 스폰 서버 base URL
+ * @returns {Promise<boolean>} 서버 준비 완료 여부
+ */
+async function waitForServer(url) {
+  for (let i = 0; i < 60; i++) {
+    if (await probe(url)) return true;
+    await new Promise(r => setTimeout(r, 500));
   }
-  throw new Error('dev server not found');
-})();
+  return false;
+}
+
+let BASE = null;
+let server = null;
+for (const cand of ['http://localhost:5175', 'http://localhost:5173']) {
+  if (await probe(cand)) { BASE = cand; break; }
+}
+if (!BASE) {
+  server = spawn('npx', ['vite', 'dev', '--port', String(BASE_PORT), '--strictPort'], {
+    cwd: pkgRoot, stdio: 'pipe', shell: true,
+  });
+  const spawnedUrl = `http://localhost:${BASE_PORT}`;
+  if (await waitForServer(spawnedUrl)) BASE = spawnedUrl;
+  else { server.kill(); throw new Error(`vite dev server not ready on ${spawnedUrl}`); }
+}
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
@@ -189,5 +233,6 @@ for (const t of r.tests) {
 }
 
 await browser.close();
+if (server) server.kill();
 console.log(failures.length === 0 ? `\nALL PASS (${r.tests.length} fields × 6 assertions)` : `\n${failures.length} FAILURES`);
 process.exit(failures.length === 0 ? 0 : 1);
