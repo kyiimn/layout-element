@@ -1885,7 +1885,7 @@ export class TextEditController {
         if (leftMm !== undefined) {
           newSpan.style.position = 'absolute';
           newSpan.style.left = `${leftMm}mm`;
-          newSpan.style.top = '0';
+          newSpan.style.top = this._getOptimisticTopMm(startOffset, compositionStyle);
         }
         if (placement.atEndOfChar) {
           span.after(newSpan);
@@ -2113,7 +2113,7 @@ export class TextEditController {
     if (leftMm !== undefined) {
       newSpan.style.position = 'absolute';
       newSpan.style.left = `${leftMm}mm`;
-      newSpan.style.top = '0';
+      newSpan.style.top = this._getOptimisticTopMm(sourceOffset, optimisticStyle);
     }
     if (placement.atEndOfChar) {
       span.after(newSpan);
@@ -2210,12 +2210,57 @@ export class TextEditController {
   }
 
   /**
+   * source 오프셋이 속한 라인의 확정 `maxFontSize`(mm)를 반환한다.
+   *
+   * 낙관적(optimistic) span의 수직 하단 앵커 계산에 필요하다. 확정 렌더가
+   * 아직 이번 입력을 반영하지 않았어도 직전 확정 라인 데이터를 기준으로
+   * 반환하며, 확정 렌더 이후 diff 렌더링이 동일 규칙으로 다시 정렬한다.
+   * 라인 데이터가 없으면 문단 기본 fontSize로 폴백한다.
+   *
+   * @param sourceOffset - 소스 텍스트 오프셋
+   * @returns 라인 maxFontSize (mm). 라인 정보가 없으면 문단 기본 fontSize
+   */
+  private _getLineMaxFontSizeAt(sourceOffset: number): number {
+    const model = this._paragraph.model;
+    if (!model) return 0;
+    const lineInfo = this._mapper.getLineInfoBySourceOffset(sourceOffset);
+    const line = lineInfo ? model.columnContents[lineInfo.columnIndex]?.[lineInfo.lineIndex] : null;
+    return line?.maxFontSize ?? model.fontSize;
+  }
+
+  /**
+   * 낙관적(optimistic) span의 `top` 값을 계산한다.
+   *
+   * 확정 렌더 경로(`column.element.ts _applySpanStyle`)와 동일한 엔진 하단
+   * 앵커 오프셋(`_getCharVerticalOffset` = 라인 maxFontSize − 글자 fontSize)을
+   * 적용한다. 기존에는 `top: '0'` 하드코딩으로 라인 상단 기준 배치되어
+   * 라인 높이보다 작은 글자 타이핑 시 확정 렌더까지 상단에 붙어 있었다.
+   *
+   * @param sourceOffset - 삽입 위치의 소스 텍스트 오프셋
+   * @param inlineStyle - 삽입 위치 런의 인라인 스타일 (선택)
+   * @returns CSS `top` 문자열 (mm). 라인 데이터가 없으면 '0'
+   */
+  private _getOptimisticTopMm(sourceOffset: number, inlineStyle?: TextInlineStyle): string {
+    const model = this._paragraph.model;
+    if (!model) return '0';
+    const lineMaxFs = this._getLineMaxFontSizeAt(sourceOffset);
+    const charFs = inlineStyle?.fontSize ?? model.fontSize;
+    const topMm = model._getCharVerticalOffset(lineMaxFs, charFs);
+    return topMm !== 0 ? `${topMm}mm` : '0';
+  }
+
+  /**
    * 낙관적(optimistic) 임시 span을 생성한다.
    *
    * `inlineStyle`이 있으면 `genCharStyleFlat`에 전달하여 런 폭
    * (letterSpacing/widthRatio/spaceRatio/fontSize 오버라이드)을 span에
    * 반영한다. 타이핑 연속성 규칙상 삽입 텍스트는 커서 직전 런 스타일을
    * 이어받으므로, 호출자가 `getStyleAtOffset`으로 조회해 전달한다.
+   *
+   * 라인이 확정되지 않은(이번 입력으로 라인 높이가 바뀔 수 있는) 상태라도
+   * 직전 확정 렌더의 라인 데이터를 기준으로 하단 앵커 오프셋을 적용한다 —
+   * 확정 렌더가 도착하면 diff 렌더링이 같은 규칙(`_getCharVerticalOffset`)으로
+   * 다시 정렬하므로 시각 점프가 없다.
    *
    * @param char - 표시할 문자(열)
    * @param sourceOffset - 새 문자의 소스 오프셋
@@ -2227,7 +2272,8 @@ export class TextEditController {
     const span = document.createElement('span');
     span.dataset.sourceOffset = String(sourceOffset);
     span.dataset.temporary = "true";
-    const charStyle = model?.genCharStyleFlat(char, inlineStyle);
+    const lineMaxFs = this._getLineMaxFontSizeAt(sourceOffset);
+    const charStyle = model?.genCharStyleFlat(char, inlineStyle, lineMaxFs);
     if (charStyle) {
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(span.style, charStyle);
     }
@@ -2316,7 +2362,7 @@ export class TextEditController {
       // 라인 시작 삽입 — 파트 첫 자식이므로 offset 0
       newSpan.style.position = 'absolute';
       newSpan.style.left = '0mm';
-      newSpan.style.top = '0';
+      newSpan.style.top = this._getOptimisticTopMm(sourceOffset, inlineStyle);
       container.insertBefore(newSpan, container.firstChild);
       // 후속 span들을 임시 span 폭만큼 밀어냄
       const widthMm = this._computeTempSpanWidthMm(char, inlineStyle);

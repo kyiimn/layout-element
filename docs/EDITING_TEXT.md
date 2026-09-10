@@ -1955,8 +1955,9 @@ flowchart LR
 
 - 낙관적 span은 `data-temporary="true"` 속성을 가진다.
 - 삽입된 문자 바로 이전(또는 `\n` 위치라면 이전 문자 다음)에 생성된다.
-- `TextEditController._createOptimisticSpan()`은 `ParagraphEngine.genCharStyle()`로 스타일을 적용한다.
+- `TextEditController._createOptimisticSpan()`은 `ParagraphEngine.genCharStyleFlat()`으로 스타일을 적용한다.
 - 다음 `postRender()` 호출 시 낙관적 span은 제거되고, 실제 렌더링된 span으로 대체된다.
+- **수직 하단 앵커**: `_createOptimisticSpan()`은 삽입 위치 라인의 확정 `maxFontSize`(`_getLineMaxFontSizeAt()`, 라인 데이터 없으면 문단 기본 fontSize 폴백)를 `genCharStyleFlat`의 세 번째 인자로 전달하고, 세 생성 지점(`_optimisticSpanUpdate` / `_optimisticCompositionUpdate` / `_insertOptimisticSpanAtLineStart`)의 `top`을 하드코딩 `'0'` 대신 `_getOptimisticTopMm()`(엔진 `_getCharVerticalOffset` = 라인 maxFontSize − 글자 fontSize)으로 계산한다. 확정 렌더 경로(`column.element.ts _applySpanStyle` → `genCharStyleFlat(char, inlineStyle, lineMaxFontSize)`)와 동일 규칙이므로, 라인 높이보다 작은 글자 타이핑 시에도 확정 렌더까지 하단(베이스라인) 기준으로 표시되고 시각 점프가 없다. 기존에는 `top: '0'`으로 라인 상단 기준 배치되어 작은 글자가 라인 상단에 붙었다가 커밋 후 아래로 떨어지는 현상이 있었다.
 
 이 메커니즘은 키 입력과 화면 갱신 사이의 지연을 줄여, 사용자가 입력 지연을 덜 느끼도록 한다.
 
@@ -1977,13 +1978,13 @@ flowchart LR
 1. `getLineInfoBySourceOffset(sourceOffset)`로 컬럼/라인 인덱스 획득.
 2. `paragraph.querySelectorAll('x-layout-column')`로 컬럼 요소 찾기 (light DOM).
 3. 컬럼의 shadowRoot에서 `lineIndex`번째 자식(line div)을 찾기.
-4. 임시 span에 `position: absolute; left: 0mm; top: 0` 적용 (라인 시작이므로 offset 0).
+4. 임시 span에 `position: absolute; left: 0mm` 적용 (라인 시작이므로 offset 0). `top`은 `_getOptimisticTopMm()`으로 하단 앵커 계산 (§8 참조).
 5. line div의 첫 자식 앞에 optimistic span 삽입 (`lineDiv.insertBefore(newSpan, lineDiv.firstChild)`).
 6. `_optimisticSpan = newSpan`으로 참조 저장.
 
 ### 8.2 `_createOptimisticSpan()` 내부 로직
 
-1. `model.genCharStyleFlat(char, inlineStyle)`로 단일 span용 통합 스타일(`scale`/`transformOrigin`/`display`)을 얻는다. 런 스타일이 전달되면 `letterSpacing`/`widthRatio`/`spaceRatio`/`fontSize` 오버라이드가 `width`와 `scale`에 반영된다.
+1. `model.genCharStyleFlat(char, inlineStyle, 라인 maxFontSize)`로 단일 span용 통합 스타일(`scale`/`transformOrigin`/`display`/하단 앵커 `top`)을 얻는다. 런 스타일이 전달되면 `letterSpacing`/`widthRatio`/`spaceRatio`/`fontSize` 오버라이드가 `width`와 `scale`에 반영된다. `lineMaxFontSize`는 `_getLineMaxFontSizeAt(sourceOffset)`으로 조회한다.
 2. `Object.assign`로 span의 style에 적용.
 3. `dataset.sourceOffset = String(sourceOffset)`: 소스 오프셋.
 4. `dataset.temporary = "true"`: 임시 span 표시. `TextEditCoordinateMapper`는 이 속성이 있는 span을 매핑 대상에서 제외.
