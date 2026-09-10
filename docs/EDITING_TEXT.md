@@ -310,7 +310,7 @@ flowchart LR
 4. `_syncTextareaSelection()` — textarea의 선택 영역을 `_cursorModel` 상태에 맞춘다.
 5. `_updateCursorPosition()` — 커서를 새 DOM 위치에 재배치. `getCursorPlacement(offset, preferLineEnd=true)`를 통해 커서 배치 정보(`sourceOffset`, `atEndOfChar`)를 얻는다. `_sourceToPlacement` 맵은 `_rebuildMappings()`에서 모든 source offset에 대해 채워진다 — 가시 문자는 `atEndOfChar: false`, trailing space는 `atEndOfChar: true` + 누적 스페이스 폭, `\n` 위치는 `atEndOfChar: true`, 매핑 구멍(빈 줄 등)은 역방향으로 가장 가까운 placement로 채워진다. 단, `\n` 바로 다음 위치(새 라인 시작)는 line rect 폴백으로 처리된다. `endOfBlock`에서 `textContent`에 실제 `\n`이 있을 때만 `sourceOffset++`를 수행하여 phantom offset을 방지한다. **phantom end placement**: trailing space 없이 끝나는 라인의 마지막 가시 문자 다음 offset(= 다음 라인 첫 글자 offset)은 `_lineEndPlacements`에 별도 저장되며, `preferLineEnd=true`로 조회 시 우선 반환되어 커서가 라인 끝 문자의 오른쪽에 배치된다. `crossRightState === 'crossed'`일 때는 `preferLineEnd=false`로 다음 라인 첫 글자의 왼쪽에 배치한다. `getCursorPlacement()`가 null을 반환하는 경우(빈 줄 시작, offset=0 등) line rect 또는 first column rect로 폴백한다. **height≈0 span(공백 문자) 처리**: `getCharRect(placement.sourceOffset)`의 `rect.height <= 1`이면 `useFallback=true`로 전환하여 `_resolveFallbackTop()`으로 커서 top을 결정한다. `_resolveFallbackTop`은 (1) 인접 가시 문자의 `rect.top`, (2) `getLineRect()`의 라인 div top, (3) span 자체 `rect.top`, (4) `getFirstColumnRect().top` 순서로 폴백한다. `rect.top - cursorHeight`를 사용하지 않는다 — 라인 끝 스페이스에서 위 라인으로 커서가 올라가는 버그를 방지.
 6. `_updateSelection()` — 선택 영역을 새 DOM 위치에 재배치.
-7. 조합 중이면 `_applyCompositionUnderline()`로 조합 범위 span에 underline/breakline 장식(`_applyOptimisticDecorations` — 엔진 mm rect 규칙) 적용. 조합이 종료된 직후면 `_clearCompositionUnderline()`로 임시 장식 div 제거.
+- 조합 중이면 `_applyCompositionUnderline()`로 조합 범위 span에 underline/breakline 장식(`_applyOptimisticDecorations` — 엔진 mm rect 규칙, 색상도 엔진과 동일 4단계 `firstNonEmpty` 체인) 적용. 조합이 종료된 직후면 `_clearCompositionUnderline()`로 임시 장식 div(`div[data-deco-key^="opt-"]`) 제거 — 구 CSS `text-decoration` 정리 분기는 설정 경로 소멸로 no-op이 되어 2026-09 정리에서 삭제되었다.
 8. `_wasFocused`가 true면 `textarea.focus({ preventScroll: true })`로 포커스 복원. `preventScroll: true`로 스크롤 컨테이너의 좌상단 점프를 방지한다.
 
 > **조합 중 인라인 스타일 유지**: 낙관적 조합 span(`_createOptimisticCompositionSpan`) 생성 시
@@ -1497,7 +1497,7 @@ sequenceDiagram
 4. textarea 값과 모델 평문이 불일치하면 `model.textContent = plainToInline(textarea.value, _runMap)`으로 동기화. 이후 `this._runMap = runMapFromContent(model.textContent)`로 런 맵 재추출.
 5. 커서 offset 계산: `_cursorModel.offset = _compositionStartOffset + composedLength`.
 6. `paragraph.flushRender()` 호출로 전체 재래핑.
-7. `_clearCompositionUnderline()` 호출로 밑줄 제거.
+7. `_clearCompositionUnderline()` 호출로 조합 중 임시 장식 div 제거.
 8. `_updateCursorPosition()` 호출.
 
 ### 6.4 `compositioncancel` 내부 처리
@@ -1509,7 +1509,7 @@ sequenceDiagram
 5. `textarea.setSelectionRange(_compositionStartOffset, _compositionStartOffset)`.
 6. `_debounceTimer`가 있으면 취소.
 7. `paragraph.render()` 호출.
-8. `_clearCompositionUnderline()` 호출로 밑줄 제거.
+8. `_clearCompositionUnderline()` 호출로 조합 중 임시 장식 div 제거.
 9. `_updateCursorPosition()` 호출.
 10. `_manager._notifyTextChange(this)` 호출.
 11. `_manager._notifyCursorMove(this)` 호출.
@@ -1543,8 +1543,8 @@ sequenceDiagram
 - 조합 중인 텍스트를 `model.textContent`에 즉시 반영하여 엔진이 라인 넘침 계산과 금칙어 규칙 적용에 조합 글자를 포함하도록 한다.
 - `compositionupdate`가 발생할 때마다 `model.textContent`를 갱신하고 `paragraph.scheduleRender()` (microtask)로 엔진 재레이아웃을 즉시 트리거한다.
 - 별도의 임시 조합 span을 사용하지 않는다. 엔진이 조합 텍스트를 일반 텍스트로 렌더링하므로 글자 위치 변경(금칙어 규칙, 라인 넘침 등)이 DOM에 즉시 반영된다.
-- `postRender()`에서 조합 범위 `[_compositionStartOffset, start + _compositionData.length)`의 엔진 렌더링 span에 `text-decoration: underline` 스타일을 적용한다.
-- 조합 종료(`compositionend`/`compositioncancel`) 시 `_clearCompositionUnderline()`로 모든 span에서 밑줄을 제거한다.
+- `postRender()`에서 조합 범위 `[_compositionStartOffset, start + _compositionData.length)`의 엔진 렌더링 span에 underline/breakline 장식 선 div를 적용한다 (`_applyOptimisticDecorations` — CSS `text-decoration`이 아닌 엔진 mm rect 규칙).
+- 조합 종료(`compositionend`/`compositioncancel`) 시 `_clearCompositionUnderline()`로 모든 span에서 조합 중 임시 장식 div(`div[data-deco-key^="opt-"]`)를 제거한다.
 - 조합 중에 화살표 키를 누르면, 조합을 시각적으로 취소하고 `textarea` 커서를 조합 시작 위치로 되돌린다.
 - `Escape` 키를 누르면 조합 상태를 해제한다. `model.textContent`는 조합 전 내용으로 복원된다.
 
@@ -1995,7 +1995,7 @@ flowchart LR
 4. `dataset.temporary = "true"`: 임시 span 표시. `TextEditCoordinateMapper`는 이 속성이 있는 span을 매핑 대상에서 제외.
 5. `dataset.widthRatio = String(적용된 장평)`: span에 실제 적용된 장평(런 오버라이드 → 문단 effective → 1 폴백)을 기록한다 — §8.3의 커서 폭 복원이 이 값을 소비한다.
 6. `textContent = char`: 단일 span에 직접 글자 설정 (outer/inner 중첩 없음).
-7. **underline/breakline 장식**: `textContent` 할당 **이후에** `_applyOptimisticDecorations()`을 호출한다 — textContent 할당은 기존 자식 노드를 모두 교체하므로 먼저 붙인 장식 div가 사라진다. 적용 여부는 런 오버라이드 → 문단 effective 폴백으로 판정한다(확정 렌더 `_computeDecorations`와 동일). 기하도 엔진 규칙을 따른다: 두께 = `max(fontSize × 0.06, 0.12mm)`, 밑줄 y = `lineMaxFontSize − 두께`, 취소선 y = `lineMaxFontSize/2 − 두께/2`, 색상 = 런 장식색상 → 런 글자색상 → 문단 effective. 조합 중에도 확정 렌더와 동일 장식이 보이고 시각 점프가 없다.
+7. **underline/breakline 장식**: `textContent` 할당 **이후에** `_applyOptimisticDecorations()`을 호출한다 — textContent 할당은 기존 자식 노드를 모두 교체하므로 먼저 붙인 장식 div가 사라진다(이전에 textContent **이전**에 적용하는 데드 블록이 존재했으나 2026-09 정리에서 삭제되었다 — 항상 폐기되는 장식 div를 매 조합 업데이트마다 생성하는 낭비였다). 적용 여부는 런 오버라이드 → 문단 effective 폴백으로 판정한다(확정 렌더 `_computeDecorations`와 동일). 기하도 엔진 규칙을 따른다: 두께 = `max(fontSize × 0.06, 0.12mm)`, 밑줄 y = `lineMaxFontSize − 두께`, 취소선 y = `lineMaxFontSize/2 − 두께/2`, 색상 = 런 장식색상 → 문단 장식색상 → 런 글자색상 → 문단 글자색상 (`firstNonEmpty` 단일 소스 — 엔진과 동일 체인, `''`도 "값 없음"으로 스킵). 조합 중에도 확정 렌더와 동일 장식이 보이고 시각 점프가 없다.
 8. 호출자가 `_computeTempSpanLeft()`로 계산한 `left`값과 `_getOptimisticTopMm()`(§8 하단 앵커)으로 `position: absolute; left: ${mm}mm; top: ${mm}mm`를 추가 적용.
 
 ### 8.3 낙관적 span이 있는 경우의 커서 위치 처리

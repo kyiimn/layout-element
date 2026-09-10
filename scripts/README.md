@@ -13,12 +13,12 @@
 | `snapshot-layout.mjs` | 정합성 (엔진) | `columnContents` + `overflow` 직렬화 | **byte 동일** |
 | `verify-dom-diff.mjs` | 정합성 (DOM) | DOM ↔ 엔진 텍스트/span 무결성 | ALL PASS |
 | `verify-visual-render.mjs` | 정합성 (화면) | 실제 렌더 검증 — rect 기반 표시성 (호스트 CSS rule stale/0폭/클립 감지) | ALL PASS |
-| `verify-ime.mjs` | 정합성 (IME) | 한글 조합 커밋/취소/혼합 | ALL PASS |
+| `verify-ime.mjs` | 정합성 (IME) | 한글 조합 커밋/취소/혼합 | ALL PASS (서버 없으면 자동 기동) |
 | `verify-multicolumn.mjs` | 정합성 (멀티컬럼) | prefix 캐시 경로 === 전체 재래핑 | ALL PASS |
 | `verify-inline-metrics.mjs` | 정합성 (엔진) | 인라인 `letterSpacing`/`widthRatio`/`spaceRatio` 런 오버라이드 — 폭 공식/캐시 해시/printPostData/extractData/스타일 조회/런 맵 병합/오버랩 회피(파트 분할·좁은 영역 COVER) | ALL PASS |
 | `verify-text-decoration.mjs` | 정합성 (엔진) | 텍스트 장식 `underline`/`breakline`/`outline` — 장식선 rect 산출(구간 병합·듀얼 트랙)/색상 폴백/캐시 무효화/printPostData decorations+chars.outline/화면-인쇄 패리티/스타일 조회/런 맵 병합/OFF 기준선 | ALL PASS |
-| `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/캐스케이드 통일) | ALL PASS |
-| `verify-pending-style.mjs` | 정합성 (스타일) | pending style 라이프사이클 — blur 재포커스 유지(핵심)/커서 이동·selection 해제/타이핑·paste 적용/연속 타이핑 유지 | ALL PASS |
+| `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/캐스케이드 통일) | ALL PASS (서버 없으면 자동 기동) |
+| `verify-pending-style.mjs` | 정합성 (스타일) | pending style 라이프사이클 — blur 재포커스 유지(핵심)/커서 이동·selection 해제/타이핑·paste 적용/연속 타이핑 유지 | ALL PASS (서버 없으면 자동 기동) |
 | `verify-hangul-glyph-fallback.mjs` | 정합성 (엔진) | cmap 미등록 한글 음절 폭 폴백 (`가` 폭 대체) | ALL PASS |
 | `verify-hanging-punctuation.mjs` | 정합성 (엔진) | 걸침표(행말/행두) — OFF 기준선 byte 동일/금칙 대체 배치/trailing run/justify/getCharRect/print 패리티/히트테스트/엣지 게이트/블록 경계/prefix 캐시/API | ALL PASS |
 | `verify-line-gap-mode.mjs` | 정합성 (엔진) | 행간 고정값 모드 (`lineGapMode` ratio/fixed/fixed-min) — 기본값 byte 동일/fixed 균일 라인+absHeight/fixed-min 스케일업/오버랩 근사 방향/오버플로우↔absHeight/verticalAlign/해시 충돌(lgm:·lg:)/개별 setter/GC 정합/두 층위/flipLayout/prefix 캐시/extractData | ALL PASS |
@@ -182,8 +182,10 @@ npx tsx scripts/verify-visual-render.mjs   # ALL PASS (서버 없으면 자동 �
 
 **실행**:
 ```bash
-npx tsx scripts/verify-ime.mjs   # 11항목 ALL PASS
+npx tsx scripts/verify-ime.mjs   # 11항목 ALL PASS (서버 없으면 자동 기동)
 ```
+
+**dev server 방어 (포트 오인 사고 교훈)**: `verify-multicolumn.mjs`와 동일한 2중 방어 — probe가 HTML title(`Layout Element Benchmark`)까지 검증해 타 앱 Vite 서버의 SPA fallback 200을 걸러내고, 정상 서버가 없으면 **자체 스폰**(포트 5200) 후 종료 시 정리한다. 리포트(2026-09)가 지적한 HEAD 프로브 전용 취약 3종 중 두 번째 이식 사례.
 
 ### `verify-multicolumn.mjs` — 멀티컬럼 타이핑 정합성 (브라우저)
 
@@ -240,8 +242,10 @@ npx tsx scripts/verify-inline-metrics.mjs   # 47항목 ALL PASS
 
 **실행**:
 ```bash
-npx tsx scripts/verify-style-revert.mjs   # 42항목 ALL PASS (7개 인라인 필드)
+npx tsx scripts/verify-style-revert.mjs   # 42항목 ALL PASS (7개 인라인 필드, 서버 없으면 자동 기동)
 ```
+
+**dev server 방어 (포트 오인 사고 교훈)**: `verify-multicolumn.mjs`와 동일한 2중 방어 — probe가 HTML title(`Layout Element Benchmark`)까지 검증해 타 앱 Vite 서버의 SPA fallback 200을 걸러내고, 정상 서버가 없으면 **자체 스폰**(포트 5201) 후 종료 시 정리한다. 리포트(2026-09)가 지적한 HEAD 프로브 전용 취약 3종 중 세 번째 이식 사례.
 
 ### `verify-pending-style.mjs` — pending style 라이프사이클 (브라우저)
 
@@ -262,8 +266,10 @@ npx tsx scripts/verify-style-revert.mjs   # 42항목 ALL PASS (7개 인라인 �
 
 **실행**:
 ```bash
-npx tsx scripts/verify-pending-style.mjs   # 16항목 ALL PASS (dev server 필요)
+npx tsx scripts/verify-pending-style.mjs   # 16항목 ALL PASS (서버 없으면 자동 기동)
 ```
+
+**dev server 방어 (포트 오인 사고 교훈)**: `verify-multicolumn.mjs`와 동일한 2중 방어 — probe가 HTML title(`Layout Element Benchmark`)까지 검증해 타 앱 Vite 서버의 SPA fallback 200을 걸러내고, 정상 서버가 없으면 **자체 스폰**(포트 5199 — multicolumn의 5198과 충돌 방지) 후 종료 시 정리한다. 실제 사고(2026-09): layout-ui 서버(5173)를 잡아 BENCH_READY 타임아웃 30초 — 초기 버전은 HEAD 프로브만으로 `res.ok` 판정이라 이를 걸러내지 못했다.
 
 ### `verify-right-indent-tab.mjs` / `verify-right-indent-tab-browser.mjs` — 좌우 밀기 탭 정합성
 
