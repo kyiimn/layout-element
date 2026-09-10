@@ -7,7 +7,8 @@ import type { TextLineData } from "@/types/layout/text/text-line.type";
 import type { TextInlineData } from "@/types/layout/text/text-inline.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
-import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA, SHORTCUT_BOLD_WEIGHT, SHORTCUT_MIN_FONT_SIZE, SHORTCUT_MIN_SPACE_RATIO, DECORATION_THICKNESS_RATIO, DECORATION_MIN_THICKNESS_MM } from "@/constants";
+import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA, SHORTCUT_BOLD_WEIGHT, SHORTCUT_MIN_FONT_SIZE, SHORTCUT_MIN_SPACE_RATIO, DECORATION_THICKNESS_RATIO, DECORATION_MIN_THICKNESS_MM, TEXT_INLINE_STYLE_FIELDS } from "@/constants";
+import { firstNonEmpty } from "@/engine/paragraph-engine";
 import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, normalizeInlineContent, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent, adjustStyleInRange, NumericInlineMetricField } from "./run-map";
 import { ColorRegistry } from "@/resource/color-registry";
 
@@ -115,14 +116,6 @@ export class TextEditController {
    * 연속 타이핑까지 적용된다.
    */
   private _pendingNextStyle: Partial<TextInlineStyle> | undefined = undefined;
-  /**
-   * 커서 이동 시 pending 스타일 유지 여부 (내부 옵션 — 기본 false, 현재 미사용).
-   *
-   * `false`(기본): 커서가 기존 텍스트 중간으로 이동하거나 selection이 형성되면
-   * pending을 해제한다. `true`로 설정하면 커서 이동과 무관하게 유지되며
-   * blur 또는 명시적 해제 시에만 해제된다.
-   */
-  private _pendingNextStyleKeepOnCursorMove: boolean = false;
 
   /** postRender의 커서/선택 배치 지연 rAF 핸들 (강제 리플로우 회피). */
   private _cursorSelectionRafId: number | null = null;
@@ -2044,12 +2037,6 @@ export class TextEditController {
       if (!col.shadowRoot) continue;
       const spans = col.shadowRoot.querySelectorAll<HTMLSpanElement>('span[data-source-offset]');
       for (const span of spans) {
-        if (span.style.textDecoration) {
-          span.style.textDecoration = '';
-        }
-        if (span.style.textUnderlineOffset) {
-          span.style.textUnderlineOffset = '';
-        }
         for (const el of Array.from(span.querySelectorAll(':scope > div[data-deco-key^="opt-"]'))) {
           el.remove();
         }
@@ -2313,17 +2300,6 @@ export class TextEditController {
     // 폰트·색상 필드는 별도로 적용해야 한다. 이것이 없으면 조합 중 텍스트가
     // 문단 기본 스타일로 렌더링되어 인라인 스타일(굵게·색상 등)이 무시된다.
     this._applyOptimisticInlineOverrides(span, inlineStyle, model ?? null);
-    if (model) {
-      // underline/breakline 장식: 엔진 _computeDecorations와 동일 규칙(두께/y/색상)으로
-      // 선 div를 그린다 — 조합 중에도 확정 렌더와 동일 장식이 보여야 한다.
-      // 런 오버라이드가 없어도 문단 effective 장식은 적용된다(확정 렌더 폴백과 동일).
-      const eff = model.effectiveTextStyle;
-      const ulOn = (inlineStyle?.underline ?? eff.underline!) === true;
-      const blOn = (inlineStyle?.breakline ?? eff.breakline!) === true;
-      if (ulOn || blOn) {
-        this._applyOptimisticDecorations(span, lineMaxFs, inlineStyle);
-      }
-    }
     // span에 실제 적용된 장평을 기록한다 — _updateCursorPosition가 시각 폭에서
     // 레이아웃 폭을 복원할 때 파싱한다. genCharStyleFlat과 동일 폴백 체인
     // (런 오버라이드 → 문단 effective → 1)이므로 적용값과 항상 일치한다.
@@ -2396,7 +2372,8 @@ export class TextEditController {
    * - 두께 = `max(fontSize × DECORATION_THICKNESS_RATIO, DECORATION_MIN_THICKNESS_MM)`
    * - 밑줄 y = 글자 em box 하단 − 두께 (`lineMaxFontSize − 두께`)
    * - 취소선 y = 글자 em box 중앙 − 두께/2 (`lineMaxFontSize/2 − 두께/2`)
-   * - 색상 = 런 장식색상 → 런 글자색상 → 문단 글자색상 (런에 없으면 문단 effective)
+   * - 색상 = 런 장식색상 → 문단 장식색상 → 런 글자색상 → 문단 글자색상
+   *   (`firstNonEmpty` 단일 소스 — 엔진 `_computeDecorations`와 동일 체인)
    *
    * 선 div는 span 내부에 `position: absolute; left: 0; width: 100%`로
    * 배치되며, span이 `position: absolute`(charOffsets 경로) 또는
@@ -2423,13 +2400,15 @@ export class TextEditController {
       {
         kind: 'underline',
         on: (inlineStyle?.underline ?? eff.underline!) === true,
-        colorName: inlineStyle?.underlineColor ?? inlineStyle?.color ?? eff.color,
+        // 엔진 _computeDecorations와 동일 폴백 체인 (런 장식색상 → 문단 장식색상 →
+        // 런 글자색상 → 문단 글자색상). firstNonEmpty 단일 소스 — ''도 "값 없음"으로 skip.
+        colorName: firstNonEmpty(inlineStyle?.underlineColor, eff.underlineColor, inlineStyle?.color, eff.color),
         y: lineMaxFontSize - thickness,
       },
       {
         kind: 'breakline',
         on: (inlineStyle?.breakline ?? eff.breakline!) === true,
-        colorName: inlineStyle?.breaklineColor ?? inlineStyle?.color ?? eff.color,
+        colorName: firstNonEmpty(inlineStyle?.breaklineColor, eff.breaklineColor, inlineStyle?.color, eff.color),
         y: lineMaxFontSize / 2 - thickness / 2,
       },
     ];
@@ -2833,7 +2812,6 @@ export class TextEditController {
   /**
    * 커서 이동·selection 변화 시 pending 스타일을 해제한다.
    *
-   * `_pendingNextStyleKeepOnCursorMove`가 `true`면 유지한다 (내부 옵션, 현재 미사용).
    * 입력으로 인한 커서 이동(타이핑)은 제외한다 — 입력 직후의 offset 갱신은
    * pending을 소진하지 않고 유지한다(연속 타이핑 적용).
    *
@@ -2846,7 +2824,6 @@ export class TextEditController {
    */
   private _releasePendingOnCursorMove(): boolean {
     if (this._pendingNextStyle === undefined) return false;
-    if (this._pendingNextStyleKeepOnCursorMove) return false;
     this._pendingNextStyle = undefined;
     this._emitStyleChange();
     return true;
@@ -2967,12 +2944,7 @@ export class TextEditController {
     const model = this._paragraph.model;
     if (!model) return;
 
-    const INLINE_FIELDS = [
-      "fontFamily", "fontSize", "fontWeight", "fontStyle", "color",
-      "letterSpacing", "widthRatio", "spaceRatio",
-      "underline", "breakline", "outline",
-      "underlineColor", "breaklineColor", "outlineColor",
-    ] as const;
+    const INLINE_FIELDS = TEXT_INLINE_STYLE_FIELDS;
 
     // 상속 회귀(inherit revert) 규칙:
     // - patch 필드 값 === inheritStyle 같은 필드 → 오버라이드를 만들지 않고 기존 오버라이드 제거

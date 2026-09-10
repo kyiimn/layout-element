@@ -145,3 +145,18 @@ export const DECORATION_THICKNESS_RATIO = 0.06;
 
 /** 밑줄/취소선 최소 두께 (mm). 작은 글자에서도 보이는 두께 보장. */
 export const DECORATION_MIN_THICKNESS_MM = 0.12;
+
+/**
+ * 인라인 런 오버라이드 가능 필드 집합 — TextStyle 전 필드 중 런 단위 주입 가능한
+ * 14필드. 편집 레이어(revert/주입/캐스케이드 판정)와 엔진(getCommonStyleInRange
+ * 공통값 산출)이 동일 목록을 소비한다. 필드 추가 시 이 배열만 갱신한다 —
+ * d6ba0c9가 수리한 부분 적용 버그가 복사본 간 드리프트에서 비롯했으므로
+ * 3곳 로컬 복사본을 이 단일 소스로 통합했다.
+ * (과거 3복사본의 선언 순서가 상이했으나 모든 소비처가 집합 순회만 하므로 순서 무의미)
+ */
+export const TEXT_INLINE_STYLE_FIELDS = [
+  "fontFamily", "fontSize", "fontWeight", "fontStyle", "color",
+  "letterSpacing", "widthRatio", "spaceRatio",
+  "underline", "breakline", "outline",
+  "underlineColor", "breaklineColor", "outlineColor",
+] as const;

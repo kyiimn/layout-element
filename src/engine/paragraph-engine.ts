@@ -14,6 +14,7 @@ import {
   DEFAULT_FONT_SIZE,
   DEFAULT_FONT_STYLE,
   DEFAULT_FONT_WEIGHT,
+  DEFAULT_HANGING_PUNCTUATION,
   DEFAULT_INDENT,
   DEFAULT_LETTER_SPACING,
   DEFAULT_LINE_GAP_MODE,
@@ -36,6 +37,7 @@ import {
   isLineStartForbidden,
   isWordChar,
   isAlnumCode,
+  TEXT_INLINE_STYLE_FIELDS,
 } from "@/constants";
 import { computeLineHeightMm, resolveLineGap } from "./line-height";
 import {
@@ -82,7 +84,7 @@ const DEFAULT_PARAGRAPH_STYLE_NO_LINE_GAP: Required<ParagraphStyle> = {
   lineGapMode: DEFAULT_LINE_GAP_MODE,
   verticalAlign: DEFAULT_VERTICAL_ALIGN,
   textAlign: DEFAULT_TEXT_ALIGN,
-  hangingPunctuation: false,
+  hangingPunctuation: DEFAULT_HANGING_PUNCTUATION,
   wordWrap: DEFAULT_WORD_WRAP,
 };
 
@@ -757,9 +759,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         if (
           cfg.lineEnd &&
           isHangableLineEnd(nextFirstPart.content[0]!) &&
-          // word-wrap: 당겨올 글자가 워드 글자(조인터 포함)면 걸침 교정을
-          // 하지 않는다 — 강제 분할 잔여(".14159" 등)가 걸침으로 컬럼 밖에
-          // 배치되고 워드가 다시 쪼개지는 것을 막는다.
+          // word-wrap: 당겨올 글자가 워드 글자(alnum·조인터)면 걸침 교정을
+          // 하지 않는다 — 워드 무결성 > 걸침. `undefined` prev의 `.`/`,`
+          // 시작 잔여는 isWordChar 계약상 항상 false이므로 이 가드는
+          // alnum 시작 잔여만 걸러낸다(조인터 시작 잔여는 eager lookahead상
+          // 발생하지 않음).
           !(this.wordWrap &&
             isWordChar(undefined, nextFirstPart.content[0]!, nextFirstPart.content[1])) &&
           !curHasTab &&
@@ -879,11 +883,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   }
 
   /**
-   * 파트에 적재된 글자들의 배치 폭 합계(mm)를 계산한다.
+   * 파트에 적재된 글자들의 배치 소비 폭 합계(mm)를 계산한다.
    *
    * 금칙 패스의 폭 게이트가 pull-up 전후의 파트 폭 위반을 판정할 때
-   * 사용한다. 배치 패스와 동일한 폭 공식(`_charWidthMm`)을 글자별로
-   * 누적한다 — `charOffsets`는 아직 산출 전이므로 쓰지 않는다.
+   * 사용한다. 배치 패스(charLoop)와 동일한 소비 폭 공식(`_charConsumedWidthMm`:
+   * raw 폭 × widthRatio + letterSpacing, 런 오버라이드 해석, 탭 0)을
+   * 글자별로 누적한다 — `charOffsets`는 아직 산출 전이므로 쓰지 않는다.
    *
    * @param part - 폭을 계산할 파트
    * @returns 글자 폭 합계 (mm). 빈 파트는 0.
@@ -892,9 +897,33 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   private _partContentWidthMm(part: TextPartData): number {
     let sum = 0;
     for (let i = 0; i < part.content.length; i++) {
-      sum += this._charWidthMm(part.content[i]!, part.inlineStyles?.[i]);
+      sum += this._charConsumedWidthMm(part.content[i]!, part.inlineStyles?.[i]);
     }
     return sum;
+  }
+
+  /**
+   * 글자의 배치 소비 폭(mm)을 반환한다.
+   *
+   * 배치 패스(charLoop)가 글자 하나를 배치할 때 소비하는 공식
+   * (`_charWidthMm` raw 폭 × widthRatio + letterSpacing, 런별 오버라이드
+   * 해석)의 헬퍼다. 탭은 배치 패스와 동일하게 0을 반환한다. 게이트
+   * 판정값과 실제 배치 소비 폭이 부동소수점 수준에서 일치하도록 한다 —
+   * raw 폭만 누산하면 기본 자간(-0.1em)에서 게이트가 과소평가되고
+   * 장평 확대 시 과대낙관이 되어 pull-up이 파트 폭을 초과했다.
+   *
+   * @param char - 측정할 문자
+   * @param inlineStyle - 인라인 스타일 오버라이드
+   * @returns 소비 폭 (mm)
+   * @throws 없음
+   */
+  private _charConsumedWidthMm(char: string, inlineStyle: TextInlineStyle | undefined): number {
+    if (char === RIGHT_INDENT_TAB_CHAR) return 0;
+    const raw = this._charWidthMm(char, inlineStyle);
+    const fontSize = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
+    const lsMm = (inlineStyle?.letterSpacing ?? this.effectiveTextStyle.letterSpacing!) * fontSize;
+    const wr = inlineStyle?.widthRatio ?? this.widthRatio;
+    return raw * wr + lsMm;
   }
 
   /**
@@ -1033,9 +1062,10 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         const nextFirstChar = nextFirstPart.content[0];
 
         if (isLineStartForbidden(nextFirstChar)) {
-          // word-wrap: pull-up 대상이 워드 글자(조인터 포함)면 건드리지
-          // 않는다 — 워드 무결성 > 금칙 교정. 강제 분할 잔여가 "."나 ","
-          // 로 시작하는 경우가 이에 해당한다.
+          // word-wrap: pull-up 대상이 워드 글자(alnum·조인터)면 건드리지
+          // 않는다 — 워드 무결성 > 금칙 교정. `undefined` prev의 `.`/`,`
+          // 시작 잔여는 isWordChar 계약상 항상 false이므로 이 가드는
+          // alnum 시작 잔여만 걸러낸다.
           if (this.wordWrap && isWordChar(undefined, nextFirstChar, nextFirstPart.content[1])) {
             continue;
           }
@@ -1044,7 +1074,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
             // 미리 계산한다. 초과하면 넘겨받지 않고 追い出시(おいだし)로
             // 전환한다 — cur의 마지막 글자를 next 앞으로 내려 금칙 글자와
             // 함께 배치함으로써 cur의 폭 위반을 만들지 않는다.
-            const nextCharWidth = this._charWidthMm(nextFirstChar, nextFirstPart.inlineStyles?.[0]);
+            const nextCharWidth = this._charConsumedWidthMm(nextFirstChar, nextFirstPart.inlineStyles?.[0]);
             const curUsedWidth = this._partContentWidthMm(curLastPart);
             const fits = curUsedWidth + nextCharWidth <= curLastPart.width + 1e-6;
 
@@ -1066,6 +1096,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
               // 글자만 유지하는 기존 동작(넘침)으로 폴백한다.
               // word-wrap: 내보낼 글자(outChar)가 워드 글자면 교정 포기 —
               // 후처리에는 폭 재검증이 없어 워드를 안전하게 옮길 수 없다.
+              // 이 가드는 alnum 잔여만 판정한다(행두 걸침 가드와 동일 계약).
               if (this.wordWrap && isWordChar(undefined, curLastChar, nextFirstChar)) {
                 continue;
               }
@@ -2128,12 +2159,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   }
 
   /**
-   * 파트의 stripped 글자 인덱스에 대한 배치 폭(swidth, mm)을 반환한다.
+   * 파트의 raw 글자 인덱스에 대한 배치 폭(swidth, mm)을 반환한다.
    * 걸침 글자는 0을 반환한다(선 구간 제외).
    */
-  private _charSwidthAt(part: TextPartData, strippedIdx: number, inlineStyle: TextInlineStyle | undefined): number {
-    const char = part.content[strippedIdx]!;
-    if (part.hangs !== undefined && (part.hangs[strippedIdx] === 'start' || part.hangs[strippedIdx] === 'end')) {
+  private _charSwidthAt(part: TextPartData, rawIdx: number, inlineStyle: TextInlineStyle | undefined): number {
+    const char = part.content[rawIdx]!;
+    if (part.hangs !== undefined && (part.hangs[rawIdx] === 'start' || part.hangs[rawIdx] === 'end')) {
       return 0;
     }
     return this.getCharWidths(char, inlineStyle).swidth;
@@ -4202,11 +4233,6 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 
   /**
    * 내부 소비용: 상속값 + 주입값 + 기본값을 모두 병합한 텍스트 스타일.
-   * 메모이제이션: _textStyle/_inheritStyle 변경 시 dirty 플래그로 무효화.
-   * @returns 병합된 TextStyle
-   */
-  /**
-   * 내부 소비용: 상속값 + 주입값 + 기본값을 모두 병합한 텍스트 스타일.
    *
    * 과거 데이터 호환: 주입/상속 객체에 **명시적 `undefined` 키**가 있으면
    * 스프레드가 DEFAULT 값을 덮어쓴다. 신규 필드(underline/breakline/outline
@@ -4368,12 +4394,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const base = this.effectiveTextStyle;
     if (endOffset <= startOffset) return { ...base };
 
-    const INLINE_FIELDS = [
-      "color", "fontFamily", "fontWeight", "fontStyle", "fontSize",
-      "letterSpacing", "widthRatio", "spaceRatio",
-      "underline", "breakline", "outline",
-      "underlineColor", "breaklineColor", "outlineColor",
-    ] as const;
+    const INLINE_FIELDS = TEXT_INLINE_STYLE_FIELDS;
     const runs = this._styleRuns ?? (this._styleRuns = this._buildStyleRuns());
 
     let first = true;
@@ -4557,12 +4578,14 @@ function computeStripRange(part: TextPartData, line: TextLineData, partIdx: numb
  *
  * 스타일 색상 필드는 `undefined`(미지정)와 `''`(DEFAULT_TEXT_STYLE 기본값)가
  * 모두 "값 없음"이므로 `??` 체인으로는 폴백할 수 없다 — `''`가 nullish가
- * 아니기 때문이다.
+ * 아니기 때문이다. 엔진(`_computeDecorations`, `buildParagraphPrintPostData`)과
+ * 편집 레이어(`_applyOptimisticDecorations`)가 동일 색상 폴백 체인을
+ * 구성하는 단일 소스다.
  *
  * @param values - 우선순위 순 문자열들 (undefined 허용)
  * @returns 첫 번째 비-빈 문자열. 모두 비었으면 `''`
  */
-function firstNonEmpty(...values: (string | undefined)[]): string {
+export function firstNonEmpty(...values: (string | undefined)[]): string {
   for (const v of values) {
     if (v !== undefined && v !== '') return v;
   }

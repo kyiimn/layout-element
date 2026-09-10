@@ -15,7 +15,7 @@ import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, Lay
 import type { BoxRole } from "@/types/layout";
 import { LayoutImageElement } from "@/components/layout/image.element";
 import { ImageEditController } from "./image-edit-controller";
-import { DEFAULT_SHORTCUT_METRIC_STEPS, type ShortcutMetricSteps } from "@/constants";
+import { DEFAULT_SHORTCUT_METRIC_STEPS, TEXT_INLINE_STYLE_FIELDS, type ShortcutMetricSteps } from "@/constants";
 
 /** 레이아웃 편집 대상 요소 (box 및 TD) */
 export type LayoutElement = LayoutBoxElement | LayoutTableCellElement;
@@ -936,12 +936,7 @@ export class EditManager {
       inheritStyle,
     ) as Partial<ParagraphStyle>;
 
-    const INLINE_FIELDS = [
-      "fontFamily", "fontSize", "fontWeight", "fontStyle", "color",
-      "letterSpacing", "widthRatio", "spaceRatio",
-      "underline", "breakline", "outline",
-      "underlineColor", "breaklineColor", "outlineColor",
-    ] as const;
+    const INLINE_FIELDS = TEXT_INLINE_STYLE_FIELDS;
     const PARAGRAPH_FIELDS = ["lineGap", "lineGapMode", "textAlign", "verticalAlign", "hangingPunctuation", "wordWrap"] as const;
     const revertTextFields: string[] = [];
     const revertParagraphFields: string[] = [];
