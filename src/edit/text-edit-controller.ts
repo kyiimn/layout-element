@@ -7,7 +7,7 @@ import type { TextLineData } from "@/types/layout/text/text-line.type";
 import type { TextInlineData } from "@/types/layout/text/text-inline.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
-import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA, SHORTCUT_BOLD_WEIGHT, SHORTCUT_MIN_FONT_SIZE, SHORTCUT_MIN_SPACE_RATIO } from "@/constants";
+import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA, SHORTCUT_BOLD_WEIGHT, SHORTCUT_MIN_FONT_SIZE, SHORTCUT_MIN_SPACE_RATIO, DECORATION_THICKNESS_RATIO, DECORATION_MIN_THICKNESS_MM } from "@/constants";
 import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, normalizeInlineContent, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent, adjustStyleInRange, NumericInlineMetricField } from "./run-map";
 import { ColorRegistry } from "@/resource/color-registry";
 
@@ -1844,11 +1844,29 @@ export class TextEditController {
       // 조합 텍스트는 조합 시작 위치의 런 스타일을 사용한다 — _onCompositionUpdate가
       // runMap을 model.textContent(조합 반영됨)에서 재추출한 직후이므로 직접 조회가
       // 항상 최신이며, 타이핑 span을 재사용한 경우에도 정확하다.
+      const style = getStyleAtOffset(this._runMap, startOffset);
       const prevWidthMm = this._optimisticSpanWidthMm;
-      const widthMm = this._computeTempSpanWidthMm(data[data.length - 1] ?? '', getStyleAtOffset(this._runMap, startOffset));
+      const widthMm = this._computeTempSpanWidthMm(data[data.length - 1] ?? '', style);
       if (widthMm !== prevWidthMm) {
         this._shiftFollowingSpans(this._optimisticSpan, prevWidthMm - widthMm);
         this._optimisticSpanWidthMm = widthMm;
+      }
+      // 조합 중 pending 스타일 주입(예: underline/breakline 토글)으로 런 스타일이
+      // 바뀌면 장식선도 갱신한다 — 재사용 span은 _createOptimisticSpan을 다시
+      // 거치지 않으므로 여기서 반영한다.
+      const model = this._paragraph.model;
+      if (model) {
+        const eff = model.effectiveTextStyle;
+        const ulOn = (style?.underline ?? eff.underline!) === true;
+        const blOn = (style?.breakline ?? eff.breakline!) === true;
+        const lineMaxFs = this._getLineMaxFontSizeAt(startOffset);
+        if (ulOn || blOn) {
+          this._applyOptimisticDecorations(this._optimisticSpan, lineMaxFs, style);
+        } else {
+          for (const el of Array.from(this._optimisticSpan.querySelectorAll(':scope > div[data-deco-key^="opt-"]'))) {
+            el.remove();
+          }
+        }
       }
       return;
     }
@@ -1988,6 +2006,15 @@ export class TextEditController {
     const len = this._compositionData.length;
     if (len === 0) return;
 
+    const model = this._paragraph.model;
+    if (!model) return;
+    const eff = model.effectiveTextStyle;
+    // 조합 런 스타일은 pending 포함 전체 런 스타일이므로, 확정 렌더와 동일 폴백
+    // (런 → 문단 effective)으로 underline/breakline 여부를 판정한다.
+    const style = getStyleAtOffset(this._runMap, start);
+    const ulOn = (style?.underline ?? eff.underline!) === true;
+    const blOn = (style?.breakline ?? eff.breakline!) === true;
+
     const columns = this._paragraph.querySelectorAll('x-layout-column');
     for (const col of columns) {
       if (!col.shadowRoot) continue;
@@ -1995,8 +2022,10 @@ export class TextEditController {
       for (const span of spans) {
         const offset = parseInt(span.dataset.sourceOffset!, 10);
         if (offset >= start && offset < start + len) {
-          span.style.textDecoration = 'underline';
-          span.style.textUnderlineOffset = '2px';
+          if (span.dataset.temporary === 'true') continue;
+          if (ulOn || blOn) {
+            this._applyOptimisticDecorations(span, span.dataset.lineMaxFs !== undefined ? parseFloat(span.dataset.lineMaxFs) : this._getLineMaxFontSizeAt(offset), style);
+          }
         }
       }
     }
@@ -2020,6 +2049,9 @@ export class TextEditController {
         }
         if (span.style.textUnderlineOffset) {
           span.style.textUnderlineOffset = '';
+        }
+        for (const el of Array.from(span.querySelectorAll(':scope > div[data-deco-key^="opt-"]'))) {
+          el.remove();
         }
       }
     }
@@ -2281,11 +2313,34 @@ export class TextEditController {
     // 폰트·색상 필드는 별도로 적용해야 한다. 이것이 없으면 조합 중 텍스트가
     // 문단 기본 스타일로 렌더링되어 인라인 스타일(굵게·색상 등)이 무시된다.
     this._applyOptimisticInlineOverrides(span, inlineStyle, model ?? null);
+    if (model) {
+      // underline/breakline 장식: 엔진 _computeDecorations와 동일 규칙(두께/y/색상)으로
+      // 선 div를 그린다 — 조합 중에도 확정 렌더와 동일 장식이 보여야 한다.
+      // 런 오버라이드가 없어도 문단 effective 장식은 적용된다(확정 렌더 폴백과 동일).
+      const eff = model.effectiveTextStyle;
+      const ulOn = (inlineStyle?.underline ?? eff.underline!) === true;
+      const blOn = (inlineStyle?.breakline ?? eff.breakline!) === true;
+      if (ulOn || blOn) {
+        this._applyOptimisticDecorations(span, lineMaxFs, inlineStyle);
+      }
+    }
     // span에 실제 적용된 장평을 기록한다 — _updateCursorPosition가 시각 폭에서
     // 레이아웃 폭을 복원할 때 파싱한다. genCharStyleFlat과 동일 폴백 체인
     // (런 오버라이드 → 문단 effective → 1)이므로 적용값과 항상 일치한다.
     span.dataset.widthRatio = String(inlineStyle?.widthRatio ?? model?.widthRatio ?? 1);
     span.textContent = char;
+    // underline/breakline 장식: 엔진 _computeDecorations와 동일 규칙(두께/y/색상)으로
+    // 선 div를 그린다. textContent **이후에** 적용한다 — textContent 할당은 기존
+    // 자식 노드를 모두 교체하므로 먼저 붙인 장식 div가 사라진다. 런 오버라이드가
+    // 없어도 문단 effective 장식은 적용된다(확정 렌더 폴백과 동일).
+    if (model) {
+      const eff = model.effectiveTextStyle;
+      const ulOn = (inlineStyle?.underline ?? eff.underline!) === true;
+      const blOn = (inlineStyle?.breakline ?? eff.breakline!) === true;
+      if (ulOn || blOn) {
+        this._applyOptimisticDecorations(span, lineMaxFs, inlineStyle);
+      }
+    }
     return span;
   }
 
@@ -2293,6 +2348,15 @@ export class TextEditController {
    * 낙관적 span에 인라인 스타일 오버라이드 필드를 적용한다.
    * column.element.ts의 `_applyInlineOverrides`와 동일한 로직이지만,
    * optimistic span은 column의 렌더 경로를 거치지 않으므로 여기서 직접 적용한다.
+   *
+   * 장식 필드(underline/breakline/outline)도 적용한다 — 조합 중 글자에도
+   * 확정 시 적용될 스타일이 모두 보여야 한다는 요구. `outline`은
+   * `genCharStyleFlat`이 `webkitTextStroke`로 반환하지만, 런 오버라이드가
+   * 문단 effective와 다르면(런에 undefined여도 문단 effective > 0이면)
+   * 이 경로가 폴백 값을 다시 쓴다. `underline`/`breakline`은 엔진 산출
+   * mm rect 장식(`_computeDecorations` 규칙과 동일 두께/y)으로
+   * `_applyOptimisticDecoration`이 그린다 — CSS text-decoration은 사용하지
+   * 않는다 (확정 렌더 장식선 rect와 두께/위치가 다르기 때문).
    *
    * @param span - 스타일을 적용할 낙관적 span 요소
    * @param inlineStyle - 인라인 런 스타일 (undefined면 문단 기본값 사용)
@@ -2322,6 +2386,79 @@ export class TextEditController {
       span.style.lineHeight = `${inlineStyle.fontSize}mm`;
       span.style.display = 'inline-block';
       span.style.height = `${inlineStyle.fontSize}mm`;
+    }
+  }
+
+  /**
+   * 낙관적 span에 underline/breakline 장식선 div를 붙인다.
+   *
+   * 엔진 `_computeDecorations`의 산출 규칙과 동일 기하를 사용한다:
+   * - 두께 = `max(fontSize × DECORATION_THICKNESS_RATIO, DECORATION_MIN_THICKNESS_MM)`
+   * - 밑줄 y = 글자 em box 하단 − 두께 (`lineMaxFontSize − 두께`)
+   * - 취소선 y = 글자 em box 중앙 − 두께/2 (`lineMaxFontSize/2 − 두께/2`)
+   * - 색상 = 런 장식색상 → 런 글자색상 → 문단 글자색상 (런에 없으면 문단 effective)
+   *
+   * 선 div는 span 내부에 `position: absolute; left: 0; width: 100%`로
+   * 배치되며, span이 `position: absolute`(charOffsets 경로) 또는
+   * `position: relative`(flexbox 경로)라는 전제가 필요하다.
+   * 확정 렌더가 도착하면 임시 span과 함께 제거되고 엔진 rect로 교체된다.
+   *
+   * @param span - 장식선을 붙일 낙관적 span
+   * @param lineMaxFontSize - 라인의 최대 폰트 크기 (mm)
+   * @param inlineStyle - 런 스타일 (undefined면 문단 effective 폴백)
+   * @returns void
+   */
+  private _applyOptimisticDecorations(
+    span: HTMLSpanElement,
+    lineMaxFontSize: number,
+    inlineStyle: TextInlineStyle | undefined,
+  ): void {
+    const model = this._paragraph.model;
+    if (!model) return;
+    const eff = model.effectiveTextStyle;
+    const fs = inlineStyle?.fontSize ?? eff.fontSize!;
+    const thickness = Math.max(fs * DECORATION_THICKNESS_RATIO, DECORATION_MIN_THICKNESS_MM);
+
+    const kinds: Array<{ kind: 'underline' | 'breakline'; on: boolean; colorName?: string; y: number }> = [
+      {
+        kind: 'underline',
+        on: (inlineStyle?.underline ?? eff.underline!) === true,
+        colorName: inlineStyle?.underlineColor ?? inlineStyle?.color ?? eff.color,
+        y: lineMaxFontSize - thickness,
+      },
+      {
+        kind: 'breakline',
+        on: (inlineStyle?.breakline ?? eff.breakline!) === true,
+        colorName: inlineStyle?.breaklineColor ?? inlineStyle?.color ?? eff.color,
+        y: lineMaxFontSize / 2 - thickness / 2,
+      },
+    ];
+
+    for (const { kind, on, colorName, y } of kinds) {
+      const decoKey = `opt-${kind}`;
+      const existing = span.querySelector<HTMLDivElement>(`& > div[data-deco-key="${decoKey}"]`);
+      if (!on) {
+        if (existing) existing.remove();
+        continue;
+      }
+      const cssColor = colorName !== undefined && colorName !== ''
+        ? ColorRegistry.getInstance().getCSSColor(colorName)
+        : '';
+      let decoEl = existing;
+      if (!decoEl) {
+        decoEl = document.createElement('div');
+        decoEl.dataset.decoKey = decoKey;
+        decoEl.style.position = 'absolute';
+        decoEl.style.left = '0';
+        decoEl.style.width = '100%';
+        decoEl.style.pointerEvents = 'none';
+        span.appendChild(decoEl);
+      }
+      const needTop = `${y}mm`;
+      const needHeight = `${thickness}mm`;
+      if (decoEl.style.top !== needTop) decoEl.style.top = needTop;
+      if (decoEl.style.height !== needHeight) decoEl.style.height = needHeight;
+      if (decoEl.style.backgroundColor !== cssColor) decoEl.style.backgroundColor = cssColor;
     }
   }
 
