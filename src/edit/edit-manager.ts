@@ -963,11 +963,13 @@ export class EditManager {
     // 문단 기본을 '주입 후' 값으로 비교해야 캐스케이드로 기본과 같아진 필드가 정리된다
     const paragraphTextStyle = model.effectiveTextStyle;
 
-    if (resolvedTextPatch.fontFamily !== undefined || resolvedTextPatch.fontWeight !== undefined ||
-        resolvedTextPatch.fontSize !== undefined || resolvedTextPatch.fontStyle !== undefined ||
-        resolvedTextPatch.color !== undefined ||
-        resolvedTextPatch.letterSpacing !== undefined || resolvedTextPatch.widthRatio !== undefined ||
-        resolvedTextPatch.spaceRatio !== undefined) {
+    // 스탬프 대상 필드: 런에 필드 오버라이드가 남아 있으면 문단 폴백을 가리므로,
+    // 캐스케이드 값과 함께 주입한 뒤 문단 기본과 동일해진 필드는 제거한다.
+    // 데코 필드(underline/breakline/outline/색상)도 동일 — 런에 박힌 stale
+    // underline:false 등이 문단 폴백을 가리면 "문단 전체 적용"이 부분 적용으로 깨진다.
+    const STAMP_FIELDS = [...INLINE_FIELDS] as (keyof TextInlineStyle)[];
+    const hasResolvedTextPatch = (resolvedTextPatch as Record<string, unknown>);
+    if (STAMP_FIELDS.some((field) => hasResolvedTextPatch[field] !== undefined)) {
       for (const entry of runMap) {
         if (!entry.style) continue;
         entry.style = { ...entry.style, ...resolvedTextPatch };
