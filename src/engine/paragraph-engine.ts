@@ -4205,11 +4205,33 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * 메모이제이션: _textStyle/_inheritStyle 변경 시 dirty 플래그로 무효화.
    * @returns 병합된 TextStyle
    */
+  /**
+   * 내부 소비용: 상속값 + 주입값 + 기본값을 모두 병합한 텍스트 스타일.
+   *
+   * 과거 데이터 호환: 주입/상속 객체에 **명시적 `undefined` 키**가 있으면
+   * 스프레드가 DEFAULT 값을 덮어쓴다. 신규 필드(underline/breakline/outline
+   * 및 색상)가 과거 저장 데이터에 부재할 수 있으므로, undefined 키는
+   * DEFAULT 값으로 폴백되도록 정리한다.
+   *
+   * 메모이제이션: _textStyle/_inheritStyle 변경 시 dirty 플래그로 무효화.
+   * @returns 병합된 TextStyle
+   */
   get effectiveTextStyle(): TextStyle {
     if (this._effectiveTsCache !== null && !this._effectiveTsDirty) {
       return this._effectiveTsCache;
     }
-    this._effectiveTsCache = { ...DEFAULT_TEXT_STYLE, ...this._inheritStyle, ...this._textStyle };
+    const merged = { ...DEFAULT_TEXT_STYLE, ...this._inheritStyle, ...this._textStyle };
+    // undefined 키 정리 — DEFAULT 값으로 폴백되도록 한다.
+    for (const key of Object.keys(merged) as (keyof TextStyle)[]) {
+      if (merged[key] === undefined) {
+        delete (merged as Record<string, unknown>)[key];
+        const defaultValue = (DEFAULT_TEXT_STYLE as Record<string, unknown>)[key as string];
+        if (defaultValue !== undefined) {
+          (merged as Record<string, unknown>)[key] = defaultValue;
+        }
+      }
+    }
+    this._effectiveTsCache = merged;
     this._effectiveTsDirty = false;
     return this._effectiveTsCache;
   }
@@ -4653,10 +4675,12 @@ export function buildParagraphPrintPostData(
             ?? textStyle?.fontStyle
             ?? inheritStyle?.fontStyle
             ?? DEFAULT_FONT_STYLE;
-          const colorName = inlineStyle?.color
-            ?? textStyle?.color
-            ?? inheritStyle?.color;
-          const cmyk = colorName !== undefined
+          const colorName = firstNonEmpty(
+            inlineStyle?.color,
+            textStyle?.color,
+            inheritStyle?.color,
+          );
+          const cmyk = colorName !== ''
             ? colorRegistry.get(colorName)
             : { c: 0, m: 0, y: 0, k: 255 };
 
@@ -4664,11 +4688,13 @@ export function buildParagraphPrintPostData(
             ?? textStyle?.outline
             ?? inheritStyle?.outline
             ?? 0;
-          const outlineColorName = inlineStyle?.outlineColor
-            ?? textStyle?.outlineColor
-            ?? inheritStyle?.outlineColor
-            ?? colorName;
-          const outlineCmyk = outlineColorName !== undefined
+          const outlineColorName = firstNonEmpty(
+            inlineStyle?.outlineColor,
+            textStyle?.outlineColor,
+            inheritStyle?.outlineColor,
+            colorName,
+          );
+          const outlineCmyk = outlineColorName !== ''
             ? colorRegistry.get(outlineColorName)
             : { c: 0, m: 0, y: 0, k: 255 };
 

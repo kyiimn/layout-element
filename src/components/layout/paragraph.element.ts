@@ -327,7 +327,8 @@ export class LayoutParagraphElement extends HTMLElement {
     Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(
       hostRule.style,
       {
-        color: color !== undefined ? colorRegistry.getCSSColor(color) : undefined,
+        // color ''(상속)이면 color를 설정하지 않는다 — 부모의 color가 상속된다.
+        color: color ? colorRegistry.getCSSColor(color) : undefined,
         fontFamily: fontFamily !== undefined ? fontLoader.getFontFamily(fontFamily) : undefined,
         fontStyle,
         fontWeight: fontWeight ? String(fontWeight) : undefined,
