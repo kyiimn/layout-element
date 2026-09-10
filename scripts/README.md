@@ -17,7 +17,8 @@
 | `verify-multicolumn.mjs` | 정합성 (멀티컬럼) | prefix 캐시 경로 === 전체 재래핑 | ALL PASS |
 | `verify-inline-metrics.mjs` | 정합성 (엔진) | 인라인 `letterSpacing`/`widthRatio`/`spaceRatio` 런 오버라이드 — 폭 공식/캐시 해시/printPostData/extractData/스타일 조회/런 맵 병합/오버랩 회피(파트 분할·좁은 영역 COVER) | ALL PASS |
 | `verify-text-decoration.mjs` | 정합성 (엔진) | 텍스트 장식 `underline`/`breakline`/`outline` — 장식선 rect 산출(구간 병합·듀얼 트랙)/색상 폴백/캐시 무효화/printPostData decorations+chars.outline/화면-인쇄 패리티/스타일 조회/런 맵 병합/OFF 기준선 | ALL PASS |
-| `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/런/캐스케이드) | ALL PASS |
+| `verify-style-revert.mjs` | 정합성 (스타일) | 인라인 회귀 주입 범위 (selection/캐스케이드 통일) | ALL PASS |
+| `verify-pending-style.mjs` | 정합성 (스타일) | pending style 라이프사이클 — blur 재포커스 유지(핵심)/커서 이동·selection 해제/타이핑·paste 적용/연속 타이핑 유지 | ALL PASS |
 | `verify-hangul-glyph-fallback.mjs` | 정합성 (엔진) | cmap 미등록 한글 음절 폭 폴백 (`가` 폭 대체) | ALL PASS |
 | `verify-hanging-punctuation.mjs` | 정합성 (엔진) | 걸침표(행말/행두) — OFF 기준선 byte 동일/금칙 대체 배치/trailing run/justify/getCharRect/print 패리티/히트테스트/엣지 게이트/블록 경계/prefix 캐시/API | ALL PASS |
 | `verify-line-gap-mode.mjs` | 정합성 (엔진) | 행간 고정값 모드 (`lineGapMode` ratio/fixed/fixed-min) — 기본값 byte 동일/fixed 균일 라인+absHeight/fixed-min 스케일업/오버랩 근사 방향/오버플로우↔absHeight/verticalAlign/해시 충돌(lgm:·lg:)/개별 setter/GC 정합/두 층위/flipLayout/prefix 캐시/extractData | ALL PASS |
@@ -229,9 +230,9 @@ npx tsx scripts/verify-inline-metrics.mjs   # 47항목 ALL PASS
 
 **목적**: `_applyTextStyle`이 문단 상속값과 동일한 값을 주입받을 때(상속 회귀), **적용 범위가 편집 상태에 맞는지** 검증한다. 이력: 회귀 주입이 편집 분기와 무관하게 전체 런 맵에서 필드를 제거해, "문단 fontSize 4 + 런 fontSize 6" 상태에서 런 일부에 4를 주입하면 **런 전체는 물론 다른 런의 오버라이드까지 사라지는** 버그가 있었다.
 
-**시나리오** (7개 인라인 필드 × 7 assertion = 49항목 — fontSize, fontWeight, fontStyle, color, letterSpacing, widthRatio, spaceRatio):
+**시나리오** (7개 인라인 필드 × 6 assertion = 42항목 — fontSize, fontWeight, fontStyle, color, letterSpacing, widthRatio, spaceRatio):
 - **selection 경로**: 선택 영역만 회귀 — 선택 밖 런 오버라이드 보존
-- **커서가 런 안**: 그 런만 회귀 (런 단위 시맨틱) — 다른 런 보존
+- **selection 없음 (커서 런 안)**: 전체 런 회귀 (기본 복원 — 의도적 동작). 구 규칙(런 단위 "그 런만" 회귀)은 제거되었다 — `isCascadePath = !hasSelection`으로 캐스케이드 통일 (docs/EDITING_TEXT.md §6A)
 - **캐스케이드**(커서가 런 밖): 전체 런 회귀 (기본 복원 — 의도적 동작)
 - 무관 필드 런(fontWeight 마커)이 회귀 주입에서 영향받지 않는지
 
@@ -239,7 +240,29 @@ npx tsx scripts/verify-inline-metrics.mjs   # 47항목 ALL PASS
 
 **실행**:
 ```bash
-npx tsx scripts/verify-style-revert.mjs   # 49항목 ALL PASS (7개 인라인 필드)
+npx tsx scripts/verify-style-revert.mjs   # 42항목 ALL PASS (7개 인라인 필드)
+```
+
+### `verify-pending-style.mjs` — pending style 라이프사이클 (브라우저)
+
+**목적**: 커서 상태의 툴바 스타일 변경이 pending으로 보관되고, 이후 입력에 적용되는 전 라이프사이클을 검증한다. 특히 **blur → 같은 위치 재포커스 시 pending 유지** 계약(§4.1.7)을 회귀 방어한다 — 버그 이력: `setCursor`가 이동 전 오프셋 비교 없이 `_releasePendingOnCursorMove`를 무조건 호출해, blur 복원(`focusParagraph` 커서 복원) 시 pending이 소실되었음. 수정은 `_releasePendingIfCursorMoved` 가드(이동 전/후 오프셋 동일 시 유지)로 이루어졌다.
+
+**시나리오** (9개 그룹 16항목):
+- **A. 설정/조회**: `setPendingNextStyle` → `pendingNextStyle` 조회, 명시적 `undefined` 해제, 재설정 시 `_lastStyleJson` 리셋 (이후 styleChange dedupe 생략 방지)
+- **B. blur 재포커스 유지 (핵심)**: blur 직후 커서 보존 → 같은 오프셋 재포커스 시 pending 유지 → 유지된 pending이 타이핑 런(`textInlineStyle.bold`)으로 삽입 → 삽입 직후에도 유지 (연속 타이핑)
+- **C. blur → 다른 오프셋 재포커스**: 실제 커서 이동이므로 해제
+- **D. mousedown**: 같은 위치(span mid-point 우측 클릭 → +1 규칙) 유지 / 다른 위치 해제
+- **E. 화살표 키 이동**: 해제
+- **F. selection 형성**: 해제 (pending은 "앞으로 입력될 텍스트"에만 의미)
+- **G. pendingBaseStyle**: pending 없으면 현재 삽입점 유효 스타일(시드용), 있으면 currentStyle과 동일
+- **H. 붙여넣기**: paste 텍스트가 pending 런으로 삽입
+- **I. 커서 이동 해제 후 styleChange 발화**: 툴바가 커서 유효 스타일로 복귀
+
+**검증기 작성 주의**: 삽입 런의 스타일 필드명은 `i.style`이 아니라 **`i.textInlineStyle`**이다 (`TextInlineData` 계약) — 이를 잘못 읽으면 pending 적용이 정상인데도 FAIL이 난다 (실측 오탐 경험). 또한 명시적 `setPendingNextStyle(undefined)` 해제는 styleChange를 발화하지 않는다 — 발화하는 해제 경로는 커서 이동 해제(`_releasePendingOnCursorMove`)뿐이다.
+
+**실행**:
+```bash
+npx tsx scripts/verify-pending-style.mjs   # 16항목 ALL PASS (dev server 필요)
 ```
 
 ### `verify-right-indent-tab.mjs` / `verify-right-indent-tab-browser.mjs` — 좌우 밀기 탭 정합성

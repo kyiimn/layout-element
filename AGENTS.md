@@ -35,6 +35,7 @@ npx tsx scripts/verify-ime.mjs          # 한글 IME 조합 정합성 (커밋/�
 npx tsx scripts/verify-multicolumn.mjs  # 멀티컬럼 타이핑 정합성 (prefix 캐시 경로)
 npx tsx scripts/verify-inline-metrics.mjs # 인라인 letterSpacing/widthRatio/spaceRatio 오버라이드 전 파이프라인 정합성
 npx tsx scripts/verify-text-decoration.mjs # 텍스트 장식 underline/breakline/outline 엔진 전 파이프라인 정합성
+npx tsx scripts/verify-pending-style.mjs # pending style 라이프사이클 (blur 재포커스 유지/커서 이동 해제/타이핑·paste 적용)
 npx tsx scripts/verify-image-edit-mode.mjs # 이미지 편집 모드 전 동작 (진입/드래그/휠/ESC/Tab/selection 연동)
 npx tsx scripts/verify-engine-node.mjs  # 엔진 계층 Node.js 호환성 (DOM-free 검증)
 npx tsx scripts/verify-hanging-punctuation.mjs # 걸침표(행말/행두) 엔진 전 파이프라인 정합성
