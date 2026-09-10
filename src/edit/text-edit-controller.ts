@@ -8,7 +8,7 @@ import type { TextInlineData } from "@/types/layout/text/text-inline.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
 import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA, SHORTCUT_BOLD_WEIGHT, SHORTCUT_MIN_FONT_SIZE, SHORTCUT_MIN_SPACE_RATIO } from "@/constants";
-import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, normalizeInlineContent, mergeAdjacentSameStyle, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent, adjustStyleInRange, NumericInlineMetricField } from "./run-map";
+import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, normalizeInlineContent, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent, adjustStyleInRange, NumericInlineMetricField } from "./run-map";
 import { ColorRegistry } from "@/resource/color-registry";
 
 /**
@@ -105,6 +105,24 @@ export class TextEditController {
   private _isFocused: boolean = false;
   private _pendingTextChangeOnBlur: boolean = false;
   private _mousemoveRafId: number | null = null;
+
+  /**
+   * 이후 입력에 적용될 대기 스타일 (pending style).
+   *
+   * 툴바에서 커서만 있는 상태(selection 없음)로 스타일을 변경하면 즉시 적용 대신
+   * 여기에 보관된다. 이후 타이핑/붙여넣기/IME 확정 텍스트가 이 스타일의 런으로
+   * 삽입된다 (`insertTextIntoInline`의 `insertStyle`). 삽입 후에도 유지되어
+   * 연속 타이핑까지 적용된다.
+   */
+  private _pendingNextStyle: Partial<TextInlineStyle> | undefined = undefined;
+  /**
+   * 커서 이동 시 pending 스타일 유지 여부 (내부 옵션 — 기본 false, 현재 미사용).
+   *
+   * `false`(기본): 커서가 기존 텍스트 중간으로 이동하거나 selection이 형성되면
+   * pending을 해제한다. `true`로 설정하면 커서 이동과 무관하게 유지되며
+   * blur 또는 명시적 해제 시에만 해제된다.
+   */
+  private _pendingNextStyleKeepOnCursorMove: boolean = false;
 
   /** postRender의 커서/선택 배치 지연 rAF 핸들 (강제 리플로우 회피). */
   private _cursorSelectionRafId: number | null = null;
@@ -222,8 +240,19 @@ export class TextEditController {
    * `engine.getCommonStyleInRange(start, end)`으로 조회한다. 문단 스타일은
    * `engine.effectiveParagraphStyle`에서 가져온다.
    *
-   * 커서가 텍스트 끝이나 빈 단락에 있어도 단락 수준의 스타일을 반환한다.
-   * 편집 모드가 활성화되지 않았거나 엔진이 없으면 빈 객체를 반환한다.
+   * 커서(선택 없음)는 **타이핑 삽입점 관점**으로 조회한다 — 삽입 텍스트는
+   * 커서 앞 글자의 런 스타일을 이어받으므로(`spliceTextIntoRuns`의
+   * `itemStyleAtBoundary` 타이핑 연속성), 표시도 `offset - 1`의 유효 스타일로
+   * 조회해야 타이핑 결과와 툴바 표시가 일치한다. `getInlineStyleAt`의
+   * 반개구간 `[start, end)` 조회는 경계에서 다음 런을 반환하므로 그대로 쓰면
+   * 표시와 삽입이 반대가 된다 — 커서가 런 A 바로 앞이면 A 스타일이 표시되지만
+   * 타이핑은 A 앞 런(=A 밖) 스타일로 삽입되는 불일치.
+   *
+   * 커서가 텍스트 끝이나 빈 단락에 있어도 단락 수준의 스타일을 반환한다
+   * (offset - 1 = 마지막 글자). offset이 0이면 앞 글자가 없으므로 문단
+   * effective 스타일을 반환한다 — 문단 시작 삽입도 문단 기본을 이어받는
+   * 삽입 규칙과 일치한다. 편집 모드가 활성화되지 않았거나 엔진이 없으면
+   * 빈 객체를 반환한다.
    */
   get currentStyle(): CurrentStyle {
     const engine = this._paragraph.engine;
@@ -240,8 +269,11 @@ export class TextEditController {
       }
     }
 
+    const offset = this._cursorModel.offset;
     return {
-      textStyle: engine.getEffectiveStyleAt(this._cursorModel.offset),
+      textStyle: offset > 0
+        ? engine.getEffectiveStyleAt(offset - 1)
+        : { ...engine.effectiveTextStyle },
       paragraphStyle: engine.effectiveParagraphStyle,
     };
   }
@@ -604,6 +636,7 @@ export class TextEditController {
           if (event.shiftKey) {
             this._extendSelection(targetOffset);
           } else {
+            this._releasePendingIfCursorMoved(targetOffset);
             this._cursorModel.offset = targetOffset;
             this._cursorModel.selection = null;
           }
@@ -637,6 +670,7 @@ export class TextEditController {
       return;
     }
     this._selectionAnchor = sourceOffset;
+    this._releasePendingIfCursorMoved(sourceOffset);
     this._cursorModel.offset = sourceOffset;
     this._cursorModel.selection = null;
     this._textarea.setSelectionRange(sourceOffset, sourceOffset);
@@ -894,6 +928,7 @@ export class TextEditController {
       if (isShift) {
         this._extendSelection(targetLeft);
       } else {
+        this._releasePendingOnCursorMove();
         this._cursorModel.offset = targetLeft;
         this._cursorModel.selection = null;
       }
@@ -945,6 +980,7 @@ export class TextEditController {
       if (isShift) {
         this._extendSelection(targetRight);
       } else {
+        this._releasePendingOnCursorMove();
         this._cursorModel.offset = targetRight;
         this._cursorModel.selection = null;
       }
@@ -1177,6 +1213,7 @@ export class TextEditController {
   }
 
   private _extendSelection(newOffset: number): void {
+    this._releasePendingOnCursorMove();
     const current = this._cursorModel;
     const anchor = current.selection?.anchor.textOffset ?? current.offset;
     current.selection = SelectionRange.fromOffsets(anchor, newOffset);
@@ -1272,6 +1309,7 @@ export class TextEditController {
       deleteTextFromInline(model.textContent, startOffset, endOffset - startOffset),
       startOffset,
       pastedText,
+      this._pendingNextStyle,
     );
     this._runMap = runMapFromContent(model.textContent);
     this._textarea.value = newContent;
@@ -1605,6 +1643,7 @@ export class TextEditController {
         deleteTextFromInline(model.textContent, startOffset, deletedLen),
         startOffset,
         inserted,
+        this._pendingNextStyle,
       );
       this._runMap = runMapFromContent(model.textContent);
       this._textarea.value = after;
@@ -1637,6 +1676,7 @@ export class TextEditController {
       deleteTextFromInline(model.textContent, spliceAt, deletedLen),
       spliceAt,
       insertedText,
+      this._pendingNextStyle,
     );
     this._runMap = runMapFromContent(model.textContent);
     this._cursorModel.offset = newOffset;
@@ -1756,6 +1796,7 @@ export class TextEditController {
         deleteTextFromInline(model.textContent, start, prevCompositionLen),
         start,
         data,
+        this._pendingNextStyle,
       );
       this._runMap = runMapFromContent(model.textContent);
       this._compositionData = data;
@@ -1910,7 +1951,11 @@ export class TextEditController {
     const composedLength = after.length - beforeContent.length;
 
     if (model.plainText !== after) {
-      model.textContent = plainToInline(after, this._runMap);
+      const pending = this._pendingNextStyle;
+      const runMapForPlain = pending
+        ? applyStyleToRange(this._runMap, startOffset, startOffset + composedLength, pending)
+        : this._runMap;
+      model.textContent = plainToInline(after, runMapForPlain);
     }
     this._runMap = runMapFromContent(model.textContent);
 
@@ -2593,11 +2638,107 @@ export class TextEditController {
     } else if (Array.isArray(textContent)) {
       maxOffset = textContent.reduce((sum, item) => sum + (typeof item === 'string' ? item.length : item.content.length), 0);
     }
+    const previousOffset = this._cursorModel.offset;
     this._cursorModel.offset = Math.max(0, Math.min(position.textOffset, maxOffset));
+    this._releasePendingIfCursorMoved(previousOffset);
     this._syncTextareaSelection();
     this._updateCursorPosition();
     this._emitStyleChange();
     this._manager._notifyCursorMove(this);
+  }
+
+  /**
+   * 커서 이동·selection 변화 시 pending 스타일을 해제한다.
+   *
+   * `_pendingNextStyleKeepOnCursorMove`가 `true`면 유지한다 (내부 옵션, 현재 미사용).
+   * 입력으로 인한 커서 이동(타이핑)은 제외한다 — 입력 직후의 offset 갱신은
+   * pending을 소진하지 않고 유지한다(연속 타이핑 적용).
+   *
+   * pending이 해제되면 `styleChange`를 발화한다 — 툴바가 pending 값을
+   * 표시하고 있다가 해제 시 커서 위치 유효 스타일로 복귀해야 하기 때문이다.
+   * 해제 직후 `currentStyle`은 커서 위치의 기존 유효 스타일이므로 이벤트
+   * 페이로드로 툴바를 갱신할 수 있다.
+   *
+   * @returns pending이 해제되었으면 true (호출자가 styleChange 재발화 판단용)
+   */
+  private _releasePendingOnCursorMove(): boolean {
+    if (this._pendingNextStyle === undefined) return false;
+    if (this._pendingNextStyleKeepOnCursorMove) return false;
+    this._pendingNextStyle = undefined;
+    this._emitStyleChange();
+    return true;
+  }
+
+  /**
+   * 커서가 실제로 이동했을 때만 pending 스타일을 해제한다.
+   *
+   * blur → 재포커스 사이에 커서는 컨트롤러에 보존되므로, 같은 오프셋으로의
+   * 재진입(mousedown, `setCursor` 복원)은 커서 이동이 아니다 — pending은
+   * 유지되어야 재포커스 후 타이핑에 계속 적용된다 (문서 계약 §4.1.7:
+   * "blur 시 pending도 유지 — 재포커스 시 계속 적용").
+   * 오프셋이 다르면 기존과 동일하게 `_releasePendingOnCursorMove()`를 호출한다.
+   *
+   * @param targetOffset - 이동 대상 오프셋
+   * @returns pending이 해제되었으면 true
+   *
+   * @example
+   * ```ts
+   * // 같은 위치 재클릭(blur 복원) — pending 유지
+   * this._releasePendingIfCursorMoved(offset); // false (pending 유지)
+   * // 다른 위치 클릭 — pending 해제
+   * this._releasePendingIfCursorMoved(otherOffset); // true
+   * ```
+   */
+  private _releasePendingIfCursorMoved(targetOffset: number): boolean {
+    if (this._cursorModel.offset === targetOffset) return false;
+    return this._releasePendingOnCursorMove();
+  }
+
+  /**
+   * 대기 스타일(pending style)을 설정한다. `undefined` 전달 시 해제.
+   *
+   * 툴바가 커서만 있는 상태에서 스타일을 변경할 때 즉시 적용 대신 호출한다.
+   * 이후 타이핑/붙여넣기/IME 확정 텍스트가 이 스타일의 런으로 삽입되며,
+   * 삽입 후에도 유지되어 연속 타이핑까지 적용된다. 툴바 표시는 호스트가
+   * pending 값을 직접 반영한다 — 여기서 styleChange를 발화하지 않는다.
+   * 대신 `_lastStyleJson`을 null로 리셋한다 — pending 해제 시의
+   * `_emitStyleChange`가 커서 위치 유효 스타일을 이전과 비교할 때
+   * pending 설정 전 값과 동일하면 이벤트가 생략(dedupe)되는 것을 막기 위함이다.
+   * pending이 있는 동안 currentStyle 비교 기준은 무의미하므로 리셋이 안전하다.
+   *
+   * @param style - 이후 입력에 적용할 인라인 스타일 (부분 객체). `undefined`면 해제
+   * @returns void
+   */
+  _setPendingNextStyle(style: Partial<TextInlineStyle> | undefined): void {
+    this._pendingNextStyle = style;
+    if (style !== undefined) {
+      this._lastStyleJson = null;
+    }
+  }
+
+  /** 현재 대기 스타일. 없으면 `undefined`. */
+  get pendingNextStyle(): Partial<TextInlineStyle> | undefined {
+    return this._pendingNextStyle;
+  }
+
+  /**
+   * pending 스타일의 **기저(base) 스타일**을 반환한다.
+   *
+   * 항상 현재 삽입점의 유효 스타일을 반환한다 — 호스트는 `pendingNextStyle ??
+   * pendingBaseStyle` 패턴으로 최초 설정 시만 이 값을 시드에 사용하므로,
+   * pending이 이미 있으면 이 getter가 호출되지 않는다(호출되더라도 같은 값).
+   * 복사본을 반환한다 — 호스트가 base에 patch를 병합해 pending으로 설정하므로
+   * currentStyle 내부 객체의 참조 유출을 막는다.
+   *
+   * 최초 진입 시 pending은 빈 상태로 시작하지 않는다 — 호스트가
+   * `currentStyle`로 시드한 값에서 사용자가 새로 설정하는 필드만
+   * 덮어쓰는 "부분 병합" 모델이므로, pending 전체가 시드 스타일에서
+   * 출발해야 한다.
+   *
+   * @returns pending 병합의 기저가 될 유효 스타일
+   */
+  get pendingBaseStyle(): Partial<TextInlineStyle> {
+    return { ...this.currentStyle.textStyle };
   }
 
   /**
@@ -2630,9 +2771,8 @@ export class TextEditController {
    * 커서/선택 상태에 따라 주입 대상을 라우팅한다:
    * 1. selection 있음 → 선택 범위에 인라인 가능 필드를 주입 (`applyStyleToRange`,
    *    기존 런은 필드 오버라이드). 인라인 불가 필드(indent, ParagraphStyle)는 paragraph에 적용.
-   * 2. selection 없음 + 커서가 인라인 런 안 → 해당 런만 업데이트.
-   * 3. selection 없음 + 커서가 런 밖(평문) → paragraph 자체 스타일 수정
-   *    + 명시 주입 필드를 모든 인라인 런에 캐스케이드.
+   * 2. selection 없음 → focus 유무와 무관하게 paragraph 전역 적용:
+   *    paragraph 자체 스타일 수정 + 명시 주입 필드를 모든 인라인 런에 캐스케이드.
    *
    * 처리 후 런 맵을 정규화하고(문단 기본과 동일한 런 해제 + 병합),
    * 커서/selection 위치를 보존한다. 텍스트 길이는 변하지 않으므로 오프셋은 불변.
@@ -2714,24 +2854,16 @@ export class TextEditController {
     const hasSelection = savedSelection !== null &&
       savedSelection.normalized().start.textOffset < savedSelection.normalized().end.textOffset;
 
-    const cursorRunStyle = getStyleAtOffset(this._runMap, offset);
+    // selection이 없으면 focus 유무와 무관하게 paragraph 전역 적용(캐스케이드)한다 —
+    // 커서 위치 기반 런 적용(구 분기 2)은 제거되었다.
+    const isCascadePath = !hasSelection;
 
-    // paragraph 자체 스타일 갱신 — DOM element setter 사용.
-    // 엔진 직접 수정 시 직후 render의 layout()이 DOM element의 구값으로
-    // 엔진을 되돌려 덮어쓴다 (엔진 우선 단일 소스 흐름 유지).
-    //
-    // selection이 없을 때 커서가 런 안(분기 2)이면 런만, 런 밖(분기 3)이면 paragraph 기본 + 캐스케이드.
-    // isCascadePath === true인 경우만 인라인 필드를 paragraph에 반영한다(분기 2는 런만 고치므로 미반영).
-    const isCascadePath = !hasSelection && cursorRunStyle === undefined;
-
-    // 중요: 인라인 가능 필드(fontFamily 등)의 paragraph 반영은 런 밖(캐스케이드) 경로에서만
-    // 수행한다. selection/런-안 경로의 의미는 "그 영역에만 적용"이므로 paragraph 기본을
+    // 중요: 인라인 가능 필드(fontFamily 등)의 paragraph 반영은 캐스케이드(selection 없음) 경로에서만
+    // 수행한다. selection 경로의 의미는 "그 영역에만 적용"이므로 paragraph 기본을
     // 바꾸면 effectiveTextStyle이 런 값과 동일해져 normalizeRunMap이 런을 해제해버린다.
-    // 인라인 불가 필드(textAlign/lineGap/verticalAlign/indent)는 항상 paragraph
-    // 소속이므로 selection이 있어도 paragraph에 반영한다.
     //
     // revertParagraphTextFields는 인라인 불가 필드이므로 항상 paragraph에 반영한다.
-    // revertTextFields(인라인 가능 필드)는 런 밖(캐스케이드) 경로에서만 paragraph에서 제거한다.
+    // revertTextFields(인라인 가능 필드)는 캐스케이드(selection 없음) 경로에서만 paragraph에서 제거한다.
     const paragraphOnlyTextPatch: Partial<TextStyle> = {};
     for (const key of Object.keys(resolvedTextPatch)) {
       const isInlineField = (INLINE_FIELDS as readonly string[]).includes(key);
@@ -2769,9 +2901,9 @@ export class TextEditController {
     }
 
     // 상속 회귀 필드의 적용 범위는 편집 상태(분기)에 따라 다르다:
-    // - 캐스케이드(커서가 런 밖): 문단 기본을 상속으로 되돌리는 것이므로
+    // - 캐스케이드(selection 없음): 문단 기본을 상속으로 되돌리는 것이므로
     //   전체 런 맵에서 필드 제거가 의도적 (완전한 기본 복원).
-    // - selection / 커서가 런 안: "이 영역만 기본으로"의 의미이므로
+    // - selection: "이 영역만 기본으로"의 의미이므로
     //   전체 런에서 제거하면 선택 밖 오버라이드까지 사라진다
     //   (실측 재현: 문단 fontSize 4, 런 A fontSize 6, 런 A 일부에 4 주입 시
     //   런 A 전체의 fontSize 6이 제거됨). 이 경로에서는 inlinePatch에
@@ -2779,7 +2911,7 @@ export class TextEditController {
     if (revertTextFields.length > 0 && isCascadePath) {
       this._runMap = stripRunFields(this._runMap, revertTextFields);
     } else if (revertTextFields.length > 0) {
-      // selection/런-안 경로의 회귀 주입: 값 자체가 문단 상속값이므로
+      // selection 경로의 회귀 주입: 값 자체가 문단 상속값이므로
       // inlinePatch에 넣으면 주입 후 "문단 기본과 동일해진 필드 제거"가 정리한다.
       for (const field of revertTextFields) {
         (inlinePatch as Record<string, unknown>)[field] = textPatch[field as keyof TextStyle];
@@ -2803,22 +2935,8 @@ export class TextEditController {
           }
         }
       }
-    } else if (!hasSelection && cursorRunStyle !== undefined && hasInlinePatch) {
-      // 2. 커서가 인라인 런 안 → 해당 런만 업데이트.
-      // 커서가 런의 end 경계(문단 끝 등)에 있어도 getStyleAtOffset가 마지막
-      // 런의 스타일을 반환하므로 런-안 경로로 진입한다. 이때 런 탐색도
-      // end 경계를 포함해야 한다 — r.end > offset 조건만으로는 offset === r.end인
-      // 마지막 런을 못 찾아 주입이 조용히 무시된다 (커서가 문단 맨 뒤에 있을 때
-      // 스타일 조정이 반영되지 않는 버그).
-      const run = this._runMap.find(r => r.start <= offset
-        && (r.end > offset || (r.end === offset && r === this._runMap[this._runMap.length - 1]))
-        && r.style === cursorRunStyle);
-      if (run && run.style) {
-        run.style = { ...run.style, ...inlinePatch };
-        this._runMap = mergeAdjacentSameStyle(this._runMap);
-      }
     } else if (hasInlinePatch) {
-      // 3. 커서가 런 밖 → 명시 주입 필드를 모든 인라인 런에 캐스케이드
+      // 2. selection 없음(캐스케이드) → 명시 주입 필드를 모든 인라인 런에 캐스케이드
       const paragraphTextStyle = model.effectiveTextStyle;
       for (const entry of this._runMap) {
         if (entry.style) {

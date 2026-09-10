@@ -1058,7 +1058,7 @@ const handledReverse = manager.navigateByTab(true);
 
 ### 4.1.6 텍스트 스타일 단축키 — 토글과 per-run 상대 증감
 
-텍스트 편집 중 선택 영역이 있을 때만 동작하는 스타일 단축키. `TextEditController._tryHandleTextStyleShortcut`이 처리하며, 모두 **선택 영역 필수** — 커서만 있는 상태에서의 스타일 변경(이후 입력에 적용되는 pending style)은 **의도적으로 지원하지 않는다**. selection이 없으면 무음 무시한다.
+텍스트 편집 중 선택 영역이 있을 때만 동작하는 스타일 단축키. `TextEditController._tryHandleTextStyleShortcut`이 처리하며, 모두 **선택 영역 필수** — selection이 없으면 무음 무시한다. 커서만 있는 상태의 스타일 변경은 pending style로 지원한다(§ 4.1.7) — 단축키 경로는 기존대로 selection 필수다.
 
 | 기능 | 키 (물리 키 `event.code` 기준) | 동작 |
 |------|------|------|
@@ -1075,7 +1075,7 @@ const handledReverse = manager.navigateByTab(true);
 2. **per-run 상대 증감 (옵션 B)**: `adjustStyleInRange(runMap, start, end, paragraphEffectiveTextStyle, field, adjust)`가 선택 범위 안의 **각 런의 현재값**(런 오버라이드가 없으면 문단 effective 값)을 `adjust` 콜백에 전달하고, run별 결과값을 주입한다. 혼합 선택(5.0mm run과 4.0mm run이 섞인 선택)에서도 런 간 **상대 차이가 보존**된다 — `applyStyleToRange`의 균일 절대값 주입과의 차이점.
 3. **부동소수점 정규화**: `adjust` 콜백이 결과값을 1e-9 정밀도로 반올림한다. 연타 시 `4.0999999...` 같은 오차가 누적되어 `normalizeRunMap`의 문단 기본값 비교(정확 비교)와 `_computeLayoutInputHash`가 어긋나는 것을 방지한다. 호스트가 비십진 스텝(1U = 0.03125em, 0.5pt)을 주입해도 왕복이 안정적이다.
 4. **런 언랩 정리**: 주입 후 `normalizeRunMap`으로 문단 effective와 동일해진 필드를 제거한다 — 문단 기본 자간 −0.1에서 10회 감소 후 다시 10회 증가하면 run이 자동으로 언랩되어 인접 런과 병합된다. 데이터는 항상 최소 런 형태를 유지한다.
-5. **selection 가드**: `_adjustSelectionMetric`은 selection이 없거나 빈 selection(`start >= end`)이면 즉시 반환한다. `_toggleInlineStyle`도 동일한 가드를 가진다 — selection 없는 커서 상태의 스타일 변경은 API로도 열어두지 않는다는 설계 원칙 (§6A.5.1의 `applyTextStyle`은 예외적으로 커서 위치 런/캐스케이드 경로를 지원한다).
+5. **selection 가드**: `_adjustSelectionMetric`은 selection이 없거나 빈 selection(`start >= end`)이면 즉시 반환한다. `_toggleInlineStyle`도 동일한 가드를 가진다 — selection 없는 커서 상태의 스타일 변경은 API로도 열어두지 않는다는 설계 원칙 (§6A.5.1의 `applyTextStyle`은 예외적으로 캐스케이드 경로를 지원한다).
 6. **커서/selection 보존**: 증감은 텍스트 길이를 변경하지 않으므로 오프셋은 불변이고, selection은 그대로 유지된다. 주입 후 `model.textContent = plainToInline(...)` → `flushRender()` → `styleChange`/`textChange` 이벤트가 기존 스타일 주입 경로와 동일하게 발생한다.
 7. **이벤트 전파 차단**: `_tryHandleTextStyleShortcut`은 매칭 시 `event.preventDefault()`와 함께 `event.stopPropagation()`도 호출한다. 이로 인해 `window` bubble 단계의 `useEditorKeyboard` 핸들러로 키 이벤트가 전파되지 않아, 텍스트 편집 중 스타일 단축키가 LayoutEditor의 줌/Z-index 등 외부 단축키와 충돌하지 않는다. ESC 및 Ctrl+A/C/X도 동일하게 `stopPropagation()`을 호출한다.
 
@@ -1084,6 +1084,59 @@ const handledReverse = manager.navigateByTab(true);
 - `SHORTCUT_BOLD_WEIGHT = 700` — 볼드 토글이 주입하는 굵기. 400~900 사이의 다른 굵기는 단축키 영역 밖(UI 패널의 `applyInlineStyle({ fontWeight })`)이다.
 - `SHORTCUT_FONT_SIZE_STEP = 0.1` (mm), `SHORTCUT_METRIC_STEP = 0.01` (자간/장평/공백 공용) — **기본 증감량**. 실제 증감은 `EditManager.shortcutSteps`(`ShortcutMetricSteps` 타입, 기본값 `DEFAULT_SHORTCUT_METRIC_STEPS`)를 따른다. 호스트가 업체 표시 단위에 맞춰 이 필드를 교체하면 단축키 1회가 표시값 1만큼 움직는다 — 예: layout-ui의 급(Q) 업체는 fontSize 0.25mm(=1Q), U 업체는 letterSpacing 0.03125em(=1U)를 주입한다.
 - `SHORTCUT_MIN_FONT_SIZE = 0.1`, `SHORTCUT_MIN_SPACE_RATIO = 0` — 폭 계산 음수 방지 하한. `widthRatio`/`letterSpacing`의 극값은 엔진이 이미 감당하는 영역이므로 클램프하지 않는다.
+
+### 4.1.7 pending style — 커서 상태의 스타일을 이후 입력에 적용
+
+툴바에서 포커스 + selection 없음(커서 상태)으로 텍스트 스타일을 변경하면 즉시 적용 대신 **대기(pending) 스타일로 보관**한다. 이후 타이핑·붙여넣기·IME 확정 텍스트가 이 스타일의 런으로 삽입되며, 삽입 후에도 유지되어 연속 타이핑까지 적용된다 (워드프로세서의 pending style 관례와 동일).
+
+#### API
+
+| API | 설명 |
+|-----|------|
+| `EditManager.setPendingNextStyle(style?: Partial<TextInlineStyle>)` | 포커스된 컨트롤러에 pending 스타일 설정/해제. 기존 런·문단에는 적용하지 않는다. |
+| `EditManager.pendingNextStyle` | 현재 pending 스타일 조회. 없으면 `undefined`. |
+| `TextEditController._setPendingNextStyle(style)` | 컨트롤러 레벨 설정 (EditManager가 위임). |
+| `TextEditController.pendingNextStyle` | 컨트롤러 레벨 조회. |
+
+#### 적용 경로
+
+`insertTextIntoInline(content, at, text, insertStyle)`의 `insertStyle` 파라미터로 전달된다 — pending이 `undefined`면 기존 타이핑 연속성(직전 런 스타일 이어받기)을 따른다. 적용 지점 4곳:
+
+1. `_onInput` — selection 대체 분기 (선택 범위 삭제 + 삽입)
+2. `_onInput` — 델타 분기 (일반 타이핑)
+3. `_onPaste` — 붙여넣기
+4. `_onCompositionUpdate` / `_onCompositionEnd` — IME 조합 (확정 구간만 `applyStyleToRange`)
+
+Enter/Tab으로 삽입되는 개행·탭은 pending을 적용하지 않는다 — 런 스타일이 아닌 구조 문자이며, 개행 뒤 텍스트는 다음 `_onInput`에서 pending을 적용받는다.
+
+#### 해제 조건
+
+- **커서 이동** (사용자 조작): mousedown 커서 이동, 화살표 키, 외부 `setCursor` — `_releasePendingOnCursorMove()`. 단, **오프셋이 실제로 변경된 경우에만** 해제한다 (`_releasePendingIfCursorMoved`) — blur → 재포커스 사이 커서는 컨트롤러에 보존되므로, 같은 오프셋으로의 재진입(mousedown 재클릭, `setCursor` 복원·`focusParagraph` 커서 복원)은 커서 이동이 아니며 pending은 유지된다.
+- **selection 형성**: `_extendSelection` (Shift+화살표, Shift+클릭, 드래그)
+- **blur**: 컨트롤러 상태 유지 규칙에 따름 (커서/selection은 보존되므로 pending도 유지 — 재포커스 시 계속 적용)
+- **입력으로 인한 커서 이동은 제외**: 타이핑 직후의 offset 갱신은 pending을 소진하지 않는다 — 연속 타이핑까지 적용된다.
+- **명시적 해제**: `setPendingNextStyle(undefined)` (툴바에서 모든 pending 필드가 제거되었을 때)
+
+내부 옵션 `_pendingNextStyleKeepOnCursorMove`(기본 `false`)를 `true`로 설정하면 커서 이동·selection 형성과 무관하게 blur/명시 해제 시에만 해제된다. 현재 호스트(layout-ui)는 미사용.
+
+#### selection 형성 시의 의미 전환
+
+pending이 설정된 상태에서 selection을 형성하면 pending은 해제되고, 이후의 스타일 변경은 selection 범위에 즉시 적용된다 (기존 경로). pending은 "커서 위치에서 앞으로 입력될 텍스트"에만 의미가 있다.
+
+#### 툴바 표시 (호스트 책임)
+
+pending 설정 시 `styleChange` 이벤트는 발화하지 않는다 — pending은 커서 위치 유효 스타일이 아니므로 `EditManager.currentStyle`이 반영할 수 없다. 호스트(layout-ui의 `handleToolbarTextStyleChange`)가 pending 값을 직접 툴바 상태로 반영한다. pending 해제(커서 이동 등) 후에는 기존대로 `styleChange` 이벤트가 커서 위치 유효 스타일로 툴바를 복귀시킨다.
+
+#### 인라인 가능 필드
+
+pending 스타일은 인라인 런으로 삽입되므로 `TextInlineStyle`의 14개 필드만 유효하다. `indent`와 문단 필드(textAlign, lineGap, verticalAlign, hangingPunctuation, wordWrap)는 pending 개념이 성립하지 않아 즉시 적용 경로를 유지한다 — 호스트(`handleToolbarTextStyleChange`)가 이 필드들은 기존 핸들러로 위임한다.
+
+#### 구현 참고
+
+- 저장: `TextEditController._pendingNextStyle: Partial<TextInlineStyle> | undefined`
+- 삽입 직후에도 pending은 유지된다 — 연속 타이핑 모두 같은 스타일로 삽입된다. 해제는 위의 조건에서만 발생한다.
+- `applyStyleToRange` 기반의 compositionend 경로는 조합 확정 구간에만 pending을 반영한다 — 기존 런에는 영향 없다.
+- 검증: `scripts/verify-pending-style.mjs` (16항목 — blur 재포커스 유지·커서 이동/selection 해제·타이핑/paste 적용·pendingBaseStyle 시드). blur → 같은 오프셋 재진입은 커서 이동이 아니므로 pending이 유지된다 (`_releasePendingIfCursorMoved` 가드).
 
 ### 4.2 각 키의 내부 처리 과정
 
@@ -1590,15 +1643,8 @@ type RunMap = RunEntry[];
 | 편집 상태 | 인라인 가능 필드<sup>※1</sup> | 인라인 불가 필드<sup>※2</sup> |
 |-----------|------------------------------|------------------------------|
 | 텍스트편집모드, 포커스 + **selection 있음** | 선택 범위에 런 주입 (`applyStyleToRange`). 이미 런이 있으면 **새 런을 만들지 않고 해당 필드만 오버라이드** | paragraph |
-| 텍스트편집모드, 포커스 + selection 없음 + **커서가 런 안** | **해당 런만** 업데이트. paragraph는 무변경 | paragraph |
-| 텍스트편집모드, 포커스 + selection 없음 + **커서가 런 밖(평문)** | **paragraph 자체 스타일** 수정 + 명시 주입 필드를 **내부 모든 런에 캐스케이드** | paragraph |
+| 텍스트편집모드, 포커스 + selection 없음 | **paragraph 자체 스타일** 수정 + 명시 주입 필드를 **내부 모든 런에 캐스케이드** (커서 위치와 무관) | paragraph |
 | 포커스 없음 + **paragraph / paragraph-box selected (단일·복수 모두)** | **선택된 모든 대상**의 paragraph 자체 스타일 수정 + 명시 주입 필드 전체 캐스케이드. lock된 대상은 스킵. 하나라도 성공하면 `true` | paragraph |
-
-> **"커서가 런 안"의 end 경계 포함**: `getStyleAtOffset`은 `offset === 마지막 런.end`(문단 맨 뒤)에서도
-> 마지막 런의 스타일을 반환하므로 이 경계도 런-안 경로로 판정한다. 이에 따라 런 탐색 조건도
-> `r.end > offset`뿐 아니라 `(r.end === offset && 마지막 런)`을 포함해 판정과 대칭을 맞춘다 —
-> 탐색이 end 경계를 누락하면 커서가 문단 맨 뒤에 있을 때 인라인 주입이 **조용히 무시**된다
-> (판정/탐색 경계 비대칭 버그).
 
 > ※1 인라인 가능 필드: `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`, `letterSpacing`, `widthRatio`, `spaceRatio` (TextInlineStyle에 존재)
 > ※2 인라인 불가 필드: `textAlign`, `lineGap`, `lineGapMode`, `verticalAlign`, `hangingPunctuation`, `wordWrap` (ParagraphStyle), `indent` (TextStyle 중 인라인 미지원) — **항상 paragraph에 적용**
@@ -1627,11 +1673,11 @@ type RunMap = RunEntry[];
 
 > ⚠️ **구현 시 주의 (Partial 함수 함정)**: "undefined 전달" 판별은 반드시 `Object.prototype.hasOwnProperty.call(textPatch, field)`로 **명시 전달** 여부를 먼저 확인해야 한다. `Partial` 객체의 미정의 필드도 `undefined`이므로 이 체크가 없으면 patch에 없는 모든 인라인 필드가 전체 런에서 삭제되는 재앙이 발생한다.
 
-**selection 경로와 paragraph 선반영의 상호 배타**: selection 주입 시 인라인 가능 필드를 paragraph 자체 스타일에 먼저 반영하면 안 된다 — `effectiveTextStyle`이 런 값과 동일해져 `normalizeRunMap`이 방금 만든 런을 해제해버린다. paragraph 반영은 (a) 런 밖(캐스케이드) 경로의 인라인 가능 필드, (b) 인라인 불가 필드에서만 수행한다.
+**selection 경로와 paragraph 선반영의 상호 배타**: selection 주입 시 인라인 가능 필드를 paragraph 자체 스타일에 먼저 반영하면 안 된다 — `effectiveTextStyle`이 런 값과 동일해져 `normalizeRunMap`이 방금 만든 런을 해제해버린다. paragraph 반영은 (a) 캐스케이드(selection 없음) 경로의 인라인 가능 필드, (b) 인라인 불가 필드에서만 수행한다.
 
 #### 캐스케이드(cascade) 동작
 
-커서가 런 밖이거나 selected 경로에서 paragraph 스타일을 수정할 때, **사용자가 명시적으로 주입한 필드만** paragraph 내부 **모든 인라인 런**에 일괄 적용된다:
+selection 없이 paragraph 스타일을 수정할 때(포커스 유무 무관), **사용자가 명시적으로 주입한 필드만** paragraph 내부 **모든 인라인 런**에 일괄 적용된다:
 
 - 예: `applyTextStyle({ fontFamily: 'Batang' })` → `paragraph.textStyle.fontFamily = 'Batang'` + 모든 런의 fontFamily가 'Batang'으로 교체. 런의 fontSize/색 등 **다른 필드는 유지**.
 - 이는 paragraph 레벨 변경의 시각적 결과가 전체 텍스트에 반영되도록 하기 위함이다 — 런이 fontFamily 오버라이드를 가지면 문단 폰트 변경의 영향을 받지 않기 때문.
@@ -1706,7 +1752,7 @@ type RunMap = RunEntry[];
 | `EditManager.applyTextStyle` | `src/edit/edit-manager.ts` | 진입점. 편집 상태 판별 후 컨트롤러 위임 or selected 경로 직접 처리 |
 | `EditManager._resolveSelectedParagraphTargets` | 同 | selected paragraph / paragraph-box → 대상 paragraph 목록 수집 (복수·lock 스킴) |
 | `EditManager._applyParagraphLevelStyle` | 同 | 컨트롤러 없는 selected 경로: 부분 업데이트 + 캐스케이드 + 정규화 |
-| `TextEditController._applyTextStyle` | `src/edit/text-edit-controller.ts` | 포커스 있는 3방향 라우팅(selection/런 안/런 밖) 실행 + 커서/selection 보존 |
+| `TextEditController._applyTextStyle` | `src/edit/text-edit-controller.ts` | 포커스 있는 2방향 라우팅(selection/캐스케이드) 실행 + 커서/selection 보존 |
 | `TextEditController.normalizeNow` | 同 | 런 맵 정규화 + content 재구성 + 커서/selection 보존. 포커스/blur 시 자동 호출 |
 
 #### React 계층
@@ -1725,7 +1771,7 @@ manager.toggleInlineStyle('fontWeight', 700);
 
 // ─── applyTextStyle: 상태 기반 스타일 주입 ───
 
-// 텍스트편집모드에서 커서가 런 안이면 그 런만, 런 밖이면 paragraph + 전체 캐스케이드
+// 텍스트편집모드에서 selection 없으면 paragraph + 전체 캐스케이드 (커서 위치 무관)
 manager.applyTextStyle({ fontFamily: 'Batang' });
 
 // 정렬/행간 등 인라인 불가 필드는 항상 paragraph에 적용

@@ -2009,8 +2009,8 @@ toggleInlineStyle<K extends keyof TextInlineStyle>(
  * 텍스트/문단 스타일 주입의 단일 진입점. 편집 상태에 따라 주입 대상을 판별한다.
  *
  * - 포커스 + selection 있음 → 선택 범위에 인라인 주입 (기존 런은 필드 오버라이드)
- * - 포커스 + 커서가 인라인 런 안 → 해당 런만 업데이트 (paragraph 무변경)
- * - 포커스 + 커서가 런 밖 → paragraph 스타일 수정 + 명시 필드를 모든 런에 캐스케이드
+ * - 포커스 + selection 없음 → paragraph 스타일 수정 + 명시 필드를 모든 런에 캐스케이드
+ *   (커서 위치와 무관)
  * - 포커스 없음 + paragraph / content-type='paragraph' box가 selected (단일·복수 모두) →
  *   선택된 모든 대상의 paragraph 수정 + 전체 캐스케이드. lock된 대상은 스킵.
  *
@@ -2041,14 +2041,13 @@ applyTextStyle(
 | 편집 상태 | 인라인 가능 필드<sup>※1</sup> | 인라인 불가 필드<sup>※2</sup> |
 |-----------|------------------------------|------------------------------|
 | 포커스 + selection 있음 | 선택 범위 런 주입/업데이트 | paragraph |
-| 포커스 + 커서가 런 안 | 해당 런만 업데이트 | paragraph |
-| 포커스 + 커서가 런 밖 | paragraph + 전체 캐스케이드 | paragraph |
+| 포커스 + selection 없음 | paragraph + 전체 캐스케이드 (커서 위치 무관) | paragraph |
 | 포커스 없음 + paragraph/paragraph-box selected (단일·복수) | 선택된 모든 대상 + 전체 캐스케이드 (lock 스킵) | paragraph |
 
 > ※1 `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `color`, `letterSpacing`, `widthRatio`, `spaceRatio`
 > ※2 `textAlign`, `lineGap`, `verticalAlign`, `indent`, `hangingPunctuation`, `wordWrap`
 
-**캐스케이드**: 커서가 런 밖이거나 selected 경로에서 paragraph 스타일을 수정하면, 명시 주입 필드가 내부 모든 인라인 런에 일괄 적용된다. 캐스케이드로 런 필드가 주입 후의 문단 기본과 동일해지면 그 필드는 런에서 제거되고, 모든 필드가 동일해진 런은 `normalizeRunMap`이 해제한다. 정규화는 포커스 획득/blur 시에도 자동 수행된다. 병합·해제 규칙의 상세는 `EDITING_TEXT.md` § 6A.5 참조.
+**캐스케이드**: selection 없이 paragraph 스타일을 수정하면(포커스 유무 무관), 명시 주입 필드가 내부 모든 인라인 런에 일괄 적용된다. 캐스케이드로 런 필드가 주입 후의 문단 기본과 동일해지면 그 필드는 런에서 제거되고, 모든 필드가 동일해진 런은 `normalizeRunMap`이 해제한다. 정규화는 포커스 획득/blur 시에도 자동 수행된다. 병합·해제 규칙의 상세는 `EDITING_TEXT.md` § 6A.5 참조.
 
 **paragraph-box**: `content-type='paragraph'` box는 바로 하위에 paragraph를 하나만 가지므로, box가 selected일 때 그 box의 `contentElement`(단일 paragraph)가 주입 대상이 된다. **복수 선택**이면 선택된 모든 paragraph-box/paragraph가 대상이며, lock된 대상은 스킵하고 하나라도 적용되면 `true`를 반환한다.
 

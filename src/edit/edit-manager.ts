@@ -834,6 +834,46 @@ export class EditManager {
   }
 
   /**
+   * 이후 입력에 적용될 대기 스타일(pending style)을 설정한다.
+   *
+   * 포커스된 컨트롤러에 위임한다. 기존 런/문단에는 즉시 적용하지 않고 보관하며,
+   * 이후 타이핑/붙여넣기/IME 확정 텍스트가 이 스타일의 런으로 삽입된다.
+   * 커서 이동·selection 형성 시 해제된다.
+   *
+   * @param style - 이후 입력에 적용할 인라인 스타일 (부분 객체). `undefined`면 해제
+   * @returns 설정 성공 여부 (포커스된 컨트롤러가 없으면 false)
+   */
+  setPendingNextStyle(style: Partial<TextInlineStyle> | undefined): boolean {
+    if (!this._focusedController) return false;
+    this._focusedController._setPendingNextStyle(style);
+    return true;
+  }
+
+  /**
+   * 현재 대기 스타일을 반환한다.
+   *
+   * @returns 포커스된 컨트롤러의 대기 스타일. 없으면 `undefined`
+   */
+  get pendingNextStyle(): Partial<TextInlineStyle> | undefined {
+    return this._focusedController?.pendingNextStyle;
+  }
+
+  /**
+   * pending 병합의 기저 스타일을 반환한다.
+   *
+   * 현재 커서 위치의 삽입점 유효 스타일(인라인 포함)로, 호스트가 pending을
+   * **최초로 설정할 때** 이 값으로 시드해야 한다 — pending은 "이후 입력에
+   * 적용될 전체 스타일"이므로 새로 설정하는 필드만 덮어쓰고 나머지는 현재
+   * 위치의 유효 스타일을 유지해야 타이핑 연속성이 보존된다. 복사본을
+   * 반환하므로 currentStyle 내부 객체의 참조 유출이 없다.
+   *
+   * @returns pending 병합의 기저가 될 유효 스타일
+   */
+  get pendingBaseStyle(): Partial<TextInlineStyle> {
+    return this._focusedController?.pendingBaseStyle ?? {};
+  }
+
+  /**
    * 레이아웃 선택 상태에서 스타일 주입 대상 paragraph 목록을 수집한다.
    *
    * selected 요소가 paragraph이면 그대로, content-type='paragraph' box면
