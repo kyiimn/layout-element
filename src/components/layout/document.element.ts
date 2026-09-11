@@ -5,7 +5,6 @@ import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
 import { LayoutGuideColumnElement } from "./guide-column.element";
 import type { LayoutTableElement } from "./table.element";
-import { genUUID } from "@/utils";
 import type { FlipLayoutOptions } from "@/engine";
 import { EditManager } from "@/edit/edit-manager";
 import { DocumentEngine, BoxEngine, ParagraphEngine } from "@/engine";
@@ -123,6 +122,7 @@ export class LayoutDocumentElement extends HTMLElement {
 
   /** 스레드 체인 재배치 예약 소스(편집 프레임 id) 집합. 마이크로태스크에서 소비. */
   private _threadRelayoutSources: Set<string> | null = null;
+  private _threadRelayoutFlushing = false;
 
   /**
    * 이 문서 요소 전용 EditManager 인스턴스.
@@ -552,25 +552,61 @@ export class LayoutDocumentElement extends HTMLElement {
     const threads = engine?.data?.threads;
     if (!engine || !threads || threads.length === 0) return;
 
+    // 재진입 차단: flush 중 실행되는 domPe.render()는 편집 파이프라인이
+    // 소스 model을 이미 커밋한 상태이므로 재요청하지 않지만, flush가
+    // 재렌더한 프레임의 model이 아직 dirty면 requestThreadRelayout이
+    // flush를 재유발할 수 있다 (R4 — 암묵적 종결이 무한 재귀로 변질).
+    // 1회 flush가 체인 전체를 확정하므로 재진입은 결함이다.
+    if (this._threadRelayoutFlushing) return;
+    this._threadRelayoutFlushing = true;
+
     const affectedFrames = new Set<string>();
     for (const thread of threads) {
       const frameIds = thread.paragraphIds ?? [];
       if (!frameIds.some(id => sources.has(id))) continue;
       for (const id of frameIds) affectedFrames.add(id);
     }
-    if (affectedFrames.size === 0) return;
+    if (affectedFrames.size === 0) {
+      this._threadRelayoutFlushing = false;
+      return;
+    }
 
-    engine.relayoutThreads(sources);
-    this._syncThreadFramesToDom();
+    try {
+      const results = engine.relayoutThreads(sources);
+      this._syncThreadFramesToDom();
 
-    // 소스를 제외한 프레임 재렌더 — 편집 컨트롤러가 소스의 DOM을 관리 중
-    const domParagraphs = this.querySelectorAll('x-layout-paragraph');
-    for (const frameId of affectedFrames) {
-      if (sources.has(frameId)) continue;
-      const domPe = Array.from(domParagraphs).find(p => p.id === frameId);
-      if (domPe) {
-        domPe.render();
+      // 소스를 제외한 프레임 재렌더 — 편집 컨트롤러가 소스의 DOM을 관리 중.
+      // 경계 교정(clamp)으로 재배치된 프레임도 포함한다: 교정은 소스와
+      // 무관한 prev 프레임의 배치를 바꾸므로 flush가 화면을 확정해야 한다.
+      const correctedFrames = new Set<string>();
+      for (const result of results) {
+        for (const id of result.correctedFrames ?? []) correctedFrames.add(id);
       }
+      const domParagraphs = this.querySelectorAll('x-layout-paragraph');
+      for (const frameId of affectedFrames) {
+        if (sources.has(frameId) && !correctedFrames.has(frameId)) continue;
+        const domPe = Array.from(domParagraphs).find(p => p.id === frameId);
+        if (domPe) {
+          domPe.render();
+        }
+      }
+
+      // 명시적 종결 assert (개발 모드 검출): flush가 체인 전체의 dirty를
+      // 소진했는지 확인한다. layoutText()은 _dirty = false로 커밋하므로,
+      // 영향 프레임에 dirty가 남았다면 다음 flush가 필요한 것처럼 보이는
+      // 상태 — relayoutThreads가 일부 프레임을 건너뛰었다는 뜻이다.
+      if (typeof console !== 'undefined') {
+        for (const frameId of affectedFrames) {
+          const pe = engine.findEngineById(frameId);
+          if (pe instanceof ParagraphEngine && pe.hasPendingChanges) {
+            console.error(
+              `[layout-element] thread relayout incomplete: frame ${frameId} still has pending changes after flush`,
+            );
+          }
+        }
+      }
+    } finally {
+      this._threadRelayoutFlushing = false;
     }
   }
 
@@ -609,15 +645,14 @@ export class LayoutDocumentElement extends HTMLElement {
    */
   async render() {
     if (!this.isConnected) return null;
-    // 자식 render 전 스레드 체인을 완성한다 — reconcile 순서상 늦게 만들어진
-    // 프레임 model까지 포함해 feed-forward 배치를 확정한다.
-    this._relayoutThreads();
+    // 스레드 체인 확정은 layout()과 아래 unsynced 판정이 소유한다(단일
+    // 실행 지점) — render 진입 재실행은 B3 시간차 방어에 불필요하다.
     const sortedItems = [...this.items].sort((a, b) => b.zIndex - a.zIndex);
     for (let i = 0; i < sortedItems.length; i++) {
       await sortedItems[i].render()
     }
     // 자식 render가 model을 재생성한 경우(스레드 프레임이 아직 미적용이면)
-    // 스레드 체인을 재확정한다.
+    // 스레드 체인을 재확정한다 — 초기 로드의 실질적 확정 지점.
     if (this._hasUnsyncedThreadFrames()) {
       this._relayoutThreads();
       this._syncThreadFramesToDom();
@@ -696,7 +731,11 @@ export class LayoutDocumentElement extends HTMLElement {
   }
 
   set data(data: DocumentData) {
-    if (!data.id) data = { ...data, id: genUUID() };
+    // 문서 요소 자신의 id는 자동 생성하지 않는다 — HTML 마크업이 부여한
+    // id(`<x-layout-document id="doc">`)를 data 주입이 난수로 덮어쓰면
+    // document.getElementById가 요소를 못 찾는다. 엔진은 _rawData()에서
+    // this.id(마크업 id 또는 기존값)를 주입받는다. 자식 박스/문단은
+    // reconcile 키로 쓰이므로 자동 생성을 유지한다.
     this._rebuildingChildren = true;
     this._pendingData = data;
     try {
