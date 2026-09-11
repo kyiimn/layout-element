@@ -137,16 +137,14 @@
       doc.data = threadingDemoData;
       await doc.render();
 
-      // 타이핑 테스트: 각 스레드 head 프레임 편집 활성화.
-      // head에 타이핑하면 overflow가 다음 프레임으로 흘러야 한다.
+      // 타이핑 테스트: 스레드의 전 프레임 편집 활성화.
+      // head에 타이핑하면 overflow가 다음 프레임으로 흐르고, 후속 프레임도
+      // 클릭/Tab으로 진입해 직접 편집할 수 있다 (경계 이동은 화살표 키 지원).
       const em = doc.editManager;
       em.textEditMode = true;
-      for (const id of ["thread1-frame1", "thread2-frame1", "thread3-frame1"]) {
-        const head = doc.querySelector(`x-layout-paragraph[id="${id}"]`);
-        if (head) {
-          em.addEditableParagraph(id);
-          head.editableText = true;
-        }
+      for (const para of doc.querySelectorAll("x-layout-paragraph")) {
+        em.addEditableParagraph(para.id);
+        para.editableText = true;
       }
       await doc.render();
 
