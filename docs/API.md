@@ -1329,6 +1329,72 @@ class DocumentEngine {
 >
 > **dirty 계약**: 개별 setter는 `_dirty`만 설정하고 `extractData`/`printPostData` 조회 시 `DirtyPendingError`(`e.name === 'DirtyPendingError'`로 판별 가능)를 throw한다 — 읽기는 자가 치유하지 않는다. 일관 스냅샷이 필요한 소비자(저장/내보내기/print)는 읽기 전에 `ensureCommitted()`를 호출한다. `engine.layout()` 등 커밋 연산 후에는 조회가 정상화된다.
 
+> **스레딩**: `DocumentData.threads`가 정의되면 `layout()` 종료 시 스레드 프레임이 순차 feed-forward 배치된다 (`ThreadEngine` 위임). head 프레임이 story 전체를 소유하고 후속 프레임은 `contentFrom` 이후부터 배치된다. 상세: `TEXT_ENGINE.md` §26, 검증: `scripts/verify-threading.mjs`.
+
+---
+
+### `ThreadEngine`
+
+문서 스레드의 순차 feed-forward 배치 오케스트레이터 (Node.js 호환).
+
+```ts
+class ThreadEngine {
+  static create(): ThreadEngine;
+
+  // 문서 threads를 프레임 순서대로 배치한다.
+  // head = story 전체 소유 → layoutText → tail 슬라이싱 → 다음 프레임 주입.
+  layoutThreads(
+    threads: ThreadData[],
+    findEngineById: (id: string) => { extractData?: unknown } | undefined,
+  ): ThreadLayoutResult[];
+
+  static validate(threads: ThreadData[] | undefined): ThreadData[];  // 중복 프레임/빈 스레드 필터
+}
+
+interface ThreadLayoutResult {
+  threadId?: string;
+  frames: string[];      // 배치 완료된 프레임 문단 id 목록
+  oversetAt?: string;    // 수용되지 않은 tail이 남은 마지막 프레임 id
+}
+
+function sliceInlineContent(
+  content: string | (string | TextInlineData)[] | undefined,
+  start: number,
+  end: number,
+): (string | TextInlineData)[];  // plain 오프셋 범위 슬라이싱 (런 경계 보존)
+```
+
+---
+
+### `ParagraphEngine` 스레딩 API 추가
+
+```ts
+class ParagraphEngine {
+  get isThreadFrame: boolean;            // 문서 스레드에 등록된 프레임 여부
+  get isThreadTail: boolean;             // 체인 마지막(또는 소진 지점) 프레임 여부.
+                                         // 중간 프레임의 overflow는 소비되므로 빨간
+                                         // 테두리/render-error는 tail에서만 발동.
+  get contentFrom: number;               // 배치 시작 plain 오프셋 (0 = 전체 배치)
+  get overflowContentFrom: number;       // tail 시작 story plain 오프셋. tail 없으면 -1
+  get overflowContent: (string | TextInlineData)[];  // tail 콘텐츠 (런 경계 보존)
+
+  updateThreadContext(ctx: {
+    contentFrom?: number;
+    isThreadFrame?: boolean;
+    threadTail?: boolean;
+  }): void;
+  // 문서 스레드 feed-forward 패스가 호출. contentFrom/isThreadFrame 변경 시
+  // _layoutCache/_prefixCache 무효화. threadTail은 표시 전용 시맨틱이라
+  // 캐시를 무효화하지 않는다.
+}
+```
+
+> **타이핑 전파**: `DocumentEngine.relayoutThreads(sourceFrameIds?)` — 편집 프레임
+> id 집합을 전달하면 `_writebackThreadStory`가 소스 프레임의 `textContent`를
+> 소속 thread의 story(`content`)에 기록한 뒤 체인을 재배치한다. story writeback은
+> 엔진이 소유한다 (엔진-우선 원칙). DOM `LayoutDocumentElement`는
+> `requestThreadRelayout(sourceFrameId)`로 이 경로를 예약(마이크로태스크 통합)한다.
+
 ---
 
 ### `ImageEngine`

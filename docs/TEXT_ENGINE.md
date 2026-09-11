@@ -2027,3 +2027,100 @@ span에 적용한다. 캐시 키(`_charOuterStyleCache`)에 outline 값이 포�
   descender 영역을 피하는 신문 조판 관례값이다.
 
 검증: `npx tsx scripts/verify-text-decoration.mjs` (55항목).
+
+## 26. 텍스트 스레딩 (`DocumentData.threads`)
+
+여러 문단 프레임이 하나의 연속 텍스트 흐름(story)을 공유하는 InDesign 텍스트 스레딩 모델이다.
+thread가 story 콘텐츠의 단일 소스이며, 프레임 문단은 표시 범위(window)만 소유한다.
+
+### 26.1 데이터 모델
+
+```ts
+type ThreadData = {
+  id?: string;
+  content?: string | (string | TextInlineData)[];  // story 전체 콘텐츠 (단일 소스)
+  paragraphIds?: string[];                          // 흐름 순서대의 프레임 문단 id
+};
+```
+
+- `DocumentData.threads?: ThreadData[]` — 스레딩 정의 (옵셔널, 생략 시 기존 동작 byte-identical).
+- **head 프레임**(paragraphIds[0])이 `content` 전체를 `textContent`로 소유한다.
+- 후속 프레임은 `ParagraphData.content`를 소유하지 않는다 — `extractData`가
+  `content: undefined`를 반환하여 직렬화 round-trip에서 중복 소유를 방지한다
+  (restore 시 story가 head로 수렴).
+
+### 26.2 순차 feed-forward 배치
+
+`DocumentEngine.layout()` 종료 시 `_layoutThreads()`가 실행되어,
+`ThreadEngine.layoutThreads()`가 프레임을 순서대로 배치한다:
+
+1. head 프레임 `textContent` = story 전체 (pull-back의 단일 근거 — story 축소 시
+   이후 프레임이 자연히 비워진다)
+2. `layoutText()` 실행 → `overflowContentFrom`(tail 시작 plain 오프셋) 산출
+3. tail을 `sliceInlineContent`로 슬라이싱(런 경계 보존)하여 다음 프레임 `textContent`로
+   주입 + `updateThreadContext({ contentFrom })`
+4. 마지막 프레임의 tail은 thread 자체 overset (수용 불가)
+
+### 26.3 tail 산식 — 라인 높이 기준
+
+`_captureThreadTail()`은 **표시 영역에 들어가는 마지막 라인까지의 누적 글자 수**
+(`visibleChars`와 동일 산식, `endOfBlock` 라인 뒤 `\n` 1자 포함)를 tail 시작점으로
+기록한다. 배치 패스는 전체 텍스트를 컬럼에 배치하고 `overflow`는 라인 높이 초과
+라인의 글자 수이므로, 배치 커서가 아니라 `columnContents` 라인 높이 순회가
+정확한 단일 소스다. tail 오프셋은 `contentFrom`을 더한 **story plain 공간 절대값**이다.
+
+### 26.4 캐시 무효화
+
+- `updateThreadContext()`는 `contentFrom`/`isThreadFrame` 변경 시 `_layoutCache`와
+  `_prefixCache`를 무효화한다.
+- `_computeLayoutInputHash`/`_computePrefixHash`에 `tf:` 키가 포함된다 — 단,
+  `contentFrom > 0`일 때만 조건부로 포함되어 **비-스레딩 문단의 해시는 기존과
+  byte 동일**하다.
+- `_layoutCache`에 `overflowContentFrom`이 저장되어 캐시 히트 경로에서도 tail이
+  정확히 복원된다.
+
+### 26.5 DOM 레이어
+
+- `LayoutDocumentElement`의 `data` setter가 `threads`를 `_threads`에 저장하여
+  엔진 `docData`에 전달한다 (`_rawData()`도 포함 — round-trip 보존).
+- 스레드 프레임(`isThreadFrame`)의 `LayoutParagraphElement.content` setter는
+  외부 주입을 무시한다 — story 단일 소스 계약을 유지한다.
+- `LayoutDocumentElement.layout()`/`render()`이 스레드 체인을 완성한다
+  (`relayoutThreads` + `_syncThreadFramesToDom`): 초기 reconcile에서 paragraph
+  model이 box 엔진에 push되는 시점이 제각각이라 엔진 `layout()` 시점의
+  `_layoutThreads`가 일부 프레임만 찾을 수 있기 때문이다.
+
+### 26.6 타이핑 전파와 오버플로우 표시 (threadTail)
+
+- **타이핑 전파**: 편집(rAF 커밋)이 스레드 프레임의 `model.textContent`를
+  갱신하면 `LayoutParagraphElement.render()` 진입 시 `hasPendingChanges`로
+  이를 포착해 `LayoutDocumentElement.requestThreadRelayout(sourceFrameId)`을
+  호출한다. 문서는 마이크로태스크로 통합한 뒤 `DocumentEngine.relayoutThreads(sourceFrameIds)`
+  에 위임한다: (1) `_writebackThreadStory` — 소스 프레임의 `textContent`를
+  소속 thread의 `content`(story)에 기록, (2) 체인 재배치, (3) 문서가 소스를
+  제외한 프레임 DOM을 재렌더한다. **story writeback은 엔진이 소유한다**
+  (엔진-우선 원칙 — DOM 계층은 threads 데이터를 mutate하지 않는다).
+  `ThreadEngine.validate`는 중복 제거가 필요한 스레드만 복사본을 만들어
+  원본 객체 identity를 보존한다 — writeback이 `engine.data.threads`
+  원본에 기록되도록.
+- **오버플로우 표시 분기 (`isThreadTail`)**: 중간 프레임의 overflow는 다음
+  프레임으로 흘러 소비되므로 오류가 아니다. `ParagraphEngine.isThreadTail`
+  (기본 `true`, 비-스레드 프레임 보존)이 `false`면 빨간 테두리(`_hasOverflow`)
+  와 `render-error`가 발동하지 않는다. tail은 체인의 마지막 프레임 또는
+  story 소진 지점 프레임이다. `threadTail`은 표시 전용 시맨틱이므로
+  `updateThreadContext`가 캐시를 무효화하지 않는다.
+
+### 26.7 한계 (Phase 2 MVP)
+
+- **프레임 경계를 넘는 편집**: 커서/선택이 프레임 경계를 넘는 편집(다음
+  프레임으로 커서 이동 등)은 별도 마일스톤(Phase 3). 현재 타이핑은 소속
+  프레임 내에서만 발생하며 체인 재배치로 후속 프레임이 따라간다.
+- **테이블 셀 프레임**: `findEngineById`가 셀 내부도 순회하므로 배치는 동작하지만,
+  셀 박스 재구축(`buildCellBoxEngines`)과의 상호작용 검증은 후속 과제다.
+- **금칙 경계**: 프레임 경계(이전 프레임 마지막 라인 ↔ 다음 프레임 첫 라인)의
+  금칙/걸침 교정은 프레임 배치가 독립 실행되므로 미처리 — `ThreadEngine`이
+  이전 프레임 tail 마지막 글자를 문맥으로 전달하는 후속 개선 대상이다.
+
+검증: `npx tsx scripts/verify-threading.mjs` (55항목 — 비-스레드 회귀/단일 프레임
+기준선/feed-forward/콘텐츠 무결성/런 슬라이싱/pull-back/extractData round-trip/
+overset/thread 검증/슬라이싱 엣지/threadTail 마킹).

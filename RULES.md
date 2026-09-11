@@ -108,6 +108,20 @@ containerLineCount = floor(editableHeight / lineHeight) + 1
 - **행두금칙은 라인 폭 위반을 만들지 않는다**: 행두금칙(`isLineStartForbidden`) 1차 해소는 배치 단계 `_layoutColumnsPass`의 追い出し(직전 라인 마지막 글자를 금칙 글자와 함께 새 라인으로 내보냄)가 담당한다. 후처리 `_applyLineBreakRules`의 pull-up은 **폭 게이트**를 통과해야 하며(합친 글자 폭 ≤ 파트 폭), 초과 시 追い出し 폴백(위 줄 마지막 글자를 아래로)으로 전환한다 — 잔여 1자 파트만 기존 넘침 pull-up을 허용한다. 어떤 경로든 후처리 교정으로 **다음 줄의 파트 폭을 초과해선 안 된다** (초과 전이 방지). 검증: `scripts/verify-hanging-punctuation.mjs` (Test 2/10/11 — 라인 폭 위반 없음 어설션).
 - **라인 첫 열기 부호 행두 걸침(케이스 5)은 마킹만 추가**: `lineStart` ON 시 라인 시작 파트의 첫 글자가 열기 부호면 `hangs[0]='start'`로 마킹해 좌측 밖(`-swidth`)으로 내보낸다 — 글자 이동은 없다 (열기 부호는 행두 허용이므로 배치·금칙과 무관). 가드: 첫 파트 `left === 0`, 잔여 2자 이상, 탭 제외, 케이스 1 마킹 중복 스킵. 검증: `scripts/verify-hanging-punctuation.mjs` (Test 16).
 
+### 1.10 텍스트 스레딩(threading) 불변식
+
+- **story 단일 소스**: 스레드(`DocumentData.threads`)의 `content`가 story 전체의 단일 소스다. head 프레임만 `textContent`로 전체를 소유하고, 후속 프레임은 `extractData`가 `content: undefined`를 반환한다 (중복 소유 → restore 시 텍스트 중복 버그 방지). 새 필드 추가 시 이 계약을 유지한다.
+- **tail의 단일 소스는 라인 높이 순회**: `_captureThreadTail()`은 `columnContents`를 라인 높이 순서로 순회해 visible 라인 글자 수(`endOfBlock` 라인 뒤 `\n` 1자 포함)를 tail 시작점으로 기록한다. 배치 커서(`_layoutColumnsPass` 종료 상태)는 배치 완료 시 블록 범위를 벗어나므로 **배치 커서 기반 tail 산출은 금지** — 이 엔진의 `overflow`는 라인 높이 판정이지 배치 중단이 아니다.
+- **tail 오프셋은 story plain 공간 절대값**: `overflowContentFrom` = `contentFrom + visible 라인 글자 수`. 다음 프레임의 `contentFrom`과 정확히 일치해야 한다 (체인 무중복).
+- **`contentFrom > 0` 조건부 해시 키**: `_computeLayoutInputHash`/`_computePrefixHash`의 `tf:` 키는 `contentFrom > 0`일 때만 포함한다 — 비-스레딩 문단의 해시가 기존과 byte 동일해야 한다. 검증: `snapshot-layout.mjs` byte 비교.
+- **`_layoutCache`에 tail 포함**: `overflowContentFrom`을 캐시에 저장하고 히트 경로에서 복원한다. 누락 시 캐시 히트 경로에서 tail이 소실되어 feed-forward가 중단된다 (실제 회귀 경험).
+- **DOM content setter 가드**: 스레드 프레임(`isThreadFrame`)의 `LayoutParagraphElement.content` setter는 외부 주입을 무시한다 — story 단일 소스 계약.
+- **`updateThreadContext` 변경 시 캐시 무효화**: `contentFrom`/`isThreadFrame` 변경은 배치 입력의 변화이므로 `_layoutCache`/`_prefixCache`를 무효화한다.
+- **스레드 없으면 no-op**: `_layoutThreads()`는 threads가 없으면 즉시 반환한다. 모든 스레딩 코드 경로는 threads 존재 게이트를 유지해야 한다. 검증: `scripts/verify-threading.mjs` (55항목).
+- **중간 프레임 overflow는 오류가 아니다 (`isThreadTail`)**: 스레드 중간 프레임의 overflow는 다음 프레임으로 흘러 소비된다. 빨간 테두리(`_hasOverflow`)/`render-error`는 `isThreadTail === true`(체인 마지막 또는 소진 지점)에서만 발동한다. 기본값 `true`로 비-스레드 프레임의 기존 동작을 보존한다. DOM 게이트를 제거하면 모든 스레드 프레임에 허위 테두리가 표시된다.
+- **타이핑 전파는 story writeback으로**: 편집 프레임의 `model.textContent`가 story의 새 진실이다 — `DocumentEngine.relayoutThreads(sourceFrameIds)`가 `_writebackThreadStory`로 `thread.content`에 기록한 뒤 체인을 재배치한다. **story writeback은 엔진이 소유한다** (엔진-우선 원칙) — DOM 계층이 threads 데이터를 직접 mutate하면 안 된다. 편집 프레임 자체의 DOM은 편집 파이프라인이 소유하므로 재렌더 대상에서 제외한다.
+- **`ThreadEngine.validate`는 원본 identity를 보존**: 중복 프레임 제거가 필요한 스레드만 복사본을 만든다. 무조건 복사하면 writeback이 복사본에 기록되어 `engine.data.threads` 원본에 반영되지 않는다 (story 소실 버그). 검증: `scripts/verify-threading.mjs` [9].
+
 ---
 
 ## 2. 편집 컨트롤러 규칙

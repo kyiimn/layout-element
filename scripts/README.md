@@ -27,6 +27,7 @@
 | `verify-image-displayrect-cache.mjs` | 정합성 (엔진) | 이미지 displayRect(objectFit/none x/y/w/h) 변화 시 오버랩 회피 재계산 — layout input hash 무효화 | ALL PASS |
 | `verify-image-edit-mode.mjs` | 정합성 (브라우저) | 이미지 편집 모드 전 동작 — dblclick 진입(일반/레이아웃 모드), 부모 box 빨간테두리+라벨 숨김, 드래그/objectFit 자동전환, 휠 비율 유지, ESC 취소/복귀, Tab 순회, selection 이동 시 포커스 상실, 클램핑, **extractData/printPostData 3소스 일치, 오버랩 회피 갱신 A/B** | ALL PASS |
 | `verify-overlap-none.mjs` | 정합성 (엔진) | overlapMode 'none' 시맨틱 — 단일 관문(computeOverlapSizeMm)에서 NONE 조기 반환, box/path 회피 유지 | ALL PASS |
+| `verify-threading.mjs` | 정합성 (엔진) | 텍스트 스레딩 — 비-스레드 회귀/단일 프레임 기준선/feed-forward/콘텐츠 무결성/런 슬라이싱/pull-back/extractData round-trip/overset/threadTail 마킹 | ALL PASS |
 | `verify-print-image-overlap.mjs` | 정합성 (엔진) | 이미지/오버랩 수정의 printPostData 반영 — 모드별 print 좌표 === displayRect, objectFit 갱신, overlapMode none 관통 | ALL PASS |
 | `verify-right-indent-tab.mjs` | 정합성 (엔진) | 좌우 밀기 탭(`\t`) 배치·정렬·print 스킵 | ALL PASS |
 | `verify-right-indent-tab-browser.mjs` | 정합성 (브라우저) | Shift+Tab 키 삽입·DOM 렌더·커서 | ALL PASS |
@@ -458,6 +459,29 @@ npx tsx scripts/verify-image-edit-mode.mjs   # 46항목 ALL PASS (서버 없으�
 **실행**:
 ```bash
 npx tsx scripts/verify-overlap-none.mjs   # 7항목 ALL PASS
+```
+
+### `verify-threading.mjs` — 텍스트 스레딩 엔진 전 파이프라인 (엔진)
+
+**목적**: `DocumentData.threads`(스레드 = story 콘텐츠 단일 소스 + 프레임 순차 feed-forward)가 전 소비 경로에서 정확히 동작하는지. 스레딩이 없는 문서와의 byte-identical 회귀를 최우선으로 방어한다.
+
+검증 항목 (55항목, 11그룹):
+1. 비-스레드 회귀 — threads 없는 문단 tail 없음/isThreadFrame false
+2. 단일 프레임 기준선 — 스레드 없는 배치와 byte-identical + overset tail
+3. 2프레임 feed-forward — head tail이 next contentFrom으로 정확 전달
+4. 콘텐츠 무결성 — 배치 중복 없음 + tail 체인 오프셋 정합
+5. 런 슬라이싱 — 볼드 런 경계 보존(런 중간 분할 허용)
+6. pull-back — story 축소 시 이후 프레임 자동 비워짐
+7. extractData round-trip — head만 content 보유, 후속 프레임 생략, threads 보존
+8. overset + threadTail — 마지막 프레임 잔여 tail, 중간 프레임은 소비 표시(테두리 비대상)
+8b. threadTail 마킹 — 3프레임 체인의 tail 정확히 1개 + 소진 지점 contentFrom
+8c. 타이핑 전파 — `relayoutThreads(sources)` 엔진 story writeback + 체인 재배치 + seam 정합(f2 첫 배치 글자 === story[tail]) + 미소속 id story 불변
+9. ThreadEngine.validate — 중복 프레임/빈 스레드 필터 + **원본 identity 보존**(중복 제거 시에만 복사)
+10. sliceInlineContent 엣지
+
+**실행**:
+```bash
+npx tsx scripts/verify-threading.mjs   # 55항목 ALL PASS
 ```
 
 ### `verify-print-image-overlap.mjs` — 이미지/오버랩 수정의 print 반영 (엔진)

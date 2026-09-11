@@ -99,6 +99,7 @@ static create(
 - `_buildBoxEngine(boxData, parent)`: 박스별 `GridCalculatorEngine` 생성 (`isBox: true`), static 박스는 부모 그리드에서 컬럼/갭 슬라이스. **GC 파라미터 동일 시 인스턴스 재사용** (`_gcParamsEqual`).
 - `_buildParagraphEngine(paraData, parentBox)`: `parentBox.overlayElements`로 오버레이 계산. `layoutStructure()`만 호출, **`layoutText()`는 호출하지 않음** — `_refreshParagraphOverlays`에서 단일 실행.
 - `_refreshParagraphOverlays(boxEngines)`: 모든 단락의 overlay 문맥을 `updateOverlayContext()`로 갱신 (`_layoutCache` 보존). `TableEngine` 내부 셀 박스도 순회.
+- `_layoutThreads()`: 스레드 프레임 순차 feed-forward 배치 (`ThreadEngine` 위임). `threads`가 없으면 no-op (기존 동작 byte-identical).
 - `_buildInheritStyle()`: 문서 텍스트/단락 스타일 + 부모 dimensions/padding 머지
 - `printPostData`: 자식 박스를 z-index로 정렬 후 각 박스의 `printPostData` 위임. mm 단위 좌표를 후처리 시스템에 제공
 
