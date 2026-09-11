@@ -1840,6 +1840,8 @@ class EditManager {
   // 인라인 스타일 편집
   applyInlineStyle(style: Partial<TextInlineStyle>): void;
   toggleInlineStyle<K extends keyof TextInlineStyle>(field: K, value: NonNullable<TextInlineStyle[K]>): void;
+  togglePendingInlineStyle<K extends keyof TextInlineStyle>(field: K, value: NonNullable<TextInlineStyle[K]>): void;
+  adjustPendingMetric(field: NumericInlineMetricField, delta: number): void;
 
   // 텍스트/문단 스타일 주입 (상태 기반 라우팅)
   applyTextStyle(textPatch?: Partial<TextStyle>, paragraphPatch?: Partial<ParagraphStyle>): boolean;
@@ -2000,6 +2002,55 @@ toggleInlineStyle<K extends keyof TextInlineStyle>(
   field: K,
   value: NonNullable<TextInlineStyle[K]>,
 ): void;
+```
+
+```ts
+/**
+ * 커서 상태(selection 없음)에서 인라인 스타일 필드를 pending style로 토글한다.
+ *
+ * 기존 런/문단은 변경하지 않고 이후 타이핑/붙여넣기/IME 확정 텍스트에
+ * 적용될 대기 스타일만 변경한다. 판정 기준은 `pendingNextStyle ??
+ * pendingBaseStyle`(커서 삽입점 유효 스타일)의 해당 필드값이다.
+ * 발화한 styleChange 이벤트의 `pendingStyle` 페이로드로 호스트 툴바가
+ * pending 상태를 표시한다. 상세는 `EDITING_TEXT.md` § 4.1.6/§ 4.1.7 참조.
+ *
+ * @param field - 토글할 TextInlineStyle 필드명
+ * @param value - 토글 ON 값
+ *
+ * @example
+ * const manager = layoutDocEl.editManager;
+ * // 커서 상태에서 밑줄 pending 설정 — 이후 타이핑이 밑줄 런으로 삽입
+ * manager.togglePendingInlineStyle('underline', true);
+ * // 다시 누르면 pending에서 underline 제거 (이후 타이핑은 유효 스타일 그대로)
+ */
+togglePendingInlineStyle<K extends keyof TextInlineStyle>(
+  field: K,
+  value: NonNullable<TextInlineStyle[K]>,
+): void;
+```
+
+```ts
+/**
+ * 커서 상태(selection 없음)에서 수치형 인라인 스타일 필드를 pending style로
+ * 증감한다 — InDesign 타이핑 속성(typing attributes) 증감과 동일 개념.
+ *
+ * `pendingNextStyle ?? pendingBaseStyle`(삽입점 유효 스타일)의 해당 필드값에
+ * `delta`를 더해 pending을 재설정한다. selection 있으면 per-run 상대 증감
+ * 경로로 위임한다. 왕복은 필드 제거가 아니라 값 보존이 원칙이다 (토글과
+ * 다른 규약). 발화한 styleChange 이벤트의 `pendingStyle` 페이로드로 호스트
+ * 툴바가 pending 상태를 표시한다. 상세는 `EDITING_TEXT.md` § 4.1.6 참조.
+ *
+ * @param field - 증감할 수치형 필드 (`fontSize` | `letterSpacing` | `widthRatio` | `spaceRatio`)
+ * @param delta - 증감량 (양수: 증가, 음수: 감소)
+ *
+ * @example
+ * const manager = layoutDocEl.editManager;
+ * // 커서 상태에서 글자 크기 pending 증감 — 이후 타이핑이 4.1mm 런으로 삽입
+ * manager.adjustPendingMetric('fontSize', 0.1);
+ * // 호스트 표시 단위 스텝으로 증감
+ * manager.adjustPendingMetric('letterSpacing', shortcutSteps.letterSpacing);
+ */
+adjustPendingMetric(field: NumericInlineMetricField, delta: number): void;
 ```
 
 > **참고**: 편집 데이터 구조의 상세는 `EDITING_TEXT.md` § 6A(RunMap) 참조.

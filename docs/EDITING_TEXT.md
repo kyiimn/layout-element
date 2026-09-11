@@ -1063,19 +1063,38 @@ const handledReverse = manager.navigateByTab(true);
 
 ### 4.1.6 텍스트 스타일 단축키 — 토글과 per-run 상대 증감
 
-텍스트 편집 중 선택 영역이 있을 때만 동작하는 스타일 단축키. `TextEditController._tryHandleTextStyleShortcut`이 처리하며, 모두 **선택 영역 필수** — selection이 없으면 무음 무시한다. 커서만 있는 상태의 스타일 변경은 pending style로 지원한다(§ 4.1.7) — 단축키 경로는 기존대로 selection 필수다.
+텍스트 편집 중 동작하는 스타일 단축키. `TextEditController._tryHandleTextStyleShortcut`이 처리한다. 토글 계열(B/I/U/X/O)은 **selection 있음 → 선택 범위 런 즉시 토글**, **selection 없음(커서 상태) → pending style 토글** (§ 4.1.7)로 갈린다. 증감 계열(크기/자간/장평/공백비율)도 **selection 있음 → 선택 범위 per-run 상대 증감**, **커서 상태 → pending style 증감**으로 갈린다 — InDesign의 타이핑 속성(typing attributes) 증감과 동일 개념으로, 삽입점 이후 입력될 텍스트의 값을 움직인다 (Adobe 공식 문서: "Position the insertion point in text, or select text").
 
 | 기능 | 키 (물리 키 `event.code` 기준) | 동작 |
 |------|------|------|
-| 볼드 토글 | `Ctrl/⌘+B` | `_toggleInlineStyle("fontWeight", 700)`. 선택 영역 전체가 700이면 **문단 기본으로 복귀**(런의 `fontWeight` 필드 제거 → `normalizeRunMap`이 런 언랩/병합), 아니면 700 주입. 문단 기본이 600(타이틀)이면 600↔700로 동작 |
-| 이탤릭 토글 | `Ctrl/⌘+I` | `_toggleInlineStyle("fontStyle", "italic")`. 볼드와 동일한 이진 토글. 해제 = `'normal'` 주입이 아니라 **필드 제거** |
-| 밑줄 토글 | `Ctrl/⌘+U` | `_toggleInlineStyle("underline", true)`. 볼드/이탤릭과 동일한 이진 토글 — 선택 영역 전체가 `true`면 런의 `underline` 필드 제거(문단 기본 복귀), 아니면 `true` 주입. 선 좌표는 엔진 mm rect 단일 소스(§ 23, TEXT_ENGINE.md) |
-| 취소선 토글 | `Ctrl/⌘+Shift+X` | `_toggleInlineStyle("breakline", true)`. 밑줄과 동일한 이진 토글 |
-| 외곽선 토글 | `Ctrl/⌘+Shift+O` | `_toggleInlineStyle("outline", SHORTCUT_OUTLINE_THICKNESS)` (0.02em). 선택 영역 전체가 같은 두께면 런의 `outline` 필드 제거(문단 기본 복귀), 아니면 주입. UI 툴바의 `OUTLINE_TOGGLE_THICKNESS`와 동일 값 |
-| 글자 크기 ± | `Ctrl/⌘+Shift+.` 확대 / `Ctrl/⌘+Shift+,` 축소 | **per-run 상대 증감** `shortcutSteps.fontSize`(기본 +0.1mm/−0.1mm). 하한 0.1mm (`SHORTCUT_MIN_FONT_SIZE`) — 엔진 폭 계산이 음수가 되는 것을 방지 |
-| 자간 ± | `Ctrl/⌘+Alt+Shift+[` 증가 / `Ctrl/⌘+Alt+Shift+]` 감소 | per-run 상대 증감 ±`shortcutSteps.letterSpacing` (기본 0.01em) |
-| 장평 ± | `Ctrl/⌘+Alt+[` 증가 / `Ctrl/⌘+Alt+]` 감소 | per-run 상대 증감 ±`shortcutSteps.widthRatio` (기본 0.01, 1%p). `scale: ${widthRatio × 0.88} 1` 렌더링에 그대로 반영 |
-| 공백비율 ± | `Ctrl/⌘+Alt+Shift+,` 증가 / `Ctrl/⌘+Alt+Shift+.` 감소 | per-run 상대 증감 ±`shortcutSteps.spaceRatio` (기본 0.01em). 하한 0 (`SHORTCUT_MIN_SPACE_RATIO`) |
+| 볼드 토글 | `Ctrl/⌘+B` | selection 있음: `_toggleInlineStyle("fontWeight", 700)`. 선택 영역 전체가 700이면 **문단 기본으로 복귀**(런의 `fontWeight` 필드 제거 → `normalizeRunMap`이 런 언랩/병합), 아니면 700 주입. 문단 기본이 600(타이틀)이면 600↔700로 동작. **커서 상태: pending 토글** (아래 참조) |
+| 이탤릭 토글 | `Ctrl/⌘+I` | selection 있음: `_toggleInlineStyle("fontStyle", "italic")`. 볼드와 동일한 이진 토글. 해제 = `'normal'` 주입이 아니라 **필드 제거**. **커서 상태: pending 토글** |
+| 밑줄 토글 | `Ctrl/⌘+U` | selection 있음: `_toggleInlineStyle("underline", true)` — 이진 토글, 선 좌표는 엔진 mm rect 단일 소스(§ 23, TEXT_ENGINE.md). **커서 상태: pending 토글** |
+| 취소선 토글 | `Ctrl/⌘+Shift+X` | selection 있음: `_toggleInlineStyle("breakline", true)`. 밑줄과 동일한 이진 토글. **커서 상태: pending 토글**. 주의: 컷 단축키 분기가 `Ctrl+Shift+X`를 소비하지 않도록 `Ctrl+X`(Shift 없음)만 컷으로 라우팅한다 |
+| 외곽선 토글 | `Ctrl/⌘+Shift+O` | selection 있음: `_toggleInlineStyle("outline", SHORTCUT_OUTLINE_THICKNESS)` (0.02em). 선택 영역 전체가 같은 두께면 런의 `outline` 필드 제거(문단 기본 복귀), 아니면 주입. UI 툴바의 `OUTLINE_TOGGLE_THICKNESS`와 동일 값. **커서 상태: pending 토글** |
+| 글자 크기 ± | `Ctrl/⌘+Shift+.` 확대 / `Ctrl/⌘+Shift+,` 축소 | selection 있음: **per-run 상대 증감** ±`shortcutSteps.fontSize`. 하한 0.1mm (`SHORTCUT_MIN_FONT_SIZE`) — 엔진 폭 계산이 음수가 되는 것을 방지. **커서 상태: pending 증감** (`_adjustPendingMetric`) |
+| 자간 ± | `Ctrl/⌘+Alt+Shift+[` 증가 / `Ctrl/⌘+Alt+Shift+]` 감소 | selection 있음: per-run 상대 증감 ±`shortcutSteps.letterSpacing`. **커서 상태: pending 증감** |
+| 장평 ± | `Ctrl/⌘+Alt+[` 증가 / `Ctrl/⌘+Alt+]` 감소 | selection 있음: per-run 상대 증감 ±`shortcutSteps.widthRatio`. `scale: ${widthRatio × 0.88} 1` 렌더링에 그대로 반영. **커서 상태: pending 증감** |
+| 공백비율 ± | `Ctrl/⌘+Alt+Shift+,` 증가 / `Ctrl/⌘+Alt+Shift+.` 감소 | selection 있음: per-run 상대 증감 ±`shortcutSteps.spaceRatio`. 하한 0 (`SHORTCUT_MIN_SPACE_RATIO`). **커서 상태: pending 증감** |
+
+#### 커서 상태 pending 토글 (§ 4.1.7 연동)
+
+selection 없는 커서 상태에서 토글 단축키(B/I/U/X/O)를 누르면 기존 런/문단은 **전혀 변경되지 않고** pending style만 토글된다 (`TextEditController._togglePendingInlineStyle`, 공개 API `EditManager.togglePendingInlineStyle`):
+
+1. **판정 기준**: `pendingNextStyle ?? pendingBaseStyle`의 해당 필드값. pending이 없으면 커서 삽입점 유효 스타일(`currentStyle.textStyle`)을 기저로 시드한다.
+2. **토글 ON**: 기저 필드값이 토글 값과 다르면 pending에 필드를 주입 (`{ ...기저, [field]: 토글값 }`).
+3. **토글 OFF**: pending의 필드값이 토글 값과 동일하면 pending에서 필드를 제거한다. 남은 필드가 없으면 pending 전체 해제. **예외 — pending이 아예 없고 삽입점 유효 스타일이 이미 ON이면 pending을 만들지 않는다** ("pending 없음 = 이후 입력이 유효 스타일 따름"이 이미 OFF를 의미할 수 없으므로, 제거 대상이 없다).
+4. **발화**: `styleChange` 이벤트만 발화한다 (textChange 없음 — 기존 텍스트가 변하지 않기 때문). `_dispatch`가 페이로드에 `pendingStyle`(현재 `pendingNextStyle`)을 채운다 — 호스트 툴바(`use-editor-selection-style`)는 `event.pendingStyle`이 정의된 styleChange를 **pending 표시 갱신**으로 채택한다 (일반 styleChange의 pending 유지 로직을 우회하는 예외 경로).
+5. **기존 런 무변경**: 토글은 런 맵을 건드리지 않으므로 `model.textContent`가 변하지 않는다 — pending 해제 계약(커서 이동/selection 형성 시 해제)은 § 4.1.7과 동일하게 적용된다.
+
+#### 커서 상태 pending 증감 (§ 4.1.7 연동, InDesign 타이핑 속성)
+
+selection 없는 커서 상태에서 증감 단축키(크기/자간/장평/공백비율)를 누르면 기존 런/문단은 **전혀 변경되지 않고** pending style을 증감한다 (`TextEditController._adjustPendingMetric`, 공개 API `EditManager.adjustPendingMetric`):
+
+1. **기저**: `pendingNextStyle ?? pendingBaseStyle`(삽입점 유효 스타일). 커서 삽입점은 값이 하나뿐이므로 상대 증감이 pending의 절대값 시드 모델과 정확히 호환된다 — pending이 이미 있으면 현재 pending 값을 이어 증감한다.
+2. **계산**: `(기저 필드값 ?? 0) + delta`를 1e-9 정밀도로 반올림하고, selection 경로와 동일한 하한(`SHORTCUT_MIN_FONT_SIZE`, `SHORTCUT_MIN_SPACE_RATIO`)으로 클램프해 pending을 재설정한다. `delta`는 selection 경로와 동일하게 `EditManager.shortcutSteps`에서 온다 — 호스트(layout-ui)가 `useShortcutMetricSteps`로 UnitContext(업체 단위 설정) 기반 스텝을 주입하므로, pending 증감도 단축키 1회당 **표시 단위 1**씩 움직인다 (Q 업체 1Q, U 업체 1U).
+3. **왕복은 값 보존**: 증감 왕복으로 값이 유효 스타일과 동일해져도 pending 필드를 **제거하지 않는다** (토글과 다른 규약) — 상대 증감의 연속성이 원칙이며, pending 해제는 커서 이동/명시적 `setPendingNextStyle(undefined)`만 수행한다.
+4. **발화**: 토글과 동일 — `styleChange`만 발화, `pendingStyle` 페이로드로 호스트 툴바 반영.
 
 #### 동작 상세
 
@@ -1083,7 +1102,7 @@ const handledReverse = manager.navigateByTab(true);
 2. **per-run 상대 증감 (옵션 B)**: `adjustStyleInRange(runMap, start, end, paragraphEffectiveTextStyle, field, adjust)`가 선택 범위 안의 **각 런의 현재값**(런 오버라이드가 없으면 문단 effective 값)을 `adjust` 콜백에 전달하고, run별 결과값을 주입한다. 혼합 선택(5.0mm run과 4.0mm run이 섞인 선택)에서도 런 간 **상대 차이가 보존**된다 — `applyStyleToRange`의 균일 절대값 주입과의 차이점.
 3. **부동소수점 정규화**: `adjust` 콜백이 결과값을 1e-9 정밀도로 반올림한다. 연타 시 `4.0999999...` 같은 오차가 누적되어 `normalizeRunMap`의 문단 기본값 비교(정확 비교)와 `_computeLayoutInputHash`가 어긋나는 것을 방지한다. 호스트가 비십진 스텝(1U = 0.03125em, 0.5pt)을 주입해도 왕복이 안정적이다.
 4. **런 언랩 정리**: 주입 후 `normalizeRunMap`으로 문단 effective와 동일해진 필드를 제거한다 — 문단 기본 자간 −0.1에서 10회 감소 후 다시 10회 증가하면 run이 자동으로 언랩되어 인접 런과 병합된다. 데이터는 항상 최소 런 형태를 유지한다.
-5. **selection 가드**: `_adjustSelectionMetric`은 selection이 없거나 빈 selection(`start >= end`)이면 즉시 반환한다. `_toggleInlineStyle`도 동일한 가드를 가진다 — selection 없는 커서 상태의 스타일 변경은 API로도 열어두지 않는다는 설계 원칙 (§6A.5.1의 `applyTextStyle`은 예외적으로 캐스케이드 경로를 지원한다).
+5. **selection 가드**: `_adjustSelectionMetric`은 selection이 없거나 빈 selection(`start >= end`)이면 즉시 반환한다 — 커서 상태는 `_adjustOrPendingMetric` 라우터가 pending 증감으로 갈라내므로 이 가드에 도달하지 않는다. `_toggleInlineStyle`도 동일한 가드를 가진다.
 6. **커서/selection 보존**: 증감은 텍스트 길이를 변경하지 않으므로 오프셋은 불변이고, selection은 그대로 유지된다. 주입 후 `model.textContent = plainToInline(...)` → `flushRender()` → `styleChange`/`textChange` 이벤트가 기존 스타일 주입 경로와 동일하게 발생한다.
 7. **이벤트 전파 차단**: `_tryHandleTextStyleShortcut`은 매칭 시 `event.preventDefault()`와 함께 `event.stopPropagation()`도 호출한다. 이로 인해 `window` bubble 단계의 `useEditorKeyboard` 핸들러로 키 이벤트가 전파되지 않아, 텍스트 편집 중 스타일 단축키가 LayoutEditor의 줌/Z-index 등 외부 단축키와 충돌하지 않는다. ESC 및 Ctrl+A/C/X도 동일하게 `stopPropagation()`을 호출한다.
 
@@ -1104,8 +1123,14 @@ const handledReverse = manager.navigateByTab(true);
 |-----|------|
 | `EditManager.setPendingNextStyle(style?: Partial<TextInlineStyle>)` | 포커스된 컨트롤러에 pending 스타일 설정/해제. 기존 런·문단에는 적용하지 않는다. |
 | `EditManager.pendingNextStyle` | 현재 pending 스타일 조회. 없으면 `undefined`. |
+| `EditManager.togglePendingInlineStyle(field, value)` | 커서 상태 pending 토글 (스타일 단축키의 커서 경로, § 4.1.6). 판정 기준 `pendingNextStyle ?? pendingBaseStyle`. |
+| `EditManager.adjustPendingMetric(field, delta)` | 커서 상태 pending 증감 (스타일 단축키의 커서 경로, § 4.1.6 — InDesign 타이핑 속성 증감). selection 있으면 per-run 상대 증감으로 위임. 왕복은 값 보존 (필드 제거 아님). |
 | `TextEditController._setPendingNextStyle(style)` | 컨트롤러 레벨 설정 (EditManager가 위임). |
 | `TextEditController.pendingNextStyle` | 컨트롤러 레벨 조회. |
+
+#### 이벤트 페이로드 (`EditManagerEvent.pendingStyle`)
+
+`styleChange` 이벤트에 `pendingStyle: Partial<TextInlineStyle> | undefined` 필드가 추가되었다 — `_dispatch`가 항상 현재 `pendingNextStyle`을 채운다. 커서 상태 pending 토글이 발화한 styleChange에서 호스트는 이 값을 표시값으로 채택한다. 정의되지 않은 일반 styleChange(타이핑 직후, 커서 이동 해제)는 기존 로직(pending 활성 중 표시 유지, 해제 시 커서 유효 스타일 복귀)을 따른다.
 
 #### 적용 경로
 
