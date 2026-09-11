@@ -226,6 +226,30 @@ export class ParagraphEngine {
   private _previousOverflow: number = -1;
 
   /**
+   * 스레딩: 배치 시작 지점 (평문 오프셋, `\n` 포함).
+   * 문서 스레드의 이전 프레임이 소비한 길이 — 0이면 기존 경로와 byte-identical.
+   * `textContent` 세터와 무관하게 `_layoutColumnsPass` 시작점으로 쓰인다.
+   */
+  private _contentFrom: number = 0;
+
+  /**
+   * 스레딩: 마지막 `layoutText()`가 배치하지 못한 tail (평문 오프셋, `\n` 포함).
+   * -1 = tail 없음(전체 배치) 또는 아직 배치 전. `overflowContent` 게터의 근거.
+   */
+  private _overflowContentFrom: number = -1;
+
+  /** 스레딩: 이 문단이 문서 스레드에 등록된 프레임인지 여부. `updateThreadContext()`에서 설정. */
+  private _isThreadFrame: boolean = false;
+
+  /**
+   * 스레딩: 이 프레임이 체인의 마지막(또는 story 소진 지점) 프레임인지.
+   * 중간 프레임의 overflow는 다음 프레임으로 흘러 소비되므로 오류가 아니다 —
+   * 빨간 테두리/render-error는 tail에서만 의미가 있다.
+   * 기본값 `true` (비-스레드 프레임의 overflow는 항상 오류).
+   */
+  private _threadTail: boolean = true;
+
+  /**
    * `preserveRenderShapeAcrossReset()`가 예약한 렌더 형태 보존 요청 (1회성).
    * `resetIncrementalState()`가 소비 후 null로 돌아간다.
    */
@@ -256,7 +280,13 @@ export class ParagraphEngine {
   private _overlayRectsMm: Map<BoxEngine, MmRect> | null = null;
 
   /** Skeleton 캐시: 입력 매개변수 해시가 동일하면 _layoutTextIntoColumns() 결과를 재사용. */
-  private _layoutCache: { hash: string; columnContents: TextLineData[][]; overflow: number } | null = null;
+  private _layoutCache: {
+    hash: string;
+    columnContents: TextLineData[][];
+    overflow: number;
+    /** 스레딩 tail 시작 오프셋 (스레드 프레임만 의미 있음) */
+    overflowContentFrom: number;
+  } | null = null;
 
   /**
    * `_parseContents()` 결과 캐시. `textContent` 참조가 동일하면 편집(블록/런 분해)을 생략.
@@ -1655,6 +1685,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     if (this._layoutCache && this._layoutCache.hash === inputHash) {
       this._columnContents = this._layoutCache.columnContents;
       this._overflow = this._layoutCache.overflow;
+      this._overflowContentFrom = this._layoutCache.overflowContentFrom;
       this._overlayRectsMm = null;
       this._refreshInlineStylesOnly();
       this._caretHint = undefined;
@@ -1710,6 +1741,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     this._computePerLineHeights();
     this._computeDecorations();
 
+    this._captureThreadTail();
+
     this._previousLineCount = this._columnContents.reduce((sum, col) => sum + col.length, 0);
     this._previousOverflow = this._overflow;
 
@@ -1717,6 +1750,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       hash: inputHash,
       columnContents: this._columnContents,
       overflow: this._overflow,
+      overflowContentFrom: this._overflowContentFrom,
     };
 
     if (caretOffset !== undefined && caretOffset > 0 && verticalAlign !== 'center' && verticalAlign !== 'bottom') {
@@ -1854,9 +1888,144 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       // word-wrap 여부는 워드 단위 라인 브레이크(래핑)에 직접 개입하므로
       // 해시에 포함해야 한다. _computeLayoutInputHash와 동일 키.
       "ww:" + (this.effectiveParagraphStyle.wordWrap ?? false),
+      // 스레딩 contentFrom — _computeLayoutInputHash와 동일 조건부 키.
+      ...(this._contentFrom > 0 ? ["tf:" + this._contentFrom] : [] as string[]),
     );
 
     return parts.join("|");
+  }
+
+  /**
+   * 배치 종료 후 스레딩 tail 시작점을 기록한다.
+   *
+   * 스레딩 tail의 단일 소스는 **표시 영역에 들어가는 마지막 라인까지의 누적
+   * 글자 수**다. 배치 패스(`_layoutColumnsPass`)는 전체 텍스트를 컬럼에
+   * 배치하고, `overflow`는 라인 높이 초과 라인의 글자 수이므로 — 배치 커서가
+   * 아니라 `columnContents`를 라인 높이 순서로 순회해 visible 라인 글자 수를
+   * 세는 것이 정확하다 (`visibleChars`와 동일 산식, 단 `\n` 포함 plain 공간
+   * 으로 환산 — endOfBlock 라인 뒤 `\n` 1자 포함).
+   *
+   * @returns 없음. `_overflowContentFrom`을 설정한다.
+   */
+  private _captureThreadTail(): void {
+    if (!this._isThreadFrame || this._overflow <= 0) {
+      this._overflowContentFrom = -1;
+      return;
+    }
+    const parentHeight = this._inheritStyle?.parentHeight ?? 0;
+    if (parentHeight <= 0) {
+      this._overflowContentFrom = -1;
+      return;
+    }
+    const effectiveColumnHeight = parentHeight + (this._lineHeight - this.fontSize);
+    let visibleCount = 0;
+    let exhausted = true;
+
+    columnLoop: for (let c = 0; c < this._columnContents.length; c++) {
+      const lines = this._columnContents[c] ?? [];
+      let accumulatedHeightMm = 0;
+      let hasOverflowed = false;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const lineHeightMm = line?.lineHeight ?? this._lineHeight;
+        const isOverflow = hasOverflowed
+          || accumulatedHeightMm + lineHeightMm > effectiveColumnHeight + 1e-6;
+        if (isOverflow) {
+          hasOverflowed = true;
+          exhausted = false;
+          break columnLoop;
+        }
+        accumulatedHeightMm += lineHeightMm;
+        visibleCount += line.parts.reduce((s, p) => s + p.content.length, 0);
+        if (line.endOfBlock) visibleCount++;
+      }
+    }
+
+    // 전체 라인이 수용되면 tail 없음 (마지막 라인의 endOfText는 tail 아님)
+    if (exhausted && this._overflow <= 0) {
+      this._overflowContentFrom = -1;
+      return;
+    }
+    this._overflowContentFrom = this._contentFrom + visibleCount;
+  }
+
+  /**
+   * 스레딩 tail: 이 프레임이 배치하지 못한 콘텐츠의 시작 plain 오프셋.
+   *
+   * @returns tail 시작 오프셋. tail이 없거나 아직 배치 전이면 `-1`.
+   */
+  public get overflowContentFrom(): number {
+    return this._overflowContentFrom;
+  }
+
+  /**
+   * 스레딩 tail 콘텐츠 — 이 프레임이 배치하지 못한 나머지 (inline run 보존).
+   *
+   * `_overflowContentFrom`부터 `_textContent` 끝까지를 런 경계에서 슬라이싱한다.
+   * 슬라이싱은 run의 절반 지점에서도 문자열을 분리하므로(스타일은 동일해
+   * 안전), 런 경계 보존은 가능한 한 유지되지만 문자열 런 내부 분할이
+   * 발생할 수 있다 — 스타일이 같으므로 배치 결과에 영향 없음.
+   *
+   * @returns tail 콘텐츠 배열. tail이 없으면 빈 배열.
+   */
+  public get overflowContent(): (string | TextInlineData)[] {
+    if (this._overflowContentFrom < 0 || this._overflow <= 0) return [];
+    return sliceInlineContent(this._textContent, this._overflowContentFrom, Number.MAX_SAFE_INTEGER);
+  }
+
+  /** 이 문단이 문서 스레드에 등록된 프레임인지 여부 */
+  public get isThreadFrame(): boolean {
+    return this._isThreadFrame;
+  }
+
+  /**
+   * 이 프레임이 스레드 체인의 tail(오버플로우 표시 대상)인지.
+   *
+   * 스레드 중간 프레임의 overflow는 다음 프레임으로 흘러 소비되므로 오류가
+   * 아니다. 빨간 테두리/`render-error`는 이 값이 true일 때만 의미가 있다.
+   * 비-스레드 프레임은 항상 true.
+   */
+  public get isThreadTail(): boolean {
+    return this._threadTail;
+  }
+
+  /**
+   * 스레딩 문맥을 갱신한다. 문서 스레드 feed-forward 패스가 호출한다.
+   *
+   * - `isThreadFrame`: 스레드 프레임 여부. `true`면 `overflowContent`가 활성화된다.
+   * - `contentFrom`: 배치 시작 plain 오프셋. 0이면 전체 배치(기존 경로).
+   * - `threadTail`: 체인 마지막 프레임 여부. 중간 프레임의 overflow는
+   *   소비되므로 오류 표시에서 제외한다.
+   *
+   * `threadTail`은 표시 전용 시맨틱이다 — 배치 입력이 아니므로 캐시를
+   * 무효화하지 않는다. `contentFrom` 변경과 `isThreadFrame` 전환만 무효화한다
+   * (`isThreadFrame` 전환 시 캐시된 `overflowContentFrom`(-1)이 stale해진다).
+   * `_layoutCache` 해시에는 `contentFrom > 0`일 때만 `tf:` 키로 반영된다.
+   *
+   * @param ctx - 스레딩 문맥. `contentFrom`은 이전 프레임이 소비한 길이.
+   */
+  public updateThreadContext(ctx: {
+    contentFrom?: number;
+    isThreadFrame?: boolean;
+    threadTail?: boolean;
+  }): void {
+    this._threadTail = ctx.threadTail ?? this._threadTail;
+    const contentFrom = ctx.contentFrom ?? this._contentFrom;
+    const isThreadFrame = ctx.isThreadFrame ?? this._isThreadFrame;
+    if (contentFrom !== this._contentFrom || isThreadFrame !== this._isThreadFrame) {
+      this._contentFrom = contentFrom;
+      this._isThreadFrame = isThreadFrame;
+      this._layoutCache = null;
+      this._prefixCache = null;
+      this._overflowContentFrom = -1;
+    }
+  }
+
+  /**
+   * 스레딩: 현재 배치 시작 오프셋.
+   */
+  public get contentFrom(): number {
+    return this._contentFrom;
   }
 
   /**
@@ -1967,6 +2136,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     this._computePerLineHeights();
     this._computeDecorations();
 
+    this._captureThreadTail();
+
     this._previousLineCount = this._columnContents.reduce((sum, col) => sum + col.length, 0);
     this._previousOverflow = this._overflow;
 
@@ -1975,6 +2146,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       hash: fullHash,
       columnContents: this._columnContents,
       overflow: this._overflow,
+      overflowContentFrom: this._overflowContentFrom,
     };
 
     this._buildPrefixCache(caretOffset);
@@ -2402,6 +2574,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     if (startColumn === 0) {
       this._columnContents = [];
       this._overflow = 0;
+      this._overflowContentFrom = -1;
       // 컬럼 왼쪽 오프셋 prefix sum: columnLeft(idx) = widths[0..idx-1] 합 + gaps[0..idx-1] 합.
       // cum에 gap도 함께 누적해야 한다 — width만 누적하고 직전 gap 하나만 더하면
       // 3단(idx≥2)부터 이전 gap들이 누락되어 라인 rect가 실제보다 왼쪽으로
@@ -2417,6 +2590,24 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     }
     this._overlayRectsMm = null;
 
+    // 스레딩: 이전 프레임이 소비한 prefix를 `_contents` 위치로 환산해 시작점으로 쓴다.
+    // `_contentFrom > 0`이면 배치는 이 위치부터 시작하고, 컬럼은 처음부터 채운다.
+    let skipBlockIdx = startBlockIdx;
+    let skipRunIdx = startRunIdx;
+    let skipCharIdx = startCharIdx;
+    if (startColumn === 0 && this._contentFrom > 0) {
+      const pos = this._plainOffsetToContentsPos(this._contentFrom);
+      if (pos) {
+        skipBlockIdx = pos.blockIdx;
+        skipRunIdx = pos.runIdx;
+        skipCharIdx = pos.charIdx;
+      } else {
+        // contentFrom이 plain 범위를 벗어나면(이전 프레임이 전부 소비) 배치 대상 없음.
+        skipBlockIdx = this._contents.length;
+      }
+    }
+    this._overlayRectsMm = null;
+
     // 인라인 fontSize 오버라이드가 있으면 라인 rect를 per-line 높이로 계산한다
     // (오버랩 판정/overflow 판정을 실제 렌더링 위치와 일치시킨다). 오버라이드가
     // 없으면 모든 라인 높이가 균일(base)하므로 기존 균일 경로를 쓴다 — 성능과
@@ -2428,9 +2619,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       (line) => line.some((run) => (run.textInlineStyle?.fontSize ?? baseFontSizeMmForPending) > baseFontSizeMmForPending),
     );
 
-    let beforeIdxBlock = startBlockIdx;
-    let beforeRunIdx = startRunIdx;
-    let beforeCharIdx = startCharIdx;
+    let beforeIdxBlock = skipBlockIdx;
+    let beforeRunIdx = skipRunIdx;
+    let beforeCharIdx = skipCharIdx;
 
     for (let curColumn = startColumn; curColumn < this.columnCount; curColumn++) {
       let columnContent: TextLineData[] = [];
@@ -3047,6 +3238,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       // 워드 래핑 여부는 배치(워드 단위 라인 브레이크)에 직접 개입하므로
       // 해시에 포함해야 한다. _computePrefixHash와 동일 키.
       "ww:" + (this.effectiveParagraphStyle.wordWrap ?? false),
+      // 스레딩: 배치 시작점(contentFrom)이 0이 아닐 때만 키에 반영 —
+      // 비-스레딩 문단은 해시가 기존과 byte 동일하게 유지된다.
+      ...(this._contentFrom > 0 ? ["tf:" + this._contentFrom] : [] as string[]),
     );
 
     return parts.join("|");
@@ -3841,7 +4035,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     this._data = options;
     this._resources = options.resources;
     this._inheritStyle = options.inheritStyle;
-    this._textContent = options.content;
+    // 스레드 프레임의 story는 문서 스레드 feed-forward가 소유한다 —
+    // data 재주입이 빈 content로 story를 소거하지 않도록 보존한다.
+    this._textContent = this._isThreadFrame && options.content === ''
+      ? this._textContent
+      : options.content;
     this._plainTextCache = null;
     this._styleRuns = null;
     this._parsedContentsCache = null;
@@ -4438,10 +4636,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       }
     }
     const content = this._textContent;
+    const isThreadFrame = this._isThreadFrame && this._contentFrom > 0;
     return {
       type: 'paragraph',
       id: this._id,
-      content,
+      content: isThreadFrame ? undefined : content,
       column: this._columnWidths,
       gap: this._gaps,
       paragraphStyle: Object.keys(paragraphStyle).length > 0 ? paragraphStyle as ParagraphStyle : undefined,
@@ -4799,4 +4998,51 @@ export function buildParagraphPrintPostData(
     chars,
     decorations,
   }];
+}
+
+/**
+ * inline 콘텐츠를 plain 오프셋 범위로 슬라이싱한다 (런 경계 보존).
+ *
+ * 스레딩 feed-forward가 tail을 잘라 다음 프레임에 전달할 때 사용한다.
+ * plain 오프셋은 `\n`을 포함한 편집 공간(plainText getter와 동일) 기준이다.
+ * 런의 절반 지점 분할은 스타일이 동일한 문자열 런 내부에서만 발생하므로
+ * 배치 결과에 영향이 없다.
+ *
+ * @param content - 원본 콘텐츠 (string 또는 인라인 런 배열)
+ * @param start - 시작 plain 오프셋 (포함)
+ * @param end - 끝 plain 오프셋 (제외)
+ * @returns 슬라이스된 콘텐츠 배열. 빈 범위면 빈 배열.
+ */
+export function sliceInlineContent(
+  content: string | (string | TextInlineData)[] | undefined,
+  start: number,
+  end: number,
+): (string | TextInlineData)[] {
+  if (content === undefined) return [];
+  const raw: (string | TextInlineData)[] = typeof content === 'string'
+    ? [content]
+    : content;
+  const result: (string | TextInlineData)[] = [];
+  let offset = 0;
+  for (const item of raw) {
+    if (offset >= end) break;
+    const text = typeof item === 'string' ? item : item.content;
+    const itemEnd = offset + text.length;
+    if (itemEnd <= start) {
+      offset += text.length;
+      continue;
+    }
+    const sliceStart = Math.max(0, start - offset);
+    const sliceEnd = Math.min(text.length, end - offset);
+    const slice = text.slice(sliceStart, sliceEnd);
+    if (slice.length > 0) {
+      if (typeof item === 'string' || item.textInlineStyle === undefined) {
+        result.push(slice);
+      } else {
+        result.push({ content: slice, textInlineStyle: item.textInlineStyle });
+      }
+    }
+    offset += text.length;
+  }
+  return result;
 }
