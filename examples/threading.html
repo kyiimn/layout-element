@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Threading Demo — 텍스트 스레딩</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #eceff1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 30px 20px;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 18px;
+    }
+
+    header h1 {
+      font-size: 20px;
+      color: #222;
+      margin-bottom: 6px;
+    }
+
+    header p {
+      font-size: 13px;
+      color: #666;
+    }
+
+    #page {
+      background: #fff;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+      position: relative;
+    }
+
+    #panel {
+      margin-top: 20px;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 13px;
+      color: #333;
+      max-width: 800px;
+      width: 100%;
+    }
+
+    #panel table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+
+    #panel th,
+    #panel td {
+      border: 1px solid #e0e0e0;
+      padding: 4px 10px;
+      text-align: left;
+      font-size: 12px;
+    }
+
+    #panel th {
+      background: #f5f5f5;
+      font-weight: 600;
+    }
+
+    .thread-badge {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      color: #fff;
+      margin-right: 6px;
+    }
+
+    .badge-1 { background: #1a73e8; }
+    .badge-2 { background: #e8451a; }
+    .badge-3 { background: #1a7e3a; }
+    .overset { color: #c62828; font-weight: 700; }
+    .ok { color: #1a7e3a; }
+
+    #thread-legend {
+      margin-top: 10px;
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: #555;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>텍스트 스레딩 (Paragraph Threading) 데모</h1>
+    <p>3개의 스레드가 각각 여러 프레임 박스에 걸쳐 흐릅니다 — head 프레임이 story를 소유하고, 넘치는 텍스트가 순서대로 다음 프레임으로 feed-forward됩니다.</p>
+  </header>
+
+  <x-layout-document id="doc"></x-layout-document>
+
+  <div id="panel">
+    <strong>스레드 상태</strong>
+    <table>
+      <thead>
+        <tr><th>스레드</th><th>프레임 순서</th><th>배치 글자</th><th>잔여(overset)</th></tr>
+      </thead>
+      <tbody id="thread-rows"></tbody>
+    </table>
+    <div id="thread-legend">
+      <span><span class="thread-badge badge-1">Thread 1</span> 우측 2단 기사 (3프레임)</span>
+      <span><span class="thread-badge badge-2">Thread 2</span> 좌측 기사 (2프레임)</span>
+      <span><span class="thread-badge badge-3">Thread 3</span> 하단 확장 기사 (3프레임)</span>
+    </div>
+  </div>
+
+  <script type="module">
+    import "/src/index.ts";
+    import { ColorRegistry } from "/src/resource/color-registry";
+    import { FontLoader } from "/src/resource/font-loader";
+    import { threadingDemoData } from "/src/examples";
+
+    (async () => {
+      await ColorRegistry.getInstance().init();
+      await FontLoader.getInstance().init();
+
+      const doc = document.getElementById("doc");
+      doc.data = threadingDemoData;
+      await doc.render();
+
+      // 타이핑 테스트: 각 스레드 head 프레임 편집 활성화.
+      // head에 타이핑하면 overflow가 다음 프레임으로 흘러야 한다.
+      const em = doc.editManager;
+      em.textEditMode = true;
+      for (const id of ["thread1-frame1", "thread2-frame1", "thread3-frame1"]) {
+        const head = doc.querySelector(`x-layout-paragraph[id="${id}"]`);
+        if (head) {
+          em.addEditableParagraph(id);
+          head.editableText = true;
+        }
+      }
+      await doc.render();
+
+      // 체인 재배치 후 패널 갱신
+      doc.addEventListener("render-complete", () => renderPanel());
+      renderPanel();
+    })();
+
+    /**
+     * 스레드 상태 패널을 렌더링한다.
+     * 각 스레드의 프레임별 배치 글자 수와 overset 잔여를 집계한다.
+     * 중간 프레임의 overflow는 소비되므로 tail만 오류로 센다.
+     */
+    function renderPanel() {
+      const doc = document.getElementById("doc");
+      const engine = doc?.engine;
+      if (!engine) return;
+      const threads = engine.data.threads ?? [];
+      const rows = document.getElementById("thread-rows");
+      rows.innerHTML = "";
+
+      threads.forEach((thread, ti) => {
+        const frames = (thread.paragraphIds ?? [])
+          .map(id => engine.findEngineById(id))
+          .filter(Boolean);
+        const head = frames[0];
+        const totalPlaced = frames.reduce((sum, pe) => sum + pe.visibleChars, 0);
+        const storyLen = head ? head.totalChars : 0;
+        const tailOversized = frames.some(pe => pe.isThreadFrame && !pe.isThreadTail && pe.overflow > 0);
+        const remaining = Math.max(0, storyLen - totalPlaced);
+
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><span class="thread-badge badge-${ti + 1}">Thread ${ti + 1}</span></td>
+          <td>${(thread.paragraphIds ?? []).length}개 프레임</td>
+          <td class="ok">${totalPlaced}자 배치</td>
+          <td>${remaining > 0 ? `<span class="overset">${remaining}자 overset</span>` : '<span class="ok">전부 수용</span>'}${tailOversized ? ' <span class="overset">(소비 안 됨!)</span>' : ''}</td>
+        `;
+        rows.appendChild(tr);
+      });
+    }
+  </script>
+</body>
+
+</html>
