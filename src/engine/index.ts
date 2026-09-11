@@ -23,3 +23,4 @@ export * from "./paragraph-engine";
 export * from "./document-engine";
 export * from "./font-loader-engine";
 export * from "./color-registry-engine";
+export * from "./thread-engine";
