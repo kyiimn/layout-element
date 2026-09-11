@@ -8,3 +8,4 @@ export * from "./table.type";
 export * from "./text/text-inline.type";
 export * from "./text/text-line.type";
 export * from "./text.type";
+export * from "./thread.type";

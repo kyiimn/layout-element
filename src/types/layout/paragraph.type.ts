@@ -63,8 +63,11 @@ export type ParagraphData = {
    * - `string`: 전체에 동일 스타일 적용
    * - `(string | TextInlineData)[]`: 하나의 연속 텍스트 흐름에서 구간별 개별 스타일.
    *   런은 라인 경계와 무관하며 `\n`으로 라인이 분리된다.
+   *
+   * 스레딩 프레임(문서 `threads`에 등록된 문단)에서는 head 프레임만 이 값을
+   * 소유하고, 후속 프레임은 엔진 feed-forward로 주입받는다 (직렬화 시 생략).
    */
-  content: string | (string | TextInlineData)[];
+  content?: string | (string | TextInlineData)[];
 
   /** 문단 스타일. 상위 `InheritStyle`의 값을 오버라이드 */
   paragraphStyle?: ParagraphStyle;

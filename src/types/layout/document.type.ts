@@ -1,5 +1,6 @@
 import { ParagraphStyle, TextStyle } from "../style";
 import { BoxData } from "./box.type";
+import { ThreadData } from "./thread.type";
 
 /**
  * 문서 전체의 루트 데이터. 용지 크기, 컬럼 그리드, 기본 스타일을 정의한다.
@@ -64,4 +65,10 @@ export type DocumentData = {
 
   /** 최상위 박스 자식들 */
   children?: BoxData[];
+
+  /**
+   * 텍스트 스레딩 정의 (옵셔널 — 생략 시 스레딩 미사용, 기존 동작 byte-identical).
+   * thread가 story 콘텐츠의 단일 소스이며, 프레임 문단은 표시 범위만 소유한다.
+   */
+  threads?: ThreadData[];
 };
