@@ -1069,6 +1069,9 @@ const handledReverse = manager.navigateByTab(true);
 |------|------|------|
 | 볼드 토글 | `Ctrl/⌘+B` | `_toggleInlineStyle("fontWeight", 700)`. 선택 영역 전체가 700이면 **문단 기본으로 복귀**(런의 `fontWeight` 필드 제거 → `normalizeRunMap`이 런 언랩/병합), 아니면 700 주입. 문단 기본이 600(타이틀)이면 600↔700로 동작 |
 | 이탤릭 토글 | `Ctrl/⌘+I` | `_toggleInlineStyle("fontStyle", "italic")`. 볼드와 동일한 이진 토글. 해제 = `'normal'` 주입이 아니라 **필드 제거** |
+| 밑줄 토글 | `Ctrl/⌘+U` | `_toggleInlineStyle("underline", true)`. 볼드/이탤릭과 동일한 이진 토글 — 선택 영역 전체가 `true`면 런의 `underline` 필드 제거(문단 기본 복귀), 아니면 `true` 주입. 선 좌표는 엔진 mm rect 단일 소스(§ 23, TEXT_ENGINE.md) |
+| 취소선 토글 | `Ctrl/⌘+Shift+X` | `_toggleInlineStyle("breakline", true)`. 밑줄과 동일한 이진 토글 |
+| 외곽선 토글 | `Ctrl/⌘+Shift+O` | `_toggleInlineStyle("outline", SHORTCUT_OUTLINE_THICKNESS)` (0.02em). 선택 영역 전체가 같은 두께면 런의 `outline` 필드 제거(문단 기본 복귀), 아니면 주입. UI 툴바의 `OUTLINE_TOGGLE_THICKNESS`와 동일 값 |
 | 글자 크기 ± | `Ctrl/⌘+Shift+.` 확대 / `Ctrl/⌘+Shift+,` 축소 | **per-run 상대 증감** `shortcutSteps.fontSize`(기본 +0.1mm/−0.1mm). 하한 0.1mm (`SHORTCUT_MIN_FONT_SIZE`) — 엔진 폭 계산이 음수가 되는 것을 방지 |
 | 자간 ± | `Ctrl/⌘+Alt+Shift+[` 증가 / `Ctrl/⌘+Alt+Shift+]` 감소 | per-run 상대 증감 ±`shortcutSteps.letterSpacing` (기본 0.01em) |
 | 장평 ± | `Ctrl/⌘+Alt+[` 증가 / `Ctrl/⌘+Alt+]` 감소 | per-run 상대 증감 ±`shortcutSteps.widthRatio` (기본 0.01, 1%p). `scale: ${widthRatio × 0.88} 1` 렌더링에 그대로 반영 |
@@ -1087,6 +1090,7 @@ const handledReverse = manager.navigateByTab(true);
 #### 관련 constants (`src/constants/defaults.ts`)
 
 - `SHORTCUT_BOLD_WEIGHT = 700` — 볼드 토글이 주입하는 굵기. 400~900 사이의 다른 굵기는 단축키 영역 밖(UI 패널의 `applyInlineStyle({ fontWeight })`)이다.
+- `SHORTCUT_OUTLINE_THICKNESS = 0.02` (em) — 외곽선 토글이 주입하는 두께. UI 툴바(`OUTLINE_TOGGLE_THICKNESS`)와 동일 값이다.
 - `SHORTCUT_FONT_SIZE_STEP = 0.1` (mm), `SHORTCUT_METRIC_STEP = 0.01` (자간/장평/공백 공용) — **기본 증감량**. 실제 증감은 `EditManager.shortcutSteps`(`ShortcutMetricSteps` 타입, 기본값 `DEFAULT_SHORTCUT_METRIC_STEPS`)를 따른다. 호스트가 업체 표시 단위에 맞춰 이 필드를 교체하면 단축키 1회가 표시값 1만큼 움직는다 — 예: layout-ui의 급(Q) 업체는 fontSize 0.25mm(=1Q), U 업체는 letterSpacing 0.03125em(=1U)를 주입한다.
 - `SHORTCUT_MIN_FONT_SIZE = 0.1`, `SHORTCUT_MIN_SPACE_RATIO = 0` — 폭 계산 음수 방지 하한. `widthRatio`/`letterSpacing`의 극값은 엔진이 이미 감당하는 영역이므로 클램프하지 않는다.
 

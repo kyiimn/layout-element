@@ -54,6 +54,14 @@ export const DEFAULT_OUTLINE_COLOR: string = '';
  */
 export const SHORTCUT_BOLD_WEIGHT = 700;
 
+/**
+ * 텍스트 스타일 단축키가 주입하는 외곽선(outline) 두께 (em).
+ * UI 툴바(text-style-toolbar-group / text-style-panel)의
+ * `OUTLINE_TOGGLE_THICKNESS`와 동일 값이다. OFF(0) → ON 토글 시 주입되며,
+ * ON → OFF는 런의 `outline` 필드 제거(`_toggleInlineStyle`)로 수행한다.
+ */
+export const SHORTCUT_OUTLINE_THICKNESS = 0.02;
+
 /** 텍스트 스타일 단축키의 글자 크기 조절 step (mm). */
 export const SHORTCUT_FONT_SIZE_STEP = 0.1;
 

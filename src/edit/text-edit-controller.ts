@@ -7,7 +7,7 @@ import type { TextLineData } from "@/types/layout/text/text-line.type";
 import type { TextInlineData } from "@/types/layout/text/text-inline.type";
 import { TextEditCoordinateMapper } from "./text-edit-coordinate-mapper";
 import { EditManager } from "./edit-manager";
-import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA, SHORTCUT_BOLD_WEIGHT, SHORTCUT_MIN_FONT_SIZE, SHORTCUT_MIN_SPACE_RATIO, DECORATION_THICKNESS_RATIO, DECORATION_MIN_THICKNESS_MM, TEXT_INLINE_STYLE_FIELDS } from "@/constants";
+import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA, SHORTCUT_BOLD_WEIGHT, SHORTCUT_OUTLINE_THICKNESS, SHORTCUT_MIN_FONT_SIZE, SHORTCUT_MIN_SPACE_RATIO, DECORATION_THICKNESS_RATIO, DECORATION_MIN_THICKNESS_MM, TEXT_INLINE_STYLE_FIELDS } from "@/constants";
 import { firstNonEmpty } from "@/engine/paragraph-engine";
 import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, normalizeInlineContent, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent, adjustStyleInRange, NumericInlineMetricField } from "./run-map";
 import { ColorRegistry } from "@/resource/color-registry";
@@ -3207,12 +3207,15 @@ export class TextEditController {
    *
    * | 기능 | 키 (물리 키 기준) |
    * |------|----|
-   * | 볼드 토글 (700 ↔ 문단 기본) | `Ctrl/⌘+B` |
-   * | 이탤릭 토글 ('italic' ↔ 문단 기본) | `Ctrl/⌘+I` |
-   * | 글자 크기 ±0.1mm | `Ctrl/⌘+Shift+.` (확대) / `Ctrl/⌘+Shift+,` (축소) |
-   * | 자간 ±0.01em | `Ctrl/⌘+Alt+Shift+[` (증가) / `Ctrl/⌘+Alt+Shift+]` (감소) |
-   * | 장평 ±0.01 | `Ctrl/⌘+Alt+[` (증가) / `Ctrl/⌘+Alt+]` (감소) |
-   * | 공백비율 ±0.01em | `Ctrl/⌘+Alt+Shift+,` (증가) / `Ctrl/⌘+Alt+Shift+.` (감소) |
+    * | 볼드 토글 (700 ↔ 문단 기본) | `Ctrl/⌘+B` |
+    * | 이탤릭 토글 ('italic' ↔ 문단 기본) | `Ctrl/⌘+I` |
+    * | 밑줄 토글 (`true` ↔ 문단 기본) | `Ctrl/⌘+U` |
+    * | 취소선 토글 (`true` ↔ 문단 기본) | `Ctrl/⌘+Shift+X` |
+    * | 외곽선 토글 (0.02em ↔ 문단 기본) | `Ctrl/⌘+Shift+O` |
+    * | 글자 크기 ±0.1mm | `Ctrl/⌘+Shift+.` (확대) / `Ctrl/⌘+Shift+,` (축소) |
+    * | 자간 ±0.01em | `Ctrl/⌘+Alt+Shift+[` (증가) / `Ctrl/⌘+Alt+Shift+]` (감소) |
+    * | 장평 ±0.01 | `Ctrl/⌘+Alt+[` (증가) / `Ctrl/⌘+Alt+]` (감소) |
+    * | 공백비율 ±0.01em | `Ctrl/⌘+Alt+Shift+,` (증가) / `Ctrl/⌘+Alt+Shift+.` (감소) |
    *
    * @param event - textarea의 keydown 이벤트
    * @returns 단축키를 소비했으면 `true`, 아니면 `false`
@@ -3237,7 +3240,30 @@ export class TextEditController {
         this._toggleInlineStyle("fontStyle", "italic");
         return true;
       }
+      if (key === "u") {
+        event.preventDefault();
+        event.stopPropagation();
+        this._toggleInlineStyle("underline", true);
+        return true;
+      }
       return false;
+    }
+
+    if (!alt) {
+      // Ctrl/⌘+Shift — 취소선/외곽선 토글. 매칭 안 된 키(Ctrl+Shift+. / ,)는
+      // 아래 shift 블록의 글자 크기 switch로 흘려보낸다.
+      if (key === "x") {
+        event.preventDefault();
+        event.stopPropagation();
+        this._toggleInlineStyle("breakline", true);
+        return true;
+      }
+      if (key === "o") {
+        event.preventDefault();
+        event.stopPropagation();
+        this._toggleInlineStyle("outline", SHORTCUT_OUTLINE_THICKNESS);
+        return true;
+      }
     }
 
     if (alt) {
