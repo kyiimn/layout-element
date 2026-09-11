@@ -5,7 +5,7 @@ import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { LayoutTableElement } from "@/components/layout/table.element";
 import type { TextEditController, CurrentStyle } from "./text-edit-controller";
 import type { TextInlineStyle, TextStyle, ParagraphStyle } from "@/types/style";
-import { inlineToPlain, plainToInline, normalizeRunMap, resolvePatchAgainstInherit, stripRunFields, type RunMap } from "./run-map";
+import { inlineToPlain, plainToInline, normalizeRunMap, resolvePatchAgainstInherit, stripRunFields, type NumericInlineMetricField, type RunMap } from "./run-map";
 import { InsertController } from "./insert-controller";
 import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
@@ -70,6 +70,16 @@ export interface EditManagerEvent {
    * 영역 내에 상이한 값이 있는 필드는 생략된다. textStyle/paragraphStyle 각각 반환.
    */
   style?: CurrentStyle;
+  /**
+   * 현재 pending style (styleChange 이벤트에서만).
+   *
+   * 커서 상태의 pending 토글(`togglePendingInlineStyle`)이 발화한
+   * styleChange에만 담긴다 — 호스트 툴바는 `style`(커서 유효 스타일) 대신
+   * 이 값을 표시한다 (pending은 이후 입력의 전체 인라인 스타일이므로).
+   * `undefined`면 pending이 없는 일반 styleChange다 — 기존 수신자의
+   * `pendingNextStyle !== undefined` 무시 로직과 충돌하지 않는다.
+   */
+  pendingStyle?: Partial<TextInlineStyle>;
   /** 레이아웃 선택 변경 시 선택된 요소들 (layoutSelectionChange 이벤트에서만) */
   selectedLayouts?: LayoutElement[];
   /** 레이아웃 선택 변경 시 이전 선택 요소들 (layoutSelectionChange 이벤트에서만) */
@@ -796,6 +806,37 @@ export class EditManager {
    */
   toggleInlineStyle<K extends keyof TextInlineStyle>(field: K, value: NonNullable<TextInlineStyle[K]>): void {
     this._focusedController?._toggleInlineStyle(field, value);
+  }
+
+  /**
+   * 커서 상태(selection 없음)에서 인라인 스타일 필드를 **pending style**로 토글한다.
+   *
+   * 기존 런/문단은 변경하지 않고 이후 타이핑/붙여넣기/IME 확정 텍스트에
+   * 적용될 대기 스타일만 변경한다. 판정 기준과 발화 계약은
+   * `TextEditController._togglePendingInlineStyle` 참조 — `styleChange`
+   * 이벤트의 `pendingStyle` 페이로드로 호스트 툴바가 pending 상태를
+   * 표시한다. 포커스된 컨트롤러가 없으면 무음 무시한다.
+   *
+   * @param field - 토글할 필드명
+   * @param value - 토글 ON 값
+   */
+  togglePendingInlineStyle<K extends keyof TextInlineStyle>(field: K, value: NonNullable<TextInlineStyle[K]>): void {
+    this._focusedController?._togglePendingInlineStyle(field, value);
+  }
+
+  /**
+   * 커서 상태(selection 없음)에서 수치형 인라인 스타일 필드를 **pending style**로
+   * 증감한다 — InDesign 타이핑 속성 증감과 동일 개념 (§ 4.1.6).
+   *
+   * `pendingNextStyle ?? pendingBaseStyle`의 해당 필드값에 `delta`를 더해
+   * pending을 재설정한다. selection 있으면 per-run 상대 증감 경로로 위임한다.
+   * 포커스된 컨트롤러가 없으면 무음 무시한다.
+   *
+   * @param field - 증감할 수치형 필드 (`fontSize` | `letterSpacing` | `widthRatio` | `spaceRatio`)
+   * @param delta - 증감량 (양수: 증가, 음수: 감소)
+   */
+  adjustPendingMetric(field: NumericInlineMetricField, delta: number): void {
+    this._focusedController?._adjustOrPendingMetric(field, delta);
   }
 
   /**
@@ -3131,6 +3172,7 @@ export class EditManager {
     };
     if (type === 'styleChange' && controller) {
       event.style = controller.currentStyle;
+      event.pendingStyle = controller.pendingNextStyle;
     }
 
     this._dispatching = true;

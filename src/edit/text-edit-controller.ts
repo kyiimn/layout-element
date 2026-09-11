@@ -851,7 +851,7 @@ export class TextEditController {
       return;
     }
 
-    if (hasShortcut && (event.key.toLowerCase() === "c" || event.key.toLowerCase() === "x")) {
+    if (hasShortcut && (event.key.toLowerCase() === "c" || (event.key.toLowerCase() === "x" && !event.shiftKey))) {
       event.preventDefault();
       event.stopPropagation();
       this._copySelection();
@@ -3207,15 +3207,23 @@ export class TextEditController {
    *
    * | 기능 | 키 (물리 키 기준) |
    * |------|----|
-    * | 볼드 토글 (700 ↔ 문단 기본) | `Ctrl/⌘+B` |
-    * | 이탤릭 토글 ('italic' ↔ 문단 기본) | `Ctrl/⌘+I` |
-    * | 밑줄 토글 (`true` ↔ 문단 기본) | `Ctrl/⌘+U` |
-    * | 취소선 토글 (`true` ↔ 문단 기본) | `Ctrl/⌘+Shift+X` |
-    * | 외곽선 토글 (0.02em ↔ 문단 기본) | `Ctrl/⌘+Shift+O` |
-    * | 글자 크기 ±0.1mm | `Ctrl/⌘+Shift+.` (확대) / `Ctrl/⌘+Shift+,` (축소) |
-    * | 자간 ±0.01em | `Ctrl/⌘+Alt+Shift+[` (증가) / `Ctrl/⌘+Alt+Shift+]` (감소) |
-    * | 장평 ±0.01 | `Ctrl/⌘+Alt+[` (증가) / `Ctrl/⌘+Alt+]` (감소) |
-    * | 공백비율 ±0.01em | `Ctrl/⌘+Alt+Shift+,` (증가) / `Ctrl/⌘+Alt+Shift+.` (감소) |
+   * | 볼드 토글 (700 ↔ 문단 기본) | `Ctrl/⌘+B` |
+   * | 이탤릭 토글 ('italic' ↔ 문단 기본) | `Ctrl/⌘+I` |
+   * | 밑줄 토글 (`true` ↔ 문단 기본) | `Ctrl/⌘+U` |
+   * | 취소선 토글 (`true` ↔ 문단 기본) | `Ctrl/⌘+Shift+X` |
+   * | 외곽선 토글 (0.02em ↔ 문단 기본) | `Ctrl/⌘+Shift+O` |
+   * | 글자 크기 ±0.1mm | `Ctrl/⌘+Shift+.` (확대) / `Ctrl/⌘+Shift+,` (축소) |
+   * | 자간 ±0.01em | `Ctrl/⌘+Alt+Shift+[` (증가) / `Ctrl/⌘+Alt+Shift+]` (감소) |
+   * | 장평 ±0.01 | `Ctrl/⌘+Alt+[` (증가) / `Ctrl/⌘+Alt+]` (감소) |
+   * | 공백비율 ±0.01em | `Ctrl/⌘+Alt+Shift+,` (증가) / `Ctrl/⌘+Alt+Shift+.` (감소) |
+   *
+   * selection 없는 커서 상태에서의 토글 단축키(B/I/U/X/O)는 기존 런을 건드리지
+   * 않고 **pending style**을 토글한다 (§ 4.1.7) — 판정 기준은
+   * `pendingNextStyle ?? pendingBaseStyle`(커서 삽입점 유효 스타일)의 해당
+   * 필드값이 토글 값과 동일하면 pending에서 필드를 제거하고, 아니면 주입한다.
+   * 증감 계열(크기/자간/장평/공백비율)도 커서 상태에서 pending을 증감한다
+   * (`_adjustPendingMetric`) — InDesign 타이핑 속성 증감과 동일 개념으로,
+   * 이후 입력의 삽입점 값에 delta를 더한다.
    *
    * @param event - textarea의 keydown 이벤트
    * @returns 단축키를 소비했으면 `true`, 아니면 `false`
@@ -3231,19 +3239,19 @@ export class TextEditController {
       if (key === "b") {
         event.preventDefault();
         event.stopPropagation();
-        this._toggleInlineStyle("fontWeight", SHORTCUT_BOLD_WEIGHT);
+        this._toggleOrPendingStyle("fontWeight", SHORTCUT_BOLD_WEIGHT);
         return true;
       }
       if (key === "i") {
         event.preventDefault();
         event.stopPropagation();
-        this._toggleInlineStyle("fontStyle", "italic");
+        this._toggleOrPendingStyle("fontStyle", "italic");
         return true;
       }
       if (key === "u") {
         event.preventDefault();
         event.stopPropagation();
-        this._toggleInlineStyle("underline", true);
+        this._toggleOrPendingStyle("underline", true);
         return true;
       }
       return false;
@@ -3255,13 +3263,13 @@ export class TextEditController {
       if (key === "x") {
         event.preventDefault();
         event.stopPropagation();
-        this._toggleInlineStyle("breakline", true);
+        this._toggleOrPendingStyle("breakline", true);
         return true;
       }
       if (key === "o") {
         event.preventDefault();
         event.stopPropagation();
-        this._toggleInlineStyle("outline", SHORTCUT_OUTLINE_THICKNESS);
+        this._toggleOrPendingStyle("outline", SHORTCUT_OUTLINE_THICKNESS);
         return true;
       }
     }
@@ -3273,12 +3281,12 @@ export class TextEditController {
           case "BracketLeft":
             event.preventDefault();
             event.stopPropagation();
-            this._adjustSelectionMetric("widthRatio", this._manager.shortcutSteps.widthRatio);
+            this._adjustOrPendingMetric("widthRatio", this._manager.shortcutSteps.widthRatio);
             return true;
           case "BracketRight":
             event.preventDefault();
             event.stopPropagation();
-            this._adjustSelectionMetric("widthRatio", -this._manager.shortcutSteps.widthRatio);
+            this._adjustOrPendingMetric("widthRatio", -this._manager.shortcutSteps.widthRatio);
             return true;
         }
         return false;
@@ -3288,22 +3296,22 @@ export class TextEditController {
         case "BracketLeft":
           event.preventDefault();
           event.stopPropagation();
-          this._adjustSelectionMetric("letterSpacing", this._manager.shortcutSteps.letterSpacing);
+          this._adjustOrPendingMetric("letterSpacing", this._manager.shortcutSteps.letterSpacing);
           return true;
         case "BracketRight":
           event.preventDefault();
           event.stopPropagation();
-          this._adjustSelectionMetric("letterSpacing", -this._manager.shortcutSteps.letterSpacing);
+          this._adjustOrPendingMetric("letterSpacing", -this._manager.shortcutSteps.letterSpacing);
           return true;
         case "Comma":
           event.preventDefault();
           event.stopPropagation();
-          this._adjustSelectionMetric("spaceRatio", this._manager.shortcutSteps.spaceRatio);
+          this._adjustOrPendingMetric("spaceRatio", this._manager.shortcutSteps.spaceRatio);
           return true;
         case "Period":
           event.preventDefault();
           event.stopPropagation();
-          this._adjustSelectionMetric("spaceRatio", -this._manager.shortcutSteps.spaceRatio);
+          this._adjustOrPendingMetric("spaceRatio", -this._manager.shortcutSteps.spaceRatio);
           return true;
       }
       return false;
@@ -3315,12 +3323,12 @@ export class TextEditController {
         case "Period":
           event.preventDefault();
           event.stopPropagation();
-          this._adjustSelectionMetric("fontSize", this._manager.shortcutSteps.fontSize);
+          this._adjustOrPendingMetric("fontSize", this._manager.shortcutSteps.fontSize);
           return true;
         case "Comma":
           event.preventDefault();
           event.stopPropagation();
-          this._adjustSelectionMetric("fontSize", -this._manager.shortcutSteps.fontSize);
+          this._adjustOrPendingMetric("fontSize", -this._manager.shortcutSteps.fontSize);
           return true;
       }
     }
@@ -3390,6 +3398,131 @@ export class TextEditController {
     this._paragraph.flushRender();
     this._emitStyleChange();
     this._manager._notifyTextChange(this);
+  }
+
+  /**
+   * 증감 단축키의 진입 라우터 — selection 상태에 따라 경로를 갈린다.
+   *
+   * - selection 있음 → `_adjustSelectionMetric` (선택 범위 per-run 상대 증감)
+   * - selection 없음(커서 상태) → `_adjustPendingMetric` (pending style 증감,
+   *   InDesign 타이핑 속성 증감과 동일 개념 — 이후 입력의 삽입점 값을 움직인다)
+   *
+   * @param field - 증감할 수치형 필드
+   * @param delta - 증감량 (양수: 증가, 음수: 감소)
+   */
+  _adjustOrPendingMetric(field: NumericInlineMetricField, delta: number): void {
+    if (this._cursorModel.selection) {
+      this._adjustSelectionMetric(field, delta);
+    } else {
+      this._adjustPendingMetric(field, delta);
+    }
+  }
+
+  /**
+   * 커서 상태(selection 없음)에서 수치형 인라인 스타일 필드를 **pending style**로
+   * 증감한다 — InDesign의 타이핑 속성(typing attributes) 증감과 동일 개념이다.
+   *
+   * 기존 런/문단은 변경하지 않고, `pendingNextStyle ?? pendingBaseStyle`(삽입점
+   * 유효 스타일)의 해당 필드값에 `delta`를 더해 pending을 재설정한다. 커서 삽입점은
+   * 값이 하나뿐이므로 상대 증감이 pending의 절대값 시드 모델과 정확히 호환된다 —
+   * 툴바 pending이 설정된 상태에서도 현재 pending 값을 이어 증감한다.
+   * 결과값은 selection 경로와 동일하게 1e-9 정밀도로 반올림하고, 필드별 하한
+   * (`SHORTCUT_MIN_FONT_SIZE`, `SHORTCUT_MIN_SPACE_RATIO`)으로 클램프한다.
+   *
+   * 발화: `styleChange` 이벤트만 발화한다 (textChange 없음 — 기존 텍스트가
+   * 변하지 않기 때문). 페이로드의 `pendingStyle`은 `_dispatch`가 채운다
+   * (§ 4.1.6 커서 상태 토글과 동일 계약).
+   *
+   * @example
+   * ```ts
+   * // 삽입점 유효 fontSize 4, pending 없음
+   * _adjustPendingMetric("fontSize", 0.1);
+   * // → pending = { ...유효스타일, fontSize: 4.1 }, 이후 타이핑이 4.1mm 런으로 삽입
+   * _adjustPendingMetric("fontSize", -0.1);
+   * // → pending.fontSize = 4 (필드 제거 아님 — 유효값과 동일해져도 pending은 유지;
+   * //   해제는 커서 이동/명시 해제만 수행한다 — 상대 증감의 왕복은 값 보존이 원칙)
+   * ```
+   *
+   * @param field - 증감할 수치형 필드
+   * @param delta - 증감량 (양수: 증가, 음수: 감소)
+   */
+  _adjustPendingMetric(field: NumericInlineMetricField, delta: number): void {
+    const base = this._pendingNextStyle ?? this.pendingBaseStyle;
+    const precision = 1_000_000_000;
+    const min = field === "fontSize" ? SHORTCUT_MIN_FONT_SIZE
+      : field === "spaceRatio" ? SHORTCUT_MIN_SPACE_RATIO
+      : Number.NEGATIVE_INFINITY;
+    const current = base[field] ?? 0;
+    const next = Math.max(min, Math.round((current + delta) * precision) / precision);
+    this._setPendingNextStyle({ ...base, [field]: next });
+    this._emitStyleChange();
+  }
+
+  /**
+   * 커서 상태(selection 없음)에서 인라인 스타일 필드를 **pending style**로 토글한다.
+   *
+   * 기존 런/문단은 변경하지 않고 이후 입력에 적용될 대기 스타일만 변경한다.
+   * 토글 판정 기준은 `pendingNextStyle ?? pendingBaseStyle`의 해당 필드값이다
+   * — pending이 없으면 커서 삽입점 유효 스타일(`currentStyle.textStyle`)을
+   * 기저로 시드하는데, 이 값에 필드가 이미 토글 값(ON)이면 pending 자체를
+   * 설정하지 않는다(유효 OFF → 제거 대상 없음). pending이 있고 해당 필드가
+   * 토글 값과 동일하면 pending에서 필드를 제거한다 — 남은 필드가 없으면
+   * pending 전체를 해제한다.
+   *
+   * 발화: `_emitStyleChange()`만 호출한다 (textChange 없음 — 기존 텍스트가
+   * 변하지 않기 때문). `_setPendingNextStyle`과 동일하게 pending 설정 시
+   * `_lastStyleJson`을 리셋한다 — 이후 커서 이동 해제 시의 styleChange가
+   * dedupe로 생략되지 않는다. 이벤트 페이로드의 `pendingStyle`은
+   * `_dispatch`가 `pendingNextStyle`을 채워 넣는다 — 호스트 툴바가 pending
+   * 상태를 그대로 표시한다 (use-editor-selection-style의 `event.pendingStyle`
+   * 우선 채택 계약).
+   *
+   * @example
+   * ```ts
+   * // 커서 상태, pending 없음, 삽입점 유효 스타일 underline=false
+   * _togglePendingInlineStyle("underline", true);
+   * // → pending = { ...유효스타일, underline: true } 설정, 이후 타이핑에 밑줄 런 삽입
+   * _togglePendingInlineStyle("underline", true);
+   * // → pending에서 underline 제거 (이후 타이핑은 유효 스타일 그대로)
+   * ```
+   *
+   * @param field - 토글할 TextInlineStyle 필드명
+   * @param value - 토글 ON 값
+   */
+  _togglePendingInlineStyle<K extends keyof TextInlineStyle>(field: K, value: NonNullable<TextInlineStyle[K]>): void {
+    const base = this._pendingNextStyle ?? this.pendingBaseStyle;
+    if (base[field] === value) {
+      // 유효 OFF → pending에서 해당 필드 제거. pending이 아예 없었던 경우
+      // (커서 삽입점이 이미 ON)에는 pending을 만들지 않는다 — 제거할 게 없고,
+      // "pending 없음 = 이후 입력이 유효 스타일 따름"이 이미 ON 아님을 의미한다.
+      if (this._pendingNextStyle !== undefined) {
+        const next = { ...this._pendingNextStyle };
+        delete next[field];
+        this._setPendingNextStyle(Object.keys(next).length > 0 ? next : undefined);
+      }
+      this._emitStyleChange();
+      return;
+    }
+    this._setPendingNextStyle({ ...base, [field]: value });
+    this._emitStyleChange();
+  }
+
+  /**
+   * 토글 단축키의 진입 라우터 — selection 상태에 따라 경로를 갈린다.
+   *
+   * - selection 있음 → `_toggleInlineStyle` (선택 범위 런 즉시 토글)
+   * - selection 없음(커서 상태) → `_togglePendingInlineStyle` (pending style 토글,
+   *   기존 런/문단은 변경하지 않는다 — § 4.1.7 pending 계약)
+   *
+   * @param field - 토글할 TextInlineStyle 필드명
+   * @param value - 토글 ON 값
+   */
+  private _toggleOrPendingStyle<K extends keyof TextInlineStyle>(field: K, value: NonNullable<TextInlineStyle[K]>): void {
+    if (this._cursorModel.selection) {
+      this._toggleInlineStyle(field, value);
+    } else {
+      this._togglePendingInlineStyle(field, value);
+    }
   }
 
   /**
