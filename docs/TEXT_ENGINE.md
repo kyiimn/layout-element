@@ -2057,9 +2057,17 @@ type ThreadData = {
 1. head 프레임 `textContent` = story 전체 (pull-back의 단일 근거 — story 축소 시
    이후 프레임이 자연히 비워진다)
 2. `layoutText()` 실행 → `overflowContentFrom`(tail 시작 plain 오프셋) 산출
-3. tail을 `sliceInlineContent`로 슬라이싱(런 경계 보존)하여 다음 프레임 `textContent`로
-   주입 + `updateThreadContext({ contentFrom })`
+3. 다음 프레임에 `updateThreadContext({ contentFrom })` 주입 — **전 프레임이
+   story 전체를 `textContent`로 소유**하므로 tail 슬라이싱 주입은 하지
+   않는다 (슬라이스 주입 + contentFrom 스킵을 함께 쓰면 이중으로 건너뛴다)
 4. 마지막 프레임의 tail은 thread 자체 overset (수용 불가)
+
+프레임 소속은 **first-claim-wins**로 확정된다: `layoutThreads`가
+`ThreadEngine.validate`와 동일한 소속 판정으로 각 프레임을 첫 유효
+thread에 귀속시킨다. 한 프레임이 여러 thread에 중복 소속되면 둘째
+thread의 story가 head `textContent` 배치 시점에 첫 thread story로
+덮어써지는 소실이 발생하므로 (writeback 방어와 짝을 이루는 소유권
+단일 소스), 소속 확정 없이 배치하지 않는다.
 
 ### 26.3 tail 산식 — 라인 높이 기준
 
@@ -2110,17 +2118,60 @@ type ThreadData = {
   story 소진 지점 프레임이다. `threadTail`은 표시 전용 시맨틱이므로
   `updateThreadContext`가 캐시를 무효화하지 않는다.
 
-### 26.7 한계 (Phase 2 MVP)
+### 26.7 한계 (Phase 2 MVP → P1/P2/Phase 3 해소)
 
-- **프레임 경계를 넘는 편집**: 커서/선택이 프레임 경계를 넘는 편집(다음
-  프레임으로 커서 이동 등)은 별도 마일스톤(Phase 3). 현재 타이핑은 소속
-  프레임 내에서만 발생하며 체인 재배치로 후속 프레임이 따라간다.
-- **테이블 셀 프레임**: `findEngineById`가 셀 내부도 순회하므로 배치는 동작하지만,
-  셀 박스 재구축(`buildCellBoxEngines`)과의 상호작용 검증은 후속 과제다.
-- **금칙 경계**: 프레임 경계(이전 프레임 마지막 라인 ↔ 다음 프레임 첫 라인)의
-  금칙/걸침 교정은 프레임 배치가 독립 실행되므로 미처리 — `ThreadEngine`이
-  이전 프레임 tail 마지막 글자를 문맥으로 전달하는 후속 개선 대상이다.
+- **프레임 경계를 넘는 편집 (해소)**: 스레드 프레임의 편집 커서는
+  **story 절대 좌표계**를 쓴다 — `TextEditCoordinateMapper`가 placement·라인
+  맵을 `contentFrom` 기준으로 구축하고, 렌더 span(`data-source-offset`
+  프레임 로컬)과 엔진 쿼리(`getCharRect`/`getOffsetFromPoint`)를 절대
+  공간과 변환한다. 화살표(좌우/상하)/Backspace/타이핑이 프레임 coverage를
+  벗어나면 `EditManager.transferCursorToOwningThreadFrame`이 소유 프레임으로
+  포커스를 이관한다. 경계점(이전 tail === 다음 contentFrom)은 이동 방향이
+  소유를 결정한다 (ArrowLeft/ArrowUp → 이전 프레임 끝). Backspace@프레임
+  시작은 story 절대공간에서 자동 성립(`offset > 0`)해 이전 프레임 tail의
+  글자를 지우고 체인 재배치가 자동 수렴한다. 타이핑 흐름 넘김은
+  커밋 후 마이크로태스크에서 재확인한다 (스레드 재배치 flush 이후).
+  IME 조합 중에는 이관하지 않는다. 검증: `verify-threading-browser.mjs` [7].
+  **잔여**: 프레임을 넘는 selection 확장(Shift+Arrow)은 미지원.
+- **테이블 셀 프레임**: `findEngineById`가 셀 내부도 순회하므로 배치는
+  동작하고, **행 삭제(라벨 시프트) 후 체인·identity 유지는
+  `verify-threading.mjs` [18]이 검증한다** (prevCellBoxEnginesById 재사용).
+- **금칙 경계**: ~~프레임 경계의 금칙/걸침 교정은 미처리~~ → **해소**:
+  `ThreadEngine._boundaryCorrection`이 프레임 경계에 라인 경계와 동일한
+  追い出し 시맨틱을 적용한다 (`ParagraphEngine.shiftVisibleTail`).
+  검증: `verify-threading.mjs` [17]. 경계 걸침(행말 닫기 부호 반각 돌출)은
+  여전히 미구현 — 프레임 경계는 컬럼 경계와 달리 컬럼 밖이 프레임 밖이라
+  걸침의 지오메트리가 성립하지 않는다.
 
-검증: `npx tsx scripts/verify-threading.mjs` (55항목 — 비-스레드 회귀/단일 프레임
+### 26.8 성능 — 스레드 단위 변경 감지 (P1)
+
+`relayoutThreads`가 DOM `layout()`·`render()`에서 재실행되는 구조에서
+입력 불변 시의 비용을 제거한다:
+
+- **스킵 판정은 참조 동등성**: ThreadEngine이 스레드당 시그니처
+  (story 참조 + contentFrom 연쇄)를 기록하고, 재호출 시 (a) 전 프레임
+  `textContent`가 동일 참조 (b) `contentFrom` 연쇄 일치 (c) 전 프레임
+  `hasLayoutCache` — 세 조건이 성립하면 `updateThreadContext`+`layoutText`
+  를 통째로 스킵한다. `layoutText()`의 내부 캐시 히트조차 해시 구성 비용
+  (story 전체 직렬화, 프레임당)을 지불하므로 스킵은 `layoutText` 호출
+  자체를 건너뛴다.
+- **`hasLayoutCache`가 배치 입력 불변의 증명**: 배치 입력을 바꾸는 경로는
+  모두 data setter의 `resetIncrementalState()`로 캐시를 지운다 — 캐시가
+  살아있으면 아무도 입력을 바꾸지 않았다.
+- **flush 재진입 차단**: `_flushThreadRelayout`은 `_threadRelayoutFlushing`
+  플래그로 재진입을 차단하고 종료 시 영향 프레임의 dirty 소진을
+  assert한다. `render()` 진입의 스레드 재배치는 제거했다 — 초기 로드의
+  model 시간차는 렌더 후 unsynced 판정(`_hasUnsyncedThreadFrames`)이
+  방어한다.
+- 검증: `verify-threading.mjs` [15]/[16] (layoutText 0회 실측),
+  `verify-threading-browser.mjs` [5] (연속 10키 스트레스 dirty 소진).
+
+검증: `npx tsx scripts/verify-threading.mjs` (78항목 — 비-스레드 회귀/단일 프레임
 기준선/feed-forward/콘텐츠 무결성/런 슬라이싱/pull-back/extractData round-trip/
-overset/thread 검증/슬라이싱 엣지/threadTail 마킹).
+overset/thread 검증/슬라이싱 엣지/threadTail 마킹/**지오메트리 행렬 81조합**
+(seam·단조성·커버·tail 유일성 일괄 + 이중 스킵 검출력 증명)/**childrenData
+삼분 계약**(undefined 보존/`[]` 소거/제외 재주입)/**writeback 방어**(중복 소속
+first-claim-wins)/**printPostData 패리티**(seam print 판·contentAbsRect 범위·
+스토리 문자 동일성·getCharRect 좌표 일치·R8 로컬 오프셋=story[contentFrom]) 및
+`npx tsx scripts/verify-threading-browser.mjs` (17항목 — 초기 로드 3계층 일치/
+타이핑 전파 seam/테두리 tail 분기/round-trip 체인 동등, 브라우저 실측).

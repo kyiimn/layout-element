@@ -41,6 +41,8 @@ npx tsx scripts/verify-engine-node.mjs  # 엔진 계층 Node.js 호환성 (DOM-f
 npx tsx scripts/verify-hanging-punctuation.mjs # 걸침표(행말/행두) 엔진 전 파이프라인 정합성
 npx tsx scripts/verify-hanging-punctuation-browser.mjs # 걸침표 ON 상태 실제 화면 페인트 (파트 밖 span/클리핑/히트테스트)
 npx tsx scripts/verify-word-wrap.mjs # 워드 래핑(영문·숫자 단위 줄바꿈) 엔진 전 파이프라인 정합성
+npx tsx scripts/verify-threading.mjs # 텍스트 스레딩 엔진 전 파이프라인 정합성 (지오메트리 행렬/childrenData 계약/writeback 방어/print 패리티)
+npx tsx scripts/verify-threading-browser.mjs # 스레딩 화면 진실 (타이핑 전파 seam/테두리 tail 분기/round-trip)
 ```
 
 각 스크립트의 목적·측정 원칙·오탐 주의사항·워크플로는 **`scripts/README.md`** 참조. 성능 작업 시 `scripts/README.md`의 워크플로(기준선 측정 → 수정 → 검증 → 재측정)를 따른다.

@@ -27,7 +27,8 @@
 | `verify-image-displayrect-cache.mjs` | 정합성 (엔진) | 이미지 displayRect(objectFit/none x/y/w/h) 변화 시 오버랩 회피 재계산 — layout input hash 무효화 | ALL PASS |
 | `verify-image-edit-mode.mjs` | 정합성 (브라우저) | 이미지 편집 모드 전 동작 — dblclick 진입(일반/레이아웃 모드), 부모 box 빨간테두리+라벨 숨김, 드래그/objectFit 자동전환, 휠 비율 유지, ESC 취소/복귀, Tab 순회, selection 이동 시 포커스 상실, 클램핑, **extractData/printPostData 3소스 일치, 오버랩 회피 갱신 A/B** | ALL PASS |
 | `verify-overlap-none.mjs` | 정합성 (엔진) | overlapMode 'none' 시맨틱 — 단일 관문(computeOverlapSizeMm)에서 NONE 조기 반환, box/path 회피 유지 | ALL PASS |
-| `verify-threading.mjs` | 정합성 (엔진) | 텍스트 스레딩 — 비-스레드 회귀/단일 프레임 기준선/feed-forward/콘텐츠 무결성/런 슬라이싱/pull-back/extractData round-trip/overset/threadTail 마킹 | ALL PASS |
+| `verify-threading.mjs` | 정합성 (엔진) | 텍스트 스레딩 — 비-스레드 회귀/단일 프레임 기준선/feed-forward/콘텐츠 무결성/런 슬라이싱/pull-back/extractData round-trip/overset/threadTail 마킹/**지오메트리 행렬 81조합**/childrenData 삼분 계약/writeback 방어/printPostData 패리티/**변경 감지 스킵**/**프레임 경계 금칙 교정**/**테이블 셀 프레임 행 삭제** | ALL PASS |
+| `verify-threading-browser.mjs` | 정합성 (브라우저) | 스레딩 화면 진실 — 초기 로드 3계층(엔진↔DOM span)/타이핑 전파 seam/테두리 tail 분기/round-trip 체인 동등/**타이핑 스트레스 flush 통합**/**IME 조합 × flush**/**키보드 프레임 경계 이동(절대 좌표계)** | ALL PASS |
 | `verify-print-image-overlap.mjs` | 정합성 (엔진) | 이미지/오버랩 수정의 printPostData 반영 — 모드별 print 좌표 === displayRect, objectFit 갱신, overlapMode none 관통 | ALL PASS |
 | `verify-right-indent-tab.mjs` | 정합성 (엔진) | 좌우 밀기 탭(`\t`) 배치·정렬·print 스킵 | ALL PASS |
 | `verify-right-indent-tab-browser.mjs` | 정합성 (브라우저) | Shift+Tab 키 삽입·DOM 렌더·커서 | ALL PASS |
@@ -465,7 +466,9 @@ npx tsx scripts/verify-overlap-none.mjs   # 7항목 ALL PASS
 
 **목적**: `DocumentData.threads`(스레드 = story 콘텐츠 단일 소스 + 프레임 순차 feed-forward)가 전 소비 경로에서 정확히 동작하는지. 스레딩이 없는 문서와의 byte-identical 회귀를 최우선으로 방어한다.
 
-검증 항목 (55항목, 11그룹):
+**핵심 설계 교훈 — 지오메트리 행렬**: B1(이중 스킵)·B5(소진 조합)는 단일 시나리오를 우회 통과했다 — 프레임 용량이 잔여보다 작으면 이중 스킵이 배치를 소진시키지 않아 `visibleChars>0` 어설션이 통과한다. 스레딩은 **지오메트리 변수**(컬럼 수·높이·프레임 수·story 길이)가 결함을 은폐할 수 있는 도메인이므로 [11]은 81조합 행렬(columns×height×frames×story)에 공통 어설션 5종을 일괄 적용한다. 이 행렬이 실제로 발견한 결함: 소진 경로의 잔여 중간 프레임까지 `threadTail: true`로 마킹되어 tail이 다중 생성되는 것([8b]의 f=3 단일 시나리오는 이를 우회했다).
+
+검증 항목 (98항목, 18그룹):
 1. 비-스레드 회귀 — threads 없는 문단 tail 없음/isThreadFrame false
 2. 단일 프레임 기준선 — 스레드 없는 배치와 byte-identical + overset tail
 3. 2프레임 feed-forward — head tail이 next contentFrom으로 정확 전달
@@ -478,10 +481,49 @@ npx tsx scripts/verify-overlap-none.mjs   # 7항목 ALL PASS
 8c. 타이핑 전파 — `relayoutThreads(sources)` 엔진 story writeback + 체인 재배치 + seam 정합(f2 첫 배치 글자 === story[tail]) + 미소속 id story 불변
 9. ThreadEngine.validate — 중복 프레임/빈 스레드 필터 + **원본 identity 보존**(중복 제거 시에만 복사)
 10. sliceInlineContent 엣지
+11. **지오메트리 행렬** — 81조합 × 5어설션(seam 오프셋·seam 문자·단조성·커버·tail 유일성) + **이중 스킵 검출력 증명**(결함 변형에서 어설션이 FAIL함을 확인 — 어설션 자체의 검출력 증명)
+12. **childrenData 삼분 계약** — undefined 주입 보존/`[]` 주입 소거/제외 재주입 선택 소거 + 잔여 엔진 identity 보존
+13. **writeback 방어** — 중복 소속 프레임 first-claim-wins: 첫 thread만 갱신, 둘째 thread story 보존, 둘째 thread 프레임은 자기 story 배치 유지
+14. **printPostData 패리티** — print 첫 글자 === story[contentFrom](seam print 판)/chars 전부 contentAbsRect 내부(mm)/스토리 문자 동일성(strip 규칙 포함 기대 스트림)/getCharRect === print rect(좌표 일치)/R8 로컬 오프셋 0 = story[contentFrom]
+15. **스레드 단위 변경 감지 (P1-6)** — 변경 없는 재호출은 `skipped: true`로 프레임 `layoutText`를 통째로 스킵(래핑 카운터 0회 실측)/story 편집(참조 변경)·캐시 무효화(`hasLayoutCache` 소실)는 재배치/재배치 후 시그니처 수렴. 스킵 판정은 **참조 동등성**(story 참조 + contentFrom 연쇄 + hasLayoutCache) — 해시 직렬화 비용 0
+16. **relayoutThreads 사이클 (P1-7)** — 첫 배치 후 연속 재호출 모두 스킵 + 배치 상태 byte 불변 (DOM render() 진입의 재실행은 제거 — unsynced 판정이 초기 로드를 방어)
+17. **프레임 경계 금칙 교정 (P2-9/10)** — 위반 유도 스토리(story[tail] = 전각 닫기 부호 `」`)에서 A/B: 교정 OFF는 f2 행두금칙 위반 잔존, 교정 ON은 해소 + seam 정합(head tail === f2 contentFrom). 이동은 追い出し(prev 마지막 일반 글자와 닫기 부호를 함께 내보냄 — 라인 경계 `_applyLineBreakRules`와 동일 시맨틱). 워드 가드: prev 마지막이 워드 글자면 위반 잔존 허용(워드 무결성 > 금칙)
+18. **테이블 셀 프레임 × 행 삭제 (P2-11)** — 셀 내 2프레임 스레드 체인 배치/행 삭제(라벨 시프트) 후 잔여 프레임 엔진 identity 보존 + threads 데이터로 체인 재배치 + story 배치 지속
+
+**print 스트림 비교 주의 (오탐 방지)**: print chars는 라인 경계 공백(strip 규칙)과 탭이 제외된다 — raw story 슬라이스와 직접 비교하면 오탐이다. `printWalk` 측정 유틸이 print와 동일한 워크(overflow 게이팅 + stripRange + 탭 스킵 + source offset 누적)로 기대 스트림을 산출한다. 또한 **justify 정렬은 charOffsets 차분 ≠ swidth가 기하학적으로 정상**(분산 gap)이므로 getCharRect↔print 폭 비교는 left 정렬 문서로 수행하고, 파트 마지막 글자는 getCharRect가 커서 시맨틱(파트 잔여 폭)을 주는 사전 존재 동작이므로 폭 비교에서 제외한다.
 
 **실행**:
 ```bash
-npx tsx scripts/verify-threading.mjs   # 55항목 ALL PASS
+npx tsx scripts/verify-threading.mjs   # 98항목 ALL PASS
+```
+
+### `verify-threading-browser.mjs` — 스레딩 화면 진실 (브라우저)
+
+**목적**: 엔진 검증(verify-threading.mjs)이 증명하지 못하는 "화면 진실"을 검증한다. B3(엔진 트리/DOM model 이원화)·B6(타이핑 미전파·허위 테두리)는 **엔진 게터가 올바른데 DOM span이 0개인 상태**로 발생했다 — 3계층(엔진 게터 → 섀도우 DOM span → :host boxShadow)을 모두 측정해야 "보인다"가 증명된다. `examples/threading.html`(3 스레드 × 프레임 체인)에서 Playwright로 검증한다.
+
+검증 항목 (17항목, 4 시나리오):
+1. **초기 로드** — 전 스레드 프레임 `isThreadFrame` + 컬럼 수 일치(엔진↔DOM) + span 글자 수 === 엔진 visibleChars 근사(strip 편차 허용) + 배치 대상 프레임 span 존재(소진 프레임의 빈 렌더는 정상)
+2. **타이핑 전파** — head `execCommand('insertText')` → story 갱신 + seam 문자 일치(f2 DOM 첫 글자 === story[f2.contentFrom]) + 체인 일치(f2.from === head tail) + 소스 프레임 편집 파이프라인 렌더 유지. **주의**: tail이 이동하지 않으면 f2 헤드가 불변인 것이 기하학적으로 정상(라인 충전률 불변 시 tail 불변) — 전파 판정은 story 성장+seam+체인의 3각 구조로 한다 (기대값 직관 오탐 방지)
+3. **테두리 분기** — 중간 프레임 boxShadow에 빨간 없음 / overset 유도 후 tail만 `rgb(255,0,0)`. **주의**: overset 유도는 `doc.data` setter 경로로 — `engine.data` 직접 주입은 `doc.layout()`의 `_layoutStructure`가 DOM 캐시(`_threads`)로 되돌리므로 스레딩 story 갱신 경로가 아니다
+4. **round-trip** — `ensureCommitted` → `engine.extractData` 직렬화 → `doc.data` 재주입 → threads 보존 + 프레임 체인 동등(contentFrom·visibleChars) + 배치 대상 프레임 span 존재
+
+**측정 유틸 모듈화** (`plainOf`/`domTextOf`/`readBoxShadow`/`frameOf`/`threadFrameIds`): 측정 코드 자체의 버그(속성명 혼동, 배열 인덱싱)가 seam 판정을 오측한 실패 모드를 종지한다 — 전 시나리오가 동일 함수를 재사용한다.
+
+**이 스크립트가 잡은 실제 버그 (작성 과정)**:
+- **문서 요소 id 덮어쓰기** — `LayoutDocumentElement.data` setter가 id 없는 문서 데이터에 `genUUID()`를 자동 생성해 `this.id`를 덮어써, HTML 마크업이 부여한 `id="doc"`이 난수로 바뀌고 `document.getElementById('doc')`가 null을 반환했다. 수정: 문서 요소 자신의 id는 자동 생성하지 않는다(자식 박스/문단은 reconcile 키로 쓰이므로 유지).
+
+**dev server 방어**: `verify-multicolumn.mjs`와 동일한 2중 방어 — probe가 HTML title(`Threading Demo — 텍스트 스레딩`)까지 검증하고, 정상 서버가 없으면 자체 스폰(포트 5202) 후 종료 시 정리한다.
+
+**검증 항목 확장 (P1-8/P2-12/Phase 3)**: 브라우저 검증은 28항목으로 확장되었다:
+5. **타이핑 스트레스 (P1-8)** — 연속 10키 타이핑으로 (a) 마이크로태스크 통합 동작 (b) flush 후 체인 dirty 전부 소진(`hasPendingChanges` 전부 false — 재진입 원천 제거) (c) 스트레스 후 seam 정합. `_flushThreadRelayout`은 `_threadRelayoutFlushing` 플래그로 재진입을 차단하고 flush 종료 시 dirty 잔존을 console.error로 assert한다
+6. **IME 조합 × flush (P2-12)** — Chromium 이벤트 모방(compositionstart → update → end)으로 (a) 조합 중 `_isComposing` 유지(flush가 조합 상태를 훼손하지 않음 — `isComposing` 게이트 불필요를 실측으로 확인) (b) 커밋('한')의 story 반영 (c) 커밋 후 체인 seam 정합
+7. **키보드 프레임 경계 이동 (Phase 3 — story 절대 좌표계)** — 스레드 프레임의 편집 커서는 story 절대 오프셋(mapper 통일)이다: (a) ArrowRight@head 끝 → f2 포커스 이관 + 커서 유지 (b) ArrowLeft@f2 시작(경계점) → head 이관 (경계점은 이동 방향이 소유 결정) (c) Backspace@f2 시작 → head 마지막 visible 글자 삭제 + head 이관 (d) 클릭 매핑 → 절대 오프셋(f2 첫 span = contentFrom)
+8. **f2 클릭(CDP) 진입 → 실제 타이핑 — 컨트롤러 직접 파싱 경로** — `_getSourceOffsetFromEvent`가 span dataset(프레임 로컬)을 직접 파싱한다: 절대 변환이 없으면 f2 클릭이 로컬 오프셋을 커서로 주고, 타이핑이 head 영역에 삽입돼 **"커서만 이동하고 글자가 안 써지는"** 회귀가 난다 (실측 재현). 합성 dispatchEvent로는 span 히트가 재현되지 않으므로 독립 페이지 로드에서 CDP 마우스·키보드로 검증한다: (a) f2 span 클릭 → f2 편집 포커스 (b) 클릭 커서가 절대 오프셋 (c) 실제 타이핑 → f2 화면 렌더 + 포커스 유지
+9. **f2 연속 타이핑 — prefix 캐시 좌표계 (비-헤드 프레임)** — `_buildPrefixCache`가 절대 캐럿과 로컬 컬럼 글자수를 비교하면 전 컬럼이 prefix로 분류돼 재배치가 0회가 된다 — **두 번째 키스트로크부터 새 글자가 화면에 안 쓰지는 회귀** (영문: 커서만 이동 / 한글: 조합 span이 커밋 순간 사라지는 플리커 = "원본으로 돌아갔다가"). (a) 영문 5자 연속 타이핑 → "abcde" 전부 렌더 (b) 한글 2단어 연속 조합 → 커밋 전부 렌더
+
+**실행**:
+```bash
+npx tsx scripts/verify-threading-browser.mjs   # 33항목 ALL PASS (서버 없으면 자동 기동)
 ```
 
 ### `verify-print-image-overlap.mjs` — 이미지/오버랩 수정의 print 반영 (엔진)
