@@ -927,8 +927,12 @@ export class BoxEngine {
       this._gridCalculator = GridCalculatorEngine.create(gcOptions, this._resources!.ppm);
     }
 
-    if (!this._childrenData) {
-      if (this._childEngines.length > 0) this._childEngines = [];
+    if (this._childrenData === undefined) {
+      // children 미주입(undefined)은 기존 childEngines를 유지한다 —
+      // DOM `_rawData()`는 children을 의도적으로 제외하므로(엔진-우선 원칙),
+      // children 없는 재주입이 이미 구축된 paragraph 엔진(스레드 프레임 포함)을
+      // 소거하면 안 된다. 명시적 소거는 children: [] 주입으로 수행한다 —
+      // 빈 배열은 이 가드를 통과해 아래 경로에서 childEngines를 소거한다.
       this._dirty = false;
       return;
     }
@@ -1242,7 +1246,7 @@ export class BoxEngine {
         pe.data = {
           id: paraData.id,
           zIndex: paraData.zIndex,
-          content: paraData.content,
+          content: paraData.content ?? '',
           column,
           gap,
           paragraphStyle: paraData.paragraphStyle ?? {},
@@ -1262,7 +1266,7 @@ export class BoxEngine {
     const engineData = {
       id: paraData.id,
       zIndex: paraData.zIndex,
-      content: paraData.content,
+      content: paraData.content ?? '',
       column,
       gap,
       paragraphStyle: paraData.paragraphStyle ?? {},

@@ -23,6 +23,7 @@ import { TableEngine, TableCellEngine } from "./table-engine";
 import { prepareImageDecoder } from "./image-decoder";
 import { computeLineHeightMm, resolveLineGap } from "./line-height";
 import { DEFAULT_LINE_GAP_MODE } from "@/constants";
+import { ThreadEngine } from "./thread-engine";
 
 let _engineIdCounter = 0;
 
@@ -71,6 +72,7 @@ export class DocumentEngine {
   private _gridCalculator: GridCalculatorEngine;
   private _childBoxEngines: BoxEngine[] = [];
   private _childrenData: BoxData[] = [];
+  private _threadEngine: ThreadEngine | null = null;
 
   /** Generation counter — incremented on data/ppm change. Used by child BoxEngine for cache invalidation. */
   private _generation: number = 0;
@@ -953,6 +955,65 @@ export class DocumentEngine {
     this._childBoxEngines = boxEngines;
     this._newEnginesCreated = ctx.newEnginesCreated;
     this._refreshParagraphOverlays(boxEngines);
+    this._layoutThreads();
+  }
+
+  /**
+   * 문서 스레드의 순차 feed-forward 배치를 실행한다.
+   *
+   * threads가 정의된 문서에서만 동작하며, 각 thread의 프레임 문단을
+   * ThreadEngine으로 순차 배치한다. threads가 없으면 no-op (기존 동작
+   * byte-identical). `_buildTree()` 이후에 호출되어야 프레임 엔진이 존재한다.
+   */
+  private _layoutThreads(): void {
+    if (!this._data.threads || this._data.threads.length === 0) return;
+    if (!this._threadEngine) {
+      this._threadEngine = ThreadEngine.create();
+    }
+    this._threadEngine.layoutThreads(this._data.threads, id => this.findEngineById(id));
+  }
+
+  /**
+   * 스레드 배치를 재실행한다 (DOM layout 종료 시점용).
+   *
+   * 초기 reconcile 중 paragraph model이 box 엔진에 push되는 시점이
+   * 제각각이라 `layout()` 내부의 `_layoutThreads`가 일부 프레임만
+   * 찾을 수 있다. 모든 model이 존재하는 시점에 재호출해 스레드
+   * 체인을 완성한다. threads가 없으면 no-op.
+   *
+   * @param sourceFrameIds - (선택) 편집이 발생한 프레임 id 집합. 전달되면
+   *   해당 프레임의 `textContent`를 소속 thread의 story(`content`)에
+   *   writeback한 뒤 체인을 재배치한다 — 편집 프레임의 model이 story의
+   *   새 진실이 되기 때문이다.
+   */
+  public relayoutThreads(sourceFrameIds?: ReadonlySet<string>): void {
+    if (sourceFrameIds && sourceFrameIds.size > 0) {
+      this._writebackThreadStory(sourceFrameIds);
+    }
+    this._layoutThreads();
+  }
+
+  /**
+   * 편집 프레임의 textContent를 소속 스레드의 story에 writeback한다.
+   *
+   * story 소유권은 엔진에 있다 (엔진-우선 원칙) — DOM 계층이 threads 데이터를
+   * 직접 mutate하지 않는다. writeback은 `this._data.threads`의 **원본 객체**에
+   * 기록한다 (`ThreadEngine.validate`가 중복 제거가 필요한 경우만 복사본을
+   * 만들므로 원본 identity가 보존된다).
+   *
+   * @param sourceFrameIds - 편집이 발생한 프레임 id 집합
+   */
+  private _writebackThreadStory(sourceFrameIds: ReadonlySet<string>): void {
+    const threads = this._data.threads;
+    if (!threads) return;
+    for (const thread of threads) {
+      const frameIds = thread.paragraphIds ?? [];
+      const sourceId = frameIds.find(id => sourceFrameIds.has(id));
+      if (sourceId === undefined) continue;
+      const sourcePe = this.findEngineById(sourceId);
+      if (!(sourcePe instanceof ParagraphEngine)) continue;
+      thread.content = sourcePe.textContent;
+    }
   }
 
   /**
