@@ -1,5 +1,5 @@
 import { Z_INDEX_TYPE_LABEL } from "@/constants";
-import { DocumentData, ParagraphStyle, TextStyle, BoxData, Font, CMYKColorSet } from "@/types";
+import { DocumentData, ParagraphStyle, TextStyle, BoxData, Font, CMYKColorSet, ThreadData } from "@/types";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
@@ -8,7 +8,7 @@ import type { LayoutTableElement } from "./table.element";
 import { genUUID } from "@/utils";
 import type { FlipLayoutOptions } from "@/engine";
 import { EditManager } from "@/edit/edit-manager";
-import { DocumentEngine, BoxEngine } from "@/engine";
+import { DocumentEngine, BoxEngine, ParagraphEngine } from "@/engine";
 import type { FontLoaderEngine, ColorRegistryEngine, ParsedFont, GridCalculatorEngine } from "@/engine";
 import { FontLoader } from "@/resource/font-loader";
 import { ColorRegistry } from "@/resource/color-registry";
@@ -117,6 +117,12 @@ export class LayoutDocumentElement extends HTMLElement {
 
   private _paragraphStyle: ParagraphStyle = {};
   private _textStyle: TextStyle = {};
+
+  /** 스레딩 정의 (옵셔널). `data` 세터에서 설정되어 엔진에 전달된다. */
+  private _threads?: ThreadData[];
+
+  /** 스레드 체인 재배치 예약 소스(편집 프레임 id) 집합. 마이크로태스크에서 소비. */
+  private _threadRelayoutSources: Set<string> | null = null;
 
   /**
    * 이 문서 요소 전용 EditManager 인스턴스.
@@ -302,6 +308,7 @@ export class LayoutDocumentElement extends HTMLElement {
       gap: this._gap,
       paragraphStyle: this._paragraphStyle,
       textStyle: this._textStyle,
+      threads: this._threads,
     };
     if (!this._engine) {
       this._engine = DocumentEngine.create(docData, fontLoader, colorRegistry, this._ppm);
@@ -488,7 +495,112 @@ export class LayoutDocumentElement extends HTMLElement {
     this._applyStyle();
     this._renderGuideColumns();
     this._propagateInheritStyle();
+    this._relayoutThreads();
+    this._syncThreadFramesToDom();
     return this;
+  }
+
+  /**
+   * 스레드 배치를 재실행한다.
+   *
+   * 초기 reconcile 중 paragraph의 connectedCallback이 model을 box 엔진에
+   * push하는 시점이 제각각이므로, 엔진 layout 시점의 `_layoutThreads`가
+   * 일부 프레임만 찾는 경우가 있다. layout() 종료 시점(모든 model이
+   * push된 후)에 재실행해 스레드 체인을 완성한다. threads가 없으면
+   * no-op (기존 동작 byte-identical).
+   */
+  private _relayoutThreads(): void {
+    const engine = this._engine;
+    if (!engine?.data?.threads?.length) return;
+    engine.relayoutThreads();
+  }
+
+  /**
+   * 스레드 프레임 편집(타이핑) 전파 — 체인 재배치를 예약한다.
+   *
+   * 편집 중인 프레임의 model.textContent가 story의 새 진실이므로, 체인
+   * 재배치 시 threads.content를 소스 프레임의 textContent로 갱신한다
+   * (writeback). 마이크로태스크로 통합해 키 입력마다 체인 전체를
+   * 재배치하는 비용을 한 번으로 묶는다.
+   *
+   * @param sourceFrameId - 편집이 발생한 스레드 프레임 id
+   */
+  requestThreadRelayout(sourceFrameId: string): void {
+    if (!this._threadRelayoutSources) {
+      const sources = new Set<string>();
+      this._threadRelayoutSources = sources;
+      queueMicrotask(() => {
+        this._threadRelayoutSources = null;
+        this._flushThreadRelayout(sources);
+      });
+    }
+    this._threadRelayoutSources.add(sourceFrameId);
+  }
+
+  /**
+   * 예약된 스레드 체인 재배치를 실행한다.
+   *
+   * 1. story writeback + 체인 재배치 — `DocumentEngine.relayoutThreads(sources)`
+   *    가 수행한다 (story 소유권은 엔진)
+   * 2. 스레드 프레임 DOM model 동기화
+   * 3. 소스를 제외한 스레드 프레임 DOM 재렌더 (소스는 편집 파이프라인이 렌더)
+   *
+   * @param sources - 편집이 발생한 프레임 id 집합
+   */
+  private _flushThreadRelayout(sources: Set<string>): void {
+    const engine = this._engine;
+    const threads = engine?.data?.threads;
+    if (!engine || !threads || threads.length === 0) return;
+
+    const affectedFrames = new Set<string>();
+    for (const thread of threads) {
+      const frameIds = thread.paragraphIds ?? [];
+      if (!frameIds.some(id => sources.has(id))) continue;
+      for (const id of frameIds) affectedFrames.add(id);
+    }
+    if (affectedFrames.size === 0) return;
+
+    engine.relayoutThreads(sources);
+    this._syncThreadFramesToDom();
+
+    // 소스를 제외한 프레임 재렌더 — 편집 컨트롤러가 소스의 DOM을 관리 중
+    const domParagraphs = this.querySelectorAll('x-layout-paragraph');
+    for (const frameId of affectedFrames) {
+      if (sources.has(frameId)) continue;
+      const domPe = Array.from(domParagraphs).find(p => p.id === frameId);
+      if (domPe) {
+        domPe.render();
+      }
+    }
+  }
+
+  /**
+   * 스레딩 프레임 DOM model을 엔진 트리 PE(스레드 배치 완료 상태)로 동기화한다.
+   *
+   * 초기 reconcile이 스레드 패스보다 먼저 DOM model을 만들면 엔진 트리 PE와
+   * DOM model이 서로 다른 인스턴스가 되어 DOM 렌더가 스레드 결과를 표시하지
+   * 못한다. 엔진 `layout()` 종료 후(스레드 배치 완료 시점) 프레임 id로 양쪽을
+   * 일치시킨다. threads가 없으면 no-op (기존 동작 byte-identical).
+   */
+  private _syncThreadFramesToDom(): void {
+    const engine = this._engine;
+    const threads = engine?.data?.threads;
+    if (!threads || threads.length === 0) return;
+
+    const domParagraphs = this.querySelectorAll('x-layout-paragraph');
+    const synced = new Set<string>();
+    for (const thread of threads) {
+      for (const frameId of thread.paragraphIds ?? []) {
+        if (synced.has(frameId)) continue;
+        synced.add(frameId);
+        const enginePe = engine.findEngineById(frameId);
+        if (!(enginePe instanceof ParagraphEngine) || !enginePe.isThreadFrame) continue;
+        const domPe = Array.from(domParagraphs).find(p => p.id === frameId);
+        if (domPe) {
+          domPe.syncThreadEngine(enginePe);
+        }
+      }
+    }
   }
 
   /**
@@ -497,11 +609,41 @@ export class LayoutDocumentElement extends HTMLElement {
    */
   async render() {
     if (!this.isConnected) return null;
+    // 자식 render 전 스레드 체인을 완성한다 — reconcile 순서상 늦게 만들어진
+    // 프레임 model까지 포함해 feed-forward 배치를 확정한다.
+    this._relayoutThreads();
     const sortedItems = [...this.items].sort((a, b) => b.zIndex - a.zIndex);
     for (let i = 0; i < sortedItems.length; i++) {
       await sortedItems[i].render()
     }
+    // 자식 render가 model을 재생성한 경우(스레드 프레임이 아직 미적용이면)
+    // 스레드 체인을 재확정한다.
+    if (this._hasUnsyncedThreadFrames()) {
+      this._relayoutThreads();
+      this._syncThreadFramesToDom();
+    }
     return this;
+  }
+
+  /**
+   * 스레드 프레임 중 엔진 트리 PE가 아직 스레드 배치가 적용되지 않은 것이 있는지.
+   * render 이후 재확정이 필요한지 판정한다.
+   *
+   * @returns 미적용 스레드 프레임이 있으면 true
+   */
+  private _hasUnsyncedThreadFrames(): boolean {
+    const engine = this._engine;
+    const threads = engine?.data?.threads;
+    if (!threads || threads.length === 0) return false;
+    for (const thread of threads) {
+      for (const frameId of thread.paragraphIds ?? []) {
+        const enginePe = engine.findEngineById(frameId);
+        if (enginePe instanceof ParagraphEngine && !enginePe.isThreadFrame) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   appendChild<T extends Node>(node: T) {
@@ -570,6 +712,7 @@ export class LayoutDocumentElement extends HTMLElement {
       this._gap = data.gap;
       this._paragraphStyle = data.paragraphStyle;
       this._textStyle = data.textStyle;
+      this._threads = data.threads;
 
       // reconcile 전에 엔진의 문서 속성(width/height/columns/gap/styles)만 갱신한다.
       // childrenData + layout()은 reconcile 후에 호출해야 구 content가 엔진에
@@ -589,6 +732,7 @@ export class LayoutDocumentElement extends HTMLElement {
         gap: this._gap,
         paragraphStyle: this._paragraphStyle,
         textStyle: this._textStyle,
+        threads: this._threads,
       };
       if (!this._engine) {
         this._engine = DocumentEngine.create(docData, fontLoader, colorRegistry, this._ppm);
@@ -746,6 +890,7 @@ export class LayoutDocumentElement extends HTMLElement {
       gap: this.gap,
       paragraphStyle: this.paragraphStyle,
       textStyle: this.textStyle,
+      threads: this._threads,
     }
   }
 
@@ -761,6 +906,8 @@ export class LayoutDocumentElement extends HTMLElement {
   get gap() { return this._gap; }
   get paragraphStyle() { return this._paragraphStyle; }
   get textStyle() { return this._textStyle; }
+  /** 스레딩 정의 (옵셔널) */
+  get threads() { return this._threads; }
 
   get visibleGuide() { return this._visibleGuide; }
   get type() { return 'document' as const; }

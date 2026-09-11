@@ -153,7 +153,13 @@ export class LayoutParagraphElement extends HTMLElement {
       // data setter가 model.textContent를 새 content로 갱신했지만, engine 트리 재구축으로
       // childEngines에 이전 content를 가진 PE가 existing으로 들어올 수 있다. 기존 model의
       // 신선한 content를 이관하여 텍스트가 되돌려지지 않도록 한다.
-      if (this._model) {
+      //
+      // 스레드 프레임은 방향이 반전된다 — 엔진 트리 existing이 문서 스레드
+      // feed-forward로 주입한 story를 소유하므로, existing의 content가 진실이다.
+      // DOM model의 stale content('')로 existing을 소거하면 스레드가 지워진다.
+      if (existing.isThreadFrame) {
+        this._sourceContent = existing.textContent;
+      } else if (this._model) {
         existing.textContent = this._model.textContent;
       }
       this._model = existing;
@@ -229,8 +235,14 @@ export class LayoutParagraphElement extends HTMLElement {
       }
     } else {
       const oldData = this._model.data;
+      // 스레드 프레임의 engine data content는 직렬화 시 생략된다(undefined) —
+      // model이 소유한 실제 textContent가 스레드 feed-forward의 소스이므로
+      // content 비교 기준도 model textContent여야 재주입이 무한 반복되지 않는다.
+      const oldContentForCompare = this._model.isThreadFrame
+        ? this._model.textContent
+        : oldData.content;
       const structureUnchanged =
-        oldData.content === newContent &&
+        oldContentForCompare === newContent &&
         oldData.column === newColumn &&
         oldData.gap === newGap &&
         oldData.paragraphStyle === this._paragraphStyle &&
@@ -371,6 +383,14 @@ export class LayoutParagraphElement extends HTMLElement {
       this._model.scale = manager.scale;
     }
 
+    // 스레딩 편집 전파: 편집(rAF 커밋)이 model.textContent를 갱신한 뒤 이
+    // render()로 들어오면 문서 스레드 체인 재배치를 요청한다. dirty 여부로
+    // "편집 직후"만 판별해 일반 재렌더와 구분한다.
+    if (this._model.isThreadFrame && this._model.hasPendingChanges) {
+      const docEl = this._findDocumentElement();
+      docEl?.requestThreadRelayout(this.id);
+    }
+
     const lineCountBefore = this._model.previousLineCount;
     const overflowBefore = this._model.previousOverflow;
 
@@ -414,14 +434,19 @@ export class LayoutParagraphElement extends HTMLElement {
 
     const renderStats = this._computeRenderStats();
 
+    // 스레딩 중간 프레임의 overflow는 다음 프레임으로 흘러 소비된다 — 오류가
+    // 아니므로 빨간 테두리/render-error는 체인 tail에서만 발동한다.
+    const isOverflowError = this._model.overflow > 0 && this._model.isThreadTail;
+    const visibleHasOverflow = renderStats.overflow.hasOverflow && this._model.isThreadTail;
+
     const hadOverflow = this._hasOverflow;
-    const hasOverflowNow = renderStats.overflow.hasOverflow;
+    const hasOverflowNow = visibleHasOverflow;
     if (hasOverflowNow !== hadOverflow) {
       this._hasOverflow = hasOverflowNow;
       this._applyStyle();
     }
 
-    if (this._model.overflow > 0) {
+    if (isOverflowError) {
       const event = new CustomEvent('render-error', {
         detail: { id: this.id, type: 'text-overflow', overflow: this._model.overflow },
         bubbles: true,
@@ -591,7 +616,7 @@ export class LayoutParagraphElement extends HTMLElement {
     if (data.zIndex !== undefined) this._zIndex = data.zIndex;
     if (data.overlapMode !== undefined) this._overlapMode = data.overlapMode;
 
-    this._sourceContent = data.content;
+    this._sourceContent = data.content ?? '';
     let editingPath = false;
     if (this._model && data.content !== undefined) {
       const manager = this._editManagerRef ?? this.editManager;
@@ -605,7 +630,9 @@ export class LayoutParagraphElement extends HTMLElement {
           this._model.textContent = data.content;
         }
         editingPath = true;
-      } else if (!isEditingThis) {
+      } else if (!isEditingThis && !this._model.isThreadFrame) {
+        // 스레드 프레임의 content는 문서 스레드 feed-forward가 소유한다 —
+        // data 주입('')이 엔진 story를 소거하지 않도록 건너뛴다.
         this._model.textContent = data.content;
       }
     }
@@ -681,6 +708,10 @@ export class LayoutParagraphElement extends HTMLElement {
    * `data` setter는 내부 필드를 직접 갱신한 뒤 자체 `layout()`을
    * 호출하므로 이 setter를 거치지 않는다 (중복 렌더링 방지).
    *
+   * 스레딩 프레임(engine-fed, `_isThreadFrame`)에서는 콘텐츠가 스레드
+   * story에서 feed-forward되므로 외부 주입을 무시한다 — story 단일 소스
+   * 계약을 유지한다.
+   *
    * @param value - 새 텍스트 콘텐츠. `string` 또는 인라인 런 배열.
    *
    * @example
@@ -691,7 +722,7 @@ export class LayoutParagraphElement extends HTMLElement {
    */
   set content(value: string | (string | TextInlineData)[]) {
     this._sourceContent = value;
-    if (this._model) this._model.textContent = value;
+    if (this._model && !this._model.isThreadFrame) this._model.textContent = value;
     this.markStructureChangedAndRender();
   }
 
@@ -1034,6 +1065,27 @@ export class LayoutParagraphElement extends HTMLElement {
   markStructureChangedAndFlushRender(): void {
     this._perfStructureChanged = true;
     this.flushRender();
+  }
+
+  /**
+   * 스레딩 프레임 동기화 — 문서 스레드 배치가 완료된 엔진 트리 PE를
+   * 이 문단의 model로 이관한다.
+   *
+   * DOM 초기 reconcile이 스레드 패스보다 먼저 DOM model을 만들면
+   * 엔진 트리 PE(스레드 배치 소유)와 DOM model이 서로 다른 인스턴스가
+   * 된다. 이 상태로는 DOM 렌더가 스레드 결과(빈 후속 프레임)를 표시하지
+   * 못한다. `LayoutDocumentElement.layout()`이 엔진 배치 직후 호출한다.
+   *
+   * @param enginePe - 엔진 트리의 ParagraphEngine (스레드 배치 완료 상태)
+   * @returns 이관되었으면 true
+   */
+  syncThreadEngine(enginePe: ParagraphEngine): boolean {
+    if (!enginePe || enginePe === this._model) return false;
+    this._model = enginePe;
+    this._sourceContent = enginePe.textContent;
+    this._engine = enginePe;
+    this._perfStructureChanged = false;
+    return true;
   }
 
   /**
