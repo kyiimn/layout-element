@@ -60,6 +60,18 @@ export class TextEditCoordinateMapper {
   private _columnSpansCache: Map<LayoutColumnElement, HTMLSpanElement[]> = new Map();
 
   /**
+   * 스레딩 프레임의 story 절대 오프셋 기준점.
+   *
+   * 스레드 프레임은 story 전체를 `textContent`로 소유하고 `contentFrom`부터
+   * 배치한다 — 렌더 span(`data-source-offset`)과 엔진 쿼리는 프레임 로컬
+   * 오프셋이고, 편집 커서는 story 절대 오프셋을 사용한다. 이 기준점으로
+   * 두 공간을 변환한다. 비-스레딩 문단은 0이라 변환이 항등이 된다.
+   *
+   * `rebuild()`/`rebuildMappingsOnly()` 시점에 model에서 읽는다.
+   */
+  private _contentFrom = 0;
+
+  /**
    * 각 컬럼의 source offset 범위. binary search용.
    * `_columnRanges[columnIndex] = { start, end }` — start는 첫 가시 문자의 source offset, end는 마지막 가시 문자의 source offset + 1.
    */
@@ -145,7 +157,8 @@ export class TextEditCoordinateMapper {
     if (!model) return;
 
     const columnContents = model.columnContents;
-    let sourceOffset = 0;
+    this._contentFrom = model.isThreadFrame ? model.contentFrom : 0;
+    let sourceOffset = this._contentFrom;
     const textContent = model.plainText;
 
     for (let columnIndex = 0; columnIndex < columnContents.length; columnIndex++) {
@@ -399,7 +412,8 @@ export class TextEditCoordinateMapper {
   private _getCharRectFromEngine(sourceOffset: number): DOMRect | null {
     const engine = this._paragraph.engine;
     if (!engine) return null;
-    const mmRect = engine.getCharRect(sourceOffset);
+    // 엔진 쿼리는 프레임 로컬 오프셋을 기대한다 — 절대 → 로컬 변환.
+    const mmRect = engine.getCharRect(sourceOffset - this._contentFrom);
     if (!mmRect) return null;
 
     const scale = this._manager.scale;
@@ -512,9 +526,12 @@ export class TextEditCoordinateMapper {
     const srcOff = parseInt(bestSpan.dataset.sourceOffset ?? '', 10);
     if (Number.isNaN(srcOff)) return null;
 
+    // span srcOff는 렌더 로컬 — story 절대로 변환해 반환한다.
+    const absOff = srcOff + this._contentFrom;
+
     // span 중심 기준 좌/우 결정
     const isRightSide = x > bestSpanRect.left + bestSpanRect.width / 2;
-    return { textOffset: isRightSide ? srcOff + 1 : srcOff };
+    return { textOffset: isRightSide ? absOff + 1 : absOff };
   }
 
   /**
@@ -556,8 +573,9 @@ export class TextEditCoordinateMapper {
       for (const span of spans) {
         const srcOff = parseInt(span.dataset.sourceOffset ?? '', 10);
         if (Number.isNaN(srcOff)) continue;
+        const absOff = srcOff + this._contentFrom;
 
-        if (srcOff < startOffset || srcOff >= endOffset) {
+        if (absOff < startOffset || absOff >= endOffset) {
           if (currentRow) {
             ranges.push({
               top: currentRow.top,
@@ -634,11 +652,12 @@ export class TextEditCoordinateMapper {
       for (const span of spans) {
         const srcOff = parseInt(span.dataset.sourceOffset ?? '', 10);
         if (Number.isNaN(srcOff)) continue;
+        const absOff = srcOff + this._contentFrom;
 
-        if (srcOff < startOffset || srcOff >= endOffset) continue;
+        if (absOff < startOffset || absOff >= endOffset) continue;
 
-        result += model.plainText[srcOff] ?? span.innerText;
-        lastSourceOffset = srcOff;
+        result += model.plainText[absOff] ?? span.innerText;
+        lastSourceOffset = absOff;
       }
     }
 
@@ -713,7 +732,8 @@ export class TextEditCoordinateMapper {
     const endSource = parseInt(lastSpan.dataset.sourceOffset ?? '', 10);
     if (Number.isNaN(startSource) || Number.isNaN(endSource)) return null;
 
-    return { start: startSource, end: endSource + 1 };
+    // 렌더 로컬 → story 절대
+    return { start: startSource + this._contentFrom, end: endSource + this._contentFrom + 1 };
   }
 
   private _findColumnBySpan(span: HTMLSpanElement): LayoutColumnElement | null {
@@ -770,8 +790,10 @@ export class TextEditCoordinateMapper {
     const column = columns[columnIndex];
     if (!column || !column.shadowRoot) return null;
 
+    // span의 data-source-offset은 렌더 로컬 오프셋이다 (contentFrom 기준).
+    const localOffset = sourceOffset - this._contentFrom;
     const span = column.shadowRoot.querySelector<HTMLSpanElement>(
-      `[data-source-offset="${sourceOffset}"]:not([data-temporary])`,
+      `[data-source-offset="${localOffset}"]:not([data-temporary])`,
     );
     if (!span) return null;
 

@@ -1,4 +1,5 @@
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
+import { ParagraphEngine } from "@/engine";
 import { LayoutDocumentElement } from "@/components/layout/document.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
@@ -1177,6 +1178,114 @@ export class EditManager {
     if (currentParagraph !== paragraph) return false;
 
     (this._focusedController as unknown as { _blurInternal(): void })._blurInternal();
+    return true;
+  }
+
+  /**
+   * 스레드 프레임의 story 절대 오프셋 커버리지.
+   *
+   * `contentFrom`부터 visible 끝까지가 프레임이 표시하는 story 구간이다.
+   * tail이 있으면 tail까지, 없으면(소진) story 끝까지가 visible 연속 구간이다.
+   */
+  private _threadFrameCoverage(
+    frameId: string,
+  ): { start: number; end: number } | null {
+    const engine = this._docEl.engine;
+    if (!engine) return null;
+    const pe = engine.findEngineById(frameId);
+    if (!(pe instanceof ParagraphEngine) || !pe.isThreadFrame) return null;
+    const start = pe.contentFrom;
+    // tail(overflow)가 있으면 tail이 visible 끝이다. 소진(tail -1)이면
+    // 남은 story 전체를 배치했으므로 story 끝이 visible 끝이다.
+    // (visibleChars는 strip 공백을 제외한 수라 end 산정에 부적합하다)
+    const end = pe.overflowContentFrom >= 0 ? pe.overflowContentFrom : pe.totalChars;
+    return end > start ? { start, end } : null;
+  }
+
+  /**
+   * story 절대 오프셋이 현재 포커스된 스레드 프레임의 visible 영역 밖이면
+   * 소유 프레임으로 포커스를 이관한다.
+   *
+   * 스레드 프레임의 편집 커서는 story 절대 좌표계를 쓴다 (mapper 통일).
+   * 화살표/타이핑으로 커서가 프레임의 visible 영역을 벗어나면 사용자에게
+   * 커서가 보이지 않는다 — 이관 대상 프레임을 찾아 같은 story 오프셋으로
+   * 포커스를 옮긴다. 커서가 story 끝을 넘으면 마지막 프레임 tail에 머문다.
+   *
+   * **경계점 소유 편입**: 커서가 두 프레임의 경계(= 이전 tail === 다음
+   * contentFrom)에 있으면 양쪽 coverage 모두 소유권을 주장한다. 이때는
+   * 이동 방향으로 소유를 정한다 — 왼쪽 이동(ArrowLeft/ArrowUp)이면 이전
+   * 프레임 끝, 오른쪽/아래 이동이면 다음 프레임 시작. 방향 미지정(null,
+   * 타이핑 흐름 넘김)이면 현재 프레임을 유지한다 (갑작스러운 포커스 점프 방지).
+   *
+   * @param storyOffset - story 절대 오프셋
+   * @param approachDirection - 이동 방향 ('left' | 'right' | null).
+   *   경계점에서의 소유 프레임 판정에만 사용된다.
+   * @returns 포커스를 이관했으면 true (이관 없이 현재 프레임 유지면 false)
+   */
+  transferCursorToOwningThreadFrame(
+    storyOffset: number,
+    approachDirection: 'left' | 'right' | null = null,
+  ): boolean {
+    const current = this.focusedParagraph;
+    const engine = this._docEl.engine;
+    if (!engine || !current) return false;
+
+    const threads = engine.data.threads ?? [];
+    const owner = threads.find(t =>
+      (t.paragraphIds ?? []).some(id => id === current.id));
+    if (!owner) return false;
+    const frameIds = owner.paragraphIds ?? [];
+    const currentIdx = frameIds.indexOf(current.id);
+    if (currentIdx < 0) return false;
+
+    // 현재 프레임이 소유하면 이관 없음 — 경계점에서는 방향이 소유를 결정한다.
+    const own = this._threadFrameCoverage(current.id);
+    const atBoundaryStart = own !== null && storyOffset === own.start;
+    if (own && storyOffset >= own.start && storyOffset <= own.end) {
+      if (!atBoundaryStart || approachDirection !== 'left' || currentIdx === 0) {
+        return false;
+      }
+    }
+
+    // 이관 대상: 오프셋을 커버하는 프레임 (없으면 경계 클램프)
+    let targetId: string | null = null;
+    let targetOffset = storyOffset;
+    if (atBoundaryStart && approachDirection === 'left' && currentIdx > 0) {
+      // 경계점 왼쪽 편입: 이전 프레임의 끝(= 현재 start)으로
+      targetId = frameIds[currentIdx - 1];
+      targetOffset = storyOffset;
+    } else {
+      for (const id of frameIds) {
+        const cov = this._threadFrameCoverage(id);
+        if (!cov) continue;
+        if (storyOffset >= cov.start && storyOffset <= cov.end) {
+          if (id === current.id) return false;
+          targetId = id;
+          targetOffset = storyOffset;
+          break;
+        }
+      }
+    }
+    if (targetId === null) {
+      // 커버 프레임 없음 — story 앞/뒤 클램프
+      const first = this._threadFrameCoverage(frameIds[0]);
+      const last = this._threadFrameCoverage(frameIds[frameIds.length - 1]);
+      if (storyOffset <= (first?.start ?? 0)) {
+        targetId = frameIds[0];
+        targetOffset = first?.start ?? 0;
+      } else if (last) {
+        targetId = frameIds[frameIds.length - 1];
+        targetOffset = last.end;
+      }
+    }
+    if (targetId === null || targetId === current.id) return false;
+
+    const targetEl = this._docEl.querySelector('#' + CSS.escape(targetId));
+    if (!(targetEl instanceof LayoutParagraphElement)) return false;
+    if (!targetEl.editableText) {
+      targetEl.editableText = true;
+    }
+    this.focusParagraph(targetEl, { cursorOffset: targetOffset });
     return true;
   }
 

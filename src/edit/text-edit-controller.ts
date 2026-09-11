@@ -595,16 +595,23 @@ export class TextEditController {
     const sourceOffset = parseInt(targetSpan.dataset.sourceOffset ?? '', 10);
     if (Number.isNaN(sourceOffset)) return null;
 
+    // 렌더 span의 data-source-offset은 프레임 로컬이다 — 스레드 프레임은
+    // story 절대 공간으로 변환한다 (mapper 좌표계 통일 계약, RULES §1.10).
+    const model = this._paragraph.model;
+    const absoluteOffset = model?.isThreadFrame
+      ? sourceOffset + model.contentFrom
+      : sourceOffset;
+
     const spanRect = targetSpan.getBoundingClientRect();
     const midpoint = spanRect.left + spanRect.width / 2;
     if (event.clientX >= midpoint) {
       const content = this._paragraph.model?.textContent as string | undefined;
-      if (content !== undefined && sourceOffset < content.length) {
-        return sourceOffset + 1;
+      if (content !== undefined && absoluteOffset < content.length) {
+        return absoluteOffset + 1;
       }
     }
 
-    return sourceOffset;
+    return absoluteOffset;
   }
 
   private _onMouseDown(event: MouseEvent): void {
@@ -924,6 +931,11 @@ export class TextEditController {
         this._releasePendingOnCursorMove();
         this._cursorModel.offset = targetLeft;
         this._cursorModel.selection = null;
+        // 스레드 경계: 커서가 이 프레임 coverage를 벗어났으면 소유 프레임으로 이관.
+        if (this._transferCursorAcrossThreadBoundary('left')) {
+          if (isCursorKey) this._manager._notifyCursorMove(this);
+          break;
+        }
       }
       this._syncTextareaSelection();
       this._updateCursorPosition();
@@ -976,6 +988,12 @@ export class TextEditController {
         this._releasePendingOnCursorMove();
         this._cursorModel.offset = targetRight;
         this._cursorModel.selection = null;
+        // 스레드 경계: 커서가 이 프레임 coverage를 벗어났으면 소유 프레임으로
+        // 이관한다. 이관되면 이 컨트롤러는 blur 상태가 되므로 갱신을 마친다.
+        if (this._transferCursorAcrossThreadBoundary('right')) {
+          if (isCursorKey) this._manager._notifyCursorMove(this);
+          break;
+        }
       }
       this._syncTextareaSelection();
       this._updateCursorPosition();
@@ -991,7 +1009,8 @@ export class TextEditController {
     case "ArrowUp":
     case "ArrowDown": {
       event.preventDefault();
-      const newOffset = this._computeVerticalOffset(event.key === "ArrowUp" ? -1 : 1);
+      const direction = event.key === "ArrowUp" ? -1 : 1;
+      const newOffset = this._computeVerticalOffset(direction);
       this._crossRightState = 'none';
       this._crossLeftState = 'none';
       if (isShift) {
@@ -1001,6 +1020,26 @@ export class TextEditController {
           this._cursorModel.offset = newOffset;
         }
         this._cursorModel.selection = null;
+        // 스레드 경계 (수직): 프레임 첫/마지막 라인에서 이동이 끝나면(null)
+        // 이전/다음 프레임의 끝/시작 라인으로 커서를 넘긴다.
+        if (newOffset === null && !this._isComposing) {
+          const model = this._paragraph.model;
+          if (model?.isThreadFrame) {
+            const verticalTarget = direction > 0
+              ? this._threadBoundaryDown()
+              : this._threadBoundaryUp();
+            if (verticalTarget !== null) {
+              this._cursorModel.offset = verticalTarget;
+              if (this._transferCursorAcrossThreadBoundary(direction > 0 ? 'right' : 'left')) {
+                if (isCursorKey) this._manager._notifyCursorMove(this);
+                break;
+              }
+            }
+          }
+        } else if (newOffset !== null && this._transferCursorAcrossThreadBoundary(direction > 0 ? 'right' : 'left')) {
+          if (isCursorKey) this._manager._notifyCursorMove(this);
+          break;
+        }
       }
       this._syncTextareaSelection();
       this._updateCursorPosition();
@@ -1337,6 +1376,63 @@ export class TextEditController {
     if (hadSelection) {
       this._manager._notifySelectionEnd(this);
     }
+  }
+
+  /**
+   * 스레드 경계 이관 — 커서가 현재 프레임의 visible 영역을
+   * 벗어났으면 소유 프레임으로 포커스를 옮긴다.
+   *
+   * 스레드 프레임의 커서는 story 절대 좌표계(mapper 통일)를 쓴다.
+   * 화살표/Backspace로 커서가 프레임 coverage 밖으로 이동하면
+   * `EditManager.transferCursorToOwningThreadFrame`이 같은 story 오프셋으로
+   * 포커스를 이관한다. 이관되면 현재 컨트롤러는 blur되므로 이후
+   * 커서/selection 갱신을 건너뛴다.
+   *
+   * IME 조합 중에는 이관하지 않는다 — 조합 텍스트의 커밋이 완료된
+   * 뒤(compositionend)에야 프레임을 옮긴다 (조합 상태 훼손 방지).
+   *
+   * @param approachDirection - 경계점에서의 소유 판정 방향 (타이핑은 null)
+   * @returns 이관이 일어났으면 true (호출자는 후속 커서 갱신 생략)
+   */
+  private _transferCursorAcrossThreadBoundary(
+    approachDirection: 'left' | 'right' | null = null,
+  ): boolean {
+    const model = this._paragraph.model;
+    if (!model?.isThreadFrame) return false;
+    if (this._isComposing) return false;
+    return this._manager.transferCursorToOwningThreadFrame(
+      this._cursorModel.offset,
+      approachDirection,
+    );
+  }
+
+  /**
+   * ArrowDown이 프레임 마지막 라인에서 끝났을 때 넘어갈 story 오프셋.
+   *
+   * 다음 프레임이 존재하면 다음 프레임의 시작(contentFrom)이고,
+   * 체인 끝이면 null (이동 없음 — 체인 tail 아래에는 라인이 없다).
+   *
+   * @returns 다음 프레임 시작 story 오프셋 또는 null
+   */
+  private _threadBoundaryDown(): number | null {
+    const model = this._paragraph.model;
+    // tail이 있으면 다음 프레임 시작점은 현재 tail
+    const next = model?.overflowContentFrom;
+    return next !== undefined && next >= 0 ? next : null;
+  }
+
+  /**
+   * ArrowUp이 프레임 첫 라인에서 끝났을 때 올라갈 story 오프셋.
+   *
+   * 이전 프레임이 존재하면 이전 프레임 coverage의 끝(= 현재 contentFrom)이고,
+   * 체인 head면 null.
+   *
+   * @returns 이전 프레임 끝 story 오프셋 또는 null
+   */
+  private _threadBoundaryUp(): number | null {
+    const model = this._paragraph.model;
+    const from = model?.contentFrom;
+    return from !== undefined && from > 0 ? from : null;
   }
 
   private _computeVerticalOffset(direction: -1 | 1): number | null {
@@ -1832,7 +1928,11 @@ export class TextEditController {
     if (this._optimisticSpan && this._optimisticSpan.parentNode) {
       // 기존 조합 span 재사용: 내용 교체만으로 1-span dirty 유지.
       this._optimisticSpan.textContent = data;
-      this._optimisticSpan.dataset.sourceOffset = String(startOffset);
+      // span dataset은 렌더 공간(프레임 로컬)이다.
+      const localStart = this._paragraph.model?.isThreadFrame
+        ? startOffset - this._paragraph.model.contentFrom
+        : startOffset;
+      this._optimisticSpan.dataset.sourceOffset = String(localStart);
       // 폭 변화(ㅎ→하→한) 반영: 새 음절 폭으로 재계산하여 후속 span 밀기 조정.
       // 조합 텍스트는 조합 시작 위치의 런 스타일을 사용한다 — _onCompositionUpdate가
       // runMap을 model.textContent(조합 반영됨)에서 재추출한 직후이므로 직접 조회가
@@ -2009,12 +2109,17 @@ export class TextEditController {
     const blOn = (style?.breakline ?? eff.breakline!) === true;
 
     const columns = this._paragraph.querySelectorAll('x-layout-column');
+    // 조합 밑줄 탐색은 렌더 span(프레임 로컬)과 비교한다 — compositionStart를
+    // 로컬로 환산한다 (스레드 프레임).
+    const localStart = model?.isThreadFrame
+      ? start - model.contentFrom
+      : start;
     for (const col of columns) {
       if (!col.shadowRoot) continue;
       const spans = col.shadowRoot.querySelectorAll<HTMLSpanElement>('span[data-source-offset]');
       for (const span of spans) {
         const offset = parseInt(span.dataset.sourceOffset!, 10);
-        if (offset >= start && offset < start + len) {
+        if (offset >= localStart && offset < localStart + len) {
           if (span.dataset.temporary === 'true') continue;
           if (ulOn || blOn) {
             this._applyOptimisticDecorations(span, span.dataset.lineMaxFs !== undefined ? parseFloat(span.dataset.lineMaxFs) : this._getLineMaxFontSizeAt(offset), style);
@@ -2289,7 +2394,12 @@ export class TextEditController {
   private _createOptimisticSpan(char: string, sourceOffset: number, inlineStyle?: TextInlineStyle): HTMLSpanElement {
     const model = this._paragraph.model;
     const span = document.createElement('span');
-    span.dataset.sourceOffset = String(sourceOffset);
+    // span의 data-source-offset은 렌더 공간(프레임 로컬)이다 — 절대 오프셋을
+    // 기록하면 조합 밑줄 탐색(_applyCompositionUnderline)·렌더 diff와 어긋난다.
+    const localOffset = model?.isThreadFrame
+      ? sourceOffset - model.contentFrom
+      : sourceOffset;
+    span.dataset.sourceOffset = String(localOffset);
     span.dataset.temporary = "true";
     const lineMaxFs = this._getLineMaxFontSizeAt(sourceOffset);
     const charStyle = model?.genCharStyleFlat(char, inlineStyle, lineMaxFs);
@@ -2524,6 +2634,16 @@ export class TextEditController {
       this._paragraph.flushRender();
       this._manager._notifyTextChange(this);
       this._manager._notifyCursorMove(this);
+      // 스레드 타이핑 흐름 넘김: flushRender가 예약한 스레드 체인 재배치가
+      // 마이크로태스크(requestThreadRelayout)에서 실행된 뒤, 커서가 이
+      // 프레임의 새 coverage 밖이 되었으면 소유 프레임으로 이관한다 —
+      // head 끝에서 타이핑이 f2 영역을 채우면 커서가 따라간다.
+      if (model.isThreadFrame) {
+        queueMicrotask(() => {
+          if (!this._isFocused) return;
+          this._transferCursorAcrossThreadBoundary();
+        });
+      }
     } else {
       this._paragraph.scheduleRender();
     }
