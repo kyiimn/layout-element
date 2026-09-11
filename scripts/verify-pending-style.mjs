@@ -229,6 +229,165 @@ const r = await page.evaluate(async () => {
   em.removeEventListener('styleChange', restoreListener);
   out.checks.push({ name: 'I. 커서 이동 해제 후 styleChange 발화 (툴바 복귀)', ok: restoredStyle !== null && em.pendingNextStyle === undefined });
 
+  // ── 시나리오 J: 커서 상태 토글 단축키 — pending style 토글 (§4.1.6) ──
+  // Ctrl+U/Shift+X/Shift+O/B/I가 selection 없이 눌리면 기존 런을 건드리지 않고
+  // pending을 토글한다. 판정 기준은 pending ?? pendingBaseStyle.
+  const fireKey = (c, init) => {
+    c._textarea.focus();
+    c._textarea.dispatchEvent(new KeyboardEvent('keydown', init));
+  };
+
+  // J1. pending 없음 + 커서 위치 underline OFF → Ctrl+U가 pending 설정
+  em.focusParagraph(p, { cursorOffset: 2 });
+  em.setPendingNextStyle(undefined);
+  const contentBeforeJ1 = JSON.stringify(p.model.textContent);
+  fireKey(em.focusedController, { key: 'u', ctrlKey: true });
+  const contentAfterJ1 = JSON.stringify(p.model.textContent);
+  out.checks.push({ name: 'J1. 커서 상태 Ctrl+U — pending 설정 (기존 런 무변경)', ok: em.pendingNextStyle?.underline === true && contentBeforeJ1 === contentAfterJ1 });
+
+  // J2. 이벤트 페이로드에 pendingStyle 포함 (호스트 툴바 반영 계약) —
+  // 토글 OFF는 pending에서 underline 필드를 제거한다 (남은 필드는 시드 effective가
+  // 유지된다 — pending은 "이후 입력의 전체 인라인 스타일"이므로 전체 해제가 아니다).
+  let j2PendingPayload = undefined;
+  const j2Listener = (event) => { j2PendingPayload = event.pendingStyle; };
+  em.addEventListener('styleChange', j2Listener);
+  fireKey(em.focusedController, { key: 'u', ctrlKey: true });
+  em.removeEventListener('styleChange', j2Listener);
+  out.checks.push({ name: 'J2. 토글 OFF — pendingStyle 페이로드에 underline 없음', ok: j2PendingPayload !== undefined && j2PendingPayload.underline === undefined && em.pendingNextStyle?.underline === undefined });
+
+  // J3. pending 설정 → styleChange 페이로드에 새 pending (underline: true)
+  em.setPendingNextStyle(undefined);
+  let j3Payload = undefined;
+  const j3Listener = (event) => { j3Payload = event.pendingStyle; };
+  em.addEventListener('styleChange', j3Listener);
+  fireKey(em.focusedController, { key: 'u', ctrlKey: true });
+  em.removeEventListener('styleChange', j3Listener);
+  out.checks.push({ name: 'J3. Ctrl+U ON — pending 설정 + pendingStyle 페이로드', ok: em.pendingNextStyle?.underline === true && j3Payload?.underline === true });
+
+  // J4. 유지된 pending이 타이핑 런에 적용 (underline 런 삽입)
+  const cJ = em.focusedController;
+  const taJ = cJ._textarea;
+  const insertLenJ = taJ.selectionStart;
+  taJ.value = taJ.value.slice(0, insertLenJ) + 'u' + taJ.value.slice(taJ.selectionEnd);
+  taJ.setSelectionRange(insertLenJ + 1, insertLenJ + 1);
+  taJ.dispatchEvent(new InputEvent('input', { data: 'u', inputType: 'insertText', bubbles: true }));
+  const contentJ = p.model.textContent;
+  const insertedJ = Array.isArray(contentJ) ? contentJ.find(i => typeof i === 'object' && i.content.includes('u')) : null;
+  out.checks.push({ name: 'J4. pending underline이 타이핑 런에 적용', ok: insertedJ?.textInlineStyle?.underline === true });
+  em.setPendingNextStyle(undefined);
+
+  // J5. Ctrl+Shift+X (취소선) / Ctrl+Shift+O (외곽선) 토글
+  em.setPendingNextStyle(undefined);
+  fireKey(em.focusedController, { key: 'x', ctrlKey: true, shiftKey: true });
+  const j5Break = em.pendingNextStyle?.breakline === true;
+  fireKey(em.focusedController, { key: 'o', ctrlKey: true, shiftKey: true });
+  const j5Outline = em.pendingNextStyle?.outline === 0.02 && em.pendingNextStyle?.breakline === true;
+  fireKey(em.focusedController, { key: 'x', ctrlKey: true, shiftKey: true });
+  const j5BreakOff = em.pendingNextStyle?.breakline === undefined && em.pendingNextStyle?.outline === 0.02;
+  out.checks.push({ name: 'J5. Ctrl+Shift+X/O — breakline/outline pending 토글', ok: j5Break && j5Outline && j5BreakOff });
+  em.setPendingNextStyle(undefined);
+
+  // J6. selection 있으면 기존 경로(런 즉시 토글) — pending 건드리지 않음
+  em.focusParagraph(p, { cursorOffset: 2 });
+  em.setPendingNextStyle(undefined);
+  const cJ6 = em.focusedController;
+  cJ6._extendSelection(5);
+  fireKey(cJ6, { key: 'u', ctrlKey: true });
+  const contentJ6 = p.model.textContent;
+  let j6SelectedOn = false;
+  if (Array.isArray(contentJ6)) {
+    for (const item of contentJ6) {
+      if (typeof item === 'object' && item.textInlineStyle?.underline === true) { j6SelectedOn = true; break; }
+    }
+  }
+  out.checks.push({ name: 'J6. selection 상태 Ctrl+U — 런 즉시 토글 (pending 미설정)', ok: j6SelectedOn && em.pendingNextStyle === undefined });
+
+  // J7. 커서 삽입점이 이미 ON이고 pending 없음 → Ctrl+U가 pending을 만들지 않음
+  // (유효 OFF → 제거 대상 없음). 삽입점(오프셋 2) 앞 글자에 underline 런 주입.
+  em.focusParagraph(p, { cursorOffset: 2 });
+  em.setPendingNextStyle(undefined);
+  const modelJ7 = p.model;
+  modelJ7.textContent = [
+    modelJ7.plainText.slice(0, 2),
+    { content: modelJ7.plainText.slice(2, 4), textInlineStyle: { underline: true } },
+    modelJ7.plainText.slice(4),
+  ];
+  cJ6._cursorModel.selection = null;
+  cJ6._cursorModel.offset = 3;
+  cJ6._textarea.setSelectionRange(3, 3);
+  fireKey(cJ6, { key: 'u', ctrlKey: true });
+  out.checks.push({ name: 'J7. 삽입점 유효 ON + pending 없음 — pending 생성 안 함', ok: em.pendingNextStyle === undefined });
+  modelJ7.textContent = modelJ7.plainText;
+
+  // J8. pending 존재 + 필드 ON → 토글로 pending 해제
+  em.setPendingNextStyle({ underline: true });
+  fireKey(cJ6, { key: 'u', ctrlKey: true });
+  out.checks.push({ name: 'J8. pending ON 상태 Ctrl+U — pending 해제', ok: em.pendingNextStyle === undefined });
+
+  // ── 시나리오 K: 커서 상태 증감 단축키 — pending style 증감 (§4.1.6, InDesign 타이핑 속성) ──
+  // 증감 계열도 커서 상태에서 pending을 증감한다 — 삽입점 값(pending ?? 유효 스타일)에
+  // delta를 더해 pending을 재설정한다. 왕복은 필드 제거가 아니라 값 보존이 원칙이다.
+  const fireAdjustKey = (c, init) => {
+    c._textarea.focus();
+    c._textarea.dispatchEvent(new KeyboardEvent('keydown', init));
+  };
+
+  // K1. pending 없음 + 커서 → Ctrl+Shift+. (글자 크기 확대) → pending 설정 (기본 4 → 4.1)
+  em.focusParagraph(p, { cursorOffset: 2 });
+  em.setPendingNextStyle(undefined);
+  const contentBeforeK1 = JSON.stringify(p.model.textContent);
+  fireAdjustKey(em.focusedController, { key: '>', code: 'Period', ctrlKey: true, shiftKey: true });
+  out.checks.push({ name: 'K1. 커서 상태 Ctrl+Shift+. — pending fontSize 증감 (기존 런 무변경)', ok: em.pendingNextStyle?.fontSize === 4.1 && contentBeforeK1 === JSON.stringify(p.model.textContent) });
+
+  // K2. 연타 감소 → 왕복 — pending 유지 + fontSize 유효값 복귀 (필드 제거 아님)
+  fireAdjustKey(em.focusedController, { key: '<', code: 'Comma', ctrlKey: true, shiftKey: true });
+  out.checks.push({ name: 'K2. 증감 왕복 — pending 유지, fontSize 유효값 복귀', ok: em.pendingNextStyle !== undefined && em.pendingNextStyle?.fontSize === 4 });
+
+  // K3. 하한 클램프 — pending fontSize 0.15 → 감소 → SHORTCUT_MIN_FONT_SIZE(0.1) 클램프
+  em.setPendingNextStyle({ fontSize: 0.15 });
+  fireAdjustKey(em.focusedController, { key: '<', code: 'Comma', ctrlKey: true, shiftKey: true });
+  out.checks.push({ name: 'K3. fontSize 하한 클램프 (SHORTCUT_MIN_FONT_SIZE 0.1mm)', ok: em.pendingNextStyle?.fontSize === 0.1 });
+  em.setPendingNextStyle(undefined);
+
+  // K4. 증감 발화의 pendingStyle 페이로드 — 호스트 툴바 반영 계약
+  let k4Payload = undefined;
+  const k4Listener = (event) => { k4Payload = event.pendingStyle; };
+  em.addEventListener('styleChange', k4Listener);
+  fireAdjustKey(em.focusedController, { key: '>', code: 'Period', ctrlKey: true, shiftKey: true });
+  em.removeEventListener('styleChange', k4Listener);
+  out.checks.push({ name: 'K4. 증감 발화 — pendingStyle 페이로드에 증감 후 값', ok: k4Payload?.fontSize === 4.1 });
+  em.setPendingNextStyle(undefined);
+
+  // K5. 커서 이동 해제 후 증감 — 유효 스타일 기저에서 pending 재설정
+  em.setPendingNextStyle({ fontSize: 4.1 });
+  em.focusedController.setCursor({ textOffset: 5 });
+  const releasedK5 = em.pendingNextStyle === undefined;
+  fireAdjustKey(em.focusedController, { key: '>', code: 'Period', ctrlKey: true, shiftKey: true });
+  out.checks.push({ name: 'K5. 해제 후 증감 — 유효 스타일 기저(4)에서 pending 재설정', ok: releasedK5 && em.pendingNextStyle?.fontSize === 4.1 });
+  em.setPendingNextStyle(undefined);
+
+  // K6. selection 있으면 per-run 즉시 적용 경로 위임 — pending 건드리지 않음
+  // 주의: K5의 setCursor(5) 후 커서가 5에 있으므로, _extendSelection(5)는 빈
+  // selection [5,5)가 된다 — 커서를 2로 되돌린 뒤 확장해야 비-빈 selection이 된다.
+  const cK6 = em.focusedController;
+  cK6.setCursor({ textOffset: 2 });
+  cK6._extendSelection(5);
+  const contentBeforeK6 = JSON.stringify(p.model.textContent);
+  fireAdjustKey(cK6, { key: '>', code: 'Period', ctrlKey: true, shiftKey: true });
+  const contentAfterK6 = JSON.stringify(p.model.textContent);
+  out.checks.push({ name: 'K6. selection 상태 증감 — 런 즉시 적용 (pending 미설정)', ok: contentBeforeK6 !== contentAfterK6 && em.pendingNextStyle === undefined });
+  p.model.textContent = p.model.plainText;
+
+  // K7. 공개 API adjustPendingMetric — 커서 상태에서 pending letterSpacing 증감 (기본 -0.1 + 0.01)
+  // 주의: focusParagraph/setCursor는 selection을 clear하지 않는다 (README 검증기 주의사항) —
+  // K6의 selection이 남으면 API가 selection 경로로 위임하므로 명시 해제가 필요하다.
+  em.focusParagraph(p, { cursorOffset: 2 });
+  em.focusedController._cursorModel.selection = null;
+  em.setPendingNextStyle(undefined);
+  em.adjustPendingMetric('letterSpacing', 0.01);
+  out.checks.push({ name: 'K7. adjustPendingMetric API — pending letterSpacing 증감', ok: em.pendingNextStyle?.letterSpacing === -0.09 });
+  em.setPendingNextStyle(undefined);
+
   // 원상 복원
   if (em.focusedController) em.focusedController.blur();
 

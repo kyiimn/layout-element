@@ -251,7 +251,7 @@ npx tsx scripts/verify-style-revert.mjs   # 42항목 ALL PASS (7개 인라인 �
 
 **목적**: 커서 상태의 툴바 스타일 변경이 pending으로 보관되고, 이후 입력에 적용되는 전 라이프사이클을 검증한다. 특히 **blur → 같은 위치 재포커스 시 pending 유지** 계약(§4.1.7)을 회귀 방어한다 — 버그 이력: `setCursor`가 이동 전 오프셋 비교 없이 `_releasePendingOnCursorMove`를 무조건 호출해, blur 복원(`focusParagraph` 커서 복원) 시 pending이 소실되었음. 수정은 `_releasePendingIfCursorMoved` 가드(이동 전/후 오프셋 동일 시 유지)로 이루어졌다.
 
-**시나리오** (9개 그룹 16항목):
+**시나리오** (12개 그룹 31항목):
 - **A. 설정/조회**: `setPendingNextStyle` → `pendingNextStyle` 조회, 명시적 `undefined` 해제, 재설정 시 `_lastStyleJson` 리셋 (이후 styleChange dedupe 생략 방지)
 - **B. blur 재포커스 유지 (핵심)**: blur 직후 커서 보존 → 같은 오프셋 재포커스 시 pending 유지 → 유지된 pending이 타이핑 런(`textInlineStyle.bold`)으로 삽입 → 삽입 직후에도 유지 (연속 타이핑)
 - **C. blur → 다른 오프셋 재포커스**: 실제 커서 이동이므로 해제
@@ -261,12 +261,14 @@ npx tsx scripts/verify-style-revert.mjs   # 42항목 ALL PASS (7개 인라인 �
 - **G. pendingBaseStyle**: pending 없으면 현재 삽입점 유효 스타일(시드용), 있으면 currentStyle과 동일
 - **H. 붙여넣기**: paste 텍스트가 pending 런으로 삽입
 - **I. 커서 이동 해제 후 styleChange 발화**: 툴바가 커서 유효 스타일로 복귀
+- **J. 커서 상태 토글 단축키 (§4.1.6)**: Ctrl+U pending 설정(기존 런 무변경)/`pendingStyle` 페이로드/ON-OFF 반복/타이핑 런 적용, Ctrl+Shift+X/O(breakline/outline), selection 상태 런 즉시 토글(pending 미설정), 삽입점 유효 ON + pending 없음 → pending 생성 안 함, pending ON 토글 → 해제
+- **K. 커서 상태 증감 단축키 (§4.1.6, InDesign 타이핑 속성)**: Ctrl+Shift+. pending fontSize 증감(기존 런 무변경)/증감 왕복 값 보존(필드 제거 아님)/하한 클램프(SHORTCUT_MIN_FONT_SIZE)/`pendingStyle` 페이로드/해제 후 유효 스타일 기저 재시드/selection 상태 per-run 즉시 적용 위임(pending 미설정)/공개 API `adjustPendingMetric`
 
 **검증기 작성 주의**: 삽입 런의 스타일 필드명은 `i.style`이 아니라 **`i.textInlineStyle`**이다 (`TextInlineData` 계약) — 이를 잘못 읽으면 pending 적용이 정상인데도 FAIL이 난다 (실측 오탐 경험). 또한 명시적 `setPendingNextStyle(undefined)` 해제는 styleChange를 발화하지 않는다 — 발화하는 해제 경로는 커서 이동 해제(`_releasePendingOnCursorMove`)뿐이다.
 
 **실행**:
 ```bash
-npx tsx scripts/verify-pending-style.mjs   # 16항목 ALL PASS (서버 없으면 자동 기동)
+npx tsx scripts/verify-pending-style.mjs   # 31항목 ALL PASS (서버 없으면 자동 기동)
 ```
 
 **dev server 방어 (포트 오인 사고 교훈)**: `verify-multicolumn.mjs`와 동일한 2중 방어 — probe가 HTML title(`Layout Element Benchmark`)까지 검증해 타 앱 Vite 서버의 SPA fallback 200을 걸러내고, 정상 서버가 없으면 **자체 스폰**(포트 5199 — multicolumn의 5198과 충돌 방지) 후 종료 시 정리한다. 실제 사고(2026-09): layout-ui 서버(5173)를 잡아 BENCH_READY 타임아웃 30초 — 초기 버전은 HEAD 프로브만으로 `res.ok` 판정이라 이를 걸러내지 못했다.
