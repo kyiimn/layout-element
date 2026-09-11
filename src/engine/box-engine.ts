@@ -1246,7 +1246,11 @@ export class BoxEngine {
         pe.data = {
           id: paraData.id,
           zIndex: paraData.zIndex,
-          content: paraData.content ?? '',
+          // content 미지정(undefined) 주입은 기존 textContent를 보존한다 —
+          // DOM `_rawData()`는 편집 중 문단의 content를 제외할 수 있고,
+          // `?? ''`로 강제하면 편집 중 재주입이 내용을 소거한다 (IME 회귀:
+          // 조합 중 box layout() 재호출이 content를 지웠다).
+          content: paraData.content ?? pe.textContent,
           column,
           gap,
           paragraphStyle: paraData.paragraphStyle ?? {},

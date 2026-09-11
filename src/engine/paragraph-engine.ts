@@ -233,6 +233,13 @@ export class ParagraphEngine {
   private _contentFrom: number = 0;
 
   /**
+   * 스레딩 경계 교정 clamp: 이 프레임 배치의 배타적 상한(story plain 오프셋).
+   * -1 = 제한 없음. `updateThreadContext`가 설정하고 배치 패스(charLoop)가
+   * 소비한다 — 금칙 追い出し를 출력 변이가 아닌 배치 입력으로 인코딩한다.
+   */
+  private _tailClampFrom: number = -1;
+
+  /**
    * 스레딩: 마지막 `layoutText()`가 배치하지 못한 tail (평문 오프셋, `\n` 포함).
    * -1 = tail 없음(전체 배치) 또는 아직 배치 전. `overflowContent` 게터의 근거.
    */
@@ -286,6 +293,8 @@ export class ParagraphEngine {
     overflow: number;
     /** 스레딩 tail 시작 오프셋 (스레드 프레임만 의미 있음) */
     overflowContentFrom: number;
+    /** 경계 교정 clamp (스레드 프레임만, -1 = 제한 없음) */
+    tailClampFrom: number;
   } | null = null;
 
   /**
@@ -1686,6 +1695,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       this._columnContents = this._layoutCache.columnContents;
       this._overflow = this._layoutCache.overflow;
       this._overflowContentFrom = this._layoutCache.overflowContentFrom;
+      this._tailClampFrom = this._layoutCache.tailClampFrom;
       this._overlayRectsMm = null;
       this._refreshInlineStylesOnly();
       this._caretHint = undefined;
@@ -1751,6 +1761,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       columnContents: this._columnContents,
       overflow: this._overflow,
       overflowContentFrom: this._overflowContentFrom,
+      tailClampFrom: this._tailClampFrom,
     };
 
     if (caretOffset !== undefined && caretOffset > 0 && verticalAlign !== 'center' && verticalAlign !== 'bottom') {
@@ -1890,6 +1901,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       "ww:" + (this.effectiveParagraphStyle.wordWrap ?? false),
       // 스레딩 contentFrom — _computeLayoutInputHash와 동일 조건부 키.
       ...(this._contentFrom > 0 ? ["tf:" + this._contentFrom] : [] as string[]),
+      // 경계 교정 clamp — 배치 상한이 배치 결과를 직접 결정하므로 포함.
+      ...(this._tailClampFrom >= 0 ? ["tc:" + this._tailClampFrom] : [] as string[]),
     );
 
     return parts.join("|");
@@ -1908,7 +1921,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * @returns 없음. `_overflowContentFrom`을 설정한다.
    */
   private _captureThreadTail(): void {
-    if (!this._isThreadFrame || this._overflow <= 0) {
+    if (!this._isThreadFrame || (this._overflow <= 0 && this._tailClampFrom < 0)) {
       this._overflowContentFrom = -1;
       return;
     }
@@ -1941,12 +1954,17 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       }
     }
 
-    // 전체 라인이 수용되면 tail 없음 (마지막 라인의 endOfText는 tail 아님)
-    if (exhausted && this._overflow <= 0) {
+    // 전체 라인이 수용되면 tail 없음 (마지막 라인의 endOfText는 tail 아님).
+    // 단, 경계 교정 clamp가 배치를 제한했으면 tail은 clamp 위치다 —
+    // clamp는 "용량은 남았지만 인위적으로 여기서 끊고 다음 프레임으로
+    // 이어진다"는 배치 입력이므로, 소진(-1) 판정은 clamp가 없을 때뿐이다.
+    if (exhausted && this._overflow <= 0 && this._tailClampFrom < 0) {
       this._overflowContentFrom = -1;
       return;
     }
-    this._overflowContentFrom = this._contentFrom + visibleCount;
+    this._overflowContentFrom = this._tailClampFrom >= 0
+      ? this._tailClampFrom
+      : this._contentFrom + visibleCount;
   }
 
   /**
@@ -2008,13 +2026,17 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     contentFrom?: number;
     isThreadFrame?: boolean;
     threadTail?: boolean;
+    tailClampFrom?: number;
   }): void {
     this._threadTail = ctx.threadTail ?? this._threadTail;
     const contentFrom = ctx.contentFrom ?? this._contentFrom;
     const isThreadFrame = ctx.isThreadFrame ?? this._isThreadFrame;
-    if (contentFrom !== this._contentFrom || isThreadFrame !== this._isThreadFrame) {
+    const tailClampFrom = ctx.tailClampFrom ?? this._tailClampFrom;
+    if (contentFrom !== this._contentFrom || isThreadFrame !== this._isThreadFrame
+      || tailClampFrom !== this._tailClampFrom) {
       this._contentFrom = contentFrom;
       this._isThreadFrame = isThreadFrame;
+      this._tailClampFrom = tailClampFrom;
       this._layoutCache = null;
       this._prefixCache = null;
       this._overflowContentFrom = -1;
@@ -2062,6 +2084,16 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const plain = this.plainText;
     if (caretOffset >= plain.length) return;
 
+    // 스레딩 프레임의 caretOffset은 story 절대 plain 공간이다(textContent가
+    // story 전체). 컬럼 글자수 누적은 이 프레임의 배치 영역(contentFrom부터
+    // 시작하는 로컬 렌더 공간, 0 기반)이므로 비교 전에 로컬로 환산한다.
+    // 누락 시 절대 캐럿(f2: ≥1112)이 항상 전 컬럼 문자수(~1115)보다 크거나
+    // 같아 전 컬럼이 prefix로 분류되고 startColumn이 columnCount가 되어
+    // 재배치 패스가 0회 반복 — 두 번째 키스트로크부터 새 글자가 배치에
+    // 반영되지 않는다 (f2 타이핑 회귀. 검증: verify-threading-browser [9]).
+    const caretLocal = caretOffset - this._contentFrom;
+    if (caretLocal < 0) return;
+
     let globalOffset = 0;
     let prefixColumnCount = 0;
 
@@ -2077,11 +2109,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         // 누락 시 globalOffset이 컬럼당 블록 수만큼 짧아져 재개 위치가
         // 앞 블록 중간을 가리키고, 앞 단의 마지막 글자들이 현재 단으로
         // 당겨와 렌더된다 (3단 문서의 2·3단 타이핑 시 재현).
-        if (line.endOfBlock && globalOffset + colCharCount + 1 <= plain.length && plain[globalOffset + colCharCount] === '\n') {
+        // globalOffset은 로컬이므로 plain(전체 story) 인덱싱에는 contentFrom을 더한다.
+        if (line.endOfBlock && this._contentFrom + globalOffset + colCharCount + 1 <= plain.length && plain[this._contentFrom + globalOffset + colCharCount] === '\n') {
           colCharCount++;
         }
       }
-      if (globalOffset + colCharCount <= caretOffset) {
+      if (globalOffset + colCharCount <= caretLocal) {
         prefixColumnCount = c + 1;
         globalOffset += colCharCount;
       } else {
@@ -2089,9 +2122,13 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       }
     }
 
-    if (prefixColumnCount === 0) return;
+    // 전 컬럼이 prefix(= 캐럿이 마지막 컬럼 끝 이후)면 캐시를 만들지 않는다 —
+    // startColumn이 columnCount가 되어 재배치가 no-op이 되는 독 상태 방지.
+    if (prefixColumnCount === 0 || prefixColumnCount >= this._columnContents.length) return;
 
-    const pos = this._plainOffsetToContentsPos(globalOffset);
+    // 재개 위치는 절대 plain 공간(textContent) 기준이다 — 로컬 globalOffset에
+    // contentFrom을 더해 contents 위치를 산출한다.
+    const pos = this._plainOffsetToContentsPos(this._contentFrom + globalOffset);
     if (!pos) return;
 
     this._prefixCache = {
@@ -2147,6 +2184,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       columnContents: this._columnContents,
       overflow: this._overflow,
       overflowContentFrom: this._overflowContentFrom,
+      tailClampFrom: this._tailClampFrom,
     };
 
     this._buildPrefixCache(caretOffset);
@@ -2623,6 +2661,24 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     let beforeRunIdx = skipRunIdx;
     let beforeCharIdx = skipCharIdx;
 
+    // 스레딩 경계 교정 clamp: 이 프레임의 배치가 끝나는 story plain 오프셋
+    // (배타적 상한). -1이면 제한 없음. 지정되면 charLoop가 이 위치의 글자를
+    // 배치하지 않고 종료해 tail이 clamp 위치에서 재산출된다 — 프레임 경계
+    // 금칙 追い出し를 "출력 변이(shiftVisibleTail)"가 아니라 "배치 입력
+    // 인코딩"으로 수행하는 단일소스 경로다 (charOffsets가 항상 파생 상태를
+    // 유지한다 — 소거 시 getCharRect/print 좌표가 x=0 폴백으로 붕괴).
+    const clampFrom = this._tailClampFrom;
+
+    // blockIdx 순회의 블록 시작 plain 오프셋 — clamp 판정이 plain 공간에서
+    // 정확하도록 블록 누적을 추적한다. beforeIdxBlock부터 세는 이유:
+    // contentFrom 스킵과 clamp가 모두 절대 plain 공간이기 때문이다.
+    let blockPlainStart = 0;
+    for (let b = 0; b < beforeIdxBlock; b++) {
+      const runsB = this._contents[b];
+      for (const r of runsB) blockPlainStart += r.content.length;
+      blockPlainStart += 1; // 블록 구분자 \n
+    }
+
     for (let curColumn = startColumn; curColumn < this.columnCount; curColumn++) {
       let columnContent: TextLineData[] = [];
       let hasLine = false;
@@ -2644,6 +2700,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       for (; idxBlock < this.contents.length; idxBlock++) {
         const runs = this.contents[idxBlock];
         if (idxBlock !== beforeIdxBlock) { runIdx = 0; charIdx = 0; }
+        if (idxBlock !== beforeIdxBlock) {
+          blockPlainStart += this._contents[idxBlock - 1].reduce((s, r) => s + r.content.length, 0) + 1;
+        }
 
         const blockTotalChars = runs.reduce((sum, r) => sum + r.content.length, 0);
         let flatIdxInBlock = 0;
@@ -2748,6 +2807,13 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 
           for (; charIdx < content.length; charIdx++, flatIdxInBlock++) {
             const char = content[charIdx];
+
+            // 경계 교정 clamp: 배치 상한 이후 글자는 배치하지 않는다 —
+            // charLoop를 탈출하면 남은 컬럼 용량과 무관하게 tail이 clamp
+            // 위치에서 확정된다 (이후 프레임이 이 지점부터 이어받는다).
+            if (clampFrom >= 0 && blockPlainStart + flatIdxInBlock >= clampFrom) {
+              break charLoop;
+            }
 
             // _charWidthMm 인라인: 런당 1회 조합 키, 글자별 단일 키 조회
             let rawCharWidth: number;
@@ -3241,6 +3307,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       // 스레딩: 배치 시작점(contentFrom)이 0이 아닐 때만 키에 반영 —
       // 비-스레딩 문단은 해시가 기존과 byte 동일하게 유지된다.
       ...(this._contentFrom > 0 ? ["tf:" + this._contentFrom] : [] as string[]),
+      // 경계 교정 clamp — 배치 상한이 배치 결과를 직접 결정하므로 포함.
+      ...(this._tailClampFrom >= 0 ? ["tc:" + this._tailClampFrom] : [] as string[]),
     );
 
     return parts.join("|");
@@ -3286,6 +3354,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     parentAbsRect: AbsRect,
     inheritStyle: InheritStyle,
   ): void {
+    const oldParentWidth = this._data.inheritStyle?.parentWidth;
     this._data = {
       ...this._data,
       overlayEngines,
@@ -3296,6 +3365,15 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     this._effectivePsDirty = true;
     this._effectiveTsDirty = true;
     this._overlayRectsMm = null;
+    // 부모 폭이 변하면 컬럼 폭 파생 상태를 재계산한다 — columnWidths는
+    // data setter(_applyColumnGapFromData)에서만 계산되므로, 이 경량 갱신이
+    // 폭만 바꾸면 무효한 columnWidths(초기 시간차의 parentWidth 0에서 온
+    // 음수)가 REUSE 판정을 우회해 영구 고착된다. 실측 회귀: 초기 reconcile
+    // 시간차에 parentWidth 0으로 생성된 PE가 이후 371 갱신에서 columnWidths
+    // -3.33을 유지해 315개 빈 라인으로 렌더됨 (IME/일반 문단 공통).
+    if (oldParentWidth !== inheritStyle.parentWidth) {
+      this._applyColumnGapFromData();
+    }
   }
 
   /**
@@ -4254,6 +4332,34 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * console.log(model.visibleChars); // 예: 1800
    * console.log(model.totalChars - model.visibleChars); // 오버플로우 문자 수
    */
+  /**
+   * 마지막 visible 라인 (라인 높이 순회 — `visibleChars`/`_captureThreadTail`
+   * 판정과 동일). 스레딩 경계 교정(ThreadEngine)이 프레임 경계의 금칙
+   * 상태를 읽는 단일 소스다.
+   *
+   * @returns 마지막 visible 라인 데이터 (visible 라인이 없으면 undefined)
+   */
+  public get lastVisibleLine(): TextLineData | undefined {
+    const parentHeight = this._inheritStyle?.parentHeight ?? 0;
+    if (parentHeight <= 0) return undefined;
+    const effectiveHeight = parentHeight + (this._lineHeight - this.fontSize);
+    let last: TextLineData | undefined;
+    for (const column of this._columnContents) {
+      let accumulated = 0;
+      let overflowed = false;
+      for (const line of column) {
+        const lineH = line?.lineHeight ?? this._lineHeight;
+        if (overflowed || accumulated + lineH > effectiveHeight + 1e-6) {
+          overflowed = true;
+          break;
+        }
+        accumulated += lineH;
+        last = line;
+      }
+    }
+    return last;
+  }
+
   public get visibleChars(): number {
     const parentHeight = this._inheritStyle?.parentHeight ?? 0;
     if (parentHeight <= 0) {

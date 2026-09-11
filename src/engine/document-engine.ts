@@ -23,7 +23,7 @@ import { TableEngine, TableCellEngine } from "./table-engine";
 import { prepareImageDecoder } from "./image-decoder";
 import { computeLineHeightMm, resolveLineGap } from "./line-height";
 import { DEFAULT_LINE_GAP_MODE } from "@/constants";
-import { ThreadEngine } from "./thread-engine";
+import { ThreadEngine, type ThreadLayoutResult } from "./thread-engine";
 
 let _engineIdCounter = 0;
 
@@ -965,12 +965,12 @@ export class DocumentEngine {
    * ThreadEngine으로 순차 배치한다. threads가 없으면 no-op (기존 동작
    * byte-identical). `_buildTree()` 이후에 호출되어야 프레임 엔진이 존재한다.
    */
-  private _layoutThreads(): void {
-    if (!this._data.threads || this._data.threads.length === 0) return;
+  private _layoutThreads(): ThreadLayoutResult[] {
+    if (!this._data.threads || this._data.threads.length === 0) return [];
     if (!this._threadEngine) {
       this._threadEngine = ThreadEngine.create();
     }
-    this._threadEngine.layoutThreads(this._data.threads, id => this.findEngineById(id));
+    return this._threadEngine.layoutThreads(this._data.threads, id => this.findEngineById(id));
   }
 
   /**
@@ -981,16 +981,20 @@ export class DocumentEngine {
    * 찾을 수 있다. 모든 model이 존재하는 시점에 재호출해 스레드
    * 체인을 완성한다. threads가 없으면 no-op.
    *
+   * 스레드 단위 변경 감지(입력 불변 스킵)가 있으므로 변경 없는 재호출은
+   * 프레임 재배치 없이 `skipped: true` 결과로 반환된다.
+   *
    * @param sourceFrameIds - (선택) 편집이 발생한 프레임 id 집합. 전달되면
    *   해당 프레임의 `textContent`를 소속 thread의 story(`content`)에
    *   writeback한 뒤 체인을 재배치한다 — 편집 프레임의 model이 story의
    *   새 진실이 되기 때문이다.
+   * @returns 스레드별 배치 결과 배열 (스레드가 없으면 빈 배열)
    */
-  public relayoutThreads(sourceFrameIds?: ReadonlySet<string>): void {
+  public relayoutThreads(sourceFrameIds?: ReadonlySet<string>): ThreadLayoutResult[] {
     if (sourceFrameIds && sourceFrameIds.size > 0) {
       this._writebackThreadStory(sourceFrameIds);
     }
-    this._layoutThreads();
+    return this._layoutThreads();
   }
 
   /**
@@ -999,16 +1003,25 @@ export class DocumentEngine {
    * story 소유권은 엔진에 있다 (엔진-우선 원칙) — DOM 계층이 threads 데이터를
    * 직접 mutate하지 않는다. writeback은 `this._data.threads`의 **원본 객체**에
    * 기록한다 (`ThreadEngine.validate`가 중복 제거가 필요한 경우만 복사본을
-   * 만들므로 원본 identity가 보존된다).
+   * 만들고 그 결과는 여기에 재주입되지 않으므로 원본 identity가 보존된다).
+   *
+   * 프레임 소속 판정은 `ThreadEngine.validate`와 동일한 first-claim-wins로
+   * 한다: 한 프레임이 여러 thread에 중복 소속되어도 첫 유효 thread만 그
+   * 프레임을 소유한다. 스레드 프레임의 `textContent`는 배치 순서상 첫 유효
+   * thread의 story 전체이므로, 이후 thread에 writeback하면 해당 thread의
+   * story를 첫 thread의 story로 덮어써 소실시킨다.
    *
    * @param sourceFrameIds - 편집이 발생한 프레임 id 집합
    */
   private _writebackThreadStory(sourceFrameIds: ReadonlySet<string>): void {
     const threads = this._data.threads;
     if (!threads) return;
+    const claimed = new Set<string>();
     for (const thread of threads) {
-      const frameIds = thread.paragraphIds ?? [];
-      const sourceId = frameIds.find(id => sourceFrameIds.has(id));
+      const validIds = (thread.paragraphIds ?? []).filter(Boolean)
+        .filter(id => !claimed.has(id));
+      for (const id of validIds) claimed.add(id);
+      const sourceId = validIds.find(id => sourceFrameIds.has(id));
       if (sourceId === undefined) continue;
       const sourcePe = this.findEngineById(sourceId);
       if (!(sourcePe instanceof ParagraphEngine)) continue;
