@@ -406,6 +406,52 @@ const r = await page.evaluate(`
         offset: em7._focusedController?._cursorModel?.offset,
       };
     }
+    // 7e. ArrowDown@head tail → f2 이관 (end 경계점 right 편입 — 수직 경계)
+    //     결함 이력: tail이 own.end이므로 "소유" 판정으로 early return해
+    //     다음 프레임으로 이관되지 않았다 (atBoundaryStart만 방향 편입을 지원).
+    {
+      const tail = engine.findEngineById(f1Id7).overflowContentFrom;
+      em7.focusParagraph(frameOf7(f1Id7), { cursorOffset: tail });
+      await waitRaF7();
+      const c = em7._focusedController;
+      c?._textarea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await new Promise(r => setTimeout(r, 250));
+      out.nav.arrowDownAtHeadTail = {
+        tail,
+        focused: em7.focusedParagraph?.id,
+        offset: em7._focusedController?._cursorModel?.offset,
+      };
+    }
+    // 7f. ArrowDown@f2 tail → f3 이관 (연쇄 경계 동일 계약)
+    {
+      const f2Id = ids[2] ?? engine.data.threads[0]?.paragraphIds?.[2];
+      const tail = engine.findEngineById(f2Id7).overflowContentFrom;
+      em7.focusParagraph(frameOf7(f2Id7), { cursorOffset: tail });
+      await waitRaF7();
+      const c = em7._focusedController;
+      c?._textarea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await new Promise(r => setTimeout(r, 250));
+      out.nav.arrowDownAtF2Tail = {
+        tail,
+        focused: em7.focusedParagraph?.id,
+        offset: em7._focusedController?._cursorModel?.offset,
+      };
+    }
+    // 7g. ArrowDown@head 마지막 라인 끝-1 → f2 이관 (수직 이동 null 경로 — 라인 끝이 아니어도
+    //     마지막 라인 아래로 내려가면 경계를 넘는다)
+    {
+      const tail = engine.findEngineById(f1Id7).overflowContentFrom;
+      em7.focusParagraph(frameOf7(f1Id7), { cursorOffset: tail - 1 });
+      await waitRaF7();
+      const c = em7._focusedController;
+      c?._textarea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await new Promise(r => setTimeout(r, 250));
+      out.nav.arrowDownAtHeadLastLineMid = {
+        from: tail - 1,
+        focused: em7.focusedParagraph?.id,
+        offset: em7._focusedController?._cursorModel?.offset,
+      };
+    }
     // 7c. Backspace@f2 시작 → head 마지막 visible 글자 삭제 + head 이관
     {
       const plainOf7 = plainOf;
@@ -583,6 +629,17 @@ console.log('\n[7] 키보드 프레임 경계 이동 (story 절대 좌표계)');
   check('ArrowLeft@f2 시작(경계점) → head 포커스 이관',
     n.arrowLeftAtF2Start?.focused === r.frameIds?.[0],
     JSON.stringify(n.arrowLeftAtF2Start));
+  check('ArrowDown@head tail → f2 포커스 이관 + 커서 유지 (end 경계점 right 편입)',
+    n.arrowDownAtHeadTail?.focused === r.frameIds?.[1]
+    && n.arrowDownAtHeadTail?.offset === n.arrowDownAtHeadTail?.tail,
+    JSON.stringify(n.arrowDownAtHeadTail));
+  check('ArrowDown@f2 tail → f3 포커스 이관 (연쇄 경계 동일 계약)',
+    n.arrowDownAtF2Tail?.focused === r.frameIds?.[2]
+    && n.arrowDownAtF2Tail?.offset === n.arrowDownAtF2Tail?.tail,
+    JSON.stringify(n.arrowDownAtF2Tail));
+  check('ArrowDown@head 마지막 라인 끝-1 → f2 이관 (수직 이동 null 경로)',
+    n.arrowDownAtHeadLastLineMid?.focused === r.frameIds?.[1],
+    JSON.stringify(n.arrowDownAtHeadLastLineMid));
   check('Backspace@f2 시작 → head 마지막 visible 글자 삭제 (story 1자 감소)',
     n.backspaceAtF2Start?.storyAfter === (n.backspaceAtF2Start?.storyBefore ?? 0) - 1,
     JSON.stringify(n.backspaceAtF2Start));

@@ -1239,10 +1239,19 @@ export class EditManager {
     if (currentIdx < 0) return false;
 
     // 현재 프레임이 소유하면 이관 없음 — 경계점에서는 방향이 소유를 결정한다.
+    // 경계점은 start(= 이전 프레임 tail과 공유)와 end(= 다음 프레임 start와 공유)
+    // 양쪽이 있다 — tail 오프셋은 이전 프레임의 visible 끝이자 다음 프레임의
+    // 배치 시작이므로 양쪽 coverage가 동시에 주장한다. 왼쪽 이동은 start 경계점에서
+    // 이전 프레임으로 편입, 오른쪽/아래 이동은 end 경계점에서 다음 프레임으로
+    // 편입한다 (실측 결함: end 경계점 분기 부재로 ArrowDown@tail이 "소유" 판정으로
+    // early return해 다음 프레임으로 이관되지 않았다).
     const own = this._threadFrameCoverage(current.id);
     const atBoundaryStart = own !== null && storyOffset === own.start;
+    const atBoundaryEnd = own !== null && storyOffset === own.end;
     if (own && storyOffset >= own.start && storyOffset <= own.end) {
-      if (!atBoundaryStart || approachDirection !== 'left' || currentIdx === 0) {
+      const hasLeftClaim = atBoundaryStart && approachDirection === 'left' && currentIdx > 0;
+      const hasRightClaim = atBoundaryEnd && approachDirection === 'right' && currentIdx < frameIds.length - 1;
+      if (!hasLeftClaim && !hasRightClaim) {
         return false;
       }
     }
@@ -1253,6 +1262,12 @@ export class EditManager {
     if (atBoundaryStart && approachDirection === 'left' && currentIdx > 0) {
       // 경계점 왼쪽 편입: 이전 프레임의 끝(= 현재 start)으로
       targetId = frameIds[currentIdx - 1];
+      targetOffset = storyOffset;
+    } else if (atBoundaryEnd && approachDirection === 'right' && currentIdx < frameIds.length - 1) {
+      // 경계점 오른쪽 편입: 다음 프레임의 시작(= 현재 end)으로.
+      // 커서는 다음 프레임의 첫 글자 앞에 놓인다 — ArrowDown@tail의 자연스러운
+      // 착지점이며, ArrowRight@tail과 동일한 오프셋 시맨틱(경계 공유 지점)이다.
+      targetId = frameIds[currentIdx + 1];
       targetOffset = storyOffset;
     } else {
       for (const id of frameIds) {
