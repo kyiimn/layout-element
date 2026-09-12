@@ -4606,6 +4606,68 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     return visible;
   }
 
+  /**
+   * 커서가 위치할 수 있는 마지막(최대) source 오프셋 — 오버플로(숨김) 라인 진입 금지 경계.
+   *
+   * `columnContents`를 `visibleChars`와 동일한 라인 높이 기준
+   * (`effectiveColumnHeight = parentHeight + (lineHeight - fontSize)`)으로 순회하여
+   * 첫 overflow 라인 직전까지의 plain 공간 오프셋을 누적한다. 누적 규칙은
+   * `TextEditCoordinateMapper._rebuildMappings`의 source offset walk와 동일하다
+   * (파트 content 길이 = 선행 공백 + 가시 문자 + 후행 공백, endOfBlock 라인 뒤 `\n` 소비).
+   *
+   * 경계 값: 첫 overflow 라인 시작 오프셋의 바로 앞 문자가 `\n`이면 그 `\n` 위치
+   * (endOfBlock phantom placement 존재), 아니면 직전 라인 후행 공백을 건너뛴
+   * 첫 공백/마지막 가시 문자 다음 오프셋(trailing space atEndOfChar placement 또는
+   * 라인 끝 phantom end placement 존재). 두 경우 모두
+   * `getCursorPlacement(offset, preferLineEnd=true)`가 유효한 배치를 반환하므로
+   * 이 오프셋의 커서는 항상 마지막 visible 라인에 그려진다.
+   *
+   * 스레드 프레임의 커서 내비게이션은 프레임 경계 이관(`EditManager`)이 소유하므로
+   * 이 값을 소비하지 않는다. 게터는 프레임 로컬 오프셋을 반환한다 — 비-스레드 문단은
+   * contentFrom이 0이므로 story 절대 오프셋과 동일하다.
+   *
+   * @returns 최대 커서 오프셋. 오버플로 라인이 없으면(전체 visible, 배치 전,
+   *   부모 높이 미설정) `-1`.
+   * @throws 없음
+   * @example
+   * const model = ParagraphEngine.create({ content: "AAAA\nBBBB", ... });
+   * model.layoutStructure(); model.layoutText(); // BBBB가 오버플로인 높이
+   * model.maxVisibleCursorOffset; // 4 — \n 위치(마지막 visible 라인 끝)
+   * // "AAAABBBB"가 "AAAAB"만 들어가고 "BBB"가 오버플로이면 5 — phantom end placement
+   */
+  public get maxVisibleCursorOffset(): number {
+    const parentHeight = this._inheritStyle?.parentHeight ?? 0;
+    if (parentHeight <= 0) return -1;
+    const effectiveColumnHeight = parentHeight + (this._lineHeight - this.fontSize);
+    const plain = this.plainText;
+    let offset = 0;
+    for (let c = 0; c < this._columnContents.length; c++) {
+      const lines = this._columnContents[c] ?? [];
+      let accumulatedHeightMm = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const lineHeightMm = line?.lineHeight ?? this._lineHeight;
+        if (accumulatedHeightMm + lineHeightMm > effectiveColumnHeight + 1e-6) {
+          // 경계 배치 보장: 직전 문자가 \n이면 그 \n 위치(endOfBlock phantom placement 존재),
+          // 아니면 마지막 가시 문자 바로 다음(후행 공백 제외). 후행 공백 오프셋의 placement는
+          // 마지막 가시 문자 우측을 참조하므로 렌더가 안전하지만, 공백 다음(overflow 첫 문자)
+          // placement는 숨김 라인 span을 가리켜 커서 렌더 폴백이 깨진다.
+          if (offset > 0 && plain[offset - 1] === "\n") return offset - 1;
+          while (offset > 0 && plain[offset - 1] === " ") offset--;
+          return offset;
+        }
+        accumulatedHeightMm += lineHeightMm;
+        for (const part of line.parts) {
+          offset += part.content.length;
+        }
+        if (line.endOfBlock && offset < plain.length && plain[offset] === "\n") {
+          offset++;
+        }
+      }
+    }
+    return -1;
+  }
+
   /** 장평 비율 */
   public get widthRatio(): number {
     return this.effectiveTextStyle.widthRatio!;
