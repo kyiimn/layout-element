@@ -289,6 +289,30 @@ export interface CursorPlacement {
   atEndOfChar: boolean;
 }
 
+/**
+ * 라인별 source offset 경계 — 커서 내비게이션의 라인 경계 단일 소스.
+ *
+ * `ParagraphEngine.cursorLineRanges`가 산출하고, 편집 계층
+ * (`@/edit/text-edit-coordinate-mapper.ts`)이 라인 소속 판정·내비게이션
+ * 목적으로 소비한다. 오프셋은 프레임 로컬(비-스레드 문단은 story 절대와 동일).
+ */
+export interface CursorLineRange {
+  /** 라인의 시작 source offset (선행 공백 포함) */
+  startOffset: number;
+  /**
+   * 라인에서 커서가 위치할 수 있는 마지막 source offset — endOfBlock 라인은
+   * `\n` 위치, 그 외에는 다음 라인의 `startOffset`과 같은 경계 값. 시각적으로는
+   * 이전 라인 끝(phantom end)을 의미할 수 있으며 어느 쪽인지는 커서 배치가 결정.
+   */
+  endOffset: number;
+  /** 라인의 첫 배치 가능 글자 offset (선행 공백 건너뜀). 빈 라인이면 startOffset. */
+  firstVisible: number | null;
+  /** 라인의 마지막 배치 가능 글자 offset (후행 공백 제외). 렌더 가능 글자가 없으면 null. */
+  lastVisible: number | null;
+  /** 라인이 블록의 끝인지 (`\n` 직전) */
+  endOfBlock: boolean;
+}
+
 // ─────────────────────────────────────────────────────────────
 // 엔진 옵션 타입
 // ─────────────────────────────────────────────────────────────

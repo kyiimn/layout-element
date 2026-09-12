@@ -58,6 +58,7 @@ import {
 import type { BoxEngine } from "./box-engine";
 import {
   AbsRect,
+  CursorLineRange,
   CursorPlacement,
   CursorPosition,
   EngineResources,
@@ -4574,36 +4575,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   }
 
   public get visibleChars(): number {
-    const parentHeight = this._inheritStyle?.parentHeight ?? 0;
-    if (parentHeight <= 0) {
-      return this.totalChars;
-    }
-
-    const effectiveColumnHeight = parentHeight + (this._lineHeight - this.fontSize);
-    let visible = 0;
-
-    for (let c = 0; c < this._columnContents.length; c++) {
-      const lines = this._columnContents[c] || [];
-      let accumulatedHeightMm = 0;
-      let hasOverflowed = false;
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const lineHeightMm = line?.lineHeight ?? this._lineHeight;
-
-        const isOverflow = hasOverflowed
-          || accumulatedHeightMm + lineHeightMm > effectiveColumnHeight + 1e-6;
-        if (isOverflow) {
-          hasOverflowed = true;
-          continue;
-        }
-        accumulatedHeightMm += lineHeightMm;
-        for (const part of line.parts) {
-          visible += part.content.length;
-        }
-      }
-    }
-    return visible;
+    return this._cursorLineWalk().visibleCount;
   }
 
   /**
@@ -4636,36 +4608,140 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * // "AAAABBBB"가 "AAAAB"만 들어가고 "BBB"가 오버플로이면 5 — phantom end placement
    */
   public get maxVisibleCursorOffset(): number {
+    return this._cursorLineWalk().maxCursorOffset;
+  }
+
+  /**
+   * 커서 내비게이션의 라인별 source offset 경계 — 라인 경계의 단일 소스.
+   *
+   * `columnContents`를 1회 순회하여 라인별 `{startOffset, endOffset, firstVisible,
+   * lastVisible, endOfBlock, columnIndex, lineIndex}` 배열을 산출한다. 누적 규칙은
+   * `TextEditCoordinateMapper._rebuildMappings`의 source offset walk와 동일하다
+   * (파트 content 길이 = 선행 공백 + 가시 문자 + 후행 공백, endOfBlock 라인 뒤
+   * `\n` 소비). `visibleChars`/`maxVisibleCursorOffset`도 이 walk를 소비한다 —
+   * 세 walk가 분기하면 배치 불일치가 발생하므로 구조적으로 통합한다.
+   *
+   * **소유권 규칙 (경계 offset 이중 소속)**: 라인 i의 `endOffset`은 라인 i+1의
+   * `startOffset`과 같은 값이다 — 이 경계 offset은 편집 커서 기준 다음 라인
+   * 소속(`getLineInfoBySourceOffset` ≥ start 규칙)이며, 시각적으로는 라인 i 끝
+   * (phantom end placement)을 의미할 수 있다. 어느 쪽인지는 커서의 배치
+   * (atEndOfChar/bias)가 결정한다 — 이 게터는 경계 값만 소유한다.
+   *
+   * 게터는 프레임 로컬 오프셋을 반환한다 — 비-스레드 문단은 contentFrom이 0이므로
+   * story 절대 오프셋과 동일하다. 스레드 프레임의 story 절대 변환은 소비자
+   * (TextEditCoordinateMapper, contentFrom 보유)가 수행한다.
+   *
+   * @example
+   * const model = ParagraphEngine.create({ content: "가나다\n라마바", ... });
+   * model.layoutStructure(); model.layoutText();
+   * model.cursorLineRanges; // [[{startOffset: 0, endOffset: 3(\\n), ...},
+   *                         //  {startOffset: 4, endOffset: 7, ...}]]
+   * // 라인 0: plain 0~2(가나다) + \n(3) — endOffset 3은 \n 위치
+   * // 라인 1: plain 4~6(라마바) — endOffset 7 = 텍스트 끝
+   */
+  public get cursorLineRanges(): CursorLineRange[][] {
+    return this._cursorLineWalk().ranges;
+  }
+
+  /**
+   * 라인 경계 walk의 단일 구현 — visibleChars/maxVisibleCursorOffset/cursorLineRanges가 공유한다.
+   * @private
+   */
+  private _cursorLineWalk(): { ranges: CursorLineRange[][]; visibleCount: number; maxCursorOffset: number } {
     const parentHeight = this._inheritStyle?.parentHeight ?? 0;
-    if (parentHeight <= 0) return -1;
-    const effectiveColumnHeight = parentHeight + (this._lineHeight - this.fontSize);
+    const effectiveColumnHeight = parentHeight > 0
+      ? parentHeight + (this._lineHeight - this.fontSize)
+      : Infinity;
     const plain = this.plainText;
+
+    const ranges: CursorLineRange[][] = [];
+    let visible = 0;
+    let overflowBoundary: number | null = null;
     let offset = 0;
+
     for (let c = 0; c < this._columnContents.length; c++) {
       const lines = this._columnContents[c] ?? [];
+      const columnRanges: CursorLineRange[] = [];
       let accumulatedHeightMm = 0;
+      let hasOverflowed = false;
+
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
+        const lineStartOffset = offset;
         const lineHeightMm = line?.lineHeight ?? this._lineHeight;
-        if (accumulatedHeightMm + lineHeightMm > effectiveColumnHeight + 1e-6) {
-          // 경계 배치 보장: 직전 문자가 \n이면 그 \n 위치(endOfBlock phantom placement 존재),
-          // 아니면 마지막 가시 문자 바로 다음(후행 공백 제외). 후행 공백 오프셋의 placement는
-          // 마지막 가시 문자 우측을 참조하므로 렌더가 안전하지만, 공백 다음(overflow 첫 문자)
-          // placement는 숨김 라인 span을 가리켜 커서 렌더 폴백이 깨진다.
-          if (offset > 0 && plain[offset - 1] === "\n") return offset - 1;
-          while (offset > 0 && plain[offset - 1] === " ") offset--;
-          return offset;
+        const isOverflow: boolean = hasOverflowed
+          || (effectiveColumnHeight !== Infinity
+            && accumulatedHeightMm + lineHeightMm > effectiveColumnHeight + 1e-6);
+        hasOverflowed = hasOverflowed || isOverflow;
+        if (isOverflow && overflowBoundary === null) {
+          // 경계는 오버플로 라인의 시작 offset 기준 — 첫 overflow 라인 시작의
+          // 바로 앞 문자가 \n이면 그 \n 위치(endOfBlock phantom placement 존재),
+          // 아니면 후행 공백을 건너뛴 첫 공백/마지막 가시 문자 다음 offset
+          // (trailing space atEndOfChar 또는 라인 끝 phantom end placement 존재).
+          if (lineStartOffset > 0 && plain[lineStartOffset - 1] === '\n') {
+            overflowBoundary = lineStartOffset - 1;
+          } else {
+            let b = lineStartOffset;
+            while (b > 0 && plain[b - 1] === ' ') b--;
+            overflowBoundary = b;
+          }
         }
-        accumulatedHeightMm += lineHeightMm;
-        for (const part of line.parts) {
-          offset += part.content.length;
+
+        // plain offset은 오버플로 여부와 무관하게 전진 — 숨김 라인도 source offset 공간에 존재.
+        let leadingSpaces = 0;
+        if (line.parts.length > 0 && line.firstOfBlock !== true) {
+          const first = line.parts[0].content;
+          for (let k = 0; k < first.length && first[k] === ' '; k++) leadingSpaces++;
         }
-        if (line.endOfBlock && offset < plain.length && plain[offset] === "\n") {
+        let lastVisibleOffset: number | null = null;
+        for (let p = 0; p < line.parts.length; p++) {
+          const part = line.parts[p];
+          const isLast = p === line.parts.length - 1;
+          const content = part.content;
+          const firstCharIdx = (p === 0 && line.firstOfBlock !== true) ? leadingSpaces : 0;
+          // strip 규칙: 마지막 파트의 trailing space는 렌더에서 제외 —
+          // endOfBlock은 공백을 유지하므로 마지막 글자까지 가시 범위.
+          const trailingStrip = (isLast && line.endOfBlock !== true)
+            ? countTrailingSpaces(content)
+            : 0;
+          for (let k = 0; k < content.length; k++) {
+            const isRendered = k >= firstCharIdx && k < content.length - trailingStrip;
+            if (isRendered) {
+              lastVisibleOffset = offset;
+            }
+            offset++;
+          }
+        }
+        if (isOverflow) {
+          // 가시 글자 수에는 오버플로 라인이 포함되지 않는다 (visibleChars 계약).
+        } else {
+          // 기존 visibleChars 계약: Σ 파트 content 길이. endOfBlock +1은
+          // \n이 실제로 존재할 때만 — plain에 \n이 없는 마지막 블록은 제외한다
+          // (없는 \n을 세면 총합이 totalChars를 초과한다).
+          for (const part of line.parts) {
+            visible += part.content.length;
+          }
+        }
+        if (line.endOfBlock && offset < plain.length && plain[offset] === '\n') {
           offset++;
         }
+        accumulatedHeightMm += lineHeightMm;
+        columnRanges.push({
+          startOffset: lineStartOffset,
+          endOffset: line.endOfBlock ? offset - 1 : offset,
+          firstVisible: lineStartOffset + leadingSpaces,
+          lastVisible: lastVisibleOffset,
+          endOfBlock: line.endOfBlock === true,
+        });
       }
+      ranges.push(columnRanges);
     }
-    return -1;
+
+    // 오버플로 없으면 -1 (기존 계약 — 클램프 비활성 신호)
+    const maxCursorOffset = overflowBoundary !== null
+      ? overflowBoundary
+      : -1;
+    return { ranges, visibleCount: visible, maxCursorOffset };
   }
 
   /** 장평 비율 */
@@ -5119,6 +5195,16 @@ function inlineStyleEqual(a: TextInlineStyle | undefined, b: TextInlineStyle | u
     a.breaklineColor === b.breaklineColor &&
     a.outlineColor === b.outlineColor
   );
+}
+
+/**
+ * 배열 콘텐츠의 후행 공백 개수 — strip 규칙 계산용.
+ * @private
+ */
+function countTrailingSpaces(content: string[]): number {
+  let n = 0;
+  for (let k = content.length - 1; k >= 0 && content[k] === ' '; k--) n++;
+  return n;
 }
 
 /**
