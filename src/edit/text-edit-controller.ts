@@ -1045,6 +1045,11 @@ export class TextEditController {
     }
     case "Home": {
       event.preventDefault();
+      // 리셋 전 crossRight 상태를 캡처한다 — End 주차(sticking)에서 Home을 누르면
+      // 출발 라인 시작으로 이동해야 하며, 커서가 주차된 라인 끝 경계 offset은
+      // getLineInfoBySourceOffset 기준 '다음 라인' 소속이므로 offset-1로 출발 라인을
+      // 찾는다. (이중 소속 문제: 라인 끝 offset = 다음 라인 시작 offset)
+      const wasEndParked = this._crossRightState === 'sticking';
       this._crossRightState = 'none';
       if (hasShortcut) {
         const lineStart = this._findLineStart(content, offset);
@@ -1055,29 +1060,21 @@ export class TextEditController {
         this._extendSelection(lineStart);
         this._crossLeftState = 'none';
       } else {
-        const lineStart = this._getLogicalLineStart(offset);
-        const atLineStart = offset === lineStart;
-        if (atLineStart && offset === 0) {
-          break;
-        }
+        // 단순 이동 머신 (End case와 대칭): 직전 입력이 Home(crossLeft sticking)이면
+        // 이미 라인 시작에 주차된 상태이므로 반복 입력에 제자리를 유지한다.
         if (this._crossLeftState === 'sticking') {
           this._cursorModel.offset = offset;
-          this._cursorModel.selection = null;
-          this._crossLeftState = 'crossed';
-        } else if (this._crossLeftState === 'crossed') {
-          const prevStart = this._getLogicalLineStart(Math.max(0, offset - 1));
-          this._cursorModel.offset = prevStart;
-          this._cursorModel.selection = null;
-          this._crossLeftState = 'none';
-        } else if (atLineStart) {
-          this._cursorModel.offset = offset;
-          this._cursorModel.selection = null;
-          this._crossLeftState = 'sticking';
+        } else if (wasEndParked) {
+          const sourceLineStart = this._getLogicalLineStart(Math.max(0, offset - 1));
+          this._cursorModel.offset = sourceLineStart === offset ? offset : sourceLineStart;
         } else {
-          this._cursorModel.offset = lineStart;
-          this._cursorModel.selection = null;
-          this._crossLeftState = 'sticking';
+          this._cursorModel.offset = this._getLogicalLineStart(offset);
         }
+        if (this._cursorModel.offset === 0 && offset === 0) {
+          break;
+        }
+        this._cursorModel.selection = null;
+        this._crossLeftState = 'sticking';
       }
       this._syncTextareaSelection();
       this._updateCursorPosition();
@@ -1098,26 +1095,18 @@ export class TextEditController {
         this._extendSelection(lineEnd);
         this._crossRightState = 'none';
       } else {
-        const lineEnd = this._getEndKeyOffset(offset);
-        const atLineEnd = offset === lineEnd;
+        // 단순 이동 머신: 착지 offset은 항상 착지 라인에 그려진다 — sticking 상태
+        // 유지로 crossed 렌더 분기(이웃 라인 미리보기)에 진입하지 않는다. 직전 입력이
+        // End(crossRight sticking)이면 이미 라인 끝에 주차된 상태이므로 반복 입력에
+        // 제자리를 유지한다. 직전 입력이 Home(crossLeft sticking)이면 커서는 라인 시작
+        // 주차 상태이므로 정상 경로(_getEndKeyOffset)로 라인 끝을 계산한다.
         if (this._crossRightState === 'sticking') {
           this._cursorModel.offset = offset;
-          this._cursorModel.selection = null;
-          this._crossRightState = 'crossed';
-        } else if (this._crossRightState === 'crossed') {
-          const nextEnd = this._getEndKeyOffset(Math.min(content.length, offset + 1));
-          this._cursorModel.offset = nextEnd;
-          this._cursorModel.selection = null;
-          this._crossRightState = 'none';
-        } else if (atLineEnd) {
-          this._cursorModel.offset = offset;
-          this._cursorModel.selection = null;
-          this._crossRightState = 'sticking';
         } else {
-          this._cursorModel.offset = lineEnd;
-          this._cursorModel.selection = null;
-          this._crossRightState = 'sticking';
+          this._cursorModel.offset = this._getEndKeyOffset(offset);
         }
+        this._cursorModel.selection = null;
+        this._crossRightState = 'sticking';
       }
       this._syncTextareaSelection();
       this._updateCursorPosition();
@@ -2636,7 +2625,22 @@ export class TextEditController {
       }
     } else if (this._crossLeftState === 'sticking') {
       const curPlacement = this._mapper.getCursorPlacement(offset, false);
-      if (curPlacement) placement = { ...curPlacement, atEndOfChar: false };
+      if (curPlacement) {
+        // 라인 시작 주차 렌더: placement가 이전 라인 끝을 참조하면(leading space 라인의
+        // 시작 offset이 구멍 채우기 패스에서 이전 라인 끝 atEndOfChar로 채워지는 케이스)
+        // 커서가 이전 라인에 그려진다 — placement의 라인 소속이 offset의 라인과 다르면
+        // placement를 무시하고 line rect 폴백(라인 시작 left)으로 떨어뜨린다.
+        const offsetLine = this._mapper.getLineInfoBySourceOffset(offset);
+        const placementLine = this._mapper.getLineInfoBySourceOffset(curPlacement.sourceOffset);
+        const sameLine = offsetLine !== null && placementLine !== null &&
+          offsetLine.columnIndex === placementLine.columnIndex &&
+          offsetLine.lineIndex === placementLine.lineIndex;
+        if (sameLine) {
+          placement = { ...curPlacement, atEndOfChar: false };
+        } else {
+          placement = null;
+        }
+      }
     }
 
     // placement가 없는 경우(빈 줄 시작, offset=0 등): line rect 또는 first column rect 사용
