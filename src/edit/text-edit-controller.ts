@@ -490,8 +490,6 @@ export class TextEditController {
   }
 
   private _onClick(event: MouseEvent): void {
-    this._crossRightState = 'none';
-    this._crossLeftState = 'none';
     if (this._wasDragged) {
       this._wasDragged = false;
       return;
@@ -973,6 +971,14 @@ export class TextEditController {
           this._crossRightState = 'none';
         }
       }
+      // 오버플로 라인 진입 금지: 착지가 경계에 도달/초과하면 경계로 되돌리고 cross
+      // 상태 진행(sticking→crossed)도 차단한다 — crossed 배치는 다음 라인 첫 글자
+      // (숨김 span) placement를 참조하므로 커서 렌더 폴백이 깨진다.
+      const maxOffset = this._cursorMaxOffset();
+      if (maxOffset !== null && targetRight >= maxOffset) {
+        targetRight = maxOffset;
+        this._crossRightState = 'none';
+      }
       if (isShift) {
         this._extendSelection(targetRight);
       } else {
@@ -1001,9 +1007,22 @@ export class TextEditController {
     case "ArrowDown": {
       event.preventDefault();
       const direction = event.key === "ArrowUp" ? -1 : 1;
-      const newOffset = this._computeVerticalOffset(direction);
-      this._crossRightState = 'none';
-      this._crossLeftState = 'none';
+      let newOffset = this._computeVerticalOffset(direction);
+      // 아래 방향만 클램프 — 위 방향은 오버플로 영역으로 진입하지 않는다.
+      // 스레드 프레임은 _cursorMaxOffset가 null이므로 클램프 없이 이관 로직이 그대로 동작한다.
+      if (direction > 0) {
+        const cursorMax = this._cursorMaxOffset();
+        if (newOffset !== null && cursorMax !== null && newOffset > cursorMax) {
+          newOffset = cursorMax;
+        }
+      }
+      // 출발 주차 상태 보존: Home 주차(crossLeft sticking)에서 Up/Down하면 착지도
+      // 라인 시작에 그려지고, End 주차(crossRight sticking)에서 Up/Down하면 착지도
+      // 라인 끝에 그려진다 — sticking 상태를 리셋하면 착지 렌더가 기본 경로
+      // (preferLineEnd)로 돌아가 라인 경계 offset이 이웃 라인을 참조한다.
+      // crossed(라인 경계 미리보기 잔존 상태)만 리셋한다.
+      if (this._crossLeftState === 'crossed') this._crossLeftState = 'none';
+      if (this._crossRightState === 'crossed') this._crossRightState = 'none';
       if (isShift) {
         this._extendSelection(newOffset ?? offset);
       } else {
@@ -1087,11 +1106,20 @@ export class TextEditController {
       event.preventDefault();
       this._crossLeftState = 'none';
       if (hasShortcut) {
-        const lineEnd = this._findLineEnd(content, offset);
+        let lineEnd = this._findLineEnd(content, offset);
+        // Ctrl+End는 라인이 아닌 문서 끝으로 이동하므로 단일 블록 텍스트에서
+        // 숨김 영역(오버플로 라인)에 착지할 수 있다 — 경계로 클램프한다.
+        const endMax = this._cursorMaxOffset();
+        if (endMax !== null && lineEnd > endMax) lineEnd = endMax;
         if (isShift) { this._extendSelection(lineEnd); } else { this._cursorModel.offset = lineEnd; this._cursorModel.selection = null; }
         this._crossRightState = 'none';
       } else if (isShift) {
-        const lineEnd = this._getEndKeyOffset(offset);
+        let lineEnd = this._getEndKeyOffset(offset);
+        // Shift+End가 커서 경계(offset)의 논리 라인이 아닌 오버플로 라인의 끝을
+        // 계산하는 케이스를 경계로 되돌린다 (커서가 숨김 영역의 offset 위에 있으면
+        // getLineInfoBySourceOffset가 오버플로 라인을 반환한다).
+        const shiftEndMax = this._cursorMaxOffset();
+        if (shiftEndMax !== null && lineEnd > shiftEndMax) lineEnd = shiftEndMax;
         this._extendSelection(lineEnd);
         this._crossRightState = 'none';
       } else {
@@ -1103,7 +1131,14 @@ export class TextEditController {
         if (this._crossRightState === 'sticking') {
           this._cursorModel.offset = offset;
         } else {
-          this._cursorModel.offset = this._getEndKeyOffset(offset);
+          let endOffset = this._getEndKeyOffset(offset);
+          // 커서가 경계(마지막 visible 라인 끝)에 있으면 논리 라인이 오버플로
+          // 라인이라 그 끝이 숨김 영역에 착지한다 — 경계로 되돌린다. 경계 offset은
+          // line-end phantom placement를 참조하므로 커서는 마지막 visible 문자
+          // 오른쪽에 그려진다.
+          const endKeyMax = this._cursorMaxOffset();
+          if (endKeyMax !== null && endOffset > endKeyMax) endOffset = endKeyMax;
+          this._cursorModel.offset = endOffset;
         }
         this._cursorModel.selection = null;
         this._crossRightState = 'sticking';
@@ -1415,6 +1450,25 @@ export class TextEditController {
     return from !== undefined && from > 0 ? from : null;
   }
 
+  /**
+   * 화살표 키 이동의 최대 착지 오프셋 — 오버플로(숨김) 라인 진입 금지 경계.
+   *
+   * 엔진 `maxVisibleCursorOffset`(라인 높이 기준 첫 overflow 라인 직전 경계)를
+   * 소비한다. 스레드 프레임은 커서 이동을 프레임 경계 이관
+   * (`_transferCursorAcrossThreadBoundary` → `EditManager`)이 소유하므로 null을
+   * 반환해 클램프를 스킵한다 — 기존 이관 흐름 무영향.
+   *
+   * @returns story 절대 최대 착지 오프셋. 클램프 대상이 아니면(스레드 프레임,
+   *   오버플로 없음, 모델 없음) null.
+   * @throws 없음
+   */
+  private _cursorMaxOffset(): number | null {
+    const model = this._paragraph.model;
+    if (!model || model.isThreadFrame) return null;
+    const max = model.maxVisibleCursorOffset;
+    return max >= 0 ? max : null;
+  }
+
   private _computeVerticalOffset(direction: -1 | 1): number | null {
     const model = this._paragraph.model;
     if (!model) return null;
@@ -1430,14 +1484,33 @@ export class TextEditController {
     // \n 위치나 trailing space처럼 매핑이 없는 offset은 커서가 직접
     // 위치할 수 없으므로, 마지막 visible 문자(offset === visualBounds.end - 1)를
     // 라인 끝으로 취급한다.
-    const isAtLineStart = atVisualLineStart;
-    const isAtLineEnd = atVisualLineEnd
+    let isAtLineStart = atVisualLineStart;
+    let isAtLineEnd = atVisualLineEnd
       || (visualBounds !== null
         && offset === visualBounds.end - 1
         && this._mapper.getCursorPlacement(offset + 1) === null);
 
     let currentLineInfo = this._mapper.getLineInfoBySourceOffset(offset);
     if (currentLineInfo === null) return null;
+
+    // 라인 끝 주차(End 착지) offset은 내부적으로 '다음 라인 시작'과 같은 값이므로
+    // getLineInfoBySourceOffset가 다음 라인을 소속 라인으로 판정한다. 직전 입력이
+    // End(crossRight sticking)였으면 커서가 그려진 라인은 이전 라인이므로 출발 라인을
+    // 한 라인 되돌려 판정한다 — 그렇지 않으면 ArrowDown이 2 라인 아래로, ArrowUp이
+    // 같은 라인(순환)으로 이동한다. isAtLineStart/isAtLineEnd도 다음 라인 기준으로
+    // 판정되었으므로(라인 시작 경계는 findVisualLineBounds가 다음 라인 소속으로 본다)
+    // 출발 라인 기준으로 재판정한다: 라인 끝 주차는 항상 출발 라인의 끝 상태이므로
+    // 상대 위치 유지 경로(isAtLineEnd)로 강제.
+    const fromEndParked = this._crossRightState === 'sticking'
+      && (visualBounds === null || offset === visualBounds.start);
+    if (fromEndParked) {
+      const prevInfo = offset > 0 ? this._mapper.getLineInfoBySourceOffset(offset - 1) : null;
+      if (prevInfo !== null) {
+        currentLineInfo = prevInfo;
+      }
+      isAtLineStart = false;
+      isAtLineEnd = true;
+    }
 
     const flatIndex = this._toFlatLineIndex(currentLineInfo.columnIndex, currentLineInfo.lineIndex);
     const targetFlatIndex = flatIndex + direction;
@@ -2593,6 +2666,32 @@ export class TextEditController {
     // 기본 조회에서 preferLineEnd=true: 라인 끝 문자 다음 offset에서 phantom end placement를 우선하여
     // 커서가 라인 끝 문자의 오른쪽에 배치되도록 한다.
     let placement = this._mapper.getCursorPlacement(offset, true);
+    if (this._crossRightState === 'none' && this._crossLeftState === 'none' && placement?.atEndOfChar === true) {
+      // 기본 경로 same-line 가드: preferLineEnd가 반환한 phantom placement가
+      // 이전 라인을 참조하면(라인 끝 경계 offset = 다음 라인 시작을 preferLineEnd가
+      // 이전 라인 끝으로 채우는 케이스) 커서가 2 라인 위 끝에 그려진다. ArrowUp/Down
+      // 착지처럼 cross 상태가 none인 이동에서는 offset 소속 라인의 배치가 우선이므로
+      // default placement(atEndOfChar: false, 다음 라인 시작)로 폴백한다.
+      // cross sticking/crossed 분기는 라인 끝/이웃 라인 참조가 의도된 동작이므로 가드하지 않는다.
+      const offsetLine = this._mapper.getLineInfoBySourceOffset(offset);
+      const placementLine = this._mapper.getLineInfoBySourceOffset(placement.sourceOffset);
+      const sameLine = offsetLine !== null && placementLine !== null &&
+        offsetLine.columnIndex === placementLine.columnIndex &&
+        offsetLine.lineIndex === placementLine.lineIndex;
+      if (!sameLine) {
+        const defaultPlacement = this._mapper.getCursorPlacement(offset, false);
+        // default placement도 구멍 채우기 패스에서 이전 라인 끝을 참조하는 케이스
+        // (leading space 라인 시작)가 있다 — placement 소속이 offset 소속과 다르면
+        // line rect 폴백으로 떨어뜨린다(placement null).
+        const defaultLine = defaultPlacement
+          ? this._mapper.getLineInfoBySourceOffset(defaultPlacement.sourceOffset)
+          : null;
+        const defaultSameLine = offsetLine !== null && defaultLine !== null &&
+          offsetLine.columnIndex === defaultLine.columnIndex &&
+          offsetLine.lineIndex === defaultLine.lineIndex;
+        placement = defaultSameLine ? defaultPlacement : null;
+      }
+    }
     if (this._crossRightState === 'sticking') {
       // sticking: 라인 끝에 머무는 상태. 기본 placement(phantom end)를 그대로 사용한다.
       // phantom end placement가 없는 경우(trailing space 있음)는 기본 placement가 이미 atEndOfChar: true.
