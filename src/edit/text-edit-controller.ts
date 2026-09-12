@@ -1588,16 +1588,53 @@ export class TextEditController {
 
   /**
    * End 키로 이동해야 할 라인 끝 offset을 반환한다.
-   * `_getLogicalLineEnd`가 \n 위치나 content.length이면 그대로 반환하고,
-   * 렌더링된 마지막 문자 위치이면 +1을 반환하여 커서가 문자 오른쪽에 표시되도록 한다.
+   *
+   * 규칙 (우선순위 순):
+   * 1. `lineEnd`가 `\n` 위치거나 텍스트 끝이면 그대로 반환 — `\n`은 매핑이
+   *    없는 위치이고, 텍스트 끝(`content.length`)은 endOfBlock phantom
+   *    placement(`atEndOfChar: true`)가 이미 등록되어 있어 이 offset 자체가
+   *    "마지막 가시 문자 오른쪽"을 의미한다. `+1`하면 매핑 밖 offset이 되어
+   *    `_updateCursorPosition`이 line rect 폴백(라인 맨앞)으로 빠진다.
+   * 2. `lineEnd`의 placement가 이미 `atEndOfChar: true`이면 그대로 반환 —
+   *    trailing space로 끝나는 라인의 끝 offset은 후행 공백을 참조하는
+   *    `atEndOfChar: true` placement가 있어 커서가 마지막 가시 문자 오른쪽에
+   *    배치된다. `+1`하면 다음 라인 첫 글자 왼쪽(라인 경계 넘음)이 된다.
+   * 3. `lineEnd`가 매핑된 가시 문자 위치이면 `+1` 반환 — preferLineEnd 조회로
+   *    phantom end placement가 커서를 문자 오른쪽에 그린다.
+   * 4. `lineEnd`가 매핑되지 않은 위치(\n, 생략된 공백)면 역방향으로 가장 가까운
+   *    매핑된 위치 + 1을 반환.
+   *
+   * @param offset - 현재 커서 source offset
+   * @returns End 키가 이동해야 할 라인 끝 source offset
+   * @example
+   * // 마지막 라인 끝 (텍스트 끝): endOfBlock phantom이 content.length에 있음
+   * _getEndKeyOffset(5);  // plainText.length === 6 → 6 (그대로, +1 안 함)
+   * // trailing space로 끝나는 중간 라인: placement가 atEndOfChar: true
+   * _getEndKeyOffset(3);  // → 5 (그대로, 다음 라인으로 넘어가지 않음)
+   * // 중간 라인 끝 (가시 문자 매핑, 다음 라인 첫 글자와 offset 공유)
+   * _getEndKeyOffset(2);  // → 3 (+1, phantom end placement로 문자 오른쪽에 그림)
    */
   private _getEndKeyOffset(offset: number): number {
     const lineEnd = this._getLogicalLineEnd(offset);
+    const plainText = this._paragraph.model?.plainText;
     // lineEnd가 \n 위치이면 그대로 반환 (\n 앞에서 멈춤)
-    if (this._paragraph.model?.plainText[lineEnd] === "\n") {
+    if (plainText?.[lineEnd] === "\n") {
       return lineEnd;
     }
-    if (this._mapper.getCursorPlacement(lineEnd) !== null) {
+    // lineEnd가 텍스트 끝이면 그대로 반환 — endOfBlock phantom placement가
+    // lineEnd에 존재(atEndOfChar: true)하므로 +1하면 매핑 밖 offset이 되어
+    // line rect 폴백(라인 맨앞)으로 빠진다.
+    if (lineEnd >= (plainText?.length ?? 0)) {
+      return lineEnd;
+    }
+    // lineEnd의 placement가 이미 atEndOfChar: true면 그대로 반환 —
+    // trailing space로 끝나는 라인의 끝 offset은 후행 공백을 참조하는
+    // placement로, 커서가 마지막 가시 문자 오른쪽에 배치된다.
+    const lineEndPlacement = this._mapper.getCursorPlacement(lineEnd, true);
+    if (lineEndPlacement?.atEndOfChar === true) {
+      return lineEnd;
+    }
+    if (lineEndPlacement !== null) {
       return lineEnd + 1;
     }
     // lineEnd가 매핑되지 않은 위치(\n, 생략된 공백)면
