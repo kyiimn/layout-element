@@ -1050,9 +1050,9 @@ const handledReverse = manager.navigateByTab(true);
 - **다중 탭**: 한 파트에 탭이 여러 개면 첫 번째 탭 기준으로 collapse된다 (InDesign은 후속 탭을 다음 라인으로 밀지만, v1은 collapse로 단순화 — 의도된 편차).
 - **렌더링**: 탭은 `data-source-offset` diff 키를 유지하는 **0폭 + `visibility: hidden` span**으로 렌더링된다. span이 존재하므로 커서/선택/클릭 매핑(`TextEditCoordinateMapper`)이 오프셋 산술을 그대로 유지한다.
 - **탭 영역 점선 가이드 (편집 모드 전용)**: `editableText`가 활성화된 단락에서 탭 span에 얇은 **점선 배경**이 표시되어 좌/우 텍스트 사이의 탭 영역을 시각적으로 드러낸다 (`_applyTabGuideStyle`). 갭 폭은 탭 앞쪽 마지막 가시 span의 **시각 우측 끝**(`data-char-offset + data-swidth × scaleX`)부터 탭 위치(`data-char-offset` = 우측 세그먼트 시작)까지이며, `width` 확장 + `transform: translateX(-갭폭)`으로 표현한다 — `data-char-offset`/`style.left`는 건드리지 않아 diff 시스템(positionChanged 판정)과 충돌하지 않는다. `scaleX`는 기준 span의 **per-span 장평**(`data-dim-key`에서 `widthRatio` 파싱 → `× 0.88`, dimKey에 없으면 문단 effective 장평)이다 — 장평이 런 단위 오버라이드 가능해져 문단 값 고정이면 오버라이드 런 옆에서 점선이 글자를 침범한다. 렌더링 함정 2가지: (1) 점선 색을 `currentColor`로 하면 `color: transparent`(글자 숨김)에 묻혀 점선도 투명해지므로 **fixed 색(#888)**을 쓴다. (2) `scale` 개별 프로퍼티(장평 스케일)를 **1로 리셋**한다 — 탭 span은 시각 글자가 없어 장평이 무의미하고 scale은 배경 폭을 압축해 갭을 다 덮지 못한다. 높이도 명시해야 한다(높이 0이면 배경이 안 보임). 점선은 라인 수직 중앙에 배치한다 — `backgroundPosition: calc(50% - 밴드절반)`. 비편집 모드로 전환 시 잔존 인라인 스타일을 원복하여 0폭+hidden으로 복귀한다. 인쇄(printPostData)에는 영향이 없다.
-- **낙관적 span(optimistic) 스킵 + 탭 라인 조합의 엔진 렌더 반영**: 탭이 포함된 **라인**에서는 `_optimisticSpanUpdate`(일반 타이핑)와 `_optimisticCompositionUpdate`(IME 조합) 모두 임시 span을 생성하지 않는다. 우측 정렬은 새 글자가 파트 끝에 붙고 **기존 글자가 왼쪽으로 밀리지만**, `_shiftFollowingSpans`/`_computeTempSpanLeft`는 좌측 정렬 가정(오른쪽 밀어내기)으로 설계되어 방향이 반전된다. 좌측 세그먼트 타이핑도 같은 파트의 우측 세그먼트 span들을 밀어내므로, 라인에 탭이 있으면 optimistic을 아예 끈다.
-  - **탭 라인 조합 표시**: optimistic이 없으면 조합 중 텍스트가 화면에 표시되지 않으므로(조합 중 렌더 지연 최적화가 표시를 optimistic에 위임하기 때문), `_onCompositionUpdate`는 탭 라인 조합 시(`_isTabLineComposition`) **`_debouncedRender()`로 조합 중 텍스트를 실제 엔진 렌더에 반영**한다. 엔진이 매 프레임 정확한 우측 정렬을 계산하므로 조합 글자가 항상 올바른 위치에 표시되고, 밑줄(`_applyCompositionUnderline`)도 정상 적용된다. 음절당 렌더는 rAF로 프레임당 1회로 병합되며, 바이라인은 짧아 렌더 비용이 미미하다.
-  - **조합 중 커서 폴백**: 조합 중 커서가 stale mapper 범위 밖(조합 텍스트 끝 offset)을 가리키면 `_updateCursorPosition`의 placement-없음 폴백이 실패해 커서가 (0,0)(paragraph 좌상단)으로 이동하는 **화면 이탈**이 발생한다. 폴백에 **조합 중 분기**를 추가한다: `_isComposing && _compositionStartOffset > 0`이면 조합 시작 위치의 placement(phantom end 우선)로 커서를 배치한다 — 커서가 조합 텍스트가 표시될 지점에 머무르고, 조합 텍스트의 실제 위치는 compositionend의 flushRender 후 확정된다.
+- **IME 조합은 항상 엔진 렌더 경로 (optimistic 조합 span 제거)**: `_onCompositionUpdate`는 매 음절 `model.textContent`를 갱신한 뒤 **`_debouncedRender()`(rAF 프레임당 1회 병합)로 조합 중 텍스트를 실제 엔진 렌더에 반영**한다. 과거 조합 중 optimistic span 경로는 라인 끝 근처 조합 시 `_shiftFollowingSpans`가 기존 span을 파트/컬럼 폭 밖으로 밀어냈다 — `overflow: hidden` 컬럼에서는 가려질 뿐 **데이터상 라인 밖 배치**였고(커밋 후에야 wrap 반영), 걸침표 ON 컬럼(`overflow: visible`)에서는 눈에 보였다. 밀어내기는 라인 폭 경계를 모르는 DOM 사이드채널이므로 근본적으로 올바르지 않아 제거했다. 엔진 경로는 wrap·금칙·걸침·정렬을 매 프레임 정확히 계산하므로 조합 중에도 다음 라인으로 랩된다. 프레임 비용은 영문 타이핑과 동일 수준이다 — 과거 지연 최적화의 "음절당 2회 렌더"(실측 80회)는 scheduleRender microtask + rAF 커밋의 이중 예약 때문이었고, 현재 `_debouncedRender()`는 프레임당 1회로 병합되므로 재발하지 않는다. 탭 라인/우측·중앙 정렬은 과거부터 동일 엔진 경로를 썼다(`_shiftFollowingSpans`가 좌측 정렬 가정이라 방향이 반전되기 때문).
+  - **조합 중 커서 폴백**: 커서 offset이 조합 텍스트 끝을 가리키며, mapper가 rAF 커밋 직후 재구축되기 전(또는 stale) 상태에서 placement가 없으면 `_isComposing && _compositionStartOffset > 0` 분기가 조합 시작 위치의 placement(phantom end 우선)로 커서를 배치한다 — 커서가 조합 텍스트가 표시될 지점에 머무른다.
+- **일반 타이핑 optimistic span (잔존 경로)**: 단일 글자 영문 입력은 여전히 `_optimisticSpanUpdate`로 커밋 전 1프레임 피드백을 제공한다. 탭 라인/우측·중앙 정렬에서는 생성하지 않는다 — `_shiftFollowingSpans`/`_computeTempSpanLeft`는 좌측 정렬 가정(오른쪽 밀어내기)으로 설계되어 방향이 반전되기 때문. 라인 끝 밀어남은 다음 rAF 커밋(flushRender)이 즉시 확정하므로 지연이 없다.
 - **인쇄**: `buildParagraphPrintPostData`는 `\t`를 출력에서 제외한다 (좌표는 charOffsets 기반으로 그대로 유지).
 - **붙여넣기**: 클립보드에서 붙여넣은 텍스트의 `\t`도 Right Indent Tab으로 동작한다 (의도된 동작).
 
@@ -1514,7 +1514,7 @@ sequenceDiagram
    - `model.textContent` 갱신 후 `this._runMap = runMapFromContent(model.textContent)`로 런 맵을 재추출한다.
    - `_compositionData = event.data`.
    - `_cursorModel.offset = _compositionStartOffset + event.data.length`.
-3. `paragraph.scheduleRender()` 호출 (microtask). 엔진이 조합 텍스트를 포함하여 라인 넘침과 금칙어 규칙을 재계산. microtask이므로 현재 실행 스택 종료 직후 즉시 렌더링됨.
+3. `_debouncedRender()` 호출 — 조합 중 표시는 **항상 엔진 렌더 경로**다 (§ 4.1.5). rAF 프레임당 1회 병합으로 엔진 layoutText 전체를 재계산하고 renderText diff가 결과를 화면에 반영한다 — wrap·금칙·걸침·정렬이 매 음절 정확히 반영된다.
 4. `_updateCursorPosition()` 호출.
 5. `_emitStyleChange()` 호출.
 
@@ -1570,8 +1570,7 @@ sequenceDiagram
 ### 6.7 조합 중 동작 요약
 
 - 조합 중인 텍스트를 `model.textContent`에 즉시 반영하여 엔진이 라인 넘침 계산과 금칙어 규칙 적용에 조합 글자를 포함하도록 한다.
-- `compositionupdate`가 발생할 때마다 `model.textContent`를 갱신하고 `paragraph.scheduleRender()` (microtask)로 엔진 재레이아웃을 즉시 트리거한다.
-- 별도의 임시 조합 span을 사용하지 않는다. 엔진이 조합 텍스트를 일반 텍스트로 렌더링하므로 글자 위치 변경(금칙어 규칙, 라인 넘침 등)이 DOM에 즉시 반영된다.
+- 조합 중 표시는 **항상 엔진 렌더 경로**다: `compositionupdate`마다 `model.textContent`를 갱신하고 `_debouncedRender()`(rAF 프레임당 1회 병합)로 엔진이 조합 텍스트를 일반 텍스트로 렌더링한다 — 글자 위치 변경(금칙어 규칙, 라인 넘침/wrap)이 즉시 반영되며, 조합 중에도 다음 라인으로 랩되어 라인 밖 밀어남이 없다. 조합 중 optimistic span은 존재하지 않는다 (라인 폭 경계를 모르는 DOM 밀어내기 사이드채널 제거 — § 4.1.5).
 - `postRender()`에서 조합 범위 `[_compositionStartOffset, start + _compositionData.length)`의 엔진 렌더링 span에 underline/breakline 장식 선 div를 적용한다 (`_applyOptimisticDecorations` — CSS `text-decoration`이 아닌 엔진 mm rect 규칙).
 - 조합 종료(`compositionend`/`compositioncancel`) 시 `_clearCompositionUnderline()`로 모든 span에서 조합 중 임시 장식 div(`div[data-deco-key^="opt-"]`)를 제거한다.
 - 조합 중에 화살표 키를 누르면, 조합을 시각적으로 취소하고 `textarea` 커서를 조합 시작 위치로 되돌린다.
@@ -1991,7 +1990,7 @@ flowchart LR
 - 삽입된 문자 바로 이전(또는 `\n` 위치라면 이전 문자 다음)에 생성된다.
 - `TextEditController._createOptimisticSpan()`은 `ParagraphEngine.genCharStyleFlat()`으로 스타일을 적용한다.
 - 다음 `postRender()` 호출 시 낙관적 span은 제거되고, 실제 렌더링된 span으로 대체된다.
-- **수직 하단 앵커**: `_createOptimisticSpan()`은 삽입 위치 라인의 확정 `maxFontSize`(`_getLineMaxFontSizeAt()`, 라인 데이터 없으면 문단 기본 fontSize 폴백)를 `genCharStyleFlat`의 세 번째 인자로 전달하고, 세 생성 지점(`_optimisticSpanUpdate` / `_optimisticCompositionUpdate` / `_insertOptimisticSpanAtLineStart`)의 `top`을 하드코딩 `'0'` 대신 `_getOptimisticTopMm()`(엔진 `_getCharVerticalOffset` = 라인 maxFontSize − 글자 fontSize)으로 계산한다. 확정 렌더 경로(`column.element.ts _applySpanStyle` → `genCharStyleFlat(char, inlineStyle, lineMaxFontSize)`)와 동일 규칙이므로, 라인 높이보다 작은 글자 타이핑 시에도 확정 렌더까지 하단(베이스라인) 기준으로 표시되고 시각 점프가 없다. 기존에는 `top: '0'`으로 라인 상단 기준 배치되어 작은 글자가 라인 상단에 붙었다가 커밋 후 아래로 떨어지는 현상이 있었다.
+- **수직 하단 앵커**: `_createOptimisticSpan()`은 삽입 위치 라인의 확정 `maxFontSize`(`_getLineMaxFontSizeAt()`, 라인 데이터 없으면 문단 기본 fontSize 폴백)를 `genCharStyleFlat`의 세 번째 인자로 전달하고, 생성 지점(`_optimisticSpanUpdate` / `_insertOptimisticSpanAtLineStart` — 일반 타이핑 경로)의 `top`을 하드코딩 `'0'` 대신 `_getOptimisticTopMm()`(엔진 `_getCharVerticalOffset` = 라인 maxFontSize − 글자 fontSize)으로 계산한다. 확정 렌더 경로(`column.element.ts _applySpanStyle` → `genCharStyleFlat(char, inlineStyle, lineMaxFontSize)`)와 동일 규칙이므로, 라인 높이보다 작은 글자 타이핑 시에도 확정 렌더까지 하단(베이스라인) 기준으로 표시되고 시각 점프가 없다. 기존에는 `top: '0'`으로 라인 상단 기준 배치되어 작은 글자가 라인 상단에 붙었다가 커밋 후 아래로 떨어지는 현상이 있었다. IME 조합은 이 경로를 쓰지 않는다 (엔진 렌더 경로 통일 — § 4.1.5).
 
 이 메커니즘은 키 입력과 화면 갱신 사이의 지연을 줄여, 사용자가 입력 지연을 덜 느끼도록 한다.
 

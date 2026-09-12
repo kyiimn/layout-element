@@ -13,7 +13,7 @@
 | `snapshot-layout.mjs` | 정합성 (엔진) | `columnContents` + `overflow` 직렬화 | **byte 동일** |
 | `verify-dom-diff.mjs` | 정합성 (DOM) | DOM ↔ 엔진 텍스트/span 무결성 | ALL PASS |
 | `verify-visual-render.mjs` | 정합성 (화면) | 실제 렌더 검증 — rect 기반 표시성 (호스트 CSS rule stale/0폭/클립 감지) | ALL PASS |
-| `verify-ime.mjs` | 정합성 (IME) | 한글 조합 커밋/취소/혼합 | ALL PASS (서버 없으면 자동 기동) |
+| `verify-ime.mjs` | 정합성 (IME) | 한글 조합 커밋/취소/혼합/엔진 렌더 경로 통일(optimistic 조합 span 제거·컬럼 밖 밀어남 방지·걸침표 ON 포함) | ALL PASS (서버 없으면 자동 기동) |
 | `verify-multicolumn.mjs` | 정합성 (멀티컬럼) | prefix 캐시 경로 === 전체 재래핑 | ALL PASS |
 | `verify-inline-metrics.mjs` | 정합성 (엔진) | 인라인 `letterSpacing`/`widthRatio`/`spaceRatio` 런 오버라이드 — 폭 공식/캐시 해시/printPostData/extractData/스타일 조회/런 맵 병합/오버랩 회피(파트 분할·좁은 영역 COVER) | ALL PASS |
 | `verify-text-decoration.mjs` | 정합성 (엔진) | 텍스트 장식 `underline`/`breakline`/`outline` — 장식선 rect 산출(구간 병합·듀얼 트랙)/색상 폴백/캐시 무효화/printPostData decorations+chars.outline/화면-인쇄 패리티/스타일 조회/런 맵 병합/OFF 기준선 | ALL PASS |
@@ -172,19 +172,21 @@ npx tsx scripts/verify-visual-render.mjs   # ALL PASS (서버 없으면 자동 �
 
 ### `verify-ime.mjs` — 한글 IME 조합 정합성 (브라우저)
 
-**목적**: IME 조합 최적화(조합 중 렌더 지연, optimistic span) 후에도 조합 동작이 정확한지:
+**목적**: 조합 중 표시를 **엔진 렌더 경로로 통일**(optimistic 조합 span 제거 — 라인 폭 경계를 모르는 `_shiftFollowingSpans` 밀어내기가 `overflow: hidden`에 가려진 채 데이터상 라인 밖 배치를 만드는 근본 결함 제거)한 뒤에도 조합 동작이 정확한지:
 
-1. 조합 중 optimistic span 존재 + 커서 위치
+1. 조합 중 엔진 렌더 경로 (optimistic span 없음) + 커서 위치
 2. 조합 커밋 후 DOM === 엔진 (`한`, `한글` 연속)
 3. **조합 취소(compositioncancel) 원상 복원**
 4. 영문+한글 혼합 시퀀스 (`한글abc력xy`)
-5. 조합 중 엔진 dirty 유지, 커서 매핑
+5. 조합 중 음절 커밋 해소 (rAF 커밋 — dirty 없음), 커서 매핑
+6. 조합 중 엔진 wrap 실증 (라인 수 증가) + **컬럼 밖 span 0개** (`data-char-offset > columnWidth` 직접 검증)
+7. 걸침표 ON (`overflow: visible`) 조합 좌표 무결성
 
 **이벤트 시뮬레이션**: Playwright는 OS IME를 구동하지 못해 **Chromium 실제 이벤트 시퀀스를 모방**한다: `compositionstart → (compositionupdate + input(isComposing))× → compositionend + input`. **한계**: 브라우저/IME별 이벤트 순서 차이는 커버하지 못함 — 실사용 체감 이상 시 이 시퀀스를 해당 환경에 맞춰 확장할 것.
 
 **실행**:
 ```bash
-npx tsx scripts/verify-ime.mjs   # 11항목 ALL PASS (서버 없으면 자동 기동)
+npx tsx scripts/verify-ime.mjs   # 25항목 ALL PASS (서버 없으면 자동 기동)
 ```
 
 **dev server 방어 (포트 오인 사고 교훈)**: `verify-multicolumn.mjs`와 동일한 2중 방어 — probe가 HTML title(`Layout Element Benchmark`)까지 검증해 타 앱 Vite 서버의 SPA fallback 200을 걸러내고, 정상 서버가 없으면 **자체 스폰**(포트 5200) 후 종료 시 정리한다. 리포트(2026-09)가 지적한 HEAD 프로브 전용 취약 3종 중 두 번째 이식 사례.
@@ -605,7 +607,7 @@ fix: ... (재현: 수정 전 A → 수정 후 B, verify-multicolumn ALL PASS)
 | `6d1890a` | span 델타 적용 + postRender 조건부 지연 | 인라인 스타일 p95 35.9→12.7ms |
 | `9a0d2b0` | 정렬 변경 증분 렌더 (센티넬 보존) | 정렬 p95 31.6→12.4ms |
 | `7701813` | 라인 수 변화 diff 허용 | fontSize p95 32.5→21.5ms |
-| `53c8557` | 한글 IME 조합 최적화 | 조합 음절 29→8.2ms, render 80→10회 |
+| `53c8557` | 한글 IME 조합 최적화 (조합 중 렌더 지연 + optimistic span) | 조합 음절 29→8.2ms, render 80→10회 — **2026-09에 optimistic 경로 제거로 대체** (라인 밖 밀어남 결함, 음절당 2회 렌더는 이중 예약 문제였음 — 현재 rAF 프레임당 1회로 동일 예산 달성) |
 | `37e32b7` | prefix 캐시 `\n` 누락 수정 | 2·3단 타이핑 글자 당겨옴 버그 |
 | `c11850c` | trailing `\n` 빈 블록 보존 | 문단 끝 엔터 커서 폴백 버그 |
 | `2fad972` | `_columnLeftOffsets` gap 누락 수정 | 3단 오버랩 오른쪽 치우침 버그 |
