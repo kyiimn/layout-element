@@ -941,9 +941,9 @@ flowchart TD
 | `ArrowUp` | `Shift` | 선택 영역을 위 시각적 라인으로 확장 |
 | `ArrowDown` | 없음 | 커서를 아래 시각적 라인으로 이동. 라인 시작에서는 target 라인 시작으로, 라인 끝에서는 상대 위치를 유지하며 이동 |
 | `ArrowDown` | `Shift` | 선택 영역을 아래 시각적 라인으로 확장 |
-| `Home` | 없음 | 현재 시각적 라인의 시작으로 이동. 라인 시작에 도달하면 2단계로 멈추고(sticking→crossed), 세 번째 누름에서 이전 라인 시작으로 이동 |
+| `Home` | 없음 | 현재 시각적 라인의 시작으로 이동. 이미 라인 시작에 있거나 직전 입력이 Home이면 제자리 (커서는 라인 시작에 그려짐) |
 | `Home` | `Shift` | 선택 영역을 현재 시각적 라인의 시작까지 확장 |
-| `End` | 없음 | 현재 시각적 라인의 끝으로 이동. 라인 끝에 도달하면 2단계로 멈추고(sticking→crossed), 세 번째 누름에서 다음 라인 끝으로 이동 |
+| `End` | 없음 | 현재 시각적 라인의 끝으로 이동. 이미 라인 끝에 있거나 직전 입력이 End이면 제자리 (커서는 라인 끝에 그려짐) |
 | `End` | `Shift` | 선택 영역을 현재 시각적 라인의 끝까지 확장 |
 | `Backspace` | 없음 | 커서 앞 문자를 삭제. 선택 영역이 있으면 선택 영역을 삭제 |
 | `Delete` | 없음 | 커서 뒤 문자를 삭제. 선택 영역이 있으면 선택 영역을 삭제 |
@@ -1259,25 +1259,18 @@ pending 스타일은 인라인 런으로 삽입되므로 `TextInlineStyle`의 14
 
 #### `Home` / `End`
 
-- **보조키 없음 (3단계 스틱 동작)**: ArrowLeft/Right와 동일한 `none` → `sticking` → `crossed` → `none` 상태 머신을 사용한다. 라인 시작/끝은 `findVisualLineBounds`가 아닌 **논리적 라인 정보**(`_getLogicalLineStart`/`_getLogicalLineEnd`)에서 가져온다. `findVisualLineBounds`는 선행/후행 공백 제거와 폴백으로 인해 잘못된 라인 경계를 반환할 수 있기 때문이다.
+- **보조키 없음 (주차 기반 단순 이동 머신)**: ArrowLeft/Right와 달리 sticking→crossed 미리보기를 하지 않는다. 커서는 **항상 착지 offset의 라인에 그려진다** — 착지 시 cross 상태를 `sticking`으로 유지하므로 `_updateCursorPosition`의 crossed 렌더 분기(이웃 라인 미리보기)에 진입하지 않는다. cross 상태 `sticking`은 "Home/End로 착지해 주차됨" 표지이기도 하다 — **직전 입력이 Home/End(=sticking 상태)면 반복 입력에 완전 제자리**를 유지한다. 라인 시작/끝은 `findVisualLineBounds`가 아닌 **논리적 라인 정보**(`_getLogicalLineStart`/`_getLogicalLineEnd`)에서 가져온다. `findVisualLineBounds`는 선행/후행 공백 제거와 폴백으로 인해 잘못된 라인 경계를 반환할 수 있기 때문이다.
   - `End` (`_crossRightState`):
-    1. `_getEndKeyOffset(offset)`으로 라인 끝 offset 계산. 규칙(우선순위 순): `\n` 위치나 텍스트 끝이면 그대로; placement가 이미 `atEndOfChar: true`(trailing space 라인 끝)면 그대로; 매핑된 가시 문자면 +1(phantom end placement로 문자 오른쪽에 그림); 매핑 없는 위치면 역방향 탐색 +1.
-    2. `atLineEnd = offset === lineEnd`.
-    3. `sticking`: 제자리, `crossed` 설정. 커서는 다음 라인 시작에 그려짐.
-    4. `crossed`: `_getEndKeyOffset(offset + 1)`로 다음 라인 끝 계산 후 이동, `none` 리셋.
-    5. `atLineEnd`: 제자리, `sticking` 설정.
-    6. 그 외: `lineEnd`로 이동, `sticking` 설정.
+    1. `_crossRightState === 'sticking'`(직전 End 착지)이면 제자리 유지, 그 외에는 `_getEndKeyOffset(offset)`으로 라인 끝 offset 계산 후 이동. `_getEndKeyOffset` 규칙(우선순위 순): `\n` 위치나 텍스트 끝이면 그대로; placement가 이미 `atEndOfChar: true`(trailing space 라인 끝)면 그대로; 매핑된 가시 문자면 +1(phantom end placement로 문자 오른쪽에 그림); 매핑 없는 위치면 역방향 탐색 +1.
+    2. 착지 후 `_crossRightState = 'sticking'` 설정 — 이후 반복 입력은 제자리.
   - `Home` (`_crossLeftState`):
-    1. `_getLogicalLineStart(offset)`으로 현재 라인의 시작 source offset 계산.
-    2. `atLineStart = offset === lineStart`.
-    3. **블록 시작 무시**: `atLineStart && offset === 0`이면 Home을 무시하고 break (스틱 상태 변경 없음).
-    4. `sticking`: 제자리, `crossed` 설정. 커서는 이전 라인 끝에 그려짐.
-    5. `crossed`: `_getLogicalLineStart(offset - 1)`로 이전 라인 시작 계산 후 이동, `none` 리셋.
-    6. `atLineStart`: 제자리, `sticking` 설정.
-    7. 그 외: `lineStart`로 이동, `sticking` 설정.
+    1. `_crossLeftState === 'sticking'`(직전 Home 착지)이면 제자리 유지, 그 외에는 `_getLogicalLineStart(offset)`으로 라인 시작 offset 계산 후 이동.
+    2. 문서 시작 종료: 결과 offset과 현재 offset이 모두 0이면 Home을 무시하고 break (스틱 상태 변경 없음).
+    3. 착지 후 `_crossLeftState = 'sticking'` 설정 — 이후 반복 입력은 제자리.
   - 방향 전환 시 반대 상태 리셋: Home 시작 시 `_crossRightState = 'none'`, End 시작 시 `_crossLeftState = 'none'`.
+  - 커서 렌더: 착지 시 `sticking`을 유지하므로 렌더가 항상 착지 라인에 배치된다. 이전 3단계 머신의 crossed 미리보기(제자리에서 커서가 이웃 라인에 그려지는 현상), 컬럼 경계 라인에서의 문단 최상단/최하단 점프, 반복 입력의 라인 순회는 제거되었다.
   - `Ctrl`/`Cmd`: 문서 전체 시작/끝으로 이동 (`_findLineStart`/`_findLineEnd`), 스틱 없음.
-  - `Shift`: 스틱 없이 선택 영역 확장 (`_getLogicalLineStart`/`_getLogicalLineEnd` 사용).
+  - `Shift`: 스틱 없이 선택 영역 확장 (`_getLogicalLineStart`/`_getEndKeyOffset` 사용).
 
 **`_getLogicalLineStart(offset)`**: `getLineInfoBySourceOffset(offset)`으로 `{columnIndex, lineIndex}`를 찾고, `getLineStartSourceOffset()`으로 라인 시작 source offset을 반환한다. `findVisualLineBounds`와 달리 선행/후행 공백 제거에 영향받지 않는다.
 
