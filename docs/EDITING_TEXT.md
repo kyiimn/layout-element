@@ -933,13 +933,13 @@ flowchart TD
 | `ArrowLeft` | `Shift` | 선택 영역을 왼쪽으로 한 문자 확장 |
 | `ArrowLeft` | `Ctrl`/`Cmd` | 이전 단어의 시작으로 이동 |
 | `ArrowLeft` | `Shift`+`Ctrl`/`Cmd` | 선택 영역을 이전 단어의 시작까지 확장 |
-| `ArrowRight` | 없음 | 커서를 오른쪽으로 한 문자 이동. 시각적 라인 끝에 도달하면 2단계로 멈추고(sticking→crossed), 세 번째 누름에서 다음 라인 시작으로 이동 |
+| `ArrowRight` | 없음 | 커서를 오른쪽으로 한 문자 이동. 시각적 라인 끝에 도달하면 2단계로 멈추고(sticking→crossed), 세 번째 누름에서 다음 라인 시작으로 이동. 오버플로된 문단에서는 엔진 경계를 넘어 숨김 라인으로 이동하지 않는다 (§오버플로 라인 커서 클램프) |
 | `ArrowRight` | `Shift` | 선택 영역을 오른쪽으로 한 문자 확장 |
 | `ArrowRight` | `Ctrl`/`Cmd` | 다음 단어의 시작으로 이동 |
 | `ArrowRight` | `Shift`+`Ctrl`/`Cmd` | 선택 영역을 다음 단어의 시작까지 확장 |
-| `ArrowUp` | 없음 | 커서를 위 시각적 라인으로 이동. 라인 시작에서는 target 라인 시작으로, 라인 끝에서는 상대 위치를 유지하며 이동 |
+| `ArrowUp` | 없음 | 커서를 위 시각적 라인으로 이동. 라인 시작에서는 target 라인 시작으로, 라인 끝에서는 상대 위치를 유지하며 이동. **항상 바로 위 라인으로 이동이 보장**된다 — End 주차(라인 끝 착지) 상태에서는 출발 라인을 커서가 그려진 라인 기준으로 보정 판정하여 순환 이동을 방지 |
 | `ArrowUp` | `Shift` | 선택 영역을 위 시각적 라인으로 확장 |
-| `ArrowDown` | 없음 | 커서를 아래 시각적 라인으로 이동. 라인 시작에서는 target 라인 시작으로, 라인 끝에서는 상대 위치를 유지하며 이동 |
+| `ArrowDown` | 없음 | 커서를 아래 시각적 라인으로 이동. 라인 시작에서는 target 라인 시작으로, 라인 끝에서는 상대 위치를 유지하며 이동. 아래 이동도 오버플로 경계를 넘지 않는다 (§오버플로 라인 커서 클램프). **항상 바로 아래 라인으로 이동이 보장**된다 — End 주차(라인 끝 착지) offset은 내부적으로 다음 라인 시작과 같은 값이므로 출발 라인을 커서가 그려진 라인 기준으로 보정 판정하여 2 라인 아래 이동을 방지 |
 | `ArrowDown` | `Shift` | 선택 영역을 아래 시각적 라인으로 확장 |
 | `Home` | 없음 | 현재 시각적 라인의 시작으로 이동. 이미 라인 시작에 있거나 직전 입력이 Home이면 제자리 (커서는 라인 시작에 그려짐) |
 | `Home` | `Shift` | 선택 영역을 현재 시각적 라인의 시작까지 확장 |
@@ -1255,6 +1255,7 @@ pending 스타일은 인라인 런으로 삽입되므로 `TextInlineStyle`의 14
   17. **그 외**: `offsetInLine = offset - currentLineStart`, `Math.min(targetLineStart + offsetInLine, targetVisualEnd)` 반환.
 
 - `_computeVerticalOffset` 호출 **후** `_crossRightState`/`_crossLeftState`가 `'none'`으로 리셋된다.
+- **오버플로 클램프**: 아래 방향(ArrowDown)의 착지가 엔진 경계(`maxVisibleCursorOffset`)를 넘으면 경계로 되돌린다. 위 방향(ArrowUp)은 오버플로 영역으로 진입하지 않으므로 클램프하지 않는다 (§오버플로 라인 커서 클램프).
 - **빈 줄 처리**: `columnContents`의 각 라인(빈 줄 포함)이 라인 인덱스 기반 이동에 사용되므로, 빈 줄(span 없는 라인)도 정확히 통과한다.
 
 #### `Home` / `End`
@@ -1271,6 +1272,7 @@ pending 스타일은 인라인 런으로 삽입되므로 `TextInlineStyle`의 14
   - 커서 렌더: 착지 시 `sticking`을 유지하므로 렌더가 항상 착지 라인에 배치된다. 이전 3단계 머신의 crossed 미리보기(제자리에서 커서가 이웃 라인에 그려지는 현상), 컬럼 경계 라인에서의 문단 최상단/최하단 점프, 반복 입력의 라인 순회는 제거되었다.
   - `Ctrl`/`Cmd`: 문서 전체 시작/끝으로 이동 (`_findLineStart`/`_findLineEnd`), 스틱 없음.
   - `Shift`: 스틱 없이 선택 영역 확장 (`_getLogicalLineStart`/`_getEndKeyOffset` 사용).
+  - **오버플로 클램프**: plain/Shift End는 커서가 경계 offset 위에 있을 때 논리 라인이 오버플로 라인이라 그 끝(숨김 영역)을 계산할 수 있다 — 결과가 엔진 경계를 넘으면 경계로 되돌린다. `Ctrl`/`Cmd`+End는 단일 블록 텍스트에서 문서 끝 자체가 숨김 영역이므로 경계로 클램프한다 (§오버플로 라인 커서 클램프).
 
 **`_getLogicalLineStart(offset)`**: `getLineInfoBySourceOffset(offset)`으로 `{columnIndex, lineIndex}`를 찾고, `getLineStartSourceOffset()`으로 라인 시작 source offset을 반환한다. `findVisualLineBounds`와 달리 선행/후행 공백 제거에 영향받지 않는다.
 
@@ -1302,6 +1304,30 @@ pending 스타일은 인라인 런으로 삽입되므로 `TextInlineStyle`의 14
 4. 도달한 위치가 다음 단어의 시작이다.
 
 **예시:** `"hello  world"`에서 offset 7(`w` 위치)에서 `Ctrl+ArrowLeft` → offset 0, `Ctrl+ArrowRight` → offset 12.
+
+#### 오버플로 라인 커서 클램프
+
+paragraph가 오버플로된 경우(마지막 컬럼에 배치되지 못한 라인이 `display: none`으로 렌더 — `docs/TEXT_ENGINE.md` §오버플로 라인 DOM 노드 생략), 화살표 키·End 이동의 착지 offset이 **첫 오버플로 라인 직전 경계**(`ParagraphEngine.maxVisibleCursorOffset`)를 넘지 않도록 클램프한다.
+
+**경계 값 (`maxVisibleCursorOffset`)**: `columnContents`를 `visibleChars`와 동일한 라인 높이 기준(`effectiveColumnHeight = parentHeight + (lineHeight - fontSize)`)으로 순회해, 첫 overflow 라인 직전까지의 plain 공간 오프셋을 누적한다. 누적 규칙은 mapper의 source offset walk와 동일하다(파트 content 길이 = 선행 공백 + 가시 문자 + 후행 공백, endOfBlock 라인 뒤 `\n` 소비). 경계는 다음 중 하나다:
+
+- 첫 overflow 라인 시작의 바로 앞 문자가 `\n`이면 그 `\n` 위치 — endOfBlock phantom placement가 존재해 커서가 마지막 visible 라인 끝에 그려진다.
+- 그 외에는 직전 라인의 후행 공백을 건너뛴 첫 공백/마지막 가시 문자 다음 offset — trailing space `atEndOfChar` placement 또는 라인 끝 phantom end placement가 존재해 커서가 마지막 visible 문자 오른쪽에 그려진다.
+
+오버플로 없음·배치 전·부모 높이 미설정이면 `-1`을 반환하고 클램프는 비활성된다.
+
+**클램프 지점 (`TextEditController._cursorMaxOffset()`)**:
+
+| 경로 | 동작 |
+| --- | --- |
+| `ArrowRight` (plain/Shift/Ctrl) | 착지가 경계에 도달·초과하면 경계로 되돌리고 `_crossRightState`를 `'none'`으로 되돌린다 — crossed 주차 상태의 커서 배치는 다음 라인 첫 글자(숨김 span) placement를 참조하므로 렌더 폴백이 깨진다. 경계에서 반복 입력은 제자리(sticking/crossed 진행 차단) |
+| `ArrowDown` (plain/Shift) | 착지가 경계를 넘으면 경계로 되돌린다. `ArrowUp`은 위 방향으로 오버플로 영역에 진입하지 않으므로 클램프하지 않는다 |
+| `End` (plain/Shift) | 커서가 경계 offset 위에 있으면 논리 라인이 오버플로 라인이라 그 끝(숨김 영역)을 계산한다 — 결과가 경계를 넘으면 경계로 되돌린다. 경계 offset은 phantom end placement를 참조해 커서가 마지막 visible 문자 오른쪽에 그려진다 |
+| `Ctrl`/`Cmd`+`End` (plain/Shift) | 단일 블록 텍스트에서 문서 끝 자체가 숨김 영역이므로 경계로 클램프한다 |
+
+**스레드 프레임 무영향**: `_cursorMaxOffset()`는 `model.isThreadFrame`에서 `null`을 반환해 클램프를 스킵한다. 스레드 프레임의 커서 이동은 프레임 경계 이관(`_transferCursorAcrossThreadBoundary` → `EditManager.transferCursorToOwningThreadFrame`)이 소유하며, 기존 이관 흐름은 전혀 건드리지 않는다(§14 제약 사항 "스레드 프레임 경계 이동" 참조). 경계 getter도 프레임 로컬 오프셋을 반환하되, 클램프 소비처는 비-스레드 문단(contentFrom = 0, story 절대 오프셋과 동일)뿐이다.
+
+검증: `npx tsx scripts/verify-overflow-cursor-clamp.mjs` (24항목 — 엔진 경계/placement 보장/ArrowRight 반복·수렴/Shift·Ctrl 변형/ArrowDown·Up/오버플로 해제 비활성/\n 경계/Ctrl+End/End·Shift+End).
 
 #### `Backspace` / `Delete`
 
