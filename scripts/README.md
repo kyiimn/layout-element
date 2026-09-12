@@ -470,9 +470,9 @@ npx tsx scripts/verify-overlap-none.mjs   # 7항목 ALL PASS
 
 **핵심 설계 교훈 — 지오메트리 행렬**: B1(이중 스킵)·B5(소진 조합)는 단일 시나리오를 우회 통과했다 — 프레임 용량이 잔여보다 작으면 이중 스킵이 배치를 소진시키지 않아 `visibleChars>0` 어설션이 통과한다. 스레딩은 **지오메트리 변수**(컬럼 수·높이·프레임 수·story 길이)가 결함을 은폐할 수 있는 도메인이므로 [11]은 81조합 행렬(columns×height×frames×story)에 공통 어설션 5종을 일괄 적용한다. 이 행렬이 실제로 발견한 결함: 소진 경로의 잔여 중간 프레임까지 `threadTail: true`로 마킹되어 tail이 다중 생성되는 것([8b]의 f=3 단일 시나리오는 이를 우회했다).
 
-검증 항목 (98항목, 18그룹):
+검증 항목 (104항목, 18그룹):
 1. 비-스레드 회귀 — threads 없는 문단 tail 없음/isThreadFrame false
-2. 단일 프레임 기준선 — 스레드 없는 배치와 byte-identical + overset tail
+2. 단일 프레임 기준선 — 스레드 없는 배치와 byte-identical + overset tail (**P2 컷의 제외 대상 — tail 프레임은 레거시 카운트 유지**)
 3. 2프레임 feed-forward — head tail이 next contentFrom으로 정확 전달
 4. 콘텐츠 무결성 — 배치 중복 없음 + tail 체인 오프셋 정합
 5. 런 슬라이싱 — 볼드 런 경계 보존(런 중간 분할 허용)
@@ -487,7 +487,7 @@ npx tsx scripts/verify-overlap-none.mjs   # 7항목 ALL PASS
 12. **childrenData 삼분 계약** — undefined 주입 보존/`[]` 주입 소거/제외 재주입 선택 소거 + 잔여 엔진 identity 보존
 13. **writeback 방어** — 중복 소속 프레임 first-claim-wins: 첫 thread만 갱신, 둘째 thread story 보존, 둘째 thread 프레임은 자기 story 배치 유지
 14. **printPostData 패리티** — print 첫 글자 === story[contentFrom](seam print 판)/chars 전부 contentAbsRect 내부(mm)/스토리 문자 동일성(strip 규칙 포함 기대 스트림)/getCharRect === print rect(좌표 일치)/R8 로컬 오프셋 0 = story[contentFrom]
-15. **스레드 단위 변경 감지 (P1-6)** — 변경 없는 재호출은 `skipped: true`로 프레임 `layoutText`를 통째로 스킵(래핑 카운터 0회 실측)/story 편집(참조 변경)·캐시 무효화(`hasLayoutCache` 소실)는 재배치/재배치 후 시그니처 수렴. 스킵 판정은 **참조 동등성**(story 참조 + contentFrom 연쇄 + hasLayoutCache) — 해시 직렬화 비용 0
+15. **스레드 단위 변경 감지 (P1-6) + R-T2 same-ref 게이트** — 변경 없는 재호출은 `skipped: true`로 프레임 `layoutText`를 통째로 스킵(래핑 카운터 0회 실측)/story 편집(참조 변경)·캐시 무효화(`hasLayoutCache` 소실)는 재배치/재배치 후 시그니처 수렴. 스킵 판정은 **참조 동등성**(story 참조 + contentFrom 연쇄 + hasLayoutCache) — 해시 직렬화 비용 0. **R-T2 게이트**: 캐시 히트 layoutText 재진입에서 동일 참조(textContent + effective 스타일)면 inlineStyles 재매핑 생략(재매핑 호출 카운터 0회 실측 — DOM flush가 비-소스 프레임 render()로 재진입하는 경로의 O(placed) 제거)/해시 무영향 스타일 변경(굵기)은 참조만 바뀌어 재매핑 강제 + inlineStyles 최신화 (호출 1회 실측). **배치 조회(P2-2)**: 체인 배치·DOM 동기화가 `findEnginesByIds`(트리 1회 순회)로 전 프레임 엔진을 수집 — 프레임별 재귀 검색(F×트리) 제거
 16. **relayoutThreads 사이클 (P1-7)** — 첫 배치 후 연속 재호출 모두 스킵 + 배치 상태 byte 불변 (DOM render() 진입의 재실행은 제거 — unsynced 판정이 초기 로드를 방어)
 17. **프레임 경계 금칙 교정 (P2-9/10)** — 위반 유도 스토리(story[tail] = 전각 닫기 부호 `」`)에서 A/B: 교정 OFF는 f2 행두금칙 위반 잔존, 교정 ON은 해소 + seam 정합(head tail === f2 contentFrom). 이동은 追い出し(prev 마지막 일반 글자와 닫기 부호를 함께 내보냄 — 라인 경계 `_applyLineBreakRules`와 동일 시맨틱). 워드 가드: prev 마지막이 워드 글자면 위반 잔존 허용(워드 무결성 > 금칙)
 18. **테이블 셀 프레임 × 행 삭제 (P2-11)** — 셀 내 2프레임 스레드 체인 배치/행 삭제(라벨 시프트) 후 잔여 프레임 엔진 identity 보존 + threads 데이터로 체인 재배치 + story 배치 지속
@@ -496,7 +496,7 @@ npx tsx scripts/verify-overlap-none.mjs   # 7항목 ALL PASS
 
 **실행**:
 ```bash
-npx tsx scripts/verify-threading.mjs   # 98항목 ALL PASS
+npx tsx scripts/verify-threading.mjs   # 104항목 ALL PASS
 ```
 
 ### `verify-threading-browser.mjs` — 스레딩 화면 진실 (브라우저)

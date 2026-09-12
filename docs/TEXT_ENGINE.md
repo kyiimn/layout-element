@@ -2086,6 +2086,21 @@ thread의 story가 head `textContent` 배치 시점에 첫 thread story로
   byte 동일**하다.
 - `_layoutCache`에 `overflowContentFrom`이 저장되어 캐시 히트 경로에서도 tail이
   정확히 복원된다.
+- **참조 단위 공유 캐시 (R-T1/T3)**: 해시의 텍스트 직렬화(`_textContentDigest`),
+  `plainText` 플래트닝, `_parseContents` 결과는 **정적 WeakMap에 소스 참조 단위로
+  캐시**된다. 스레드 체인의 전 프레임이 동일 스토리 참조를 소유하므로 체인당
+  1회만 O(N) 작업을 수행하고 나머지 프레임은 O(1) 조회다 — 기존 인스턴스 캐시는
+  `textContent` setter마다 무효화되어 체인에서 F×O(N)으로 증폭됐다. 전제는
+  **주입 배열의 in-place 변이 금지**(내용 변경은 항상 새 참조 주입) — 이 전제는
+  `_parsedContentsCache`/`_plainTextCache`가 이미 사용하던 참조 동등성 전제와
+  동일하다. 검증: 스냅샷 byte 동일.
+- **캐시 히트 경로 same-ref 게이트 (R-T2)**: `_layoutCache`가 `textContentRef`와
+  effective 스타일 참조(`effTextStyleRef`/`effParagraphStyleRef`)를 저장하고, 히트
+  시 전부 동일 참조면 `_refreshInlineStylesOnly`(O(placed) 스트림 재매핑 + 장식
+  재계산)를 생략한다. 해시 일치만으로는 불충분하다 — `tf:` 키가 `contentFrom`
+  조건부라 비-헤드 프레임은 해시가 동일해도 참조가 다를 수 있고(구간 직렬화
+  결과 동일), 굵기·색상 같은 해시 무영향 스타일 변경은 effective 참조만 바뀐다.
+  참조 미저장 캐시는 `undefined !== value`로 안전 폴백(재매핑)한다.
 
 ### 26.5 DOM 레이어
 
@@ -2143,7 +2158,7 @@ thread의 story가 head `textContent` 배치 시점에 첫 thread story로
   여전히 미구현 — 프레임 경계는 컬럼 경계와 달리 컬럼 밖이 프레임 밖이라
   걸침의 지오메트리가 성립하지 않는다.
 
-### 26.8 성능 — 스레드 단위 변경 감지 (P1)
+### 26.8 성능 — 스레드 단위 변경 감지 (P1) + 참조 단위 캐시 공유 (P1-캐시)
 
 `relayoutThreads`가 DOM `layout()`·`render()`에서 재실행되는 구조에서
 입력 불변 시의 비용을 제거한다:
@@ -2158,6 +2173,54 @@ thread의 story가 head `textContent` 배치 시점에 첫 thread story로
 - **`hasLayoutCache`가 배치 입력 불변의 증명**: 배치 입력을 바꾸는 경로는
   모두 data setter의 `resetIncrementalState()`로 캐시를 지운다 — 캐시가
   살아있으면 아무도 입력을 바꾸지 않았다.
+- **타이핑 경로의 비용 구조 (실측)**: 타이핑은 story 참조를 바꾸므로
+  스킵이 발동하지 않고, 체인 전 프레임이 재배치된다. 이때 비용은
+  (a) 프레임당 O(N) 해시 직렬화 — **정적 참조 캐시(R-T1)로 제거** (체인의
+  모든 프레임이 동일 참조를 소유하므로 head 직렬화 1회, 나머지 O(1)),
+  (b) F×O(N) 파싱/플래트닝 — **정적 공유 캐시(R-T3)로 체인당 1회로 수렴**,
+  (c) 캐시 히트 프레임의 O(placed) inlineStyles 재매핑(DOM flush가 비-소스
+  프레임 render()로 재진입할 때) — **same-ref 게이트(R-T2)로 생략**.
+  실측 (Node, 배열 소스): 캐시 히트 재매핑 Σ 6.12ms → **0.02ms** (F=4 N=4000,
+  체인 flush 경로), 현실적 3프레임 체인 키스트로크 완전수용 0.97 → **0.42ms**,
+  2배 과잉 3.59 → **0.98ms**.
+- **overset 소비 상한 (P2)**: 스토리가 체인 용량을 크게 초과하면(overset)
+  각 중간 프레임의 배치 패스가 잔여를 전부 방문해 `overflow++`로 카운트한다 —
+  체인에서 F×O(N) 소비. 중간 프레임(`threadTail === false`, clamp 재배치 아님)은
+  첫 overflow 라인 생성 시점에서 배치를 종료하고(컷 게이트 4사이트),
+  `_captureThreadTail`이 cut 이후의 non-newline 잔여를 해석적으로 산출한다.
+  overflow 라인의 글자는 어디에도 소비되지 않으므로(중간 프레임 overflow는 다음
+  프레임이 재배치, DOM은 overflow 라인 span 미생성, print는 overflow 게이팅)
+  배치 결과는 동일하고 잔여 방문만 제거된다. **tail 프레임과 비-스레드 문단은
+  기존 경로 그대로다**(단일 프레임 기준선 byte-identical 보존 — 레거시 카운트는
+  `\n` 미집계·+1 아티팩트가 있는 근사). 실측: 3프레임 체인 10배 과잉 타이핑
+  5.18 → **2.02ms**(boxH=20), 12.98 → **4.40ms**(boxH=40).
+- **프레임 단위 소비 구간 digest 스킵은 불건전 (거부된 접근)**: "프레임의
+  소비 구간 `[contentFrom, nextFrom)` digest가 불변이면 그 프레임 재배치를
+  스킵"하는 접근은 워드랩 eager lookahead와 금칙 追い出し가 **구간 밖
+  콘텐츠**(프레임 경계 너머)에 의존할 수 있어 기각했다 — 구간 내부만
+  비교하면 스킵 판정이 sound하지 않다. 프레임 단위 스킵의 실질 효과는
+  R-T2 게이트(입력 불변 프레임의 캐시 히트를 O(1)화)가 대신 수행한다.
+- **스레드 프레임 배치 조회 (`findEnginesByIds`, P2-2)**: 체인 배치·DOM
+  동기화·flush가 프레임마다 `findEngineById`(재귀 검색)를 호출하면 조회 수 ×
+  트리 크기로 증폭된다 — `DocumentEngine.findEnginesByIds(ids)`가 트리를
+  1회만 순회해 전 프레임 엔진을 수집한다(순회 순서·첫 일치 우선 시맨틱 동일).
+  캐시가 아니므로 reparent/제거의 직접 splice(generation 미증가 변이 경로)에도
+  무효화 문제가 없다 — generation 기반 id→engine 맵 캐시는 무효화 누수 위험으로
+  기각했다.
+- **overset 소비 상한 (P2 — 중간 프레임 한정)**: 스토리가 체인 용량을 크게
+  초과하면(overset) 각 중간 프레임의 배치 패스가 잔여를 전부 방문해
+  `overflow++`로 카운트했다 — 프레임당 O(N) 소비가 체인에서 F×O(N)으로
+  증폭됐다. 중간 프레임(`threadTail === false`, clamp 재배치 아님)은 첫 overflow
+  라인 생성 시점(컷 게이트: 라인 생성 루프·배치 루프 4사이트)에서 배치를
+  종료하고, `_captureThreadTail`이 cut 위치 이후의 non-newline 잔여를 해석적으로
+  산출한다 — overflow 라인의 글자는 어디에도 소비되지 않는다(중간 프레임
+  overflow는 다음 프레임이 재배치하고, DOM은 overflow 라인 span을 생성하지
+  않으며, print는 overflow 게이팅으로 제외된다). `overflow` 소비처는 `> 0`
+  판정(테두리 게이트는 별도 라인 순회)이므로 중간 프레임의 정확 잔여 산출로의
+  전환이 계약을 유지한다. **tail 프레임과 비-스레드 문단은 기존 경로 그대로다**
+  (레거시 카운트 유지 — 실측상 `\n` 미집계·마지막 라인 +1 아티팩트가 있는
+  근사이므로 스레드 중간 프레임만 정확 산출로 전환). 실측: 3프레임 체인
+  10배 과잉 타이핑 5.18 → **2.02ms**(boxH=20), 12.98 → **4.40ms**(boxH=40).
 - **flush 재진입 차단**: `_flushThreadRelayout`은 `_threadRelayoutFlushing`
   플래그로 재진입을 차단하고 종료 시 영향 프레임의 dirty 소진을
   assert한다. `render()` 진입의 스레드 재배치는 제거했다 — 초기 로드의
