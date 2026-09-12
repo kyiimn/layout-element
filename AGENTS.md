@@ -43,6 +43,7 @@ npx tsx scripts/verify-hanging-punctuation-browser.mjs # 걸침표 ON 상태 실
 npx tsx scripts/verify-word-wrap.mjs # 워드 래핑(영문·숫자 단위 줄바꿈) 엔진 전 파이프라인 정합성
 npx tsx scripts/verify-threading.mjs # 텍스트 스레딩 엔진 전 파이프라인 정합성 (지오메트리 행렬/childrenData 계약/writeback 방어/print 패리티)
 npx tsx scripts/verify-threading-browser.mjs # 스레딩 화면 진실 (타이핑 전파 seam/테두리 tail 분기/round-trip)
+npx tsx scripts/verify-overflow-cursor-clamp.mjs # 오버플로(숨김) 라인 커서 진입 금지 클램프 (화살표·End 이동 경계)
 ```
 
 각 스크립트의 목적·측정 원칙·오탐 주의사항·워크플로는 **`scripts/README.md`** 참조. 성능 작업 시 `scripts/README.md`의 워크플로(기준선 측정 → 수정 → 검증 → 재측정)를 따른다.
