@@ -83,15 +83,6 @@ export class TextEditController {
   /** postRender에서 조합 범위 span에 밑줄을 적용했는지 추적 */
   private _compositionUnderlineApplied: boolean = false;
 
-  /**
-   * 현재 조합이 Right Indent Tab(`\t`)이 포함된 라인에서 진행 중인지 여부.
-   *
-   * `_optimisticCompositionUpdate`의 첫 음절에서 판정한다. 탭 라인 조합에서는
-   * optimistic span 대신 `_onCompositionUpdate`가 `_debouncedRender()`로
-   * 조합 중 텍스트를 엔진 렌더에 반영한다 — 우측 정렬은 엔진이 계산하므로
-   * 조합 글자가 항상 올바른 위치에 표시된다.
-   */
-  private _isRightAlignedComposition: boolean = false;
   private _debounceTimer: number | null = null;
   private _wasFocused: boolean = false;
   private _optimisticSpan: HTMLSpanElement | null = null;
@@ -1819,8 +1810,7 @@ export class TextEditController {
     if (this._debounceTimer !== null) {
       cancelAnimationFrame(this._debounceTimer);
       this._debounceTimer = null;
-      // 조합 시작 전 보류 변경분이 있으면 즉시 반영한다. 조합 중에는 렌더를
-      // 예약하지 않으므로(optimistic span이 표시 담당), 여기가 마지막 flush 기회다.
+      // 조합 시작 전 보류 변경분을 즉시 반영해 조합이 확정 렌더 상태에서 시작한다.
       if (this._paragraph.model?.hasPendingChanges) {
         this._paragraph.flushRender();
       }
@@ -1874,13 +1864,18 @@ export class TextEditController {
       const start = this._compositionStartOffset;
       const data = event.data ?? "";
       const prevCompositionLen = this._compositionData.length;
-      // 엔진 데이터는 매 음절 즉시 갱신한다 (구독자/hasPendingChanges 정합성).
-      // 그러나 DOM 렌더는 예약하지 않는다 — 조합 중간 텍스트(ㅎ→하→한)는
-      // optimistic span이 화면에 표시하고, 최종 커밋은 compositionend의
-      // flushRender가 1회로 처리한다. 조합 중 debounce rAF가 flushRender를
-      // 실행하면 매 음절마다 전체 renderText가 2회(scheduleRender microtask +
-      // rAF 커밋)씩 실행돼 한글 타이핑이 영문 대비 2배 이상 느려진다 (실측:
-      // 조합 스트림 30음절에서 80회 render).
+      // 엔진 데이터는 매 음절 즉시 갱신하고, 표시도 즉시 디바운스 렌더로 커밋한다.
+      // 조합 중 표시는 항상 엔진 렌더 경로다 — 조합 텍스트가 model.textContent에
+      // 반영되어 있으므로 디바운스 렌더(rAF 프레임당 1회 병합)가 엔진 layoutText
+      // 전체를 재계산하고 renderText diff가 결과를 화면에 반영한다. 과거
+      // optimistic span 경로(라인 끝 근처 조합 시 _shiftFollowingSpans가 기존
+      // span을 파트/컬럼 폭 밖으로 밀어냄 — overflow hidden에 가려질 뿐 데이터상
+      // 라인 밖 배치)는 라인 폭 경계를 모르므로 근본적으로 올바르지 않아 제거했다.
+      // 엔진 경로는 wrap·금칙·걸침·정렬을 정확히 계산한다. 영문 타이핑도 매 키마다
+      // 동일 비용(_debouncedRender)을 지불하므로 조합의 프레임 비용은 영문 타이핑과
+      // 동일 수준이다 (과거 지연 최적화의 "음절당 2회 렌더"는 scheduleRender
+      // microtask + rAF 커밋의 이중 예약 때문이었고, 현재 _debouncedRender는
+      // 프레당 1회로 병합되므로 재발하지 않는다).
       model.textContent = insertTextIntoInline(
         deleteTextFromInline(model.textContent, start, prevCompositionLen),
         start,
@@ -1891,14 +1886,7 @@ export class TextEditController {
       this._compositionData = data;
       this._cursorModel.offset = start + data.length;
 
-      this._optimisticCompositionUpdate(start, data);
-      // 탭 라인 조합: optimistic span이 없어 조합 중 텍스트가 화면에 표시되지 않는다.
-      // 디바운스 렌더(rAF 병합)로 조합 중 텍스트를 실제 엔진 렌더에 반영한다 —
-      // 엔진이 우측 정렬을 정확히 계산하므로 흔들림/이탈 없이 표시된다.
-      // 음절당 렌더는 rAF로 프레임당 1회로 병합된다.
-      if (this._isRightAlignedComposition) {
-        this._debouncedRender();
-      }
+      this._debouncedRender();
       this._updateCursorPosition();
     } else {
       this._updateCursorPosition();
@@ -1907,121 +1895,9 @@ export class TextEditController {
     this._emitStyleChange();
   }
 
-  /**
-   * IME 조합 중인 음절을 optimistic span으로 표시한다.
-   *
-   * 조합 위치에 이미 optimistic 조합 span이 있으면 내용만 교체하고(1-span dirty),
-   * 없으면 조합 시작 위치에 생성한다. 전체 renderText는 `_debouncedRender()`가
-   * rAF 프레임에 1회로 병합 실행한다.
-   *
-   * @param startOffset - 조합 시작 source offset
-   * @param data - 현재 조합 음절 (예: 'ㅎ' → '하' → '한')
-   * @returns void
-   *
-   * @example
-   * ```ts
-   * // '한글' 입력 중 '한' 조합: startOffset=100, data='한'
-   * this._optimisticCompositionUpdate(100, '한');
-   * ```
-   */
-  private _optimisticCompositionUpdate(startOffset: number, data: string): void {
-    if (this._optimisticSpan && this._optimisticSpan.parentNode) {
-      // 기존 조합 span 재사용: 내용 교체만으로 1-span dirty 유지.
-      this._optimisticSpan.textContent = data;
-      // span dataset은 렌더 공간(프레임 로컬)이다.
-      const localStart = this._paragraph.model?.isThreadFrame
-        ? startOffset - this._paragraph.model.contentFrom
-        : startOffset;
-      this._optimisticSpan.dataset.sourceOffset = String(localStart);
-      // 폭 변화(ㅎ→하→한) 반영: 새 음절 폭으로 재계산하여 후속 span 밀기 조정.
-      // 조합 텍스트는 조합 시작 위치의 런 스타일을 사용한다 — _onCompositionUpdate가
-      // runMap을 model.textContent(조합 반영됨)에서 재추출한 직후이므로 직접 조회가
-      // 항상 최신이며, 타이핑 span을 재사용한 경우에도 정확하다.
-      const style = getStyleAtOffset(this._runMap, startOffset);
-      const prevWidthMm = this._optimisticSpanWidthMm;
-      const widthMm = this._computeTempSpanWidthMm(data[data.length - 1] ?? '', style);
-      if (widthMm !== prevWidthMm) {
-        this._shiftFollowingSpans(this._optimisticSpan, prevWidthMm - widthMm);
-        this._optimisticSpanWidthMm = widthMm;
-      }
-      // 조합 중 pending 스타일 주입(예: underline/breakline 토글)으로 런 스타일이
-      // 바뀌면 장식선도 갱신한다 — 재사용 span은 _createOptimisticSpan을 다시
-      // 거치지 않으므로 여기서 반영한다.
-      const model = this._paragraph.model;
-      if (model) {
-        const eff = model.effectiveTextStyle;
-        const ulOn = (style?.underline ?? eff.underline!) === true;
-        const blOn = (style?.breakline ?? eff.breakline!) === true;
-        const lineMaxFs = this._getLineMaxFontSizeAt(startOffset);
-        if (ulOn || blOn) {
-          this._applyOptimisticDecorations(this._optimisticSpan, lineMaxFs, style);
-        } else {
-          for (const el of Array.from(this._optimisticSpan.querySelectorAll(':scope > div[data-deco-key^="opt-"]'))) {
-            el.remove();
-          }
-        }
-      }
-      return;
-    }
-
-    // 첫 조합 음절: 조합 시작 위치에 optimistic span 생성.
-    // 기존 _optimisticSpanUpdate는 단일 문자 삽입용이므로 여기서 직접 생성한다.
-    this._optimisticSpan = null;
-    this._optimisticSpanWidthMm = 0;
-    if (!this._paragraph.model) return;
-
-    // 우측/중앙 정렬 또는 Right Indent Tab이 포함된 라인에서는 조합 optimistic을
-    // 생성하지 않는다 — _shiftFollowingSpans/_computeTempSpanLeft은 좌측 정렬 가정
-    // (오른쪽 밀어내기)으로 설계되어, 우측 정렬에서는 밀어내기 방향이 반전된다.
-    // 대신 _onCompositionUpdate가 _debouncedRender로 조합 중 텍스트를 실제 엔진
-    // 렌더에 반영하여 표시한다 (엔진이 정확한 정렬을 계산하므로 흔들림/이탈 없음).
-    const lineInfo = this._mapper.getLineInfoBySourceOffset(startOffset);
-    const cursorLine = lineInfo
-      ? this._paragraph.model.columnContents[lineInfo.columnIndex]?.[lineInfo.lineIndex]
-      : null;
-    const textAlign = this._paragraph.paragraphStyle?.textAlign || DEFAULT_TEXT_ALIGN;
-    const isRightOrCenter = textAlign === 'right' || textAlign === 'center';
-    this._isRightAlignedComposition = isRightOrCenter
-      || (cursorLine?.parts.some((part) => part.content.includes("\t")) ?? false);
-    if (this._isRightAlignedComposition) return;
-
-    const placement = this._mapper.getCursorPlacement(startOffset);
-    if (placement) {
-      const span = this._mapper.getSpanByOffset(placement.sourceOffset);
-      if (span) {
-        // 조합 텍스트는 조합 시작 위치의 런 스타일을 이어받는다 (타이핑 연속성).
-        const compositionStyle = getStyleAtOffset(this._runMap, startOffset);
-        const newSpan = this._createOptimisticSpan(data, startOffset, compositionStyle);
-        const leftMm = this._computeTempSpanLeft(span, placement.atEndOfChar);
-        if (leftMm !== undefined) {
-          newSpan.style.position = 'absolute';
-          newSpan.style.left = `${leftMm}mm`;
-          newSpan.style.top = this._getOptimisticTopMm(startOffset, compositionStyle);
-        }
-        if (placement.atEndOfChar) {
-          span.after(newSpan);
-        } else {
-          span.before(newSpan);
-        }
-        const widthMm = this._computeTempSpanWidthMm(data[data.length - 1] ?? '', compositionStyle);
-        this._shiftFollowingSpans(newSpan, widthMm);
-        this._optimisticSpanWidthMm = widthMm;
-        this._optimisticSpan = newSpan;
-        return;
-      }
-    }
-
-    // placement 실패(라인 시작/빈 줄): 기존 line-start 경로 재사용 시도.
-    const plainText = this._paragraph.model.plainText;
-    if (startOffset > 0 && plainText[startOffset - 1] === '\n') {
-      this._insertOptimisticSpanAtLineStart(data, startOffset);
-    }
-  }
-
   private _onCompositionCancel(): void {
     this._isComposing = false;
     this._compositionData = "";
-    this._isRightAlignedComposition = false;
 
     const model = this._paragraph.model;
     if (model) {
@@ -2044,7 +1920,6 @@ export class TextEditController {
   private _onCompositionEnd(_event: CompositionEvent): void {
     this._isComposing = false;
     this._compositionData = "";
-    this._isRightAlignedComposition = false;
 
     if (this._debounceTimer !== null) {
       cancelAnimationFrame(this._debounceTimer);
@@ -2729,11 +2604,9 @@ export class TextEditController {
 
     // placement가 없는 경우(빈 줄 시작, offset=0 등): line rect 또는 first column rect 사용
     if (!placement) {
-      // IME 조합 중: 커서 offset이 조합 텍스트 끝을 가리켜 stale mapper 범위를
-      // 벗어난다(조합 중에는 렌더가 지연되어 mapper가 갱신되지 않음).
-      // 조합 시작 위치의 placement로 폴백하면 커서가 조합 텍스트가 표시될 지점
-      // (조합 시작 글자 위치)에 머문다 — 라인/파트 밖 이탈을 막는다.
-      // 조합 텍스트의 실제 위치는 compositionend의 flushRender 후 확정된다.
+      // IME 조합 중: 커서 offset이 조합 텍스트 끝을 가리킨다. rAF 커밋 직후
+      // mapper 재구축 전(또는 stale mapper) 상태에서 placement가 없으면 조합 시작
+      // 위치의 placement로 폴백한다 — 커서가 조합 텍스트가 표시될 지점에 머문다.
       if (this._isComposing && this._compositionStartOffset > 0) {
         const startPlacement =
           this._mapper.getCursorPlacement(this._compositionStartOffset, true) ??

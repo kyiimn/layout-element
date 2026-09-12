@@ -1,13 +1,14 @@
 /**
  * IME 조합 경로 DOM 정합성 검증.
  *
- * 조합 중 렌더를 compositionend까지 지연하는 최적화(_onCompositionUpdate가
- * optimistic span만 갱신) 후에도 다음이 정합한지 검사한다:
- * 1. 조합 커밋 후 DOM 텍스트 === 엔진 텍스트
+ * 조합 중 표시를 엔진 렌더 경로로 통일(optimistic span 제거 — 라인 밖 밀어남
+ * 방지)한 뒤에도 다음이 정합한지 검사한다:
+ * 1. 조합 중 엔진 렌더 경로 (optimistic span 없음) + 커밋 후 DOM 텍스트 === 엔진 텍스트
  * 2. 조합 취소(compositioncancel) 시 원상 복원
- * 3. 조합 중 optimistic span 표시 + 커서 위치
- * 4. 영문 타이핑 + 한글 조합 혼합 시퀀스 정합
- * 5. 조합 중 span source-offset 무결성
+ * 3. 영문 타이핑 + 한글 조합 혼합 시퀀스 정합
+ * 4. 조합 중 span source-offset 무결성
+ * 5. 조합 중 엔진 wrap 실증 (라인 증가) + 컬럼 밖 span 0개
+ * 6. 걸침표 ON (overflow visible) 조합 좌표 무결성
  *
  * @example
  * ```bash
@@ -171,7 +172,7 @@ const r = await page.evaluate(async () => {
   // ── 1. 조합 커밋 정합 ('한글입력' 단어 2개) ──
   const before = ta.value;
   await compose(['ㅎ', '하', '한']);
-  // 1a. 조합 중: optimistic span 존재 + 커서 위치
+  // 1a. 조합 중: 엔진 렌더 경로 (optimistic span 없음 — 라인 밖 밀어남 방지) + 커서 위치
   out.composingState = {
     hasOptimisticSpan: !!(controller._optimisticSpan && controller._optimisticSpan.parentNode),
     optimisticText: controller._optimisticSpan?.textContent ?? null,
@@ -237,7 +238,10 @@ const r = await page.evaluate(async () => {
   const probe = [0, 1, Math.floor(ta.value.length / 3), Math.floor(ta.value.length / 2), ta.value.length - 1];
   out.cursorProbes = probe.map(off => ({ off, ok: controller._mapper.getCursorPlacement(off) !== null || controller._mapper.getCharRect(off) !== null }));
 
-  // ── 5. 조합 중 caretHint 상태 (커밋 시 prefix 캐시 활용) ──
+  // ── 5. 조합 중 커밋 상태 (엔진 렌더 경로 — 음절당 즉시 커밋) ──
+  // 과거(렌더 지연 최적화)에는 조합 중 dirty가 유지되었지만, 엔진 렌더 경로
+  // 통일 후에는 매 음절이 rAF 커밋(flushRender)으로 즉시 반영되므로 dirty가
+  // 해소된다. 조합 중 dirty=false가 새 정합 계약이다.
   await compose(['ㅅ', '수', '순']);
   out.composingCacheHint = {
     engineDirty: engine.hasPendingChanges,
@@ -245,6 +249,87 @@ const r = await page.evaluate(async () => {
   };
   await commitCompose('순');
   out.afterCommit3 = { domEngineMatch: domText() === engineText(), cacheHit: engine.hasLayoutCache };
+
+  // ── 6. 조합 중 엔진 렌더 경로 — 라인 밖 밀어남 방지 (걸침표 OFF 포함 전 조합) ──
+  // 버그: 과거 조합 중 optimistic span 밀어내기(_shiftFollowingSpans)가 라인 폭을
+  // 넘어도 wrap 없이 기존 span을 파트/컬럼 폭 밖으로 밀어냈다. 걸침표 OFF 컬럼은
+  // overflow: hidden에 가려질 뿐 데이터상 라인 밖 배치였고, 걸침표 ON 컬럼
+  // (overflow: visible)에서는 눈에 보였다. 수정: 조합 중 표시를 항상 엔진 렌더
+  // 경로로 통일 — 엔진이 매 음절 정확한 wrap을 계산한다.
+  const totalLines = () => engine.columnContents.reduce((a, c) => a + (c?.length ?? 0), 0);
+  // 버그 직접 검증: 어떤 span도 컬럼 폭 밖(charOffset > columnWidth)에 배치되지 않는다.
+  // 걸침 글자(charOffset === partWidth)는 걸침표 산출물이므로 폭 이하면 정상.
+  const outOfColumnSpans = () => {
+    const cols = [...p.querySelectorAll('x-layout-column')];
+    const bad = [];
+    cols.forEach((c, ci) => {
+      const colW = engine.columnWidths[ci] ?? 0;
+      c.shadowRoot.querySelectorAll('span[data-char-offset]').forEach(s => {
+        const off = parseFloat(s.dataset.charOffset);
+        if (!Number.isNaN(off) && off > colW + 0.01) bad.push({ col: ci, off, colW });
+      });
+    });
+    return bad;
+  };
+
+  const baselineLines = totalLines();
+  // 마지막 라인 끝에서 컬럼 폭을 넘는 조합을 구성해 조합 중 wrap을 강제한다.
+  const colCount = engine.columnContents.length;
+  const lastColW = engine.columnWidths[colCount - 1] ?? engine.columnWidths[0];
+  const charW = engine.getCharWidths('가').swidth;
+  const growChars = Math.ceil(lastColW / charW) + 2;
+  const growth = [];
+  let g = '';
+  for (let i = 0; i < growChars; i++) { g += '가'; growth.push(g); }
+  await compose(growth);
+  await wait2();
+  const midLines = totalLines();
+  out.hangingCompose = {
+    // optimistic 경로 미사용 — 엔진 렌더 경로 판정 (걸침표 OFF 상태에서도)
+    engineRenderPath: controller._optimisticSpan === null,
+    noTemporarySpan: [...p.querySelectorAll('x-layout-column')].every(
+      c => c.shadowRoot.querySelectorAll('span[data-temporary]').length === 0),
+    // 조합 중에도 엔진이 조합 텍스트를 wrap하여 렌더 (DOM === 엔진)
+    domEngineMatch: domText() === engineText(),
+    baselineLines,
+    midLines,
+    outOfColumn: outOfColumnSpans(),
+    span: spanIntegrity(),
+  };
+  await commitCompose(g);
+  out.afterHangingCommit = {
+    domEngineMatch: domText() === engineText(),
+    endLines: totalLines(),
+    outOfColumn: outOfColumnSpans(),
+    span: spanIntegrity(),
+  };
+
+  // ── 7. 걸침표 ON 조합 — overflow visible 상태에서도 라인 밖 밀어남 없음 ──
+  // OFF 상태의 [6]에 더해, 걸침표 ON(컬럼 overflow: visible)에서도 동일 계약이
+  // 유지되는지 확인한다. 조합은 클립 없이 페인트되므로 좌표 무결성이 곧 화면 진실.
+  const origParagraphStyle = { ...p.paragraphStyle };
+  p.paragraphStyle = { ...origParagraphStyle, hangingPunctuation: true };
+  await wait2();
+  em.focusParagraph(p, { cursorOffset: ta.value.length });
+  await wait2();
+  const hangBaselineLines = totalLines();
+  await compose(growth);
+  await wait2();
+  out.hangingOnCompose = {
+    domEngineMatch: domText() === engineText(),
+    baselineLines: hangBaselineLines,
+    midLines: totalLines(),
+    outOfColumn: outOfColumnSpans(),
+    span: spanIntegrity(),
+  };
+  await commitCompose(g);
+  out.afterHangingOnCommit = {
+    domEngineMatch: domText() === engineText(),
+    outOfColumn: outOfColumnSpans(),
+    span: spanIntegrity(),
+  };
+  // 원상 복원 (paragraphStyle 포함)
+  p.paragraphStyle = origParagraphStyle;
 
   // 원상 복원
   ta.value = before;
@@ -259,7 +344,7 @@ const r = await page.evaluate(async () => {
 
 if (r.error) { console.log('ERROR:', r.error); process.exit(1); }
 
-check('1a. 조합 중 optimistic span 존재', r.composingState.hasOptimisticSpan, `text="${r.composingState.optimisticText}"`);
+check('1a. 조합 중 엔진 렌더 경로 (optimistic span 없음)', !r.composingState.hasOptimisticSpan, `text="${r.composingState.optimisticText}"`);
 check('1a. 조합 중 커서 위치 (start+data.length)', r.composingState.cursorOffset >= 0 && r.composingState.composingFlag);
 check('1b. 커밋 후 DOM===엔진 (한)', r.afterCommit1.domEngineMatch, `ta="${r.afterCommit1.taValueEndsWith}"`);
 check('1b. 커밋 후 span 무결성', r.afterCommit1.span.monotonic && r.afterCommit1.span.dups === 0);
@@ -268,8 +353,27 @@ check('2. 조합 취소 원상 복원', r.afterCancel.restored && r.afterCancel.
 check('3. 영문+한글 혼합 정합', r.mixed[0].domEngineMatch, `tail="${r.mixed[0].taTail}"`);
 check('3. 혼합 후 span 무결성', r.mixed[0].span.monotonic && r.mixed[0].span.dups === 0);
 check('4. 커서 조회 전 경로 유효', r.cursorProbes.every(c => c.ok));
-check('5. 조합 중 엔진 dirty 유지', r.composingCacheHint.engineDirty);
+check('5. 조합 중 음절 커밋 해소 (엔진 렌더 경로 — dirty 없음)', !r.composingCacheHint.engineDirty);
 check('5. 커밋 후 DOM===엔진 (순)', r.afterCommit3.domEngineMatch);
+check('6. 조합 중 optimistic 경로 미사용 (엔진 렌더 통일)', r.hangingCompose.engineRenderPath && r.hangingCompose.noTemporarySpan,
+  `optimistic=${r.hangingCompose.engineRenderPath}, tempSpan=${!r.hangingCompose.noTemporarySpan}`);
+check('6. 조합 중 DOM===엔진 (wrap 적용)', r.hangingCompose.domEngineMatch, `midLines=${r.hangingCompose.midLines}`);
+check('6. 조합 중 span 무결성', r.hangingCompose.span.monotonic && r.hangingCompose.span.dups === 0);
+check('6. 조합 중 라인 증가 (엔진 wrap 실증)', r.hangingCompose.midLines > r.hangingCompose.baselineLines,
+  `baseline=${r.hangingCompose.baselineLines} → mid=${r.hangingCompose.midLines}`);
+check('6. 조합 중 컬럼 밖 span 0개 (버그 직접 검증)', r.hangingCompose.outOfColumn.length === 0,
+  r.hangingCompose.outOfColumn.map(b => `col${b.col}:off=${b.off.toFixed(1)}>w=${b.colW.toFixed(1)}`).join(','));
+check('6. 커밋 후 DOM===엔진', r.afterHangingCommit.domEngineMatch, `endLines=${r.afterHangingCommit.endLines}`);
+check('6. 커밋 후 컬럼 밖 span 0개', r.afterHangingCommit.outOfColumn.length === 0);
+check('6. 커밋 후 span 무결성', r.afterHangingCommit.span.monotonic && r.afterHangingCommit.span.dups === 0);
+check('7. 걸침표 ON 조합 중 DOM===엔진 (overflow visible)', r.hangingOnCompose.domEngineMatch,
+  `baseline=${r.hangingOnCompose.baselineLines} → mid=${r.hangingOnCompose.midLines}`);
+check('7. 걸침표 ON 조합 중 컬럼 밖 span 0개', r.hangingOnCompose.outOfColumn.length === 0,
+  r.hangingOnCompose.outOfColumn.map(b => `col${b.col}:off=${b.off.toFixed(1)}>w=${b.colW.toFixed(1)}`).join(','));
+check('7. 걸침표 ON 조합 중 span 무결성', r.hangingOnCompose.span.monotonic && r.hangingOnCompose.span.dups === 0);
+check('7. 걸침표 ON 커밋 후 DOM===엔진', r.afterHangingOnCommit.domEngineMatch);
+check('7. 걸침표 ON 커밋 후 컬럼 밖 span 0개', r.afterHangingOnCommit.outOfColumn.length === 0);
+check('7. 걸침표 ON 커밋 후 span 무결성', r.afterHangingOnCommit.span.monotonic && r.afterHangingOnCommit.span.dups === 0);
 
 await browser.close();
 if (server) server.kill();
