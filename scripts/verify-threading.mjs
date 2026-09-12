@@ -928,6 +928,49 @@ console.log('\n[15] 스레드 단위 변경 감지 — 스킵·재배치 분기'
   check('재배치 후 재호출 — 다시 스킵 (시그니처 수렴)',
     r4.every(t => t.skipped === true),
     `results=${JSON.stringify(r4.map(t => !!t.skipped))}`);
+
+  // (e) R-T2 same-ref 게이트 — 캐시 히트 layoutText 재진입에서 재매핑(O(placed)
+  //     스트림 소비 + 장식 재계산)을 생략/강제하는 게이트를 호출 카운터로 실측한다.
+  //     DOM flush가 비-소스 프레임 render() → layoutText()로 재진입하는 경로의
+  //     비용이 이 게이트로 제거된다.
+  {
+    const proto = Object.getPrototypeOf(f2);
+    const origRemap = proto._refreshInlineStylesOnly;
+    let remapCalls = 0;
+    Object.defineProperty(proto, '_refreshInlineStylesOnly', {
+      value: function () { remapCalls++; return origRemap.call(this); },
+      writable: true, configurable: true,
+    });
+    try {
+      // (e-1) 동일 참조 재진입 — 해시 히트 + 전 참조 동일 → 재매핑 생략
+      const beforeGate = JSON.stringify(f2.columnContents);
+      remapCalls = 0;
+      f2.layoutText();
+      f2.layoutText();
+      check('R-T2 게이트 — 동일 참조 재진입 재매핑 생략 (호출 0회)',
+        remapCalls === 0, `calls=${remapCalls}`);
+      check('R-T2 게이트 — 재진입 후 배치 상태 byte 불변',
+        JSON.stringify(f2.columnContents) === beforeGate);
+
+      // (e-2) 해시 무영향 스타일 변경(굵기) — 참조만 바뀌므로 재매핑 강제 + 최신화.
+      //       문자열→배열 전환은 직렬화 자체가 달라져 MISS이므로, 배열(400) 캐시를
+      //       먼저 구축한 뒤 배열(700)로 참조만 바꿔 히트 경로를 만든다.
+      f2.textContent = [{ content: typed, textInlineStyle: { fontWeight: 400 } }];
+      f2.layoutText(); // MISS — 배열 소스 캐시 구축
+      remapCalls = 0;
+      f2.textContent = [{ content: typed, textInlineStyle: { fontWeight: 700 } }];
+      f2.layoutText(); // HIT (해시 동일 — fontWeight 무영향) + 참조 상이 → 재매핑
+      check('R-T2 게이트 — 해시 무영향 스타일 변경 시 재매핑 강제 (호출 1회)',
+        remapCalls === 1, `calls=${remapCalls}`);
+      const firstPart = f2.columnContents[0]?.[0]?.parts?.find(p => p.content.length > 0);
+      check('R-T2 게이트 — 재매핑이 새 런 스타일을 반영 (inlineStyles 최신화)',
+        (firstPart?.inlineStyles ?? []).some(s => s?.fontWeight === 700),
+        `firstInline=${JSON.stringify(firstPart?.inlineStyles?.[0])}`);
+    } finally {
+      Object.defineProperty(proto, '_refreshInlineStylesOnly',
+        { value: origRemap, writable: true, configurable: true });
+    }
+  }
 }
 
 // ═══ 16. relayoutThreads 사이클 실행 횟수 — 단일 확정 지점 (P1-7) ═══

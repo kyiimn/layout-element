@@ -347,6 +347,25 @@ export class DocumentEngine {
   }
 
   /**
+   * 여러 ID의 엔진을 트리 1회 순회로 일괄 조회한다.
+   *
+   * 스레드 체인 배치(ThreadEngine)와 DOM flush가 프레임마다 `findEngineById`를
+   * 호출하면 조회 수 × 트리 크기로 증폭된다 — F개 프레임 조회를 단일 순회로
+   * 수렴시킨다. 순회 순서와 첫 일치 우선 시맨틱은 `findEngineById`와 동일하다.
+   * 캐시가 아니므로 엔진 트리 변이(reparent/제거의 직접 splice)에도 무효화
+   * 문제가 없다.
+   *
+   * @param ids - 조회할 엔진 id 집합
+   * @returns id → 엔진 맵 (미발견 id는 키 부재)
+   */
+  findEnginesByIds(ids: ReadonlySet<string>): Map<string, BoxEngine | ParagraphEngine | ImageEngine | TableEngine> {
+    const out = new Map<string, BoxEngine | ParagraphEngine | ImageEngine | TableEngine>();
+    if (ids.size === 0 || this._childBoxEngines.length === 0) return out;
+    _collectEnginesByIdsInBoxes(this._childBoxEngines, ids, out);
+    return out;
+  }
+
+  /**
    * 역할(`role`)으로 박스 엔진을 검색한다. 트리 전체를 재귀 순회하며 일치하는 모든 박스를 반환한다.
    *
    * @param role - 검색할 박스 역할 (예: `'body'`, `'title'`, `'image'`)
@@ -970,7 +989,12 @@ export class DocumentEngine {
     if (!this._threadEngine) {
       this._threadEngine = ThreadEngine.create();
     }
-    return this._threadEngine.layoutThreads(this._data.threads, id => this.findEngineById(id));
+    // 배치 조회: 프레임별 재귀 검색(F×트리) 대신 트리 1회 순회로 전 프레임을 수집한다.
+    return this._threadEngine.layoutThreads(
+      this._data.threads,
+      id => this.findEngineById(id),
+      ids => this.findEnginesByIds(ids),
+    );
   }
 
   /**
@@ -1215,6 +1239,58 @@ function _findEngineByIdInBoxes(
     }
   }
   return undefined;
+}
+
+/**
+ * 박스 엔진 배열을 단일 순회하며 요청된 모든 id의 엔진을 수집한다.
+ *
+ * 순회 순서와 첫 일치 우선 시맨틱은 `_findEngineByIdInBoxes`와 동일하다
+ * (자기 → 직계 컨텐츠 → 중첩 자식 박스 → 테이블 셀 내부 박스). 중복 id는
+ * 첫 일치가 이긴다 (`findEngineById`의 첫 반환과 일치).
+ *
+ * @param boxEngines - 순회 대상 박스 엔진 배열
+ * @param ids - 수집 대상 엔진 id 집합
+ * @param out - 수집 결과 맵 (id → 엔진, in-place 갱신)
+ */
+function _collectEnginesByIdsInBoxes(
+  boxEngines: BoxEngine[],
+  ids: ReadonlySet<string>,
+  out: Map<string, BoxEngine | ParagraphEngine | ImageEngine | TableEngine>,
+): void {
+  for (const be of boxEngines) {
+    if (out.size === ids.size) return;
+    const boxId = be.data.id;
+    if (boxId !== undefined && ids.has(boxId) && !out.has(boxId)) out.set(boxId, be);
+
+    for (const ce of be.childEngines) {
+      if (ce instanceof ParagraphEngine || ce instanceof ImageEngine) {
+        const ceId = ce.id;
+        if (ceId !== undefined && ids.has(ceId) && !out.has(ceId)) out.set(ceId, ce);
+      } else if (ce instanceof TableEngine) {
+        const ceId = ce.data.id;
+        if (ceId !== undefined && ids.has(ceId) && !out.has(ceId)) out.set(ceId, ce);
+      }
+    }
+
+    const childBoxes = be.childBoxEngines;
+    if (childBoxes.length > 0) {
+      _collectEnginesByIdsInBoxes(childBoxes, ids, out);
+      if (out.size === ids.size) return;
+    }
+
+    for (const ce of be.childEngines) {
+      if (ce instanceof TableEngine) {
+        for (const rowEngine of ce.rowEngines) {
+          for (const cellEngine of rowEngine.cellEngines) {
+            const cellBox = cellEngine.boxEngine;
+            if (cellBox) {
+              _collectEnginesByIdsInBoxes([cellBox], ids, out);
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 /**

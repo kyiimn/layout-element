@@ -18,6 +18,17 @@ import type { ParagraphEngine } from "./paragraph-engine";
 import { isLineStartForbidden, isLineEndForbidden, isWordChar } from "@/constants/line-break";
 
 /**
+ * 스레드 프레임 일괄 조회 계약 (`DocumentEngine.findEnginesByIds`).
+ *
+ * 트리를 1회만 순회해 전 프레임 엔진을 수집한다 — 프레임별 재귀 검색
+ * (`findEngineById` × F)의 조회 수 × 트리 크기 증폭을 제거한다. `ReadonlyMap`으로
+ * 선언해 엔진 구체 타입 맵과의 공변 할당을 보장한다.
+ */
+export type ThreadFrameBatchLookup = (
+  ids: ReadonlySet<string>,
+) => ReadonlyMap<string, { extractData?: unknown } | undefined>;
+
+/**
  * 스레드 프레임 순차 배치 결과.
  */
 export interface ThreadLayoutResult {
@@ -119,6 +130,7 @@ export class ThreadEngine {
   public layoutThreads(
     threads: ThreadData[],
     findEngineById: (id: string) => { extractData?: unknown } | undefined,
+    batchLookup?: ThreadFrameBatchLookup,
   ): ThreadLayoutResult[] {
     // validate와 동일한 first-claim-wins로 프레임 소속을 확정한다 —
     // 한 프레임이 여러 thread에 중복 소속되면 첫 유효 thread만 소유한다.
@@ -135,12 +147,41 @@ export class ThreadEngine {
     }).filter(thread => (thread.paragraphIds ?? []).length > 0);
     if (valid.length === 0) return [];
 
+    // 배치 조회: 전 스레드 프레임 id를 한 번에 수집해 트리 1회 순회로 엔진 맵을
+    // 얻는다. 미제공 시 기존 단건 경로로 폴백한다 (호환성 유지).
+    const lookup = batchLookup
+      ? this._buildBatchLookup(valid, batchLookup)
+      : null;
+
     const results: ThreadLayoutResult[] = [];
     for (const thread of valid) {
-      const result = this._layoutOneThread(thread, findEngineById);
+      const result = lookup
+        ? this._layoutOneThread(thread, lookup)
+        : this._layoutOneThread(thread, findEngineById);
       results.push(result);
     }
     return results;
+  }
+
+  /**
+   * 전 스레드 프레임 id 집합으로 배치 조회 맵을 구축하고 단건 조회 함수로 변환한다.
+   *
+   * @param valid - 소속 확정된 스레드 배열
+   * @param batchLookup - 트리 1회 순회 일괄 조회 함수
+   * @returns id → 엔진 조회 함수 (미발견 id는 undefined — `findEngineById` 폴백과 동일 시맨틱)
+   */
+  private _buildBatchLookup(
+    valid: ThreadData[],
+    batchLookup: ThreadFrameBatchLookup,
+  ): (id: string) => { extractData?: unknown } | undefined {
+    const ids = new Set<string>();
+    for (const thread of valid) {
+      for (const id of thread.paragraphIds ?? []) {
+        if (id) ids.add(id);
+      }
+    }
+    const map = batchLookup(ids);
+    return (id: string) => map.get(id);
   }
 
   /**

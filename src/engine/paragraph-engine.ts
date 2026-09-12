@@ -240,6 +240,14 @@ export class ParagraphEngine {
   private _tailClampFrom: number = -1;
 
   /**
+   * 스레딩 overset cut 위치 (P2): 마지막 컬럼의 첫 overflow 글자 다음 plain
+   * 오프셋. `_layoutColumnsPass`가 기록하고 `_captureThreadTail`이 소비한다 —
+   * 잔여 글자를 배치 패스에서 전부 방문하는 대신 tail 이후의 non-newline
+   * 잔여를 해석적으로 산출한다. -1 = cut 없음 (비-스레드·clamp 재배치 경로).
+   */
+  private _oversetCutFrom: number = -1;
+
+  /**
    * 스레딩: 마지막 `layoutText()`가 배치하지 못한 tail (평문 오프셋, `\n` 포함).
    * -1 = tail 없음(전체 배치) 또는 아직 배치 전. `overflowContent` 게터의 근거.
    */
@@ -261,6 +269,50 @@ export class ParagraphEngine {
    * `resetIncrementalState()`가 소비 후 null로 돌아간다.
    */
   private _renderShapePreserved: { lineCount: number; overflow: number } | null = null;
+
+  /**
+   * `textContent` 직렬화 다이제스트 캐시 (R-T1 해시 비용 제거).
+   *
+   * 배치 입력 해시(`_computeLayoutInputHash`)는 매번 `textContent` 전체를
+   * 해시 문자열로 조립해왔다 — 키스트로크마다 O(N) 직렬화 비용이 캐시 히트
+   * 경로에도 지불되고, 스레드 체인 재배치(DOM render의 layoutText 재호출
+   * 포함)에서 프레임당 F×O(N)으로 증폭됐다.
+   *
+   * 참조 단위 캐싱: 내용 변경은 항상 새 참조로 주입된다(textContent 세터는
+   * 대입만 하고, 편집 파이프라인은 `plainToInline`/문자열 연결로 새 객체를
+   * 만든다). 참조가 불변이면 직렬화 결과도 불변이므로 **객체 참조당 1회만
+   * 직렬화**한다. 캐시는 정적 WeakMap — 스레드 체인의 모든 프레임이 동일
+   * 스토리 참조를 소유하므로 head가 직렬화하면 나머지 프레임은 O(1) 조회다
+   * (F×O(N) → O(N)). 수명은 참조에 귀속되어 GC 안전.
+   *
+   * 불변 계약: 주입된 배열을 소비자가 in-place 변이하는 것은 금지다
+   * (변이 시 다이제스트가 stale해진다). 현재 코드베이스는 항상 새 배열을
+   * 주입한다 (grep: textContent in-place 변이 없음).
+   *
+   * 핫 경로 O(1): `_lastDigestKey`/`_lastDigest`에 마지막 조회를 저장해
+   * 동일 참조 반복 조회(레이아웃 캐시 히트, ThreadEngine 스킵 판정)는
+   * 인스턴스 필드 2비교로 끝난다.
+   */
+  private static readonly _TEXT_DIGEST_BY_REF = new WeakMap<object, string>();
+
+  /**
+   * plainText 플래트닝 결과 공유 캐시 (참조 단위). 스레드 체인의 전 프레임이
+   * 동일 스토리 참조를 소유하므로 체인당 1회만 O(N) 플래트닝한다 — 프레임별
+   * 인스턴스 캐시는 textContent setter마다 무효화되어 체인에서 F×O(N)으로
+   * 증폭됐다. 문자열 textContent는 내용 자체가 plainText이므로 캐시 불필요.
+   */
+  private static readonly _PLAIN_TEXT_BY_REF = new WeakMap<object, string>();
+
+  /**
+   * `_parseContents` 결과(라인 × 런 블록) 공유 캐시 (참조 단위). 파싱 결과는
+   * 소스 참조만으로 결정되고, 파서가 런을 **새 객체로 생성**하므로(소스 불변)
+   * 체인 엔진 간 배열 공유가 안전하다 — 기존 인스턴스 캐시(`_parsedContentsCache`)
+   * 도 동일한 참조 동등성 전제로 동작한다.
+   */
+  private static readonly _PARSED_CONTENTS_BY_REF = new WeakMap<object, TextInlineData[][]>();
+
+  private _lastDigestKey: unknown = undefined;
+  private _lastDigest: string | undefined = undefined;
 
   /** 성능 캐시: 문자별 외부 span 스타일. 키 `${char}|${widthRatio}|${letterSpacing}|${spaceRatio}|${fontSize}`. LRU (5000). */
   private _charOuterStyleCache: _LRU<string, Partial<CSSStyleDeclaration>> = new _LRU(5000);
@@ -295,6 +347,20 @@ export class ParagraphEngine {
     overflowContentFrom: number;
     /** 경계 교정 clamp (스레드 프레임만, -1 = 제한 없음) */
     tailClampFrom: number;
+    /**
+     * 캐시 적용 시점의 `textContent` 참조 (R-T2 히트 경로 게이트).
+     * 동일 참조면 inlineStyles 재매핑(`_refreshInlineStylesOnly`, O(placed))이
+     * 무의미 — 배치된 런 스타일이 소스와 이미 일치하므로 생략한다.
+     */
+    textContentRef?: string | (string | TextInlineData)[];
+    /**
+     * 캐시 적용 시점의 effective 스타일 객체 참조. effective 게터는 dirty 시
+     * 새 병합 객체를 만들므로 참조 상이 = 스타일 실변경 — 재매핑(장식·라인
+     * 높이 재계산 포함)을 강제한다. 해시에 없는 무영향 필드(굵기·색상·장식
+     * 플래그) 변경을 이 게이트가 흡수한다.
+     */
+    effTextStyleRef?: TextStyle;
+    effParagraphStyleRef?: ParagraphStyle;
   } | null = null;
 
   /**
@@ -381,10 +447,16 @@ export class ParagraphEngine {
       this._plainTextCache = tc;
       return tc;
     }
+    const shared = ParagraphEngine._PLAIN_TEXT_BY_REF.get(tc);
+    if (shared !== undefined) {
+      this._plainTextCache = shared;
+      return shared;
+    }
     let result = "";
     for (const item of tc) {
       result += typeof item === "string" ? item : item.content;
     }
+    ParagraphEngine._PLAIN_TEXT_BY_REF.set(tc, result);
     this._plainTextCache = result;
     return result;
   }
@@ -1647,6 +1719,18 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 
     const rawContents = !Array.isArray(this._textContent) ? [{ content: this._textContent }] : this._textContent;
 
+    // R-T3 파싱 공유: 배열 소스 참조가 이미 다른 엔진(체인 이전 프레임)에서
+    // 파싱됐으면 그 결과(불변, 파서가 런을 새 객체로 생성)를 재사용한다 —
+    // 체인 F×O(N) 파싱을 O(N)으로. 문자열 소스는 참조가 내용이라 공유 무의미.
+    const sharedParsed = Array.isArray(this._textContent)
+      ? ParagraphEngine._PARSED_CONTENTS_BY_REF.get(this._textContent)
+      : undefined;
+    if (sharedParsed !== undefined) {
+      this._contents = sharedParsed;
+      this._parsedContentsCache = { textContent: this._textContent, contents: sharedParsed };
+      return;
+    }
+
     this._contents = [];
     let curLine: TextInlineData[] = [];
     let curRun: TextInlineData | null = null;
@@ -1679,6 +1763,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     // 연속 개행은 이미 빈 블록을 유지한다 — 여기만 맞추면 일관된다.)
     if (curLine.length > 0 || lastCh === "\n") this._contents.push(curLine);
 
+    if (Array.isArray(this._textContent)) {
+      ParagraphEngine._PARSED_CONTENTS_BY_REF.set(this._textContent, this._contents);
+    }
     this._parsedContentsCache = { textContent: this._textContent, contents: this._contents };
   }
 
@@ -1697,7 +1784,19 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       this._overflowContentFrom = this._layoutCache.overflowContentFrom;
       this._tailClampFrom = this._layoutCache.tailClampFrom;
       this._overlayRectsMm = null;
-      this._refreshInlineStylesOnly();
+      // R-T2 same-ref 게이트: 해시 일치 + textContent 참조까지 동일하면
+      // 배치된 inlineStyles가 소스 런 스타일과 이미 일치한다 — 재매핑
+      // (_refreshInlineStylesOnly, O(placed) 스트림 소비 + deco 재계산)은
+      // no-op이므로 생략한다. effective 스타일 참조도 함께 비교한다 — 문단
+      // 레벨 스타일 변경(해시 무영향 필드: 굵기·색상·장식 플래그)은 effective
+      // 게터가 새 병합 객체를 만들어 참조가 바뀌므로, 이 비교가 그 경우
+      // 재매핑(장식선 색상 등 재계산)을 강제한다. 참조가 다르면 기존 경로대로
+      // 재매핑하고, 참조 미저장 캐시도 안전 폴백으로 재매핑한다.
+      if (this._layoutCache.textContentRef !== this._textContent
+        || this._layoutCache.effTextStyleRef !== this.effectiveTextStyle
+        || this._layoutCache.effParagraphStyleRef !== this.effectiveParagraphStyle) {
+        this._refreshInlineStylesOnly();
+      }
       this._caretHint = undefined;
       return;
     }
@@ -1762,6 +1861,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       overflow: this._overflow,
       overflowContentFrom: this._overflowContentFrom,
       tailClampFrom: this._tailClampFrom,
+      textContentRef: this._textContent,
+      effTextStyleRef: this.effectiveTextStyle,
+      effParagraphStyleRef: this.effectiveParagraphStyle,
     };
 
     if (caretOffset !== undefined && caretOffset > 0 && verticalAlign !== 'center' && verticalAlign !== 'bottom') {
@@ -1921,7 +2023,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * @returns 없음. `_overflowContentFrom`을 설정한다.
    */
   private _captureThreadTail(): void {
-    if (!this._isThreadFrame || (this._overflow <= 0 && this._tailClampFrom < 0)) {
+    if (!this._isThreadFrame
+      || (this._overflow <= 0 && this._tailClampFrom < 0 && this._oversetCutFrom < 0)) {
       this._overflowContentFrom = -1;
       return;
     }
@@ -1958,13 +2061,31 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     // 단, 경계 교정 clamp가 배치를 제한했으면 tail은 clamp 위치다 —
     // clamp는 "용량은 남았지만 인위적으로 여기서 끊고 다음 프레임으로
     // 이어진다"는 배치 입력이므로, 소진(-1) 판정은 clamp가 없을 때뿐이다.
-    if (exhausted && this._overflow <= 0 && this._tailClampFrom < 0) {
+    if (exhausted && this._overflow <= 0 && this._tailClampFrom < 0 && this._oversetCutFrom < 0) {
       this._overflowContentFrom = -1;
       return;
     }
     this._overflowContentFrom = this._tailClampFrom >= 0
       ? this._tailClampFrom
       : this._contentFrom + visibleCount;
+
+    // 스레딩 overset cut (P2): 중간 프레임이 첫 overflow 글자에서 배치를 종료했으면
+    // tail 이후 잔여를 해석적으로 산출해 기존 계약(스토리 끝까지 카운트, `\n` 미포함
+    // 근사 + 마지막 라인 아티팩트)과 동일한 `> 0` 의미를 유지한다. 레거시 카운트는
+    // 실측상 `\n` 미집계·+1 아티팩트가 있는 근사였으므로(실측: N=4000에서
+    // overflow=4043 > 배치 4000), 정확한 잔여 산출이 오히려 근사 제거다. 소비처가
+    // `> 0` 판정만 하므로(테두리 게이트는 라인 순회 기반, `render-error` 페이로드
+    // 정밀도는 계약상 요구되지 않음) 중간 프레임에서만 정확 산출로 전환한다 —
+    // tail 프레임과 비-스레드 문단은 기존 배치 경로 그대로다 (스냅샷 byte 동일).
+    if (this._oversetCutFrom >= 0) {
+      const plain = this.plainText;
+      let remainder = 0;
+      for (let i = this._oversetCutFrom; i < plain.length; i++) {
+        if (plain[i] !== "\n") remainder++;
+      }
+      this._overflow = remainder + 1;
+      this._oversetCutFrom = -1;
+    }
   }
 
   /**
@@ -2185,6 +2306,9 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       overflow: this._overflow,
       overflowContentFrom: this._overflowContentFrom,
       tailClampFrom: this._tailClampFrom,
+      textContentRef: this._textContent,
+      effTextStyleRef: this.effectiveTextStyle,
+      effParagraphStyleRef: this.effectiveParagraphStyle,
     };
 
     this._buildPrefixCache(caretOffset);
@@ -2669,6 +2793,18 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     // 유지한다 — 소거 시 getCharRect/print 좌표가 x=0 폴백으로 붕괴).
     const clampFrom = this._tailClampFrom;
 
+    // 스레딩 overset cut (P2): 스레드 프레임(경계 교정 clamp 없음)은 마지막
+    // 컬럼의 첫 overflow 글자 다음 위치에서 배치를 종료한다 — 잔여 글자를 전부
+    // 방문해 `overflow++`로 카운트하는 대신 `_captureThreadTail`이 tail 이후
+    // 잔여를 해석적으로 산출한다. overflow 라인의 글자는 어디에도 소비되지
+    // 않는다(중간 프레임 overflow는 다음 프레임이 재배치하고, DOM은 overflow
+    // 라인 span을 생성하지 않으며, print는 overflow 게이팅으로 제외된다).
+    // clamp 재배치 프레임은 제외한다 — clamp 이후 글자는 다음 프레임 소속이라
+    // "이 프레임의 잔여" 해석이 성립하지 않는다. 비-스레드 프레임은 기존
+    // 경로 그대로다 (스냅샷 byte 동일).
+    const oversetCutArmed = this._isThreadFrame && this._tailClampFrom < 0 && !this._threadTail;
+    this._oversetCutFrom = -1;
+
     // blockIdx 순회의 블록 시작 plain 오프셋 — clamp 판정이 plain 공간에서
     // 정확하도록 블록 누적을 추적한다. beforeIdxBlock부터 세는 이유:
     // contentFrom 스킵과 clamp가 모두 절대 plain 공간이기 때문이다.
@@ -2767,6 +2903,15 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 
           if (!hasLine) {
             if (isColumnOverflow && curColumn < this._columnWidths.length - 1) break;
+          }
+
+          // 스레딩 overset cut (P2): 라인 생성 루프가 마지막 컬럼에서 overflow
+          // 로 종료했으면(= 첫 overflow 라인 생성 직후, 배치 전) 컷 위치를
+          // 기록하고 블록 순회를 종료한다 — 잔여 글자를 방문하지 않는다.
+          if (oversetCutArmed && !hasLine && isColumnOverflow
+            && curColumn === this.columnCount - 1) {
+            this._oversetCutFrom = blockPlainStart + flatIdxInBlock;
+            break;
           }
 
           if (!hasLine || partWidths.length === 0) {
@@ -2924,6 +3069,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
                     columnContent = this._removeTrailingEmptyLine(columnContent);
                   }
                   break charLoop;
+                } else if (oversetCutArmed) {
+                  // 스레딩 overset cut (P2): 마지막 컬럼 overflow 상태에서 배치되는
+                  // 첫 글자 — 이후 잔여는 해석 산출로 대체한다.
+                  this._oversetCutFrom = blockPlainStart + flatIdxInBlock;
+                  break charLoop;
                 } else {
                   this._overflow++;
                 }
@@ -2956,6 +3106,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
                   if (!isLastCharInBlock) {
                     columnContent = this._removeTrailingEmptyLine(columnContent);
                   }
+                  break charLoop;
+                } else if (oversetCutArmed) {
+                  // 스레딩 overset cut (P2): part-hop으로 배치된 첫 overflow 글자 —
+                  // 이후 잔여는 해석 산출로 대체한다.
+                  this._oversetCutFrom = blockPlainStart + flatIdxInBlock;
                   break charLoop;
                 } else {
                   this._overflow++;
@@ -2996,6 +3151,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
                       columnContent = this._removeTrailingEmptyLine(columnContent);
                     }
                     break charLoop;
+                  } else if (oversetCutArmed) {
+                    // 스레딩 overset cut (P2): 마지막 컬럼 커버 라인 + overflow —
+                    // 커버 라인의 글자는 배치 불가이므로 현재 글자부터 잔여다.
+                    this._oversetCutFrom = blockPlainStart + flatIdxInBlock;
+                    break charLoop;
                   } else {
                     this._overflow++;
                   }
@@ -3012,6 +3172,19 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
                   partWidths = [];
                   break charLoop;
                 } else {
+                  // 스레딩 overset cut (P2): 마지막 컬럼에서 첫 overflow 라인이
+                  // 생성된 순간, "다음 글자"(현재 글자)가 첫 overflow 대상이다.
+                  // 이 위치에서 배치를 종료한다 — 잔여 글자를 전부 방문해
+                  // `overflow++`로 카운트하는 대신 `_captureThreadTail`이 해석
+                  // 산출한다. overflow 라인의 글자는 어디에도 소비되지 않는다
+                  // (중간 프레임 overflow는 다음 프레임이 재배치하고, DOM은
+                  // overflow 라인 span을 생성하지 않으며, print는 overflow
+                  // 게이팅으로 제외된다). clamp 재배치 프레임은 제외 — clamp
+                  // 이후 글자는 다음 프레임 소속이라 잔여 해석이 성립하지 않는다.
+                  if (oversetCutArmed) {
+                    this._oversetCutFrom = blockPlainStart + flatIdxInBlock;
+                    break charLoop;
+                  }
                   this._overflow++;
                 }
               }
@@ -3143,6 +3316,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
                   columnContent = this._removeTrailingEmptyLine(columnContent);
                 }
                 break charLoop;
+              } else if (oversetCutArmed) {
+                // 스레딩 overset cut (P2): 새 라인으로 넘어간 첫 overflow 글자 —
+                // 이후 잔여는 해석 산출로 대체한다.
+                this._oversetCutFrom = blockPlainStart + flatIdxInBlock;
+                break charLoop;
               } else {
                 this._overflow++;
               }
@@ -3152,6 +3330,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
           runIdx++;
         }
 
+        if (oversetCutArmed && this._oversetCutFrom >= 0) break;
         if (isColumnOverflow) {
           if (curColumn < this._columnWidths.length - 1) break;
         }
@@ -3230,6 +3409,60 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   }
 
   /**
+   * `textContent` 직렬화(해시 텍스트 부분)를 참조 단위 캐시에서 조회한다.
+   *
+   * 직렬화 규칙은 기존 `_computeLayoutInputHash` 인라인 코드와 byte 동일:
+   * 블록 content를 순서대로 push하고, 인라인 스타일 블록은 폭 영향 필드
+   * (fontFamily/fontSize/fontStyle/letterSpacing/widthRatio/spaceRatio)만
+   * `s:` 키로 이어붙인다. fontWeight/color는 무영향이므로 제외 — 스타일만
+   * 변경된 주입(굵게/색상)에서 캐시 히트 → 재래핑 생략 계약을 유지한다.
+   *
+   * 캐시 키는 참조(배열) 또는 문자열 내용 자체다. 내용 변경은 항상 새 참조로
+   * 주입되므로 참조 불변 = 직렬화 불변. 스레드 체인의 전 프레임이 동일 스토리
+   * 참조를 소유하므로 head의 직렬화 1회로 체인 전체가 O(1) 조회로 수렴한다.
+   *
+   * @returns 해시에 push할 텍스트 직렬화 문자열
+   */
+  private _textContentDigest(): string {
+    const tc = this._textContent;
+    if (typeof tc === "string") {
+      return tc;
+    }
+    if (this._lastDigestKey === tc && this._lastDigest !== undefined) return this._lastDigest;
+    const cached = ParagraphEngine._TEXT_DIGEST_BY_REF.get(tc);
+    if (cached !== undefined) {
+      this._lastDigestKey = tc;
+      this._lastDigest = cached;
+      return cached;
+    }
+    const segs: string[] = [];
+    for (const block of tc) {
+      if (typeof block === "string") {
+        segs.push(block);
+      } else {
+        segs.push(block.content);
+        const s = block.textInlineStyle;
+        if (s) {
+          segs.push(
+            "s:" +
+              (s.fontFamily ?? "") + "," +
+              (s.fontSize ?? "") + "," +
+              (s.fontStyle ?? "") + "," +
+              (s.letterSpacing ?? "") + "," +
+              (s.widthRatio ?? "") + "," +
+              (s.spaceRatio ?? ""),
+          );
+        }
+      }
+    }
+    const digest = segs.join("|");
+    ParagraphEngine._TEXT_DIGEST_BY_REF.set(tc, digest);
+    this._lastDigestKey = tc;
+    this._lastDigest = digest;
+    return digest;
+  }
+
+  /**
    * 레이아웃 입력 매개변수 해시를 계산한다.
    * 해시가 동일하면 레이아웃 결과가 동일하므로 `_layoutTextIntoColumns()`를 생략할 수 있다.
    *
@@ -3238,33 +3471,13 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   private _computeLayoutInputHash(): string {
     const parts: string[] = [];
 
+    // R-T1: 텍스트 직렬화는 참조(또는 문자열) 단위 캐시 재사용 — 키스트로크마다
+    // O(N) 직렬화를 O(1) 조회로. 직렬화 규칙은 기존 인라인 코드와 byte 동일.
+    // 빈 배열은 push하지 않았던 기존 규칙(파트 0개)을 그대로 유지한다.
     if (typeof this._textContent === "string") {
       parts.push(this._textContent);
-    } else {
-      for (const block of this._textContent) {
-        if (typeof block === "string") {
-          parts.push(block);
-        } else {
-          parts.push(block.content);
-          const s = block.textInlineStyle;
-          if (s) {
-            // 배치(글자 폭, 라인 분할)에 영향을 주는 필드만 해시에 포함.
-            // fontWeight/color는 폭/높이에 무영향이므로 제외 — 스타일만 변경된
-            // 주입(굵게/색상)에서 캐시 히트 → 재래핑 생략. inlineStyles는
-            // _refreshInlineStylesOnly() 경량 패스로 최신화된다.
-            // letterSpacing/widthRatio/spaceRatio는 폭 계산에 개입하므로 포함.
-            parts.push(
-              "s:" +
-                (s.fontFamily ?? "") + "," +
-                (s.fontSize ?? "") + "," +
-                (s.fontStyle ?? "") + "," +
-                (s.letterSpacing ?? "") + "," +
-                (s.widthRatio ?? "") + "," +
-                (s.spaceRatio ?? ""),
-            );
-          }
-        }
-      }
+    } else if (this._textContent.length > 0) {
+      parts.push(this._textContentDigest());
     }
 
     const pAbsLeft = this._data.parentAbsRect.absLeft;

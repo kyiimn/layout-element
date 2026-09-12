@@ -596,8 +596,9 @@ export class LayoutDocumentElement extends HTMLElement {
       // 영향 프레임에 dirty가 남았다면 다음 flush가 필요한 것처럼 보이는
       // 상태 — relayoutThreads가 일부 프레임을 건너뛰었다는 뜻이다.
       if (typeof console !== 'undefined') {
+        const pendingLookup = engine.findEnginesByIds(affectedFrames);
         for (const frameId of affectedFrames) {
-          const pe = engine.findEngineById(frameId);
+          const pe = pendingLookup.get(frameId);
           if (pe instanceof ParagraphEngine && pe.hasPendingChanges) {
             console.error(
               `[layout-element] thread relayout incomplete: frame ${frameId} still has pending changes after flush`,
@@ -623,13 +624,22 @@ export class LayoutDocumentElement extends HTMLElement {
     const threads = engine?.data?.threads;
     if (!threads || threads.length === 0) return;
 
+    // 배치 조회: 프레임별 재귀 검색 대신 트리 1회 순회로 전 프레임 엔진을 수집한다.
+    const frameIds = new Set<string>();
+    for (const thread of threads) {
+      for (const frameId of thread.paragraphIds ?? []) {
+        if (frameId) frameIds.add(frameId);
+      }
+    }
+    const engineLookup = engine.findEnginesByIds(frameIds);
+
     const domParagraphs = this.querySelectorAll('x-layout-paragraph');
     const synced = new Set<string>();
     for (const thread of threads) {
       for (const frameId of thread.paragraphIds ?? []) {
         if (synced.has(frameId)) continue;
         synced.add(frameId);
-        const enginePe = engine.findEngineById(frameId);
+        const enginePe = engineLookup.get(frameId);
         if (!(enginePe instanceof ParagraphEngine) || !enginePe.isThreadFrame) continue;
         const domPe = Array.from(domParagraphs).find(p => p.id === frameId);
         if (domPe) {
