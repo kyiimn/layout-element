@@ -1075,8 +1075,9 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 | `overflow` | `number` | 오버플로우된 문자 수 (마지막 컬럼에서만 집계) |
 | `hasOverflow` | `boolean` | 오버플로우 발생 여부 (`overflow > 0`) |
 | `totalChars` | `number` | 입력된 텍스트의 총 문자 수 (`\n` 제외) |
-| `visibleChars` | `number` | 컬럼 영역 내 visible 문자 수. 오버플로우 라인의 문자 제외. visible 판정은 `effectiveColumnHeight = parentHeight + (lineHeight - fontSize)` 기준 |
-| `maxVisibleCursorOffset` | `number` | 커서가 위치할 수 있는 마지막 source 오프셋 — 첫 오버플로 라인 직전 경계. `visibleChars`와 동일 라인 높이 판정 + mapper offset walk와 동일 누적(파트 content 길이, endOfBlock 뒤 `\n`). 오버플로 없음/배치 전/부모 높이 미설정이면 `-1`. 편집 커서 화살표·End 이동의 클램프 경계로 소비 (`docs/EDITING_TEXT.md` §오버플로 라인 커서 클램프). 스레드 프레임은 프레임 경계 이관이 커서 이동을 소유하므로 소비하지 않는다 |
+| `visibleChars` | `number` | 컬럼 영역 내 visible 문자 수. 오버플로우 라인의 문자 제외. visible 판정은 `effectiveColumnHeight = parentHeight + (lineHeight - fontSize)` 기준. **`_cursorLineWalk()` 단일 walk의 `visibleCount`를 반환** — `maxVisibleCursorOffset`/`cursorLineRanges`와 동일 순회 (구조적 분기 불가) |
+| `maxVisibleCursorOffset` | `number` | 커서가 위치할 수 있는 마지막 source 오프셋 — 첫 오버플로 라인 직전 경계. `_cursorLineWalk()` 단일 walk가 산출 (mapper offset walk와 동일 누적: 파트 content 길이, endOfBlock 뒤 `\n`). 오버플로 없음/배치 전/부모 높이 미설정이면 `-1`. 편집 커서 화살표·End 이동의 클램프 경계로 소비 (`docs/EDITING_TEXT.md` §오버플로 라인 커서 클램프). 스레드 프레임은 프레임 경계 이관이 커서 이동을 소유하므로 소비하지 않는다 |
+| `cursorLineRanges` | `CursorLineRange[][]` | 라인별 source offset 경계 — **라인 경계의 단일 소스** (`docs/ENGINE.md` §2.5 참조). `[columnIndex][lineIndex]` = `{ startOffset, endOffset, firstVisible, lastVisible, endOfBlock }`. `TextEditCoordinateMapper`가 라인 소속 판정·커서 내비게이션에 소비 |
 | `widthRatio` | `number` | 장평 비율 |
 | `spaceRatio` | `number` | 공백 너비 비율 (em 단위). 기본값: 0.5 |
 | `indent` | `number` | 첫 줄 들여쓰기 비율 (fontSize 대비, 0.0~1.0). 기본값: 0 |

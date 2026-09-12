@@ -1148,6 +1148,7 @@ Enter/Tab으로 삽입되는 개행·탭은 pending을 적용하지 않는다 �
 - **커서 이동** (사용자 조작): mousedown 커서 이동, 화살표 키, 외부 `setCursor` — `_releasePendingOnCursorMove()`. 단, **오프셋이 실제로 변경된 경우에만** 해제한다 (`_releasePendingIfCursorMoved`) — blur → 재포커스 사이 커서는 컨트롤러에 보존되므로, 같은 오프셋으로의 재진입(mousedown 재클릭, `setCursor` 복원·`focusParagraph` 커서 복원)은 커서 이동이 아니며 pending은 유지된다.
 - **selection 형성**: `_extendSelection` (Shift+화살표, Shift+클릭, 드래그)
 - **blur**: 컨트롤러 상태 유지 규칙에 따름 (커서/selection은 보존되므로 pending도 유지 — 재포커스 시 계속 적용)
+- **data setter reconcile (disconnect/reconnect)**: `LayoutParagraphElement`는 `disconnectedCallback`에서 커서 offset·**bias**(`cursorBias`)·selection을 저장하고, `connectedCallback`에서 `setCursor` + `setCursorBias` + `setSelection`으로 복원한다 — 주차 상태(라인 경계 소속)도 복원되어 커서가 같은 라인에 그려진다. bias 저장이 없으면(구현) 주차 커서가 reconnect 후 기본 경로 렌더로 빠져 이웃 라인에 그려질 수 있다.
 - **입력으로 인한 커서 이동은 제외**: 타이핑 직후의 offset 갱신은 pending을 소진하지 않는다 — 연속 타이핑까지 적용된다.
 - **명시적 해제**: `setPendingNextStyle(undefined)` (툴바에서 모든 pending 필드가 제거되었을 때)
 
@@ -1176,48 +1177,37 @@ pending 스타일은 인라인 런으로 삽입되므로 `TextInlineStyle`의 14
 
 #### `ArrowLeft` / `ArrowRight`
 
-- **보조키 없음 (3단계 스틱 동작)**: 라인 경계에서 2단계로 멈추고, 세 번째 누름에서 라인을 넘어간다. 상태 머신: `none` → `sticking` → `crossed` → `none`.
+- **보조키 없음 (bias 기반 순수 이동 머신)**: 라인 경계에서의 소속이 커서 위치 값(`CursorModel.bias`)에 인코딩된다. 히스토리 플래그(sticking/crossed)는 존재하지 않는다 — 같은 offset이 두 라인을 공유하는 좌표계 함정에서 어느 라인에 그릴지가 `bias` 값으로 결정된다.
 
-  스틱 동작은 라인 경계에서 커서가 시각적으로 어느 라인에 속하는지를 명확히 하기 위한 장치이다. 자동 줄바꿈 지점에서는 offset이 이전 라인의 끝이자 다음 라인의 시작이 된다. 스틱 없이 바로 넘어가면 사용자가 어느 라인에 있는지 알기 어렵다. 3단계 스틱은 "현재 라인 끝에서 멈춤 → 다음 라인 시작으로 시각 전환 → 실제로 다음 라인으로 이동"의 흐름을 제공한다.
+  자동 줄바꿈 지점에서는 offset이 이전 라인의 끝이자 다음 라인의 시작이 된다. ArrowLeft/Right의 반복 입력은 이 경계에서 "라인 끝 주차 → 다음 라인 시작 → 실제로 다음 라인으로 이동"의 흐름을 bias 전환으로 제공한다.
 
-  - **ArrowRight** (`_crossRightState`):
-    1. `_crossLeftState === 'crossed'`이면: 즉시 양쪽 상태 리셋, `offset` 유지(crossed 처리 완료).
-    2. `Ctrl`/`Cmd` + ArrowRight: `_crossRightState = 'none'`, `_findWordEnd()` 호출.
-    3. `Shift` + ArrowRight: `_crossRightState = 'none'`, `offset + 1`로 선택 확장.
-    4. 보조키 없음:
-       - `_crossLeftState = 'none'`으로 리셋 (방향 전환 시 반대 상태 리셋).
+  - **ArrowRight**:
+    1. `Ctrl`/`Cmd` + ArrowRight: `_findWordEnd()` 호출 (주차 없음).
+    2. `Shift` + ArrowRight: `offset + 1`로 선택 확장 (bias-blind).
+    3. 보조키 없음:
        - `findVisualLineBounds(offset - 1)`로 이전 문자 기준 라인 경계 계산 (이전 문자가 속한 라인의 끝을 구함).
        - `atLineEnd = offset === lineBounds.end`
        - `atLastChar = offset === lineBounds.end - 1` (마지막 보이는 문자)
-       - **`_crossRightState === 'sticking'` + `atLineEnd`**: 제자리, `_crossRightState = 'crossed'` 설정. 커서는 다음 라인 첫 번째 문자 왼쪽에 그려짐.
-       - **`_crossRightState === 'crossed'`**: `offset + 1`로 이동(다음 라인 두 번째 문자), `_crossRightState = 'none'` 리셋.
-       - **`atLastChar`**: `offset + 1`로 이동(라인 끝), `_crossRightState = 'sticking'` 설정. 커서는 현재 라인 끝에 그려짐.
-       - **그 외**: `offset + 1`로 일반 이동, `_crossRightState = 'none'` 유지.
-    5. `findVisualLineBounds`가 `null`이면 `offset + 1`로 폴백.
+       - **`bias === 'end'` + `atLineEnd`**: 제자리 (라인 끝 주차 유지). 다음 Right에서 라인을 넘어간다.
+       - **`atLastChar`**: `offset + 1`로 이동(라인 끝), `bias = 'end'` 주차. 커서는 현재 라인 끝에 그려짐.
+       - **그 외**: `offset + 1`로 일반 이동, 착지가 라인 끝 경계면 `bias = 'end'`, 아니면 `'start'`.
+    4. `findVisualLineBounds`가 `null`이면 `offset + 1`로 폴백.
 
-  - **ArrowLeft** (`_crossLeftState`):
-    1. `_crossRightState === 'crossed'`이면: 즉시 양쪽 상태 리셋, `offset` 유지.
-    2. `Ctrl`/`Cmd` + ArrowLeft: `_crossLeftState = 'none'`, `_findWordStart()` 호출.
-    3. `Shift` + ArrowLeft: `_crossLeftState = 'none'`, `offset - 1`로 선택 확장.
-    4. 보조키 없음:
-       - `_crossRightState = 'none'`으로 리셋.
+  - **ArrowLeft**:
+    1. `Ctrl`/`Cmd` + ArrowLeft: `_findWordStart()` 호출 (주차 없음).
+    2. `Shift` + ArrowLeft: `offset - 1`로 선택 확장 (bias-blind).
+    3. 보조키 없음:
        - `findVisualLineBounds(offset)`로 현재 문자 기준 라인 경계 계산.
        - `atLineStart = offset === lineBounds.start`
-       - `atSecondChar = offset === lineBounds.start + 1` (두 번째 문자)
-       - **`_crossLeftState === 'sticking'` + `atLineStart`**: 제자리, `_crossLeftState = 'crossed'` 설정. 커서는 이전 라인 마지막 문자의 오른쪽에 그려짐.
-       - **`_crossLeftState === 'crossed'`**: `offset - 1`로 이동(이전 라인 마지막 문자), `_crossLeftState = 'none'` 리셋.
-       - **`atSecondChar`**: `offset - 1`로 이동(라인 시작), `_crossLeftState = 'sticking'` 설정. 커서는 현재 라인 첫 번째 문자 왼쪽에 그려짐.
-       - **그 외**: `offset - 1`로 일반 이동, `_crossLeftState = 'none'` 유지.
-    5. `findVisualLineBounds`가 `null`이면 `offset - 1`로 폴백.
+       - **`bias === 'end'` + `atLineStart`**: `offset - 1`로 이동 (이전 라인 마지막 문자) — 라인 시작 주차에서의 두 번째 누름.
+       - **`atLineStart`** (bias 'start'에서 라인 시작에 도달): `offset` 유지, `bias = 'end'` 주차. 커서는 이전 라인 마지막 문자의 오른쪽에 그려짐 (첫 번째 누름).
+       - **그 외**: `offset - 1`로 일반 이동, `bias = 'start'` 유지.
+    3. `findVisualLineBounds`가 `null`이면 `offset - 1`로 폴백.
 
-  - **스틱 상태 리셋 조건**: `_crossRightState`/`_crossLeftState`는 다음 키(ArrowUp, ArrowDown, Home, End, Backspace, Delete, Enter), 마우스 클릭, `Ctrl`/`Cmd` 단어 이동, `Shift` 선택 확장 시 `none`으로 리셋된다. 단, ArrowLeft/ArrowRight 자체는 반대 상태만 리셋하고 자기 상태는 유지한다.
-
-  - **스틱 상태에 따른 커서 시각적 위치** (`_updateCursorPosition()`에서 처리):
-    - `_crossRightState === 'sticking'` + `offset > 0`: `renderedOffset(offset - 1)` 사용, `atEndOfChar = true` → 이전 문자의 오른쪽(현재 라인 끝)에 커서 표시.
-    - `_crossRightState === 'crossed'`: `renderedOffset(offset)` 사용, `atEndOfChar = false` → 다음 라인 첫 번째 문자 왼쪽에 커서 표시. `renderedOffset(offset)`이 null이면 `renderedOffset(offset + 1)`로 폴백.
-    - `_crossLeftState === 'crossed'` + `offset > 0`: `renderedOffset(offset - 1)` 사용, `atEndOfChar = true` → 이전 라인 마지막 문자의 오른쪽에 커서 표시.
-    - `_crossLeftState === 'sticking'`: `renderedOffset(offset)` 사용, `atEndOfChar = false` → 현재 라인 첫 번째 문자 왼쪽에 커서 표시.
-    - 위 조건에 해당하지 않으면 기본 로직(`renderedOffset(offset)`, `atEndOfChar = false`)으로 커서 위치 결정.
+  - **bias 상태에 따른 커서 시각적 위치** (`_updateCursorPosition()`에서 처리):
+    - `bias === 'end'`: preferLineEnd 기본 조회(phantom end placement) 유지 — 라인 끝 문자의 오른쪽에 그려짐.
+    - `bias === 'start'`: same-line 가드 — preferLineEnd가 반환한 placement의 라인 소속이 offset 소속 라인과 다르면 placement 폐기 → default placement(`atEndOfChar: false`) 또는 line rect 폴백으로 다음 라인 시작에 그려짐. leading space 라인 시작처럼 default placement도 이전 라인을 참조하는 케이스는 line rect 폴백(라인 시작 left)으로 배치.
+    - bias가 라인 경계가 아닌 offset이면 어느 쪽이든 일반 placement가 채운다 (렌더 무차별).
 
   - **overflow 시 textarea 위치 클램핑**: `_updateCursorPosition()`은 paragraph visible 영역 높이(`getBoundingClientRect().height / scale`)를 구하고, `textarea.style.top`을 `0 ~ visibleHeightPx - 1`로 클램핑한다. 커서 요소(`_cursorEl`)는 overflow 영역에 그대로 표시되지만, textarea(브라우저 스크롤 유발원)만 visible 영역 내에 머물러 `focus()`/`setSelectionRange()` 시 브라우저가 상위 스크롤 컨테이너를 강제 스크롤하는 것을 방지한다.
 
@@ -1228,7 +1218,8 @@ pending 스타일은 인라인 런으로 삽입되므로 `TextInlineStyle`의 14
 #### `ArrowUp` / `ArrowDown`
 
 - `_computeVerticalOffset(direction)` 메서드를 호출한다. `direction`은 위쪽이 `-1`, 아래쪽이 `1`이다.
-- **스틱 상태 참조하지 않음**: `_computeVerticalOffset`은 `_crossRightState`/`_crossLeftState`를 참조하지 않는다. 라인 시작/끝 판정은 `findVisualLineBounds`의 결과만으로 결정한다.
+- **bias-carry (출발 주차 소속 유지)**: 착지 bias는 출발 bias를 유지한다 — `bias: 'end'`(End 주차)에서 Up/Down하면 착지도 라인 끝 근처(`'end'`), `bias: 'start'`에서는 `'start'`. 착지 렌더 소속 라인이 출발 주차 상태와 일치한다.
+- **fromEndParked 보정**: `bias === 'end'`이고 커서가 라인 경계(visualBounds.start)에 있으면 출발 라인을 `offset - 1` 소속으로 보정 판정한다 (라인 끝 경계 offset은 다음 라인 소속이므로; 이중 소속 함정) — 그렇지 않으면 ArrowDown이 2 라인 아래로, ArrowUp이 같은 라인(순환)으로 이동한다. 보정 시 `isAtLineStart = false`/`isAtLineEnd = true`로 재판정해 상대 위치 유지 경로를 강제한다.
 - **라인 경계 처리**:
   - 라인 시작에서 ↓/↑ → target 라인 **시작**으로 이동 (`isAtLineStart` 판정 시 `targetLineStart` 반환).
   - 라인 끝에서 ↓/↑ → 상대 위치를 유지하며 target 라인으로 이동. clamp 시 `targetVisualEnd`를 사용한다.
@@ -1254,24 +1245,25 @@ pending 스타일은 인라인 런으로 삽입되므로 `TextInlineStyle`의 14
   16. **`isAtLineEnd`이면**: `offsetInLine = offset - currentLineStart`, `Math.min(targetLineStart + offsetInLine, targetVisualEnd)` 반환.
   17. **그 외**: `offsetInLine = offset - currentLineStart`, `Math.min(targetLineStart + offsetInLine, targetVisualEnd)` 반환.
 
-- `_computeVerticalOffset` 호출 **후** `_crossRightState`/`_crossLeftState`가 `'none'`으로 리셋된다.
+- **커서 bias (라인 경계 소속의 단일 소스)**: 커서는 `CursorModel {offset, bias}`로 표현된다. `bias: 'end'`는 라인 끝 경계 offset이 이전 라인 끝(phantom end placement, `atEndOfChar: true`) 소속임을, `bias: 'start'`는 다음 라인 시작 소속임을 **위치 값 자체**가 소유한다. 라인 경계 offset은 두 라인이 공유하므로(라인 끝 = 다음 라인 시작, 같은 값) 어느 쪽인지는 bias가 결정한다 — 경계가 아닌 offset에서는 bias가 렌더에 영향을 주지 않는다. bias는 컨트롤러 내부 전용이며 textarea `setSelectionRange`, `SelectionRange`/`CursorPosition`(공개 타입), `cursorMove` payload, `caretHint`에는 **노출되지 않는다** (plain offset 유지 — React 레이어·호스트 API 호환).
 - **오버플로 클램프**: 아래 방향(ArrowDown)의 착지가 엔진 경계(`maxVisibleCursorOffset`)를 넘으면 경계로 되돌린다. 위 방향(ArrowUp)은 오버플로 영역으로 진입하지 않으므로 클램프하지 않는다 (§오버플로 라인 커서 클램프).
 - **빈 줄 처리**: `columnContents`의 각 라인(빈 줄 포함)이 라인 인덱스 기반 이동에 사용되므로, 빈 줄(span 없는 라인)도 정확히 통과한다.
 
 #### `Home` / `End`
 
-- **보조키 없음 (주차 기반 단순 이동 머신)**: ArrowLeft/Right와 달리 sticking→crossed 미리보기를 하지 않는다. 커서는 **항상 착지 offset의 라인에 그려진다** — 착지 시 cross 상태를 `sticking`으로 유지하므로 `_updateCursorPosition`의 crossed 렌더 분기(이웃 라인 미리보기)에 진입하지 않는다. cross 상태 `sticking`은 "Home/End로 착지해 주차됨" 표지이기도 하다 — **직전 입력이 Home/End(=sticking 상태)면 반복 입력에 완전 제자리**를 유지한다. 라인 시작/끝은 `findVisualLineBounds`가 아닌 **논리적 라인 정보**(`_getLogicalLineStart`/`_getLogicalLineEnd`)에서 가져온다. `findVisualLineBounds`는 선행/후행 공백 제거와 폴백으로 인해 잘못된 라인 경계를 반환할 수 있기 때문이다.
-  - `End` (`_crossRightState`):
-    1. `_crossRightState === 'sticking'`(직전 End 착지)이면 제자리 유지, 그 외에는 `_getEndKeyOffset(offset)`으로 라인 끝 offset 계산 후 이동. `_getEndKeyOffset` 규칙(우선순위 순): `\n` 위치나 텍스트 끝이면 그대로; placement가 이미 `atEndOfChar: true`(trailing space 라인 끝)면 그대로; 매핑된 가시 문자면 +1(phantom end placement로 문자 오른쪽에 그림); 매핑 없는 위치면 역방향 탐색 +1.
-    2. 착지 후 `_crossRightState = 'sticking'` 설정 — 이후 반복 입력은 제자리.
-  - `Home` (`_crossLeftState`):
-    1. `_crossLeftState === 'sticking'`(직전 Home 착지)이면 제자리 유지, 그 외에는 `_getLogicalLineStart(offset)`으로 라인 시작 offset 계산 후 이동.
-    2. 문서 시작 종료: 결과 offset과 현재 offset이 모두 0이면 Home을 무시하고 break (스틱 상태 변경 없음).
-    3. 착지 후 `_crossLeftState = 'sticking'` 설정 — 이후 반복 입력은 제자리.
-  - 방향 전환 시 반대 상태 리셋: Home 시작 시 `_crossRightState = 'none'`, End 시작 시 `_crossLeftState = 'none'`.
-  - 커서 렌더: 착지 시 `sticking`을 유지하므로 렌더가 항상 착지 라인에 배치된다. 이전 3단계 머신의 crossed 미리보기(제자리에서 커서가 이웃 라인에 그려지는 현상), 컬럼 경계 라인에서의 문단 최상단/최하단 점프, 반복 입력의 라인 순회는 제거되었다.
-  - `Ctrl`/`Cmd`: 문서 전체 시작/끝으로 이동 (`_findLineStart`/`_findLineEnd`), 스틱 없음.
-  - `Shift`: 스틱 없이 선택 영역 확장 (`_getLogicalLineStart`/`_getEndKeyOffset` 사용).
+- **보조키 없음 (bias 기반 순수 이동 머신)**: 커서 위치가 `CursorModel {offset, bias}`이므로 라인 경계 소속은 히스토리 플래그가 아닌 **위치 값 자체**가 소유한다. 커서는 항상 착지 offset의 라인에 그려진다 — 착지 bias가 그려질 라인을 결정한다 (`bias: 'end'` = 이전 라인 끝, `bias: 'start'` = 다음 라인 시작). 라인 시작/끝은 `findVisualLineBounds`가 아닌 **논리적 라인 정보**(`_getLogicalLineStart`/`_getLogicalLineEnd`)에서 가져온다. `findVisualLineBounds`는 선행/후행 공백 제거와 폴백으로 인해 잘못된 라인 경계를 반환할 수 있기 때문이다.
+  - `End`:
+    1. `bias === 'end'`면 제자리 (이미 라인 끝 주차).
+    2. `bias === 'start'`면 `_getEndKeyOffset(offset)`으로 라인 끝 offset 계산 후 이동. `_getEndKeyOffset` 규칙(우선순위 순): `\n` 위치나 텍스트 끝이면 그대로; placement가 이미 `atEndOfChar: true`(trailing space 라인 끝)면 그대로; 매핑된 가시 문자면 +1(phantom end placement로 문자 오른쪽에 그림); 매핑 없는 위치면 역방향 탐색 +1.
+    3. 착지 후 `bias = 'end'` — 이후 반복 입력은 제자리.
+  - `Home`:
+    1. `bias === 'end'`(End 주차)면 출발 라인 시작으로 이동 — 출발 라인은 `offset - 1`로 찾는다 (라인 끝 경계 offset은 `getLineInfoBySourceOffset` 기준 다음 라인 소속이므로; **이중 소속 함정**: 라인 끝 offset = 다음 라인 시작 offset).
+    2. `bias === 'start'`면 `_getLogicalLineStart(offset)`으로 라인 시작 offset 계산 후 이동.
+    3. 문서 시작 종료: 결과 offset과 현재 offset이 모두 0이면 Home을 무시하고 break.
+    4. 착지 후 `bias = 'start'` — 이후 반복 입력은 제자리.
+  - 커서 렌더: `_updateCursorPosition`에서 `bias: 'end'`는 preferLineEnd 기본 조회(phantom end placement, 문자 오른쪽)를 유지하고, `bias: 'start'`는 same-line 가드로 placement의 라인 소속이 offset 소속과 다르면 placement를 폐기하고 default placement(또는 line rect 폴백)로 배치한다 — **커서가 bias 소속 라인에 그려지는 것이 보장된다**. 이전 3단계 머신의 crossed 미리보기(제자리에서 커서가 이웃 라인에 그려지는 현상), 컬럼 경계 라인에서의 문단 최상단/최하단 점프, 반복 입력의 라인 순회는 제거되었다.
+  - `Ctrl`/`Cmd`: 문서 전체 시작/끝으로 이동 (`_findLineStart`/`_findLineEnd`), 주차 없음.
+  - `Shift`: bias-blind 선택 영역 확장 (`_getLogicalLineStart`/`_getEndKeyOffset` 사용, `bias` 불변).
   - **오버플로 클램프**: plain/Shift End는 커서가 경계 offset 위에 있을 때 논리 라인이 오버플로 라인이라 그 끝(숨김 영역)을 계산할 수 있다 — 결과가 엔진 경계를 넘으면 경계로 되돌린다. `Ctrl`/`Cmd`+End는 단일 블록 텍스트에서 문서 끝 자체가 숨김 영역이므로 경계로 클램프한다 (§오버플로 라인 커서 클램프).
 
 **`_getLogicalLineStart(offset)`**: `getLineInfoBySourceOffset(offset)`으로 `{columnIndex, lineIndex}`를 찾고, `getLineStartSourceOffset()`으로 라인 시작 source offset을 반환한다. `findVisualLineBounds`와 달리 선행/후행 공백 제거에 영향받지 않는다.

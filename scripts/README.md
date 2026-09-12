@@ -29,7 +29,8 @@
 | `verify-overlap-none.mjs` | 정합성 (엔진) | overlapMode 'none' 시맨틱 — 단일 관문(computeOverlapSizeMm)에서 NONE 조기 반환, box/path 회피 유지 | ALL PASS |
 | `verify-threading.mjs` | 정합성 (엔진) | 텍스트 스레딩 — 비-스레드 회귀/단일 프레임 기준선/feed-forward/콘텐츠 무결성/런 슬라이싱/pull-back/extractData round-trip/overset/threadTail 마킹/**지오메트리 행렬 81조합**/childrenData 삼분 계약/writeback 방어/printPostData 패리티/**변경 감지 스킵**/**프레임 경계 금칙 교정**/**테이블 셀 프레임 행 삭제** | ALL PASS |
 | `verify-threading-browser.mjs` | 정합성 (브라우저) | 스레딩 화면 진실 — 초기 로드 3계층(엔진↔DOM span)/타이핑 전파 seam/테두리 tail 분기/round-trip 체인 동등/**타이핑 스트레스 flush 통합**/**IME 조합 × flush**/**키보드 프레임 경계 이동(절대 좌표계)** | ALL PASS |
-| `verify-overflow-cursor-clamp.mjs` | 정합성 (브라우저) | 오버플로(숨김) 라인 커서 진입 금지 클램프 — 엔진 경계(`maxVisibleCursorOffset`)/경계 placement 보장/ArrowRight 반복·수렴·cross 상태 미진행/Shift·Ctrl 변형/ArrowDown·Up 방향성/오버플로 해제 비활성/\n 경계/Ctrl+End/End·Shift+End | ALL PASS (서버 없으면 자동 기동) |
+| `verify-overflow-cursor-clamp.mjs` | 정합성 (브라우저) | 오버플로(숨김) 라인 커서 진입 금지 클램프 — 엔진 경계(`maxVisibleCursorOffset`)/경계 placement 보장/ArrowRight 반복·수렴·bias 'end' 주차 유지/Shift·Ctrl 변형/ArrowDown·Up 방향성/오버플로 해제 비활성/\n 경계/Ctrl+End/End·Shift+End | ALL PASS (서버 없으면 자동 기동) |
+| `verify-caret-parking.mjs` | 정합성 (브라우저) | 커서 주차 회귀 코퍼스 — 키 시퀀스 × 커서 px 좌표 + bias: End/Home 단일·연타(제자리)/라인 맨앞→Up/라인 끝→Down·Up/라인 맨앞→Down 전 라인 스캔 + End 반복 입력 이벤트 스트림(cursorMove 발화·styleChange dedupe). **커서 내비게이션 변경 시 선행 실행** — bias 이행·placement 리졸버 변경의 동작 동일성 증명망 | ALL PASS (28항목, 서버 없으면 자동 기동) |
 | `verify-print-image-overlap.mjs` | 정합성 (엔진) | 이미지/오버랩 수정의 printPostData 반영 — 모드별 print 좌표 === displayRect, objectFit 갱신, overlapMode none 관통 | ALL PASS |
 | `verify-right-indent-tab.mjs` | 정합성 (엔진) | 좌우 밀기 탭(`\t`) 배치·정렬·print 스킵 | ALL PASS |
 | `verify-right-indent-tab-browser.mjs` | 정합성 (브라우저) | Shift+Tab 키 삽입·DOM 렌더·커서 | ALL PASS |

@@ -10,6 +10,8 @@ Newspaper layout engine implemented as Web Components (Custom Elements). Renders
 
 **Style injection layering rule (run-map-mutation is edit-domain work)**: Run map mutation — field override via `applyStyleToRange`, and removal of run fields that became identical to the paragraph effective style after injection — lives in the edit layer (`TextEditController._applyTextStyle` / `run-map.ts`), NOT in the engine. The engine (`ParagraphEngine`) receives only the fully normalized `(string | TextInlineData)[]` via `model.textContent` and owns all wrapping/line-breaking/column computation (`layoutText`). DOM elements only display engine output (`columnContents`). Do not move the "strip paragraph-default run fields" responsibility into `run-map.ts`'s `normalizeRunMap` or into the engine — it is an edit policy; detail in `docs/EDITING_TEXT.md` § 6A.5.1.
 
+**Cursor biased position (line-boundary ownership is a property of the position value)**: The cursor is `CursorModel { offset, bias }` (`src/edit/text-edit-controller.ts`) — `bias: 'end'` means a line-end boundary offset belongs to the previous line's end (phantom end placement, `atEndOfChar: true`), `bias: 'start'` means the next line's start. A line-end boundary offset is shared by two lines (line end = next line start, same source offset); which side the cursor renders on is owned by `bias`, not by history. The legacy `_crossRightState`/`_crossLeftState` 3-phase (none/sticking/crossed) state machine was removed — ArrowLeft/Right/Home/End navigation is a pure function of (biased position, engine line ranges, plainText). The engine is the single source of line boundaries: `ParagraphEngine.cursorLineRanges` (frame-local `{startOffset, endOffset, firstVisible, lastVisible, endOfBlock}` per line) is consumed by the mapper's line-membership queries, and `visibleChars`/`maxVisibleCursorOffset` share the same `_cursorLineWalk()` — the three walks cannot structurally diverge. `bias` never leaks outside the controller: textarea `setSelectionRange`, public `SelectionRange`/`CursorPosition`, `cursorMove` payload, and `caretHint` remain plain offsets (React/host API compatibility). Verification: `scripts/verify-caret-parking.mjs` (28 checks — key-sequence × caret px-position + bias corpus) must be run BEFORE any cursor-navigation change pins the current behavior.
+
 ## Commands
 
 ```bash
@@ -44,6 +46,7 @@ npx tsx scripts/verify-word-wrap.mjs # 워드 래핑(영문·숫자 단위 줄�
 npx tsx scripts/verify-threading.mjs # 텍스트 스레딩 엔진 전 파이프라인 정합성 (지오메트리 행렬/childrenData 계약/writeback 방어/print 패리티)
 npx tsx scripts/verify-threading-browser.mjs # 스레딩 화면 진실 (타이핑 전파 seam/테두리 tail 분기/round-trip)
 npx tsx scripts/verify-overflow-cursor-clamp.mjs # 오버플로(숨김) 라인 커서 진입 금지 클램프 (화살표·End 이동 경계)
+npx tsx scripts/verify-caret-parking.mjs # 커서 주차 회귀 코퍼스 (End/Home/ArrowUp/Down × 커서 px 좌표+bias — 커서 내비게이션 변경 시 선행 실행)
 ```
 
 각 스크립트의 목적·측정 원칙·오탐 주의사항·워크플로는 **`scripts/README.md`** 참조. 성능 작업 시 `scripts/README.md`의 워크플로(기준선 측정 → 수정 → 검증 → 재측정)를 따른다.
