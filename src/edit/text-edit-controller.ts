@@ -47,10 +47,8 @@ export class TextEditController {
   private _cursorEl: LayoutCursorElement;
   private _selectionEl: LayoutSelectionElement;
 
-  private _cursorModel: CursorModel = { offset: 0, selection: null };
+  private _cursorModel: CursorModel = { offset: 0, bias: 'start', selection: null };
 
-  private _crossRightState: 'none' | 'sticking' | 'crossed' = 'none';
-  private _crossLeftState: 'none' | 'sticking' | 'crossed' = 'none';
 
   private _handleClick: (event: MouseEvent) => void;
   private _handleFocus: () => void;
@@ -176,6 +174,7 @@ export class TextEditController {
             model.textContent = plainToInline(after, this._runMap);
             const composedLength = after.length - this._compositionBeforeContent.length;
             this._cursorModel.offset = this._compositionStartOffset + composedLength;
+            this._cursorModel.bias = 'start';
     if (this._debounceTimer !== null) {
       cancelAnimationFrame(this._debounceTimer);
       this._debounceTimer = null;
@@ -207,6 +206,25 @@ export class TextEditController {
    */
   get cursorOffset(): number {
     return this._cursorModel.offset;
+  }
+
+  /**
+   * 커서 주차 bias — 라인 경계 offset에서 어느 라인 소속인지.
+   * 외부 UI 표시용이며 bias를 변경하려면 `setCursorBias`를 사용한다.
+   */
+  get cursorBias(): CursorBias {
+    return this._cursorModel.bias;
+  }
+
+  /**
+   * 주차 상태 복원용 bias 설정 (paragraph.element의 disconnect/reconnect 복원 경로).
+   * 커서 렌더를 다시 계산한다 — 소속 라인이 바뀔 수 있다.
+   * @param bias - 복원할 소속 ('start' = 다음 라인 시작, 'end' = 이전 라인 끝)
+   * @throws 없음
+   */
+  setCursorBias(bias: CursorBias): void {
+    this._cursorModel.bias = bias;
+    this._updateCursorPosition();
   }
 
   /**
@@ -533,6 +551,7 @@ export class TextEditController {
             this._extendSelection(targetOffset);
           } else {
             this._cursorModel.offset = targetOffset;
+            this._cursorModel.bias = 'start';
             this._cursorModel.selection = null;
           }
           this._syncTextareaSelection();
@@ -546,6 +565,7 @@ export class TextEditController {
 
     if (!event.shiftKey) {
       this._cursorModel.offset = sourceOffset;
+      this._cursorModel.bias = 'start';
       this._cursorModel.selection = null;
       this._textarea.setSelectionRange(sourceOffset, sourceOffset);
       this._updateCursorPosition();
@@ -627,6 +647,7 @@ export class TextEditController {
           } else {
             this._releasePendingIfCursorMoved(targetOffset);
             this._cursorModel.offset = targetOffset;
+            this._cursorModel.bias = 'start';
             this._cursorModel.selection = null;
           }
           this._isMouseDown = true;
@@ -661,6 +682,7 @@ export class TextEditController {
     this._selectionAnchor = sourceOffset;
     this._releasePendingIfCursorMoved(sourceOffset);
     this._cursorModel.offset = sourceOffset;
+    this._cursorModel.bias = 'start';
     this._cursorModel.selection = null;
     this._textarea.setSelectionRange(sourceOffset, sourceOffset);
     this.focus();
@@ -693,6 +715,7 @@ export class TextEditController {
       const anchor = this._selectionAnchor ?? this._cursorModel.offset;
       this._cursorModel.selection = SelectionRange.fromOffsets(anchor, focusOffset);
       this._cursorModel.offset = focusOffset;
+      this._cursorModel.bias = 'start';
       this._syncTextareaSelection();
       this._updateCursorPosition();
       this._updateSelection();
@@ -743,6 +766,7 @@ export class TextEditController {
     const { start, end } = this._findWordBoundaries(content, sourceOffset);
     this._cursorModel.selection = SelectionRange.fromOffsets(start, end);
     this._cursorModel.offset = end;
+    this._cursorModel.bias = 'start';
     this._textarea.setSelectionRange(end, end);
     this.focus();
     this._updateCursorPosition();
@@ -798,6 +822,7 @@ export class TextEditController {
         model.textContent = plainToInline(after, this._runMap);
         const composedLength = after.length - this._compositionBeforeContent.length;
         this._cursorModel.offset = this._compositionStartOffset + composedLength;
+            this._cursorModel.bias = 'start';
     if (this._debounceTimer !== null) {
       cancelAnimationFrame(this._debounceTimer);
       this._debounceTimer = null;
@@ -879,46 +904,36 @@ export class TextEditController {
       case "ArrowLeft": {
       event.preventDefault();
       let targetLeft: number;
-      if (this._crossRightState === 'crossed') {
-        this._crossRightState = 'none';
-        this._crossLeftState = 'none';
-        targetLeft = offset;
-      } else if (hasShortcut) {
-        this._crossRightState = 'none';
+      if (hasShortcut) {
         targetLeft = this._findWordStart(content, offset);
-        this._crossLeftState = 'none';
       } else if (isShift) {
-        this._crossRightState = 'none';
         targetLeft = offset > 0 ? offset - 1 : offset;
-        this._crossLeftState = 'none';
       } else {
-        this._crossRightState = 'none';
+        // bias 기반 순수 머신 (라인 시작 주차 → 이전 라인 끝 → 전진의 3단계를
+        // bias가 위치 값으로 소유한다 — 히스토리 플래그 없음):
+        // - {X, 'end'} (라인 시작 주차=이전 라인 끝)에서 Left → 이전 라인 마지막 문자 {X-1, 'start'}
+        //   (X가 라인 경계 = 이전 라인 끝+1이므로 X-1은 이전 라인의 마지막 가시 문자).
+        // - {X, 'start'}에서 Left → {X-1, 'start'}. 단, X-1이 라인 끝 문자면
+        //   그 문자의 우측이 라인 끝이므로 {X, 'end'}로 주차한다 (ArrowRight의
+        //   atLastChar와 대칭 — 라인 내 이동과 경계 주차가 양방향 순환).
         const lineBounds = this._mapper.findVisualLineBounds(offset);
         const atLineStart = lineBounds && offset === lineBounds.start;
-        const atSecondChar = lineBounds && offset === lineBounds.start + 1;
-        if (this._crossLeftState === 'sticking' && atLineStart) {
-          targetLeft = offset;
-          this._crossLeftState = 'crossed';
-        } else if (this._crossLeftState === 'crossed') {
+        if (this._cursorModel.bias === 'end' && atLineStart) {
           targetLeft = offset > 0 ? offset - 1 : offset;
-          this._crossLeftState = 'none';
         } else if (atLineStart) {
-          // 라인 시작에서 ArrowLeft: 이전 라인 끝(phantom end)으로 배치
           targetLeft = offset;
-          this._crossLeftState = 'crossed';
-        } else if (atSecondChar) {
-          targetLeft = offset - 1;
-          this._crossLeftState = 'sticking';
         } else {
           targetLeft = offset > 0 ? offset - 1 : offset;
-          this._crossLeftState = 'none';
         }
       }
       if (isShift) {
         this._extendSelection(targetLeft);
       } else {
         this._releasePendingOnCursorMove();
+        // ArrowLeft bias: 라인 시작에서 제자리 이동이면 이전 라인 끝 주차('end'),
+        // 실제 이동이면 다음 글자 왼쪽('start').
         this._cursorModel.offset = targetLeft;
+        this._cursorModel.bias = targetLeft === offset ? 'end' : 'start';
         this._cursorModel.selection = null;
         // 스레드 경계: 커서가 이 프레임 coverage를 벗어났으면 소유 프레임으로 이관.
         if (this._transferCursorAcrossThreadBoundary('left')) {
@@ -940,35 +955,25 @@ export class TextEditController {
     case "ArrowRight": {
       event.preventDefault();
       let targetRight: number;
-      if (this._crossLeftState === 'crossed') {
-        this._crossLeftState = 'none';
-        this._crossRightState = 'none';
-        targetRight = offset;
-      } else if (hasShortcut) {
-        this._crossLeftState = 'none';
+      if (hasShortcut) {
         targetRight = this._findWordEnd(content, offset);
-        this._crossRightState = 'none';
       } else if (isShift) {
-        this._crossLeftState = 'none';
         targetRight = offset < content.length ? offset + 1 : offset;
-        this._crossRightState = 'none';
       } else {
-        this._crossLeftState = 'none';
+        // bias 기반 순수 머신 (ArrowLeft와 대칭):
+        // - {X, 'end'}에서 Right: X가 라인 끝 주차(이전 라인 끝+1)이므로 다음 라인
+        //   첫 글자 {X, 'start'}로 전환 (경계 소속 전환 — 렌더가 다음 라인 시작으로).
+        // - {X, 'start'}에서 Right: {X+1, 'start'}. 단, X가 마지막 가시 문자면
+        //   라인 끝 주차 {X+1, 'end'} (라인 끝 문자 우측).
         const lineBounds = offset > 0 ? this._mapper.findVisualLineBounds(offset - 1) : null;
         const atLineEnd = lineBounds && offset === lineBounds.end;
         const atLastChar = lineBounds && offset === lineBounds.end - 1;
-        if (this._crossRightState === 'sticking' && atLineEnd) {
+        if (this._cursorModel.bias === 'end' && atLineEnd) {
           targetRight = offset;
-          this._crossRightState = 'crossed';
-        } else if (this._crossRightState === 'crossed') {
-          targetRight = offset < content.length ? offset + 1 : offset;
-          this._crossRightState = 'none';
         } else if (atLastChar) {
           targetRight = offset + 1;
-          this._crossRightState = 'sticking';
         } else {
           targetRight = offset < content.length ? offset + 1 : offset;
-          this._crossRightState = 'none';
         }
       }
       // 오버플로 라인 진입 금지: 착지가 경계에 도달/초과하면 경계로 되돌리고 cross
@@ -977,13 +982,17 @@ export class TextEditController {
       const maxOffset = this._cursorMaxOffset();
       if (maxOffset !== null && targetRight >= maxOffset) {
         targetRight = maxOffset;
-        this._crossRightState = 'none';
       }
       if (isShift) {
         this._extendSelection(targetRight);
       } else {
         this._releasePendingOnCursorMove();
         this._cursorModel.offset = targetRight;
+        // ArrowRight bias: 제자리 이동(라인 끝 주차)이면 'end' 유지, 실제 이동 중
+        // 라인 끝 문자 우측 착지면 'end', 그 외 'start'.
+        const lineBounds2 = targetRight > 0 ? this._mapper.findVisualLineBounds(targetRight - 1) : null;
+        const targetAtLineEnd = lineBounds2 && targetRight === lineBounds2.end;
+        this._cursorModel.bias = targetAtLineEnd ? 'end' : 'start';
         this._cursorModel.selection = null;
         // 스레드 경계: 커서가 이 프레임 coverage를 벗어났으면 소유 프레임으로
         // 이관한다. 이관되면 이 컨트롤러는 blur 상태가 되므로 갱신을 마친다.
@@ -1021,13 +1030,14 @@ export class TextEditController {
       // 라인 끝에 그려진다 — sticking 상태를 리셋하면 착지 렌더가 기본 경로
       // (preferLineEnd)로 돌아가 라인 경계 offset이 이웃 라인을 참조한다.
       // crossed(라인 경계 미리보기 잔존 상태)만 리셋한다.
-      if (this._crossLeftState === 'crossed') this._crossLeftState = 'none';
-      if (this._crossRightState === 'crossed') this._crossRightState = 'none';
       if (isShift) {
         this._extendSelection(newOffset ?? offset);
       } else {
         if (newOffset !== null) {
           this._cursorModel.offset = newOffset;
+          // 수직 이동 bias-carry: End 주차('end')에서 착지도 라인 끝 근처('end'),
+          // Home 주차/일반('start')에서 착지도('start') — 착지 렌더 소속 유지.
+          this._cursorModel.bias = this._cursorModel.bias === 'end' ? 'end' : 'start';
         }
         this._cursorModel.selection = null;
         // 스레드 경계 (수직): 프레임 첫/마지막 라인에서 이동이 끝나면(null)
@@ -1064,36 +1074,32 @@ export class TextEditController {
     }
     case "Home": {
       event.preventDefault();
-      // 리셋 전 crossRight 상태를 캡처한다 — End 주차(sticking)에서 Home을 누르면
-      // 출발 라인 시작으로 이동해야 하며, 커서가 주차된 라인 끝 경계 offset은
-      // getLineInfoBySourceOffset 기준 '다음 라인' 소속이므로 offset-1로 출발 라인을
-      // 찾는다. (이중 소속 문제: 라인 끝 offset = 다음 라인 시작 offset)
-      const wasEndParked = this._crossRightState === 'sticking';
-      this._crossRightState = 'none';
       if (hasShortcut) {
         const lineStart = this._findLineStart(content, offset);
         if (isShift) { this._extendSelection(lineStart); } else { this._cursorModel.offset = lineStart; this._cursorModel.selection = null; }
-        this._crossLeftState = 'none';
       } else if (isShift) {
         const lineStart = this._getLogicalLineStart(offset);
         this._extendSelection(lineStart);
-        this._crossLeftState = 'none';
       } else {
-        // 단순 이동 머신 (End case와 대칭): 직전 입력이 Home(crossLeft sticking)이면
-        // 이미 라인 시작에 주차된 상태이므로 반복 입력에 제자리를 유지한다.
-        if (this._crossLeftState === 'sticking') {
-          this._cursorModel.offset = offset;
-        } else if (wasEndParked) {
+        // bias 기반 순수 머신 (End case와 대칭):
+        // - {X, 'end'} (End 주차 = 이전 라인 끝+1)에서 Home → 출발 라인 시작.
+        //   출발 라인은 bias가 소유한다 — offset-1로 이전 라인을 찾아 시작으로 이동.
+        //   (라인 끝 경계 offset은 getLineInfoBySourceOffset 기준 다음 라인 소속이므로
+        //   offset-1로 출발 라인을 찾는다 — 이중 소속 함정).
+        // - {X, 'start'}에서 Home → 라인 시작으로 이동, 'start' 유지.
+        // - 이미 라인 시작 주차 {X, 'start'} (X === 라인 시작)에서 Home → 제자리.
+        if (this._cursorModel.bias === 'end') {
           const sourceLineStart = this._getLogicalLineStart(Math.max(0, offset - 1));
           this._cursorModel.offset = sourceLineStart === offset ? offset : sourceLineStart;
         } else {
-          this._cursorModel.offset = this._getLogicalLineStart(offset);
-        }
-        if (this._cursorModel.offset === 0 && offset === 0) {
-          break;
+          const lineStart = this._getLogicalLineStart(offset);
+          if (lineStart === offset && offset === 0) {
+            break;
+          }
+          this._cursorModel.offset = lineStart;
         }
         this._cursorModel.selection = null;
-        this._crossLeftState = 'sticking';
+        this._cursorModel.bias = 'start';
       }
       this._syncTextareaSelection();
       this._updateCursorPosition();
@@ -1104,7 +1110,6 @@ export class TextEditController {
     }
     case "End": {
       event.preventDefault();
-      this._crossLeftState = 'none';
       if (hasShortcut) {
         let lineEnd = this._findLineEnd(content, offset);
         // Ctrl+End는 라인이 아닌 문서 끝으로 이동하므로 단일 블록 텍스트에서
@@ -1112,7 +1117,6 @@ export class TextEditController {
         const endMax = this._cursorMaxOffset();
         if (endMax !== null && lineEnd > endMax) lineEnd = endMax;
         if (isShift) { this._extendSelection(lineEnd); } else { this._cursorModel.offset = lineEnd; this._cursorModel.selection = null; }
-        this._crossRightState = 'none';
       } else if (isShift) {
         let lineEnd = this._getEndKeyOffset(offset);
         // Shift+End가 커서 경계(offset)의 논리 라인이 아닌 오버플로 라인의 끝을
@@ -1121,15 +1125,14 @@ export class TextEditController {
         const shiftEndMax = this._cursorMaxOffset();
         if (shiftEndMax !== null && lineEnd > shiftEndMax) lineEnd = shiftEndMax;
         this._extendSelection(lineEnd);
-        this._crossRightState = 'none';
       } else {
-        // 단순 이동 머신: 착지 offset은 항상 착지 라인에 그려진다 — sticking 상태
-        // 유지로 crossed 렌더 분기(이웃 라인 미리보기)에 진입하지 않는다. 직전 입력이
-        // End(crossRight sticking)이면 이미 라인 끝에 주차된 상태이므로 반복 입력에
-        // 제자리를 유지한다. 직전 입력이 Home(crossLeft sticking)이면 커서는 라인 시작
-        // 주차 상태이므로 정상 경로(_getEndKeyOffset)로 라인 끝을 계산한다.
-        if (this._crossRightState === 'sticking') {
-          this._cursorModel.offset = offset;
+        // bias 기반 순수 머신 (Home case와 대칭):
+        // - {X, 'end'}에서 End → 제자리 (이미 라인 끝 주차).
+        // - {X, 'start'}에서 End → 라인 끝으로 이동. 단, X가 이미 라인 끝
+        //   (X === 라인 끝 경계)이면 제자리.
+        // - 착지는 항상 'end' 주차 (라인 끝 문자 우측, phantom end placement 참조).
+        if (this._cursorModel.bias === 'end') {
+          // 제자리
         } else {
           let endOffset = this._getEndKeyOffset(offset);
           // 커서가 경계(마지막 visible 라인 끝)에 있으면 논리 라인이 오버플로
@@ -1141,7 +1144,7 @@ export class TextEditController {
           this._cursorModel.offset = endOffset;
         }
         this._cursorModel.selection = null;
-        this._crossRightState = 'sticking';
+        this._cursorModel.bias = 'end';
       }
       this._syncTextareaSelection();
       this._updateCursorPosition();
@@ -1152,8 +1155,7 @@ export class TextEditController {
     }
       case "Backspace": {
       event.preventDefault();
-      this._crossRightState = 'none';
-      this._crossLeftState = 'none';
+      this._cursorModel.bias = 'start';
       const activeSelection = this._cursorModel.selection;
       if (activeSelection) {
         this._replaceSelection("");
@@ -1169,8 +1171,7 @@ export class TextEditController {
     }
     case "Delete": {
       event.preventDefault();
-      this._crossRightState = 'none';
-      this._crossLeftState = 'none';
+      this._cursorModel.bias = 'start';
       const activeSelection = this._cursorModel.selection;
       if (activeSelection) {
         this._replaceSelection("");
@@ -1185,8 +1186,7 @@ export class TextEditController {
     }
   case "Enter": {
         event.preventDefault();
-        this._crossRightState = 'none';
-        this._crossLeftState = 'none';
+        this._cursorModel.bias = 'start';
         const activeSelection = this._cursorModel.selection;
         const { start, end } = activeSelection?.normalized() ?? { start: null, end: null };
         const replaceStart = start?.textOffset ?? offset;
@@ -1211,8 +1211,7 @@ export class TextEditController {
         // 일반 Tab: 단락 간 포커스 이동(document capture handler와 동일 동작).
         event.preventDefault();
         event.stopPropagation();
-        this._crossRightState = 'none';
-        this._crossLeftState = 'none';
+        this._cursorModel.bias = 'start';
         if (!event.shiftKey) {
           this._manager.navigateByTab(false);
           break;
@@ -1265,6 +1264,8 @@ export class TextEditController {
     const anchor = current.selection?.anchor.textOffset ?? current.offset;
     current.selection = SelectionRange.fromOffsets(anchor, newOffset);
     current.offset = newOffset;
+    // Shift 이동은 bias-blind (라인 경계 소속은 확정되지 않음 — selection이 활성인 동안 렌더가 숨는다).
+    current.bias = 'start';
   }
 
   private _syncTextareaSelection(): void {
@@ -1319,6 +1320,7 @@ export class TextEditController {
     this._runMap = runMapFromContent(model.textContent);
     this._textarea.value = newContent;
     this._cursorModel.offset = start.textOffset;
+    this._cursorModel.bias = 'start';
     this._cursorModel.selection = null;
     this._textarea.setSelectionRange(start.textOffset, start.textOffset);
     this._debouncedRender();
@@ -1361,6 +1363,7 @@ export class TextEditController {
     this._runMap = runMapFromContent(model.textContent);
     this._textarea.value = newContent;
     this._cursorModel.offset = newOffset;
+    this._cursorModel.bias = 'start';
     this._cursorModel.selection = null;
     this._textarea.setSelectionRange(newOffset, newOffset);
     this._debouncedRender();
@@ -1375,6 +1378,7 @@ export class TextEditController {
     const content = this._textarea.value;
     this._cursorModel.selection = SelectionRange.fromOffsets(0, content.length);
     this._cursorModel.offset = content.length;
+    this._cursorModel.bias = 'start';
     this._textarea.setSelectionRange(0, content.length);
     this._updateCursorPosition();
     this._updateSelection();
@@ -1501,7 +1505,7 @@ export class TextEditController {
     // 판정되었으므로(라인 시작 경계는 findVisualLineBounds가 다음 라인 소속으로 본다)
     // 출발 라인 기준으로 재판정한다: 라인 끝 주차는 항상 출발 라인의 끝 상태이므로
     // 상대 위치 유지 경로(isAtLineEnd)로 강제.
-    const fromEndParked = this._crossRightState === 'sticking'
+    const fromEndParked = this._cursorModel.bias === 'end'
       && (visualBounds === null || offset === visualBounds.start);
     if (fromEndParked) {
       const prevInfo = offset > 0 ? this._mapper.getLineInfoBySourceOffset(offset - 1) : null;
@@ -1788,6 +1792,7 @@ export class TextEditController {
       this._cursorModel.selection = SelectionRange.fromOffsets(clamp(start.textOffset), clamp(end.textOffset));
     } else {
       this._cursorModel.offset = Math.max(0, Math.min(this._cursorModel.offset, plainLength));
+      this._cursorModel.bias = 'start';
     }
 
     return true;
@@ -1828,6 +1833,7 @@ export class TextEditController {
       this._textarea.value = after;
       this._textarea.setSelectionRange(newOffset, newOffset);
       this._cursorModel.offset = newOffset;
+      this._cursorModel.bias = 'start';
       this._cursorModel.selection = null;
 
       if (insertedCount === 1) {
@@ -1859,6 +1865,7 @@ export class TextEditController {
     );
     this._runMap = runMapFromContent(model.textContent);
     this._cursorModel.offset = newOffset;
+    this._cursorModel.bias = 'start';
 
     if (change.type === "insert" && change.text.length === 1) {
       this._optimisticSpanUpdate(newOffset - 1, change.text);
@@ -1895,6 +1902,7 @@ export class TextEditController {
     this._runMap = runMapFromContent(model.textContent);
     this._textarea.value = newContent;
     this._cursorModel.offset = start.textOffset + replacement.length;
+    this._cursorModel.bias = 'start';
     this._textarea.setSelectionRange(this._cursorModel.offset, this._cursorModel.offset);
     this._cursorModel.selection = null;
 
@@ -1984,6 +1992,7 @@ export class TextEditController {
       this._runMap = runMapFromContent(model.textContent);
       this._compositionData = data;
       this._cursorModel.offset = start + data.length;
+      this._cursorModel.bias = 'start';
 
       this._debouncedRender();
       this._updateCursorPosition();
@@ -2003,6 +2012,7 @@ export class TextEditController {
       model.textContent = plainToInline(this._compositionBeforeContent, this._runMap);
       this._textarea.value = this._compositionBeforeContent;
       this._cursorModel.offset = this._compositionStartOffset;
+      this._cursorModel.bias = 'start';
       this._textarea.setSelectionRange(this._compositionStartOffset, this._compositionStartOffset);
       if (this._debounceTimer !== null) {
         cancelAnimationFrame(this._debounceTimer);
@@ -2045,6 +2055,7 @@ export class TextEditController {
     this._runMap = runMapFromContent(model.textContent);
 
     this._cursorModel.offset = startOffset + composedLength;
+    this._cursorModel.bias = 'start';
 
     model.caretHint = this._cursorModel.offset;
     this._paragraph.flushRender();
@@ -2666,13 +2677,12 @@ export class TextEditController {
     // 기본 조회에서 preferLineEnd=true: 라인 끝 문자 다음 offset에서 phantom end placement를 우선하여
     // 커서가 라인 끝 문자의 오른쪽에 배치되도록 한다.
     let placement = this._mapper.getCursorPlacement(offset, true);
-    if (this._crossRightState === 'none' && this._crossLeftState === 'none' && placement?.atEndOfChar === true) {
-      // 기본 경로 same-line 가드: preferLineEnd가 반환한 phantom placement가
+    if (this._cursorModel.bias === 'start' && placement?.atEndOfChar === true) {
+      // bias 'start' same-line 가드: preferLineEnd가 반환한 phantom placement가
       // 이전 라인을 참조하면(라인 끝 경계 offset = 다음 라인 시작을 preferLineEnd가
-      // 이전 라인 끝으로 채우는 케이스) 커서가 2 라인 위 끝에 그려진다. ArrowUp/Down
-      // 착지처럼 cross 상태가 none인 이동에서는 offset 소속 라인의 배치가 우선이므로
-      // default placement(atEndOfChar: false, 다음 라인 시작)로 폴백한다.
-      // cross sticking/crossed 분기는 라인 끝/이웃 라인 참조가 의도된 동작이므로 가드하지 않는다.
+      // 이전 라인 끝으로 채우는 케이스) 커서가 2 라인 위 끝에 그려진다.
+      // bias 'start'는 다음 라인 시작 소속이므로 default placement로 폴백한다.
+      // bias 'end'는 이전 라인 끝 소속이므로 phantom이 정상이다 (가드하지 않음).
       const offsetLine = this._mapper.getLineInfoBySourceOffset(offset);
       const placementLine = this._mapper.getLineInfoBySourceOffset(placement.sourceOffset);
       const sameLine = offsetLine !== null && placementLine !== null &&
@@ -2692,54 +2702,9 @@ export class TextEditController {
         placement = defaultSameLine ? defaultPlacement : null;
       }
     }
-    if (this._crossRightState === 'sticking') {
-      // sticking: 라인 끝에 머무는 상태. 기본 placement(phantom end)를 그대로 사용한다.
+    if (this._cursorModel.bias === 'end') {
+      // bias 'end': 라인 끝 주차. 기본 placement(phantom end)를 그대로 사용한다.
       // phantom end placement가 없는 경우(trailing space 있음)는 기본 placement가 이미 atEndOfChar: true.
-    } else if (this._crossRightState === 'crossed') {
-      // crossed: 다음 라인 첫 글자의 왼쪽에 배치해야 하므로 preferLineEnd=false
-      const curPlacement = this._mapper.getCursorPlacement(offset, false);
-      if (curPlacement && curPlacement.sourceOffset === offset) {
-        // 현재 offset이 가시 문자(또는 phantom end) 자체인 경우
-        placement = { ...curPlacement, atEndOfChar: false };
-      } else {
-        // 현재 offset이 trailing space 등 다른 문자를 참조하는 경우:
-        // 다음 라인 첫 글자를 찾아 배치한다.
-        const nextPlacement = this._mapper.getCursorPlacement(offset + 1);
-        if (nextPlacement) {
-          placement = { ...nextPlacement, atEndOfChar: false };
-        } else if (curPlacement) {
-          placement = { ...curPlacement, atEndOfChar: false };
-        }
-      }
-    } else if (this._crossLeftState === 'crossed' && offset > 0) {
-      // crossed: 이전 라인 끝 글자 뒤에 배치.
-      // offset은 라인 시작이고 phantom end placement가 offset에 설정되어 있으므로
-      // getCursorPlacement(offset, true)로 조회하여 이전 라인 끝 글자 뒤에 배치한다.
-      const curPlacement = this._mapper.getCursorPlacement(offset, true);
-      if (curPlacement && curPlacement.atEndOfChar === true) {
-        placement = curPlacement;
-      } else {
-        const prevPlacement = this._mapper.getCursorPlacement(offset - 1);
-        if (prevPlacement) placement = prevPlacement;
-      }
-    } else if (this._crossLeftState === 'sticking') {
-      const curPlacement = this._mapper.getCursorPlacement(offset, false);
-      if (curPlacement) {
-        // 라인 시작 주차 렌더: placement가 이전 라인 끝을 참조하면(leading space 라인의
-        // 시작 offset이 구멍 채우기 패스에서 이전 라인 끝 atEndOfChar로 채워지는 케이스)
-        // 커서가 이전 라인에 그려진다 — placement의 라인 소속이 offset의 라인과 다르면
-        // placement를 무시하고 line rect 폴백(라인 시작 left)으로 떨어뜨린다.
-        const offsetLine = this._mapper.getLineInfoBySourceOffset(offset);
-        const placementLine = this._mapper.getLineInfoBySourceOffset(curPlacement.sourceOffset);
-        const sameLine = offsetLine !== null && placementLine !== null &&
-          offsetLine.columnIndex === placementLine.columnIndex &&
-          offsetLine.lineIndex === placementLine.lineIndex;
-        if (sameLine) {
-          placement = { ...curPlacement, atEndOfChar: false };
-        } else {
-          placement = null;
-        }
-      }
     }
 
     // placement가 없는 경우(빈 줄 시작, offset=0 등): line rect 또는 first column rect 사용
@@ -2935,6 +2900,7 @@ export class TextEditController {
     }
     const previousOffset = this._cursorModel.offset;
     this._cursorModel.offset = Math.max(0, Math.min(position.textOffset, maxOffset));
+    this._cursorModel.bias = 'start';
     this._releasePendingIfCursorMoved(previousOffset);
     this._syncTextareaSelection();
     this._updateCursorPosition();
@@ -3040,6 +3006,7 @@ export class TextEditController {
    */
   setSelection(range: SelectionRange): void {
     this._cursorModel.selection = range;
+    this._cursorModel.bias = 'start';
     this._syncTextareaSelection();
     this._updateSelection();
     this._emitStyleChange();
@@ -3701,9 +3668,32 @@ export class TextEditController {
 }
 
 /**
+ * 커서가 라인 경계 offset 위에 있을 때 어느 쪽 라인 소속인지.
+ *
+ * 라인 끝과 다음 라인 시작이 같은 source offset을 공유하는 좌표계 함정에서
+ * 소속을 결정한다 — `bias: 'end'`는 이전 라인 끝(phantom end placement,
+ * atEndOfChar=true)으로 그려지고, `bias: 'start'`는 다음 라인 시작
+ * (다음 첫 글자 왼쪽)으로 그려진다. 경계가 아닌 offset에서는 bias가
+ * 렌더에 영향을 주지 않는다 (일반 placement가 채움).
+ *
+ * 기존 cross-state 플래그(`_crossRightState`/`_crossLeftState`)와의 대응
+ * (Phase 2 이중 기록 — Phase 3에서 플래그 삭제 시 이 규칙이 단일 소스가 된다):
+ * right-sticking / End 주차 / left-crossed → 'end';
+ * left-sticking(라인 시작 주차) / Home 주차 / right-crossed / 타이핑·편집 후 → 'start'.
+ */
+type CursorBias = 'start' | 'end';
+
+/**
  * 커서/선택의 내부 상태.
+ *
+ * `offset`은 story 절대 plain 오프셋 (스레드 프레임 포함 — mapper 통일 계약),
+ * `bias`는 offset이 라인 경계에 있을 때 어느 쪽 소속인지를 위치 값 자체에
+ * 담는다. 외부 경계(textarea setSelectionRange, SelectionRange/CursorPosition,
+ * cursorMove payload, caretHint)에는 bias가 노출되지 않는다 — 이들에 bias를
+ * 흘려보내면 React 레이어와 호스트 API가 깨진다.
  */
 interface CursorModel {
   offset: number;
+  bias: CursorBias;
   selection: SelectionRange | null;
 }

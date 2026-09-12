@@ -136,7 +136,7 @@ const r = await page.evaluate(async () => {
   // ── 3. ArrowRight 반복: 경계에서 제자리 ──
   for (let i = 0; i < 10; i++) await press(c, 'ArrowRight');
   push('3. 경계에서 ArrowRight ×10 — 제자리 (오버플로 진입 없음)', c._cursorModel.offset === max, `offset=${c._cursorModel.offset}, max=${max}`);
-  push('3c. 경계에서 cross 상태 미진행 (crossed 숨김 span 참조 차단)', c._crossRightState === 'none', `state=${c._crossRightState}`);
+  push("3c. 경계에서 bias 'end' 주차 유지 (crossed 숨김 span 참조 차단)", c._cursorModel.bias === 'end', `bias=${c._cursorModel.bias}`);
   const visH = p.getBoundingClientRect().height / (em.scale || 1);
   push('3d. 경계 커서가 visible 영역 내에 렌더', c._cursorEl.top >= 0 && c._cursorEl.top < visH, `top=${c._cursorEl.top}, visH=${visH}`);
 

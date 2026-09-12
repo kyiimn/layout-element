@@ -48,6 +48,7 @@ export class LayoutParagraphElement extends HTMLElement {
   private _editManagerRef: EditManager | null = null;
 
   private _savedCursorOffset: number | null = null;
+  private _savedCursorBias: 'start' | 'end' = 'start';
   private _savedSelection: import("@/types").SelectionRange | null = null;
 
   /** 성능 최적화: 구조 변경 여부 플래그. true면 다음 render()에서 전체 재생성을 수행한다. */
@@ -82,11 +83,13 @@ export class LayoutParagraphElement extends HTMLElement {
       this._editController = this._editManagerRef ? new TextEditController(this, this._editManagerRef) : null;
       if (this._editController && this._savedCursorOffset !== null) {
         this._editController.setCursor({ textOffset: this._savedCursorOffset });
+        this._editController.setCursorBias(this._savedCursorBias);
         if (this._savedSelection) {
           this._editController.setSelection(this._savedSelection);
         }
       }
       this._savedCursorOffset = null;
+      this._savedCursorBias = 'start';
       this._savedSelection = null;
     }
   }
@@ -122,6 +125,7 @@ export class LayoutParagraphElement extends HTMLElement {
     removeAiProcessingOverlay(this._shadowRoot);
     if (this._editController) {
       this._savedCursorOffset = this._editController.cursorOffset;
+      this._savedCursorBias = this._editController.cursorBias;
       this._savedSelection = this._editController.selection;
       this._editController.destroy();
       this._editController = null;
