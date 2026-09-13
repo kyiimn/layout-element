@@ -2876,6 +2876,49 @@ export class EditManager {
   }
 
   /**
+   * 서브트리 detach 시 서브트리 내부의 잔류 선택·이미지 포커스를 정리한다.
+   *
+   * `_unregisterLayout()`이 detach된 요소 자체만 선택 해제하는 반면, 이 메서드는
+   * 서브트리 전체를 스위프한다. 가상화의 페이지 단위 장기 detach에서, 선택된 자식
+   * 박스를 포함한 페이지가 통째로 분리될 때 자식 선택이 `_selectedLayouts`에
+   * stale로 남는 것(G3)을 방지한다. 텍스트 포커스는 자식 문단의 컨트롤러
+   * destroy → `_unregister()` 경로에서 이미 정리되므로 여기서 다루지 않는다.
+   *
+   * data setter reconcile churn(reorder)에서는 fast path 가드로 무비용 복귀한다.
+   *
+   * @param root - detach된 서브트리의 루트 요소 (페이지 박스 등)
+   * @internal
+   */
+  _unregisterLayoutSubtree(root: Element): void {
+    if (this._selectedLayouts.length === 0 && !this._focusedImage && !this._imageEditMode) return;
+
+    const inSubtree = (el: Element | null): boolean =>
+      !!el && (el === root || root.contains(el));
+
+    const previousLayouts = [...this._selectedLayouts];
+    const kept = previousLayouts.filter(el => !inSubtree(el));
+    if (kept.length !== previousLayouts.length) {
+      for (const el of previousLayouts) {
+        if (!kept.includes(el)) {
+          el.removeAttribute('selected');
+          el.removeAttribute('text-focused');
+        }
+      }
+      this._selectedLayouts = kept;
+      this._dispatchLayoutSelection(previousLayouts);
+    }
+
+    const focusedImage = this._focusedImage;
+    if (focusedImage && inSubtree(focusedImage)) {
+      // blurImage()는 포커스만 해제하고 모드 플래그는 유지하므로, detach된
+      // 이미지를 가리키는 모드가 잔류하지 않도록 모드도 함께 종료한다.
+      // imageEditMode setter가 modeChange를 디스패치한다.
+      this.blurImage();
+      this.imageEditMode = false;
+    }
+  }
+
+  /**
    * 레이아웃 요소의 이동 완료/취소 이벤트를 발생시킨다.
    *
    * reparent 모드에서 부모가 변경된 경우 `newContainer`와 `previousContainer`를 전달한다.

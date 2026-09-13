@@ -68,6 +68,7 @@ Before working on any feature, you **must** read the corresponding documentation
 | Table editing | `docs/EDITING_TABLE.md` | Table element, cell block selection, cell merge/split, table keyboard shortcuts, TableStructureEditor |
 | Rendering performance | `docs/PERFORMANCE.md` | LRU caching, char width cache, style cache, queueMicrotask batch rendering, incremental style sheet update, skeleton layout cache |
 | Multi-page virtualization | `docs/VIRTUALIZATION.md` | Document-scale diagnosis (hundreds of pages), DOM virtualization design + gaps (G1~G4) + pre-implementation patches (P1~P4), Web Worker failure analysis, `transform: scale` compatibility rules |
+| Incremental reflow (line cache) | `docs/INCREMENTAL_REFLOW.md` | Thread-chain typing cost root fix: line-identity cache + suffix-match resync (engine), line-keyed DOM reconciliation, conditional demand-driven thread deferral, per-phase verification gates |
 | Vanilla JS API reference | `docs/API.md` | Custom Element public API (properties, methods, events), utility functions, constants |
 | React component layer | `docs/REACT_COMPONENT.md` | React wrapper components, props, hooks (`useEditManager`, `useLayoutElement`, `useEditableText`) |
 | Engine layer (Node.js) | `docs/ENGINE.md` | `src/engine/` classes, ppm injection, RGBA data, overlap detection, Node.js compatibility |
@@ -251,7 +252,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 ### `_syncEngineIdsToDom()` — Engine ID Write-Back
 
 - Called after `engine.layout()` in `document._layoutStructure()`.
-- Top-level boxes: `engineBoxes[i].data.id` → `domBoxes[i].id`.
+- **ID-based matching** (not positional): each engine box is matched to the DOM box with the same id. Parked pages (DOM virtualization) have no DOM element and are skipped; engine-generated ids for id-less DOM boxes are written back via positional fallback among id-less boxes only.
 - Recursive: `_syncEngineIdsToDomRecursive(engineBox, domBox)` traverses child engines and matches by `localName` (not `instanceof`, to avoid circular import issues).
 - Matches `x-layout-box`, `x-layout-paragraph`, `x-layout-image`, `x-layout-table` by `localName` string comparison.
 
@@ -273,7 +274,17 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 
 - **`LayoutParagraphElement.disconnectedCallback` saves cursor offset and selection** via `_savedCursorOffset` / `_savedSelection` before destroying `_editController`.
 - **`connectedCallback` restores them** when recreating `_editController`, then clears the saved values.
+- On restore, `connectedCallback` also calls `scheduleRender()` so the coordinate mapper rebuilds via `postRender` (otherwise the restored cursor stays misplaced until the next render — required for virtualization remount; coalesced by the `_renderScheduled` guard in reconcile flows).
 - This prevents cursor jump during `data` setter reconcile.
+
+### DOM Virtualization — Parked Pages
+
+- `LayoutDocumentElement.parkPage(id)` detaches a top-level page box, leaving a `PARKED_PAGE_ATTR` (`data-parked-page`) placeholder div at its DOM index, and stores `{ element, data }` in `_parkedPages`. `unparkPage(id)` restores via `replaceWith` (position-preserving). Shared contract constant lives in `src/constants/defaults.ts`.
+- **Engine keeps parked pages**: `document._layoutStructure()` builds `childrenData` via `_collectChildrenData()` — mounted boxes contribute `_rawData()` in DOM order, placeholders contribute the stored snapshot at their index. With zero parked pages this is byte-identical to `items.map(e => e._rawData())`. Never revert to items-only assembly — parked pages would drop from the engine tree (threads, printPostData, overlay refresh) on the next document layout.
+- **`data` setter never resurrects parked pages**: the creation branch skips parked ids (refreshing the stored snapshot + detached element props instead) and drops parked entries missing from the new `children`. `removeChildData(id)` also clears the parked entry + placeholder.
+- **Detach sweep**: `box.disconnectedCallback` calls `EditManager._unregisterLayoutSubtree(this)` after `_unregisterLayout(this)` — batch-removes descendant layout selections (single dispatch) and ends image edit mode when the focused image is inside the detached subtree. Text focus is handled by paragraph controller `destroy()` → `_unregister()`. Fast-path no-op when nothing is active (reconcile churn safe).
+- Mount orchestration: `PageMountManager` (`src/utils/page-mount-manager.ts`) — IntersectionObserver + index-window (±N pages), 2px hysteresis band (`rootMargin`, scale-independent) + rAF-coalesced apply (no per-batch DOM surgery — fixes IO flapping at fractional px boundaries). Unmount measures footprint as fractional layout px (`getBoundingClientRect / scale`, `scale` option defaulting to 1 — integer `offsetWidth` rounding pushes neighbors across boundaries). Host must `pin()` the focused page and call `refresh()` after out-of-band structural changes.
+- Detail design + audit record: `docs/VIRTUALIZATION.md`.
 
 ### `HOST_STYLE_ID` — Style Element Identification
 

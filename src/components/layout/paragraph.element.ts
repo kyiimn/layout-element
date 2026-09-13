@@ -87,6 +87,12 @@ export class LayoutParagraphElement extends HTMLElement {
         if (this._savedSelection) {
           this._editController.setSelection(this._savedSelection);
         }
+        // G2(가상화 재부착): 복원된 커서/선택의 좌표 매퍼 재구축을 위해 렌더를 예약한다.
+        // 매퍼 rebuild는 render()의 postRender에서 일어나는데, 재부착 경로는
+        // layout()만 호출하므로 예약 없이는 복원 커서가 다음 렌더까지 부정확하다.
+        // scheduleRender()는 _renderScheduled 가드로 병합되므로 reconcile 중
+        // 후속 render()와 중복 실행되지 않으며, 캐시 히트 시 span diff는 스킵된다.
+        this.scheduleRender();
       }
       this._savedCursorOffset = null;
       this._savedCursorBias = 'start';

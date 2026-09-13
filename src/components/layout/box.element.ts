@@ -148,7 +148,13 @@ export class LayoutBoxElement extends HTMLElement {
     this.removeEventListener('mouseenter', this._onLayoutMouseEnter);
     this.removeEventListener('mouseleave', this._onLayoutMouseLeave);
     this.removeEventListener('mousedown', this._onPlaceGunMouseDown);
-    this._editManagerRef?._unregisterLayout(this);
+    const editManager = this._editManagerRef;
+    if (editManager) {
+      editManager._unregisterLayout(this);
+      // G3(가상화 장기 detach): 서브트리 내부의 잔류 선택·이미지 포커스를 정리한다.
+      // 활성 상태가 없으면 fast path로 즉시 복귀하므로 reconcile churn 비용은 없다.
+      editManager._unregisterLayoutSubtree(this);
+    }
     this._editManagerRef = null;
     // 엔진을 부모 엔진 트리에서 제거하지 않는다.
     //

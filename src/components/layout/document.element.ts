@@ -1,4 +1,4 @@
-import { Z_INDEX_TYPE_LABEL } from "@/constants";
+import { Z_INDEX_TYPE_LABEL, PARKED_PAGE_ATTR } from "@/constants";
 import { DocumentData, ParagraphStyle, TextStyle, BoxData, Font, CMYKColorSet, ThreadData } from "@/types";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
@@ -101,6 +101,16 @@ export class LayoutDocumentElement extends HTMLElement {
 
   /** `_rebuildingChildren`이 true인 동안 getter가 반환할 캐시된 데이터. */
   private _pendingData: DocumentData | null = null;
+
+  /**
+   * 가상화로 DOM에서 분리된 페이지 박스 보관소 (G1 방어).
+   *
+   * `parkPage()`가 박스 요소를 `PARKED_PAGE_ATTR` 플레이스홀더로 교체하고
+   * 요소+스냅샷 데이터를 여기에 보관한다. 보관된 페이지는 `data` setter의
+   * DOM 재생성 대상에서 제외되지만, `_collectChildrenData()`가 엔진
+   * `childrenData`에 합류시켜 엔진 트리·스레딩·printPostData는 완결을 유지한다.
+   */
+  private _parkedPages = new Map<string, { element: LayoutBoxElement; data: BoxData }>();
 
   private _visibleGuide: boolean;
 
@@ -317,7 +327,7 @@ export class LayoutDocumentElement extends HTMLElement {
       this._engine.ppm = this._ppm;
     }
 
-    this._engine.childrenData = this.items.map(e => e._rawData());
+    this._engine.childrenData = this._collectChildrenData();
     this._engine.layout();
 
     if (this._engine.newEnginesCreated) {
@@ -325,6 +335,35 @@ export class LayoutDocumentElement extends HTMLElement {
     }
 
     return this;
+  }
+
+  /**
+   * 엔진 `childrenData`를 조립한다. 마운트된 박스는 DOM 순서의 `_rawData()`를,
+   * 분리 보관(park)된 페이지는 플레이스홀더 위치의 보관 스냅샷을 사용한다.
+   *
+   * 플레이스홀더가 원래 DOM 인덱스에 남아 있으므로 엔진 자식 순서는 가상화
+   * 여부와 무관하게 항상 문서 순서와 일치한다. 보관 페이지가 하나도 없으면
+   * 기존 경로(`items.map`)와 byte-identical한 결과를 반환한다.
+   *
+   * @returns 엔진에 전달할 최상위 박스 데이터 배열
+   */
+  private _collectChildrenData(): BoxData[] {
+    if (this._parkedPages.size === 0) {
+      return this.items.map(e => e._rawData());
+    }
+    const out: BoxData[] = [];
+    for (const node of Array.from(this.childNodes)) {
+      if (node.nodeName === 'X-LAYOUT-BOX') {
+        out.push((node as unknown as LayoutBoxElement)._rawData());
+      } else if (node instanceof HTMLDivElement) {
+        const parkedId = node.getAttribute(PARKED_PAGE_ATTR);
+        if (parkedId) {
+          const parked = this._parkedPages.get(parkedId);
+          if (parked) out.push(parked.data);
+        }
+      }
+    }
+    return out;
   }
 
   /**
@@ -336,13 +375,31 @@ export class LayoutDocumentElement extends HTMLElement {
   private _syncEngineIdsToDom(): void {
     if (!this._engine) return;
     const engineBoxes = this._engine.childBoxEngines;
-    const domBoxes = this.items;
-    for (let i = 0; i < engineBoxes.length && i < domBoxes.length; i++) {
-      const engineId = engineBoxes[i].data.id;
-      if (engineId && domBoxes[i].id !== engineId) {
-        domBoxes[i].id = engineId;
+    // G1(가상화): 보관 페이지는 DOM에 없으므로 위치 기반 매칭이 어긋난다.
+    // id 기반 매칭으로 전환한다 — 보관 항목은 스킵하고, id 없는 DOM 박스에
+    // 엔진이 발급한 id를 write-back하는 기존 동작은 폴백으로 유지한다.
+    // 보관 페이지의 id는 park 시점에 항상 존재하므로 폴백과 충돌하지 않는다.
+    const domById = new Map<string, LayoutBoxElement>();
+    const idLessDom: LayoutBoxElement[] = [];
+    for (const box of this.items) {
+      if (box.id) domById.set(box.id, box);
+      else idLessDom.push(box);
+    }
+    let idLessIdx = 0;
+    for (const engineBox of engineBoxes) {
+      const engineId = engineBox.data.id;
+      if (!engineId) continue;
+      const domBox = domById.get(engineId);
+      if (domBox) {
+        this._syncEngineIdsToDomRecursive(engineBox, domBox);
+        continue;
       }
-      this._syncEngineIdsToDomRecursive(engineBoxes[i], domBoxes[i]);
+      if (this._parkedPages.has(engineId)) continue;
+      const target = idLessIdx < idLessDom.length ? idLessDom[idLessIdx++] : undefined;
+      if (target) {
+        target.id = engineId;
+        this._syncEngineIdsToDomRecursive(engineBox, target);
+      }
     }
   }
 
@@ -733,11 +790,89 @@ export class LayoutDocumentElement extends HTMLElement {
    * @param id - 삭제할 box의 id
    */
   removeChildData(id: string): void {
+    if (this._parkedPages.has(id)) {
+      this._parkedPages.delete(id);
+      this.querySelector(`div[${PARKED_PAGE_ATTR}="${CSS.escape(id)}"]`)?.remove();
+    }
     const child = this.items.find(e => e.id === id);
     if (!child) return;
     Element.prototype.remove.call(child);
     this.layout();
     this.render();
+  }
+
+  /**
+   * 페이지 박스를 DOM에서 분리하고 보관한다 (DOM 가상화).
+   *
+   * 박스 요소를 `PARKED_PAGE_ATTR` 플레이스홀더 div로 교체하고 요소+데이터
+   * 스냅샷을 보관소에 남긴다. 엔진 트리에서는 유지되므로(`_collectChildrenData`
+   * 가 플레이스홀더 위치의 데이터를 합류) 스레딩·추출·내보내기가 정상 동작한다.
+   * 플레이스홀더 크기는 호출자(`PageMountManager`)가 분리 전 footprint로 지정한다.
+   *
+   * @param id - 분리할 최상위 박스의 id
+   * @returns 생성된 플레이스홀더. 이미 보관 중이면 기존 플레이스홀더,
+   *   대상이 없으면 `null`
+   *
+   * @example
+   * ```ts
+   * const w = boxEl.offsetWidth, h = boxEl.offsetHeight;
+   * const ph = docEl.parkPage('page-042');
+   * if (ph) { ph.style.width = `${w}px`; ph.style.height = `${h}px`; }
+   * ```
+   */
+  parkPage(id: string): HTMLDivElement | null {
+    if (this._parkedPages.has(id)) {
+      return this.querySelector<HTMLDivElement>(`div[${PARKED_PAGE_ATTR}="${CSS.escape(id)}"]`);
+    }
+    const child = this.items.find(e => e.id === id);
+    if (!child) return null;
+    const data = child.data as BoxData;
+    const placeholder = document.createElement('div');
+    placeholder.setAttribute(PARKED_PAGE_ATTR, id);
+    child.replaceWith(placeholder);
+    this._parkedPages.set(id, { element: child, data });
+    return placeholder;
+  }
+
+  /**
+   * 보관된 페이지 박스를 플레이스홀더 자리에 복원한다.
+   *
+   * `replaceWith`로 재삽입하면 `connectedCallback` → `layout()`이 실행되어
+   * 기존 엔진에 재연결된다(엔진은 분리 중에도 유지되므로 캐시 히트).
+   * 텍스트 커서 복원의 mapper 재구축은 문단 `connectedCallback`의 예약 렌더가
+   * 담당하므로, 호출자는 이미지 등 비동기 페인트가 필요할 때만 `render()`를
+   * 호출하면 된다.
+   *
+   * @param id - 복원할 페이지의 id
+   * @returns 복원된 박스 요소. 보관 내역이 없고 이미 마운트되어 있으면 그 요소,
+   *   둘 다 없으면 `null`
+   *
+   * @example
+   * ```ts
+   * const boxEl = docEl.unparkPage('page-042');
+   * if (boxEl) await boxEl.render();
+   * ```
+   */
+  unparkPage(id: string): LayoutBoxElement | null {
+    const parked = this._parkedPages.get(id);
+    if (!parked) return this.items.find(e => e.id === id) ?? null;
+    const placeholder = this.querySelector(`div[${PARKED_PAGE_ATTR}="${CSS.escape(id)}"]`);
+    if (placeholder) {
+      placeholder.replaceWith(parked.element);
+    } else {
+      this.appendChild(parked.element);
+    }
+    this._parkedPages.delete(id);
+    return parked.element;
+  }
+
+  /**
+   * 현재 보관 중인(언마운트된) 페이지 id 목록을 반환한다.
+   *
+   * @returns 보관 중인 페이지 id 배열 (보관 순서)
+   */
+  get parkedPageIds(): string[] {
+    return [...this._parkedPages.keys()];
   }
 
   set data(data: DocumentData) {
@@ -818,6 +953,17 @@ export class LayoutDocumentElement extends HTMLElement {
           }
           this.appendChild(existingBox);
         } else {
+          if (childId && this._parkedPages.has(childId)) {
+            // G1(가상화): 분리 보관 중인 페이지는 DOM을 재생성하지 않는다.
+            // 엔진은 _collectChildrenData()의 플레이스홀더 위치 병합으로 유지되며,
+            // 보관 요소의 프로퍼티는 detach 안전 경로(data setter)로 갱신한다
+            // (미연결 요소의 생성 경로와 동일 — layout/render는 early-return).
+            const parked = this._parkedPages.get(childId)!;
+            parked.data = child;
+            usedIds.add(childId);
+            parked.element.data = child;
+            continue;
+          }
           const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
           boxEl.data = child;
           this.appendChild(boxEl);
@@ -828,6 +974,18 @@ export class LayoutDocumentElement extends HTMLElement {
       for (const box of existingBoxes) {
         if (box.id && !usedIds.has(box.id)) {
           Element.prototype.remove.call(box);
+        }
+      }
+
+      // 보관 중인데 새 data.children에 없는 페이지(보관 중 삭제)는 보관소와
+      // 플레이스홀더를 함께 정리한다. 방치하면 엔진에 고스트 데이터가 남는다.
+      if (this._parkedPages.size > 0) {
+        const childIds = new Set(children.map(c => c.id));
+        for (const parkedId of [...this._parkedPages.keys()]) {
+          if (!childIds.has(parkedId)) {
+            this._parkedPages.delete(parkedId);
+            this.querySelector(`div[${PARKED_PAGE_ATTR}="${CSS.escape(parkedId)}"]`)?.remove();
+          }
         }
       }
 

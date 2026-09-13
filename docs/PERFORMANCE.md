@@ -921,7 +921,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | 한국어 정적 폭 테이블 | 11,172 한글 음절 균일 폭(970/1000 em) 룩업 테이블 | 콜드 스타트 시 opentype.js 파싱 생략 | 중간 |
 | ~~Skeleton 캐시~~ | ~~Univer 패턴 — 레이아웃 결과 캐시~~ | ~~증분 리플로우~~ | ~~구현됨 (§3.12)~~ |
 | `Promise.all` 병렬 렌더 | `LayoutDocumentElement.render()` 순차 await (`document.element.ts:506`) → 병렬 | 이미지 로드 블로킹 해소 | 낮음 |
-| 가상화 | 뷰포트 밖 컬럼/라인 DOM 지연 생성. **상세 설계·쟁점·구현 전 보강(P1~P4)은 `docs/VIRTUALIZATION.md` 참조** — 연결/해제 콜백 전수 감사, G1(data 세터 부활 문제) 등 공백 분석, `transform: scale` 호환성 규칙 포함 | 다중 페이지 DOM 크기 감소 | 중간 |
+| 가상화 | ~~뷰포트 밖 컬럼/라인 DOM 지연 생성~~ → **구현됨**: `LayoutDocumentElement.parkPage()`/`unparkPage()`/`parkedPageIds` + `PageMountManager`(`src/utils/page-mount-manager.ts`). 최상위 박스(페이지) 단위 IntersectionObserver 인덱스 윈도우(±N) 마운트, 플레이스홀더 footprint 유지. 분리 페이지는 엔진 트리에 유지. G1(data 세터 부활)은 보관소 스킵으로, G2(재마운트 커서)는 문단 `connectedCallback` 예약 렌더로, G3(detach 잔류 선택·이미지 포커스)은 `_unregisterLayoutSubtree`로 해소. 상세 설계·감사 기록은 `docs/VIRTUALIZATION.md` 참조 | 다중 페이지 DOM 크기 감소 | 구현됨 |
 | `_getAllColumns()` 캐싱 | `EditCoordinateMapper`에서 컬럼 목록 캐싱 | `querySelectorAll` 호출 감소 | 낮음 |
 | ~~키 입력 O(N) 패스 제거~~ | ~~`_getPlainText()`/`postRender`가 캐시 getter 사용 + `mapper.rebuild()` 증분화~~ | ~~타이핑 O(N) inlineToPlain 제거~~ | ~~구현됨: Phase 1(캐시 getter) + Phase 2(델타 스플라이스 + `rebuildMappingsOnly()`)~~ |
 | ~~부분 증분 `layoutText`~~ | ~~캐럿 이전 라인 재래핑 불변성을 이용한 prefix 라인 캐시 (엔진 단일 소스 원칙 내)~~ | ~~연속 타이핑 중 전체 재래핑 제거~~ | ~~구현됨 (§3.14 — 컬럼 단위 prefix 캐시, `verticalAlign: top` 한정)~~ |

@@ -153,6 +153,8 @@ class LayoutDocumentElement extends HTMLElement
 | `render()` | `(): Promise<this \| null>` | 자식 박스를 z-index 역순으로 비동기 렌더링. `layout()` 완료 후 호출. |
 | `appendChild<T>(node)` | `(node: T): T` | 박스/단락/이미지 자식에 `InheritStyle` 자동 전파. |
 | `flipLayout(options)` | `(options: FlipLayoutOptions): void` | 문서 또는 지정된 박스의 **하위 요소** 배치를 좌우/상하/상하좌우 반전. 엔진의 `DocumentEngine.flipLayout()`을 호출하여 엔진 트리에서 직접 반전을 수행하고, 반환된 `DocumentData`를 `data` setter에 적용. `targetId` 지정 시 해당 박스가 root, 생략 시 문서가 root. 반전 전 편집 상태(포커스, 선택)를 해제. |
+| `parkPage(id)` | `(id: string): HTMLDivElement \| null` | 페이지 박스를 DOM에서 분리하고 보관 (DOM 가상화). `data-parked-page` 플레이스홀더로 교체. 엔진 트리에는 유지되므로 스레딩·추출·내보내기가 정상 동작. 반환된 플레이스홀더에 분리 전 footprint 크기를 지정해야 스크롤이 유지된다. |
+| `unparkPage(id)` | `(id: string): LayoutBoxElement \| null` | 보관된 페이지를 플레이스홀더 자리에 복원. `connectedCallback → layout()`으로 기존 엔진에 재연결 (캐시 히트). 비동기 페인트 확정이 필요하면 반환 요소의 `render()`를 호출. |
 
 #### 데이터 프로퍼티 (setter / getter)
 
@@ -184,6 +186,7 @@ class LayoutDocumentElement extends HTMLElement
 | `visibleGuide` | `boolean` | 가이드 컬럼 표시 여부. |
 | `type` | `'document'` | 타입 리터럴. |
 | `zIndex` | `number` | 항상 0. |
+| `parkedPageIds` | `string[]` | 현재 분리 보관 중인(언마운트된) 페이지 id 목록. |
 
 #### 가시성 / 후처리 데이터
 
@@ -218,6 +221,58 @@ doc.flipLayout({ axis: 'vertical' });                             // 문서의 �
 doc.flipLayout({ axis: 'both' });                                 // 180도 회전
 doc.flipLayout({ axis: 'horizontal', targetId: 'box-42' });       // box-42의 하위 요소들만 좌우 반전
 ```
+
+#### DOM 가상화
+
+수백 페이지 문서에서 뷰포트 밖 페이지의 DOM(span 수만 개)을 분리한다.
+엔진 트리는 유지되므로 스레딩·`extractData`·`printPostData`는 분리 페이지 포함
+완결 동작한다. 마운트 단위는 최상위 박스 서브트리 전체이다.
+
+관측용 데모: `examples/virtualization.html` (`npm run dev` 후 접속) —
+30페이지 단일 스레드 체인 + 매니저 기본 장착 + 마운트 상태 패널 +
+플레이스홀더 틴트. 스크롤만으로 교환을 관측할 수 있다.
+
+```ts
+import { PageMountManager } from 'layout-element';
+
+const manager = new PageMountManager({ document: doc, window: 1 });
+manager.attach();
+
+// 편집 중인 페이지는 고정 (포커스된 페이지가 언마운트되면 IME 상태 소실)
+// pin 대상은 최상위 박스 id이다
+editManager.addEventListener('focusChange', () => {
+  const para = editManager.focusedParagraph;
+  let page: Element | null = para;
+  while (page?.parentElement && page.parentElement.localName !== 'x-layout-document') {
+    page = page.parentElement;
+  }
+  const pageId = page?.localName === 'x-layout-box' ? (page as Element).id : null;
+  // 이전 pin 해제 + pageId를 pin (호스트 상태로 관리)
+});
+
+// 구조 변경(appendChildData 등) 후에는 스캔 갱신
+manager.refresh();
+
+// 종료 시
+manager.detach();
+```
+
+| API | 설명 |
+|---|---|
+| `new PageMountManager({ document, root?, window?, scale?, onMount?, onUnmount? })` | `window` = 가시 페이지 앞뒤 유지 페이지 수 (기본 1). `root` = 스크롤 컨테이너 (생략 시 뷰포트). 마운트 판정은 인덱스 윈도우 방식이라 `transform: scale` 줌과 무관 (경계 flapping 방지 2px 히스테리시스 + rAF 병합 내장). `scale` = 화면 scale getter (기본 1, 줌 환경은 `() => doc.editManager.scale`) — 플레이스홀더 footprint 환산용. |
+| `manager.attach()` / `detach()` | 감시 시작/중단. `detach()`은 마운트 상태를 그대로 둔다. |
+| `manager.refresh()` | 문서 구조 재스캔 (호스트가 구조를 바꾼 뒤 호출). |
+| `manager.pin(id)` / `unpin(id)` | 언마운트 제외/해제. |
+| `manager.mountedIds` / `pinnedIds` | 현재 마운트/고정 페이지 id 목록. |
+
+제약:
+- `data` setter 풀 복원 중에도 분리 페이지는 재생성되지 않고 보관 스냅샷이
+  갱신된다. 보관 중 삭제된 페이지는 보관소·플레이스홀더와 함께 정리된다.
+- 분리된 서브트리 내부의 잔류 레이아웃 선택·이미지 포커스는 detach 시점에
+  자동 해제된다 (`EditManager._unregisterLayoutSubtree`). 텍스트 포커스는
+  컨트롤러 destroy 경로에서 정리된다.
+- 재마운트된 문단의 커서 복원은 `connectedCallback`의 예약 렌더가 mapper를
+  재구축하여 확정한다.
 
 ---
 

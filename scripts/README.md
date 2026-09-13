@@ -38,6 +38,7 @@
 | `verify-right-indent-tab-guide.mjs` | 정합성 (브라우저) | 탭 점선 가이드 (편집 모드 전용 표시·원복) | ALL PASS |
 | `verify-right-indent-tab-single-source.mjs` | 정합성 (원칙) | 탭 좌표 단일 소스: DOM === 엔진 === print | ALL PASS |
 | `verify-engine-node.mjs` | 정합성 (Node) | 엔진 계층 DOM-free 동작 | ALL PASS |
+| `verify-virtualization.mjs` | 정합성 (브라우저) | DOM 가상화 — park/unpark 엔진 완결, data 세터 부활 방지(G1), 재마운트 커서 복원+예약 렌더(P1), detach 서브트리 정리(P3), PageMountManager 윈도우/pin, parked 오버레이 회피(H), 리사이즈 attach/detach(I), 성능 실측(J) | ALL PASS (40항목, 서버 없으면 자동 기동) |
 | `verify-obfuscated.mjs` | 정합성 (빌드) | 난독화 IIFE 번들 로딩 | ALL PASS |
 | `obfuscate.mjs` | 빌드 | IIFE 번들 난독화 | build 완료 |
 
@@ -333,6 +334,53 @@ npx tsx scripts/verify-engine-node.mjs
 ```
 
 엔진 코드에 DOM 참조가 추가되면 import/실행 단계에서 실패한다.
+
+### `verify-virtualization.mjs` — DOM 가상화 정합성 (브라우저)
+
+**목적**: P1~P4 보강(`parkPage`/`unparkPage`/`_collectChildrenData`/
+`_unregisterLayoutSubtree`/`PageMountManager`)의 정합성을 검증한다. 6페이지
+문서(텍스트 5 + 중첩 박스 1 + 이미지 1) 픽스처에서 **CDP가 아닌 DOM 직접
+조작**으로 검증한다 (park/unpark는 프로그래밍 API이므로 합성 스크롤 외에
+직접 호출 경로도 검증).
+
+**검증 항목** (40항목, 10 시나리오):
+1. **A. 기준선** — 6페이지 마운트 + 엔진 6엔트리 + 전 페이지 DOM===엔진
+2. **B. park** — 플레이스홀더 교체 + 원래 인덱스 유지 + 엔진·extractData 6유지
+   + 나머지 페이지 정합
+3. **C. G1** — 보관 중 `data` 세터 풀 라운드트립 후 부활 없음(items 5 유지) +
+   보관·엔진 유지
+4. **D. 보관 중 편집** — data 세터로 보관 페이지 텍스트 변경 → unpark 후 반영 +
+   순서 보존 + 정합
+5. **E. P1** — detach 시 포커스 해제(설계 동작) + 재부착 컨트롤러 재생성·커서
+   복원 + 예약 렌더 실행(render 스파이 ≥1) + 정합
+6. **F. P3** — 중첩 자식 박스 선택 후 detach 시 선택 해제 + dispatch 1회 +
+   이미지 포커스 후 detach 시 포커스 해제·모드 종료
+7. **G. PageMountManager** — 하단 스크롤 시 윈도우(page-3,4,5) 분리·유지 +
+   footprint 유지 + 복귀 시 재마운트·정합 + pin 유지/unpin 분리 + data 세터 후
+   마운트 수 안정 + 전 페이지 복원·최종 정합
+8. **H. parked 오버레이 회피 (핵심)** — 텍스트(z1) + 교차 이미지(z10, box 모드,
+   `objectFit: none` 명시 rect) 최상위 형제. 기준선 파트 분할 → 이미지 페이지
+   분리 + 텍스트 재계산(콘텐츠 변경으로 캐시 무효화 강제) 후에도 분할 유지 +
+   가시 글자 중심의 이미지 rect 침범 0 (0.05mm 엡실론) + 복원 후 유지.
+   픽스처 주의: `cover` 모드는 비율 맞춤으로 rect가 재계산되어 비결정적이므로
+   `none` + 명시 rect를 쓴다. 또한 행머리/행끝 공백 금지와 더불어 이미지 경계와
+   라인 경계의 정확 일치도 피한다 (exclusive-boundary 시맨틱상 미분할이 정상).
+9. **I. 리사이즈** — 600px 기준 윈도우 → 300px 축소 시 마운트 축소 + 정합 →
+   1400px 확대 시 마운트 확대. 엔진(mm)은 무영향, 마운트 집합만 변경.
+   뷰포트 변경은 Node 컨텍스트(`page.setViewportSize`)에서 수행하므로 단계별
+   evaluate로 나눈다.
+10. **J. 성능** — 30페이지(22,750 span) 풀 렌더 후 27개 park → 윈도우 span
+    2,310 (약 10%, park 13.2ms) + 페이지당 재마운트(unpark+render) ~1~10ms +
+    샘플 정합. 실측 수치 기록 (판정은 비율·상한 기준).
+
+**검증기 작성 주의**: bench 페이지와 픽스처 문서를 공유하므로 절대 스크롤 좌표가
+아니라 `scrollIntoView`로 대상 페이지를 뷰포트에 둔다. 픽스처 텍스트는
+행머리/행끝 공백 없이 작성한다 (strip 규칙이 DOM↔엔진 비교를 어긋나게 한다).
+
+**실행**:
+```bash
+npx tsx scripts/verify-virtualization.mjs   # 40항목 ALL PASS (서버 없으면 자동 기동 — 포트 5203)
+```
 
 ### `verify-hangul-glyph-fallback.mjs` — cmap 미등록 한글 음절 폭 폴백
 

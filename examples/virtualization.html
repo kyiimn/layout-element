@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Layout Element Virtualization Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #f0f0f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding-top: 118px;
+    }
+
+    /* 고정 상태 패널 */
+    #vpanel {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100000;
+      background: #212121;
+      color: #eee;
+      padding: 10px 16px;
+      font-size: 13px;
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    #vpanel .stat b { color: #ffca28; font-size: 15px; }
+    #vpanel .stat.mounted b { color: #69f0ae; }
+    #vpanel .stat.parked b { color: #ffab91; }
+
+    #vpanel select, #vpanel button {
+      padding: 5px 10px;
+      border-radius: 4px;
+      border: 1px solid #616161;
+      background: #424242;
+      color: #eee;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    #vpanel button.off { background: #6d0d0d; border-color: #a33; }
+    #vpanel label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+
+    #vlog {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      z-index: 100000;
+      width: 260px;
+      max-height: 220px;
+      overflow: hidden;
+      background: rgba(33, 33, 33, 0.92);
+      color: #ccc;
+      font: 11px/1.7 monospace;
+      padding: 8px 10px;
+      border-radius: 6px;
+      pointer-events: none;
+    }
+
+    #vlog .mount { color: #69f0ae; }
+    #vlog .unmount { color: #ffab91; }
+
+    /* 마운트된 페이지: 얇은 초록 테두리 */
+    x-layout-document > x-layout-box {
+      outline: 1px solid rgba(76, 175, 80, 0.55);
+      outline-offset: -1px;
+    }
+
+    /* 분리된 페이지 자리: 빗금 + 주황 점선 + id 라벨. 모든 데모 페이지는
+       absolute이므로 플레이스홀더도 absolute이며 ::after 라벨이 그 안에 놓인다. */
+    x-layout-document div[data-parked-page] {
+      background: repeating-linear-gradient(
+        45deg, #fff3e0, #fff3e0 10px, #ffe0b2 10px, #ffe0b2 20px);
+      outline: 2px dashed #ef6c00;
+      outline-offset: -2px;
+    }
+
+    x-layout-document div[data-parked-page]::after {
+      content: 'parked ' attr(data-parked-page);
+      position: absolute;
+      top: 6px;
+      left: 10px;
+      font: bold 14px sans-serif;
+      color: #bf360c;
+      background: rgba(255, 255, 255, 0.85);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="vpanel">
+    <span class="stat mounted">마운트 <b id="st-mounted">-</b></span>
+    <span class="stat parked">분리 <b id="st-parked">-</b></span>
+    <span class="stat">span <b id="st-spans">-</b></span>
+    <span class="stat" id="st-last">대기 중…</span>
+    <label>window
+      <select id="sel-window">
+        <option value="0">0</option>
+        <option value="1" selected>1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+      </select>
+    </label>
+    <button id="btn-top">맨 위</button>
+    <button id="btn-mid">중간</button>
+    <button id="btn-bottom">맨 아래</button>
+    <span class="stat" title="30개 프레임이 하나의 story를 공유합니다. 분리된 프레임도 엔진 체인에 남아 흐름이 유지됩니다.">스레드 1체인·30프레임</span>
+    <label><input type="checkbox" id="ck-pin" checked /> 포커스 페이지 고정</label>
+    <button id="btn-toggle">가상화 끄기</button>
+  </div>
+  <div id="vlog"></div>
+
+  <x-layout-document id="doc"></x-layout-document>
+
+  <script type="module">
+    import "/src/index.ts";
+
+    import { ColorRegistry } from "/src/resource/color-registry";
+    import { FontLoader } from "/src/resource/font-loader";
+    import { PageMountManager } from "/src/utils/page-mount-manager.ts";
+
+    await ColorRegistry.getInstance().init();
+    await FontLoader.getInstance().init();
+
+    const PAGE_COUNT = 30;
+    const PAGE_PITCH_MM = 115;
+    const PAGE_HEIGHT_MM = 100;
+
+    const doc = document.getElementById("doc");
+    const em = doc.editManager;
+    em.textEditMode = true;
+
+    // 30페이지 단일 스레드 — 하나의 story가 30개 프레임을 쭉 흐른다.
+    // head(page-0) 문단이 story 전체를 소유하고, 후속 프레임 content는 비운다
+    // (엔진이 feed-forward로 채운다). 30페이지를 채우고도 남도록 overset 분량을
+    // 포함한다 — 마지막 페이지의 빨간 테두리는 체인 끝 잔여(overset tail) 표시다.
+    const STORY_UNIT = "가상화스레딩데모본문가나다라라마바사아자차카타파하.";
+    const storyParts = [];
+    for (let k = 0; k < 14; k++) {
+      storyParts.push(`[${String(k).padStart(2, "0")}]` + STORY_UNIT.repeat(120));
+    }
+    const story = storyParts.join("");
+    const frameIds = [];
+    for (let i = 0; i < PAGE_COUNT; i++) frameIds.push(`vpage-${i}-para`);
+
+    const children = [];
+    for (let i = 0; i < PAGE_COUNT; i++) {
+      children.push({
+        type: "box",
+        id: `vpage-${i}`,
+        position: "absolute",
+        left: 10,
+        top: i * PAGE_PITCH_MM,
+        width: 170,
+        height: PAGE_HEIGHT_MM,
+        children: {
+          type: "paragraph",
+          id: `vpage-${i}-para`,
+          content: i === 0 ? story : "",
+          paragraphStyle: {},
+          textStyle: {},
+        },
+      });
+    }
+    doc.data = {
+      width: 190,
+      height: PAGE_COUNT * PAGE_PITCH_MM,
+      columns: 1,
+      gap: 0,
+      paragraphStyle: { lineGap: 1.2 },
+      textStyle: { fontSize: 4 },
+      threads: [{ id: "story-main", paragraphIds: frameIds, content: story }],
+      children,
+    };
+    await doc.render();
+    // 편집 가능하게 — 포커스 페이지 pin 동작까지 함께 시연된다
+    for (const p of doc.querySelectorAll("x-layout-paragraph")) p.editableText = true;
+
+    // ── 상태 패널 ──
+    const elMounted = document.getElementById("st-mounted");
+    const elParked = document.getElementById("st-parked");
+    const elSpans = document.getElementById("st-spans");
+    const elLast = document.getElementById("st-last");
+    const elLog = document.getElementById("vlog");
+
+    function countSpans() {
+      let n = 0;
+      for (const p of doc.querySelectorAll("x-layout-paragraph")) {
+        for (const col of p.querySelectorAll("x-layout-column")) {
+          n += col.shadowRoot.querySelectorAll("span[data-source-offset]").length;
+        }
+      }
+      return n;
+    }
+
+    function logEvent(kind, id) {
+      const div = document.createElement("div");
+      div.className = kind;
+      div.textContent = `${new Date().toLocaleTimeString("ko-KR", { hour12: false })} ${kind} ${id}`;
+      elLog.prepend(div);
+      while (elLog.children.length > 12) elLog.lastChild.remove();
+    }
+
+    function refreshStatus(last) {
+      const mounted = mgr.mountedIds;
+      elMounted.textContent = `${mounted.length} / ${PAGE_COUNT}`;
+      elParked.textContent = String(doc.parkedPageIds.length);
+      elSpans.textContent = countSpans().toLocaleString();
+      if (last) elLast.textContent = last;
+    }
+
+    // ── 매니저 ──
+    let mgr = null;
+    let pinnedId = null;
+
+    function createManager(windowSize) {
+      if (mgr) mgr.detach();
+      mgr = new PageMountManager({
+        document: doc,
+        window: windowSize,
+        onMount: (id) => { logEvent("mount", id); refreshStatus(`mount ${id}`); },
+        onUnmount: (id) => { logEvent("unmount", id); refreshStatus(`unmount ${id}`); },
+      });
+      mgr.attach();
+      refreshStatus("매니저 시작");
+    }
+
+    createManager(1);
+
+    document.getElementById("sel-window").addEventListener("change", (e) => {
+      createManager(Number(e.target.value));
+    });
+
+    const scrollToPage = (i) => {
+      const box = [...doc.querySelectorAll("x-layout-box")].find(b => b.id === `vpage-${i}`);
+      const node = box ?? doc.querySelector(`div[data-parked-page="vpage-${i}"]`);
+      if (node) node.scrollIntoView({ block: "start" });
+    };
+    document.getElementById("btn-top").addEventListener("click", () => scrollToPage(0));
+    document.getElementById("btn-mid").addEventListener("click", () => scrollToPage(14));
+    document.getElementById("btn-bottom").addEventListener("click", () => scrollToPage(29));
+
+    // 포커스 페이지 고정 — 권장 호스트 계약의 라이브 시연
+    em.addEventListener("focusChange", () => {
+      if (!document.getElementById("ck-pin").checked) return;
+      const para = em.focusedParagraph;
+      let page = para;
+      while (page?.parentElement && page.parentElement.localName !== "x-layout-document") {
+        page = page.parentElement;
+      }
+      const pageId = page?.localName === "x-layout-box" ? page.id : null;
+      if (pinnedId && pinnedId !== pageId) mgr.unpin(pinnedId);
+      pinnedId = pageId;
+      if (pageId) {
+        mgr.pin(pageId);
+        refreshStatus(`pin ${pageId}`);
+      }
+    });
+
+    // 가상화 ON/OFF 토글 — 끄면 전 페이지 복원
+    const btnToggle = document.getElementById("btn-toggle");
+    let enabled = true;
+    btnToggle.addEventListener("click", async () => {
+      enabled = !enabled;
+      if (!enabled) {
+        mgr.detach();
+        for (const id of [...doc.parkedPageIds]) {
+          const el = doc.unparkPage(id);
+          if (el) await el.render();
+        }
+        btnToggle.textContent = "가상화 켜기";
+        btnToggle.classList.add("off");
+        refreshStatus("가상화 OFF — 전체 마운트");
+      } else {
+        mgr.attach();
+        btnToggle.textContent = "가상화 끄기";
+        btnToggle.classList.remove("off");
+        refreshStatus("가상화 ON");
+      }
+    });
+
+    refreshStatus("준비 완료 — 스크롤해 보세요");
+    document.title = "VIRTUALIZATION_READY";
+  </script>
+</body>
+
+</html>

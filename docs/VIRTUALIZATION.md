@@ -1,6 +1,9 @@
 # VIRTUALIZATION.md — 수백 페이지 문서 가상화 및 대규모 문서 스케일 대응 (인계 문서)
 
-> **문서 성격**: 분석·설계 문서. **구현은 별도 에이전트가 수행한다.**
+> **문서 성격**: 분석·설계 + 구현 기록. **P1~P4 보강은 구현 완료**
+> (사용자 지시로 하위 에이전트 위임 없이 직접 구현 — `paragraph.element.ts`,
+> `edit-manager.ts`/`box.element.ts`, `document.element.ts`,
+> `src/utils/page-mount-manager.ts`, `src/constants/defaults.ts`).
 > 이 문서는 세션 전체에서 실측·검증된 사실만을 담는다. 모든 줄 번호·시그니처는 작성 시점
 > (main 브랜치) 기준이며, 구현 전 최신 코드와 대조할 것.
 >
@@ -18,7 +21,7 @@
 해법 축 3개:
 
 1. **① DOM 가상화** — 즉시 효과, 엔진 무변경. 콜백 감사 결과 구현 가능하나
-   **G1~G3 보강 선행** (§4, §5).
+   **G1~G3 보강 선행** (§4, §5) → **보강 구현 완료 (P1~P4, §4.4 참조)**.
 2. **② 페이지 모델** — 나머지 문제 전부의 데이터적 기반. G1의 근본 해소.
 3. **③′ 시분할 프로그레시브 레이아웃** — Web Worker의 **대체** 수단.
    Worker 이관은 수차례 시도 끝에 실패했으며(역사적 사실), 이 코드베이스 구조상
@@ -223,18 +226,22 @@ rebuild는 `paragraph.render()`의 postRender에서 일어나는데, 재부착 �
 4. **mm 좌표계** — ppm/줌 변화가 언마운트 페이지에 영향 없음.
 5. **`items` = 마운트된 자식만** — 문서 `render()`가 자연스럽게 마운트 분만 순회. 별도 컬링 불필요.
 
-### 4.4 구현 전 보강 (P1~P4)
+### 4.4 구현 전 보강 (P1~P4) — 구현 완료
 
-| 보강 | 내용                                                                                                                                                                                                                                     | 범위                          |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| **P1**   | G2 — paragraph `connectedCallback`에서 `_savedCursorOffset` 복원 시 `queueMicrotask(() => this.render())` 스케줄 (기존 `_renderScheduled` 가드로 배치 병합됨)                                                                                     | paragraph.element.ts 수 줄        |
-| **P2**   | G1 — 임시 방어: 가상화 활성 시 `document.data` 세터 대신 페이지 스코프 복원 경로 사용을 **호스트 계약으로 문서화**. 근본 해결은 페이지 모델(②)                                                                                                      | 문서화 + 향후 페이지 모델         |
-| **P3**   | G3 — detach 시 EditManager가 이 요소를 타깃으로 하는 활성 모드(imageEditMode/placeGun/insert)면 취소하는 방어 코드                                                                                                                               | edit-manager + 각 콜백          |
-| **P4**   | 마운트 매니저 유틸: IntersectionObserver로 뷰포트 ±1~2페이지 윈도우 유지, 재마운트 순서 `appendChild → layout(자동) → render()` 고정. 마운트 단위는 **최상위 박스(페이지 컨테이너)** — 부모-자식 connectedCallback 순서가 DOM 삽입 순서를 따르므로 서브트리 통째 마운트만 안전 | 신규 유틸 또는 호스트           |
+| 보강 | 내용 | 범위 |
+| ---- | ---- | ---- |
+| **P1** ✅ | G2 — paragraph `connectedCallback`에서 `_savedCursorOffset` 복원 시 `scheduleRender()` 호출 (`paragraph.element.ts`). `_renderScheduled` 가드로 병합되며 캐시 히트 시 span diff 스킵. 계획안(`queueMicrotask` 직접 호출)과 동일 효과이며 기존 배치 메커니즘을 재사용. | paragraph.element.ts 수 줄 |
+| **P2** ✅ (계획보다 강하게 구현) | G1 — 호스트 계약 문서화에 그치지 않고 **분리 보관소(`_parkedPages`) + `parkPage()`/`unparkPage()`/`parkedPageIds` 공개 API**를 `LayoutDocumentElement`에 구현. `data` setter는 보관 id의 DOM 재생성을 스킵하고 보관 스냅샷·분리 요소 프로퍼티를 갱신하며, 보관 중 삭제된 페이지는 보관소·플레이스홀더와 함께 정리. `_layoutStructure()`는 `_collectChildrenData()`로 플레이스홀더 위치의 보관 데이터를 합류시켜 엔진 자식 순서를 보존 (보관 0건이면 기존 경로와 byte-identical). `_syncEngineIdsToDom()`은 위치 기반 → id 기반 매칭으로 전환 (보관 항목 스킵 + id-less DOM write-back 폴백 유지). 공유 계약 상수 `PARKED_PAGE_ATTR`는 `src/constants/defaults.ts`에 위치 (임포트 사이클 방지). | document.element.ts + constants |
+| **P3** ✅ | G3 — `EditManager._unregisterLayoutSubtree(root)` 신설 + `box.disconnectedCallback`에서 호출. 서브트리 내 잔류 레이아웃 선택을 배치 정리(1회 dispatch)하고, 분리 서브트리 안의 포커스 이미지는 `blurImage()` + `imageEditMode = false`로 종료. 텍스트 포커스는 문단 컨트롤러 destroy → `_unregister()` 기존 경로가 담당. 활성 상태가 없으면 fast path 즉시 복귀로 reconcile churn 무비용. PlaceGun/Insert 타깃은 라이브 hit-test 방식이라 detach 시 참조 불가 — 호스트 계약으로 남김 (당초 계획에서 축소). | edit-manager.ts + box.element.ts |
+| **P4** ✅ (라이브러리 유틸로 구현) | `src/utils/page-mount-manager.ts` — `PageMountManager` 클래스 (attach/detach/refresh/pin/unpin/mountedIds/pinnedIds). IntersectionObserver + **인덱스 윈도우(가시 ±N)** 방식이라 rootMargin 스케일 환산이 불필요 (§5.3 항목 2의 대안 채택). 마운트: `unparkPage()` + `void box.render()` (텍스트·테이블은 connectedCallback 자가 복원, 비동기 페인트만 확정). 언마운트: 분리 전 `offsetWidth/offsetHeight` + absolute 위치를 플레이스홀더에 지정. 요소 클래스 런타임 임포트 없이 `import type` + `localName` 판정으로 utils 배럴 순환 방지. `pin()`으로 편집 중 페이지 고정 (IME 조합 상태 보호 — 호스트가 focusChange에서 pin/unpin). | src/utils/page-mount-manager.ts (신규) |
 
-**P4를 호스트 유틸로 먼저 만들어 실험한 뒤 페이지 모델에 흡수하는 순서를 권한다.**
-G1이 남아 있는 상태에서는 "마운트 매니저 + data 세터 금지 계약"으로 동작하지만,
-페이지 모델이 들어오면 마운트 단위·데이터 경로·스레딩이 한 곳에 정리되어 P2 계약이 자연 소멸한다.
+G4(z-순서)는 미대응 — 문서 렌더 1회 후 해소되며 페이지 단위 마운트에서 실질 영향이
+없으므로 의도적 제외.
+
+**당초 권고("P4를 호스트 유틸로 먼저 실험")에서 변경**: P2를 실제 보관소로 구현하면서
+`data` 세터 금지 계약이 불필요해졌으므로 (보관 페이지는 스킵+스냅샷 갱신),
+매니저를 라이브러리 유틸로 직접 구현했다. 페이지 모델(②)이 들어오면 마운트 단위·데이터
+경로·스레딩이 한 곳에 정리된다는 전망은 유지된다.
 
 ---
 
@@ -314,12 +321,58 @@ transform: scale(s)  →  브라우저 컴포지트 단계만 변경 (layout/ref
 
 ---
 
-## 7. 인계 에이전트를 위한 실행 순서 제안
+## 7. 실행 순서 — P1~P4 완료, 검증 완료
 
-1. **[준비]** `benchmark-browser.mjs`에 300p 시나리오 + 스케일 시나리오 추가 → 기준선 확보
-2. **[P1]** paragraph 재부착 render 스케줄 (수 줄) → `verify-dom-diff.mjs` 통과 확인
-3. **[P3]** detach 시 활성 모드 취소 방어 → `verify-image-edit-mode.mjs`, `verify-pending-style.mjs` 회귀 확인
-4. **[P4]** 마운트 매니저 유틸(호스트 또는 라이브러리) — BCR 기반 판정, IO rootMargin 스케일 환산, `appendChild → layout → render()` 순서 고정
-5. **[P2]** 가상화 활성 시 `document.data` 세터 금지 계약 문서화 (본 문서 §4.4 인용)
-6. **[① 완료 판정]** 300p 시나리오에서 노드 수·메모리·재마운트 p95 재측정
-7. **[② 페이지 모델]** 위 로드맵대로 — 이후 P2 계약 소멸, ③′ 이후 단계 순차 적용
+1. **[완료]** P1 (paragraph 재부착 render 스케줄), P3 (detach 서브트리 정리),
+   P2 (parked 보관소 + data 세터 스킵 + id 기반 sync), P4 (`PageMountManager`) —
+   `npm run build` + `tsc --noEmit` + `verify-engine-node.mjs` 통과.
+2. **[완료]** 회귀 6종 ALL PASS (구현 세션 실측):
+   `verify-dom-diff` / `verify-pending-style`(31) / `verify-visual-render`(7) /
+   `verify-multicolumn` / `verify-image-edit-mode`(64) / `verify-caret-parking`(28).
+3. **[완료]** 신규 `scripts/verify-virtualization.mjs` 40항목 ALL PASS —
+   park/unpark 엔진 완결, G1 부활 방지, 보관 중 편집 반영, P1 커서 복원+예약 렌더,
+   P3 선택·이미지 포커스 정리, 매니저 윈도우·pin·footprint,
+   **H (parked 오버레이 회피)**: 분리 상태 재계산도 파트 분할 유지 + 가시 글자
+   이미지 rect 침범 0, **I (리사이즈)**: 축소 시 마운트 축소·확대 시 확대,
+   **J (성능)**: 30페이지 22,750 span → 윈도우 2,310 (약 10%, park 13.2ms),
+   페이지당 재마운트(unpark+render) ~1~10ms. 상세는
+   `scripts/README.md`의 해당 섹션 참조.
+4. **[완료]** 검증 중 발견된 매니저 결함 1건 수정 — **IO flapping**:
+   mm 기반 fractional px 경계에 페이지가 정확히 걸리면 반올림 노이즈로
+   intersection이 0/1 토글되어 park/unpark이 무한 반복됨 (IO 로그 실측).
+   대책 3종: (1) 2px 히스테리시스 밴드(`rootMargin`, root 좌표계라 스케일 무관),
+   (2) rAF 병합 적용 (IO 배치당 DOM surgery 금지 — 최신 `_visible` 기준 프레임당
+   1회), (3) 플레이스홀더 fractional 사이징 (`getBoundingClientRect/scale`,
+   `scale` 옵션, 기본 1 — `offsetWidth` 정수 반올림이 이웃을 경계 너머로 민다).
+5. **[다음]** `benchmark-browser.mjs`에 300p + 마운트/언마운트 시나리오 추가 →
+   노드 수·메모리·재마운트 p95 측정 (§6.2).
+6. **[② 페이지 모델]** 위 로드맵대로 — 마운트 단위·데이터 경로·스레딩 통합.
+7. **[③′ 이후]** 시분할 프로그레시브 레이아웃 등 순차 적용.
+8. **[근본 해결 — 상세 설계 완료]** 스레드 체인 타이핑 비용의 라인 단위 증분
+   설계가 `docs/INCREMENTAL_REFLOW.md`에 있다 (라인 식별자·무효화표·resync
+   알고리즘·DOM 줄 reconciliation·조건부 demand·페이즈별 검증 게이트).
+   본 문서는 진단·가상화 기록으로 유지하고, 리플로우 작업의 기준 문서는
+   `INCREMENTAL_REFLOW.md`로 한다.
+
+### 7.1 스레드 체인 타이핑 비용 귀속 (실측)
+
+30프레임 단일 체인 데모에서 키스트로크당 비용을 위치별·윈도우별로 실측했다
+(헤드리스, `longtask` 합산):
+
+| 조건 | 롱태스크 합 | 엔진 전체 재계산 |
+|---|---|---|
+| head 타이핑, window=1 (3p 마운트) | ~468ms | 30프레임 중 유의미 전체 재계산 다수 |
+| tail 타이핑, window=1 | ~472ms | 1프레임만 전체 재계산 (슬라이스-로컬 해시로 나머지 히트) |
+| head 타이핑, window=0 (2p 마운트) | ~308ms | 동일 체인 (30프레임) |
+
+결론:
+- **위치 무관성이 정상이다.** 엔진은 끝쪽이 6배 저렴하지만(50ms→8ms), 전체의
+  90%를 차지하는 마운트 윈도우 DOM 비용(span 쓰기 + 강제 리플로우 + 페인트
+  커밋)이 위치와 무관하므로 체감이 같다. 사용자의 "끝쪽도 같다"는 관측이 맞다.
+- **윈도우 크기가 직접 비례한다.** 마운트 3→2페이지에 490ms→308ms (페이지당
+  약 160ms, 헤드리스). 타이핑 체감의 즉시 레버는 윈도우 축소와 체인 분할이다.
+- 헤드리스(SwiftShader) 수치는 실기보다 5~10배 부풀려져 있다. 실기 DevTools
+  Performance 패널로 엔진/DOM 분할을 재확인할 것.
+- 시도 후 revert한 것: overflow 카운트 변화 시 span 전체 재생성 제거 —
+  동일 페이지 A/B(강제 recreate vs diff)에서 484ms vs 458ms로 유의미한 차이
+  없음이 실측되어 원복했다 (근거 없는 최적화 금지 원칙).
