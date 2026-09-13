@@ -67,6 +67,7 @@ Before working on any feature, you **must** read the corresponding documentation
 | Place Gun | `docs/EDITING_PLACE_GUN.md` | PlaceGunController, item loading/unloading, click-to-place, pause, reorder |
 | Table editing | `docs/EDITING_TABLE.md` | Table element, cell block selection, cell merge/split, table keyboard shortcuts, TableStructureEditor |
 | Rendering performance | `docs/PERFORMANCE.md` | LRU caching, char width cache, style cache, queueMicrotask batch rendering, incremental style sheet update, skeleton layout cache |
+| Multi-page virtualization | `docs/VIRTUALIZATION.md` | Document-scale diagnosis (hundreds of pages), DOM virtualization design + gaps (G1~G4) + pre-implementation patches (P1~P4), Web Worker failure analysis, `transform: scale` compatibility rules |
 | Vanilla JS API reference | `docs/API.md` | Custom Element public API (properties, methods, events), utility functions, constants |
 | React component layer | `docs/REACT_COMPONENT.md` | React wrapper components, props, hooks (`useEditManager`, `useLayoutElement`, `useEditableText`) |
 | Engine layer (Node.js) | `docs/ENGINE.md` | `src/engine/` classes, ppm injection, RGBA data, overlap detection, Node.js compatibility |
