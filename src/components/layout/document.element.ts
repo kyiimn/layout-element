@@ -582,7 +582,7 @@ export class LayoutDocumentElement extends HTMLElement {
       for (const result of results) {
         for (const id of result.correctedFrames ?? []) correctedFrames.add(id);
       }
-      const domParagraphs = this.querySelectorAll('x-layout-paragraph');
+      const domParagraphs = this.querySelectorAll<LayoutParagraphElement>('x-layout-paragraph');
       for (const frameId of affectedFrames) {
         if (sources.has(frameId) && !correctedFrames.has(frameId)) continue;
         const domPe = Array.from(domParagraphs).find(p => p.id === frameId);
@@ -633,7 +633,7 @@ export class LayoutDocumentElement extends HTMLElement {
     }
     const engineLookup = engine.findEnginesByIds(frameIds);
 
-    const domParagraphs = this.querySelectorAll('x-layout-paragraph');
+    const domParagraphs = this.querySelectorAll<LayoutParagraphElement>('x-layout-paragraph');
     const synced = new Set<string>();
     for (const thread of threads) {
       for (const frameId of thread.paragraphIds ?? []) {
