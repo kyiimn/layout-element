@@ -311,6 +311,138 @@ const r = await page.evaluate(async () => {
   docH.remove();
   out.H = { H1, H2, H3, H4 };
 
+  // ── K. 스레드 + park (엔진 story 보존) ──
+  // parked 스냅샷은 extractData 기반이라 비-head 프레임 content가 undefined다.
+  // _buildParagraphEngine의 `?? pe.textContent` 가드가 story를 보존해야 하며,
+  // 분리 상태에서도 체인 feed-forward가 parked 프레임 엔진을 갱신해야 한다.
+  const docT = document.createElement('x-layout-document');
+  document.body.appendChild(docT);
+  const kStory = '스레드파크검증본문가나다라.'.repeat(110);
+  docT.data = {
+    width: 190, height: 400, columns: 1, gap: 0,
+    paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4 },
+    threads: [{ id: 'kt', paragraphIds: ['tframe-0', 'tframe-1'], content: kStory }],
+    children: [
+      { type: 'box', id: 'tpage-0', position: 'absolute', left: 10, top: 0, width: 170, height: 100,
+        children: { type: 'paragraph', id: 'tframe-0', content: kStory, paragraphStyle: {}, textStyle: {} } },
+      { type: 'box', id: 'tpage-1', position: 'absolute', left: 10, top: 115, width: 170, height: 100,
+        children: { type: 'paragraph', id: 'tframe-1', content: '', paragraphStyle: {}, textStyle: {} } },
+      { type: 'box', id: 'tpage-2', position: 'absolute', left: 10, top: 230, width: 170, height: 100,
+        children: { type: 'paragraph', id: 'tpara-2', content: '일반문단가나다라.', paragraphStyle: {}, textStyle: {} } },
+    ],
+  };
+  await docT.render();
+  await sleep(400);
+  const tbox = (id) => [...docT.querySelectorAll('x-layout-box')].find(b => b.id === id);
+  const tpara = (boxId) => tbox(boxId).querySelector('x-layout-paragraph');
+  // 엔진 배치 텍스트 (visible만 — 오버플로우 라인은 DOM에 span이 없으므로 제외).
+  // renderText와 동일 규칙: effective 높이 누적 초과분은 스킵한다.
+  const engVisibleText = (pe) => {
+    const cols = pe.columnContents;
+    const inheritH = pe.inheritStyle?.parentHeight ?? 0;
+    const effH = inheritH + (pe.baseLineHeight - pe.fontSize);
+    let out = '';
+    for (const col of cols) {
+      let acc = 0, hid = false;
+      for (const line of col) {
+        const lh = line.lineHeight ?? pe.baseLineHeight;
+        const ov = hid || (effH > 0 && acc + lh > effH + 1e-6);
+        if (ov) { hid = true; continue; }
+        acc += lh;
+        for (const part of line.parts) out += part.content.join('');
+      }
+    }
+    return out;
+  };
+  const domTextOf = (p) => [...p.querySelectorAll('x-layout-column')]
+    .map(col => [...col.shadowRoot.querySelectorAll('span[data-source-offset]')].map(s => s.textContent).join('')).join('');
+  const engFrame1 = () => docT.engine.findEngineById('tframe-1');
+  const K0match = domTextOf(tpara('tpage-1')) === engVisibleText(engFrame1());
+  const cfBefore = engFrame1().contentFrom;
+  const domBefore = domTextOf(tpara('tpage-1'));
+  docT.parkPage('tpage-1');
+  docT.data = docT.data;
+  await sleep(300);
+  const K1 = {
+    parked: JSON.stringify(docT.parkedPageIds),
+    items: docT.items.length,
+    storyKept: engFrame1().textContent.length === kStory.length,
+    contentFromKept: engFrame1().contentFrom === cfBefore,
+    engines: docT.engine.childBoxEngines.length,
+  };
+  const restoredT = docT.unparkPage('tpage-1');
+  await restoredT.render();
+  await sleep(300);
+  const K2 = {
+    restored: restoredT && restoredT.id === 'tpage-1',
+    stable: domTextOf(tpara('tpage-1')) === domBefore,
+    match: domTextOf(tpara('tpage-1')) === engVisibleText(engFrame1()),
+  };
+  // 분리 상태 체인 전파: head 타이핑 → parked 프레임 엔진 갱신 → 복원 시 화면 반영
+  docT.parkPage('tpage-1');
+  const cfParked = engFrame1().contentFrom;
+  const emT = docT.editManager;
+  emT.textEditMode = true;
+  const headP = tpara('tpage-0');
+  headP.editableText = true;
+  await sleep(200);
+  emT.focusParagraph(headP);
+  await sleep(200);
+  emT._focusedController._textarea.focus();
+  emT._focusedController.setCursor({ textOffset: 0 });
+  document.execCommand('insertText', false, 'Q');
+  await sleep(800);
+  const K3engine = {
+    shifted: engFrame1().contentFrom === cfParked + 1,
+    engines: docT.engine.childBoxEngines.length,
+  };
+  const restoredT2 = docT.unparkPage('tpage-1');
+  await restoredT2.render();
+  await sleep(300);
+  const K3 = {
+    ...K3engine,
+    // head 삽입은 하류 slice의 주소만 +1 옮기고 내용물은 동일하다
+    // (동일 용량 소비) — DOM 불변이 정답이다. 전파 증명은 shifted가 담당한다.
+    stable: domTextOf(tpara('tpage-1')) === domBefore,
+    match: domTextOf(tpara('tpage-1')) === engVisibleText(engFrame1()),
+  };
+  // ── K4. 범위-증명 스코프: tail 타이핑은 prefix를 건드리지 않는다 ──
+  // frame-1(마지막, 마운트)에 타이핑 → frame-0은 엔진(layoutText 0회)도
+  // DOM(render-complete 미발화, span 생존)도 손대지 않아야 한다.
+  // 경계 글자가 한글 음절이므로 금칙 교정 발화 없음 (결정적).
+  // 주의: 포커스 동기화 자체가 index 모드 flush를 유발하므로 (오늘과 동일,
+  // 경계+하류만 배치) warmup 1타 후 델타만 측정한다.
+  const tailP = tpara('tpage-1');
+  emT.focusParagraph(tailP);
+  await sleep(200);
+  const markF0 = tpara('tpage-0').querySelector('x-layout-column').shadowRoot.querySelector('span[data-source-offset]');
+  const engF0 = docT.engine.findEngineById('tframe-0');
+  let f0Layouts = 0;
+  const origLayoutF0 = engF0.layoutText.bind(engF0);
+  engF0.layoutText = (...a) => { f0Layouts++; return origLayoutF0(...a); };
+  let rcCount = 0;
+  const rcListener = () => { rcCount++; };
+  emT._focusedController._textarea.focus();
+  emT._focusedController.setCursor({ textOffset: engFrame1().contentFrom + 5 });
+  document.execCommand('insertText', false, 'A');
+  await sleep(800);
+  f0Layouts = 0;
+  rcCount = 0;
+  docT.addEventListener('render-complete', rcListener);
+  document.execCommand('insertText', false, 'Q');
+  await sleep(800);
+  docT.removeEventListener('render-complete', rcListener);
+  const K4 = {
+    f0Layouts,
+    rcCount,
+    markAlive: markF0.isConnected,
+    match: domTextOf(tpara('tpage-1')) === engVisibleText(engFrame1()),
+  };
+  out.K4 = K4;
+  emT.blurParagraph();
+  docT.remove();
+  out.K = { K0match, K1, K2, K3 };
+
   // ── G. PageMountManager ──
   // 주의: bench 페이지(상단 bench 문서와 검증 문서를 공유)이므로 절대 스크롤
   // 좌표가 아니라 scrollIntoView로 대상 페이지를 뷰포트에 둔다.
@@ -520,6 +652,16 @@ check('G. 매니저: pin 유지', r.G.pinnedKept === true);
 check('G. 매니저: unpin 후 분리', r.G.unpinnedGone === true);
 check('G. 매니저+G1: data 세터 후 마운트 수 안정 + 엔진 완결', r.G.mountedCountStable === true && r.G.engines === 6 && r.G.extractChildren === 6);
 check('G. 매니저: 전 페이지 복원 + 최종 정합', r.G.allRemounted === true && r.G.finalMatch === true);
+check('K. 스레드 기준선: 프레임 DOM≡엔진', r.K.K0match === true);
+check('K. park+layout 후 story 보존', r.K.K1.storyKept === true, `len vs story`);
+check('K. park+layout 후 체인 유지', r.K.K1.contentFromKept === true && r.K.K1.engines === 3, `engines=${r.K.K1.engines}`);
+check('K. park+layout 후 보관 유지', r.K.K1.parked === '["tpage-1"]' && r.K.K1.items === 2, `items=${r.K.K1.items}`);
+check('K. unpark 후 안정 + 정합', r.K.K2.restored === true && r.K.K2.stable === true && r.K.K2.match === true);
+check('K. 핵심: 분리 상태 체인 전파', r.K.K3.shifted === true);
+check('K. 핵심: 복원 시 slice 안정 + 정합', r.K.K3.stable === true && r.K.K3.match === true);
+check('K4. 범위-증명: prefix 엔진 미실행', r.K4.f0Layouts === 0, `layouts=${r.K4.f0Layouts}`);
+check('K4. 범위-증명: prefix 렌더 미발화', r.K4.rcCount === 1, `renderCompletes=${r.K4.rcCount}`);
+check('K4. 범위-증명: prefix span 생존 + tail 정합', r.K4.markAlive === true && r.K4.match === true);
 check('H. 오버랩 기준선: 교차 라인 파트 분할 + 정합', r.H.H1.split === true && r.H.H1.match === true);
 check('H. 핵심: 분리 상태 재계산도 회피 유지 + 정합', r.H.H2.split === true && r.H.H2.match === true && r.H.H2.engines === 2);
 check('H. 핵심: 가시 글자 이미지 rect 침범 0', r.H.H3.checked > 0 && r.H.H3.inside === 0, `checked=${r.H.H3.checked}`);

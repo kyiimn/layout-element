@@ -453,12 +453,29 @@ export class ParagraphEngine {
       this._plainTextCache = shared;
       return shared;
     }
-    let result = "";
-    for (const item of tc) {
-      result += typeof item === "string" ? item : item.content;
-    }
+    const result = ParagraphEngine.plainTextOf(tc);
     ParagraphEngine._PLAIN_TEXT_BY_REF.set(tc, result);
     this._plainTextCache = result;
+    return result;
+  }
+
+  /**
+   * 콘텐츠의 평문 문자열을 반환한다 (`plainText` 게터와 동일 규약).
+   * 스레드 writeback의 편집 범위 산출처럼 엔진 인스턴스 없이 평문이 필요할 때
+   * 사용한다. 정적 참조 캐시를 공유하므로 체인당 1회만 O(N) 평탄화를 수행한다.
+   *
+   * @param content - 텍스트 콘텐츠 (문자열 또는 인라인 런 배열)
+   * @returns 평문 문자열 (런 content 이어붙임, `\n` 포함 구조 그대로)
+   */
+  public static plainTextOf(content: string | (string | TextInlineData)[]): string {
+    if (typeof content === "string") return content;
+    const shared = ParagraphEngine._PLAIN_TEXT_BY_REF.get(content);
+    if (shared !== undefined) return shared;
+    let result = "";
+    for (const item of content) {
+      result += typeof item === "string" ? item : item.content;
+    }
+    ParagraphEngine._PLAIN_TEXT_BY_REF.set(content, result);
     return result;
   }
 

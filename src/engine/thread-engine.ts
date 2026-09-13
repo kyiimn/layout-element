@@ -42,7 +42,45 @@ export interface ThreadLayoutResult {
   skipped?: boolean;
   /** 경계 교정 clamp로 재배치된 프레임 id (DOM 재렌더 대상 통지용) */
   correctedFrames?: string[];
+  /**
+   * 이번 패스에 실제 배치(`updateThreadContext` + `layoutText`)를 수행한
+   * 프레임 id. 범위-증명 스킵으로 건너뛴 프레임은 제외된다.
+   * DOM 재렌더 범위 판정에 사용한다. 전체 스킵(`skipped: true`)이거나
+   * 생략된 경우 호출자는 기존 동작(영향 프레임 전체)을 유지해야 한다.
+   */
+  laidOutFrameIds?: string[];
 }
+
+  /**
+   * 스레드별 커밋 기록 (범위-증명용).
+   *
+   * 마지막 배치에서 확정된 contentFrom 연쇄다. 키스트로크마다 story가 바뀌어도,
+   * 커밋 tail 이전 영역은 불변이 증명되므로 해당 프레임의 배치를 생략할 수 있다.
+   * 마지막 프레임은 항상 배치하므로 (tail·overset 엣지 소거) 기록에 tail이
+   * 별도로 필요 없다.
+   */
+  interface ThreadCommitRecord {
+    /** 커밋 시점 프레임별 contentFrom (체인 순서) */
+    contentFrom: number[];
+  }
+
+  /**
+   * 스레드 배치 옵션 (범위-증명 demand).
+   */
+  export interface ThreadLayoutOptions {
+    /**
+     * 스레드 키 → 편집 시작 오프셋(Ps, story plain 공간).
+     * 생략된 스레드는 0(전체 배치, 기존 동작).
+     */
+    editPsByThreadKey?: ReadonlyMap<string, number>;
+    /**
+     * 항상 배치할 프레임 id (편집 진입점 보장용 — 보통 포커스된 문단).
+     * 범위-증명 스킵 대상에서도 제외된다. 편집 중인 프레임의 모델이
+     * 구 story에 머무르면 커밋이 구 내용 기반으로 이뤄져 다른 프레임의
+     * 편집을 덮어쓰므로, 포커스된 프레임은 절대 스킵하지 않는다.
+     */
+    pinnedFrameIds?: ReadonlySet<string>;
+  }
 
 /**
  * 스레딩 오케스트레이터. `create()` 팩토리로만 생성한다.
@@ -56,7 +94,83 @@ export class ThreadEngine {
    */
   private readonly _lastInputByThread = new Map<string, unknown[]>();
 
+  /**
+   * 스레드별 커밋 기록 (범위-증명용). 마지막 전체/부분 배치에서 확정된
+   * contentFrom 연쇄다. `_lastInputByThread`가 입력 불변 스킵용이라면,
+   * 이것은 편집 범위와 무관하게 유효한 tail 증명용이다.
+   */
+  private readonly _committedByThread = new Map<string, ThreadCommitRecord>();
+
+  /**
+   * 범위-증명으로 스킵된(구 story 참조를 보유한) 프레임 id — 스레드 키별.
+   * 배치 패스가 직접 기록한다. 편집 안전장치(`ensureThreadFramesFresh`)가
+   * 이 집합으로 신선화 필요성을 판정한다. 전체 재배치(스킵 없음)면 삭제된다.
+   */
+  private readonly _staleSkippedByThread = new Map<string, Set<string>>();
+
   private constructor() {}
+
+  /**
+   * 스레드 키를 구한다. `_lastInputByThread`/`_committedByThread`와
+   * 편집 범위 맵이 공유하는 단일 소스다.
+   *
+   * @param thread - 대상 스레드
+   * @returns 스레드 키 (id 우선, 없으면 프레임 id 결합)
+   */
+  public static threadKeyOf(thread: ThreadData): string {
+    return thread.id ?? (thread.paragraphIds ?? []).join('\u0000');
+  }
+
+  /**
+   * 지정 스레드 프레임들 중 범위-증명으로 스킵되어 구 story 참조를 보유한
+   * 것이 있는지 반환한다. `DocumentEngine.ensureThreadFramesFresh`가
+   * 편집 진입 전 신선화 필요성을 판정하는 데 사용한다.
+   *
+   * @param threadKey - 스레드 키
+   * @returns 스킵 프레임이 하나라도 있으면 true
+   */
+  public hasStaleSkippedFrames(threadKey: string): boolean {
+    const stale = this._staleSkippedByThread.get(threadKey);
+    return stale !== undefined && stale.size > 0;
+  }
+
+  /**
+   * 범위-증명 clean 판정. 프레임의 slice가 편집 범위 밖에 있음이 증명되면
+   * true — textContent 재주입·배치를 모두 생략해도 정확하다.
+   *
+   * 증명 (strict 부등호가 핵심): 커밋 tail(F) < Ps ⟹ F의 slice [.., tail)은
+   * 편집 시작점 이전에 완전히 끝나므로 내용·소비량 모두 불변. tail == Ps인
+   * 경계 프레임은 append-at-end처럼 slice가 확장될 수 있어 dirty로 처리한다
+   * (보수적, 프레임당 최대 1~2개). 마지막 프레임은 항상 dirty다 —
+   * tail·overset 엣지(확장·소진·tail 마킹)를 증명 위치에서 제외한다.
+   *
+   * @param committed - 커밋 기록 (체인 길이 일치 확인됨)
+   * @param engines - 체인 순서 프레임 엔진 배열
+   * @param index - 판정할 프레임 인덱스
+   * @param editPs - 편집 시작 오프셋(story plain 공간)
+   * @param pinned - 항상 배치할 프레임 id 집합 (편집 진입점 보장용).
+   *   포함된 프레임은 범위-증명과 무관하게 스킵하지 않는다.
+   * @returns 스킵해도 정확하면 true
+   */
+  private _isFrameClean(
+    committed: ThreadCommitRecord,
+    engines: ParagraphEngine[],
+    index: number,
+    editPs: number,
+    pinned?: ReadonlySet<string>,
+  ): boolean {
+    if (index >= engines.length - 1) return false;
+    const engine = engines[index];
+    if (pinned !== undefined) {
+      const id = engine.id;
+      if (id !== undefined && pinned.has(id)) return false;
+    }
+    return committed.contentFrom[index + 1] < editPs
+      && engine.contentFrom === committed.contentFrom[index]
+      && engine.hasLayoutCache
+      && engine.isThreadFrame
+      && !engine.hasPendingChanges;
+  }
 
   /**
    * 정적 팩토리 메서드.
@@ -125,12 +239,15 @@ export class ThreadEngine {
    *
    * @param threads - 문서 스레드 배열 (검증 후)
    * @param findEngineById - 엔진 트리 id 검색 함수 (DocumentEngine.findEngineById)
+   * @param batchLookup - 트리 1회 순회 일괄 조회 함수 (선택)
+   * @param opts - 배치 옵션 (편집 범위 Ps 맵, pinned 프레임 집합)
    * @returns 스레드별 배치 결과 배열
    */
   public layoutThreads(
     threads: ThreadData[],
     findEngineById: (id: string) => { extractData?: unknown } | undefined,
     batchLookup?: ThreadFrameBatchLookup,
+    opts?: ThreadLayoutOptions,
   ): ThreadLayoutResult[] {
     // validate와 동일한 first-claim-wins로 프레임 소속을 확정한다 —
     // 한 프레임이 여러 thread에 중복 소속되면 첫 유효 thread만 소유한다.
@@ -156,8 +273,8 @@ export class ThreadEngine {
     const results: ThreadLayoutResult[] = [];
     for (const thread of valid) {
       const result = lookup
-        ? this._layoutOneThread(thread, lookup)
-        : this._layoutOneThread(thread, findEngineById);
+        ? this._layoutOneThread(thread, lookup, opts)
+        : this._layoutOneThread(thread, findEngineById, opts);
       results.push(result);
     }
     return results;
@@ -189,11 +306,13 @@ export class ThreadEngine {
    *
    * @param thread - 대상 스레드
    * @param findEngineById - 엔진 트리 id 검색 함수
+   * @param opts - 배치 옵션 (편집 범위 Ps, pinned 집합)
    * @returns 배치 결과
    */
   private _layoutOneThread(
     thread: ThreadData,
     findEngineById: (id: string) => { extractData?: unknown } | undefined,
+    opts?: ThreadLayoutOptions,
   ): ThreadLayoutResult {
     const frameIds = thread.paragraphIds ?? [];
     const engines: ParagraphEngine[] = [];
@@ -207,15 +326,30 @@ export class ThreadEngine {
       return { threadId: thread.id, frames: [] };
     }
 
+    const threadKey = ThreadEngine.threadKeyOf(thread);
+    const editPs = opts?.editPsByThreadKey?.get(threadKey) ?? 0;
+    const pinned = opts?.pinnedFrameIds;
+
     // 1. 모든 프레임이 story 전체를 textContent로 소유한다.
     //    배치 시작점은 contentFrom(plain 오프셋) 단일 소스로 제어한다 —
     //    tail 슬라이싱 주입과 contentFrom 스킵을 함께 쓰면 이중으로 건너뛴다.
     //    head의 contentFrom = 0 (pull-back의 근거: story 축소 시 이후 프레임이
     //    자연히 비워진다).
+    //    범위-증명으로 clean한 프레임은 재주입을 생략한다 — 재주입은
+    //    `_dirty`를 세워 스킵 판정을 무력화하므로, 생략해야 스킵이 성립한다.
+    //    clean 프레임은 구 story 참조 + 구 배치를 함께 유지한다 (유효한 과거
+    //    스냅샷 — 자기모순 없음).
     const head = engines[0];
     const storyContent = thread.content ?? head.textContent;
-    for (const engine of engines) {
-      if (engine.textContent !== storyContent) {
+    const committedForAssign = this._committedByThread.get(threadKey);
+    const committedChain = committedForAssign !== undefined
+      && committedForAssign.contentFrom.length === engines.length
+      ? committedForAssign
+      : null;
+    for (let ei = 0; ei < engines.length; ei++) {
+      const engine = engines[ei];
+      if (engine.textContent !== storyContent
+        && (committedChain === null || !this._isFrameClean(committedChain, engines, ei, editPs, pinned))) {
         engine.textContent = storyContent;
       }
     }
@@ -226,13 +360,15 @@ export class ThreadEngine {
     //    (c) 전 프레임 hasLayoutCache — 배치 입력이 바뀌면 data setter가
     //        resetIncrementalState()로 캐시를 지우므로, 캐시 존재가
     //        "지오메트리·스타일·오버랩·story 모두 불변"의 증명이다.
-    //    세 조건이 성립하면 updateThreadContext+layoutText를 통째로
-    //    스킵한다 — layoutText의 내부 캐시 히트조차 해시 문자열 구성
-    //    비용(story 전체 직렬화, 프레임당)을 지불하므로 (R3).
-    const threadKey = thread.id ?? frameIds.join('\u0000');
+    // 세 조건이 성립하면 updateThreadContext+layoutText를 통째로
+    // 스킵한다 — layoutText의 내부 캐시 히트조차 해시 문자열 구성
+    // 비용(story 전체 직렬화, 프레임당)을 지불하므로 (R3).
     const lastInput = this._lastInputByThread.get(threadKey);
     if (lastInput !== undefined
       && this._threadInputUnchanged(engines, lastInput)) {
+      // stale 집합의 의미("구 story 참조 보유")는 step-1 재주입이 끝난
+      // 이 시점에 성립하지 않는다 — 스킵 판정 통과 = 전 프레임 동일 참조.
+      this._staleSkippedByThread.delete(threadKey);
       const placedFrames = engines.map(e => e.id ?? '');
       const oversetAt = engines[engines.length - 1].isThreadTail
         && engines[engines.length - 1].overflowContentFrom >= 0
@@ -246,11 +382,15 @@ export class ThreadEngine {
     //    오류가 아니다. 마지막 프레임(또는 소진 지점)만 tail로 마킹한다.
     const storyPlainLen = head.totalChars;
     const placedFrames: string[] = [];
+    const laidOutFrameIds: string[] = [];
     const correctedFrames: string[] = [];
     const contentFromChain: number[] = [];
     let oversetAt: string | undefined;
     let contentFrom = 0;
     let exhausted = false;
+
+    // 범위-증명 스킵용 커밋 기록은 step-1에서 이미 조회했다 (동기 실행이라
+    // 중간에 변하지 않는다). 없거나 체인 길이가 다르면 전체 배치한다.
 
     for (let i = 0; i < engines.length; i++) {
       const engine = engines[i];
@@ -261,9 +401,31 @@ export class ThreadEngine {
         // threadTail은 마지막 프레임에만 마킹한다 — 소진 경로의 중간
         // 프레임까지 tail로 마킹하면 체인에 tail이 여러 개 생겨
         // "tail 정확히 1개" 계약(RULES §1.10)이 깨진다.
+        // 소진 경로는 항상 실행한다 (조기 종료라 저렴): story 길이 변화에
+        // contentFrom이 추종해야 하므로 스킵 대상이 아니다.
         engine.updateThreadContext({ contentFrom: storyPlainLen, isThreadFrame: true, threadTail: isLastFrame });
         engine.layoutText();
+        if (engine.id) laidOutFrameIds.push(engine.id);
         contentFromChain.push(engine.contentFrom);
+        continue;
+      }
+
+      // 범위-증명 스킵: 커밋 tail이 편집 시작점보다 완전히 앞이면 이 프레임의
+      // slice는 불변임이 보장된다 (편집이 뒤에서 일어났으므로). textContent
+      // 재주입·updateThreadContext·layoutText를 모두 생략하고 커밋값을
+      // 그대로 쓴다 (step-1에서도 동일 판정으로 재주입을 생략했으므로
+      // `_dirty`·캐시가 그대로다). 스킵 프레임은 구 story 참조를 보유하므로
+      // stale 집합에 기록한다 — 그 프레임이 편집 소스가 되기 전에 신선화가
+      // 반드시 선행되어야 한다 (ensureThreadFramesFresh).
+      if (committedChain !== null
+        && this._isFrameClean(committedChain, engines, i, editPs, pinned)) {
+        contentFromChain.push(committedChain.contentFrom[i]);
+        contentFrom = i + 1 < engines.length
+          ? committedChain.contentFrom[i + 1]
+          : contentFrom;
+        const staleSet = this._staleSkippedByThread.get(threadKey) ?? new Set<string>();
+        if (engine.id) staleSet.add(engine.id);
+        this._staleSkippedByThread.set(threadKey, staleSet);
         continue;
       }
 
@@ -295,6 +457,14 @@ export class ThreadEngine {
         if (corrected && prevEngine.id) correctedFrames.push(prevEngine.id);
         // prev 재배치 확정 — clamp가 풀리지 않았다면 이번 프레임 시작은
         // prev의 새 tail이다. prev가 clamp 해제(소진 등)면 contentFrom 유지.
+        // prev가 범위-증명으로 스킵된 상태였더라도 여기서 실제 배치되므로
+        // laidOut에 포함한다 (DOM 재렌더 대상).
+        if (corrected) {
+          const prevId = prevEngine.id ?? '';
+          if (prevId && !laidOutFrameIds.includes(prevId)) laidOutFrameIds.push(prevId);
+        }
+        // prev 재배치 확정 — clamp가 풀리지 않았다면 이번 프레임 시작은
+        // prev의 새 tail이다. prev가 clamp 해제(소진 등)면 contentFrom 유지.
         const newTail = prevEngine.overflowContentFrom;
         if (clamp !== contentFrom && newTail >= 0) {
           contentFrom = newTail;
@@ -305,6 +475,7 @@ export class ThreadEngine {
 
       engine.updateThreadContext({ contentFrom, isThreadFrame: true, threadTail: isLastFrame });
       engine.layoutText();
+      if (engine.id) laidOutFrameIds.push(engine.id);
       contentFromChain.push(engine.contentFrom);
 
       const engineId = engine.id ?? '';
@@ -329,8 +500,26 @@ export class ThreadEngine {
     // 게터로 읽는다 (배치 직후 캐시 존재, 이후 data setter가 지우면
     // 다음 판정이 실패해 재배치된다).
     this._lastInputByThread.set(threadKey, [storyContent, ...contentFromChain]);
+    // 범위-증명용 커밋 기록은 라이브 값으로 다시 읽는다 — clamp 교정이 prev
+    // 프레임의 tail을 바꿨을 수 있어 루프 중 기록과 다를 수 있다.
+    // 스킵된 프레임은 손대지 않았으므로 커밋값 그대로 정확하다.
+    this._committedByThread.set(threadKey, {
+      contentFrom: engines.map(e => e.contentFrom),
+    });
+    // 이번 패스에서 배치된 프레임은 최신 story 참조를 소유하므로 stale에서
+    // 제거한다. 스킵 없이 전체 배치면 stale 집합은 비게 된다.
+    for (const id of laidOutFrameIds) this._staleSkippedByThread.get(threadKey)?.delete(id);
+    if (this._staleSkippedByThread.get(threadKey)?.size === 0) {
+      this._staleSkippedByThread.delete(threadKey);
+    }
 
-    return { threadId: thread.id, frames: placedFrames, oversetAt, correctedFrames: correctedFrames.length > 0 ? correctedFrames : undefined };
+    return {
+      threadId: thread.id,
+      frames: placedFrames,
+      oversetAt,
+      correctedFrames: correctedFrames.length > 0 ? correctedFrames : undefined,
+      laidOutFrameIds: laidOutFrameIds.length > 0 ? laidOutFrameIds : undefined,
+    };
   }
 
   /**

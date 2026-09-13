@@ -1111,6 +1111,23 @@ export class EditManager {
       paragraph.editableText = true;
     }
 
+    // 범위-증명 편집 안전장치: 스킵되어 구 story 참조를 보유한 스레드 프레임을
+    // 편집 소스로 삼기 전에 신선화한다. 생략하면 커밋이 구 내용 기반으로
+    // 이뤄져 다른 프레임의 편집이 덮어써진다 (실측: IME 커밋·경계 backspace
+    // 스위트에서 story 소실 재현). 신선화 시 textarea/runMap은 postRender
+    // 동기화가 필요하므로 focused 문단을 flush한다.
+    const engine = this._docEl.engine;
+    if (paragraph.id) {
+      const refreshed = engine?.ensureThreadFramesFresh(new Set([paragraph.id]));
+      if (refreshed) {
+        if (this.focusedParagraph === paragraph) {
+          paragraph.flushRender();
+        } else {
+          paragraph.scheduleRender();
+        }
+      }
+    }
+
     let controller = this._findControllerByParagraph(paragraph);
     if (!controller) {
       paragraph.editableText = false;

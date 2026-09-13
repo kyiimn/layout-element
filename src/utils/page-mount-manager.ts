@@ -49,8 +49,9 @@ export interface PageMountManagerOptions {
  * - 마운트 판정은 인덱스 윈도우(가시 페이지 ± `window`) 방식이다.
  *   `getBoundingClientRect` 기반 intersection은 transform을 반영하므로
  *   `transform: scale` 줌과 무관하게 동작한다. 경계 flapping 방지용 2px
- *   히스테리시스 밴드(`rootMargin`, root 좌표계라 스케일 무관) + rAF 병합 적용으로
- *   IO 배치당 DOM surgery가 발생하지 않는다.
+ *   히스테리시스 밴드(`rootMargin`, root 좌표계라 스케일 무관)가 있어 IO 배치마다
+ *   직접 적용해도 DOM surgery가 반복되지 않는다 (rAF 등 프레임 생산 의존
+ *   매커니즘은 정적 페이지에서 starve되므로 사용하지 않는다).
  * - 마운트 단위는 최상위 박스 서브트리 전체이다. 부모-자식 connectedCallback
  *   순서가 DOM 삽입 순서를 따르므로 서브트리 통째 재삽입만 안전하다.
  * - 플레이스홀더 footprint는 fractional 레이아웃 px(`getBoundingClientRect /
@@ -89,10 +90,11 @@ export class PageMountManager {
   private readonly _pinned = new Set<string>();
   /**
    * 최신 가시 집합. IO 배치마다 갱신되고 `_apply()`가 소비한다.
-   * 경계 flapping 배치는 여기서 흡수되어 DOM surgery까지 전파되지 않는다.
+   * 경계 flapping은 2px 히스테리시스 밴드가 흡수하므로, 배치마다 직접 적용해도
+   * DOM surgery가 반복되지 않는다. rAF 같은 프레임 생산 의존 매커니즘은 쓰지
+   * 않는다 — 정적 페이지에서는 프레임이 생산되지 않아 적용이 starve될 수 있다.
    */
   private readonly _visible = new Set<string>();
-  private _applyScheduled = false;
 
   /**
    * @param options - 매니저 옵션
@@ -236,24 +238,12 @@ export class PageMountManager {
         changed = true;
       }
     }
-    if (changed) this._scheduleApply();
-  }
-
-  /**
-   * rAF에 적용을 예약한다. IO 배치는 프레임당 여러 번 올 수 있고 detach 직후
-   * 무효 배치가 섞이므로, 최신 `_visible` 기준으로 프레임당 1회만 적용한다.
-   */
-  private _scheduleApply(): void {
-    if (this._applyScheduled) return;
-    this._applyScheduled = true;
-    requestAnimationFrame(() => {
-      this._applyScheduled = false;
-      this._apply();
-    });
+    if (changed) this._apply();
   }
 
   /**
    * 최신 가시 집합을 인덱스 윈도우로 확장해 마운트 상태를 수렴시킨다.
+   * IO 배치는 프레임당 최대 1회이므로 직접 적용해도 프레임당 1회로 수렴한다.
    */
   private _apply(): void {
     if (!this._observer) return;

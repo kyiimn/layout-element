@@ -23,7 +23,7 @@ import { TableEngine, TableCellEngine } from "./table-engine";
 import { prepareImageDecoder } from "./image-decoder";
 import { computeLineHeightMm, resolveLineGap } from "./line-height";
 import { DEFAULT_LINE_GAP_MODE } from "@/constants";
-import { ThreadEngine, type ThreadLayoutResult } from "./thread-engine";
+import { ThreadEngine, type ThreadLayoutOptions, type ThreadLayoutResult } from "./thread-engine";
 
 let _engineIdCounter = 0;
 
@@ -984,7 +984,7 @@ export class DocumentEngine {
    * ThreadEngine으로 순차 배치한다. threads가 없으면 no-op (기존 동작
    * byte-identical). `_buildTree()` 이후에 호출되어야 프레임 엔진이 존재한다.
    */
-  private _layoutThreads(): ThreadLayoutResult[] {
+  private _layoutThreads(opts?: ThreadLayoutOptions): ThreadLayoutResult[] {
     if (!this._data.threads || this._data.threads.length === 0) return [];
     if (!this._threadEngine) {
       this._threadEngine = ThreadEngine.create();
@@ -994,6 +994,7 @@ export class DocumentEngine {
       this._data.threads,
       id => this.findEngineById(id),
       ids => this.findEnginesByIds(ids),
+      opts,
     );
   }
 
@@ -1012,13 +1013,67 @@ export class DocumentEngine {
    *   해당 프레임의 `textContent`를 소속 thread의 story(`content`)에
    *   writeback한 뒤 체인을 재배치한다 — 편집 프레임의 model이 story의
    *   새 진실이 되기 때문이다.
+   * @param pinnedFrameIds - (선택) 항상 배치할 프레임 id 집합. 보통 포커스된
+   *   문단이다. 범위-증명 스킵 대상에서도 제외되어, 편집 진입점의 모델이
+   *   구 story에 머무르지 않도록 보장한다.
    * @returns 스레드별 배치 결과 배열 (스레드가 없으면 빈 배열)
    */
-  public relayoutThreads(sourceFrameIds?: ReadonlySet<string>): ThreadLayoutResult[] {
+  public relayoutThreads(sourceFrameIds?: ReadonlySet<string>, pinnedFrameIds?: ReadonlySet<string>): ThreadLayoutResult[] {
+    let editPsByThreadKey: Map<string, number> | undefined;
     if (sourceFrameIds && sourceFrameIds.size > 0) {
-      this._writebackThreadStory(sourceFrameIds);
+      editPsByThreadKey = this._writebackThreadStory(sourceFrameIds);
     }
-    return this._layoutThreads();
+    return this._layoutThreads({ editPsByThreadKey, pinnedFrameIds });
+  }
+
+  /**
+   * 지정 스레드 프레임들을 신선한 상태로 만든다 (범위-증명 편집 안전장치).
+   *
+   * 범위-증명 스킵은 프레임이 **구 story 참조 + 구 배치**를 유지하게 한다.
+   * 그 프레임이 나중에 편집 소스가 되면 커밋이 구 내용 기반으로 이뤄져
+   * 다른 프레임의 편집을 덮어쓴다. 이를 차단하기 위해 편집 진입 직전에
+   * 대상 프레임을 신선화한다: 스킵되어 구 story를 보유한 프레임이 있으면
+   * 소스 없는 체인 배치를 1회 수행해 (Ps=0, 전체) 프레임들을 최신 story로
+   * 통일한다. 통상 skip 판정(전체 입력 불변)이 즉시 반환되므로 신선화가
+   * 필요 없을 때 비용은 O(프레임)이다.
+   *
+   * @param frameIds - 편집을 시작할 프레임 id 목록
+   * @returns 신선화가 실제로 수행됐으면 true (호출자는 focused 문단을
+   *   flush하여 postRender의 textarea/runMap 동기화를 확정해야 한다)
+   */
+  public ensureThreadFramesFresh(frameIds: ReadonlySet<string>): boolean {
+    if (!this._data.threads || this._data.threads.length === 0) return false;
+    if (frameIds.size === 0) return false;
+    const te = this._threadEngine;
+    if (!te) return false;
+    const touched = new Set<string>();
+    for (const thread of this._data.threads) {
+      const ids = thread.paragraphIds ?? [];
+      if (!ids.some(id => frameIds.has(id))) continue;
+      const key = ThreadEngine.threadKeyOf(thread);
+      if (te.hasStaleSkippedFrames(key)) touched.add(key);
+    }
+    if (touched.size === 0) return false;
+    // 스킵되어 구 story 참조를 보유한 프레임이 있다: Ps=0 전체 재배치로
+    // 모든 프레임이 최신 story 참조를 소유하게 한다 (통상 변경 감지 스킵 —
+    // 시그니처가 신 story 참조로 동일하면 실제 배치는 생략되지만 step-1
+    // 재주입은 실행되므로 stale 참조가 해소된다).
+    this._layoutThreads();
+    // 재배치가 스킵 프레임을 다시 스킵하지 않도록 — 배치 패스가 이번 틱에
+    // 건드리지 않은 프레임 중 dirty가 남은 것이 있으면 (이전 flush가 parked
+    // 프레임을 배치만 하고 렌더하지 않은 경로) 커밋한다. 읽기 계약
+    // (extractData는 dirty를 허용하지 않음) 대응.
+    for (const thread of this._data.threads) {
+      const key = ThreadEngine.threadKeyOf(thread);
+      if (!touched.has(key)) continue;
+      for (const id of thread.paragraphIds ?? []) {
+        const pe = this.findEngineById(id);
+        if (pe instanceof ParagraphEngine && pe.hasPendingChanges) {
+          pe.layoutText();
+        }
+      }
+    }
+    return true;
   }
 
   /**
@@ -1037,9 +1092,16 @@ export class DocumentEngine {
    *
    * @param sourceFrameIds - 편집이 발생한 프레임 id 집합
    */
-  private _writebackThreadStory(sourceFrameIds: ReadonlySet<string>): void {
+  private _writebackThreadStory(sourceFrameIds: ReadonlySet<string>): Map<string, number> {
+    // 스레드 키 → 편집 시작 오프셋(Ps, story plain 공간). 범위-증명 스킵용.
+    // Ps 이전에 끝나는 프레임(커밋 tail < Ps)은 slice 불변이 증명되어
+    // 배치·렌더를 모두 생략한다. 텍스트 불변(스타일·지오메트리 변경)이면
+    // 소스 프레임의 커밋 contentFrom을 Ps 대신 쓴다 (소스부터 dirty —
+    // strict 부등호가 경계 프레임을 보수적으로 포함한다).
+    // 문자열이 아닌 story(인라인 런 배열)이면 Ps = 0 (전체 배치, 기존 동작).
+    const editPsByThread = new Map<string, number>();
     const threads = this._data.threads;
-    if (!threads) return;
+    if (!threads) return editPsByThread;
     const claimed = new Set<string>();
     for (const thread of threads) {
       const validIds = (thread.paragraphIds ?? []).filter(Boolean)
@@ -1049,8 +1111,45 @@ export class DocumentEngine {
       if (sourceId === undefined) continue;
       const sourcePe = this.findEngineById(sourceId);
       if (!(sourcePe instanceof ParagraphEngine)) continue;
-      thread.content = sourcePe.textContent;
+      const oldStory = thread.content;
+      const newStory = sourcePe.textContent;
+      thread.content = newStory;
+      const key = ThreadEngine.threadKeyOf(thread);
+      // 편집 범위는 평문 공간에서 산출한다 — contentFrom/tail이 평문 오프셋이므로.
+      // 컨트롤러 편집은 textContent를 인라인 런 배열로 rebuild하므로 문자열
+      // 직접 비교가 아니라 평탄화 후 비교해야 실제 편집 경로에서 동작한다.
+      // 평탄화는 정적 참조 캐시를 공유해 체인당 1회만 O(N)을 지불한다.
+      if (oldStory === undefined) {
+        editPsByThread.set(key, 0);
+      } else {
+        const oldPlain = ParagraphEngine.plainTextOf(oldStory);
+        const newPlain = sourcePe.plainText;
+        if (oldPlain.length === newPlain.length
+          && this._firstDiffOffset(oldPlain, newPlain) === oldPlain.length) {
+          // 텍스트 불변(스타일·지오메트리 변경): 소스 프레임부터 dirty.
+          // strict 부등호가 경계 프레임을 보수적으로 포함한다.
+          editPsByThread.set(key, sourcePe.contentFrom);
+        } else {
+          editPsByThread.set(key, this._firstDiffOffset(oldPlain, newPlain));
+        }
+      }
     }
+    return editPsByThread;
+  }
+
+  /**
+   * 두 문자열의 첫 차이 오프셋을 반환한다. 동일하면 짧은 쪽 길이를 반환한다
+   * (뒷부분 추가·삭제 지점). 범위-증명의 편집 시작점(Ps) 산출용.
+   *
+   * @param a - 이전 story
+   * @param b - 새 story
+   * @returns 첫 차이 오프셋
+   */
+  private _firstDiffOffset(a: string, b: string): number {
+    const n = Math.min(a.length, b.length);
+    let i = 0;
+    while (i < n && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+    return i;
   }
 
   /**

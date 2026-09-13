@@ -329,13 +329,15 @@ transform: scale(s)  →  브라우저 컴포지트 단계만 변경 (layout/ref
 2. **[완료]** 회귀 6종 ALL PASS (구현 세션 실측):
    `verify-dom-diff` / `verify-pending-style`(31) / `verify-visual-render`(7) /
    `verify-multicolumn` / `verify-image-edit-mode`(64) / `verify-caret-parking`(28).
-3. **[완료]** 신규 `scripts/verify-virtualization.mjs` 40항목 ALL PASS —
+3. **[완료]** 신규 `scripts/verify-virtualization.mjs` 47항목 ALL PASS —
    park/unpark 엔진 완결, G1 부활 방지, 보관 중 편집 반영, P1 커서 복원+예약 렌더,
    P3 선택·이미지 포커스 정리, 매니저 윈도우·pin·footprint,
    **H (parked 오버레이 회피)**: 분리 상태 재계산도 파트 분할 유지 + 가시 글자
    이미지 rect 침범 0, **I (리사이즈)**: 축소 시 마운트 축소·확대 시 확대,
    **J (성능)**: 30페이지 22,750 span → 윈도우 2,310 (약 10%, park 13.2ms),
-   페이지당 재마운트(unpark+render) ~1~10ms. 상세는
+   페이지당 재마운트(unpark+render) ~1~10ms,
+   **K (스레드+park)**: 분리+layout 후 story 보존·체인 유지, 분리 상태 체인
+   전파(contentFrom +1), 복원 후 slice 안정+정합. 상세는
    `scripts/README.md`의 해당 섹션 참조.
 4. **[완료]** 검증 중 발견된 매니저 결함 1건 수정 — **IO flapping**:
    mm 기반 fractional px 경계에 페이지가 정확히 걸리면 반올림 노이즈로
@@ -348,11 +350,11 @@ transform: scale(s)  →  브라우저 컴포지트 단계만 변경 (layout/ref
    노드 수·메모리·재마운트 p95 측정 (§6.2).
 6. **[② 페이지 모델]** 위 로드맵대로 — 마운트 단위·데이터 경로·스레딩 통합.
 7. **[③′ 이후]** 시분할 프로그레시브 레이아웃 등 순차 적용.
-8. **[근본 해결 — 상세 설계 완료]** 스레드 체인 타이핑 비용의 라인 단위 증분
-   설계가 `docs/INCREMENTAL_REFLOW.md`에 있다 (라인 식별자·무효화표·resync
-   알고리즘·DOM 줄 reconciliation·조건부 demand·페이즈별 검증 게이트).
-   본 문서는 진단·가상화 기록으로 유지하고, 리플로우 작업의 기준 문서는
-   `INCREMENTAL_REFLOW.md`로 한다.
+8. **[근본 원인 분석 완료]** 스레드 체인 타이핑 비용의 분석과 유효 레버가
+   `docs/INCREMENTAL_REFLOW.md`에 있다 (실측 귀속·불가능 결과 3종·체인 분할/
+   윈도우 축소·폐기 대안 기록). 라인 캐시 초안은 shift 편집에서 성립하지
+   않음이 증명되어 폐기됐다. 본 문서는 진단·가상화 기록으로 유지하고,
+   타이핑 비용 후속 작업의 기준 문서는 `INCREMENTAL_REFLOW.md`로 한다.
 
 ### 7.1 스레드 체인 타이핑 비용 귀속 (실측)
 

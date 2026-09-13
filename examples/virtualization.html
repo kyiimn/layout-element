@@ -111,7 +111,7 @@
     <button id="btn-top">맨 위</button>
     <button id="btn-mid">중간</button>
     <button id="btn-bottom">맨 아래</button>
-    <span class="stat" title="30개 프레임이 하나의 story를 공유합니다. 분리된 프레임도 엔진 체인에 남아 흐름이 유지됩니다.">스레드 1체인·30프레임</span>
+    <span class="stat" title="6개 체인이 각 5프레임을 공유합니다. 분리된 프레임도 엔진 체인에 남아 흐름이 유지됩니다. 체인 끝 프레임의 빨간 테두리는 잔여(overset tail) 표시입니다.">스레드 6체인·각 5프레임</span>
     <label><input type="checkbox" id="ck-pin" checked /> 포커스 페이지 고정</label>
     <button id="btn-toggle">가상화 끄기</button>
   </div>
@@ -137,21 +137,38 @@
     const em = doc.editManager;
     em.textEditMode = true;
 
-    // 30페이지 단일 스레드 — 하나의 story가 30개 프레임을 쭉 흐른다.
-    // head(page-0) 문단이 story 전체를 소유하고, 후속 프레임 content는 비운다
-    // (엔진이 feed-forward로 채운다). 30페이지를 채우고도 남도록 overset 분량을
-    // 포함한다 — 마지막 페이지의 빨간 테두리는 체인 끝 잔여(overset tail) 표시다.
+    // 6개 스레드 체인 × 5프레임 — 기사 단위 체인 분할의 라이브 예제.
+    // 단일 30프레임 체인에서는 키당 30프레임이 전부 재계산되지만, 분할 체인에서는
+    // 소속 체인(5프레임)만 재계산된다 (INCREMENTAL_REFLOW.md §4.1).
+    // 각 체인은 5페이지를 채우고 약간 넘치도록 overset 분량을 포함한다 —
+    // 체인 끝 프레임의 빨간 테두리는 잔여(overset tail) 표시다.
+    const CHAINS = 6;
+    const FRAMES_PER_CHAIN = PAGE_COUNT / CHAINS;
     const STORY_UNIT = "가상화스레딩데모본문가나다라라마바사아자차카타파하.";
-    const storyParts = [];
-    for (let k = 0; k < 14; k++) {
-      storyParts.push(`[${String(k).padStart(2, "0")}]` + STORY_UNIT.repeat(120));
+    const buildStory = (c) => {
+      const parts = [];
+      for (let k = 0; k < 3; k++) {
+        parts.push(`[T${c}-${String(k).padStart(2, "0")}]` + STORY_UNIT.repeat(80));
+      }
+      return parts.join("");
+    };
+
+    const threads = [];
+    const stories = [];
+    for (let c = 0; c < CHAINS; c++) {
+      const ids = [];
+      for (let f = 0; f < FRAMES_PER_CHAIN; f++) {
+        ids.push(`vpage-${c * FRAMES_PER_CHAIN + f}-para`);
+      }
+      const story = buildStory(c);
+      stories.push(story);
+      threads.push({ id: `story-${c}`, paragraphIds: ids, content: story });
     }
-    const story = storyParts.join("");
-    const frameIds = [];
-    for (let i = 0; i < PAGE_COUNT; i++) frameIds.push(`vpage-${i}-para`);
 
     const children = [];
     for (let i = 0; i < PAGE_COUNT; i++) {
+      const chain = Math.floor(i / FRAMES_PER_CHAIN);
+      const frameInChain = i % FRAMES_PER_CHAIN;
       children.push({
         type: "box",
         id: `vpage-${i}`,
@@ -163,7 +180,7 @@
         children: {
           type: "paragraph",
           id: `vpage-${i}-para`,
-          content: i === 0 ? story : "",
+          content: frameInChain === 0 ? stories[chain] : "",
           paragraphStyle: {},
           textStyle: {},
         },
@@ -176,7 +193,7 @@
       gap: 0,
       paragraphStyle: { lineGap: 1.2 },
       textStyle: { fontSize: 4 },
-      threads: [{ id: "story-main", paragraphIds: frameIds, content: story }],
+      threads,
       children,
     };
     await doc.render();

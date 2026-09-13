@@ -229,7 +229,7 @@ doc.flipLayout({ axis: 'horizontal', targetId: 'box-42' });       // box-42의 �
 완결 동작한다. 마운트 단위는 최상위 박스 서브트리 전체이다.
 
 관측용 데모: `examples/virtualization.html` (`npm run dev` 후 접속) —
-30페이지 단일 스레드 체인 + 매니저 기본 장착 + 마운트 상태 패널 +
+30페이지 6스레드 체인(각 5프레임) + 매니저 기본 장착 + 마운트 상태 패널 +
 플레이스홀더 틴트. 스크롤만으로 교환을 관측할 수 있다.
 
 ```ts
@@ -1444,11 +1444,19 @@ class ParagraphEngine {
 }
 ```
 
-> **타이핑 전파**: `DocumentEngine.relayoutThreads(sourceFrameIds?)` — 편집 프레임
-> id 집합을 전달하면 `_writebackThreadStory`가 소스 프레임의 `textContent`를
-> 소속 thread의 story(`content`)에 기록한 뒤 체인을 재배치한다. story writeback은
-> 엔진이 소유한다 (엔진-우선 원칙). DOM `LayoutDocumentElement`는
+> **타이핑 전파**: `DocumentEngine.relayoutThreads(sourceFrameIds?, pinnedFrameIds?)` —
+> 편집 프레임 id 집합을 전달하면 `_writebackThreadStory`가 소스 프레임의
+> `textContent`를 소속 thread의 story(`content`)에 기록한 뒤 체인을 재배치한다.
+> story writeback은 엔진이 소유한다 (엔진-우선 원칙). DOM `LayoutDocumentElement`는
 > `requestThreadRelayout(sourceFrameId)`로 이 경로를 예약(마이크로태스크 통합)한다.
+>
+> **범위-증명 스킵 (§4.6)**: 키스트로크 시 `_writebackThreadStory`가 구 story vs
+> 소스 `textContent`의 평문 공간 prefix/suffix 비교로 편집 범위 `[Ps, Pe)`를
+> 산출하고, `committedTail(F) < Ps`인 프레임(레이아웃 캐시 보유, 최후 프레임 제외,
+> `pinnedFrameIds` 제외)의 재주입·`layoutText`를 스킵한다 — O(체인 전체) →
+> O(편집점 이후). 스킵 프레임이 편집 소스가 되기 전에는
+> `ensureThreadFramesFresh(ids): boolean`으로 신선화해야 한다 (true 반환 시
+> 호출자는 focused 문단을 flush해야 한다 — `EditManager.focusParagraph` 참조).
 
 ---
 

@@ -600,7 +600,10 @@ export class LayoutDocumentElement extends HTMLElement {
    * 1. story writeback + 체인 재배치 — `DocumentEngine.relayoutThreads(sources)`
    *    가 수행한다 (story 소유권은 엔진)
    * 2. 스레드 프레임 DOM model 동기화
-   * 3. 소스를 제외한 스레드 프레임 DOM 재렌더 (소스는 편집 파이프라인이 렌더)
+   * 3. 실제 배치된 프레임 중 소스를 제외한 DOM 재렌더 (소스는 편집 파이프라인이
+   *    렌더). 범위-증명으로 스킵된 프레임은 DOM도 이미 정확하므로 렌더하지
+   *    않는다. `laidOutFrameIds`가 없는 결과(전체 스킵 등)가 하나라도 있으면
+   *    기존 동작(영향 프레임 전체)으로 폴백한다.
    *
    * @param sources - 편집이 발생한 프레임 id 집합
    */
@@ -629,18 +632,33 @@ export class LayoutDocumentElement extends HTMLElement {
     }
 
     try {
-      const results = engine.relayoutThreads(sources);
+      // 포커스된 프레임은 범위-증명 스킵에서 제외한다 (pinned): 포커스된
+      // 프레임의 모델이 구 story에 머무르면 이후 커밋이 구 내용 기반으로
+      // 이뤄져 다른 프레임의 편집을 덮어쓴다. 편집 진입점(focusParagraph)의
+      // ensureThreadFramesFresh와 짝을 이룬다.
+      const focusedId = this._editManager.focusedParagraph?.id;
+      const pinned = focusedId !== undefined && focusedId !== ''
+        ? new Set<string>([focusedId])
+        : undefined;
+      const results = engine.relayoutThreads(sources, pinned);
       this._syncThreadFramesToDom();
 
       // 소스를 제외한 프레임 재렌더 — 편집 컨트롤러가 소스의 DOM을 관리 중.
       // 경계 교정(clamp)으로 재배치된 프레임도 포함한다: 교정은 소스와
       // 무관한 prev 프레임의 배치를 바꾸므로 flush가 화면을 확정해야 한다.
       const correctedFrames = new Set<string>();
+      let laidOut: Set<string> | null = new Set<string>();
       for (const result of results) {
         for (const id of result.correctedFrames ?? []) correctedFrames.add(id);
+        if (result.laidOutFrameIds === undefined) {
+          laidOut = null;
+        } else if (laidOut !== null) {
+          for (const id of result.laidOutFrameIds) laidOut.add(id);
+        }
       }
+      const renderSet = laidOut ?? affectedFrames;
       const domParagraphs = this.querySelectorAll<LayoutParagraphElement>('x-layout-paragraph');
-      for (const frameId of affectedFrames) {
+      for (const frameId of renderSet) {
         if (sources.has(frameId) && !correctedFrames.has(frameId)) continue;
         const domPe = Array.from(domParagraphs).find(p => p.id === frameId);
         if (domPe) {

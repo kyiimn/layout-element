@@ -1,28 +1,30 @@
-# INCREMENTAL_REFLOW.md — 라인 단위 증분 리플로우 상세 설계
+# INCREMENTAL_REFLOW.md — 스레드 체인 타이핑 비용: 근본 원인 분석과 유효 레버
 
-> **문서 성격**: 상세 설계 (미구현). 스레드 체인 타이핑 비용의 근본 해결책.
-> 구현 전 최신 코드와 대조할 것. 모든 줄 번호·시그니처는 작성 시점(main) 기준.
+> **문서 성격**: 근본 원인 분석 + 유효 레버 목록 (측정 기반).
+> 초안의 "라인 식별자 캐시(text-identity resync)" 방식은 **shift 편집에서
+> 성립하지 않음이 증명**되어 폐기했다 (아래 §3). 이 문서는 무엇이 안 되는지,
+> 무엇이 남는지를 기록한다.
 >
-> **관련 문서**: `docs/VIRTUALIZATION.md` (§7 후속 단계), `docs/PERFORMANCE.md`
-> (§3.6/§3.12/§3.14 캐시 전제), `docs/TEXT_ENGINE.md` (래핑 파이프라인),
-> `docs/EDITING_TEXT.md` (§6A 런 모델), `RULES.md § 3` (엔진-우선 원칙)
+> **관련 문서**: `docs/VIRTUALIZATION.md` (§7 후속 단계), `docs/PERFORMANCE.md`,
+> `docs/TEXT_ENGINE.md`, `RULES.md § 3` (엔진-우선 원칙)
 
 ---
 
 ## 0. 요약 (TL;DR)
 
-키스트로크당 비용 = **엔진 O(체인 전체 글자) + DOM O(이동한 span)**.
-30프레임 체인 head 타이핑 실측: 엔진 30프레임 재계산(~50ms headless) +
-마운트 3개 문단 span 재쓰기·강제 리플로우·페인트(~400ms headless).
-가상화·diff·캐시는 "같은 일을 효율적으로"일 뿐 작업량 자체를 줄이지 못한다.
+30프레임 체인 head 타이핑 1타의 실측 귀속 (헤드리스, longtask 합산 ~460ms):
 
-근본 방향: **줄 단위 증분** — 1글자 삽입이 바꾸는 것은 줄바꿈 경계 몇 개뿐이고
-나머지 99% 줄은 글자序列 그대로다. 줄 동일성을 판정해 같은 줄은 손대지 않는다:
+| 구간 | 실측 | 성질 |
+|---|---|---|
+| 엔진 feed-forward 30프레임 | ~50ms | O(체인) — 아래 §3により削減 불가 판명 |
+| 마운트 3문단 DOM 재쓰기·강제 리플로우·페인트 | ~400ms | O(이동 span) — 아래 §3により削減 불가 판명 |
+| 해시·파싱·후처리·writeback (프레임당 합산) | 수 ms | 이미 최적 — 손댈 곳 없음 (실측: hash 0.1, parse 0.9, 후처리 ~0.3ms) |
 
-- **Phase 1 (엔진)**: 라인 캐시 + suffix-match resync → 체인 전파 O(전체 글자) → O(변화된 줄).
-- **Phase 2 (DOM)**: 줄 div 키 매칭 이동 → 이동 span 전수 재쓰기 → 줄당 1회 이동 + dataset 갱신.
-- **Phase 3 (조건부)**: 요구 기반 스레드 연기 — Phase 1+2 측정 후에도 체인 패스가
-  예산 초과일 때만. 아마 불필요하다 (§5 근거).
+**결론**: shift 편집(+1 삽입)은 모든 줄의 텍스트와 모든 위치의 글자를 바꾼다.
+출력 자체가 전부 달라지므로 재계산·재쓰기는 정보이론적으로 필수다.
+남는 레버는 **범위**(몇 프레임을, 몇 페이지를)뿐이다:
+윈도우 3→2페이지에 490ms→308ms 실측. 체인 분할도 같은 축이다.
+그리고 §5의 범위-증명 demand는 엔진 범위를 체인 전체에서 편집점 이후로 좁힌다.
 
 ---
 
@@ -30,306 +32,255 @@
 
 ### 목표
 
-- 스레드 체인 타이핑 키스트로크당 메인스레드 점유를 프레임 예산(16.7ms) 안으로.
-  판정: `benchmark-browser.mjs` 타이핑 시나리오 + 스레드 30체인 롱태스크 합산.
-- 화면·인쇄·추출 결과 byte-identical (`snapshot-layout`, `verify-*` 전종).
+- 키스트로크당 작업량을 **범위**로 줄인다 (체인 길이, 마운트 윈도우).
+- 실기(헤드리스가 아닌) 기준으로 프레임 예산에 접근한다.
+  헤드리스(SwiftShader) 수치는 실기보다 5~10배 부풀려져 있다 —
+  최종 판정은 실기 DevTools Performance 패널이다.
 
 ### 비목표
 
+- 출력이 전부 달라지는 shift 편집의 재계산·재쓰기 자체를 없애기 (불가능, §3).
 - Web Worker 이관 (동기 계약과 구조 충돌 — `VIRTUALIZATION.md` §3).
-- 줄바꿈 알고리즘 자체의 변경 (금칙·걸침·워드랩 시맨틱 불변).
-- `content-visibility` 등 브라우저 휴리스틱 의존 (결정적 동작 유지).
+- 보이는 하류 프레임의 동기 갱신 생략 (WYSIWYG 위반).
 
 ---
 
-## 2. 핵심 발견 (설계의 근거)
+## 2. 측정 기록 (재현 조건)
 
-### 2.1 줄은 위치-독립 데이터다
-
-`TextLineData`/`TextPartData` (`src/types/layout/text/text-line.type.ts`)는
-**절대 source offset을 어디에도 저장하지 않는다**: parts의 content/inlineStyles/
-charOffsets(파트 상대)/hangs/decorationRects(상대 rect)/left/width,
-line의 flags/maxFontSize/lineHeight. 모든 소비처(`getCharRect`, `renderText`,
-mapper, printPostData)는 누적走査로 오프셋을 복원한다.
-
-帰結: 줄 객체는 story shift에 불변 — **참조 그대로 이어붙이면 재사용**된다.
-조정할 오프셋이 없다. 캐시는 줄 객체 참조를 공유하고 (추가 메모리 없음),
-재사용 줄에 대한 후처리 변이는 copy-on-write로 막는다 (§3.5).
-
-### 2.2 dataset 쓰기는 스타일 무효화를 일으키지 않는다 (실측)
-
-`data-source-offset`/`data-offset`/`data-char-offset`/`data-inline-key` 등
-속성 선택자는 소스 전체에서 **JS `querySelector(All)`에만** 등장하고 CSS에는
-없다 (grep 실측: mapper 2곳, controller 2곳, column 2곳).
-따라서 이동 span의 dataset 갱신은 DOM 변이일 뿐 recalc·layout을 유발하지 않는다.
-Phase 2가 span 텍스트·스타일 쓰기를 생략하고 dataset만 갱신하는 근거다.
-
-### 2.3 후처리는 이미 영역 제한을 받는다
-
-- `_applyLineBreakRules(skipPairs?)` — 스킵 집합을 받는다. 이음매 쌍만
-  처리하는 데 그대로 쓴다.
-- `_applyHangingPunctuation()` — 스킵을 안 받는다 (반환만 한다).
-  Phase 1에서 동일 패턴의 스킵 파라미터를 추가한다 (소규모, §3.5).
-- `_computeCharOffsets`/`_computePerLineHeights`/`_computeDecorations` —
-  `columnContents` 위의 순수 함수. 재사용 줄은 스킵하고, 정렬 전용 변경 시
-  `_computeCharOffsets`만 단독 호출한다 (§3.6).
+- 픽스처: `examples/virtualization.html` — 30페이지 단일 스레드 체인,
+  story 약 43,700자, 페이지당 ~1,000자.
+- 방법: head 프레임 포커스 → `execCommand('insertText')` 1타 →
+  `PerformanceObserver(longtask)` 합산 + `layoutText` 래퍼 계측 +
+  CDP CPU 프로파일.
+- 결과:
+  - 30/30 프레임 `layoutText` 호출, 합산 ~51ms (개별 1~6ms).
+  - 마운트 3문단 `render-complete`, 롱태스크 합 ~460ms.
+  - CDP: `(program)` 61% (네이티브 DOM/스타일/레이아웃/페인트),
+    JS 함수들은 모두 한 자릿수 %.
+  - 위치별: head 468ms / middle 776ms(노이즈) / tail 472ms —
+    엔진 전체 재계산 수는 6→3→1로 다르지만 합계는 같다 (DOM이 지배).
+  - A/B: span 전체 재생성 강제 vs diff 경로 = 484ms vs 458ms (유의차 없음).
+    overflow 카운트 재생성 제거 시도는 이 실측으로 원복했다.
 
 ---
 
-## 3. Phase 1 — 엔진 라인 캐시
+## 3. 불가능 결과 (증명 스케치)
 
-### 3.1 캐시 레코드
+### 3.1 출력-동일성 재사용은 shift 편집에 성립하지 않는다
 
-```ts
-// ParagraphEngine 인스턴스 필드 (개념; 정확한 주거는 구현자가 정한다)
-_lineCache: {
-  paramsKey: string;          // §3.2 — 지오메트리·스타일·금칙 입력
-  sourceText: string | (string | TextInlineData)[];  // 커밋 시점 원문 (참조+내용)
-  lines: CachedLine[];        // 커밋된 columnContents 평탄화 (참조 공유)
-} | null;
++1 삽입은 모든 줄의 텍스트를 바꾼다 (각 줄이 앞 줄 끝 글자를 물려받음).
+따라서 텍스트 동일성(text-identity) 기반 줄 캐시·span 재사용은
+shift 편집에서 적중할 수 없다. 초안 설계의核心 전제였으므로 폐기한다.
+(유니코드 주기성 같은 병적 예외 제외.)
 
-CachedLine = {
-  key: string;                // §3.3 라인 식별자
-  line: TextLineData;         // 최종(후처리 완료) 객체 참조
-  colIdx: number;             // 배치 당시 컬럼 인덱스
-  startX: number;             // 라인 시작 x (파트 left 누적 전)
-};
-```
+### 3.2 체인 prefix 생략의 조건 (범위-증명으로 해소됨)
 
-### 3.2 paramsKey (캐시 전체 게이트)
+`contentFrom(K)` = `tail(K-1)`이며 tail은 배치를 돌려봐야 안다 — 원칙적으로
+prefix 생략은 불가능해 보인다. 그러나 **커밋된 tail은 범위 증명으로 재사용
+가능**하다: 편집 범위 `[Ps, Pe)` (writeback 시 prefix/suffix `memcmp`로 산출,
+O(story))보다 완전히 앞에 끝나는 프레임(`committed tail ≤ Ps`)은 slice가
+불변임이 보장되므로, 배치·렌더를 모두 생략해도 정확하다. 즉:
 
-`_computeLayoutInputHash`와 **동일 입력 집합**을 single source로 공유한다
-(중복 정의 금지 — 기존 헬퍼를 재사용하거나 분리하되 양쪽이 같은 함수를 본다):
+- clean ⟺ `committedTail(F) ≤ Ps` (+ `hasLayoutCache` + `isThreadFrame`,
+  기존 `_threadInputUnchanged`의 (c)(d) 조건 재사용).
+- clean 프레임은 `textContent` 재주입도 스킵한다 (구 참조 유지 →
+  `_layoutCache`·R-T2 유효, `_dirty` 불변 → 기존 assert·read 계약 유지).
+  단, 구 story 문자열 pinning 방지를 위해 연속 스킵 50회 상한
+  (초과 시 새 참조만 주입하고 레이아웃은 스킵 — 차후 재계산).
+- dirty 프레임부터 순차 배치한다. 시작 `contentFrom`은 마지막 clean 프레임의
+  커밋 tail (정확함). clamp 교정(`correctedFrames`)이 clean 프레임을 건드리면
+  해당 프레임을 dirty로 전환하고 계속한다 (희귀 경로, 기존 루프가 그대로 처리).
+- exhausted 경로는 항상 실행한다 (조기 종료라 저렴하고, story 길이 변화에
+  민감하므로).
+- 소스 없는 패스(`_relayoutThreads` 초기 동기화 등)는 `Ps = 0` (오늘과 동일).
 
-- 컬럼 폭/간격, 줄높이 입력(`fontSize`/`lineGap`/`lineGapMode`), 컬럼 높이
-- 배치 영향 인라인 필드 (`fontFamily`/`fontSize`/`fontStyle`/`letterSpacing`/
-  `widthRatio`/`spaceRatio` — 해시와 동일 목록)
-- 금칙·걸침·워드랩 파라미터, 오버랩 상대 좌표 (`_overlayHashKey` 재사용)
-- `contentFrom`은 키에 넣지 않는다 — 슬라이스 시작 이동은 resync 탐색이
-  처리한다 (§3.4). 단, `contentFrom` 자체는 라인 탐색의 하한으로 쓴다.
+이로써 키스트로크당 엔진 범위는 O(체인) → O(편집점 이후 + 마운트 윈도우)로
+줄고, parked dirty는 §5의 demand 캐스케이드가 처리한다.
 
-paramsKey 불일치 → 기존 전체 배치 경로 (오늘의 동작과 byte-identical).
+### 3.3 DOM 재쓰기 생략은 픽셀이 달라서 안 된다
 
-**`textAlign`은 라인 키에서 제외한다.** 정렬은 줄바꿈이 아니라 `charOffsets`
-에만 영향을 준다. 정렬 전용 변경 감지
-(paramsKey 동일 + align만 다름) 시에는 `_computeCharOffsets()`만 재실행한다
-(기존 `preserveRenderShapeAcrossReset` DOM 경로와 짝을 이룬다).
-
-### 3.3 lineKey (줄 식별자)
-
-최종(후처리 완료) 줄에 대해 커밋 시 1회 계산한다:
-
-```
-lineKey = join(\u0000, [
-  JSON.stringify(part.content 배열),   // 조인 모호성(['ab','c'] vs ['a','bc']) 방지
-  part left[] / width[],
-  글자별 배치 영향 스타일 키 (해시와 동일 필드 목록),
-  columnWidth, lineGapParams, breakParams, overlayKey,
-])
-```
-
-- 정렬·장식선 색상 등 배치 무영향 필드는 제외한다 (재사용 범위 최대화).
-- 동일 텍스트 반복 줄(`가\n가\n…`)의 키 충돌은 정당하다 — DOM 매칭은
-  키별 FIFO 큐로 소비한다. 뒤바뀌어도 내용·스타일이 동일하고 source offset은
-  dataset으로 갱신되므로 시각·정합 무영향 (§4.3).
-
-### 3.4 resync 알고리즘 (핵심)
-
-입력: 새 plain 텍스트 `N`, 캐시 `(paramsKey, sourceText O, lines[])`.
-`paramsKey` 일치 전제 (불일치면 전체 배치).
-
-1. **공통 prefix**: `memcmp(N, O)`로 첫 차이 오프셋 `D`를 구한다 (O(n), 수 µs).
-   `D`를 포함하는 줄 이전까지의 줄은 그대로 재사용한다 (O(1) 이어붙이기).
-2. **재배치 + 재동기화**: `D`를 포함한 줄부터 기존 charLoop로 배치한다.
-   줄을 하나 완성할 때마다 resync를 시도한다:
-   - 후보: 캐시의 `colIdx`·`startX`가 현재 루프 상태와 같은 줄
-     (해시셋 조회, 통상 수 개).
-   - 확정: `newPlain[newPos:] == oldPlain[oldPos:]` suffix `memcmp` 1회.
-     `memcmp`는 불일치 시 첫 글자에서 탈락하므로 실패 비용 O(1) 수준.
-     단일 연속 편집(타이핑·붙여넣기·삭제·실행취소 모두 해당)에서는
-     suffix가 동일하므로 첫 후보에서 확정된다.
-   - 확정 시 캐시 잔여 줄을 **참조 그대로** 이어붙이고 종료한다.
-3. **이음매 처리** (§3.5): 마지막 재배치 줄 + 첫 재사용 줄 쌍에 대해서만
-   금칙·걸침 규칙을 적용한다 (copy-on-write — 아래).
-4. 커밋: 새 `columnContents`를 평탄화해 캐시로 저장 (참조 공유).
-   `_buildPrefixCache`는 기존대로 호출한다 (caret 기반 prefix 캐시와 공존 —
-   caret 연속 타이핑은 prefix 경로가, 그 외 편집은 라인 경로가 담당.
-   둘 다 히트 가능하면 prefix 우선).
-
-복잡도: `O(바뀐 줄 × 줄 길이 + memcmp 전체 1~2회)`.
-30프레임 체인 head 타이핑 실측 Puzzle의 답: 프레임당 suffix 1회 `memcmp`
-(약 40k자 ≈ 0.1ms) + 이어붙이기 → 체인 전체 수 ms로 수렴한다.
-
-### 3.5 변이 규율 ( correctness의 핵심)
-
-- **캐시 줄은 절대 직접 변이하지 않는다.** 후처리 패스는 재배치된
-  **새 줄 객체**에만 적용한다. 이음매 쌍 처리 시 재사용 줄이 필요하면
-  해당 줄 1개만 복제한다 (copy-on-write, O(줄)).
-- `_applyLineBreakRules`의 기존 `skipPairs`에 이음매 쌍만 남기고 전부
-  스킵으로 전달한다.
-- `_applyHangingPunctuation`에 동일 패턴의 선택적 skip 파라미터를 추가한다.
-  (현재 시그니처 `(): ReadonlySet<string>` — `paragraph-engine.ts:814`.)
-- `_computeCharOffsets`/`_computePerLineHeights`/`_computeDecorations`는
-  재사용 줄에 대해 스킵한다 (저장된 최종값 사용). 단, 정렬 전용 변경 시에는
-  `_computeCharOffsets`만 전체에 재실행한다 (§3.2).
-- `verticalAlign: center/bottom` 다중 패스(`_layoutTextIntoColumns` 3-iteration
-  루프): 배치는 캐시로 1회 수행하고, 반복문은 align 오프셋 계산에만 쓴다
-  (구현자 과제 — 카운트 기반 오프셋은 재배치 없이 산출 가능. 기존
-  verticalAlign 커버리지로 회귀 확인).
-
-### 3.6 무효화표
-
-| 변경 | 경로 | 근거 |
-|---|---|---|
-| 텍스트 편집 (타이핑·paste·삭제·IME·undo) | resync (§3.4) | 단일 연속 편집은 suffix 동일 |
-| 장평·자간·폰트·컬럼폭·금칙·걸침·오버랩 상대좌표 | 전체 배치 | paramsKey 불일치 (오늘과 동일) |
-| 굵기·색상 (배치 무영향) | 기존 `_refreshInlineStylesOnly` 경로 | 해시 제외 필드 — 그대로 |
-| 정렬 전용 | `_computeCharOffsets`만 | 키 제외 (§3.2) |
-| `contentFrom` (스레드) | resync 탐색이 흡수 | 슬라이스 시작 이동 = 탐색 하한 이동 |
-| `data` setter 구조 변경 | `resetIncrementalState()`가 캐시도 함께 비운다 | 오늘과 동일. 단, 캐시 비움은 `_layoutCache`와 함께 `_lineCache`도 포함하도록 확장 |
-
-### 3.7 안전장치
-
-- `ParagraphEngine.lineCacheEnabled` 정적 토글 (기본 true) — 프로덕션
-  이스케이프 해치. 검증 스위트는 ON/OFF 양쪽이 아니라 ON 기준으로만 돌리고,
-  OFF는 긴급 차단용이다.
-- DEV 전용 불변 어서션 (릴리스에서 제거): 후처리 패스가 캐시 참조 줄을
-  변이하려 하면 throw. COW 위반을 구현 단계에서 검출한다.
+shift되면 각 위치의 글자가 바뀐다 — span `textContent` 재쓰기는 필수다
+(이미 동일값 가드됨). dataset·위치 쓰기도 마찬가지다.
+남는 것은 쓰기 단가(브라우저 영역)와 강제 리플로우 횟수뿐이다.
 
 ---
 
-## 4. Phase 2 — DOM 줄 단위 reconciliation
+## 4. 유효 레버 (순위 순)
 
-### 4.1 줄 div 키 매칭
+### 4.1 체인 분할 (코드 변경 없음 — 즉시)
 
-- 엔진이 `TextLineData.lineKey?: string`을 채운다 (커밋 시, §3.3 키).
-  소비처는 DOM뿐이다 (`printPostData`는 parts를 읽으므로 무영향.
-  `snapshot-layout` 직렬화에 필드가 추가되지만 전후 일관되어 판정에 무영향 —
-  스냅샷 비교는 동일 버전끼리 수행한다).
-- `renderText()`의 라인 루프를 인덱스 재사용 → 키 매칭으로 전환한다:
-  기존 div를 `dataset.lineKey` Map에 모으고, 엔진 줄 순서대로
-  히트한 div를 `insertBefore` 체인으로 이동, 미스는 생성(`_createLineElement`
-  기존 경로), 잉여는 제거한다.
-- 히트한 줄의 파트 구조는 키 동등성으로 보장되므로 파트 div는 기존처럼
-  인덱스 재사용한다 (코드 변경 없음).
+키당 재계산 프레임 수 = 소속 체인 길이. 30개 단일 체인 → 기사·섹션 단위
+체인으로 나누면 비례 감소한다. 가장 큰 즉시 효과.
+실측 (`examples/virtualization.html`, head 타이핑, 헤드리스 longtask 합산):
+30프레임 단일 체인 458~484ms → 6체인×5프레임 89~139ms (평균 약 117ms,
+약 4배). 엔진 전체 재계산도 30프레임 분산 호출에서 소속 체인 수회로 축소.
 
-### 4.2 span 작업 축소
+### 4.2 마운트 윈도우 축소 (설정 — 즉시, 실측됨)
 
-히트한 줄의 span에 대해서는 텍스트·스타일 쓰기를 생략하고
-**`data-source-offset`/`data-offset` dataset 갱신만** 수행한다:
+마운트 3→2페이지에 490ms→308ms (헤드리스). `PageMountManager({ window })`
+또는 데모 상단 select. 스크롤 여백과 맞바꾼다 (0이면 급스크롤 시 빈틈 노출).
 
-- 텍스트 동일성은 키가 보장한다 (그래도 기존 `textContent !== char` 가드는
-  유지한다 — 값싼 벨트-앤드-브레이스).
-- 스타일 동일성은 키가 보장한다 (배치 영향 필드 전부 포함).
-  단, 인라인 전용 변경(굵기 토글 등)은 레이아웃 키가 같아 **줄 히트가 발생
-  하므로**, span별 기존 모드 판별(`inline-only` 등)은 그대로 수행한다 —
-  즉 줄 히트는 오프셋·위치 쓰기를 생략하는 조건이지 스타일 판별을 생략하는
-  조건이 아니다.
-- 위치(`left`/`top`) 쓰기는 줄 div 이동 1회로 대체된다. span `left`는
-  파트 상대(불변)이므로 손대지 않는다.
-- dataset 쓰기는 §2.2 실측대로 recalc·layout을 유발하지 않는다.
+### 4.3 실기 측정 후 분할 확정 (절차)
 
-### 4.3 오버플로우 flip 처리
+헤드리스 수치는 네이티브 구간을 부풀린다. 실기 Performance 패널에서
+엔진 feed-forward vs DOM(쓰기·리플로우·페인트) vs 커서 배치를 분리하고,
+초과 구간부터 판다. 이 문서의 수치는 우선순위용이지 목표값이 아니다.
 
-기존 라인 분기(`isOverflow` → 자식 제거 + 오프셋 스킵 / visible → span diff)를
-그대로 둔다. 줄 이동과 무관하게 줄별 현재 상태로 동작하므로 flip이
-자동 처리된다. `_perfShouldFullRecreate`는 변경하지 않는다
-(overflow 카운트 제거 시도는 A/B 실측 무의미로 원복됨 — §7.1이 아니라
-본 문서 §6의 회귀 스위트가 flip 커버리지를 담보한다).
+### 4.4 마이크로 최적화 (측정 후 개별 판단 — 선행 구현 금지)
 
-### 4.4 매퍼·커서 계약
+- 비포커스 문단의 mapper 재구축 지연: `postRender`는 매 렌더마다 재구축한다.
+  포커스·선택이 없으면 생략하고 클릭·포커스 진입 시 재구축하는 방식.
+  예상 수 ms/키. stale mapper 클릭 오매핑 리스크가 있어 단독 스위트로 검증 필수.
+- `_computeLayoutInputHash` story 전체 직렬화 (프레임·렌더당 2회):
+  sub-ms로 보이나 참조 동등 fast path 가능성은 측정 후 판단.
+- 위 2건은 각각 독립 A/B 실측에서 유의차를 보여야만 채택한다
+  (근거 없는 최적화 금지 원칙).
 
-- `_sourceToPlacement`/`_lineRanges`는 엔진 데이터 기반이라 DOM 이동과
-  무관 — 기존 `postRender` 재구축 그대로.
-- `_spanCache`/`_columnSpansCache`는 source offset 키라 줄 이동 후 stale하다.
-  증분 경로의 `invalidateSpanCache()` 뒤에 **컬럼당 1회 bulk 재스캔**으로
-  재구축한다 (전체 재생성 경로와 동일 비용 — 측정 후, 필요하면 증분 수술로
-  후속 최적화).
-- 커서/선택 배치 rect 읽기는 그대로 둔다 (필수 강제 리플로우 1회).
-  `POST_RENDER_DEFER_THRESHOLD` rAF 지연 정책도 그대로 둔다.
-- 낙관적 span(IME 임시)은 기존처럼 `renderText` 시작 시점에 제거한다
-  (줄 이동 전에 수행되어야 한다 — 순서 유지).
-- 장식선 rect div (`_renderDecorationRects`): 파트별 재생성 여부와 비용을
-  구현 시 측정하고, 줄 히트 시 스킵 가능하면 스킵한다 (장식 데이터는 줄에
-  저장되어 있으므로 동일성 보장 가능 — 구현자 판단, 측정 필수).
+### 4.5 break-derivation 연구 스파이크 (boxed — 착수 조건부)
+
+shift를 텍스트가 아니라 **break 위치**로 전파하는 방식:
+이전 break + δ로 새 break를 유도하고 줄 내용만 슬라이싱한다.
+성공하면 엔진 상수를 2~3배 낮출 수 있으나, 오버랩/cover/justify/indent/
+clamp/overset-cut 엣지에서 정확성 입증 부담이 크다.
+**착수 조건**: 4.3 실기 측정에서 엔진 구간이 지배적일 때만.
+**중단 조건**: 2주 내 byte-identical 게이트(`snapshot-layout` +
+`verify-threading` 104) 미통과 시 폐기.
+
+### 4.6 범위-증명 demand — **구현 완료 (2026-09-14)**
+
+§3.2의 범위 증명을 키스트로크 경로에 적용한다. 효과: 키당 엔진
+O(체인 전체) → O(편집점 이후 + 마운트 윈도우). DOM은 기존대로 마운트 분만
+렌더한다 (분리 프레임 DOM 없음 — 가상화와 동일 원칭).
+
+#### 구현 결과 (실측·게이트 포함)
+
+- `ThreadEngine`: `ThreadLayoutOptions{editPsByThreadKey, pinnedFrameIds}`,
+  `_committedByThread`(프레임별 커밋 체인 기록), `_staleSkippedByThread`,
+  `threadKeyOf`, `hasStaleSkippedFrames`, `_isFrameClean(chain, engines, i,
+  editPs, pinned)` — strict `committedTail(F) < Ps` && `hasLayoutCache` &&
+  최후 프레임 항상 배치(tail 의존성 보존), pinned는 무조건 배치.
+  `ThreadLayoutResult.laidOutFrameIds` 추가.
+- `DocumentEngine._writebackThreadStory`: 평문 공간 `memcmp`로 Ps 맵 산출
+  (`ParagraphEngine.plainTextOf` — 인라인 런 배열 대응, 정적 참조 캐시로
+  체인당 1회 O(N)) → `_layoutThreads({editPsByThreadKey, pinnedFrameIds})`.
+- `relayoutThreads(sources, pinned)` / `ensureThreadFramesFresh(ids): boolean`:
+  stale 스킵 프레임 존재 시 Ps=0 전체 재배치 + dirty 커밋 후 true 반환.
+- DOM: `document.element._flushThreadRelayout`이 focused 문단 id를 pinned로
+  전달하고, 렌더 범위를 `laidOut ?? affectedFrames` ∩ mounted로 필터.
+- 편집 진입점: `EditManager.focusParagraph`이 항상(재포커스 포함) 가드를
+  발화하고, 신선화가 실제 일어났으면 focused 문단을 `flushRender`/
+  `scheduleRender`한다 — postRender의 `modelText !== textarea.value` 동기화가
+  runMap/textarea를 신 모델에 따라가게 한다.
+
+#### 스킵 프레임 편집 소싱 버그 (실측 → 해소)
+
+스킵된 프레임은 **구 story 참조 + 구 배치**를 함께 유지한다(자기모순 없음).
+그러나 (a) 스킵 프레임이 이후 편집 소스가 되면 커밋이 구 내용 기반으로
+이뤄져 다른 프레임 편집을 덮어쓰고, (b) 스킵된 상태의 렌더는 span diff
+생략으로 textarea/runMap 동기화까지 건너뛴다. 실측: 6체인×5프레임 스트레스
+타이핑 후 head IME 커밋(`ㅎ`→`한`)이 story 2343→2334 리버트(−9자).
+`focusParagraph` 무조건 가드 + flush로 해소 (`verify-threading-browser`
+"조합 커밋 후 story에 반영" FAIL → ALL PASS).
+
+#### 쓰기 경로 (키스트로크)
+
+1. `_writebackThreadStory(sources)`에서 편집 범위를 산출한다:
+   구 story vs 소스 `textContent`의 prefix/suffix `memcmp` → `[Ps, Pe)`
+   (O(story), 수백 µs). 다중 소스는 합집합. 텍스트 불변(스타일·지오메트리
+   변경)이면 인덱스 모드 (소스 프레임부터 dirty). 시그니처 변경 없음.
+2. `_layoutOneThread` 루프에 clean 판정을 삽입한다 (구현은 strict 부등호):
+   `committedTail(F) < Ps` (`≤`가 아님 — tail == Ps인 경계 프레임은
+   append-at-end로 slice가 확장될 수 있어 dirty로 처리한다) &&
+   `hasLayoutCache` && `isThreadFrame`이면
+   `textContent` 재주입·`updateThreadContext`·`layoutText`를 전부 스킵한다.
+   커밋 체인(`storyLen`, `contentFrom[]` — 스레드별 Map에 보관)은
+   배치된 프레임만 갱신하고 스킵 프레임은 기존값을 유지한다.
+   스킵된 프레임의 `_dirty`는 그대로이므로 기존 dev assert·
+   `DirtyPendingError` 계약이 유지된다.
+3. clamp 교정이 clean 프레임을 건드리면 dirty 전환 후 계속한다 (기존 루프가
+   그대로 처리 — 희귀 경로). exhausted 경로는 항상 실행한다 (조기 종료라 저렴).
+4. 결과에 `laidOutFrameIds: string[]`를 추가한다 (이번 패스에 실제 배치한
+   프레임. additive 필드 — 기존 테스트는 deep-equal 없이 필드 읽기만 하므로
+   안전). `_flushThreadRelayout`은 렌더 대상을
+   `affectedFrames` → `laidOut ∩ mounted ∪ corrected ∩ mounted`로 좁힌다
+   (소스 제외 규칙 유지). dev assert는 `laidOut` 범위로 스코프한다.
+
+#### 읽기 경로 (demand 캐스케이드) — **감사 결론: 별도 캐스케이드 불필요**
+
+스킵 상태 자체가 유효한 과거 스냅샷이므로 읽기에 캐스케이드가 필요 없다
+(아래 스냅샷 일관성 참조). 당초 스펙의 아래 2항은 **구현하지 않기로 확정**
+한다 (재구현 금지 — 근거와 함께 기록):
+
+- `unparkPage()` ensure: 복원된 프레임이 구 story 참조를 들고 있어도 그
+  slice 배치는 증명상 유효하므로 화면·좌표가 정확하다. 편집 소스가 되는
+  순간 `focusParagraph` 가드가 신선화한다. K 섹션 실측이 round-trip을 보증.
+- `ensureCommitted()` 스레드 캐스케이드: `ensureCommitted`/`_ensureSubtreeCommitted`
+  는 문단 엔진을 건드리지 않는다 (편집 파이프라인 소유 — 커밋→이벤트 순서
+  계약). 스킵 프레임은 `_dirty`가 아니므로 읽기 계약을 위반하지 않는다.
+
+- story vs 배치 불일치 시나리오는 존재하지 않는다:
+  스킵 프레임은 구 story 참조 + 구 배치를 함께 유지하므로 (둘 다 유효한
+  과거 스냅샷) 자기모순이 없다. 새 story로의 전이는 캐스케이드가 원자 수행한다.
+
+#### 메모리 상한 — **상한·백필 모두 불필요로 확정 (재구현 금지)**
+
+스킵 프레임은 구 story 문자열을 pin하지만 프레임당 최대 1개 참조만 보유하고
+(다음 스킵·재주입 시 교체), 참조가 끊긴 구 story는 GC가 회수하므로 누수가
+없다. 당초 스펙의 "연속 스킵 50회 상한"과 "idle 백필"은 구현하지 않는다 —
+stale 상태가 유효한 스냅샷이라 백필할 것이 없고, 상한은 불필요한 복잡도다.
+
+#### 스냅샷 일관성 (검증된 사실 + 감사 잔여 주의점)
+
+분리 프레임의 `extractData.content`는 비-head에서 `undefined`이며, 그
+스냅샷이 `_buildTree`로 재주입돼도 `_buildParagraphEngine`의
+`?? pe.textContent` 가드가 story를 보존한다 (스레드+park 섹션 K 실측).
+head의 구 story + `threads[].content` 신 story가 공존해도 복원 시
+스레드가 이긴다 (단일 소스 원칙 — 기존 동작).
+
+**잔여 주의점 (코드 감사 확인, 자가 치유됨)**: head가 스킵된 상태(예: tail
+타이핑 중 head 스킵)에서 `document.data`를 읽으면 `head.content`는 구 story
+텍스트인 반면 `threads[].content`는 신 story다 — 스냅샷 내부의 한시적
+불일치다. 복원 시 `thread.content`가 권위를 가지므로(`storyContent =
+thread.content ?? head.textContent`) story 소실 없이 자가 치유된다. 호스트는
+`head.content`를 story 진실로 취급하면 안 된다 — story 권위는 항상
+`threads[].content`다.
 
 ---
 
-## 5. Phase 3 — 요구 기반 스레드 연기 (조건부)
+## 5. 폐기된 대안 (재발 방지 기록)
 
-**게이트**: Phase 1+2 완료 후에도 체인 패스(`relayoutThreads` 전체)가
-지속적으로 8ms를 초과할 때만 진행한다. 아래 수학상 아마 불필요하다:
-
-> Phase 1이 있으면 전체 체인 패스는 프레임당 suffix `memcmp` 1회 +
-> 이어붙이기로 수렴한다. 30프레임 × 평균 잔여 수만 자 `memcmp` ≈ 수백 µs.
-> 즉 풀 패스 자체가 싸지므로 연기 machinery의 복잡도를 감당할 이유가 없다.
-> 이 장은 그 경우의 설계 스케치로만 남긴다.
-
-스케치 (게이트 통과 시 상세화):
-
-- 상태: 스레드별 `committedStoryRef` + 프레임별 `committedContentFrom[]`.
-  키스트로크마다 writeback 후 story 참조 비교로 dirty 플래그만 세운다
-  (O(프레임), 레이아웃 없음).
-- 요구 시(`render`·`extractData`·`printPostData`·언마운트 해제 전):
-  뒤로 clean anchor까지 거슬러 올라가 앞으로 배치한다. anchor는 보통 head
-  (`contentFrom = 0` 확정)이다.
-- 모든 읽기 경로는 기존 `ensureCommitted` 계열로 수렴시킨다
-  (`DirtyPendingError` 계약 확장).
-- `correctedFrames`(clamp가 prev 프레임을 바꾸는 경우): cascade 결과에 포함해
-  마운트된 해당 프레임을 재렌더한다 (기존 `_relayoutThreads` 하류 로직 재사용).
-- idle 백필 (`requestIdleCallback`): 분리 프레임의 dirty를 미리 해소해
-  스크롤 진입을 웜 상태로 둔다.
-
----
-
-## 6. 검증 게이트 (페이즈별, 전부 ALL PASS 필수)
-
-### Phase 1 (엔진 출력 불변 + 속도)
-
-| 스크립트 | 판정 |
+| 대안 | 폐기 이유 (실측/증명) |
 |---|---|
-| `snapshot-layout.mjs` 전후 byte 동일 | **라인 캐시가 엔진 출력을 바꾸지 않음** — 최강 게이트 |
-| `verify-threading.mjs` (104) | prefix 캐시·지오메트리 행렬·금칙 교정 — 후처리 스킵 정확성 |
-| `verify-multicolumn.mjs` | prefix 경로 동등성 |
-| `verify-inline-metrics` / `verify-line-gap-mode` / `verify-hanging-punctuation` / `verify-word-wrap` / `verify-text-decoration.mjs` | 배치 영향 필드·후처리 스킵 정확성 |
-| `verify-hangul-glyph-fallback` / `verify-overlap-inline-fontsize` / `verify-image-displayrect-cache` / `verify-overlap-none` / `verify-print-image-overlap` / `verify-right-indent-tab.mjs` | 폭·오버랩·print 패리티 |
-| `benchmark-typing.mjs` + `benchmark-browser.mjs` 타이핑 | 키당 시간 감소 기록 (목표: 스레드 30체인 롱태스크 합산 절반 이하) |
-
-### Phase 2 (DOM 정합 + 속도)
-
-| 스크립트 | 판정 |
-|---|---|
-| `verify-dom-diff.mjs` | span 무결성 (단조성·무중복·DOM≡엔진) — 줄 이동 후 dataset 정합의 직접 증명 |
-| `verify-visual-render.mjs` | rect 기반 화면 진실 |
-| `verify-threading-browser.mjs` (33) | tail·seam·타이핑 스트레스·IME×flush — 스레드+DOM 결합 |
-| `verify-image-edit-mode.mjs` | 오버랩 파트 분할 구조 |
-| `verify-caret-parking.mjs` (28) | 이동된 줄에서의 커서 매핑 (선행 실행 규칙) |
-| `verify-pending-style.mjs` / `verify-style-revert.mjs` / `verify-ime.mjs` / `verify-overflow-cursor-clamp.mjs` | 편집 경로 회귀 |
-| `verify-virtualization.mjs` (40) | H(parts+match) — 이동된 줄의 파트 정합 |
-| `benchmark-browser.mjs` 전 시나리오 | p95 회귀 없음 + 타이핑 개선 기록 |
+| 텍스트 동일성 라인 캐시 (초안 §3) | §3.1 — shift 편집에서 적중 불가 |
+| 요구 기반 스레드 연기 (구버전) | tail 의존성만으로는 범위 축소 불가 — §3.2 범위 증명으로 해소되어 §4.6 스펙으로 승격 |
+| overflow 카운트 재생성 제거 | A/B 484 vs 458ms — 병목이 아님. 원복됨 |
+| span 전체 재생성 vs diff 논쟁 | 같은 A/B — 둘 다 아님 |
+| Web Worker 레이아웃 이관 | 동기 계약·증분 캐시와 구조 충돌 (수차례 실패 이력) |
+| 보이는 하류 비동기 전파 | WYSIWYG 위반 |
 
 ---
 
-## 7. 리스크와 완화
+## 6. 검증 게이트 (현행 유지)
 
-| 리스크 | 완화 |
-|---|---|
-| COW 위반 (캐시 줄 변이) | DEV 전용 불변 어서션 (§3.7) + `snapshot-layout` byte gate |
-| 키 충돌 오매칭 | 키에 폭·스타일·금칙 입력 포함 + `\u0000` 구분자. DOM은 FIFO 큐 소비 — 뒤바뀌어도 내용 동일 |
-| IME 조합 중 resync | 조합 커밋도 일반 편집으로 취급 (suffix-match가 흡수). 낙관적 span은 DOM 전용이라 무관 |
-| undo/redo 풀 라운드트립 | 동일 참조면 skeleton 히트, 아니면 resync. `data` setter 경로 변경 없음 |
-| 테이블 셀 문단 | 동일 `ParagraphEngine` — 특별 취급 불필요 |
-| `center`/`bottom` 다중 패스 | 배치 1회 + 오프셋 계산 반복으로 리팩터 (§3.5). 기존 verticalAlign 커버리지로 회귀 확인 |
-| print/export 패리티 | 최종 줄 객체를 읽으므로 무영향. `verify-print-image-overlap` + 스레드 print 항목으로 검증 |
-| 스냅샷 byte 증가 (`lineKey` 필드) | 비교는 동일 버전끼리 — 판정 무영향. 문서에 기록 |
-| `_spanCache` 재스캔 비용 회귀 | Phase 2 측정 항목. 초과 시 증분 수술을 후속 과제로 (선행 구현 금지) |
-| suffix 탐색 최악 O(n²) | `memcmp` 조기 탈락 + 후보 해시셋. 병적 입력(동일 짧은 줄 수천 개)은 FIFO+dataset 갱신으로 정합 유지, 속도는 측정 후 판단 |
+- 엔진 변경 시: `snapshot-layout.mjs` byte 동일 + `verify-threading.mjs` (104)
+  + 관련 엔진 스위트 (inline/line-gap/hanging/word-wrap/decoration).
+- DOM·편집 변경 시: `verify-dom-diff` / `verify-visual-render` /
+  `verify-threading-browser.mjs` (35) / `verify-image-edit-mode` /
+  `verify-caret-parking.mjs` (커서 변경 시 선행) / `verify-virtualization.mjs` (47).
+- 성능 주장 시: 동일 페이지 A/B + `benchmark-browser.mjs` 기록.
+  헤드리스 수치 단독으로 최적화 채택 금지 (§4.3).
+- §4.6 구현 시 추가 게이트: `verify-threading.mjs` 전체(특히 스킵 판정·
+  clamp 교정·pull-back 항목) + `verify-threading-browser.mjs` +
+  `verify-virtualization.mjs` K 섹션 (스토리 보존·체인 전파·복원 정합) +
+  unpark 캐스케이드 시간 측정 (J remount 지표에 스레드 체인 케이스 추가).
 
----
-
-## 8. 롤아웃 순서
-
-1. **Phase 1** 엔진 라인 캐시 → §6 Phase 1 게이트 전부 + `snapshot-layout` byte 동일.
-2. **Phase 2** DOM 줄 reconciliation → §6 Phase 2 게이트 전부 + 벤치마크 기록.
-3. **측정 후 Phase 3 판단** (§5 게이트: 체인 패스 8ms 초과 지속 시에만).
-4. 각 페이즈 완료 시 본 문서의 상태를 갱신한다 (구현됨/측정치).
+- §4.6 구현 완료 검증 기록 (2026-09-14): `verify-threading` 104 ALL PASS,
+  `verify-threading-browser` ALL PASS (35항목 — 스킵 프레임 편집 소싱 버그
+  해소 포함), `verify-virtualization` 47 ALL PASS (K4 범위-증명 prefix skip
+  layouts=0 포함), `verify-dom-diff` / `verify-multicolumn` /
+  `verify-caret-parking` (28) / `verify-ime` / `verify-pending-style` (31) /
+  `verify-image-edit-mode` (64) / `verify-visual-render` (7) ALL PASS,
+  `snapshot-layout` 3회 연속 byte-identical (결정론 확인), `tsc` 0 에러,
+  `vite build` 통과. 실측: 6체인×5프레임 head 타이핑 키당 avg 56.4~59.3ms /
+  p50 54.8~58.5ms / p90 63.2ms (헤드리스, rAF 2프레임 대기 포함 — §4.3 참조,
+  실기 기준값 아님. 체인 분할만 적용한 117ms 대비 약 2배 개선).

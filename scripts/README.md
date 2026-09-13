@@ -38,7 +38,7 @@
 | `verify-right-indent-tab-guide.mjs` | 정합성 (브라우저) | 탭 점선 가이드 (편집 모드 전용 표시·원복) | ALL PASS |
 | `verify-right-indent-tab-single-source.mjs` | 정합성 (원칙) | 탭 좌표 단일 소스: DOM === 엔진 === print | ALL PASS |
 | `verify-engine-node.mjs` | 정합성 (Node) | 엔진 계층 DOM-free 동작 | ALL PASS |
-| `verify-virtualization.mjs` | 정합성 (브라우저) | DOM 가상화 — park/unpark 엔진 완결, data 세터 부활 방지(G1), 재마운트 커서 복원+예약 렌더(P1), detach 서브트리 정리(P3), PageMountManager 윈도우/pin, parked 오버레이 회피(H), 리사이즈 attach/detach(I), 성능 실측(J) | ALL PASS (40항목, 서버 없으면 자동 기동) |
+| `verify-virtualization.mjs` | 정합성 (브라우저) | DOM 가상화 — park/unpark 엔진 완결, data 세터 부활 방지(G1), 재마운트 커서 복원+예약 렌더(P1), detach 서브트리 정리(P3), PageMountManager 윈도우/pin, parked 오버레이 회피(H), 리사이즈 attach/detach(I), 성능 실측(J), 스레드+park story 보존·체인 전파(K) | ALL PASS (47항목, 서버 없으면 자동 기동) |
 | `verify-obfuscated.mjs` | 정합성 (빌드) | 난독화 IIFE 번들 로딩 | ALL PASS |
 | `obfuscate.mjs` | 빌드 | IIFE 번들 난독화 | build 완료 |
 
@@ -343,7 +343,7 @@ npx tsx scripts/verify-engine-node.mjs
 조작**으로 검증한다 (park/unpark는 프로그래밍 API이므로 합성 스크롤 외에
 직접 호출 경로도 검증).
 
-**검증 항목** (40항목, 10 시나리오):
+**검증 항목** (47항목, 11 시나리오):
 1. **A. 기준선** — 6페이지 마운트 + 엔진 6엔트리 + 전 페이지 DOM===엔진
 2. **B. park** — 플레이스홀더 교체 + 원래 인덱스 유지 + 엔진·extractData 6유지
    + 나머지 페이지 정합
@@ -372,6 +372,13 @@ npx tsx scripts/verify-engine-node.mjs
 10. **J. 성능** — 30페이지(22,750 span) 풀 렌더 후 27개 park → 윈도우 span
     2,310 (약 10%, park 13.2ms) + 페이지당 재마운트(unpark+render) ~1~10ms +
     샘플 정합. 실측 수치 기록 (판정은 비율·상한 기준).
+11. **K. 스레드 + park** — 2프레임 체인 별도 문서. 기준선 정합 →
+    프레임 페이지 park + `data` 세터 풀 라운드트립 후 story 보존
+    (`textContent` 길이 = story 전체 — `_buildParagraphEngine`의
+    `?? pe.textContent` 가드가 `content: undefined` 스냅샷으로부터 보호) +
+    체인·보관 유지 → unpark 후 안정·정합 → head 타이핑 중 분리 프레임의
+    `contentFrom` +1 전파 → 복원 후 slice 안정(DOM 불변이 정답: 동일 용량
+    소비 시 내용물 동일) + 정합.
 
 **검증기 작성 주의**: bench 페이지와 픽스처 문서를 공유하므로 절대 스크롤 좌표가
 아니라 `scrollIntoView`로 대상 페이지를 뷰포트에 둔다. 픽스처 텍스트는
@@ -379,7 +386,7 @@ npx tsx scripts/verify-engine-node.mjs
 
 **실행**:
 ```bash
-npx tsx scripts/verify-virtualization.mjs   # 40항목 ALL PASS (서버 없으면 자동 기동 — 포트 5203)
+npx tsx scripts/verify-virtualization.mjs   # 47항목 ALL PASS (서버 없으면 자동 기동 — 포트 5203)
 ```
 
 ### `verify-hangul-glyph-fallback.mjs` — cmap 미등록 한글 음절 폭 폴백
@@ -475,7 +482,7 @@ npx tsx scripts/verify-image-displayrect-cache.mjs   # 4항목 ALL PASS
 
 **목적**: `ImageEditController` + `EditManager` 이미지 편집 API가 전 요구사항대로 동작하는지 — 이미지 편집 관련 모든 변경(모드 시스템, 시각 피드백, Tab 순회, selection 연동)의 회귀를 방어한다. 전용 검증 페이지(`examples/image-edit-verify.html`, 이미지 2개 + 텍스트 박스 통제 환경)에서 **CDP 신뢰 이벤트**로 검증한다.
 
-**검증 항목** (60항목, 12 시나리오):
+**검증 항목** (64항목, 12 시나리오):
 1. **일반 모드 dblclick 진입 + 시각 피드백** — 이미지 dblclick → imageEditMode 진입, 부모 box `outline: red` + `.type-label display: none` (텍스트 포커스와 동일 패턴), 이미지 자체 파란 outline 없음/커서 move
 2. **ESC 종료** — 일반 모드 진입이면 완전 종료, 레이아웃 모드 진입이면 레이아웃 복귀. 종료 시 `text-focused` 제거 + `selected` 유지
 3. **드래그** — objectFit cover→none 자동 전환 (전환 시 표시 영역 스냅샷 고정, 크기 점프 없음), x/y 갱신
@@ -553,7 +560,7 @@ npx tsx scripts/verify-threading.mjs   # 104항목 ALL PASS
 
 **목적**: 엔진 검증(verify-threading.mjs)이 증명하지 못하는 "화면 진실"을 검증한다. B3(엔진 트리/DOM model 이원화)·B6(타이핑 미전파·허위 테두리)는 **엔진 게터가 올바른데 DOM span이 0개인 상태**로 발생했다 — 3계층(엔진 게터 → 섀도우 DOM span → :host boxShadow)을 모두 측정해야 "보인다"가 증명된다. `examples/threading.html`(3 스레드 × 프레임 체인)에서 Playwright로 검증한다.
 
-검증 항목 (17항목, 4 시나리오):
+검증 항목 (35항목, 9 시나리오):
 1. **초기 로드** — 전 스레드 프레임 `isThreadFrame` + 컬럼 수 일치(엔진↔DOM) + span 글자 수 === 엔진 visibleChars 근사(strip 편차 허용) + 배치 대상 프레임 span 존재(소진 프레임의 빈 렌더는 정상)
 2. **타이핑 전파** — head `execCommand('insertText')` → story 갱신 + seam 문자 일치(f2 DOM 첫 글자 === story[f2.contentFrom]) + 체인 일치(f2.from === head tail) + 소스 프레임 편집 파이프라인 렌더 유지. **주의**: tail이 이동하지 않으면 f2 헤드가 불변인 것이 기하학적으로 정상(라인 충전률 불변 시 tail 불변) — 전파 판정은 story 성장+seam+체인의 3각 구조로 한다 (기대값 직관 오탐 방지)
 3. **테두리 분기** — 중간 프레임 boxShadow에 빨간 없음 / overset 유도 후 tail만 `rgb(255,0,0)`. **주의**: overset 유도는 `doc.data` setter 경로로 — `engine.data` 직접 주입은 `doc.layout()`의 `_layoutStructure`가 DOM 캐시(`_threads`)로 되돌리므로 스레딩 story 갱신 경로가 아니다
@@ -566,16 +573,23 @@ npx tsx scripts/verify-threading.mjs   # 104항목 ALL PASS
 
 **dev server 방어**: `verify-multicolumn.mjs`와 동일한 2중 방어 — probe가 HTML title(`Threading Demo — 텍스트 스레딩`)까지 검증하고, 정상 서버가 없으면 자체 스폰(포트 5202) 후 종료 시 정리한다.
 
-**검증 항목 확장 (P1-8/P2-12/Phase 3)**: 브라우저 검증은 28항목으로 확장되었다:
+**검증 항목 확장 (P1-8/P2-12/Phase 3)**: 브라우저 검증은 28항목으로 확장되었다 (아래 5~9):
 5. **타이핑 스트레스 (P1-8)** — 연속 10키 타이핑으로 (a) 마이크로태스크 통합 동작 (b) flush 후 체인 dirty 전부 소진(`hasPendingChanges` 전부 false — 재진입 원천 제거) (c) 스트레스 후 seam 정합. `_flushThreadRelayout`은 `_threadRelayoutFlushing` 플래그로 재진입을 차단하고 flush 종료 시 dirty 잔존을 console.error로 assert한다
 6. **IME 조합 × flush (P2-12)** — Chromium 이벤트 모방(compositionstart → update → end)으로 (a) 조합 중 `_isComposing` 유지(flush가 조합 상태를 훼손하지 않음 — `isComposing` 게이트 불필요를 실측으로 확인) (b) 커밋('한')의 story 반영 (c) 커밋 후 체인 seam 정합
 7. **키보드 프레임 경계 이동 (Phase 3 — story 절대 좌표계)** — 스레드 프레임의 편집 커서는 story 절대 오프셋(mapper 통일)이다: (a) ArrowRight@head 끝 → f2 포커스 이관 + 커서 유지 (b) ArrowLeft@f2 시작(경계점) → head 이관 (경계점은 이동 방향이 소유 결정) (c) Backspace@f2 시작 → head 마지막 visible 글자 삭제 + head 이관 (d) 클릭 매핑 → 절대 오프셋(f2 첫 span = contentFrom)
 8. **f2 클릭(CDP) 진입 → 실제 타이핑 — 컨트롤러 직접 파싱 경로** — `_getSourceOffsetFromEvent`가 span dataset(프레임 로컬)을 직접 파싱한다: 절대 변환이 없으면 f2 클릭이 로컬 오프셋을 커서로 주고, 타이핑이 head 영역에 삽입돼 **"커서만 이동하고 글자가 안 써지는"** 회귀가 난다 (실측 재현). 합성 dispatchEvent로는 span 히트가 재현되지 않으므로 독립 페이지 로드에서 CDP 마우스·키보드로 검증한다: (a) f2 span 클릭 → f2 편집 포커스 (b) 클릭 커서가 절대 오프셋 (c) 실제 타이핑 → f2 화면 렌더 + 포커스 유지
 9. **f2 연속 타이핑 — prefix 캐시 좌표계 (비-헤드 프레임)** — `_buildPrefixCache`가 절대 캐럿과 로컬 컬럼 글자수를 비교하면 전 컬럼이 prefix로 분류돼 재배치가 0회가 된다 — **두 번째 키스트로크부터 새 글자가 화면에 안 쓰지는 회귀** (영문: 커서만 이동 / 한글: 조합 span이 커밋 순간 사라지는 플리커 = "원본으로 돌아갔다가"). (a) 영문 5자 연속 타이핑 → "abcde" 전부 렌더 (b) 한글 2단어 연속 조합 → 커밋 전부 렌더
 
+**검증 항목 확장 (범위-증명 편집 안전장치)**: 브라우저 검증은 35항목으로 확장되었다 (아래 10):
+10. **스킵 프레임 편집 소싱 안전장치 (범위-증명 §4.6)** — 스트레스 타이핑으로
+    스킵 프레임을 만든 뒤 (a) `focusParagraph` 재포커스가 `ensureThreadFramesFresh`
+    가드를 발화(조건부 가드의 재포커스 누락 방어) (b) 신선화 후 focused 문단
+    flush로 textarea/runMap이 신 모델 동기 (c) IME 커밋('한')이 story에 정확히
+    반영 (구 story 리버트 회귀 방어) (d) 경계 backspace가 head 마지막 글자 삭제
+
 **실행**:
 ```bash
-npx tsx scripts/verify-threading-browser.mjs   # 33항목 ALL PASS (서버 없으면 자동 기동)
+npx tsx scripts/verify-threading-browser.mjs   # 35항목 ALL PASS (서버 없으면 자동 기동)
 ```
 
 ### `verify-print-image-overlap.mjs` — 이미지/오버랩 수정의 print 반영 (엔진)
