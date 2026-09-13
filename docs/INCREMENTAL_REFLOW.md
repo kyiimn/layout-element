@@ -126,6 +126,40 @@ shift되면 각 위치의 글자가 바뀐다 — span `textContent` 재쓰기�
 엔진 feed-forward vs DOM(쓰기·리플로우·페인트) vs 커서 배치를 분리하고,
 초과 구간부터 판다. 이 문서의 수치는 우선순위용이지 목표값이 아니다.
 
+#### 실측 기록 (2026-09-14, 실기 — headed Chromium + RTX 5070 Ti)
+
+환경: `DISPLAY=:1` headed Chromium 1200×800, ANGLE 실GPU 래스터,
+`examples/virtualization.html` 6체인×5프레임 chain-1 tail 타이핑 20키.
+방법: 인페이지 exclusive-time 래핑(commit/writeback+thread/layoutText/
+render — 중첩분 제거) + CDP Tracing(`devtools.timeline`) 네이티브 분리.
+키당 평균 (합계 ≈ wall과 일치해 귀속이 닫힘):
+
+| 위상 | ms/키 | 비중 | 비고 |
+|---|---|---|---|
+| wall (rAF 2프레임 대기 포함) | 64.6 | 100% | — |
+| JS scripting 전체 | 25.4 | 39% | FunctionCall 합산 |
+| ㄴ commit (컨트롤러, 중첩 제외) | 0.03 | — | 자명 |
+| ㄴ relayout (writeback+스레드, 중첩 제외) | 0.15 | — | 범위-증명 효과: 오케스트레이션 sub-ms |
+| ㄴ layoutText (엔진 배치, 중첩 제외) | 2.7 | 4% | tail 타이핑 시 1~2프레임만 배치 |
+| ㄴ render (DOM 쓰기+mapper+커서, 중첩 제외) | 24.5 | 38% | JS 내 96% — 지배 위상 |
+| Blink Layout (리플로우) | 17.7 | 27% | DOM 쓰기가 유발 |
+| Paint + PrePaint | 9.1 | 14% | — |
+| Layerize | 6.1 | 9% | 키당 레이어 트리 갱신 — 다음 조사 후보 |
+| Raster (실GPU) | 4.8 | 7% | SwiftShader 부풀림 없음 확인 |
+| 기타 (이벤트·GC·commit) | ~1.5 | 2% | — |
+
+60fps 판정: **스레드 tail 타이핑 스트레스 경로는 미달** (rAF p50 36.6ms).
+단, 일반(비스레드) 타이핑은 기존 기록 p95 ~9ms로 예산 내 — 65ms는 체인
+전파+포커스 이관+윈도우 렌더가 겹친 스트레스 경로 수치다.
+
+#### §4.5 트리거 판정: **미발동**
+
+착수 조건 "실기에서 엔진 구간이 지배적"이 성립하지 않는다 — 엔진 2.7ms
+(4%) 대 DOM측 90% 이상 (render JS 24.5 + Layout 17.7 + Paint/Layerize/
+Raster ~20). break-derivation 스파이크는 계속 boxed. 다음 최적화 대상이
+생긴다면 엔진이 아니라 render 경로(span diff·mapper 재구축)와 Layout
+무효화 범위·Layerize churn이다 — 단, 별도 A/B와 §4.4 절차 없이 착수 금지.
+
 ### 4.4 마이크로 최적화 (측정 후 개별 판단 — 선행 구현 금지)
 
 - 비포커스 문단의 mapper 재구축 지연: `postRender`는 매 렌더마다 재구축한다.
