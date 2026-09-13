@@ -9,7 +9,7 @@
 |---|---|---|---|
 | `benchmark-typing.mjs` | 벤치마크 (Node) | 엔진 `layoutText` 타이핑 패스별 시간 | 수치 기록 (비교용) |
 | `benchmark-hotloop.mjs` | 벤치마크 (Node) | `_layoutColumnsPass` 핫 루프 세분 계측 | 수치 기록 |
-| `benchmark-browser.mjs` | 벤치마크 (브라우저) | 전체 파이프라인 5 시나리오 + 프레임 시간 | 60fps 예산 16.7ms |
+| `benchmark-browser.mjs` | 벤치마크 (브라우저) | 전체 파이프라인 5 시나리오 + 분해 계측 + 대규모 가상화(300p) | 60fps 예산 16.7ms |
 | `snapshot-layout.mjs` | 정합성 (엔진) | `columnContents` + `overflow` 직렬화 | **byte 동일** |
 | `verify-dom-diff.mjs` | 정합성 (DOM) | DOM ↔ 엔진 텍스트/span 무결성 | ALL PASS |
 | `verify-visual-render.mjs` | 정합성 (화면) | 실제 렌더 검증 — rect 기반 표시성 (호스트 CSS rule stale/0폭/클립 감지) | ALL PASS |
@@ -79,7 +79,7 @@ npx tsx scripts/benchmark-hotloop.mjs
 
 ### `benchmark-browser.mjs` — 브라우저 전체 파이프라인 벤치마크 (Playwright)
 
-**목적**: 사용자 상호작용 → 엔진 → DOM 렌더링까지 **실제 프레임 시간** 측정. 5개 시나리오 + 분해 계측:
+**목적**: 사용자 상호작용 → 엔진 → DOM 렌더링까지 **실제 프레임 시간** 측정. 5개 시나리오 + 분해 계측 + 대규모 가상화(300p):
 
 | 시나리오 | 측정 | 측정 기준 |
 |---|---|---|
@@ -90,6 +90,7 @@ npx tsx scripts/benchmark-hotloop.mjs
 | 5. 정렬 변경 | `paragraphStyle.textAlign` 전환 | `render-complete` 프레임 시간 |
 | 6. 분해: focus/applyInlineStyle | 각 단계의 순수 동기 시간 | setTimeout 오염 제거 |
 | 7. 분해: 파이프라인 | runMap → textContent → layoutText → renderText | 단계별 동기 시간 + 캐시 히트 여부 |
+| 8. 대규모 가상화(300p) | 빌드·풀렌더·park·재마운트 p95·300p 타이핑·메모리 | bench 문서 교체 — 마지막 실행 (VIRTUALIZATION §7 항목 5) |
 
 **실행**:
 ```bash
@@ -111,6 +112,31 @@ dev server(5175 → 5173 → 자동 스폰)를 자동 탐지한다. `examples/be
 | 인라인 스타일 주입 | ~12ms | ✓ 60fps |
 | 정렬 변경 | ~10ms | ✓ 60fps |
 | 인라인 글자크기 | ~22ms | 1회성 액션 (라인 수 변화 → 구조적 비용) |
+| 8d. 재마운트 (unpark+render, 300p 중 20p) | 9.10ms | ✓ 60fps 이내 |
+| 8e. 300p 문서 타이핑 (입력 동기) | 3.30ms | ✓ 60fps 이내 |
+
+### 시나리오 8 실측 기록 (2026-09-14, 헤드리스)
+
+300페이지(페이지당 600자, 절대 박스 적층) 문서에서의 가상화 효과.
+`window.bench.large` API (`buildLargeDoc`/`renderAll`/`parkAllBut`/
+`remountCycle`/`typeInPage`/`memoryMB`)로 구동한다:
+
+| 단계 | 수치 | 의미 |
+|---|---|---|
+| 8a. 빌드 (data assign) | 172.5ms | 300 박스+문단 생성·엔진 레이아웃 |
+| 8b. 풀렌더 (풀마운트) | 249.4ms, spans 179,400, nodes 909 | 풀마운트도 249ms로 가능 — 가상화는 필수 대응이 아닌 여유 확보 |
+| 8c. park 297페이지 | 232.7ms (0.78ms/페이지) | spans 179,400→1,794 (100:1), nodes 909→315 |
+| 8d. 재마운트 20페이지 | avg 7.44ms / p95 9.10ms | J(30p) 1~10ms 밴드와 동일 — 스케일 무관 |
+| 8e. 300p 타이핑 (20키) | 입력 동기 p95 3.30ms | 엔진 트리 규모와 무관 (600자 문단 기준) |
+| JS 힙 | 빌드 132.6MB → 풀렌더 132.6MB → 윈도우 132.6MB | 평탄 — span은 Blink C++ 메모리에 상주 |
+
+**메모리 방법론 주의**: `performance.memory`는 JS 힙만 보므로 DOM 메모리와
+무관하게 평탄하게 나온다. Blink 측 `Memory.getDOMCounters.nodes`도 분리
+보관 트리를 JS 참조로 유지하는 한 감소하지 않는다 (실측: 풀 394,522 →
+윈도우 394,819, +297은 플레이스홀더). 가상화의 메모리 story는 "파괴"가
+아니라 "분리+보유"다 — 즉각 재마운트(~7ms)가 이 보유의 대가이자 효과다.
+프로세스 RSS급 해제를 원하면 보관 트리 eviction(LRU)이 필요하며 미구현이다
+(향후 과제 후보 — 아래 VIRTUALIZATION §7 참조).
 
 ---
 

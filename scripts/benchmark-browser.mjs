@@ -8,6 +8,8 @@
  *   3. 인라인 스타일 주입 (bold/italic/color + 해제)
  *   4. 인라인 글자크기 주입/수정/제거
  *   5. 문단 정렬 변경
+ *   8. 대규모 문서 가상화 (300p 빌드·풀렌더·park·재마운트·타이핑·메모리)
+ *      — bench 문서를 교체하므로 마지막에 실행
  *
  * 실행: npx tsx scripts/benchmark-browser.mjs
  * (vite dev server 자동 시작/종료)
@@ -131,6 +133,46 @@ try {
   printResult('7d. renderText (DOM diff)', stats(bd2.renderText));
   printResult('7e. 전체 합계 (동기)', stats(bd2.full));
   console.log(`    (캐시 히트: ${bd2.cacheHit.filter(Boolean).length}/${bd2.cacheHit.length})`);
+
+  // 8. 대규모 문서 가상화 (300p + 마운트/언마운트) — 노드 수·메모리·재마운트 p95
+  console.log('\n=== 8. 대규모 문서 가상화 (300p, bench 문서 교체) ===\n');
+  const build = await page.evaluate(() => window.bench.large.buildLargeDoc(300, 600));
+  console.log(`  8a. 300p 빌드 (data assign): ${build.assignMs.toFixed(1)}ms`);
+  const memBase = await page.evaluate(() => window.bench.large.memoryMB());
+  console.log(`  메모리(빌드 직후): ${memBase === null ? 'N/A' : memBase.toFixed(1) + 'MB'}`);
+
+  // 8b. 풀렌더 시도 (풀마운트 기준선 — 시간 초과 시 infeasible 기록이 자체로 근거)
+  page.setDefaultTimeout(280000);
+  let full = null;
+  try {
+    full = await page.evaluate(() => window.bench.large.renderAll());
+    console.log(`  8b. 300p 풀렌더: ${full.renderMs.toFixed(1)}ms  spans=${full.spans}  nodes=${full.nodes}`);
+  } catch (e) {
+    console.log(`  8b. 300p 풀렌더: 시간 초과/실패 — 풀마운트 불가 근거 (${String(e).slice(0, 120)})`);
+  } finally {
+    page.setDefaultTimeout(30000);
+  }
+  const memFull = await page.evaluate(() => window.bench.large.memoryMB());
+  console.log(`  메모리(풀렌더 후): ${memFull === null ? 'N/A' : memFull.toFixed(1) + 'MB'}`);
+
+  // 8c. 윈도우 3p만 남기고 park
+  const parked = await page.evaluate(() => window.bench.large.parkAllBut(['bigpage-0', 'bigpage-1', 'bigpage-2']));
+  console.log(`  8c. park ${parked.parked}페이지: ${parked.parkMs.toFixed(1)}ms  spans=${parked.spans}  nodes=${parked.nodes}`);
+  const memParked = await page.evaluate(() => window.bench.large.memoryMB());
+  console.log(`  메모리(윈도우 3p): ${memParked === null ? 'N/A' : memParked.toFixed(1) + 'MB'}`);
+
+  // 8d. 재마운트 사이클 20페이지 (unpark + render, 페이지별)
+  const sampleIds = await page.evaluate(() => {
+    const L = window.bench.large;
+    return L.pageIds.filter((_, i) => i >= 5 && i % 15 === 5).slice(0, 20);
+  });
+  const remountTimes = await page.evaluate((ids) => window.bench.large.remountCycle(ids), sampleIds);
+  printResult('8d. 재마운트 (unpark+render)', stats(remountTimes));
+
+  // 8e. 마운트 페이지 타이핑 (300p 엔진 트리 하에서)
+  const typed = await page.evaluate(() => window.bench.large.typeInPage(150, 20));
+  printResult('8e. 300p 문서 타이핑 — 입력 동기', stats(typed.inputTimes));
+  printResult('8e. 300p 타이핑 rAF 델타', stats(typed.frameDeltas));
 
   // ── 요약 ──
   console.log('\n── 요약 (60fps 프레임 예산 16.7ms 기준) ──');

@@ -328,6 +328,153 @@
         getParaBox: () => paraBox,
         getImageBox: () => imageBox,
         getEditManager: () => em,
+
+        // ── 8. 대규모 문서 가상화 (300p + 마운트/언마운트) ──
+        // 시나리오 8 전용 네임스페이스. 기존 bench 문서를 교체하므로
+        // benchmark-browser.mjs에서 마지막에 실행한다.
+        large: {
+          pageIds: [],
+          paraIds: [],
+          _unit: "가상화 측정용 기준 문장입니다. 수백 페이지 문서의 마운트 윈도우와 재마운트 비용을 잰다. ",
+          _text(chars) {
+            let s = "";
+            while (s.length < chars) s += this._unit;
+            return s.slice(0, chars);
+          },
+          // 8a. N페이지 문서 빌드 (data assign) — top-level absolute 박스 + 문단
+          async buildLargeDoc(pageCount = 300, charsPerPage = 600) {
+            const PITCH = 300, PH = 280;
+            const children = [];
+            this.pageIds = [];
+            this.paraIds = [];
+            for (let i = 0; i < pageCount; i++) {
+              const boxId = `bigpage-${i}`;
+              const paraId = `bigpage-${i}-para`;
+              this.pageIds.push(boxId);
+              this.paraIds.push(paraId);
+              children.push({
+                type: "box",
+                id: boxId,
+                position: "absolute",
+                left: 10, top: i * PITCH,
+                width: 170, height: PH,
+                children: {
+                  type: "paragraph",
+                  id: paraId,
+                  content: this._text(charsPerPage),
+                  paragraphStyle: {},
+                  textStyle: {},
+                },
+              });
+            }
+            const t0 = performance.now();
+            doc.data = {
+              id: "bench-large-doc",
+              width: 190,
+              height: pageCount * PITCH,
+              columns: 1,
+              gap: 0,
+              paragraphStyle: { lineGap: 1.2 },
+              textStyle: { fontSize: 4 },
+              children,
+            };
+            const assignMs = performance.now() - t0;
+            return { pageCount, assignMs };
+          },
+          // span 집계 (섀도우 DOM 관통 — verify-virtualization J와 동일 정의)
+          countSpans() {
+            let n = 0;
+            for (const col of doc.querySelectorAll("x-layout-column")) {
+              n += col.shadowRoot.querySelectorAll("span[data-source-offset]").length;
+            }
+            return n;
+          },
+          countNodes() {
+            return document.querySelectorAll("*").length;
+          },
+          async memoryMB() {
+            try { window.gc?.(); } catch { /* --expose-gc 없이도 동작 */ }
+            await new Promise(r => setTimeout(r, 300));
+            const heap = performance.memory?.usedJSHeapSize;
+            return heap === undefined ? null : heap / 1048576;
+          },
+          // 8b. 전체 렌더 (풀마운트 기준선 — 시간 초과 시 호출자에서 infeasible 판정)
+          async renderAll() {
+            const t0 = performance.now();
+            await doc.render();
+            return { renderMs: performance.now() - t0, spans: this.countSpans(), nodes: this.countNodes() };
+          },
+          // 8c. 윈도우 외 전부 park (footprint 유지 — PageMountManager와 동일 방식)
+          async parkAllBut(keepIds) {
+            const keep = new Set(keepIds);
+            const t0 = performance.now();
+            let parked = 0;
+            for (const id of this.pageIds) {
+              if (keep.has(id)) continue;
+              const box = [...doc.querySelectorAll("x-layout-box")].find(b => b.id === id);
+              const h = box ? box.offsetHeight : 0;
+              const ph = doc.parkPage(id);
+              if (ph) {
+                if (h > 0) ph.style.height = `${h}px`;
+                parked++;
+              }
+            }
+            const parkMs = performance.now() - t0;
+            return { parkMs, parked, spans: this.countSpans(), nodes: this.countNodes() };
+          },
+          // 8d. 재마운트 사이클 (unpark + render, 페이지별 시간)
+          async remountCycle(ids) {
+            const times = [];
+            for (const id of ids) {
+              const t0 = performance.now();
+              const box = doc.unparkPage(id);
+              if (box) await box.render();
+              times.push(performance.now() - t0);
+            }
+            return times;
+          },
+          // 8e. 마운트 페이지 타이핑 (typeText와 동일 패턴 — 입력 동기 + 프레임 델타)
+          async typeInPage(pageIdx, count) {
+            let box = [...doc.querySelectorAll("x-layout-box")].find(b => b.id === this.pageIds[pageIdx]);
+            if (!box) {
+              const restored = doc.unparkPage(this.pageIds[pageIdx]);
+              if (restored) await restored.render();
+              box = [...doc.querySelectorAll("x-layout-box")].find(b => b.id === this.pageIds[pageIdx]);
+            }
+            const p = box.querySelector("x-layout-paragraph");
+            if (!p.editableText) {
+              p.editableText = true;
+              await new Promise(r => setTimeout(r, 100));
+            }
+            em.focusParagraph(p);
+            await new Promise(r => setTimeout(r, 100));
+            const controller = em._focusedController;
+            const ta = controller?._textarea;
+            const inputTimes = [];
+            const frameDeltas = [];
+            const chars = "가나다라마바사";
+            let lastRafTs = 0;
+            const raf = () => new Promise(r => requestAnimationFrame(ts => {
+              if (lastRafTs > 0) frameDeltas.push(ts - lastRafTs);
+              lastRafTs = ts;
+              r();
+            }));
+            for (let i = 0; i < count; i++) {
+              await raf();
+              await raf();
+              const t0 = performance.now();
+              if (ta) {
+                const before = ta.value;
+                const offset = ta.selectionStart ?? before.length;
+                ta.value = before.slice(0, offset) + chars[i % chars.length] + before.slice(ta.selectionEnd ?? offset);
+                ta.setSelectionRange(offset + 1, offset + 1);
+                ta.dispatchEvent(new InputEvent("input", { bubbles: true }));
+              }
+              inputTimes.push(performance.now() - t0);
+            }
+            return { inputTimes, frameDeltas };
+          },
+        },
       };
 
       document.title = "BENCH_READY";

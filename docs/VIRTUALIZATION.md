@@ -346,8 +346,17 @@ transform: scale(s)  →  브라우저 컴포지트 단계만 변경 (layout/ref
    (2) rAF 병합 적용 (IO 배치당 DOM surgery 금지 — 최신 `_visible` 기준 프레임당
    1회), (3) 플레이스홀더 fractional 사이징 (`getBoundingClientRect/scale`,
    `scale` 옵션, 기본 1 — `offsetWidth` 정수 반올림이 이웃을 경계 너머로 민다).
-5. **[다음]** `benchmark-browser.mjs`에 300p + 마운트/언마운트 시나리오 추가 →
-   노드 수·메모리·재마운트 p95 측정 (§6.2).
+5. **[완료 — 2026-09-14]** `benchmark-browser.mjs`에 300p + 마운트/언마운트
+   시나리오 추가 (시나리오 8) → 노드 수·메모리·재마운트 p95 측정 (§6.2).
+   실측 (헤드리스, 300p×600자): 빌드 172.5ms / 풀렌더 249.4ms
+   (spans 179,400, nodes 909) / park 297p 232.7ms (spans →1,794, 100:1,
+   nodes →315) / 재마운트 20p avg 7.44ms·p95 9.10ms (J 밴드와 동일 —
+   스케일 무관) / 300p 타이핑 입력 동기 p95 3.30ms / JS 힙 평탄.
+   방법론 주의: `performance.memory`·`getDOMCounters`는 분리 보관 트리를
+   JS 참조로 유지하는 한 감소하지 않는다 — 가상화의 메모리 story는
+   "파괴"가 아니라 "분리+보유"이며, 프로세스 RSS급 해제를 원하면 보관
+   트리 eviction(LRU)이 필요하다 (미구현 — 향후 과제 후보).
+   상세는 `scripts/README.md`의 시나리오 8 섹션 참조.
 6. **[② 페이지 모델]** 위 로드맵대로 — 마운트 단위·데이터 경로·스레딩 통합.
 7. **[③′ 이후]** 시분할 프로그레시브 레이아웃 등 순차 적용.
 8. **[근본 원인 분석 완료]** 스레드 체인 타이핑 비용의 분석과 유효 레버가
@@ -373,8 +382,10 @@ transform: scale(s)  →  브라우저 컴포지트 단계만 변경 (layout/ref
   커밋)이 위치와 무관하므로 체감이 같다. 사용자의 "끝쪽도 같다"는 관측이 맞다.
 - **윈도우 크기가 직접 비례한다.** 마운트 3→2페이지에 490ms→308ms (페이지당
   약 160ms, 헤드리스). 타이핑 체감의 즉시 레버는 윈도우 축소와 체인 분할이다.
-- 헤드리스(SwiftShader) 수치는 실기보다 5~10배 부풀려져 있다. 실기 DevTools
-  Performance 패널로 엔진/DOM 분할을 재확인할 것.
+- 헤드리스(SwiftShader) 수치는 실기보다 5~10배 부풀려져 있다. 실기 분할은
+  P1에서 완료했다 — headed Chromium + RTX 5070 Ti 실측으로 키당 귀속이
+  닫혔다 (엔진 layoutText 2.7ms·4% 대 DOM측 90% 이상). 상세는
+  `docs/INCREMENTAL_REFLOW.md` §4.3 실측 기록 참조.
 - 시도 후 revert한 것: overflow 카운트 변화 시 span 전체 재생성 제거 —
   동일 페이지 A/B(강제 recreate vs diff)에서 484ms vs 458ms로 유의미한 차이
   없음이 실측되어 원복했다 (근거 없는 최적화 금지 원칙).
