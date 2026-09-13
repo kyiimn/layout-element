@@ -4644,6 +4644,20 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   }
 
   /**
+   * 라인 경계 walk의 평탄화 라인 수 — 컬럼순 누적 합계.
+   * 편집 계층(`_toFlatLineIndex`/`_fromFlatLineIndex`)의 수직 이동이 소비한다.
+   * @returns 전체 컬럼의 라인 수 합계. 미배치면 0.
+   * @throws 없음
+   */
+  public get cursorLineCount(): number {
+    let count = 0;
+    for (const column of this._columnContents) {
+      count += column.length;
+    }
+    return count;
+  }
+
+  /**
    * 라인 경계 walk의 단일 구현 — visibleChars/maxVisibleCursorOffset/cursorLineRanges가 공유한다.
    * @private
    */

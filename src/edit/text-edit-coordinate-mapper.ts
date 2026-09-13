@@ -1,7 +1,7 @@
 import type { LayoutColumnElement } from "@/components/layout/column.element";
 import type { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import type { CursorPosition } from "@/types/edit/cursor.type";
-import type { CursorPlacement } from "@/engine/types";
+import type { CursorLineRange, CursorPlacement } from "@/engine/types";
 import { EditManager } from "./edit-manager";
 
 export type { CursorPlacement };
@@ -72,21 +72,13 @@ export class TextEditCoordinateMapper {
   private _contentFrom = 0;
 
   /**
-   * 각 컬럼의 source offset 범위. binary search용.
-   * `_columnRanges[columnIndex] = { start, end }` — start는 첫 가시 문자의 source offset, end는 마지막 가시 문자의 source offset + 1.
+   * 엔진 `cursorLineRanges` 캐시 — 라인 경계의 단일 소스가 엔진이다.
+   * mapper는 placement 구축((b) 패스)만 소유하고, 라인 경계/소속 판정은
+   * 이 캐시에서 읽는다. `rebuild`/`rebuildMappingsOnly` 시점에 갱신.
+   * (구 mapper walk `_lineSourceOffsets`/`_columnRanges`/`_totalLineCount`는
+   * 엔진 walk와의 이중화라 제거되었다 — 소거 커밋 계약.)
    */
-  private _columnRanges: { start: number; end: number }[] = [];
-
-  /**
-   * 모든 라인의 시작 source offset을 컬럼순·라인순으로 평탄화한 배열.
-   * `_lineSourceOffsets[columnIndex][lineIndex]` = 해당 라인의 시작 source offset.
-   */
-  private _lineSourceOffsets: number[][] = [];
-
-  /**
-   * 모든 라인의 개수(컬럼 전체 합).
-   */
-  private _totalLineCount = 0;
+  private _lineRanges: CursorLineRange[][] = [];
 
   /**
    * @param paragraph - 이 mapper가 바인딩된 paragraph 요소
@@ -115,9 +107,7 @@ export class TextEditCoordinateMapper {
     this._lineEndPlacements.clear();
     this._spanCache.clear();
     this._columnSpansCache.clear();
-    this._columnRanges = [];
-    this._lineSourceOffsets = [];
-    this._totalLineCount = 0;
+    this._lineRanges = [];
     this._rebuildMappings();
   }
 
@@ -132,9 +122,7 @@ export class TextEditCoordinateMapper {
   rebuildMappingsOnly(): void {
     this._sourceToPlacement.clear();
     this._lineEndPlacements.clear();
-    this._columnRanges = [];
-    this._lineSourceOffsets = [];
-    this._totalLineCount = 0;
+    this._lineRanges = [];
     this._rebuildMappings();
   }
 
@@ -158,17 +146,32 @@ export class TextEditCoordinateMapper {
 
     const columnContents = model.columnContents;
     this._contentFrom = model.isThreadFrame ? model.contentFrom : 0;
-    let sourceOffset = this._contentFrom;
     const textContent = model.plainText;
+
+    // 라인 경계(a)는 엔진 단일 소스에서 읽는다 — mapper는 배치(b)만 구축.
+    // 엔진 ranges는 프레임 로컬 오프셋이므로 story 절대 공간으로 +contentFrom 변환.
+    const engine = this._paragraph.engine;
+    const engineRanges = engine ? engine.cursorLineRanges : [];
+    this._lineRanges = engineRanges.map(column =>
+      column.map(range => ({
+        ...range,
+        startOffset: range.startOffset + this._contentFrom,
+        endOffset: range.endOffset + this._contentFrom,
+        firstVisible: range.firstVisible === null ? null : range.firstVisible + this._contentFrom,
+        lastVisible: range.lastVisible === null ? null : range.lastVisible + this._contentFrom,
+      })),
+    );
 
     for (let columnIndex = 0; columnIndex < columnContents.length; columnIndex++) {
       const lines = columnContents[columnIndex];
-      const lineStartOffsets: number[] = [];
-      const columnStartSourceOffset = sourceOffset;
+      // 라인 시작 offset은 엔진 ranges(단일 소스)에서 — placement walk((b))만 이 루프가 수행.
+      const columnRange = this._lineRanges[columnIndex] ?? [];
 
       for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const line = lines[lineIndex];
-        lineStartOffsets.push(sourceOffset);
+        let sourceOffset = columnRange[lineIndex]
+          ? columnRange[lineIndex].startOffset
+          : sourceOffsetFallback(columnIndex, lineIndex, this._lineRanges, textContent.length);
         let lastVisibleSourceOffset: number | null = null;
         let lineTrailingSpaces = 0;
 
@@ -247,14 +250,9 @@ export class TextEditCoordinateMapper {
         }
       }
 
-      this._lineSourceOffsets.push(lineStartOffsets);
-      this._totalLineCount += lines.length;
-      this._columnRanges.push({ start: columnStartSourceOffset, end: sourceOffset });
     }
 
     // 매핑 구멍 채우기: _sourceToPlacement에 없는 source offset에 대해
-    // 순방향 스캔으로 마지막 placement를 추적하여 O(n)으로 채운다.
-    // 생략된 공백과 \n 다음 위치는 건너뛴다 — line rect 폴백이 처리한다.
     let lastPlacement: CursorPlacement | null = null;
     for (let i = 0; i <= textContent.length; i++) {
       const existing = this._sourceToPlacement.get(i);
@@ -346,13 +344,13 @@ export class TextEditCoordinateMapper {
    * @returns `{ columnIndex, lineIndex }` 또는 null
    */
   getLineInfoBySourceOffset(sourceOffset: number): { columnIndex: number; lineIndex: number } | null {
-    for (let columnIndex = this._lineSourceOffsets.length - 1; columnIndex >= 0; columnIndex--) {
-      const lineStarts = this._lineSourceOffsets[columnIndex];
-      if (lineStarts.length === 0) continue;
-      if (sourceOffset < lineStarts[0]) continue;
+    for (let columnIndex = this._lineRanges.length - 1; columnIndex >= 0; columnIndex--) {
+      const column = this._lineRanges[columnIndex];
+      if (column.length === 0) continue;
+      if (sourceOffset < column[0].startOffset) continue;
 
-      for (let lineIndex = lineStarts.length - 1; lineIndex >= 0; lineIndex--) {
-        if (sourceOffset >= lineStarts[lineIndex]) {
+      for (let lineIndex = column.length - 1; lineIndex >= 0; lineIndex--) {
+        if (sourceOffset >= column[lineIndex].startOffset) {
           return { columnIndex, lineIndex };
         }
       }
@@ -367,9 +365,9 @@ export class TextEditCoordinateMapper {
    * @returns 시작 source 오프셋. 없으면 null.
    */
   getLineStartSourceOffset(columnIndex: number, lineIndex: number): number | null {
-    const lineStarts = this._lineSourceOffsets[columnIndex];
-    if (!lineStarts || lineIndex < 0 || lineIndex >= lineStarts.length) return null;
-    return lineStarts[lineIndex];
+    const column = this._lineRanges[columnIndex];
+    if (!column || lineIndex < 0 || lineIndex >= column.length) return null;
+    return column[lineIndex].startOffset;
   }
 
   /**
@@ -377,7 +375,7 @@ export class TextEditCoordinateMapper {
    * @returns 라인 수
    */
   get totalLineCount(): number {
-    return this._totalLineCount;
+    return this._paragraph.engine?.cursorLineCount ?? 0;
   }
 
   /**
@@ -502,9 +500,10 @@ export class TextEditCoordinateMapper {
 
     // 빈 라인: 라인 시작 offset 반환
     if (lineSpans.length === 0) {
-      const lineStarts = this._lineSourceOffsets[this._getAllColumns().indexOf(bestColumn)];
-      if (lineStarts && closestLineIndex >= 0 && closestLineIndex < lineStarts.length) {
-        return { textOffset: lineStarts[closestLineIndex] };
+      const columnIdx = this._getAllColumns().indexOf(bestColumn);
+      const lineStart = this.getLineStartSourceOffset(columnIdx, closestLineIndex);
+      if (lineStart !== null) {
+        return { textOffset: lineStart };
       }
       return null;
     }
@@ -774,7 +773,7 @@ export class TextEditCoordinateMapper {
 
   /**
    * 주어진 source 오프셋에 해당하는 문자 `span` 요소를 반환한다.
-   * 임시 span은 제외한다. `_columnRanges`로 binary search로 컬럼을 찾아 해당 컬럼만 검색한다.
+   * 임시 span은 제외한다. `_lineRanges`로 binary search로 컬럼을 찾아 해당 컬럼만 검색한다.
    * @param sourceOffset - 소스 오프셋
    * @returns span 요소 또는 null
    */
@@ -802,22 +801,25 @@ export class TextEditCoordinateMapper {
   }
 
   /**
-   * `_columnRanges`에서 source offset이 속한 컬럼 인덱스를 binary search로 찾는다.
+   * `_lineRanges`에서 source offset이 속한 컬럼 인덱스를 binary search로 찾는다.
    * @param sourceOffset - 찾을 source offset
    * @returns 컬럼 인덱스 또는 null
    */
   private _findColumnIndexByOffset(sourceOffset: number): number | null {
     let low = 0;
-    let high = this._columnRanges.length - 1;
+    let high = this._lineRanges.length - 1;
 
     while (low <= high) {
       const mid = Math.floor((low + high) / 2);
-      const range = this._columnRanges[mid];
-      const isLast = mid === this._columnRanges.length - 1;
+      const column = this._lineRanges[mid];
+      const isLast = mid === this._lineRanges.length - 1;
+      // 컬럼 범위: 첫 라인 startOffset ~ 마지막 라인 endOffset
+      const colStart = column.length > 0 ? column[0].startOffset : Infinity;
+      const colEnd = column.length > 0 ? column[column.length - 1].endOffset : -Infinity;
 
-      if (sourceOffset < range.start) {
+      if (sourceOffset < colStart) {
         high = mid - 1;
-      } else if (isLast ? sourceOffset > range.end : sourceOffset >= range.end) {
+      } else if (isLast ? sourceOffset > colEnd : sourceOffset >= colEnd) {
         low = mid + 1;
       } else {
         return mid;
@@ -840,4 +842,24 @@ export class TextEditCoordinateMapper {
     this._columnSpansCache.set(column, spans);
     return spans;
   }
+}
+
+/**
+ * 엔진 ranges에 없는 컬럼/라인의 폴백 시작 offset.
+ *
+ * 정상 경로에서는 발생하지 않는다(엔진 walk와 columnContents가 동일 트리에서
+ * 나오므로). 방어용 — 컬럼 인덱스가 ranges보다 앞서면 이전 컬럼의 endOffset,
+ * 첫 컬럼이면 0.
+ */
+function sourceOffsetFallback(
+  columnIndex: number,
+  lineIndex: number,
+  lineRanges: CursorLineRange[][],
+  textContentLength: number,
+): number {
+  if (columnIndex > 0 && lineRanges[columnIndex - 1]?.length) {
+    const prevColumn = lineRanges[columnIndex - 1];
+    return prevColumn[prevColumn.length - 1].endOffset;
+  }
+  return lineIndex === 0 ? 0 : textContentLength;
 }
