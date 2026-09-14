@@ -16,18 +16,44 @@
 
 import { DocumentData, PageData, normalizeDocumentData } from "@/types";
 import { ParagraphStyle, TextStyle } from "@/types";
-import { AbsRect, FlipLayoutOptions, FontLoaderEngine, ColorRegistryEngine } from "./types";
+import type { AbsRect, FlipLayoutOptions, FontLoaderEngine, ColorRegistryEngine } from "./types";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
-import { BoxEngine } from "./box-engine";
-import { ParagraphEngine } from "./paragraph-engine";
-import { ImageEngine } from "./image-engine";
-import { TableEngine } from "./table-engine";
 import { ThreadEngine, ThreadLayoutOptions, ThreadLayoutResult } from "./thread-engine";
 import { PageEngine } from "./page-engine";
+import { ParagraphEngine } from "./paragraph-engine";
+import type { BoxEngine } from "./box-engine";
+import type { ImageEngine } from "./image-engine";
+import type { TableEngine } from "./table-engine";
 import type { PrintPostData } from "@/types/print";
 import { createDirtyError } from "./types";
 
-/** BoxEngineParent 계약 충족 (PageEngine과 동일 — 문서는 페이지의 부모가 아니므로 최소 구현). */
+/**
+ * 문서 전용 계약 (감사 D-7 — BoxEngineParent 스텁 격리).
+ *
+ * DocumentEngine이 BoxEngineParent를 "암시적으로 만족"하기 위해 두던
+ * 스텁들(childBoxEngines[]/appendChildBoxEngine 등 no-op/absRect 0/
+ * gridCalculator 매호출 생성)은 실제 소비처가 0건인 설계 부채였다. 페이지
+ * 트리에 진입하는 엔진의 부모는 PageEngine이므로 문서는 BoxEngineParent
+ * 계약에서 격리되고, 이 인터페이스는 문서 엔진의 **실제 표면**만 선언한다.
+ *
+ * @example
+ * ```ts
+ * // 호출부는 문서 엔진을 BoxEngineParent로 기대하지 않는다 —
+ * // DocumentEngineParent로 소비하거나 구체 DocumentEngine을 쓴다.
+ * function orchestrate(doc: DocumentEngineParent): void {
+ *   doc.relayoutThreads();
+ * }
+ * ```
+ */
+export interface DocumentEngineParent {
+  /** 문서 자체는 절대 (0,0) 사각형이 아니다 — 표시 계층이 좌표를 소유 */
+  readonly absRect: AbsRect;
+  /** 스레드 조정 — story writeback + 체인 재배치 (문서 스코프 단일 소스) */
+  relayoutThreads(sourceFrameIds?: ReadonlySet<string>, pinnedFrameIds?: ReadonlySet<string>): ThreadLayoutResult[];
+  /** 문서 전체 dirty 소진 (명시적 스냅샷 경계) */
+  ensureCommitted(): void;
+}
+
 export class DocumentEngine {
   private _data: DocumentData;
   private _ppm: number;
@@ -335,10 +361,11 @@ export class DocumentEngine {
     return i;
   }
 
-  /** 미사용 인터페이스 만족 스텁 (BoxEngineParent는 페이지에 요구되지 않는다). */
-  get childBoxEngines(): BoxEngine[] { return []; }
-
-  /** flipLayout은 페이지 엔진 소유 — 문서는 페이지에 위임한다. */
+  /**
+   * flipLayout은 페이지 엔진 소유 — 문서는 페이지에 위임한다.
+   * (BoxEngineParent 스텁이 아니라 실제 위임 메서드로 유지 — DOM page.element가
+   *  문서 스코프 반전을 요청할 수 있다.)
+   */
   flipLayout(options: FlipLayoutOptions): void {
     for (const pageEngine of this._pageEngines) {
       pageEngine.flipLayout(options);
@@ -353,16 +380,15 @@ export class DocumentEngine {
   /** AbsRect 스텁 (문서는 물리적 사각형이 아니다 — 표시 계층이 좌표를 소유). */
   get absRect(): AbsRect { return { absLeft: 0, absTop: 0, absWidth: 0, absHeight: 0 }; }
 
-  /** BoxEngineParent 계약 스텁 — 문서는 자식 박스를 직접 소유하지 않는다. */
-  appendChildBoxEngine(_boxEngine: BoxEngine): void {}
-  removeChildBoxEngine(_boxEngine: BoxEngine): void {}
-  findBoxEngineById(_id: string): BoxEngine | undefined { return undefined; }
-
   /**
    * 그리드 계산기 스텁 — 그리드는 페이지 스코프 (PageEngine 소유).
-   * @throws 없음. 빈 GridCalculatorEngine을 반환.
+   *
+   * 매호출 `GridCalculatorEngine.create`였던 스텁(D-7)을 싱글턴으로 교체한다 —
+   * 호출자는 0건이지만 미래 호출자가 매호출 새 인스턴스 할당을 유발하지
+   * 않도록 불변 빈 계산기를 1회만 생성한다.
    */
-  get gridCalculator(): GridCalculatorEngine {
-    return GridCalculatorEngine.create({ width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}, isBox: true });
-  }
+  private static readonly _EMPTY_GRID = GridCalculatorEngine.create(
+    { width: 0, height: 0, columns: 1, gap: 0, paragraphStyle: {}, textStyle: {}, isBox: true },
+  );
+  get gridCalculator(): GridCalculatorEngine { return DocumentEngine._EMPTY_GRID; }
 }
