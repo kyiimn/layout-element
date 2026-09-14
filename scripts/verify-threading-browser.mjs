@@ -623,7 +623,7 @@ console.log('\n[5] 타이핑 스트레스 — flush 통합·재진입 차단 (P1
     check('스트레스 후에도 seam 정합 유지',
       r.stress.seamOk,
       `f2.from=${r.stress.f2From}`);
-    // E-2 (INCREMENTAL_REFLOW.md §2): flush 중 유도된 파생 relayout은
+    // E-2 (TEXT_ENGINE.md § 27.2): flush 중 유도된 파생 relayout은
     // 무한 재귀 없이 다음 microtask로 이월·소진된다 — 유도 1회 + 재진입
     // 차단(이번 flush가 이월 요청을 즉시 실행하지 않음) + 이월 flush도
     // 정상 소진(dirty 잔존 없음)을 함께 실측한다.
