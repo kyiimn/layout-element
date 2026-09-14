@@ -1,4 +1,4 @@
-import { LayoutDocumentElement } from "@/components/layout/document.element";
+import { LayoutPageElement } from "@/components/layout/page.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
 import { EditManager } from "./edit-manager";
 import type { ImageObjectFit } from "@/types/layout/image.type";
@@ -72,7 +72,7 @@ interface ImageDragState {
  */
 export class ImageEditController {
   /** 이벤트 리스너가 등록되는 루트 요소 (문서 요소) */
-  private _document: LayoutDocumentElement;
+  private _document: LayoutPageElement;
   /** 이 컨트롤러가 속한 EditManager 인스턴스 */
   private _manager: EditManager;
   /** 컨트롤러 활성화 여부 */
@@ -95,7 +95,7 @@ export class ImageEditController {
    * @param doc - 이벤트 리스너가 등록될 문서 요소
    * @param manager - 이 컨트롤러가 속한 EditManager 인스턴스
    */
-  constructor(doc: LayoutDocumentElement, manager: EditManager) {
+  constructor(doc: LayoutPageElement, manager: EditManager) {
     this._document = doc;
     this._manager = manager;
   }

@@ -1,4 +1,4 @@
-export { LayoutDocument, type LayoutDocumentProps } from './layout-document';
+export { LayoutPage, type LayoutPageProps } from './layout-page';
 export { LayoutBox, type LayoutBoxProps } from './layout-box';
 export { LayoutParagraph, type LayoutParagraphProps } from './layout-paragraph';
 export { LayoutImage, type LayoutImageProps } from './layout-image';

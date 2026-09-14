@@ -1,10 +1,10 @@
 import { forwardRef, useEffect, type ReactNode } from 'react';
-import { LayoutDocumentElement } from '@/components';
-import type { DocumentData, ParagraphStyle, TextStyle } from '@/types';
+import { LayoutPageElement } from '@/components';
+import type { PageData, ParagraphStyle, TextStyle } from '@/types';
 import { useLayoutElement } from '@/react/hooks';
 
-export interface LayoutDocumentProps {
-  data?: DocumentData;
+export interface LayoutPageProps {
+  data?: PageData;
   width?: number;
   height?: number;
   paddingTop?: number;
@@ -22,8 +22,8 @@ export interface LayoutDocumentProps {
   children?: ReactNode;
 }
 
-export const LayoutDocument = forwardRef<LayoutDocumentElement, LayoutDocumentProps>(
-  function LayoutDocument({
+export const LayoutPage = forwardRef<LayoutPageElement, LayoutPageProps>(
+  function LayoutPage({
     data,
     width,
     height,
@@ -40,10 +40,10 @@ export const LayoutDocument = forwardRef<LayoutDocumentElement, LayoutDocumentPr
     onRenderError,
     children,
   }, ref) {
-    const { ref: innerRef, define } = useLayoutElement<LayoutDocumentElement>();
+    const { ref: innerRef, define } = useLayoutElement<LayoutPageElement>();
 
     useEffect(() => {
-      define('x-layout-document', LayoutDocumentElement);
+      define('x-layout-page', LayoutPageElement);
     }, [define]);
 
     useEffect(() => {
@@ -95,9 +95,9 @@ export const LayoutDocument = forwardRef<LayoutDocumentElement, LayoutDocumentPr
     }, [ref, innerRef]);
 
     return (
-      <x-layout-document ref={innerRef}>
+      <x-layout-page ref={innerRef}>
         {children}
-      </x-layout-document>
+      </x-layout-page>
     );
   }
 );

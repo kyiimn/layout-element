@@ -1,5 +1,5 @@
 import { Z_INDEX_TYPE_LABEL, PARKED_PAGE_ATTR } from "@/constants";
-import { DocumentData, ParagraphStyle, TextStyle, BoxData, Font, CMYKColorSet, ThreadData } from "@/types";
+import { PageData, ParagraphStyle, TextStyle, BoxData, Font, CMYKColorSet, ThreadData } from "@/types";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
@@ -7,7 +7,7 @@ import { LayoutGuideColumnElement } from "./guide-column.element";
 import type { LayoutTableElement } from "./table.element";
 import type { FlipLayoutOptions } from "@/engine";
 import { EditManager } from "@/edit/edit-manager";
-import { DocumentEngine, BoxEngine, ParagraphEngine } from "@/engine";
+import { PageEngine, BoxEngine, ParagraphEngine } from "@/engine";
 import type { FontLoaderEngine, ColorRegistryEngine, ParsedFont, GridCalculatorEngine } from "@/engine";
 import { FontLoader } from "@/resource/font-loader";
 import { ColorRegistry } from "@/resource/color-registry";
@@ -74,9 +74,9 @@ class ColorRegistrySingletonAdapter implements ColorRegistryEngine {
 }
 
 /**
- * 문서 루트 요소. `<x-layout-document>` 커스텀 엘리먼트.
+ * 문서 루트 요소. `<x-layout-page>` 커스텀 엘리먼트.
  *
- * `DocumentData`를 받아 전체 렌더링 파이프라인을 조율한다.
+ * `PageData`를 받아 전체 렌더링 파이프라인을 조율한다.
  *
  * 렌더링 파이프라인:
  * 1. `renderLayout()` - 동기. DOM 트리 구축, 자식 박스 생성, `GridCalculator` 생성
@@ -88,8 +88,8 @@ class ColorRegistrySingletonAdapter implements ColorRegistryEngine {
  * - 최상위 `InheritStyle` 생성 및 자식에게 전파
  * - 컬럼 가이드(`<x-layout-guide-column>`) 렌더링
  */
-export class LayoutDocumentElement extends HTMLElement {
-  private _engine?: DocumentEngine;
+export class LayoutPageElement extends HTMLElement {
+  private _engine?: PageEngine;
   private _ppm: number = 0;
 
   private _shadowRoot: ShadowRoot;
@@ -100,7 +100,7 @@ export class LayoutDocumentElement extends HTMLElement {
   private _rebuildingChildren = false;
 
   /** `_rebuildingChildren`이 true인 동안 getter가 반환할 캐시된 데이터. */
-  private _pendingData: DocumentData | null = null;
+  private _pendingData: PageData | null = null;
 
   /**
    * 가상화로 DOM에서 분리된 페이지 박스 보관소 (G1 방어).
@@ -150,14 +150,14 @@ export class LayoutDocumentElement extends HTMLElement {
   get editManager(): EditManager { return this._editManager; }
 
   /**
-   * 이 문서 요소에 연결된 DocumentEngine 인스턴스를 반환한다.
+   * 이 문서 요소에 연결된 PageEngine 인스턴스를 반환한다.
    *
    * 엔진은 `connectedCallback`에서 ppm 측정 후 생성되며,
    * 하위 box/paragraph 요소들이 엔진 트리에 접근할 수 있도록 한다.
    *
-   * @returns DocumentEngine 인스턴스. 연결 전이면 undefined.
+   * @returns PageEngine 인스턴스. 연결 전이면 undefined.
    */
-  get engine(): DocumentEngine | undefined { return this._engine; }
+  get engine(): PageEngine | undefined { return this._engine; }
 
   /**
    * 이 문서의 GridCalculatorEngine을 반환한다 (엔진 기반).
@@ -291,12 +291,12 @@ export class LayoutDocumentElement extends HTMLElement {
     document.body.removeChild(div);
     this._ppm = pxWidth100mm / 100;
     if (this._ppm <= 0) {
-      throw new Error(`LayoutDocumentElement: ppm 측정 실패 (${this._ppm}). 브라우저 렌더링 컨텍스트를 확인하세요.`);
+      throw new Error(`LayoutPageElement: ppm 측정 실패 (${this._ppm}). 브라우저 렌더링 컨텍스트를 확인하세요.`);
     }
   }
 
   /**
-   * 구조 계산: DocumentEngine 데이터 할당 및 엔진 생성/갱신.
+   * 구조 계산: PageEngine 데이터 할당 및 엔진 생성/갱신.
    * 내부 전용. `layout()`에서만 호출된다.
    */
   private _layoutStructure() {
@@ -306,7 +306,7 @@ export class LayoutDocumentElement extends HTMLElement {
 
     const fontLoader = new FontLoaderSingletonAdapter(FontLoader.getInstance());
     const colorRegistry = new ColorRegistrySingletonAdapter(ColorRegistry.getInstance());
-    const docData: DocumentData = {
+    const docData: PageData = {
       id: this.id,
       width: this._width,
       height: this._height,
@@ -321,7 +321,7 @@ export class LayoutDocumentElement extends HTMLElement {
       threads: this._threads,
     };
     if (!this._engine) {
-      this._engine = DocumentEngine.create(docData, fontLoader, colorRegistry, this._ppm);
+      this._engine = PageEngine.create(docData, fontLoader, colorRegistry, this._ppm);
     } else {
       this._engine.data = docData;
       this._engine.ppm = this._ppm;
@@ -368,7 +368,7 @@ export class LayoutDocumentElement extends HTMLElement {
 
   /**
    * 엔진 트리의 id를 DOM 자식 요소에 동기화한다.
-   * DocumentEngine._buildBoxEngine이 BoxData.id가 없을 때 generateEngineId()로
+   * PageEngine._buildBoxEngine이 BoxData.id가 없을 때 generateEngineId()로
    * id를 발급한다. 이 id를 DOM 요소에 write-back하여,
    * 자식 connectedCallback의 findBoxEngineById(this.id)가 정상 작동하도록 한다.
    */
@@ -597,7 +597,7 @@ export class LayoutDocumentElement extends HTMLElement {
   /**
    * 예약된 스레드 체인 재배치를 실행한다.
    *
-   * 1. story writeback + 체인 재배치 — `DocumentEngine.relayoutThreads(sources)`
+   * 1. story writeback + 체인 재배치 — `PageEngine.relayoutThreads(sources)`
    *    가 수행한다 (story 소유권은 엔진)
    * 2. 스레드 프레임 DOM model 동기화
    * 3. 실제 배치된 프레임 중 소스를 제외한 DOM 재렌더 (소스는 편집 파이프라인이
@@ -834,7 +834,7 @@ export class LayoutDocumentElement extends HTMLElement {
    * @example
    * ```ts
    * const w = boxEl.offsetWidth, h = boxEl.offsetHeight;
-   * const ph = docEl.parkPage('page-042');
+   * const ph = pageEl.parkPage('page-042');
    * if (ph) { ph.style.width = `${w}px`; ph.style.height = `${h}px`; }
    * ```
    */
@@ -867,7 +867,7 @@ export class LayoutDocumentElement extends HTMLElement {
    *
    * @example
    * ```ts
-   * const boxEl = docEl.unparkPage('page-042');
+   * const boxEl = pageEl.unparkPage('page-042');
    * if (boxEl) await boxEl.render();
    * ```
    */
@@ -893,9 +893,9 @@ export class LayoutDocumentElement extends HTMLElement {
     return [...this._parkedPages.keys()];
   }
 
-  set data(data: DocumentData) {
+  set data(data: PageData) {
     // 문서 요소 자신의 id는 자동 생성하지 않는다 — HTML 마크업이 부여한
-    // id(`<x-layout-document id="doc">`)를 data 주입이 난수로 덮어쓰면
+    // id(`<x-layout-page id="doc">`)를 data 주입이 난수로 덮어쓰면
     // document.getElementById가 요소를 못 찾는다. 엔진은 _rawData()에서
     // this.id(마크업 id 또는 기존값)를 주입받는다. 자식 박스/문단은
     // reconcile 키로 쓰이므로 자동 생성을 유지한다.
@@ -922,7 +922,7 @@ export class LayoutDocumentElement extends HTMLElement {
       // 자식 connectedCallback이 읽는 columnCoords가 신선하도록 한다.
       const fontLoader = new FontLoaderSingletonAdapter(FontLoader.getInstance());
       const colorRegistry = new ColorRegistrySingletonAdapter(ColorRegistry.getInstance());
-      const docData: DocumentData = {
+      const docData: PageData = {
         id: this.id,
         width: this._width,
         height: this._height,
@@ -937,7 +937,7 @@ export class LayoutDocumentElement extends HTMLElement {
         threads: this._threads,
       };
       if (!this._engine) {
-        this._engine = DocumentEngine.create(docData, fontLoader, colorRegistry, this._ppm);
+        this._engine = PageEngine.create(docData, fontLoader, colorRegistry, this._ppm);
       } else {
         this._engine.data = docData;
         this._engine.ppm = this._ppm;
@@ -1135,7 +1135,7 @@ export class LayoutDocumentElement extends HTMLElement {
   get threads() { return this._threads; }
 
   get visibleGuide() { return this._visibleGuide; }
-  get type() { return 'document' as const; }
+  get type() { return 'page' as const; }
   get zIndex() { return 0; }
 
   set visibleGuide(value: boolean) {
@@ -1191,4 +1191,4 @@ export class LayoutDocumentElement extends HTMLElement {
   }
 }
 
-customElements.define('x-layout-document', LayoutDocumentElement);
+customElements.define('x-layout-page', LayoutPageElement);

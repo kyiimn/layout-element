@@ -1,5 +1,5 @@
 import type { LayoutBoxElement } from "@/components/layout/box.element";
-import type { LayoutDocumentElement } from "@/components/layout/document.element";
+import type { LayoutPageElement } from "@/components/layout/page.element";
 import type { LayoutTableCellElement } from "@/components/layout/td.element";
 
 /**
@@ -19,7 +19,7 @@ import type { LayoutTableCellElement } from "@/components/layout/td.element";
  * 컨테이너가 수용할 수 있는 최대 라인 인덱스 + 1 (= 라인 수)은:
  *   floor((editableTextHeight - fontSize) / lineHeight) + 1
  *
- * @param container - 삽입 대상 컨테이너 (LayoutDocumentElement 또는 LayoutBoxElement)
+ * @param container - 삽입 대상 컨테이너 (LayoutPageElement 또는 LayoutBoxElement)
  * @param elementLeft - 요소의 static left (컬럼 인덱스, 0부터)
  * @param elementTop - 요소의 static top (라인 인덱스, 0부터)
  * @param elementWidth - 요소의 static width (컬럼 스팬 수, ≥1)
@@ -38,7 +38,7 @@ import type { LayoutTableCellElement } from "@/components/layout/td.element";
  * ```
  */
 export function staticGridContains(
-  container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement,
+  container: LayoutPageElement | LayoutBoxElement | LayoutTableCellElement,
   elementLeft: number,
   elementTop: number,
   elementWidth: number,
@@ -91,7 +91,7 @@ export function staticGridContains(
  * ```
  */
 export function clampStaticToContainer(
-  container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement,
+  container: LayoutPageElement | LayoutBoxElement | LayoutTableCellElement,
   left: number,
   top: number,
   width: number,
@@ -137,7 +137,7 @@ export function clampStaticToContainer(
  * ```
  */
 export function clampAbsoluteToContainer(
-  container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement,
+  container: LayoutPageElement | LayoutBoxElement | LayoutTableCellElement,
   leftMm: number,
   topMm: number,
   widthMm: number,

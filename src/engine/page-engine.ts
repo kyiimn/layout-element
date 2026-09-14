@@ -1,16 +1,16 @@
 /**
  * Node.js 호환 문서 레이아웃 계산 엔진 (루트).
  *
- * 기존 `LayoutDocumentElement`에서 수치 계산 로직을 추출한 순수 엔진.
+ * 기존 `LayoutPageElement`에서 수치 계산 로직을 추출한 순수 엔진.
  * - `ppm`을 외부 주입받아 하위 엔진으로 전파 (Locked Decision 1)
  * - `GridCalculatorEngine`으로 컬럼 그리드 계산
  * - 자식 `BoxEngine` 트리 자체 관리
  * - DOM 의존성 없음
  *
- * @file src/engine/document-engine.ts
+ * @file src/engine/page-engine.ts
  */
 
-import type { DocumentData, BoxData, BoxRole, InheritStyle, ParagraphStyle, TextStyle } from "@/types";
+import type { PageData, BoxData, BoxRole, InheritStyle, ParagraphStyle, TextStyle } from "@/types";
 import type { AbsRect, FontLoaderEngine, ColorRegistryEngine, BoxEngineParent } from "./types";
 import type { PrintPostData } from "@/types";
 import { createDirtyError, removeBoxDataFromChildren } from "./types";
@@ -55,7 +55,7 @@ export { generateEngineId };
  * Node 환경에서 PDF 생성 시 ppm을 설정값으로 직접 전달.
  *
  * @example
- * const engine = DocumentEngine.create(
+ * const engine = PageEngine.create(
  *   { width: 257, height: 370, columns: 6, gap: 3, ... },
  *   3.78,  // ppm
  *   fontLoaderEngine,
@@ -64,8 +64,8 @@ export { generateEngineId };
  * engine.layout();
  * engine.childBoxEngines[0].absRect;  // 첫 번째 박스의 절대 좌표
  */
-export class DocumentEngine {
-  private _data: DocumentData;
+export class PageEngine {
+  private _data: PageData;
   private _ppm: number;
   private _fontLoader: FontLoaderEngine;
   /** @internal */ _colorRegistry: ColorRegistryEngine;
@@ -89,19 +89,19 @@ export class DocumentEngine {
    * @param fontLoader - Node 호환 폰트 로더
    * @param colorRegistry - Node 호환 색상 레지스트리
    * @param ppm - pixels-per-mm. 옵셔널 (엔진 연산에 사용되지 않음, 브라우저 호환용).
-   * @returns DocumentEngine 인스턴스
+   * @returns PageEngine 인스턴스
    */
   static create(
-    data: DocumentData,
+    data: PageData,
     fontLoader: FontLoaderEngine,
     colorRegistry: ColorRegistryEngine,
     ppm?: number,
-  ): DocumentEngine {
+  ): PageEngine {
     return new this(data, fontLoader, colorRegistry, ppm);
   }
 
   private constructor(
-    data: DocumentData,
+    data: PageData,
     fontLoader: FontLoaderEngine,
     colorRegistry: ColorRegistryEngine,
     ppm?: number,
@@ -124,7 +124,7 @@ export class DocumentEngine {
    *
    * @param d - 새 문서 데이터
    */
-  set data(d: DocumentData) {
+  set data(d: PageData) {
     const old = this._data;
     const geomChanged =
       old.width !== d.width ||
@@ -143,19 +143,19 @@ export class DocumentEngine {
   }
 
   /** 현재 문서 데이터 */
-  get data(): DocumentData {
+  get data(): PageData {
     return this._data;
   }
 
   /**
-   * 엔진이 현재 관리 중인 상태에서 DocumentData를 추출한다.
+   * 엔진이 현재 관리 중인 상태에서 PageData를 추출한다.
    *
    * `children`은 자식 박스 엔진의 `extractData`에서 동적으로 조립한다.
    *
-   * @returns 엔진 현재 상태 기반의 DocumentData
+   * @returns 엔진 현재 상태 기반의 PageData
    */
-  get extractData(): DocumentData {
-    if (this._dirty) throw createDirtyError('DocumentEngine');
+  get extractData(): PageData {
+    if (this._dirty) throw createDirtyError('PageEngine');
     return {
       ...this._data,
       paddingTop: this.paddingTop,
@@ -383,7 +383,7 @@ export class DocumentEngine {
    * `connectedCallback` 시점에 캐싱한 부모 엔진 참조를 통해 이 메서드를 호출한다.
    *
    * @param engine - 제거할 자식 엔진 (BoxEngine | ParagraphEngine | ImageEngine | TableEngine)
-   * @param parentEngine - 해당 엔진의 부모 (BoxEngine | DocumentEngine | TableCellEngine)
+   * @param parentEngine - 해당 엔진의 부모 (BoxEngine | PageEngine | TableCellEngine)
    */
   removeChildEngine(
     engine: BoxEngine | ParagraphEngine | ImageEngine | TableEngine,
@@ -453,7 +453,7 @@ export class DocumentEngine {
    * 양쪽 부모 모두 `_dirty = true`를 표시한다.
    *
    * @param boxEngine - 이동할 박스 엔진
-   * @param newParent - 새 부모 엔진 (DocumentEngine | BoxEngine | TableCellEngine)
+   * @param newParent - 새 부모 엔진 (PageEngine | BoxEngine | TableCellEngine)
    */
   reparentBoxEngine(boxEngine: BoxEngine, newParent: BoxEngineParent): void {
     const oldParent = boxEngine.parent;
@@ -461,7 +461,7 @@ export class DocumentEngine {
     const boxData = boxEngine.data;
 
     // _childrenData에서 oldParent 쪽 제거
-    if (oldParent instanceof DocumentEngine) {
+    if (oldParent instanceof PageEngine) {
       if (boxData.id) {
         const [, updated] = removeBoxDataFromChildren(oldParent._childrenData, boxData.id);
         oldParent._childrenData = updated as BoxData[];
@@ -475,7 +475,7 @@ export class DocumentEngine {
     boxEngine.parent = newParent;
 
     // _childrenData에 newParent 쪽 추가 + 엔진 트리 추가
-    if (newParent instanceof DocumentEngine) {
+    if (newParent instanceof PageEngine) {
       newParent._childBoxEngines = [...newParent._childBoxEngines, boxEngine];
       newParent._childrenData = [...newParent._childrenData, boxData];
       newParent._generation++;
@@ -502,11 +502,11 @@ export class DocumentEngine {
    * (원본 `flipBoxIfTarget` 동작 보존).
    *
    * @param options - 반전 옵션 (`axis`, `targetId`)
-   * @returns 반전된 `DocumentData`
+   * @returns 반전된 `PageData`
    * @throws {Error} `targetId`가 지정되었으나 트리에서 해당 id를 가진 박스를 찾지 못한 경우 (lock 박스 하위도 미발견 처리)
    */
-  flipLayout(options: FlipLayoutOptions): DocumentData {
-    if (this._dirty) throw createDirtyError('DocumentEngine');
+  flipLayout(options: FlipLayoutOptions): PageData {
+    if (this._dirty) throw createDirtyError('PageEngine');
     const { axis, targetId } = options;
     const metricsById = this._collectBoxMetrics();
     const container = this._documentContainerMetrics();
@@ -711,7 +711,7 @@ export class DocumentEngine {
    *
    * @example
    * // ESM 환경 (Node.js)
-   * const engine = DocumentEngine.create(docData, fontLoader, colorRegistry);
+   * const engine = PageEngine.create(docData, fontLoader, colorRegistry);
    * await engine.prepareImageDecoder();
    * engine.layout();  // base64 이미지 rgbaData 자동 주입 → path 모드 정상 동작
    */
@@ -867,7 +867,7 @@ export class DocumentEngine {
    * 엔진 트리에서 발급한 id를 this._data에 write-back한다.
    * _buildBoxEngine이 BoxData.id가 없을 때 generateEngineId()로 id를 발급하지만,
    * 지역 변수에만 적용되므로 layout() 완료 후 this._data에 반영해야
-   * engine.data에서 id가 포함된 DocumentData를 얻을 수 있다.
+   * engine.data에서 id가 포함된 PageData를 얻을 수 있다.
    */
   private _syncIdsToData(): void {
     const engineBoxes = this._childBoxEngines;
@@ -894,7 +894,7 @@ export class DocumentEngine {
    * @returns PrintPostData 배열 (z-index 오름차순)
    */
   get printPostData(): PrintPostData[] {
-    if (this._dirty) throw createDirtyError('DocumentEngine');
+    if (this._dirty) throw createDirtyError('PageEngine');
     const data: PrintPostData[] = [];
     const sorted = [...this._childBoxEngines].sort((a, b) => a.zIndex - b.zIndex);
     for (const boxEngine of sorted) {
@@ -919,7 +919,7 @@ export class DocumentEngine {
       const children = oldParent.childEngines;
       const idx = children.indexOf(box);
       if (idx >= 0) children.splice(idx, 1);
-    } else if (oldParent instanceof DocumentEngine) {
+    } else if (oldParent instanceof PageEngine) {
       const idx = oldParent.childBoxEngines.indexOf(box);
       if (idx >= 0) oldParent.childBoxEngines.splice(idx, 1);
     } else if (oldParent instanceof TableCellEngine) {

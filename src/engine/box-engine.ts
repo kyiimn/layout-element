@@ -22,7 +22,7 @@ import { ParagraphEngine } from "./paragraph-engine";
 import { TableEngine, TableCellEngine } from "./table-engine";
 import { checkOverlapMm } from "./overlap-engine";
 import type { BoxEngineParent } from "./types";
-import { DocumentEngine, generateEngineId } from "./document-engine";
+import { PageEngine, generateEngineId } from "./page-engine";
 import { DEFAULT_BORDER_STYLE } from "@/constants";
 import { valueEqual } from "@/utils/value-equal";
 import { isNodeJs, decodeBase64ImageToRgbaSync } from "./image-decoder";
@@ -86,7 +86,7 @@ export class BoxEngine {
    * 정적 팩토리 메서드. `new` 직접 사용 금지.
    *
    * @param data - 박스 데이터
-   * @param parent - 부모 엔진 (DocumentEngine | BoxEngine | TableCellEngine)
+   * @param parent - 부모 엔진 (PageEngine | BoxEngine | TableCellEngine)
    * @returns BoxEngine 인스턴스
    */
   static create(data: BoxData, parent: BoxEngineParent): BoxEngine {
@@ -431,19 +431,19 @@ export class BoxEngine {
     return this._dirty;
   }
 
-  /** 외부 엔진(DocumentEngine)에서 reparent 시 dirty를 표시하기 위한 public API. */
+  /** 외부 엔진(PageEngine)에서 reparent 시 dirty를 표시하기 위한 public API. */
   _markDirty(): void {
     this._dirty = true;
     this._generation++;
   }
 
-  /** 외부 엔진(DocumentEngine)에서 reparent 시 _childrenData에서 박스 데이터를 제거하기 위한 internal API. */
+  /** 외부 엔진(PageEngine)에서 reparent 시 _childrenData에서 박스 데이터를 제거하기 위한 internal API. */
   _removeBoxDataFromChildren(boxId: string): void {
     const [, updated] = removeBoxDataFromChildren(this._childrenData, boxId);
     this._childrenData = updated;
   }
 
-  /** 외부 엔진(DocumentEngine)에서 reparent 시 _childrenData에 박스 데이터를 추가하기 위한 internal API. */
+  /** 외부 엔진(PageEngine)에서 reparent 시 _childrenData에 박스 데이터를 추가하기 위한 internal API. */
   _appendChildBoxData(boxData: BoxData): void {
     if (Array.isArray(this._childrenData)) {
       this._childrenData = [...this._childrenData, boxData];
@@ -800,7 +800,7 @@ export class BoxEngine {
     if (this._dirty) throw createDirtyError('BoxEngine');
     const data: PrintPostData[] = [];
 
-    const doc = this._findDocumentEngine();
+    const doc = this._findPageEngine();
     const colorRegistry = doc?._colorRegistry;
 
     const rect = this.absRect;
@@ -840,12 +840,12 @@ export class BoxEngine {
     return data;
   }
 
-  private _findDocumentEngine(): DocumentEngine | null {
+  private _findPageEngine(): PageEngine | null {
     let p: BoxEngineParent = this._parent;
     while (p instanceof BoxEngine) {
       p = p.parent;
     }
-    if (p instanceof DocumentEngine) return p;
+    if (p instanceof PageEngine) return p;
     return null;
   }
 
@@ -869,7 +869,7 @@ export class BoxEngine {
   /**
    * 이 박스의 자식 엔진 트리를 `childrenData` setter로 주입된 데이터에서 재구축한다.
    *
-   * DocumentEngine._buildTree()가 최상위 박스에 대해 호출하며,
+   * PageEngine._buildTree()가 최상위 박스에 대해 호출하며,
    * 내부적으로 재귀적으로 자식 박스의 layout()을 호출한다.
    * 기존 content 엔진(ParagraphEngine, ImageEngine, TableEngine)은 id 매칭으로 보존한다.
    *
@@ -1012,7 +1012,7 @@ export class BoxEngine {
       const children = oldParent.childEngines;
       const idx = children.indexOf(box);
       if (idx >= 0) children.splice(idx, 1);
-    } else if (oldParent instanceof DocumentEngine) {
+    } else if (oldParent instanceof PageEngine) {
       const idx = oldParent.childBoxEngines.indexOf(box);
       if (idx >= 0) oldParent.childBoxEngines.splice(idx, 1);
     } else if (oldParent instanceof TableCellEngine) {
@@ -1084,7 +1084,7 @@ export class BoxEngine {
     const boxData = boxEngine.data;
 
     // oldParent의 _childrenData에서 제거
-    if (oldParent instanceof DocumentEngine) {
+    if (oldParent instanceof PageEngine) {
       if (boxData.id) oldParent._removeBoxDataFromChildren(boxData.id);
     } else if (oldParent instanceof BoxEngine) {
       oldParent._removeBoxDataFromChildren(boxData.id ?? '');
@@ -1095,7 +1095,7 @@ export class BoxEngine {
     boxEngine.parent = newParent;
 
     // newParent에 추가 (엔진 트리 + _childrenData)
-    if (newParent instanceof DocumentEngine) {
+    if (newParent instanceof PageEngine) {
       newParent.appendChildBoxEngine(boxEngine);
     } else if (newParent instanceof BoxEngine) {
       newParent.appendChildBoxEngine(boxEngine);
@@ -1512,7 +1512,7 @@ export class BoxEngine {
  * - prevCellBoxEnginesById: 이전 트리의 테이블 셀 박스 엔진을 box id로 보존.
  *   라벨 시프트(행/열 삭제, merge/split)로 cellLabel 매칭이 실패해도
  *   단락 `_layoutCache` / 이미지 `rgbaData`를 재사용한다.
- * - newEnginesCreated: 새 엔진이 생성되었는지 여부 (DocumentEngine._syncEngineIdsToDom 스킵 판단)
+ * - newEnginesCreated: 새 엔진이 생성되었는지 여부 (PageEngine._syncEngineIdsToDom 스킵 판단)
  */
 export interface BoxBuildContext {
   prevContentEnginesByBoxId: Map<string, (ImageEngine | ParagraphEngine | TableEngine)[]>;

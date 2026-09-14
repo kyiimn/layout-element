@@ -2,7 +2,7 @@ import { EditManager } from "./edit-manager";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
-import { LayoutDocumentElement } from "@/components/layout/document.element";
+import { LayoutPageElement } from "@/components/layout/page.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { staticGridContains, clampStaticToContainer, clampAbsoluteToContainer, appendBylineToBody } from "@/utils";
 import { DEFAULT_IMAGE_DPI, Z_INDEX_INSERT_PREVIEW, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER, Z_INDEX_MAX_LAYOUT } from "@/constants";
@@ -53,7 +53,7 @@ export class PlaceGunController {
    * `reparent-target` DOM 속성(주황색 테두리)으로 배치될 부모를 표시한다.
    * InsertController 삽입 하이라이트와 동일한 속성/CSS를 재사용한다.
    */
-  private _highlightTarget: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement | null = null;
+  private _highlightTarget: LayoutPageElement | LayoutBoxElement | LayoutTableCellElement | null = null;
 
   private _boundOnMouseMove: (event: MouseEvent) => void;
 
@@ -93,7 +93,7 @@ export class PlaceGunController {
    * @param event - mousedown 이벤트
    * @returns 주입 성공 여부
    */
-  handleDocumentMouseDown(doc: LayoutDocumentElement, event: MouseEvent): boolean {
+  handleDocumentMouseDown(doc: LayoutPageElement, event: MouseEvent): boolean {
     if (event.button !== 0) return false;
 
     const manager = this._manager;
@@ -501,11 +501,11 @@ export class PlaceGunController {
     position: 'static' | 'absolute',
     patternWidth: number,
     patternHeight: number,
-  ): LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement | null {
+  ): LayoutPageElement | LayoutBoxElement | LayoutTableCellElement | null {
     const manager = this._manager;
     const rootId = manager.editableRootId;
     const rootBox = rootId
-      ? manager.docEl.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null
+      ? manager.pageEl.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null
       : null;
 
     const elements = document.elementsFromPoint(clientX, clientY);
@@ -546,7 +546,7 @@ export class PlaceGunController {
         }
         return el;
       }
-      if (el instanceof LayoutDocumentElement) {
+      if (el instanceof LayoutPageElement) {
         break;
       }
     }
@@ -554,7 +554,7 @@ export class PlaceGunController {
     if (rootBox && !rootBox.lock) {
       return rootBox;
     }
-    return manager.docEl;
+    return manager.pageEl;
   }
 
   /**
@@ -570,7 +570,7 @@ export class PlaceGunController {
   private _screenToContainerMm(
     clientX: number,
     clientY: number,
-    container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement,
+    container: LayoutPageElement | LayoutBoxElement | LayoutTableCellElement,
   ): { left: number; top: number } {
     const rect = container.getBoundingClientRect();
     const manager = this._manager;
@@ -601,7 +601,7 @@ export class PlaceGunController {
   private _mmToStatic(
     leftMm: number,
     topMm: number,
-    container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement,
+    container: LayoutPageElement | LayoutBoxElement | LayoutTableCellElement,
   ): { left: number; top: number } {
     const model = container.model;
     if (!model) return { left: 0, top: 0 };
@@ -712,7 +712,7 @@ export class PlaceGunController {
    * @param container - 주입 대상 컨테이너
    * @returns 새 box의 zIndex
    */
-  private _getNextZIndex(container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement): number {
+  private _getNextZIndex(container: LayoutPageElement | LayoutBoxElement | LayoutTableCellElement): number {
     const items = container.items;
     if (items.length === 0) return 1;
     const maxZ = Math.max(...items.map(i => {
@@ -746,7 +746,7 @@ export class PlaceGunController {
       return;
     }
 
-    const docRect = manager.docEl.getBoundingClientRect();
+    const docRect = manager.pageEl.getBoundingClientRect();
     if (
       event.clientX < docRect.left ||
       event.clientX > docRect.right ||
@@ -808,7 +808,7 @@ export class PlaceGunController {
    *
    * @param target - 하이라이트할 컨테이너 (box, document 또는 TD)
    */
-  private _updateHighlight(target: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement): void {
+  private _updateHighlight(target: LayoutPageElement | LayoutBoxElement | LayoutTableCellElement): void {
     if (this._highlightTarget === target) return;
     this._clearHighlight();
     target.setAttribute('reparent-target', '');
@@ -853,11 +853,11 @@ export class PlaceGunController {
     const manager = this._manager;
     const rootId = manager.editableRootId;
     const rootEl = rootId
-      ? manager.docEl.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null
+      ? manager.pageEl.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null
       : null;
-    const root = (rootEl && !rootEl.lock) ? rootEl : manager.docEl;
+    const root = (rootEl && !rootEl.lock) ? rootEl : manager.pageEl;
     const rect = root.getBoundingClientRect();
-    const screenPpm = manager.docEl.ppm * manager.scale;
+    const screenPpm = manager.pageEl.ppm * manager.scale;
 
     const cx = Math.max(rect.left, Math.min(clientX, rect.right));
     const cy = Math.max(rect.top, Math.min(clientY, rect.bottom));
@@ -934,7 +934,7 @@ export class PlaceGunController {
   private _applyCursor(active: boolean): void {
     if (active === this._cursorApplied) return;
     // EditManager는 per-document 인스턴스이므로 자신이 관리하는 문서 요소만 변경한다.
-    this._manager.docEl.style.cursor = active ? 'copy' : '';
+    this._manager.pageEl.style.cursor = active ? 'copy' : '';
     this._cursorApplied = active;
   }
 }

@@ -6,12 +6,12 @@ import { ThreadData } from "./thread.type";
  * 문서 전체의 루트 데이터. 용지 크기, 컬럼 그리드, 기본 스타일을 정의한다.
  *
  * 렌더링 파이프라인:
- * 1. `LayoutDocumentElement`가 `data` setter를 통해 이 데이터를 받음
+ * 1. `LayoutPageElement`가 `data` setter를 통해 이 데이터를 받음
  * 2. `GridCalculator.create(this._data)`로 컬럼 좌표(`Rect[]`) 계산
  * 3. `textStyle` + `paragraphStyle`을 합쳐 `InheritStyle` 생성 후 자식에게 전파
  *
  * @example
- * const doc: DocumentData = {
+ * const doc: PageData = {
  *   width: 257,    // A4 너비 (mm)
  *   height: 370,   // A4 높이 (mm)
  *   columns: 6,    // 6등분 컬럼
@@ -21,7 +21,7 @@ import { ThreadData } from "./thread.type";
  *   children: [/* BoxData 배열 *\/]
  * };
  */
-export type DocumentData = {
+export type PageData = {
   /** 고유 식별자 (선택) */
   id?: string;
 

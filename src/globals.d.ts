@@ -2,7 +2,7 @@ import { DetailedHTMLProps, HTMLAttributes } from 'react';
 import {
   LayoutBoxElement,
   LayoutColumnElement,
-  LayoutDocumentElement,
+  LayoutPageElement,
   LayoutGuideColumnElement,
   LayoutImageElement,
   LayoutParagraphElement,
@@ -10,14 +10,14 @@ import {
   LayoutTableRowElement,
   LayoutTableCellElement,
 } from "./components";
-import type { DocumentData, BoxData, ParagraphData, ImageData, GuideColumnData, TableData, TableRowData, TableCellData, BoxRole } from "./types";
+import type { PageData, BoxData, ParagraphData, ImageData, GuideColumnData, TableData, TableRowData, TableCellData, BoxRole } from "./types";
 
 declare global {
   interface HTMLElementTagNameMap {
     'x-layout-box': LayoutBoxElement;
     'x-layout-guide-column': LayoutGuideColumnElement;
     'x-layout-column': LayoutColumnElement;
-    'x-layout-document': LayoutDocumentElement;
+    'x-layout-page': LayoutPageElement;
     'x-layout-image': LayoutImageElement;
     'x-layout-paragraph': LayoutParagraphElement;
     'x-layout-table': LayoutTableElement;
@@ -29,12 +29,12 @@ declare global {
 declare module 'react' {
   namespace JSX {
     interface IntrinsicElements {
-      'x-layout-document': DetailedHTMLProps<
-        HTMLAttributes<LayoutDocumentElement> & {
-          data?: DocumentData;
+      'x-layout-page': DetailedHTMLProps<
+        HTMLAttributes<LayoutPageElement> & {
+          data?: PageData;
           guide?: boolean;
         },
-        LayoutDocumentElement> & {
+        LayoutPageElement> & {
           onTextOverflow?: (e: Event) => void;
         };
       'x-layout-box': DetailedHTMLProps<HTMLAttributes<LayoutBoxElement> & { data?: BoxData; role?: BoxRole; contentUid?: string; groupMember?: string[]; priority?: number; lock?: boolean; }, LayoutBoxElement>;

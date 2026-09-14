@@ -1,4 +1,4 @@
-import { DocumentData } from "@/types";
+import { PageData } from "@/types";
 
 /**
  * 주제별 기사 본문을 생성한다. 신문 지면 형태의 반복 문장으로
@@ -56,7 +56,7 @@ const thread3Story = newsBody('미래');
  * └────────────────────────────────────────┘
  * ```
  */
-export const threadingDemoData: DocumentData = {
+export const threadingDemoData: PageData = {
   width: 323,
   height: 470,
   paddingTop: 14,

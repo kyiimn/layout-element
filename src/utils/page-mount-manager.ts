@@ -1,6 +1,6 @@
 import { PARKED_PAGE_ATTR } from "@/constants";
 import type { LayoutBoxElement } from "../components/layout/box.element";
-import type { LayoutDocumentElement } from "../components/layout/document.element";
+import type { LayoutPageElement } from "../components/layout/page.element";
 
 /**
  * `PageMountManager` 생성 옵션.
@@ -9,7 +9,7 @@ export interface PageMountManagerOptions {
   /**
    * 가상화를 적용할 문서 요소. 최상위 `x-layout-box`가 페이지 단위이다.
    */
-  document: LayoutDocumentElement;
+  page: LayoutPageElement;
   /**
    * IntersectionObserver root (스크롤 컨테이너). 생략 시 뷰포트를 사용한다.
    * scaled 서브트리 밖에 있어야 한다.
@@ -24,7 +24,7 @@ export interface PageMountManagerOptions {
    * 화면 scale 보정 계수 getter. 플레이스홀더 footprint를 레이아웃 px로 환산할 때
    * 사용한다 (`getBoundingClientRect`는 transform 적용 픽셀을 반환하므로 scale로
    * 나눈다). 기본값은 항상 1. 호스트 줌 환경에서는
-   * `() => docEl.editManager.scale`을 전달한다.
+   * `() => pageEl.editManager.scale`을 전달한다.
    */
   scale?: () => number;
   /**
@@ -41,7 +41,7 @@ export interface PageMountManagerOptions {
  * DOM 가상화 마운트 매니저.
  *
  * 문서의 최상위 박스(페이지)를 `IntersectionObserver`로 감시하고, 윈도우
- * 밖 페이지는 `LayoutDocumentElement.parkPage()`로 DOM에서 분리(플레이스홀더로
+ * 밖 페이지는 `LayoutPageElement.parkPage()`로 DOM에서 분리(플레이스홀더로
  * 교체)하고 윈도우 안 페이지는 `unparkPage()`로 복원한다. 분리된 페이지의
  * 엔진은 유지되므로 재마운트는 캐시 히트로 동작한다.
  *
@@ -64,7 +64,7 @@ export interface PageMountManagerOptions {
  *
  * @example
  * ```ts
- * const manager = new PageMountManager({ document: docEl, window: 1 });
+ * const manager = new PageMountManager({ page: pageEl, window: 1 });
  * manager.attach();
  * editManager.addEventListener('focusChange', (e) => {
  *   // e.controller? — 포커스된 문단의 페이지를 pin
@@ -75,7 +75,7 @@ export interface PageMountManagerOptions {
  * ```
  */
 export class PageMountManager {
-  private readonly _doc: LayoutDocumentElement;
+  private readonly _page: LayoutPageElement;
   private readonly _root: Element | null;
   private readonly _window: number;
   private readonly _scale: () => number;
@@ -98,18 +98,18 @@ export class PageMountManager {
 
   /**
    * @param options - 매니저 옵션
-   * @throws {Error} `options.document`가 없을 경우
+   * @throws {Error} `options.page`가 없을 경우
    * @throws {RangeError} `window`가 0 미만의 정수가 아닐 경우
    */
   constructor(options: PageMountManagerOptions) {
-    if (!options || !options.document) {
-      throw new Error('PageMountManager: options.document가 필요합니다.');
+    if (!options || !options.page) {
+      throw new Error('PageMountManager: options.page가 필요합니다.');
     }
     const window = options.window ?? 1;
     if (!Number.isInteger(window) || window < 0) {
       throw new RangeError(`PageMountManager: window는 0 이상의 정수여야 합니다 (입력값: ${options.window}).`);
     }
-    this._doc = options.document;
+    this._page = options.page;
     this._root = options.root ?? null;
     this._window = window;
     this._scale = options.scale ?? (() => 1);
@@ -160,7 +160,7 @@ export class PageMountManager {
     this._nodeToId.clear();
     this._mounted.clear();
     this._visible.clear();
-    for (const node of Array.from(this._doc.childNodes)) {
+    for (const node of Array.from(this._page.childNodes)) {
       if (!(node instanceof Element)) continue;
       if (node.nodeName === 'X-LAYOUT-BOX') {
         const id = node.id;
@@ -277,7 +277,7 @@ export class PageMountManager {
    */
   private _mount(id: string): void {
     const prev = this._nodes.get(id);
-    const el = this._doc.unparkPage(id);
+    const el = this._page.unparkPage(id);
     if (!el) return;
     const observer = this._observer;
     if (observer && prev) observer.unobserve(prev);
@@ -313,7 +313,7 @@ export class PageMountManager {
     const isAbsolute = computed.position === 'absolute';
     const left = computed.left;
     const top = computed.top;
-    const placeholder = this._doc.parkPage(id);
+    const placeholder = this._page.parkPage(id);
     if (!placeholder) return;
     // static 흐름 유지: offset 치수로 고정. absolute 박스는 계산 위치를 복사한다
     // (px 단위 — transform scale과 무관한 레이아웃 좌표계).

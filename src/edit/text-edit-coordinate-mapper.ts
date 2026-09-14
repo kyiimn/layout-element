@@ -415,8 +415,8 @@ export class TextEditCoordinateMapper {
     if (!mmRect) return null;
 
     const scale = this._manager.scale;
-    const docEl = (this._paragraph as unknown as { _findDocumentElement: () => { engine?: { ppm: number } } | null })._findDocumentElement();
-    const ppm = docEl?.engine?.ppm ?? 3.78;
+    const pageEl = (this._paragraph as unknown as { _findPageElement: () => { engine?: { ppm: number } } | null })._findPageElement();
+    const ppm = pageEl?.engine?.ppm ?? 3.78;
 
     return new DOMRect(
       (mmRect.left * ppm) / scale,

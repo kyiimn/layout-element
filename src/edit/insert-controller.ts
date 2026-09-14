@@ -1,6 +1,6 @@
 import { Z_INDEX_INSERT_PREVIEW, Z_INDEX_MAX_LAYOUT, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER } from "@/constants";
 import { EditManager } from "./edit-manager";
-import { LayoutDocumentElement } from "@/components/layout/document.element";
+import { LayoutPageElement } from "@/components/layout/page.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { BoxData, TableData, TableRowData, TableCellData } from "@/types";
@@ -9,7 +9,7 @@ import type { InsertMode, InsertEventDetail } from "@/types/edit";
 
 /** 드래그-삽입을 통한 새 요소 생성을 관리하는 컨트롤러. */
 export class InsertController {
-  private _document: LayoutDocumentElement;
+  private _document: LayoutPageElement;
   private _manager: EditManager;
   private _mode: InsertMode | null = null;
   private _isDragging = false;
@@ -25,7 +25,7 @@ export class InsertController {
    * 제거하고 새 컨테이너에 `reparent-target` 속성을 설정한다.
    * 레이아웃 편집 모드의 reparent 하이라이트와 동일한 속성/CSS를 재사용한다.
    */
-  private _insertHighlightTarget: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement | null = null;
+  private _insertHighlightTarget: LayoutPageElement | LayoutBoxElement | LayoutTableCellElement | null = null;
   private _boundStartDrag: (event: MouseEvent) => void;
   private _boundOnMouseMove: (event: MouseEvent) => void;
   private _boundOnMouseUp: (event: MouseEvent) => void;
@@ -37,7 +37,7 @@ export class InsertController {
    * @param document - 삽입 대상 문서 요소
    * @param manager - 이 컨트롤러가 속한 EditManager 인스턴스
    */
-  constructor(document: LayoutDocumentElement, manager: EditManager) {
+  constructor(document: LayoutPageElement, manager: EditManager) {
     this._document = document;
     this._manager = manager;
     this._boundStartDrag = this.startDrag.bind(this);
@@ -282,7 +282,7 @@ export class InsertController {
     startY: number,
     endX: number,
     endY: number,
-  ): LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement | null {
+  ): LayoutPageElement | LayoutBoxElement | LayoutTableCellElement | null {
     return this._findTargetContainer(startX, startY, endX, endY);
   }
 
@@ -298,7 +298,7 @@ export class InsertController {
    * @param endY - 드래그 영역 아래쪽 화면 y좌표 (px)
    * @returns 유효한 컨테이너 요소, 또는 루트 요소
    */
-  private _findTargetContainer(startX: number, startY: number, endX: number, endY: number): LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement {
+  private _findTargetContainer(startX: number, startY: number, endX: number, endY: number): LayoutPageElement | LayoutBoxElement | LayoutTableCellElement {
     const manager = this._manager;
     const rootId = manager.editableRootId;
     const rootBox = rootId
@@ -391,7 +391,7 @@ export class InsertController {
     ];
 
     // 네 꼭짓점에서 hit test하여 후보 컨테이너 수집
-    const candidates = new Map<LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement, number>();
+    const candidates = new Map<LayoutPageElement | LayoutBoxElement | LayoutTableCellElement, number>();
     for (const corner of corners) {
       const elements = document.elementsFromPoint(corner.x, corner.y);
       for (const el of elements) {
@@ -400,7 +400,7 @@ export class InsertController {
           candidates.set(el, existing + 1);
           break;
         }
-        if (el instanceof LayoutBoxElement || el instanceof LayoutDocumentElement) {
+        if (el instanceof LayoutBoxElement || el instanceof LayoutPageElement) {
           const existing = candidates.get(el) ?? 0;
           candidates.set(el, existing + 1);
           break;
@@ -409,7 +409,7 @@ export class InsertController {
     }
 
     // 네 꼭짓점 모두에서 hit된 후보만 필터링
-    const fullyHit: (LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement)[] = [];
+    const fullyHit: (LayoutPageElement | LayoutBoxElement | LayoutTableCellElement)[] = [];
     for (const [el, count] of candidates) {
       if (count === 4) {
         fullyHit.push(el);
@@ -463,7 +463,7 @@ export class InsertController {
     }
 
     for (const el of fullyHit) {
-      if (el instanceof LayoutDocumentElement) {
+      if (el instanceof LayoutPageElement) {
         continue;
       }
       if (el instanceof LayoutTableCellElement) {
@@ -526,7 +526,7 @@ export class InsertController {
    *
    * @returns 루트 컨테이너 요소
    */
-  private _getRootContainer(): LayoutDocumentElement | LayoutBoxElement {
+  private _getRootContainer(): LayoutPageElement | LayoutBoxElement {
     const manager = this._manager;
     const rootId = manager.editableRootId;
     if (rootId) {
@@ -537,7 +537,7 @@ export class InsertController {
   }
 
   /** 화면 좌표를 컨테이너 내부 mm 좌표로 변환한다. */
-  private _screenToContainerMm(clientX: number, clientY: number, container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement): { left: number; top: number } {
+  private _screenToContainerMm(clientX: number, clientY: number, container: LayoutPageElement | LayoutBoxElement | LayoutTableCellElement): { left: number; top: number } {
     const rect = container.getBoundingClientRect();
     const manager = this._manager;
 
@@ -556,7 +556,7 @@ export class InsertController {
   }
 
   /** mm 좌표를 static 그리드 좌표로 변환한다. */
-  private _mmToStatic(leftMm: number, topMm: number, widthMm: number, heightMm: number, container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement): { left: number; top: number; width: number; height: number } {
+  private _mmToStatic(leftMm: number, topMm: number, widthMm: number, heightMm: number, container: LayoutPageElement | LayoutBoxElement | LayoutTableCellElement): { left: number; top: number; width: number; height: number } {
     const model = container.model;
     if (!model) {
       return { left: 0, top: 0, width: 1, height: 1 };
@@ -599,7 +599,7 @@ export class InsertController {
    * // ad의 zIndex 게터는 91000이지만 0으로 취급 → max(5, 0) + 1 = 6
    * _getNextZIndex(container); // → 6
    */
-  private _getNextZIndex(container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement): number {
+  private _getNextZIndex(container: LayoutPageElement | LayoutBoxElement | LayoutTableCellElement): number {
     const items = container.items;
     if (items.length === 0) return 1;
     const maxZ = Math.max(...items.map(i => {
@@ -611,7 +611,7 @@ export class InsertController {
   }
 
   /** 삽입할 DOM 요소를 생성한다. */
-  private _createElement(mode: InsertMode, container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement, left: number, top: number, width: number, height: number, zIndex: number): HTMLElement {
+  private _createElement(mode: InsertMode, container: LayoutPageElement | LayoutBoxElement | LayoutTableCellElement, left: number, top: number, width: number, height: number, zIndex: number): HTMLElement {
     const boxData: BoxData = {
       type: 'box',
       left,
@@ -734,7 +734,7 @@ export class InsertController {
   }
 
   /** static 모드에서 미리보기를 컬럼/라인 그리드에 스냅한다. */
-  private _snapPreviewToGrid(leftPx: number, topPx: number, widthPx: number, heightPx: number, container: LayoutDocumentElement | LayoutBoxElement | LayoutTableCellElement): { left: number; top: number; width: number; height: number } {
+  private _snapPreviewToGrid(leftPx: number, topPx: number, widthPx: number, heightPx: number, container: LayoutPageElement | LayoutBoxElement | LayoutTableCellElement): { left: number; top: number; width: number; height: number } {
     const model = container.model;
     if (!model) {
       return { left: leftPx, top: topPx, width: widthPx, height: widthPx };
@@ -754,7 +754,7 @@ export class InsertController {
 
     const editAreaLeftMm = columnCoords[0]?.x1 ?? 0;
     const editAreaTopMm = columnCoords[0]?.y1 ?? 0;
-    const screenPpm = manager.docEl.ppm * manager.scale;
+    const screenPpm = manager.pageEl.ppm * manager.scale;
 
     const leftMm = Math.max(0, manager.screenPxToMm(leftPx - rect.left) - containerPaddingLeft);
     const topMm = Math.max(0, manager.screenPxToMm(topPx - rect.top) - containerPaddingTop);

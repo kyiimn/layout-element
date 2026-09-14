@@ -14,7 +14,7 @@ import { DEFAULT_LINE_GAP, DEFAULT_LINE_GAP_FIXED, DEFAULT_LINE_GAP_MODE } from 
  * - mode가 `'ratio'`(또는 생략)이면 기존 `DEFAULT_LINE_GAP` 유지 — byte-identical
  *
  * 소비처: ParagraphEngine(`_initLayoutMetrics` 등 effective 스타일 소비 지점),
- * GridCalculatorEngine, DocumentEngine._documentContainerMetrics.
+ * GridCalculatorEngine, PageEngine._documentContainerMetrics.
  *
  * @param paragraphStyle - 병합된 문단 스타일 (주입/상속/기본 병합 결과)
  * @param paragraphStyle.lineGap - 행간 값 (mode에 따라 배율 또는 mm)
@@ -49,7 +49,7 @@ export function resolveLineGap(paragraphStyle: {
  * lineHeight 도출 공식의 단일 소스. `ParagraphEngine`
  * (`_initLayoutMetrics`, `_createLineWithParts`, `_computePerLineHeights`,
  * `_confirmLineHeight`), `GridCalculatorEngine._calcColumnGridCoords`,
- * `DocumentEngine._documentContainerMetrics`가 모두 이 함수를 사용한다.
+ * `PageEngine._documentContainerMetrics`가 모두 이 함수를 사용한다.
  *
  * 모드별 공식:
  * - `'ratio'`: `maxFontSizeMm × lineGap` (lineGap은 fontSize 배율)

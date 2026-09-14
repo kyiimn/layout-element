@@ -34,7 +34,7 @@ import type { GridCalculatorEngine } from "./grid-calculator-engine";
 // 로컬에서 사용하지 않고 재내보내기만 하는 타입 (noUnusedLocals 회피)
 export type {
   BoxData,
-  DocumentData,
+  PageData,
   ImageData,
   ParagraphData,
   TableData,
@@ -260,7 +260,7 @@ export interface ColorRegistryEngine {
 
 /**
  * 엔진이 필요로 하는 리소스 번들.
- * DocumentEngine 생성 시 주입되어 하위 엔진으로 전파된다.
+ * PageEngine 생성 시 주입되어 하위 엔진으로 전파된다.
  */
 export interface EngineResources {
   /** pixels-per-mm. 외부 주입 (Locked Decision 1) */
@@ -426,7 +426,7 @@ export interface ParagraphLayoutResult {
 }
 
 /** 문서 레이아웃 결과 */
-export interface DocumentLayoutResult {
+export interface PageLayoutResult {
   /** 자식 박스 레이아웃 결과 */
   children: BoxLayoutResult[];
 }
@@ -461,14 +461,14 @@ export type LayoutResult =
  *    (커밋 → 이벤트 발행, PERFORMANCE.md §4.1)이 소유한다. 읽기가 자가 치유하면
  *    `caretHint`(prefix 캐시 용)를 조기 소비시켜 커밋 순서 계약을 깬다.
  * 2. **O(1) 읽기 유지**: `printPostData`는 전체 트리를 재귀 순회하므로 이 안에서
- *    `DocumentEngine.layout()`(전체 트리 재구축)이 유발되면 읽기 비용이 O(N)으로
+ *    `PageEngine.layout()`(전체 트리 재구축)이 유발되면 읽기 비용이 O(N)으로
  *    폭증하고, 순회 중 자식 엔진 배열이 교체되는 재진입 결과가 섞일 수 있다.
  * 3. **타입별 커밋 의미 차이**: Box/Image는 `layout()`, Paragraph는 `layoutText()`,
  *    Table은 `layout()` + `buildCellBoxEngines()` — 단일 "자가 치유" 루틴이
  *    의미 없는 커밋을 수행할 수 있다.
  *
  * 따라서 일관 스냅샷이 필요한 소비자(저장/내보내기/print)는 **자체 flush를 먼저
- * 수행**: 편집 세션 활성 중이 아니면 `DocumentEngine.ensureCommitted()`를 호출하거나
+ * 수행**: 편집 세션 활성 중이 아니면 `PageEngine.ensureCommitted()`를 호출하거나
  * 직렬 `layout()` 패스를 통과시킨 후 읽는다. 커밋 후 이벤트가 발행되는 정상 편집
  * 흐름에서는 이 에러가 관찰되지 않는다. 이 에러가 보인다면 **순서 어긋남(버그) 신호**다.
  *
@@ -496,7 +496,7 @@ export class DirtyPendingError extends Error {
     super(
       `${engineName} has pending changes from individual setters. ` +
       `This is a read path and does not auto-commit. Flush first: call the ` +
-      `document-level DocumentEngine.ensureCommitted() (outside an active edit ` +
+      `document-level PageEngine.ensureCommitted() (outside an active edit ` +
       `session) or the engine's own layout()/layoutText(), then read again. ` +
       `If this fires during a normal edit flow it indicates a commit-ordering bug.`,
     );

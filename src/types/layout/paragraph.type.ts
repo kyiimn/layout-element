@@ -47,13 +47,13 @@ export type ParagraphData = {
   id?: string;
 
   /**
-   * 하위 컬럼 그리드 정의. `DocumentData.columns`와 동일 형식.
+   * 하위 컬럼 그리드 정의. `PageData.columns`와 동일 형식.
    * 생략 시 부모의 컬럼 설정을 상속받음.
    */
   column?: number | number[];
 
   /**
-   * 하위 컬럼 간격. `DocumentData.gap`과 동일 형식.
+   * 하위 컬럼 간격. `PageData.gap`과 동일 형식.
    * 생략 시 부모의 간격 설정을 상속받음.
    */
   gap?: number | number[];

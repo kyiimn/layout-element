@@ -143,7 +143,7 @@ export class LayoutImageElement extends HTMLElement {
     // _clearImageCache() 호출 시에만 무효화한다.
     //
     // 엔진을 부모 childEngines에서 splice하지 않는다 — box.element.ts 참조.
-    // DocumentEngine._buildTree()가 전체 트리를 재구축하므로 불필요하며,
+    // PageEngine._buildTree()가 전체 트리를 재구축하므로 불필요하며,
     // 기존 엔진을 유지하는 편이 재사용 측면에서 더 효율적이다.
     //
     // blob URL의 수명은 imageUrlCache(모듈 레벨)에서 관리한다.

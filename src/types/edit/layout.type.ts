@@ -1,7 +1,7 @@
 import type { InsertMode } from "./insert.type";
 import type { BoxRole } from "@/types/layout";
 import type { LayoutBoxElement } from "@/components/layout/box.element";
-import type { LayoutDocumentElement } from "@/components/layout/document.element";
+import type { LayoutPageElement } from "@/components/layout/page.element";
 import type { LayoutTableCellElement } from "@/components/layout/td.element";
 import type { LayoutImageElement } from "@/components/layout/image.element";
 import type { ImageObjectFit } from "@/types/layout/image.type";
@@ -66,7 +66,7 @@ export interface EditModeState {
 export interface LayoutAddEventDetail {
   /** 추가된 요소 (LayoutBoxElement | LayoutParagraphElement | LayoutImageElement) */
   element: HTMLElement;
-  /** 추가된 요소의 부모 컨테이너 (LayoutDocumentElement | LayoutBoxElement) */
+  /** 추가된 요소의 부모 컨테이너 (LayoutPageElement | LayoutBoxElement) */
   container: HTMLElement;
   /** 추가 방식 */
   source: 'insert' | 'reparent' | 'programmatic';
@@ -81,7 +81,7 @@ export interface LayoutAddEventDetail {
 export interface LayoutRemoveEventDetail {
   /** 제거된 요소 (LayoutBoxElement | LayoutParagraphElement | LayoutImageElement) */
   element: HTMLElement;
-  /** 제거되기 전 부모 컨테이너 (LayoutDocumentElement | LayoutBoxElement) */
+  /** 제거되기 전 부모 컨테이너 (LayoutPageElement | LayoutBoxElement) */
   previousContainer: HTMLElement;
   /** 제거 방식 */
   source: 'reparent' | 'programmatic';
@@ -113,7 +113,7 @@ export type BoxPropertyName = 'role' | 'contentUid' | 'groupMember' | 'priority'
  */
 export interface ContextMenuEventDetail {
   /** 우클릭이 발생한 요소 (box 또는 document). `null`이면 빈 공간 우클릭 */
-  element: LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement | null;
+  element: LayoutBoxElement | LayoutPageElement | LayoutTableCellElement | null;
   /** 뷰포트 기준 마우스 X 좌표 (clientX) */
   mouseX: number;
   /** 뷰포트 기준 마우스 Y 좌표 (clientY) */

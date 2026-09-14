@@ -18,7 +18,7 @@ import type { ParagraphEngine } from "./paragraph-engine";
 import { isLineStartForbidden, isLineEndForbidden, isWordChar } from "@/constants/line-break";
 
 /**
- * 스레드 프레임 일괄 조회 계약 (`DocumentEngine.findEnginesByIds`).
+ * 스레드 프레임 일괄 조회 계약 (`PageEngine.findEnginesByIds`).
  *
  * 트리를 1회만 순회해 전 프레임 엔진을 수집한다 — 프레임별 재귀 검색
  * (`findEngineById` × F)의 조회 수 × 트리 크기 증폭을 제거한다. `ReadonlyMap`으로
@@ -123,7 +123,7 @@ export class ThreadEngine {
 
   /**
    * 지정 스레드 프레임들 중 범위-증명으로 스킵되어 구 story 참조를 보유한
-   * 것이 있는지 반환한다. `DocumentEngine.ensureThreadFramesFresh`가
+   * 것이 있는지 반환한다. `PageEngine.ensureThreadFramesFresh`가
    * 편집 진입 전 신선화 필요성을 판정하는 데 사용한다.
    *
    * @param threadKey - 스레드 키
@@ -238,7 +238,7 @@ export class ThreadEngine {
    * 3. 프레임 순서대로 `layoutText()` → tail을 다음 프레임에 주입
    *
    * @param threads - 문서 스레드 배열 (검증 후)
-   * @param findEngineById - 엔진 트리 id 검색 함수 (DocumentEngine.findEngineById)
+   * @param findEngineById - 엔진 트리 id 검색 함수 (PageEngine.findEngineById)
    * @param batchLookup - 트리 1회 순회 일괄 조회 함수 (선택)
    * @param opts - 배치 옵션 (편집 범위 Ps 맵, pinned 프레임 집합)
    * @returns 스레드별 배치 결과 배열

@@ -1,7 +1,7 @@
 import { TableRowData, TableCellData, InheritStyle } from "@/types";
 import { genUUID } from "@/utils";
 import { EditManager } from "@/edit/edit-manager";
-import { LayoutDocumentElement } from "./document.element";
+import { LayoutPageElement } from "./page.element";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutTableCellElement } from "./td.element";
 
@@ -276,7 +276,7 @@ export class LayoutTableRowElement extends HTMLElement {
   get editManager(): EditManager | null {
     let el: Element | null = this.parentElement;
     while (el) {
-      if (el instanceof LayoutDocumentElement) return el.editManager;
+      if (el instanceof LayoutPageElement) return el.editManager;
       el = el.parentElement;
     }
     return null;

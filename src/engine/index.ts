@@ -20,7 +20,7 @@ export * from "./overlap-engine";
 export * from "./box-engine";
 export * from "./table-engine";
 export * from "./paragraph-engine";
-export * from "./document-engine";
+export * from "./page-engine";
 export * from "./font-loader-engine";
 export * from "./color-registry-engine";
 export * from "./thread-engine";

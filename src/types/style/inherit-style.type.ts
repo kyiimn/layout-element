@@ -8,11 +8,11 @@ import { TextStyle } from "./text-style.type";
  *
  * 스타일 캐스케이드 흐름:
  * ```
- * DocumentData
+ * PageData
  *   ├── textStyle: { fontSize: 4, fontFamily: "Noto Sans", color: "#000" }
  *   └── paragraphStyle: { lineGap: 1.2, textAlign: "justify" }
  *         ↓
- *   LayoutDocumentElement가 InheritStyle 생성
+ *   LayoutPageElement가 InheritStyle 생성
  *         ↓
  *   자식 BoxData:
  *     자체 textStyle/paragraphStyle이 없으면 → InheritStyle 그대로 사용

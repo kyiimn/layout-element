@@ -74,7 +74,7 @@ export type ParagraphStyle = {
    *
    * 비인라인(non-inlinable) 문단 필드 — 런에 적용되지 않고 항상 문단 소속이다.
    * 그리드(static box 그리드 좌표·`absHeight`·insert 스냅·가이드 컬럼)는
-   * **문서 수준** `DocumentData.paragraphStyle`의 모드를 따르고, 문단 자체의
+   * **문서 수준** `PageData.paragraphStyle`의 모드를 따르고, 문단 자체의
    * 텍스트 라인 높이는 문단 effective 스타일의 모드를 따른다 (기존 `lineGap`과
    * 동일한 두 층위 구조).
    *

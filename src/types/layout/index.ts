@@ -1,5 +1,5 @@
 export * from "./box.type";
-export * from "./document.type";
+export * from "./page.type";
 export * from "./guide-column.type";
 export * from "./image.type";
 export * from "./paragraph.type";

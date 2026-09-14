@@ -4,12 +4,12 @@ import { InheritStyle, BoxData, ParagraphData, TextData, ImageData, TableData, P
 import { genUUID } from "@/utils";
 import { checkOverlapMm } from "@/engine";
 import { EditManager } from "@/edit/edit-manager";
-import { LayoutDocumentElement } from "./document.element";
+import { LayoutPageElement } from "./page.element";
 import { LayoutImageElement } from "./image.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutTableElement } from "./table.element";
 import { LayoutTableCellElement } from "./td.element";
-import { BoxEngine, DocumentEngine, GridCalculatorEngine, ParagraphEngine, ImageEngine, TableEngine, TableCellEngine } from "@/engine";
+import { BoxEngine, PageEngine, GridCalculatorEngine, ParagraphEngine, ImageEngine, TableEngine, TableCellEngine } from "@/engine";
 import type { BoxEngineParent, BoxBuildContext } from "@/engine";
 
 const HOST_STYLE_ID = '__layout_host_style__';
@@ -120,7 +120,7 @@ export class LayoutBoxElement extends HTMLElement {
   /**
    * 이 box가 속한 문서의 EditManager를 반환한다.
    *
-   * parent 체인을 따라 올라가 `LayoutDocumentElement.editManager`를 발견한다.
+   * parent 체인을 따라 올라가 `LayoutPageElement.editManager`를 발견한다.
    * 문서에 연결되지 않은 경우 `null`을 반환한다.
    *
    * @returns 소속 문서의 EditManager. 문서에 연결되지 않았으면 `null`.
@@ -128,7 +128,7 @@ export class LayoutBoxElement extends HTMLElement {
   get editManager(): EditManager | null {
     let el: Element | null = this.parentElement;
     while (el) {
-      if (el instanceof LayoutDocumentElement) return el.editManager;
+      if (el instanceof LayoutPageElement) return el.editManager;
       el = el.parentElement;
     }
     return null;
@@ -162,7 +162,7 @@ export class LayoutBoxElement extends HTMLElement {
     // 부모 내에서 요소를 재배치할 때 disconnectedCallback이 트리거된다.
     // 여기서 엔진을 splice하면 _buildTree가 findBoxEngineById로 기존 엔진을
     // 찾지 못해 새 엔진을 생성하게 되어, 엔진 인스턴스가 불필요하게 교체된다.
-    // DocumentEngine._buildTree()가 어차피 전체 트리를 재구축하므로,
+    // PageEngine._buildTree()가 어차피 전체 트리를 재구축하므로,
     // splice하지 않아도 최종 상태는 동일하며 기존 엔진 재사용으로 더 효율적이다.
   }
 
@@ -271,13 +271,13 @@ export class LayoutBoxElement extends HTMLElement {
 
   /**
    * BoxEngine.layout()을 호출하여 자식 엔진 트리를 재구축한다.
-   * resources와 docStyle은 DocumentEngine에서 가져온다.
+   * resources와 docStyle은 PageEngine에서 가져온다.
    */
   private _rebuildChildEngines(): void {
     if (!this._engine) return;
-    const docEl = this._findDocElement();
-    if (!docEl?.engine) return;
-    const docEngine = docEl.engine;
+    const pageEl = this._findPageElement();
+    if (!pageEl?.engine) return;
+    const docEngine = pageEl.engine;
     const ctx: BoxBuildContext = {
       prevContentEnginesByBoxId: new Map(),
       prevCellBoxEnginesById: new Map(),
@@ -292,14 +292,6 @@ export class LayoutBoxElement extends HTMLElement {
     this._engine.layout(ctx, undefined, resources, docStyle);
   }
 
-  private _findDocElement(): LayoutDocumentElement | null {
-    let el: Element | null = this.parentElement;
-    while (el) {
-      if (el instanceof LayoutDocumentElement) return el;
-      el = el.parentElement;
-    }
-    return null;
-  }
 
   /**
    * 부모 엔진 트리에 this._engine을 등록한다.
@@ -309,7 +301,7 @@ export class LayoutBoxElement extends HTMLElement {
     if (!this._engine || parentEngine.childBoxEngines.includes(this._engine)) return;
     if (parentEngine instanceof BoxEngine) {
       parentEngine.childEngines = [...parentEngine.childEngines, this._engine];
-    } else if (parentEngine instanceof DocumentEngine) {
+    } else if (parentEngine instanceof PageEngine) {
       parentEngine.childBoxEngines = [...parentEngine.childBoxEngines, this._engine];
     } else if (parentEngine instanceof TableCellEngine) {
       parentEngine.boxEngine = this._engine;
@@ -397,8 +389,8 @@ export class LayoutBoxElement extends HTMLElement {
    * 문서 요소에서 ppm을 가져온다.
    */
   private _getPpm(): number {
-    const docEl = this._findDocumentElement();
-    return docEl?.ppm ?? 3.78;
+    const pageEl = this._findPageElement();
+    return pageEl?.ppm ?? 3.78;
   }
 
   /**
@@ -406,7 +398,7 @@ export class LayoutBoxElement extends HTMLElement {
    */
   private _findParentEngine(): BoxEngineParent | null {
     const parent = this.parentElement;
-    if (parent instanceof LayoutDocumentElement) return parent.engine ?? null;
+    if (parent instanceof LayoutPageElement) return parent.engine ?? null;
     if (parent instanceof LayoutBoxElement) return parent.engine ?? null;
     const tdParent = this.parentElement;
     if (tdParent instanceof LayoutTableCellElement) {
@@ -415,10 +407,10 @@ export class LayoutBoxElement extends HTMLElement {
     return null;
   }
 
-  private _findDocumentElement(): LayoutDocumentElement | null {
+  private _findPageElement(): LayoutPageElement | null {
     let el: Element | null = this.parentElement;
     while (el) {
-      if (el instanceof LayoutDocumentElement) return el;
+      if (el instanceof LayoutPageElement) return el;
       el = el.parentElement;
     }
     return null;
@@ -1223,7 +1215,7 @@ export class LayoutBoxElement extends HTMLElement {
     const wasOverrideRole = (oldValue === 'ad' || oldValue === 'header');
     const isOverrideRole = (normalized === 'ad' || normalized === 'header');
     if (wasOverrideRole && !isOverrideRole) {
-      const parent = this.parentElement as LayoutBoxElement | LayoutDocumentElement | null;
+      const parent = this.parentElement as LayoutBoxElement | LayoutPageElement | null;
       const siblings = parent?.items ?? [];
       const maxZ = siblings.length === 0
         ? 0
@@ -1333,7 +1325,7 @@ export class LayoutBoxElement extends HTMLElement {
   get model() { return this._model; }
 
   get parentElement() {
-    return super.parentElement as LayoutDocumentElement | LayoutBoxElement;
+    return super.parentElement as LayoutPageElement | LayoutBoxElement;
   }
 
   get parentModel() {
@@ -1371,8 +1363,8 @@ export class LayoutBoxElement extends HTMLElement {
       .map(e => {
         const id = e.data.id;
         if (!id) return undefined;
-        const docEl = this._findDocumentElement();
-        return docEl?.querySelector('#' + CSS.escape(id)) as LayoutBoxElement | null;
+        const pageEl = this._findPageElement();
+        return pageEl?.querySelector('#' + CSS.escape(id)) as LayoutBoxElement | null;
       })
       .filter((el): el is LayoutBoxElement => el instanceof LayoutBoxElement);
   }

@@ -3,7 +3,7 @@ import { BoxPosition } from "@/types";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
-import { LayoutDocumentElement } from "@/components/layout/document.element";
+import { LayoutPageElement } from "@/components/layout/page.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { LayoutTableElement } from "@/components/layout/table.element";
 import { genUUID, clampStaticToContainer, clampAbsoluteToContainer } from "@/utils";
@@ -205,7 +205,7 @@ function createResizeState(): BoxResizeState {
  * 드래그/리사이즈 상태를 private 필드로 보관했다. 이 컨트롤러는 그 책임을
  * 문서 레벨의 단일 리스너로 중앙화한다.
  *
- * - **이벤트 위임**: `mousedown`과 `click`을 capture phase로 문서 요소(`LayoutDocumentElement`)에 등록한다.
+ * - **이벤트 위임**: `mousedown`과 `click`을 capture phase로 문서 요소(`LayoutPageElement`)에 등록한다.
  *   `composedPath()`를 통해 shadow DOM 내부의 box까지 추적할 수 있다.
  * - **상태 분리**: 각 box의 드래그/리사이즈 상태는 `Map<LayoutBoxElement, BoxDragState>` /
  *   `Map<LayoutBoxElement, BoxResizeState>`로 관리된다. box 인스턴스 자체는 상태를 보관하지 않는다.
@@ -221,7 +221,7 @@ function createResizeState(): BoxResizeState {
  * ```
  */
 export class LayoutEditController {
-  /** 이벤트 리스너가 등록되는 루트 요소 (문서 요소 `LayoutDocumentElement`) */
+  /** 이벤트 리스너가 등록되는 루트 요소 (문서 요소 `LayoutPageElement`) */
   private _document: HTMLElement;
   /** 이 컨트롤러가 속한 EditManager 인스턴스 */
   private _manager: EditManager;
@@ -243,7 +243,7 @@ export class LayoutEditController {
    * `null`이면 하이라이트 없음. 커서가 새 컨테이너로 이동하면 이전 하이라이트를 제거하고
    * 새 컨테이너에 `reparent-target` 속성을 설정한다.
    */
-  private _reparentHighlightTarget: LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement | null = null;
+  private _reparentHighlightTarget: LayoutBoxElement | LayoutPageElement | LayoutTableCellElement | null = null;
 
   /**
    * @param doc - 이벤트 리스너가 등록될 루트 HTMLElement
@@ -527,7 +527,7 @@ export class LayoutEditController {
     const clonedTargets: LayoutBoxElement[] = [];
     for (const target of targets) {
       const parent = target.parentElement;
-      if (!(parent instanceof LayoutBoxElement) && !(parent instanceof LayoutDocumentElement)) continue;
+      if (!(parent instanceof LayoutBoxElement) && !(parent instanceof LayoutPageElement)) continue;
       const data = target.data;
       const siblings = Array.from(parent.children).filter(
         (c): c is LayoutBoxElement => c instanceof LayoutBoxElement && c !== target,
@@ -1283,7 +1283,7 @@ export class LayoutEditController {
     const deltaMmX = manager.screenDeltaToMm(deltaPxX);
     const deltaMmY = manager.screenDeltaToMm(deltaPxY);
 
-    const isDocumentChild = box.parentElement?.type === 'document';
+    const isPageChild = box.parentElement?.type === 'page';
 
     if (box.position === 'absolute') {
       // Shift 누름 시 주축(수평/수직) 제한. 축은 첫 유의미 이동 시 한 번 결정되어
@@ -1300,7 +1300,7 @@ export class LayoutEditController {
         else if (state.lockAxis === 'y') dxMm = 0;
       }
       // 문서 직계 자식 absolute 요소는 편집 영역 밖으로 자유롭게 이동 가능
-      if (isDocumentChild) {
+      if (isPageChild) {
         const raw = { left: sLeft + dxMm, top: sTop + dyMm };
         if (!manager.snapEnabled) return raw;
         const snapped = this._snapAbsolutePosition(
@@ -2208,7 +2208,7 @@ export class LayoutEditController {
     clientX: number,
     clientY: number,
     _state: BoxDragState,
-  ): { container: LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement; newBox: LayoutBoxElement } | null {
+  ): { container: LayoutBoxElement | LayoutPageElement | LayoutTableCellElement; newBox: LayoutBoxElement } | null {
     const newContainer = this._findReparentContainer(box, clientX, clientY);
 
     if (!newContainer || newContainer === box.parentElement) return null;
@@ -2260,7 +2260,7 @@ export class LayoutEditController {
         const nearestLine = Math.round((topMm - editAreaTop) / lineHeight);
 
         const clamped = clampStaticToContainer(
-          newContainer as LayoutBoxElement | LayoutDocumentElement,
+          newContainer as LayoutBoxElement | LayoutPageElement,
           nearestColumn,
           nearestLine,
           boxData.width,
@@ -2274,7 +2274,7 @@ export class LayoutEditController {
     } else {
       boxData.position = 'absolute';
       const clamped = clampAbsoluteToContainer(
-        newContainer as LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement,
+        newContainer as LayoutBoxElement | LayoutPageElement | LayoutTableCellElement,
         Math.round(leftMm * 100) / 100,
         Math.round(topMm * 100) / 100,
         boxData.width,
@@ -2325,7 +2325,7 @@ export class LayoutEditController {
    * box 자신/자손, lock된 box, 비-box 자식이 있는 box는 제외한다.
    * 적합한 컨테이너가 없으면 EditManager 루트로 폴백한다.
    */
-  private _findReparentContainer(box: LayoutBoxElement, clientX: number, clientY: number): LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement | null {
+  private _findReparentContainer(box: LayoutBoxElement, clientX: number, clientY: number): LayoutBoxElement | LayoutPageElement | LayoutTableCellElement | null {
     const manager = this._manager;
     const rootId = manager.editableRootId;
     const rootBox = rootId
@@ -2334,7 +2334,7 @@ export class LayoutEditController {
 
     const elements = document.elementsFromPoint(clientX, clientY);
 
-    let newContainer: LayoutBoxElement | LayoutDocumentElement | LayoutTableCellElement | null = null;
+    let newContainer: LayoutBoxElement | LayoutPageElement | LayoutTableCellElement | null = null;
     for (const el of elements) {
       if (el === box) continue;
       if (box.contains(el)) continue;
@@ -2353,7 +2353,7 @@ export class LayoutEditController {
         newContainer = el;
         break;
       }
-      if (el instanceof LayoutDocumentElement) {
+      if (el instanceof LayoutPageElement) {
         if (rootBox) continue;
         newContainer = el;
         break;
@@ -2366,9 +2366,9 @@ export class LayoutEditController {
     // 드래그 중인 box의 rect를 완전히 포함하는 가장 안쪽 박스를 찾는다.
     if (!newContainer || newContainer === box.parentElement) {
       const boxRect = box.getBoundingClientRect();
-      const docEl = box.closest('x-layout-document') as LayoutDocumentElement | null;
-      if (docEl) {
-        const allTds = docEl.querySelectorAll<LayoutTableCellElement>('x-layout-td');
+      const pageEl = box.closest('x-layout-page') as LayoutPageElement | null;
+      if (pageEl) {
+        const allTds = pageEl.querySelectorAll<LayoutTableCellElement>('x-layout-td');
         let bestTd: LayoutTableCellElement | null = null;
         let bestTdArea = Infinity;
         for (const td of allTds) {
@@ -2393,7 +2393,7 @@ export class LayoutEditController {
         }
 
         if (!newContainer) {
-          const allBoxes = docEl.querySelectorAll<LayoutBoxElement>('x-layout-box');
+          const allBoxes = pageEl.querySelectorAll<LayoutBoxElement>('x-layout-box');
           let bestCandidate: LayoutBoxElement | null = null;
           let bestArea = Infinity;
           for (const candidate of allBoxes) {
@@ -2436,7 +2436,7 @@ export class LayoutEditController {
         if (rootBox) {
           newContainer = rootBox;
         } else {
-          newContainer = box.closest('x-layout-document') as LayoutDocumentElement | null;
+          newContainer = box.closest('x-layout-page') as LayoutPageElement | null;
         }
       }
     }

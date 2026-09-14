@@ -1,5 +1,5 @@
 import { LayoutBoxElement } from "@/components/layout/box.element";
-import { LayoutDocumentElement } from "@/components/layout/document.element";
+import { LayoutPageElement } from "@/components/layout/page.element";
 import { LayoutImageElement } from "@/components/layout/image.element";
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
@@ -42,14 +42,14 @@ interface MarqueeState {
  *
  * ## 아키텍처
  *
- * - **이벤트 위임**: `click`을 capture phase로 문서 요소(`LayoutDocumentElement`)에 등록한다.
+ * - **이벤트 위임**: `click`을 capture phase로 문서 요소(`LayoutPageElement`)에 등록한다.
  *   `composedPath()`를 통해 shadow DOM 내부의 box까지 추적할 수 있다.
  * - **선택 전용**: 드래그/리사이즈 상태를 관리하지 않고 오직 선택만 처리한다.
  * - **필터링**: `EditManager.isBoxSelectable()`로 선택 가능 여부를 판별한다.
  *   lock, root, role, id 필터를 적용하되 `layoutEditMode` 여부는 확인하지 않는다.
  */
 export class LayoutSelectionController {
-  /** 이벤트 리스너가 등록되는 루트 요소 (문서 요소 `LayoutDocumentElement`) */
+  /** 이벤트 리스너가 등록되는 루트 요소 (문서 요소 `LayoutPageElement`) */
   private _document: HTMLElement;
   /** 이 컨트롤러가 속한 EditManager 인스턴스 */
   private _manager: EditManager;
@@ -145,7 +145,7 @@ export class LayoutSelectionController {
         const kcInternal = kc as unknown as { _labelToCoord: (label: string) => CellCoord | null };
         const coord = kcInternal._labelToCoord ? kcInternal._labelToCoord(tdElForDrag.cellLabel) : null;
         if (coord) {
-          // EditManager는 per-document 인스턴스이므로 docEl 하위 트리만 순회한다.
+          // EditManager는 per-document 인스턴스이므로 pageEl 하위 트리만 순회한다.
           for (const t of this._document.querySelectorAll('x-layout-table')) {
             const otherKc = (t as LayoutTableElement).keyboardController;
             if (otherKc && otherKc.selection) {
@@ -227,7 +227,7 @@ export class LayoutSelectionController {
     }
 
     let clearedTable = false;
-    // EditManager는 per-document 인스턴스이므로 docEl 하위 트리만 순회한다.
+    // EditManager는 per-document 인스턴스이므로 pageEl 하위 트리만 순회한다.
     for (const t of this._document.querySelectorAll('x-layout-table')) {
       const kc = (t as LayoutTableElement).keyboardController;
       if (kc?.selection) {
@@ -248,7 +248,7 @@ export class LayoutSelectionController {
     if (tableEl && !clearedTable) return;
 
     const isInsideDocument = event.composedPath().some(
-      (el) => el instanceof LayoutDocumentElement
+      (el) => el instanceof LayoutPageElement
     );
     if (!isInsideDocument) return;
 
@@ -497,9 +497,9 @@ export class LayoutSelectionController {
   private _findIntersectingBoxes(marqueeRect: DOMRect): LayoutBoxElement[] {
     if (marqueeRect.width === 0 || marqueeRect.height === 0) return [];
     const manager = this._manager;
-    const docEl = manager.docEl;
+    const pageEl = manager.pageEl;
     const candidates: LayoutBoxElement[] = [];
-    const allBoxes = docEl.querySelectorAll('x-layout-box');
+    const allBoxes = pageEl.querySelectorAll('x-layout-box');
     for (const box of allBoxes) {
       if (!(box instanceof LayoutBoxElement)) continue;
       if (!manager.isBoxSelectable(box)) continue;
@@ -743,7 +743,7 @@ export class LayoutSelectionController {
 
     if (!box) {
       const isInsideDocument = event.composedPath().some(
-        (el) => el instanceof LayoutDocumentElement
+        (el) => el instanceof LayoutPageElement
       );
       if (isInsideDocument) {
         manager.clearLayoutSelection(false);
@@ -864,7 +864,7 @@ export class LayoutSelectionController {
       }
     } else {
       const isInsideDocument = event.composedPath().some(
-        (el) => el instanceof LayoutDocumentElement
+        (el) => el instanceof LayoutPageElement
       );
       if (isInsideDocument) {
         manager.clearLayoutSelection(false);
@@ -874,8 +874,8 @@ export class LayoutSelectionController {
     }
 
     const docElement = event.composedPath().find(
-      (el) => el instanceof LayoutDocumentElement
-    ) as LayoutDocumentElement | undefined;
+      (el) => el instanceof LayoutPageElement
+    ) as LayoutPageElement | undefined;
 
     const element = box ?? docElement ?? null;
 

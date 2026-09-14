@@ -17,7 +17,7 @@ import { genUUID } from "@/utils";
 import { EditManager } from "@/edit/edit-manager";
 import { TableKeyboardController } from "@/edit/table-keyboard-controller";
 import { TableStructureEditor } from "@/edit/table-structure-editor";
-import { LayoutDocumentElement } from "./document.element";
+import { LayoutPageElement } from "./page.element";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutTableRowElement } from "./tr.element";
 import { LayoutTableCellElement } from "./td.element";
@@ -388,17 +388,17 @@ export class LayoutTableElement extends HTMLElement {
     }
   }
 
-  private _findDocumentElement(): LayoutDocumentElement | null {
+  private _findPageElement(): LayoutPageElement | null {
     let el: Element | null = this.parentElement;
     while (el) {
-      if (el instanceof LayoutDocumentElement) return el;
+      if (el instanceof LayoutPageElement) return el;
       el = el.parentElement;
     }
     return null;
   }
 
   private _getPpm(): number {
-    return this._findDocumentElement()?.ppm ?? 3.78;
+    return this._findPageElement()?.ppm ?? 3.78;
   }
 
   private _applyStyle(): void {
@@ -1067,7 +1067,7 @@ export class LayoutTableElement extends HTMLElement {
   get editManager(): EditManager | null {
     let el: Element | null = this.parentElement;
     while (el) {
-      if (el instanceof LayoutDocumentElement) return el.editManager;
+      if (el instanceof LayoutPageElement) return el.editManager;
       el = el.parentElement;
     }
     return null;

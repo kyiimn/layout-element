@@ -11,7 +11,7 @@ import { Z_INDEX_TABLE_DIAGONAL, Z_INDEX_TYPE_LABEL } from "@/constants";
 import { genUUID } from "@/utils";
 import { EditManager } from "@/edit/edit-manager";
 import { LayoutBoxElement } from "./box.element";
-import { LayoutDocumentElement } from "./document.element";
+import { LayoutPageElement } from "./page.element";
 import { LayoutImageElement } from "./image.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutTableElement } from "./table.element";
@@ -886,7 +886,7 @@ export class LayoutTableCellElement extends HTMLElement {
   get editManager(): EditManager | null {
     let el: Element | null = this.parentElement;
     while (el) {
-      if (el instanceof LayoutDocumentElement) return el.editManager;
+      if (el instanceof LayoutPageElement) return el.editManager;
       el = el.parentElement;
     }
     return null;

@@ -12,7 +12,7 @@ import { TableBorderStore } from "./border-store";
 import type { TableData, TableRowData, TableCellData, BoxData, PrintPostData, PrintPostBorderEdge, PrintPostDiagonal, TableBorders } from "@/types";
 import { BoxEngine, type BoxBuildContext } from "./box-engine";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
-import { DocumentEngine } from "./document-engine";
+import { PageEngine } from "./page-engine";
 import type { ParagraphEngine } from "./paragraph-engine";
 import type { ImageEngine } from "./image-engine";
 import type { AbsRect, ColorRegistryEngine } from "./types";
@@ -166,7 +166,7 @@ export class TableCellEngine {
         const idx = children.indexOf(engine);
         if (idx >= 0) children.splice(idx, 1);
         if (boxData.id) oldParent._removeBoxDataFromChildren(boxData.id);
-      } else if (oldParent instanceof DocumentEngine) {
+      } else if (oldParent instanceof PageEngine) {
         const idx = oldParent.childBoxEngines.indexOf(engine);
         if (idx >= 0) oldParent.childBoxEngines.splice(idx, 1);
         if (boxData.id) oldParent._removeBoxDataFromChildren(boxData.id);
@@ -476,7 +476,7 @@ export class TableEngine {
 
   /**
    * 문서 엔진에서 ColorRegistry를 조회한다.
-   * 부모 박스 엔진 체인을 따라 DocumentEngine까지 올라간다.
+   * 부모 박스 엔진 체인을 따라 PageEngine까지 올라간다.
    *
    * @returns ColorRegistryEngine 또는 null (문서 엔진 미연결 시)
    */
@@ -485,7 +485,7 @@ export class TableEngine {
     while (p instanceof BoxEngine) {
       p = p.parent;
     }
-    if (p instanceof DocumentEngine) return p._colorRegistry;
+    if (p instanceof PageEngine) return p._colorRegistry;
     return null;
   }
 

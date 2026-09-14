@@ -9,7 +9,7 @@ import { LayoutImageElement } from "./image.element";
 import { LayoutColumnElement } from "./column.element";
 
 const HOST_STYLE_ID = '__layout_host_style__';
-import { LayoutDocumentElement } from "./document.element";
+import { LayoutPageElement } from "./page.element";
 import { ParagraphEngine } from "@/engine";
 import type { ParagraphEngineData } from "@/engine";
 
@@ -103,7 +103,7 @@ export class LayoutParagraphElement extends HTMLElement {
   /**
    * 이 paragraph가 속한 문서의 EditManager를 반환한다.
    *
-   * parent 체인을 따라 올라가 `LayoutDocumentElement.editManager`를 발견한다.
+   * parent 체인을 따라 올라가 `LayoutPageElement.editManager`를 발견한다.
    * 문서에 연결되지 않은 경우 `null`을 반환한다.
    *
    * @returns 소속 문서의 EditManager. 문서에 연결되지 않았으면 `null`.
@@ -138,7 +138,7 @@ export class LayoutParagraphElement extends HTMLElement {
     }
     this._editManagerRef = null;
     // 엔진을 부모 childEngines에서 splice하지 않는다 — box.element.ts 참조.
-    // DocumentEngine._buildTree()가 전체 트리를 재구축하므로 불필요하며,
+    // PageEngine._buildTree()가 전체 트리를 재구축하므로 불필요하며,
     // 기존 엔진을 유지하는 편이 재사용 측면에서 더 효율적이다.
   }
 
@@ -149,8 +149,8 @@ export class LayoutParagraphElement extends HTMLElement {
   private _layoutStructure() {
     if (!this.isConnected || !this.parentModel || !this._inheritStyle) return;
 
-    const docEl = this._findDocumentElement();
-    const resources = docEl?.engine?.resources;
+    const pageEl = this._findPageElement();
+    const resources = pageEl?.engine?.resources;
     if (!resources) return;
 
     const parentBox = this.parentElement;
@@ -286,10 +286,10 @@ export class LayoutParagraphElement extends HTMLElement {
     this._perfStructureChanged = true;
   }
 
-  private _findDocumentElement(): LayoutDocumentElement | null {
+  private _findPageElement(): LayoutPageElement | null {
     let el: Element | null = this.parentElement;
     while (el) {
-      if (el instanceof LayoutDocumentElement) return el;
+      if (el instanceof LayoutPageElement) return el;
       el = el.parentElement;
     }
     return null;
@@ -397,8 +397,8 @@ export class LayoutParagraphElement extends HTMLElement {
     // render()로 들어오면 문서 스레드 체인 재배치를 요청한다. dirty 여부로
     // "편집 직후"만 판별해 일반 재렌더와 구분한다.
     if (this._model.isThreadFrame && this._model.hasPendingChanges) {
-      const docEl = this._findDocumentElement();
-      docEl?.requestThreadRelayout(this.id);
+      const pageEl = this._findPageElement();
+      pageEl?.requestThreadRelayout(this.id);
     }
 
     const lineCountBefore = this._model.previousLineCount;
@@ -1084,7 +1084,7 @@ export class LayoutParagraphElement extends HTMLElement {
    * DOM 초기 reconcile이 스레드 패스보다 먼저 DOM model을 만들면
    * 엔진 트리 PE(스레드 배치 소유)와 DOM model이 서로 다른 인스턴스가
    * 된다. 이 상태로는 DOM 렌더가 스레드 결과(빈 후속 프레임)를 표시하지
-   * 못한다. `LayoutDocumentElement.layout()`이 엔진 배치 직후 호출한다.
+   * 못한다. `LayoutPageElement.layout()`이 엔진 배치 직후 호출한다.
    *
    * @param enginePe - 엔진 트리의 ParagraphEngine (스레드 배치 완료 상태)
    * @returns 이관되었으면 true

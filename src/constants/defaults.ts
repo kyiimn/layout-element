@@ -172,7 +172,7 @@ export const TEXT_INLINE_STYLE_FIELDS = [
 /**
  * 가상화 플레이스홀더 식별 속성.
  *
- * `LayoutDocumentElement.parkPage()`가 DOM에서 분리한 페이지 박스 자리에 남기는
+ * `LayoutPageElement.parkPage()`가 DOM에서 분리한 페이지 박스 자리에 남기는
  * div와 `PageMountManager`가 공유하는 계약이다. 호스트가 이 속성을 직접 부여한
  * div를 문서 요소 안에 삽입하면 안 된다 (childrenData 조립이 오판한다).
  */

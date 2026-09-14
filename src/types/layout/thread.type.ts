@@ -13,11 +13,11 @@ import { TextInlineData } from "./text/text-inline.type";
  *   `content`를 소유하고, 나머지 프레임은 오버플로우 tail을 engine이
  *   feed-forward로 주입받는다 (프레임 데이터 `content`는 비어 있음).
  *
- * `DocumentEngine._layoutThreadedParagraphs()`가 `layoutText()`를 프레임 순서대로
+ * `PageEngine._layoutThreadedParagraphs()`가 `layoutText()`를 프레임 순서대로
  * 실행하며, 각 프레임이 넘치는 tail을 다음 프레임의 시작점으로 전달한다.
  *
  * @example
- * const doc: DocumentData = {
+ * const doc: PageData = {
  *   width: 257, height: 370, columns: 6, gap: 3,
  *   paragraphStyle: {}, textStyle: {},
  *   children: [

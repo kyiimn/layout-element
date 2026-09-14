@@ -56,8 +56,8 @@ export class TableKeyboardController {
     const coord = this._labelToCoord(td.cellLabel);
     if (!coord) return;
 
-    // EditManager는 per-document 인스턴스이므로 docEl 하위 트리만 순회한다.
-    for (const t of this._editManager.docEl.querySelectorAll('x-layout-table')) {
+    // EditManager는 per-document 인스턴스이므로 pageEl 하위 트리만 순회한다.
+    for (const t of this._editManager.pageEl.querySelectorAll('x-layout-table')) {
       const otherKc = (t as LayoutTableElement).keyboardController;
       if (otherKc && otherKc !== this && otherKc.selection) {
         otherKc.selection = null;
@@ -85,7 +85,7 @@ export class TableKeyboardController {
     const ctrl = event.ctrlKey;
     const shift = event.shiftKey;
 
-    // Tab은 document.element._onWindowKeyDown (window capture)에서
+    // Tab은 page.element._onWindowKeyDown (window capture)에서
     // navigateByTab → handleTab 순서로 직접 처리하고 stopPropagation하므로
     // 이 핸들러에는 도달하지 않는다. handleTab은 navigateByTab이 직접 호출.
 
