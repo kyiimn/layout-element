@@ -242,9 +242,8 @@ const ref = useRef<LayoutPageElement>(null);
 
 > **미지정(undefined) props는 setter를 호출하지 않습니다** — 부분 업데이트 안전.
 >
-> 모든 props는 **단일 `useEffect`** 에서 동기화됩니다. 과거에는 prop마다 개별
-> `useEffect`를 가지고 있어 (12개 effect), 부모 리렌더 시 effect 스케줄링 오버헤드가
-> 발생했습니다. 병합 후 단일 effect에서 `if (value !== undefined)` 가드로 각 setter를
+> 모든 props는 **단일 `useEffect`** 에서 동기화됩니다. 단일 effect에서
+> `if (value !== undefined)` 가드로 각 setter를
 > 조건부 호출합니다. Custom Element setter 자체의 동일값 조기 반환과 함께
 > effect 실행 비용을 12회 → 1회로 감소시킵니다.
 

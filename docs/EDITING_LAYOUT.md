@@ -17,7 +17,7 @@
 
 레이아웃 편집 모드는 `<x-layout-box>` 요소를 시각적으로 선택하고 드래그하여 이동할 수 있는 기능이다. 텍스트 편집 모드(`editableText`)가 단락 내부의 텍스트를 수정하는 기능이라면, 레이아웃 편집 모드는 레이아웃 구조 요소 자체를 선택·이동하는 기능이다. `<x-layout-page>`는 레이아웃 편집 대상이 아니며, 오직 `<x-layout-box>`만 편집 대상이 된다.
 
-이전에는 각 `<x-layout-box>`의 `editableLayout` 속성으로 개별적으로 편집 모드를 켰지만, 현재는 `EditManager`의 글로벌 `layoutEditMode`와 필터(`editableRoles`, `editableBoxIds`)를 통해 한 번에 제어한다. 개별 `editableLayout` 속성은 이제 DOM 속성/커서 표시용으로만 동작하며, 실제 판단은 `EditManager.isBoxEditable()`이 수행한다.
+편집 모드는 `EditManager`의 글로벌 `layoutEditMode`와 필터(`editableRoles`, `editableBoxIds`)를 통해 문서 단위로 제어한다. 개별 `<x-layout-box>`의 `editableLayout` 속성은 DOM 속성/커서 표시용이며, 실제 판단은 `EditManager.isBoxEditable()`이 수행한다.
 
 ### 1.1 레이아웃 편집 모드 아키텍처
 
@@ -554,7 +554,7 @@ manager.navigateByTab(true);     // Shift+Tab: 이전 요소
 
 ### 2.2 `LayoutEditController` 중앙 이벤트 처리
 
-`LayoutEditController`는 `EditManager.layoutEditMode`가 활성화될 때 생성되어 문서(document) 수준에서 마우스 이벤트를 캡처 단계로 처리한다. 이전의 per-box 핸들러(`box._onLayoutClick`, `box._onLayoutMouseDown` 등)는 제거되었고, 모든 드래그/리사이즈/선택 로직이 여기로 집중되었다.
+`LayoutEditController`는 `EditManager.layoutEditMode`가 활성화될 때 생성되어 문서(document) 수준에서 마우스 이벤트를 캡처 단계로 처리한다. 모든 드래그/리사이즈/선택 로직이 여기에 집중된다 — per-box 핸들러를 요소에 두지 않는다.
 
 `LayoutEditController`는 `EditManager.isBoxEditable()` 외에도 lock과 `editableRootId`를 별도로 검사한다. 따라서 `EditManager`에서 잠금이나 루트 제한을 판별하지 않더라도, 이벤트 처리 단계에서 동일한 제한이 적용되어 lock/Root 밖의 box는 드래그/리사이즈/선택되지 않는다.
 
@@ -2082,7 +2082,7 @@ private _onKeyDown = (event: KeyboardEvent): void => {
 
 ### 10.2 드래그/리사이즈 관련 상태
 
-드래그와 리사이즈 상태는 이전에는 `box.element.ts`의 private 필드에 있었으나, 현재는 `LayoutEditController` 내부의 `Map`으로 관리된다.
+드래그와 리사이즈 상태는 `LayoutEditController` 내부의 `Map`으로 관리된다.
 
 ```typescript
 // layout-edit-controller.ts

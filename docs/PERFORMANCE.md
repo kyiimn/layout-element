@@ -54,7 +54,6 @@
   - [4.17 텍스트 영역 스타일 JSON 가드](#417-텍스트-영역-스타일-json-가드)
 - [5. 메모리 관리](#5-메모리-관리)
   - [5.1 이미지 캐시 생명 주기](#51-이미지-캐시-생명-주기)
-  - [5.2 ~~Image canvas willReadFrequently~~ (제거됨)](#52-image-canvas-willreadfrequently-제거됨)
 - [6. 기하/알고리즘 최적화](#6-기하알고리즘-최적화)
   - [6.1 mergeOverlapParts O(n) 병합](#61-mergeoverlapparts-on-병합)
   - [6.2 타원 기반 픽셀 컬링](#62-타원-기반-픽셀-컬링)
@@ -86,7 +85,7 @@ ParagraphEngine은 자체 `_LRU` 제네릭 클래스(`paragraph-engine.ts`)를 �
 | `delete(key)` | 특정 키 삭제 |
 | `clear()` | 전체 삭제 |
 
-> **변경 이력**: 2026-09에 `src/utils/lru-cache.ts`가 삭제되었다 — 어떤 모듈도 import하지 않은 데드 파일이었고(엔진은 자체 `_LRU`를 사용), 엔진 계층은 `src/utils`를 import하지 않는 관례를 유지한다.
+> **주의**: `src/utils/lru-cache.ts`는 존재하지 않는다 — 어떤 모듈도 import하지 않는 데드 파일이므로 생성 금지. 엔진은 자체 `_LRU`를 사용하며, 엔진 계층은 `src/utils`를 import하지 않는 관례를 유지한다.
 
 ### 도입 배경
 
@@ -131,7 +130,7 @@ ParagraphEngine은 자체 `_LRU` 제네릭 클래스(`paragraph-engine.ts`)를 �
 | 키 | `${char}\|${widthRatio}\|${letterSpacing}\|${spaceRatio}\|${fontSize}\|${lineMaxFontSize}\|${fontName}` |
 | 값 | `genCharStyle()` 결과 CSS 스타일 객체 |
 
-`genCharStyle()`은 장평을 적용한 최종 `width`를 CSS 값으로 포함하므로 장평이 키에 포함된다. `width` 계산에 `letterSpacing`(`lsMm`)과 `spaceRatio`도 사용되므로 이 값들도 키에 포함된다 — 자간이나 공백 비율이 변경되면 별도 캐시 항목이 생성되어 잘못된 스타일이 반환되는 것을 방지한다. **`lineMaxFontSize`(수직 하단 앵커 계산 입력)와 `fontName`도 키에 포함된다** — `width`가 `inlineStyle.fontFamily`별 메트릭(`_charWidthMm`)에서 나오므로, 동일 수치 파라미터 + 다른 폰트 조합이 충돌하면 잘못된 `width/minWidth/maxWidth` CSS가 반환된다 (D-2 교착 폰트 충돌 수정). 이전에는 `Map` + `size > 5000 → clear()` 전체 삭제 정책이었으나 LRU eviction으로 변경하여 성능 cliff를 제거.
+`genCharStyle()`은 장평을 적용한 최종 `width`를 CSS 값으로 포함하므로 장평이 키에 포함된다. `width` 계산에 `letterSpacing`(`lsMm`)과 `spaceRatio`도 사용되므로 이 값들도 키에 포함된다 — 자간이나 공백 비율이 변경되면 별도 캐시 항목이 생성되어 잘못된 스타일이 반환되는 것을 방지한다. **`lineMaxFontSize`(수직 하단 앵커 계산 입력)와 `fontName`도 키에 포함된다** — `width`가 `inlineStyle.fontFamily`별 메트릭(`_charWidthMm`)에서 나오므로, 동일 수치 파라미터 + 다른 폰트 조합이 충돌하면 잘못된 `width/minWidth/maxWidth` CSS가 반환된다 (D-2 교착 폰트 충돌 수정). LRU eviction 정책을 사용한다 — 용량 초과 시 전체 clear()가 아니라 최소 사용 항목부터 제거되어 성능 cliff가 발생하지 않는다.
 
 #### LRU 도입 전후 비교
 
@@ -161,7 +160,7 @@ ParagraphEngine은 자체 `_LRU` 제네릭 클래스(`paragraph-engine.ts`)를 �
 | 측정 | `LayoutPageElement._measurePpm()` (`page.element.ts:268-280`) — 100mm `<div>`를 DOM에 추가해 `getBoundingClientRect()`로 측정 후 `px/100` |
 | 재측정 | `LayoutPageElement.resetPpm()` (`page.element.ts:175`) |
 
-> **변경 이력**: 과거에는 `GridCalculatorEngine`이 `static _ppm` 싱글톤 캐시를 보유하고 최초 접근 시 직접 DOM을 측정했다. Node.js 호환(엔진 레이어 DOM-free) 원칙에 따라 DOM 측정은 `LayoutPageElement`로 이동했고, 엔진은 주입받은 `ppm`을 인스턴스 필드로만 보유한다. `grid-calculator-engine.ts` 헤더에 `document.createElement` / `getBoundingClientRect` 사용 금지가 명시되어 있다. ppm은 줌/CSS transform 등으로 변할 수 있으므로 `resetPpm()`으로 재측정한다.
+> **ppm 소유 규칙**: DOM 측정은 `LayoutPageElement`가 수행하고, 엔진은 주입받은 `ppm`을 인스턴스 필드로만 보유한다 (Node.js 호환 — 엔진 레이어 DOM-free 원칙). `grid-calculator-engine.ts` 헤더에 `document.createElement` / `getBoundingClientRect` 사용 금지가 명시되어 있다. ppm은 줌/CSS transform 등으로 변할 수 있으므로 `resetPpm()`으로 재측정한다.
 
 ### 2.5 이미지 3단계 캐시
 
@@ -360,7 +359,7 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 
 `box.element.ts:723-733` — 자식 `remove()`가 부모의 `_rebuildingChildren` 플래그를 읽어, 데이터 세터의 reconcile 과정 중이면 부모의 `removeChildData()` 호출을 생략하고 `super.remove()`로 무한 재귀를 방지한다.
 
-> **변경 이력**: 과거에는 `box`/`document`/`tr`/`td`가 `MutationObserver`(`{ childList: true }`)로 자식 DOM 변이를 감시하고 `_rebuildingChildren === true`일 때 콜백을 스킵했다. MutationObserver는 컴포넌트·컨트롤러 전역에서 제거되었고, 현재는 위 플래그 기반 가드(및 부모 플래그 읽기)만 남아 있다.
+> **가드 구조**: 자식 DOM 변이 감시자는 없다 — 위 플래그 기반 가드(및 부모 플래그 읽기)만이 `data` setter reconcile 중 이중 layout/render를 억제한다. 외부 코드는 반드시 `appendChildData()`/`removeChildData()`를 사용해야 한다 (raw DOM `appendChild`는 엔진 트리를 어긋나게 한다).
 
 #### 박스 value-equal setter 조기 반환
 
@@ -551,7 +550,7 @@ flexbox 폴백 경로(`charOffsets === undefined`, 외부에서 임의로 `TextP
 
 #### `printPostData` 엔진 전용 API
 
-`buildParagraphPrintPostData()`가 엔진의 `columnContents`/`charOffsets`에서 직접 char 데이터를 생성한다. DOM span에서 추출하던 이전 방식(inner span 존재 여부 분기)은 제거되었다. `printPostData`는 엔진 전용 API로, DOM 요소에서는 제거되었으며 `PageEngine.printPostData` 엔진 트리가 단일 소스다 (mm 단위).
+`buildParagraphPrintPostData()`가 엔진의 `columnContents`/`charOffsets`에서 직접 char 데이터를 생성한다. `printPostData`는 엔진 전용 API이며 `PageEngine.printPostData` 엔진 트리가 단일 소스다 — DOM 요소에서 호출하지 않는다 (mm 단위).
 
 ---
 
@@ -580,12 +579,10 @@ Enter/compositionend 핸들러는 커서/선택 동기 갱신이 필요하므로
 `flushRender()` + 즉시 이벤트를 사용한다. blur/compositionstart/compositionupdate/compositioncancel
 핸들러는 `scheduleRender()`를 사용해 배치에 참여한다.
 
-> **변경 이력**: (1차) rAF 콜백 내 `scheduleRender()`(microtask 배치)만 수행했다. (2차)
-> printPostData/extractData dirty 가드 도입으로 커밋 시점이 render 내부로 이동하면서 키
-> 입력마다 동기 `flushRender()`가 실행되었다 — 인라인 런 도입과 함께 연속 타이핑 성능의
-> 주요 병목이 되었다. (3차, 현재) 커밋과 이벤트 발행을 rAF 프레임에서 1회로 병합했다.
-> 키 입력당 O(N) `inlineToPlain` 2회(`_getPlainText`/`postRender`)도 `model.plainText`
-> 캐시 getter로 제거했다.
+> **커밋 → 이벤트 순서 계약**: 커밋(`flushRender()`의 render)과 이벤트 발행(`textChange`/`cursorMove`)은
+> rAF 프레임에서 1회로 병합되어 순서가 보장된다 — dirty가 남은 채 이벤트를 먼저 쏘면 구독자의
+> `extractData` 읽기가 dirty 가드에 걸린다. Enter/compositionend는 동기 `flushRender()`로 즉시 실행한다.
+> 키 입력당 O(N) `inlineToPlain`은 `model.plainText` 캐시 getter로 회피한다.
 
 ### 4.2 낙관적 span (optimistic span)
 
@@ -752,11 +749,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 #### blob URL 해제 정책
 
-과거의 `_objectUrl` 필드 기반 `revokeObjectURL()` 추적은 제거되었다. blob URL의 수명은 **호스트 앱의 모듈 레벨 `imageUrlCache`**가 관리한다 — 같은 URL은 세션 내 재사용되므로, 요소가 DOM에서 분리되면(disconnectedCallback) 해제하지 않고 캐시도 보존한다(`image.element.ts:130-153` 코멘트 참조). 이미지 캐시는 URL 변경(`data`/`url` setter) 또는 명시적 `_clearImageCache()` 호출 시에만 무효화된다. 엔진 주입용 rgbaData는 로드 완료 시 1회 추출하며, 이후 오버랩 판정은 typed array/비트맵 스캔으로 동작한다.
-
-### ~~5.2 Image canvas willReadFrequently~~ (제거됨)
-
-> 과거 `canvas.getContext('2d', { willReadFrequently: true })`를 사용했다 — 오버랩 `getImageData()` 픽셀 읽기 성능 최적화 목적. 오버랩 판정이 `ImageEngine.rgbaData`(로드 시 1회 추출, Node.js는 pngjs) + `opaqueRowBitmap` 비트맵 기반으로 전환되면서 오버랩 경로에서 `getImageData()` 호출이 사라졌고, 이 옵션도 제거되었다. 현재 src 전역에 `willReadFrequently` 사용처는 없다.
+blob URL의 수명은 **호스트 앱의 모듈 레벨 `imageUrlCache`**가 관리한다 — 같은 URL은 세션 내 재사용되므로, 요소가 DOM에서 분리되면(disconnectedCallback) 해제하지 않고 캐시도 보존한다(`image.element.ts:130-153` 코멘트 참조). 이미지 캐시는 URL 변경(`data`/`url` setter) 또는 명시적 `_clearImageCache()` 호출 시에만 무효화된다. 엔진 주입용 rgbaData는 로드 완료 시 1회 추출하며, 이후 오버랩 판정은 typed array/비트맵 스캔으로 동작한다.
 
 ---
 
@@ -912,15 +905,15 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산. `overlapMode === 'none'` 이미지/paragraph는 `checkOverlap()` 이전에 제외. `checkOverlap()`은 mm 좌표(`absLeft`/`absTop`/`absWidth`/`absHeight`) 기반으로 동작하므로 `getBoundingClientRect()` 강제 리플로우 비용이 발생하지 않음 |
 | 키 입력 O(N) 패스 | `TextEditController` | Phase 2로 해소: 모든 텍스트 편집 지점이 `insertTextIntoInline`/`deleteTextFromInline` 델타 스플라이스 사용 (`run-map.ts`). 편집 비용이 문단 길이가 아닌 **변경 런 수**에 비례. 잔존: `_computeLayoutInputHash`(해시용 문자열 조립) + 렌더 diff |
 
-### 9.1 스레드 flush 경로 (2026-09 개선 — `ThreadRelayoutCoordinator`)
+### 9.1 스레드 flush 경로 (`ThreadRelayoutCoordinator`)
 
-`_flushThreadRelayout`/`_syncThreadFramesToDom`의 본체가 `src/utils/thread-relayout-coordinator.ts`로 통합되었다 (document/page 이중 사본 소거 — C-1). 개선 내용 (감사 B-1):
+flush 본체는 `src/utils/thread-relayout-coordinator.ts` 단일 소스이며 document/page 요소는 위임만 수행한다:
 
-| 항목 | 이전 | 이후 |
-|---|---|---|
-| DOM 문단 조회 | `querySelectorAll` 후 루프 내 `Array.from(...).find(...)` — 프레임당 O(P), 키 입력당 O(F×P) | `querySelectorAll` 1회 + `Map` 구축 1회 — O(P + F) |
-| dirty 소진 assert | `typeof console !== 'undefined'`(브라우저에서 항상 true) — **프로덕션** 키 입력마다 `findEnginesByIds`(엔진 트리 전체 순회) 실행 | `THREAD_RELAYOUT_ASSERT` 전역 플래그 게이트 — 기본 false, `globalThis.__LAYOUT_ELEMENT_DEBUG_THREAD_FLUSH__ = true`로 옵트인 |
-| 중복 유지보수 | document/page 사본 ~120줄 × 2 | coordinator 단일 소스 + 요소별 위임(~10줄 × 2) |
+| 항목 | 설계 |
+|---|---|
+| DOM 문단 조회 | `querySelectorAll` 1회 + `Map` 구축 1회 — O(P + F) |
+| dirty 소진 assert | `THREAD_RELAYOUT_ASSERT` 전역 플래그 게이트 — 기본 false, `globalThis.__LAYOUT_ELEMENT_DEBUG_THREAD_FLUSH__ = true`로 옵트인 |
+| 중복 소유 | coordinator 단일 소스 + 요소별 위임(~10줄 × 2) |
 
 재진입 차단 플래그(`_threadRelayoutFlushing`)는 요소별 인스턴스 상태로 유지한다 — flush 중 파생 relayout 이월 계약(E-2)은 요소 수명 주기와 결합되어 있다.
 
@@ -930,20 +923,10 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 | 후보 | 설명 | 예상 효과 | 노력 |
 |---|---|---|---|
-| Web Worker 레이아웃 | `_layoutTextIntoColumns()`를 Web Worker로 이관 | 메인 스레드 블로킹 제거 | 중간-높음 |
+| Web Worker 레이아웃 | **재시도 금지** — 구조적으로 실패가 필연이다. 원인: 동기 계약(`renderText`의 즉시 `columnContents` 읽기, `ensureCommitted`), DOM-fed 증분 입력(참조 전달 불가 → structured clone 비용 > layout 비용 + 캐시 콜드), 엔진 트리 이중화(단일 소스 원칙 정면충돌). Worker 유효 틈은 이미지 디코드·printPostData 직렬화뿐 (§ 11.1) | — | 폐기 (§ 11.1) |
 | 한국어 정적 폭 테이블 | 11,172 한글 음절 균일 폭(970/1000 em) 룩업 테이블 | 콜드 스타트 시 opentype.js 파싱 생략 | 중간 |
-| ~~Skeleton 캐시~~ | ~~Univer 패턴 — 레이아웃 결과 캐시~~ | ~~증분 리플로우~~ | ~~구현됨 (§3.12)~~ |
 | `Promise.all` 병렬 렌더 | `LayoutPageElement.render()` 순차 await (`page.element.ts:506`) → 병렬 | 이미지 로드 블로킹 해소 | 낮음 |
-| 가상화 | ~~뷰포트 밖 컬럼/라인 DOM 지연 생성~~ → **구현됨**: `LayoutPageElement.parkPage()`/`unparkPage()`/`parkedPageIds` + `PageMountManager`(`src/utils/page-mount-manager.ts`). 최상위 박스(페이지) 단위 IntersectionObserver 인덱스 윈도우(±N) 마운트, 플레이스홀더 footprint 유지. 분리 페이지는 엔진 트리에 유지. G1(data 세터 부활)은 보관소 스킵으로, G2(재마운트 커서)는 문단 `connectedCallback` 예약 렌더로, G3(detach 잔류 선택·이미지 포커스)은 `_unregisterLayoutSubtree`로 해소. 상세는 § 11.2 참조 | 다중 페이지 DOM 크기 감소 | 구현됨 |
-| 시분할 프로그레시브 표시 패스 | `progressive` 프로퍼티 (document) — 초기 로드·풀 리플로우의 표시 패스(`page.render()`)를 페이지 단위 청크로 펌프 (8ms 예산 + setTimeout(0) 양보). 엔진 구축은 동기 유지 — `layout()` 반환 시 엔진·스레드·스냅샷 완결. `flushProgressiveLayout()` 편집 진입 관문. 상세는 § 11.4 참조 | 풀렌더 249ms/300p 롱태스크 제거 — 청크당 ~9페이지 | 구현됨 |
 | `_getAllColumns()` 캐싱 | `EditCoordinateMapper`에서 컬럼 목록 캐싱 | `querySelectorAll` 호출 감소 | 낮음 |
-| ~~키 입력 O(N) 패스 제거~~ | ~~`_getPlainText()`/`postRender`가 캐시 getter 사용 + `mapper.rebuild()` 증분화~~ | ~~타이핑 O(N) inlineToPlain 제거~~ | ~~구현됨: Phase 1(캐시 getter) + Phase 2(델타 스플라이스 + `rebuildMappingsOnly()`)~~ |
-| ~~부분 증분 `layoutText`~~ | ~~캐럿 이전 라인 재래핑 불변성을 이용한 prefix 라인 캐시 (엔진 단일 소스 원칙 내)~~ | ~~연속 타이핑 중 전체 재래핑 제거~~ | ~~구현됨 (§3.14 — 컬럼 단위 prefix 캐시, `verticalAlign: top` 한정)~~ |
-| ~~`_parseContents()` 1패스화~~ | ~~중간 `runSeq` 배열 제거, 1패스 직접 구축~~ | ~~편집 메모리 할당 50% 감소~~ | ~~구현됨~~ |
-| ~~`_layoutColumnsPass()` `flatChars` 제거~~ | ~~`flatMap`+`split("")` 중간 배열 제거, `(runIdx, charIdx)` 이중 인덱스 직접 순회~~ | ~~배치 시 객체 할당 0, 속도 40~60% 개선~~ | ~~구현됨~~ |
-| ~~Skeleton 캐시 키 분리~~ | ~~`fontWeight`/`color` 해시 제외 + `_refreshInlineStylesOnly` 경량 패스~~ | ~~굵게/색상 주입 시 재래핑 생략~~ | ~~구현됨~~ |
-| ~~`_parseContents()` 결과 캐싱~~ | ~~`_parsedContentsCache`: `textContent` 참조 동일성 기반~~ | ~~캐시 미스 시 편집 생략~~ | ~~구현됨~~ |
-| Web Worker 레이아웃 | **재시도 금지** — 과거 수차례 시도 후 전부 철거됨. 구조적 원인: 동기 계약(`renderText`의 즉시 `columnContents` 읽기, `ensureCommitted`), DOM-fed 증분 입력(참조 전달 불가 → structured clone 비용 > layout 비용 + 캐시 콜드), 엔진 트리 이중화(단일 소스 원칙 정면충돌). Worker 유효 틈은 이미지 디코드·printPostData 직렬화뿐 (§ 11.1) | — | 폐기 (§ 11.1) |
 | rgbaData 다운사이징 | 오버랩 판정 진실은 `opaqueRowBitmap`이므로 원본 rgbaData는 판정 완료 후 해제하고 URL 재주입 시 재추출하는 LRU(활성 페이지 기준 10~20장) 도입. "DOM 로드 실패 시 엔진 픽셀 소각 금지" 원칙 유지, 보관 정책만 페이지 스코프화 | 이미지 수 × 상주 픽셀 메모리 감소 | 미구현 |
 | 문서 스케일 스케줄러 | 문단별 `queueMicrotask` 배치를 문서 단위 우선순위 큐로 통합 (뷰포트 내 편집 > 뷰포트 내 갱신 > 뷰포트 밖 > 프리페치 프리레이아웃) | 전역 순회 우선순위화 | 미구현 |
 | 히스토리/상태 스코프화 | undo/redo를 풀 스냅샷 대신 커맨드 패치(run-map 델타 스플라이스 기반) 단위로. EditManager 편집 상태를 활성 페이지로 한정 | 스냅샷 메모리 스파이크 제거 | 미구현 |
@@ -962,7 +945,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 | # | 문제 | 근거 |
 |---|---|---|
-| 1.1 | 페이지 추상화 부재 — 페이지 경계·흐름·"현재 페이지"가 데이터 모델에 없음 (→ 11.3에서 `DocumentData.pages`로 해소) | 구 `PageData` = width/height 1개 |
+| 1.1 | 페이지 추상화 부재 — 페이지 경계·흐름·"현재 페이지"가 데이터 모델에 없음 | 단일 캔버스 모델 = width/height 1세트 |
 | 1.2 | 전역 O(N) 경로 — `PageEngine._buildTree()`가 `layout()`마다 전 트리 순회, 자식마다 `findBoxEngineById` 재귀 선형 검색 → 최상위 박스 N개에 O(N²) 성분 | `page-engine.ts` |
 | 1.3 | `_refreshParagraphOverlays` 무조건 전체 갱신 — 한 페이지만 바뀌어도 수백 페이지 문단 전체 `updateOverlayContext` + 해시 재계산 | `page-engine.ts` |
 | 1.4 | 풀 스냅샷 라운드트립 — undo/redo·외부 주입이 `data` setter 전체 reconcile 경로 | AGENTS.md "data setter는 풀 복원용" |
@@ -992,7 +975,7 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 #### Web Worker 폐기 (역사적 사실 — 재시도 금지)
 
-Web Worker 이관은 과거 수차례 시도 후 모두 철거되었다 (`src/`에 Worker 관련 심볼 0건).
+Web Worker 이관은 구조적으로 실패가 필연이다 (`src/`에 Worker 관련 심볼이 없도록 유지한다).
 실패가 필연이었던 구조적 원인:
 
 1. **동기 계약** — `_layoutStructure() → engine.layout() → render() → renderText()` 전부 동기 체인.
@@ -1008,7 +991,7 @@ Web Worker 이관은 과거 수차례 시도 후 모두 철거되었다 (`src/`�
 3. **상태 이중화** — Worker용 엔진 트리를 유지하면 엔진 트리가 두 개가 되어
    "엔진 트리가 단일 소스"(RULES.md §3)가 깨진다.
 
-Worker가 여전히 유효한 좁은 틈 (동기 계약 무관, 입출력 자기완결): **이미지 디코드 +
+Worker가 유효한 좁은 틈 (동기 계약 무관, 입출력 자기완결): **이미지 디코드 +
 rgbaData/opaqueRowBitmap 추출** (입력 URL 바이트 → 출력 다운샘플 비트맵,
 `_feedRgbaToEngine` 비동기 흐름에 자연 결합), **printPostData 직렬화(내보내기)** (풀 문서
 일괄 변환 — 배치 모델이라 Worker 모델과 일치). **레이아웃 자체는 넣지 않는다.**
@@ -1019,10 +1002,11 @@ rgbaData/opaqueRowBitmap 추출** (입력 URL 바이트 → 출력 다운샘플 
 **DOM만 뷰포트 근처 페이지 ±1~2개** 마운트. 225만 span → 화면 페이지 분(≈1.5만),
 노드 수 3~4자릿수 절감. API·계약 상세는 AGENTS.md "DOM Virtualization — Parked Pages" 절 참조.
 
-#### 연결/해제 콜백 감사 결과 (설계 근거)
+#### 연결/해제 콜백 설계 근거
 
 기존 콜백이 겨냥한 것은 data 세터 reconcile 중 appendChild 재정렬의 순간적(ms급)
-disconnect다. 가상화의 장기(분~시간급) detach에는 공백 G1~G4가 있었고 P1~P4 보강으로 해소됐다:
+disconnect다. 가상화의 장기(분~시간급) detach를 위해서는 공백 G1~G3의 보강이 필요하며
+P1~P4로 해소되어 있다:
 
 - **G1(치명)** — `data` 세터의 ID-keyed reconcile이 DOM에 있는 자식만 수집 →
   가상화 detach 상태에서 풀 복원이 페이지 전부 재마운트 (가상화 무효화).
@@ -1073,13 +1057,13 @@ mm-only라 detach 페이지도 계산 유지). 주의점:
 4. 축소에서 동시 가시 페이지 수 증가는 가상화의 본질적 한계 — 전체 조감용은 썸네일 렌더
    경로(엔진 `printPostData`/축소 canvas)로 분리.
 
-### 11.3 페이지 모델 (구현됨 — 2026-09-14)
+### 11.3 페이지 모델
 
 `DocumentData.pages` 1급화 + `DocumentEngine`(스레드 문서 소유·페이지 스코프 배치) +
 `<x-layout-document>` (EditManager·park·스레드 소유) + 레거시 호환(`normalizeDocumentData`).
 스레드 정의·EditManager·보관 단위가 문서로 이동했다. 검증: `verify-page-model.mjs` 13항목 ALL PASS.
 
-### 11.4 시분할 프로그레시브 레이아웃 (구현됨 — 2026-09-15)
+### 11.4 시분할 프로그레시브 레이아웃
 
 **원칙**: 엔진 구축은 동기 유지, **표시 패스만 시분할**.
 
@@ -1120,17 +1104,16 @@ doc.data = bigData (progressive=true)
   (e) textStyle 교체 DOM 수렴, (f) 타이핑 seam 정합, (g) flush 관문
   (커서 좌표계 보장).
 
-### 11.5 측정 & 검증 — 문서 스케일 실측 기록
+### 11.5 측정 & 검증
 
 `scripts/README.md` 워크플로 (기준선 측정 → 수정 → 검증 → 재측정) 준수.
 가상화 시나리오 측정은 `benchmark-browser.mjs` 시나리오 8
 (`scripts/README.md` §시나리오 8 참조), 회귀는 `verify-virtualization.mjs`(47항목)·
 `verify-page-model.mjs`(13항목)·`verify-progressive-layout.mjs`(21항목).
 
-#### 스레드 체인 타이핑 비용 귀속 (실측)
+#### 스레드 체인 타이핑 비용 귀속 (측정 데이터)
 
-30프레임 단일 체인 데모에서 키스트로크당 비용을 위치별·윈도우별로 실측했다
-(헤드리스, `longtask` 합산):
+30프레임 단일 체인 데모 기준 키스트로크당 비용 (헤드리스, `longtask` 합산):
 
 | 조건 | 롱태스크 합 | 엔진 전체 재계산 |
 |---|---|---|
@@ -1146,10 +1129,10 @@ doc.data = bigData (progressive=true)
 - **윈도우 크기가 직접 비례한다.** 마운트 3→2페이지에 490ms→308ms (페이지당
   약 160ms, 헤드리스). 타이핑 체감의 즉시 레버는 윈도우 축소와 체인 분할이다.
 - 헤드리스(SwiftShader) 수치는 실기보다 5~10배 부풀려져 있다. headed Chromium +
-  RTX 5070 Ti 실측으로 키당 귀속이 닫혔다 (엔진 layoutText 2.7ms·4% 대 DOM측 90% 이상).
-- 시도 후 revert한 것: overflow 카운트 변화 시 span 전체 재생성 제거 —
-  동일 페이지 A/B(강제 recreate vs diff)에서 484ms vs 458ms로 유의미한 차이
-  없음이 실측되어 원복했다 (근거 없는 최적화 금지 원칙).
+  RTX 5070 Ti 측정 기준 키당 귀속: 엔진 layoutText 2.7ms·4% 대 DOM측 90% 이상.
+- **overflow 카운트 변화 시 span 전체 재생성은 하지 않는다** — 동일 페이지 A/B
+  (강제 recreate vs diff) 측정에서 484ms vs 458ms로 유의미한 차이가 없어
+  diff 경로를 유지한다 (근거 없는 최적화 금지 원칙).
 
 #### 메모리 방법론 주의
 

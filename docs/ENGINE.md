@@ -489,7 +489,7 @@ static createOrphan(content: string | (string | TextInlineData)[], resources: En
 | `lineHeight` | `number` | 라인 높이 |
 | `overflow` | `number` | 오버플로우 라인 수 |
 | `visibleChars` | `number` | 컬럼 영역 내 visible 문자 수. 오버플로우 라인의 문자 제외. **`_cursorLineWalk()` 단일 walk의 `visibleCount`를 반환** — `maxVisibleCursorOffset`/`cursorLineRanges`와 동일 순회 (구조적 분기 불가) |
-| `cursorLineRanges` | `CursorLineRange[][]` | 라인별 source offset 경계 — **라인 경계의 단일 소스**. `[columnIndex][lineIndex]` = `{ startOffset, endOffset, firstVisible, lastVisible, endOfBlock }` (프레임 로컬 오프셋). 누적 규칙은 legacy mapper walk와 동일 (파트 content 길이 = 선행 공백 + 가시 문자 + 후행 공백, endOfBlock 뒤 `\n` 소비). **소유권 규칙**: 라인 i의 `endOffset`은 라인 i+1의 `startOffset`과 같은 값 — 경계 offset은 편집 커서 기준 다음 라인 소속이며 시각적으로는 이전 라인 끝(phantom end)일 수 있고 어느 쪽인지는 커서 배치(bias)가 결정. 소비처: `TextEditCoordinateMapper`가 라인 소속 판정·내비게이션에 소비 (구 mapper `_lineSourceOffsets`/`_columnRanges`/`_totalLineCount` walk는 **삭제** — 이중화 소거 완료). `visibleChars`/`maxVisibleCursorOffset`도 이 walk를 소비한다 — 라인 경계 계산은 구조적으로 분기 불가 |
+| `cursorLineRanges` | `CursorLineRange[][]` | 라인별 source offset 경계 — **라인 경계의 단일 소스**. `[columnIndex][lineIndex]` = `{ startOffset, endOffset, firstVisible, lastVisible, endOfBlock }` (프레임 로컬 오프셋). 누적 규칙: 파트 content 길이 = 선행 공백 + 가시 문자 + 후행 공백, endOfBlock 뒤 `\n` 소비. **소유권 규칙**: 라인 i의 `endOffset`은 라인 i+1의 `startOffset`과 같은 값 — 경계 offset은 편집 커서 기준 다음 라인 소속이며 시각적으로는 이전 라인 끝(phantom end)일 수 있고 어느 쪽인지는 커서 배치(bias)가 결정. 소비처: `TextEditCoordinateMapper`가 라인 소속 판정·내비게이션에 소비 — mapper 자체 라인 walk는 보유하지 않는다 (이 게터가 단일 소스). `visibleChars`/`maxVisibleCursorOffset`도 이 walk를 소비한다 — 라인 경계 계산은 구조적으로 분기 불가 |
 | `cursorLineCount` | `number` | 라인 경계 walk의 평탄화 라인 수 (컬럼순 누적 합계). 편집 계층 수직 이동의 `_toFlatLineIndex`/`_fromFlatLineIndex`가 소비 |
 | `maxVisibleCursorOffset` | `number` | 커서가 위치할 수 있는 마지막 source 오프셋 — 첫 오버플로 라인 직전 경계. `_cursorLineWalk()`가 산출 (경계 배치 보장: 직전 문자가 `\n`이면 그 `\n` 위치, 아니면 후행 공백을 건너뛴 첫 offset — `getCursorPlacement(offset, preferLineEnd=true)`가 유효 배치를 반환해 커서가 마지막 visible 라인에 그려진다). 오버플로 없음/배치 전/부모 높이 미설정이면 `-1` (클램프 비활성 신호 — 소비자 `_cursorMaxOffset`의 `max >= 0` 게이트). 편집 커서 화살표·End 이동의 클램프 경계로 소비 (`docs/EDITING_TEXT.md` §오버플로 라인 커서 클램프). 스레드 프레임은 프레임 경계 이관이 커서 이동을 소유하므로 소비하지 않는다 |
 | `widthRatio` | `number` | 장평 비율 (effective getter) |
@@ -790,7 +790,7 @@ PageEngine (root, owns ppm + resources)
 ### printPostData 단일화 (mm)
 
 - 엔진 트리(`PageEngine.printPostData`)가 단일 소스. 모든 rect/char 좌표는 **mm 단위**.
-- DOM 요소의 `printPostData` getter는 제거되었다. `printPostData`는 엔진 전용 API로, DOM에서 호출하지 않는다.
+- `printPostData`는 엔진 전용 API로, DOM에서 호출하지 않는다.
 - ppm 곱셈은 외부 후처리 시스템이 수행한다. 엔진은 mm만 다룬다.
 
 ---

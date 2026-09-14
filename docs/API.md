@@ -337,8 +337,8 @@ class LayoutBoxElement extends HTMLElement
 > **스타일 setter의 엔진 동기화**: 스타일 관련 setter(`borderTopWidth` 등 4종, `borderStyle`,
 > `borderColor`, `backgroundColor`, `backgroundOpacity`)는 변경 시 `layout()`을 호출한다.
 > `layout()`이 `_layoutStructure()`를 거쳐 `BoxEngine` data에 값을 전달하므로 **저장 시 값이 누락되지
-> 않는다**. (과거 일부 setter가 `_renderBorder()`만 호출하던 시기에는 shadow DOM만 갱신되고 엔진
-> data가 동기화되지 않아 저장 누락 버그가 있었다. `borderColor`를 `undefined`로 설정하면 테두리
+> 않는다** (border 스타일 setter는 반드시 `layout()` 경로를 거쳐야 한다 — shadow DOM만 갱신하면
+> 엔진 data가 동기화되지 않는다. `borderColor`를 `undefined`로 설정하면 테두리
 > 렌더링이 스킵된다.)
 | `paddingTop` | `number` | mm | 내부 상단 여백. |
 | `paddingRight` | `number` | mm | 내부 우측 여백. |
@@ -407,8 +407,8 @@ console.log(box.left, box.top, box.width, box.height); // mm 값
 `<x-layout-box>`는 MutationObserver로 자식 변이를 감시하지 않습니다 — 자식 reconcile은
 오직 `data` setter(ID 기반 diff)와 `appendChildData()`/`removeChildData()`(증분 추가/삭제)
 경로로만 수행됩니다. raw `appendChild`/`removeChild`로 자식을 조작하면 엔진 트리가
-DOM과 어긋납니다 (PERFORMANCE.md §3.4 변경 이력 참조: MutationObserver는 제거되었고
-현재는 `_rebuildingChildren` 플래그 기반 가드만 존재).
+DOM과 어긋납니다 — 자식 변이 감시는 `_rebuildingChildren` 플래그 기반 가드만 존재하며
+가드는 이 공개 경로를 전제로 동작합니다 (PERFORMANCE.md §3.4 참조).
 
 #### Attributes
 
@@ -645,9 +645,9 @@ class LayoutImageElement extends HTMLElement
 | `inheritStyle` setter | `layout()` + `render()` | 상위 box의 크기/여백 변경 시. `absWidth`/`absHeight`가 `inheritStyle.parentWidth`/`parentHeight`에 의존하므로 캔버스 픽셀을 다시 그려야 함. `_updateEngine()`이 `contentAbsRect`를 재주입하여 엔진 `displayRect` 재계산 |
 
 > **image 자식의 `parentHeight`는 `contentHeight`**: 부모 box의 `_propagateInheritStyle()`은
-> image 자식에 `parentHeight: model.contentHeight`(실제 콘텐츠 높이)를 주입한다. 과거의
-> `editableHeight`(static box의 라인 버림 계산)를 사용할 때 absolute 박스 내 이미지가 박스를
-> 꽉 채우지 못하는 버그가 있었다 — `contentHeight`가 정확한 실측값이다. paragraph 자식은
+> image 자식에 `parentHeight: model.contentHeight`(실제 콘텐츠 높이)를 주입한다.
+> `editableHeight`(static box의 라인 버림 계산)가 아니라 `contentHeight`가 정확한 값이다 —
+> `editableHeight`를 쓰면 absolute 박스 내 이미지가 박스를 꽉 채우지 못한다. paragraph 자식은
 > `parentHeight: editableTextHeight`(텍스트 라인 계산 기준)를 사용한다.
 
 **상위 box 크기/여백 변경 경로**:
@@ -954,10 +954,9 @@ class LayoutColumnElement extends HTMLElement
 오버레이입니다.
 
 각 가이드 라인은 `position: absolute`로 `top: ${lineHeight * j}mm` 위치에 배치된다.
-이전에는 flexbox `gap`으로 라인 간격을 구현했으나, 브라우저의 mm→px 하위픽셀 변환
+flexbox `gap`으로 라인 간격을 구현하면 브라우저의 mm→px 하위픽셀 변환
 오차가 라인이 아래로 갈수록 누적되어 static box의 수학적 `top` 계산(`lineHeight * top`)과
-어긋나는 문제가 있었다. absolute positioning으로 변경하여 계산식과 정확히 일치하도록
-수정했다.
+어긋나므로, absolute positioning으로 계산식과 정확히 일치시킨다.
 
 > **`pointer-events: none`**: 가이드 컬럼 오버레이 전체는 마우스 이벤트를 받지 않는다.
 > 문서 캔버스 위에 겹쳐 렌더링되지만 wheel 스크롤·클릭·드래그를 가로채지 않아
@@ -1247,7 +1246,7 @@ interface ParagraphEngineData {
 - `getCursorPlacement(sourceOffset, preferLineEnd?)`: 커서 배치 정보 반환
 
 이 API는 `TextEditCoordinateMapper.useEngineCoordinateQueries = true`로 활성화 시
-브라우저 텍스트 편집에서도 사용된다 (기본값 `false`, 점진적 마이그레이션).
+브라우저 텍스트 편집에서도 사용된다 (기본값 `false`, 옵트인 기능 플래그).
 
 #### `columnContents`
 
@@ -3721,7 +3720,7 @@ doc.data = exampleData;
 
 `printPostData`는 엔진 전용 API입니다. `PageEngine.printPostData`에서 계산된 **mm 단위** 좌표를 반환합니다. 외부 후처리 시스템(PDF 생성 등)이 엔진에서 직접 호출합니다. DOM에서는 `printPostData`를 호출하지 않습니다.
 
-1. **엔진 전용 API**: `printPostData`는 `PageEngine`의 getter로, DOM 요소에서는 제거되었다.
+1. **엔진 전용 API**: `printPostData`는 `PageEngine`의 getter다 — DOM에서 호출하지 않는다.
 2. **mm 단위**: 모든 rect/char 좌표는 mm 단위 number. 화면 표시용 ppm 변환은 외부에서 수행한다.
 3. **DOM 독립**: DOM `getBoundingClientRect()`에 의존하지 않는다.
 4. **z-index 오름차순**: 자식 요소를 z-index **오름차순**(낮은 것부터)으로 재귀 수집한다.

@@ -941,7 +941,7 @@ interface EditModeState {
 
 `_suppressLayoutClick()`은 **window capture phase 일회성 click 리스너**를 등록한다. 이 리스너는 `LayoutSelectionController._onClick`(document capture phase)보다 먼저 실행되어 click을 소비(`stopPropagation()` + `preventDefault()`)한다. click이 발생하지 않으면 350ms 타임아웃으로 리스너가 자동 제거된다.
 
-과거에는 삽입 완료/취소에 `_suppressNextClick` 불린 플래그를 사용했으나, 이 방식은 mousedown의 `preventDefault()`로 인해 브라우저가 click 이벤트를 발생시키지 않을 때 플래그가 소비되지 않고 남아 다음 정상 클릭을 잘못 무시하는 문제가 있었다 (EVENT_SYSTEM_AUDIT.md C1). 이를 해결하기 위해 삽입 경로도 `_suppressLayoutClick()`으로 통합되었다.
+삽입 완료/취소 후 클릭 억제는 `_suppressLayoutClick()` 일회성 메커니즘으로 통합되어 있다 — 불린 플래그(`_suppressNextClick`) 방식은 mousedown의 `preventDefault()`로 브라우저가 click을 발생시키지 않을 때 플래그가 소비되지 않고 남아 다음 정상 클릭을 잘못 무시하므로 사용하지 않는다.
 
 ### 11.3 호출 시점
 

@@ -170,7 +170,7 @@ paragraph.editableText = false;
 - **삽입 모드**: 삽입 모드(`insertMode !== null`)에서는 더블클릭이 무시된다.
 - **lock**: 조상 box 중 하나라도 `lock`이 `true`이면 더블클릭이 무시된다.
 
-> **히스토리 — 레이아웃 편집 모드에서의 더블클릭 차단/해제**: 과거(커밋 34c3670)에는 레이아웃 편집 모드에서 더블클릭이 텍스트 편집 모드로 잘못 진입하는 비일관성(일반 box는 mousedown `preventDefault`로 차단, 테이블 내부 box는 통과)을 막기 위해 `layoutEditMode` 가드가 있었다. 당시 전제는 "mousedown `preventDefault()`가 브라우저의 click/dblclick 생성을 억제한다"는 것이었는데, 현재 Chromium에서는 `preventDefault()`와 무관하게 click/dblclick이 정상 생성됨을 실측으로 확인했다(합성 이벤트가 아닌 CDP 신뢰 이벤트로 검증). 따라서 가드를 제거하고 레이아웃 편집 모드에서도 paragraph 더블클릭으로 텍스트 편집 모드 진입이 가능하다. 텍스트 편집 진입 시 `textEditMode = true`가 `layoutEditMode = false`를 자동 수행하므로 모드 상호 배타는 유지된다.
+> **더블클릭 진입 계약**: 레이아웃 편집 모드에서도 paragraph 더블클릭으로 텍스트 편집 모드 진입이 가능하다 — mousedown `preventDefault()`와 무관하게 Chromium은 click/dblclick을 정상 생성한다 (CDP 신뢰 이벤트 검증). 텍스트 편집 진입 시 `textEditMode = true`가 `layoutEditMode = false`를 자동 수행하므로 모드 상호 배타는 유지된다. `lock`이 `true`인 조상 box 아래의 더블클릭은 무시된다.
 
 ```ts
 // 사용자가 paragraph를 더블클릭하면:
@@ -310,7 +310,7 @@ flowchart LR
 4. `_syncTextareaSelection()` — textarea의 선택 영역을 `_cursorModel` 상태에 맞춘다.
 5. `_updateCursorPosition()` — 커서를 새 DOM 위치에 재배치. `getCursorPlacement(offset, preferLineEnd=true)`를 통해 커서 배치 정보(`sourceOffset`, `atEndOfChar`)를 얻는다. `_sourceToPlacement` 맵은 `_rebuildMappings()`에서 모든 source offset에 대해 채워진다 — 가시 문자는 `atEndOfChar: false`, trailing space는 `atEndOfChar: true` + 누적 스페이스 폭, `\n` 위치는 `atEndOfChar: true`, 매핑 구멍(빈 줄 등)은 역방향으로 가장 가까운 placement로 채워진다. 단, `\n` 바로 다음 위치(새 라인 시작)는 line rect 폴백으로 처리된다. `endOfBlock`에서 `textContent`에 실제 `\n`이 있을 때만 `sourceOffset++`를 수행하여 phantom offset을 방지한다. **phantom end placement**: trailing space 없이 끝나는 라인의 마지막 가시 문자 다음 offset(= 다음 라인 첫 글자 offset)은 `_lineEndPlacements`에 별도 저장되며, `preferLineEnd=true`로 조회 시 우선 반환되어 커서가 라인 끝 문자의 오른쪽에 배치된다. bias가 `'start'`(다음 라인 시작 소속)이고 same-line 가드가 phantom placement의 이전 라인 참조를 검출하면 `preferLineEnd=false` 폴백으로 다음 라인 첫 글자의 왼쪽에 배치한다 (RULES §2.4 — bias가 소유권을 판정). `getCursorPlacement()`가 null을 반환하는 경우(빈 줄 시작, offset=0 등) line rect 또는 first column rect로 폴백한다. **height≈0 span(공백 문자) 처리**: `getCharRect(placement.sourceOffset)`의 `rect.height <= 1`이면 `useFallback=true`로 전환하여 `_resolveFallbackTop()`으로 커서 top을 결정한다. `_resolveFallbackTop`은 (1) 인접 가시 문자의 `rect.top`, (2) `getLineRect()`의 라인 div top, (3) span 자체 `rect.top`, (4) `getFirstColumnRect().top` 순서로 폴백한다. `rect.top - cursorHeight`를 사용하지 않는다 — 라인 끝 스페이스에서 위 라인으로 커서가 올라가는 버그를 방지.
 6. `_updateSelection()` — 선택 영역을 새 DOM 위치에 재배치.
-- 조합 중이면 `_applyCompositionUnderline()`로 조합 범위 span에 underline/breakline 장식(`_applyOptimisticDecorations` — 엔진 mm rect 규칙, 색상도 엔진과 동일 4단계 `firstNonEmpty` 체인) 적용. 조합이 종료된 직후면 `_clearCompositionUnderline()`로 임시 장식 div(`div[data-deco-key^="opt-"]`) 제거 — 구 CSS `text-decoration` 정리 분기는 설정 경로 소멸로 no-op이 되어 2026-09 정리에서 삭제되었다.
+- 조합 중이면 `_applyCompositionUnderline()`로 조합 범위 span에 underline/breakline 장식(`_applyOptimisticDecorations` — 엔진 mm rect 규칙, 색상도 엔진과 동일 4단계 `firstNonEmpty` 체인) 적용. 조합이 종료된 직후면 `_clearCompositionUnderline()`로 임시 장식 div(`div[data-deco-key^="opt-"]`) 제거. CSS `text-decoration`은 사용하지 않는다 — 장식 div 기반이 엔진 mm rect 기하와 일치한다.
 8. `_wasFocused`가 true면 `textarea.focus({ preventScroll: true })`로 포커스 복원. `preventScroll: true`로 스크롤 컨테이너의 좌상단 점프를 방지한다.
 
 > **조합 중 인라인 스타일 유지**: 낙관적 조합 span(`_createOptimisticCompositionSpan`) 생성 시
@@ -423,18 +423,17 @@ type CurrentStyle = {
 };
 ```
 
-### 3.5.1 `TextEditCoordinateMapper.useEngineCoordinateQueries` (마이그레이션 플래그)
+### 3.5.1 `TextEditCoordinateMapper.useEngineCoordinateQueries` (기능 플래그)
 
-`TextEditCoordinateMapper`는 정적 프로퍼티 `useEngineCoordinateQueries: boolean = false`를 가진다. 이 플래그는 `getCharRect()`의 동작 경로를 전환한다. 점진적 엔진 마이그레이션을 위한 기능 플래그이다.
+`TextEditCoordinateMapper`는 정적 프로퍼티 `useEngineCoordinateQueries: boolean = false`를 가진다. 이 플래그는 `getCharRect()`의 동작 경로를 전환한다.
 
 | 값 | `getCharRect()` 동작 경로 |
 |----|---------------------------|
-| `false` (기본값) | DOM `getBoundingClientRect()` 기반. span rect에서 paragraph rect를 빼고 `EditManager.scale`로 나누어 paragraph local coordinate(mm)를 반환. 기존 동작. |
+| `false` (기본값) | DOM `getBoundingClientRect()` 기반. span rect에서 paragraph rect를 빼고 `EditManager.scale`로 나누어 paragraph local coordinate(mm)를 반환. |
 | `true` | `ParagraphEngine.getCharRect()` 엔진 쿼리 기반. 엔진이 mm 단위로 직접 계산한 결과를 `ppm`으로 변환하여 반환. DOM 의존성 없음. |
 
 - **기본값 `false`**: 기존 동작을 유지하여 호환성 보장.
 - **`true`로 전환 시**: `ParagraphEngine.getCharRect()`가 mm 단위로 반환한 결과를 `ppm`으로 나누어 픽셀 좌표로 변환. DOM 측정(`getBoundingClientRect`)을 거치지 않으므로 transform: scale 환경에서의 보정(`EditManager.scale`로 나누기)이 불필요.
-- **마이그레이션 목적**: 엔진 레이어(`src/engine/paragraph-engine.ts`)로의 점진적 전환을 위해 도입. 전체 전환 전 두 경로를 공존시켜 검증할 수 있다.
 - **적용 범위**: 현재 `getCharRect()`에만 영향. `getTextRange()`, `getFirstColumnRect()`, `getLineRect()` 등 다른 좌표 API는 여전히 DOM 기반.
 
 - `anchor`는 선택이 시작된 위치, `focus`는 선택이 끝난 위치이다.
@@ -491,7 +490,7 @@ InheritStyle (부모에서 상속)
 
 | API | 타입 | 설명 |
 |-----|------|------|
-| `getInstance()` | — | (제거됨) per-document 인스턴스는 `LayoutPageElement.editManager`로 접근 |
+| `getInstance()` | — | 미제공 — per-document 인스턴스는 `LayoutPageElement.editManager`로 접근 |
 | `focusedParagraph` | `LayoutParagraphElement \| null` get | 현재 포커스된 단락 요소. 없으면 `null`. |
 | `focusedController` | `TextEditController \| null` get | 현재 포커스된 편집 컨트롤러. 없으면 `null`. |
 | `cursorOffset` | `number \| null` get | 현재 커서 위치. 포커스된 단락이 없으면 `null`. |
@@ -709,7 +708,7 @@ if (manager.isParagraphEditable(paragraph)) {
 
 #### 범위-증명 신선화 가드 — 포커스 진입의 단일 관문
 
-ThreadEngine의 범위-증명 스킵(§ TEXT_ENGINE 스레딩 — 편집 위치보다 앞쪽 slice를 갖는 프레임의 재배치 생략)은 step-1에서 clean 프레임의 참조를 `ParagraphEngine.refreshStoryReference(storyContent)`로 신선화한다 (A-6 근본 해소) — 스킵 프레임은 **현재 story 참조를 소유**하며, 구 story 참조를 보유한 채 편집 소스가 되어 writeback이 구 내용으로 `threads[].content`를 덮어쓰는 롤백 결함(실측 재현: 1→2→3페이지 순편집 후 2페이지 재편집 → 3페이지 편집 소실; IME 커밋·경계 backspace 스위트)이 상태 자체에서 소멸했다. `refreshStoryReference`는 참조 키 없는 직접 유도 메모(`_plainTextCache`·`_styleRuns`)만 무효화하고 `_dirty`·`_layoutCache`는 불변이라 step-2 스킵 판정이 그대로 성립한다.
+ThreadEngine의 범위-증명 스킵(§ TEXT_ENGINE 스레딩 — 편집 위치보다 앞쪽 slice를 갖는 프레임의 재배치 생략)은 step-1에서 clean 프레임의 참조를 `ParagraphEngine.refreshStoryReference(storyContent)`로 신선화한다 (A-6 근본 해소) — 스킵 프레임은 **현재 story 참조를 소유**하며, 구 story 참조를 보유한 채 편집 소스가 되면 writeback이 구 내용으로 `threads[].content`를 덮어쓰는 롤백 결함이 발생한다(재현 경로: 1→2→3페이지 순편집 후 2페이지 재편집 → 3페이지 편집 소실; IME 커밋·경계 backspace 스위트) — 신선화로 이 결함이 상태 자체에서 소멸한다. `refreshStoryReference`는 참조 키 없는 직접 유도 메모(`_plainTextCache`·`_styleRuns`)만 무효화하고 `_dirty`·`_layoutCache`는 불변이라 step-2 스킵 판정이 그대로 성립한다.
 
 남는 위험은 **DOM 렌더·textarea/runMap 동기의 스킵**이다 — 배치를 스킵한 프레임은 span diff·postRender 동기도 건너뛰므로, 편집 진입 전 DOM 컨트롤러를 신 모델에 동기해야 한다. 방어는 `EditManager._requestFocus`에서 수행한다 — 포커스 진입의 모든 경로(텍스트 클릭/더블클릭/`focusParagraph()`/테이블 키보드/커서 이관)가 `textarea focus → _onFocus → _requestFocus`로 수렴하므로 이 관문 하나로 전 경로가 방어된다. 가드는 `engine.ensureThreadFramesFresh({paragraph.id})`로 동기가 필요하면(`ThreadEngine.hasStaleSkippedFrames` — 참조가 아닌 **동기 스킵** 기록) 체인 전체 재배치 + 대상 프레임 커밋 후 `paragraph.flushRender()`로 textarea/runMap을 신 모델에 동기화한다. 검증: `scripts/verify-threading-browser.mjs` [10] (역방향 편집 — 상류 재편집 후 하류 편집 보존), `scripts/verify-story-reference-refresh.mjs` (30항목 — 참조 소멸/스킵 판정 유지/writeback 롤백 방어).
 
@@ -1062,7 +1061,7 @@ const handledReverse = manager.navigateByTab(true);
 - **다중 탭**: 한 파트에 탭이 여러 개면 첫 번째 탭 기준으로 collapse된다 (InDesign은 후속 탭을 다음 라인으로 밀지만, v1은 collapse로 단순화 — 의도된 편차).
 - **렌더링**: 탭은 `data-source-offset` diff 키를 유지하는 **0폭 + `visibility: hidden` span**으로 렌더링된다. span이 존재하므로 커서/선택/클릭 매핑(`TextEditCoordinateMapper`)이 오프셋 산술을 그대로 유지한다.
 - **탭 영역 점선 가이드 (편집 모드 전용)**: `editableText`가 활성화된 단락에서 탭 span에 얇은 **점선 배경**이 표시되어 좌/우 텍스트 사이의 탭 영역을 시각적으로 드러낸다 (`_applyTabGuideStyle`). 갭 폭은 탭 앞쪽 마지막 가시 span의 **시각 우측 끝**(`data-char-offset + data-swidth × scaleX`)부터 탭 위치(`data-char-offset` = 우측 세그먼트 시작)까지이며, `width` 확장 + `transform: translateX(-갭폭)`으로 표현한다 — `data-char-offset`/`style.left`는 건드리지 않아 diff 시스템(positionChanged 판정)과 충돌하지 않는다. `scaleX`는 기준 span의 **per-span 장평**(`data-dim-key`에서 `widthRatio` 파싱 → `× 0.88`, dimKey에 없으면 문단 effective 장평)이다 — 장평이 런 단위 오버라이드 가능해져 문단 값 고정이면 오버라이드 런 옆에서 점선이 글자를 침범한다. 렌더링 함정 2가지: (1) 점선 색을 `currentColor`로 하면 `color: transparent`(글자 숨김)에 묻혀 점선도 투명해지므로 **fixed 색(#888)**을 쓴다. (2) `scale` 개별 프로퍼티(장평 스케일)를 **1로 리셋**한다 — 탭 span은 시각 글자가 없어 장평이 무의미하고 scale은 배경 폭을 압축해 갭을 다 덮지 못한다. 높이도 명시해야 한다(높이 0이면 배경이 안 보임). 점선은 라인 수직 중앙에 배치한다 — `backgroundPosition: calc(50% - 밴드절반)`. 비편집 모드로 전환 시 잔존 인라인 스타일을 원복하여 0폭+hidden으로 복귀한다. 인쇄(printPostData)에는 영향이 없다.
-- **IME 조합은 항상 엔진 렌더 경로 (optimistic 조합 span 제거)**: `_onCompositionUpdate`는 매 음절 `model.textContent`를 갱신한 뒤 **`_debouncedRender()`(rAF 프레임당 1회 병합)로 조합 중 텍스트를 실제 엔진 렌더에 반영**한다. 과거 조합 중 optimistic span 경로는 라인 끝 근처 조합 시 `_shiftFollowingSpans`가 기존 span을 파트/컬럼 폭 밖으로 밀어냈다 — `overflow: hidden` 컬럼에서는 가려질 뿐 **데이터상 라인 밖 배치**였고(커밋 후에야 wrap 반영), 걸침표 ON 컬럼(`overflow: visible`)에서는 눈에 보였다. 밀어내기는 라인 폭 경계를 모르는 DOM 사이드채널이므로 근본적으로 올바르지 않아 제거했다. 엔진 경로는 wrap·금칙·걸침·정렬을 매 프레임 정확히 계산하므로 조합 중에도 다음 라인으로 랩된다. 프레임 비용은 영문 타이핑과 동일 수준이다 — 과거 지연 최적화의 "음절당 2회 렌더"(실측 80회)는 scheduleRender microtask + rAF 커밋의 이중 예약 때문이었고, 현재 `_debouncedRender()`는 프레임당 1회로 병합되므로 재발하지 않는다. 탭 라인/우측·중앙 정렬은 과거부터 동일 엔진 경로를 썼다(`_shiftFollowingSpans`가 좌측 정렬 가정이라 방향이 반전되기 때문).
+- **IME 조합은 항상 엔진 렌더 경로**: `_onCompositionUpdate`는 매 음절 `model.textContent`를 갱신한 뒤 **`_debouncedRender()`(rAF 프레임당 1회 병합)로 조합 중 텍스트를 실제 엔진 렌더에 반영**한다. 조합 중에 optimistic span을 쓰지 않는 이유: span 밀어내기(`_shiftFollowingSpans`)는 라인 폭 경계를 모르는 DOM 사이드채널이라 라인 끝 근처 조합 시 span을 파트/컬럼 폭 밖으로 밀어낸다 — `overflow: hidden` 컬럼에서 가려질 뿐 데이터상 라인 밖 배치가 되고, 걸침표 ON 컬럼(`overflow: visible`)에서는 눈에 보인다. 엔진 경로는 wrap·금칙·걸침·정렬을 매 프레임 정확히 계산하므로 조합 중에도 다음 라인으로 랩된다. 프레임 비용은 영문 타이핑과 동일 수준이다 — `_debouncedRender()`가 프레임당 1회로 병합하므로 음절당 다중 렌더가 발생하지 않는다. 탭 라인/우측·중앙 정렬도 동일 엔진 경로를 쓴다.
   - **조합 중 커서 폴백**: 커서 offset이 조합 텍스트 끝을 가리키며, mapper가 rAF 커밋 직후 재구축되기 전(또는 stale) 상태에서 placement가 없으면 `_isComposing && _compositionStartOffset > 0` 분기가 조합 시작 위치의 placement(phantom end 우선)로 커서를 배치한다 — 커서가 조합 텍스트가 표시될 지점에 머무른다.
 - **일반 타이핑 optimistic span (잔존 경로)**: 단일 글자 영문 입력은 여전히 `_optimisticSpanUpdate`로 커밋 전 1프레임 피드백을 제공한다. 탭 라인/우측·중앙 정렬에서는 생성하지 않는다 — `_shiftFollowingSpans`/`_computeTempSpanLeft`는 좌측 정렬 가정(오른쪽 밀어내기)으로 설계되어 방향이 반전되기 때문. 라인 끝 밀어남은 다음 rAF 커밋(flushRender)이 즉시 확정하므로 지연이 없다.
 - **인쇄**: `buildParagraphPrintPostData`는 `\t`를 출력에서 제외한다 (좌표는 charOffsets 기반으로 그대로 유지).
@@ -1273,7 +1272,7 @@ pending 스타일은 인라인 런으로 삽입되므로 `TextInlineStyle`의 14
     2. `bias === 'start'`면 `_getLogicalLineStart(offset)`으로 라인 시작 offset 계산 후 이동.
     3. 문서 시작 종료: 결과 offset과 현재 offset이 모두 0이면 Home을 무시하고 break.
     4. 착지 후 `bias = 'start'` — 이후 반복 입력은 제자리.
-  - 커서 렌더: `_updateCursorPosition`에서 `bias: 'end'`는 preferLineEnd 기본 조회(phantom end placement, 문자 오른쪽)를 유지하고, `bias: 'start'`는 same-line 가드로 placement의 라인 소속이 offset 소속과 다르면 placement를 폐기하고 default placement(또는 line rect 폴백)로 배치한다 — **커서가 bias 소속 라인에 그려지는 것이 보장된다**. 이전 3단계 머신의 crossed 미리보기(제자리에서 커서가 이웃 라인에 그려지는 현상), 컬럼 경계 라인에서의 문단 최상단/최하단 점프, 반복 입력의 라인 순회는 제거되었다.
+  - 커서 렌더: `_updateCursorPosition`에서 `bias: 'end'`는 preferLineEnd 기본 조회(phantom end placement, 문자 오른쪽)를 유지하고, `bias: 'start'`는 same-line 가드로 placement의 라인 소속이 offset 소속과 다르면 placement를 폐기하고 default placement(또는 line rect 폴백)로 배치한다 — **커서가 bias 소속 라인에 그려지는 것이 보장된다**. crossed 미리보기(제자리에서 커서가 이웃 라인에 그려지는 현상)를 만들지 않는다 — 커서는 항상 bias 소속 라인에만 그려진다.
   - `Ctrl`/`Cmd`: 문서 전체 시작/끝으로 이동 (`_findLineStart`/`_findLineEnd`), 주차 없음.
   - `Shift`: bias-blind 선택 영역 확장 (`_getLogicalLineStart`/`_getEndKeyOffset` 사용, `bias` 불변).
   - **오버플로 클램프**: plain/Shift End는 커서가 경계 offset 위에 있을 때 논리 라인이 오버플로 라인이라 그 끝(숨김 영역)을 계산할 수 있다 — 결과가 엔진 경계를 넘으면 경계로 되돌린다. `Ctrl`/`Cmd`+End는 단일 블록 텍스트에서 문서 끝 자체가 숨김 영역이므로 경계로 클램프한다 (§오버플로 라인 커서 클램프).
@@ -1635,7 +1634,7 @@ type RunMap = RunEntry[];
 
 ### 6A.3 편집 동기화 흐름
 
-모든 텍스트 변경 경로는 **① `model.textContent`를 `insertTextIntoInline`/`deleteTextFromInline`으로 갱신 → ② `this._runMap = runMapFromContent(model.textContent)`로 런 맵 재추출** 순서를 유지한다. `model.textContent`가 단일 소스이고 런 맵은 그 투영이다 — delta-sync(`shiftRunMap`) 경로는 제거되었다.
+모든 텍스트 변경 경로는 **① `model.textContent`를 `insertTextIntoInline`/`deleteTextFromInline`으로 갱신 → ② `this._runMap = runMapFromContent(model.textContent)`로 런 맵 재추출** 순서를 유지한다. `model.textContent`가 단일 소스이고 런 맵은 그 투영이다 — delta-sync(`shiftRunMap`) 경로를 사용하지 않는다.
 
 | 경로 | `model.textContent` 갱신 | 런 맵 동기화 |
 |------|------------------------|-------------|
@@ -1962,7 +1961,7 @@ paragraph.render();
 
 #### 7.4.3 편집 델타 경로 (run-map 스플라이스)
 
-모든 텍스트 편집 지점(`_onInput` 일반/선택 분기, Backspace, Delete, Enter, `_onPaste`, `_replaceSelection`, `_deleteSelection`, `_onCompositionUpdate`)은 `run-map.ts`의 `insertTextIntoInline`/`deleteTextFromInline` 스플라이스 프리미티브로 `model.textContent`를 갱신한 뒤, 즉시 `this._runMap = runMapFromContent(model.textContent)`로 런 맵을 재추출한다. `model.textContent`가 단일 소스이고 런 맵은 그 투영(projection)이다. 이전의 delta-sync(`shiftRunMap` + `applyStyleToRange`) 경로는 제거되었다 — 런 경계에서 갭이 생겨 삽입 텍스트가 plain으로 처리되고, `model.textContent`와 `_runMap`이 불일치하는 버그가 있었다.
+모든 텍스트 편집 지점(`_onInput` 일반/선택 분기, Backspace, Delete, Enter, `_onPaste`, `_replaceSelection`, `_deleteSelection`, `_onCompositionUpdate`)은 `run-map.ts`의 `insertTextIntoInline`/`deleteTextFromInline` 스플라이스 프리미티브로 `model.textContent`를 갱신한 뒤, 즉시 `this._runMap = runMapFromContent(model.textContent)`로 런 맵을 재추출한다. `model.textContent`가 단일 소스이고 런 맵은 그 투영(projection)이다 — delta-sync(`shiftRunMap`) 경로를 사용하지 않는다. 런 경계에서 갭이 생겨 삽입 텍스트가 plain으로 처리되고, `model.textContent`와 `_runMap`이 불일치하는 버그가 발생하기 때문이다.
 
 - **`insertTextIntoInline(content, at, text, insertStyle?)`**: 인라인 콘텐츠의 평문 `at` 위치에 텍스트를 스플라이스. 런 경계에 걸치면 런을 분할하고, `insertStyle`이 `undefined`면 삽입 위치 규칙에 따라 스타일을 이어받는다 — 런 중간 삽입은 해당 런의 스타일, 런 경계 삽입은 직전 런의 스타일(타이핑 연속성).
 - **`deleteTextFromInline(content, start, deleteCount)`**: 평문 범위를 삭제하고 경계가 맞닿은 동일 스타일 런을 병합한다.
@@ -2046,7 +2045,7 @@ flowchart LR
 4. `dataset.temporary = "true"`: 임시 span 표시. `TextEditCoordinateMapper`는 이 속성이 있는 span을 매핑 대상에서 제외.
 5. `dataset.widthRatio = String(적용된 장평)`: span에 실제 적용된 장평(런 오버라이드 → 문단 effective → 1 폴백)을 기록한다 — §8.3의 커서 폭 복원이 이 값을 소비한다.
 6. `textContent = char`: 단일 span에 직접 글자 설정 (outer/inner 중첩 없음).
-7. **underline/breakline 장식**: `textContent` 할당 **이후에** `_applyOptimisticDecorations()`을 호출한다 — textContent 할당은 기존 자식 노드를 모두 교체하므로 먼저 붙인 장식 div가 사라진다(이전에 textContent **이전**에 적용하는 데드 블록이 존재했으나 2026-09 정리에서 삭제되었다 — 항상 폐기되는 장식 div를 매 조합 업데이트마다 생성하는 낭비였다). 적용 여부는 런 오버라이드 → 문단 effective 폴백으로 판정한다(확정 렌더 `_computeDecorations`와 동일). 기하도 엔진 규칙을 따른다: 두께 = `max(fontSize × 0.06, 0.12mm)`, 밑줄 y = `lineMaxFontSize − 두께`, 취소선 y = `lineMaxFontSize/2 − 두께/2`, 색상 = 런 장식색상 → 문단 장식색상 → 런 글자색상 → 문단 글자색상 (`firstNonEmpty` 단일 소스 — 엔진과 동일 체인, `''`도 "값 없음"으로 스킵). 조합 중에도 확정 렌더와 동일 장식이 보이고 시각 점프가 없다.
+7. **underline/breakline 장식**: `textContent` 할당 **이후에** `_applyOptimisticDecorations()`을 호출한다 — textContent 할당은 기존 자식 노드를 모두 교체하므로 먼저 붙인 장식 div가 사라진다(이전에 textContent **이전**에 적용하는 블록이 있으면 안 된다 — textContent 할당이 기존 자식 노드를 모두 교체하므로 먼저 붙인 장식 div는 항상 폐기되는 낭비다). 적용 여부는 런 오버라이드 → 문단 effective 폴백으로 판정한다(확정 렌더 `_computeDecorations`와 동일). 기하도 엔진 규칙을 따른다: 두께 = `max(fontSize × 0.06, 0.12mm)`, 밑줄 y = `lineMaxFontSize − 두께`, 취소선 y = `lineMaxFontSize/2 − 두께/2`, 색상 = 런 장식색상 → 문단 장식색상 → 런 글자색상 → 문단 글자색상 (`firstNonEmpty` 단일 소스 — 엔진과 동일 체인, `''`도 "값 없음"으로 스킵). 조합 중에도 확정 렌더와 동일 장식이 보이고 시각 점프가 없다.
 8. 호출자가 `_computeTempSpanLeft()`로 계산한 `left`값과 `_getOptimisticTopMm()`(§8 하단 앵커)으로 `position: absolute; left: ${mm}mm; top: ${mm}mm`를 추가 적용.
 
 ### 8.3 낙관적 span이 있는 경우의 커서 위치 처리
@@ -2095,7 +2094,7 @@ return new DOMRect(
 
 > **transform: scale 환경에서의 보정**: 부모 요소에 CSS `transform: scale(s)`가 적용되어 있으면 `getBoundingClientRect()`는 transform 적용 후의 viewport 픽셀을 반환한다. 그런데 커서/선택 DOM 요소는 paragraph의 shadow root 자식이라 paragraph local coordinate(transform 적용 전 픽셀)를 기대한다. 따라서 `getCharRect` / `getFirstColumnRect` / `getTextRange`가 반환하는 top/left/width/height는 모두 `EditManager.scale`로 나누어 local coordinate로 변환한다. 단 `fontSize`는 `getComputedStyle`에서 오므로 local coordinate와 동일하여 보정하지 않는다.
 >
-> EditContext API 어댑터(`TextEditContextAdapter`)는 2026-09에 삭제되었다 — Chromium 122+ 전용·Safari 미지원으로 활성화된 적이 없었고(deprecated, `create()` always `null`), 모든 브라우저에서 textarea 기반 경로로 동작한다.
+> EditContext API 어댑터는 사용하지 않는다 — Chromium 122+ 전용이고 Safari 미지원(deprecated, `create()` always `null`)이므로, 모든 브라우저에서 textarea 기반 경로로 동작한다. 어댑터 경로를 추가하지 말 것.
 
 ### 9.2 `getCharOffsetFromPoint()`의 binary search 전략
 
@@ -2106,7 +2105,7 @@ return new DOMRect(
 5. 정확히 span 위에 있으면 해당 span의 `data-offset`을 source offset로 변환해 반환.
 6. span 위가 아니면 같은 행(`top` 동일)의 span 중 x 거리가 가장 가까운 span을 선형 탐색으로 찾는다.
 
-**라인 div 탐색의 포함 판정 우선 (엔터 후 커서 +1 불일치 수정, 2026-09):** 라인 소속 판별의 선행 단계(라인 div 선택)는 두 단계로 동작한다 — (1) 클릭 y가 라인 div rect `[top, top+height)` 내부에 포함되는 라인을 먼저 찾고, (2) 포함 라인이 없을 때만 라인 중심 거리 폴백. 이유: Enter로 쪼개진 다음 블록의 leading space span은 height=0으로 라인 top 경계에만 걸려 rect 중심이 라인 경계와 일치한다. 중심 거리만 쓰면 이전/현재 라인이 동률(dist 동일)이 되어 **위 라인**이 반환되고, 개행 뒤 텍스트 클릭이 한 라인 앞 오프셋으로 매핑되어 커서가 실제보다 +1 어긋났다 (사용자 보고: 2번째 스레드 프레임부터 엔터 후 커서 불일치). 포함 판정 우선으로 경계상 공백 글자 클릭도 소속 라인에 귀속된다. 검증: `scripts/verify-threading-browser.mjs` [11].
+**라인 div 탐색의 포함 판정 우선:** 라인 소속 판별의 선행 단계(라인 div 선택)는 두 단계로 동작한다 — (1) 클릭 y가 라인 div rect `[top, top+height)` 내부에 포함되는 라인을 먼저 찾고, (2) 포함 라인이 없을 때만 라인 중심 거리 폴백. 이유: Enter로 쪼개진 다음 블록의 leading space span은 height=0으로 라인 top 경계에만 걸려 rect 중심이 라인 경계와 일치한다. 중심 거리만 쓰면 이전/현재 라인이 동률(dist 동일)이 되어 **위 라인**이 반환되고, 개행 뒤 텍스트 클릭이 한 라인 앞 오프셋으로 매핑되어 커서가 실제보다 +1 어긋났다 (사용자 보고: 2번째 스레드 프레임부터 엔터 후 커서 불일치). 포함 판정 우선으로 경계상 공백 글자 클릭도 소속 라인에 귀속된다. 검증: `scripts/verify-threading-browser.mjs` [11].
 
 ### 9.3 `getNearestOffsetFromPoint()`의 전략
 
@@ -2314,7 +2313,7 @@ flowchart LR
 
 ### 11.1 `_updateCursorPosition()` 전체 로직
 
-`_updateCursorPosition()`은 현재 `_cursorModel.offset`과 소속(`bias`)을 기준으로 커서의 DOM 위치를 결정한다 (e13532a — 구 `_crossRightState`/`_crossLeftState` 플래그 머신은 bias 모델로 대체되어 삭제됨). 다음 우선순위로 처리한다.
+`_updateCursorPosition()`은 현재 `_cursorModel.offset`과 소속(`bias`)을 기준으로 커서의 DOM 위치를 결정한다. 다음 우선순위로 처리한다.
 
 #### 11.1.1 낙관적 span 경로 (최우선)
 

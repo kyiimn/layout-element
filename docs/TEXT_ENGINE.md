@@ -277,12 +277,12 @@ private _createLineWithParts(
 | `cumulativeTopMm` | 이전 라인들의 **확정 높이 합** (`line.lineHeight` = per-line maxFontSize × lineGap) | `lineIndex × lineHeight` (모든 라인 높이가 base 균일) |
 | `pendingMaxFontSizeMm` | 이번 라인에 배치될 글자들의 max fontSize **근사** (커서부터 컬럼 폭만큼 폭 누적 스캔) | 문단 기본 fontSize |
 
-- **왜 필요한가**: 인라인으로 큰 글자(예: 2단 인라인 영역 6mm > 문단 기본 4mm)가 섞인 컬럼에서 렌더링 라인 위치는 per-line 높이 누적으로 내려가지만, 과거 판정 rect는 `lineIndex × baseLineHeight` 균일 가정이었다. 이 어긋남으로 오버랩 회피가 실제 위치가 아닌 엉뚱한 라인에서 발생해 텍스트가 오버랩 요소 위로 덮였다.
+- **왜 필요한가**: 인라인으로 큰 글자(예: 2단 인라인 영역 6mm > 문단 기본 4mm)가 섞인 컬럼에서 렌더링 라인 위치는 per-line 높이 누적으로 내려가지만, `lineIndex × baseLineHeight` 균일 가정 판정 rect는 실제 위치와 어긋난다. 균일 가정을 쓰면 오버랩 회피가 실제 위치가 아닌 엉뚱한 라인에서 발생해 텍스트가 오버랩 요소 위로 덮인다 — per-line 높이 판정이 필요한 이유다.
 - **확정 vs 근사**: 라인의 실제 높이는 글자가 배치된 후에야 알 수 있으므로, 라인 생성 시점(rect 계산)에는 pending 근사를 쓰고 **다음 라인 생성 직전에** `_confirmLineHeight()`가 `inlineStyles` 기반 실제 max fontSize로 `line.maxFontSize`/`line.lineHeight`를 확정한다. 확정값이 누적 top(`cumulativeTopMm`)에 반영되므로 이후 라인들의 rect는 렌더링 위치와 정확히 일치한다.
 - **pending 근사의 안전 방향**: 폭 누적 스캔 범위(컬럼 폭) ≥ 실제 배치 폭(오버랩 파트가 좁히면)이므로 pending ≥ actual이다. 오차 방향이 과도 회피(텍스트가 요소를 더 피함)이지 그 반대(덮임)가 아니다.
 - **성능 이원화**: `_layoutColumnsPass`가 `_contents`에 base를 초과하는 인라인 fontSize 오버라이드가 있는지 먼저 검사한다. 오버라이드가 없으면 모든 라인 높이가 균일하므로 기존 균일 공식(`lineIndex × lineHeight`)을 그대로 사용 — pending 스캔/확정 비용 없이 기존 성능과 결과를 byte 단위로 보존한다. 오버라이드가 있는 문단에서만 `_computePendingMaxFontSize()` 스캔(라인당 컬럼 폭만큼, `_charWidthByFontCache` 공유)이 실행된다.
 - **`_removeTrailingEmptyLine` 불변식**: 제거되는 라인은 항상 마지막(아직 확정 전) 라인이므로, 확정된 라인이 제거되어 누적 top이 어긋나는 경우는 없다.
-- **`getCharRect` multi-part 파트 누적**: multi-part 라인(오버랩 파트 분할)에서 이후 파트의 x 좌표는 `partStartMm`(첫 파트 start + 이후 파트들의 갭/폭 누적) 기반으로 계산한다 — `buildParagraphPrintPostData`의 `partStartMm` 규칙과 동일하다. 과거에는 `part.left`(첫 파트=절대 start, 이후 파트=이전 파트 끝에서의 갭)를 누적 없이 더해 이후 파트 좌표가 오버랩 쪽으로 어긋났다.
+- **`getCharRect` multi-part 파트 누적**: multi-part 라인(오버랩 파트 분할)에서 이후 파트의 x 좌표는 `partStartMm`(첫 파트 start + 이후 파트들의 갭/폭 누적) 기반으로 계산한다 — `buildParagraphPrintPostData`의 `partStartMm` 규칙과 동일하다. `part.left`(첫 파트=절대 start, 이후 파트=이전 파트 끝에서의 갭)는 갭이므로 누적 없이 더하면 이후 파트 좌표가 오버랩 쪽으로 어긋난다.
 
 검증: `npx tsx scripts/verify-overlap-inline-fontsize.mjs` (22항목 — 균일 경로 보존/버그 재현/overflow per-line화/혼합 누적 top/COVER).
 
@@ -785,7 +785,7 @@ public genColumnStyle(idx: number): Partial<CSSStyleDeclaration>
 - `height`, `minHeight`, `maxHeight`: `inheritStyle.parentHeight`
 - `display: 'block'`, `overflow: 'hidden'`: 라인 절대 위치 기반 컨테이너 (flexbox 정렬 미사용)
 
-> **엔진 우선 원칙 — verticalAlign 좌표 기반 전환**: 과거에는 `flexDirection: 'column'` + `justifyContent`로 브라우저 flexbox가 라인의 수직 정렬을 수행했다. 엔진 우선 원칙에 따라 이를 엔진 좌표 기반으로 전환했다. 엔진이 각 라인의 절대 y 좌표(`alignOffsetMm + lineIndex × lineHeight`)를 산출하고, `genLineStyle()`이 `position: absolute` + `top`으로 DOM에 전달한다. `buildParagraphPrintPostData`, `getCharRect`, `getOffsetFromPoint` 모두 동일한 `_computeAlignOffsetMm()` 헬퍼를 사용한다.
+> **엔진 우선 원칙 — verticalAlign은 엔진 좌표 기반**: 라인의 수직 정렬은 브라우저 flexbox에 위임하지 않는다. 엔진이 각 라인의 절대 y 좌표(`alignOffsetMm + lineIndex × lineHeight`)를 산출하고, `genLineStyle()`이 `position: absolute` + `top`으로 DOM에 전달한다. `buildParagraphPrintPostData`, `getCharRect`, `getOffsetFromPoint` 모두 동일한 `_computeAlignOffsetMm()` 헬퍼를 사용한다.
 
 ### 11.2 `genLineStyle(columnIndex?, lineIndex?)`
 
@@ -970,7 +970,7 @@ flexbox 정렬에 사용되고 inner의 `scale`이 glyph 축소를 담당한다.
 - 외부 span의 `width`는 `_charWidthMm(char, inlineStyle)`으로 측정한 원본 폭에 장평을 곱해 정확히 고정한다. 측정값과 DOM 렌더링이 결정론적으로 일치하며, 마지막 글자가 틀을 넘어가는 현상을 방지한다.
 - 내부 span의 `scale`은 glyph 모양을 수평으로 `wr × 0.88`배 축소한다. 시각적 장평 효과. `wr`은 런 `widthRatio` 오버라이드가 있으면 per-run 값이다.
 - 공백은 `fontSize × spaceRatio`로 고정한다 (폰트 메트릭 무시, per-run spaceRatio 오버라이드 반영).
-- 문자별 LRU 캐시(`_charOuterStyleCache`, 키 `${char}|${widthRatio}|${letterSpacing}|${spaceRatio}|${fontSize}|${lineMaxFontSize}|${fontName}` — per-run 오버라이드 값 기준, 용량 5000)로 재계산을 생략한다. 이전에는 `Map` + `size > 5000 → clear()` 전체 삭제 정책을 사용했으나, LRU eviction으로 변경하여 대형 문서에서 성능 급감(cliff)을 방지한다. 자세한 내용은 `docs/PERFORMANCE.md` 참조.
+- 문자별 LRU 캐시(`_charOuterStyleCache`, 키 `${char}|${widthRatio}|${letterSpacing}|${spaceRatio}|${fontSize}|${lineMaxFontSize}|${fontName}` — per-run 오버라이드 값 기준, 용량 5000)로 재계산을 생략한다. LRU eviction 정책을 사용한다 — 용량 초과 시 전체 clear()가 아니라 최소 사용 항목부터 제거되어 대형 문서에서 성능 급감(cliff)이 발생하지 않는다. 자세한 내용은 `docs/PERFORMANCE.md` 참조.
 
 ---
 
@@ -1712,7 +1712,7 @@ flowchart TD
    - 위 줄의 마지막 글자를 아래 줄 앞으로 이동
    - 단, 위 줄 마지막 글자 자체가 행말 금지면 **이동하지 않음** (두 금칙 충돌 시 안전 쪽 택함)
    - 단, 위 줄 마지막 파트에 글자가 2개 이상 있어야 함 (1개면 이동 후 빈 줄 방지)
-   - **폭 게이트** (배치 단계 追い出し 통합 후 잔여 위반 폴백): 아래 줄 첫 글자를 위 줄에 합쳤을 때 파트 폭을 초과하면 합치지 않는다. 대신 위 줄의 마지막 글자를 아래 줄로 내보내 금칙 글자와 함께 배치한다(후술 追い出し). 위 줄 파트에 잔여 1자뿐이면 내보낼 수 없으므로 기존 pull-up(넘침 허용)으로 폴백한다. **게이트 폭 공식은 배치 패스와 동일하다**: `_partContentWidthMm`/`nextCharWidth`는 `_charConsumedWidthMm`(raw 폭 × per-run widthRatio + per-run letterSpacing, 탭 0 — charLoop 소비 폭 공식의 헬퍼)로 누산한다. raw 폭만 누산하면 기본 자간(-0.1em)에서 게이트가 과소평가되어(들어맞는 pull-up 누락) 장평 확대 시 파트 폭 초과가 됐었다 (2026-09 정합화).
+   - **폭 게이트** (배치 단계 追い出し 통합 후 잔여 위반 폴백): 아래 줄 첫 글자를 위 줄에 합쳤을 때 파트 폭을 초과하면 합치지 않는다. 대신 위 줄의 마지막 글자를 아래 줄로 내보내 금칙 글자와 함께 배치한다(후술 追い出し). 위 줄 파트에 잔여 1자뿐이면 내보낼 수 없으므로 기존 pull-up(넘침 허용)으로 폴백한다. **게이트 폭 공식은 배치 패스와 동일하다**: `_partContentWidthMm`/`nextCharWidth`는 `_charConsumedWidthMm`(raw 폭 × per-run widthRatio + per-run letterSpacing, 탭 0 — charLoop 소비 폭 공식의 헬퍼)로 누산한다. raw 폭만 누산하면 기본 자간(-0.1em)에서 게이트가 과소평가되어(들어맞는 pull-up 누락) 장평 확대 시 파트 폭 초과가 된다 — 소비 폭 공식과 동일 누산이 필수다.
 
 2. **행말 금지 위반** (위 줄의 마지막 글자가 행말 금지):
    - 아래 줄의 첫 글자를 위 줄 뒤로 이동
@@ -1725,7 +1725,7 @@ flowchart TD
 
 4. **단일 패스**: 한 번의 순회로 처리. 이동으로 인해 새로 발생하는 위반은 추가 패스 없이 허용한다. 시각적으로 1글자 어긋남이 전체 깨짐보다 낫기 때문이다.
 
-### 22.2.1 배치 단계 行頭금칙 追い出し (2026-09 개정)
+### 22.2.1 배치 단계 行頭금칙 追い出し
 
 행두 금지 위반의 **1차 해소는 배치 단계에서 이루어진다** — `_layoutColumnsPass`가 새 라인을 생성할 때 적재할 글자가 행두 금지 부호이면, 직전 라인의 마지막 글자들을 그 글자와 함께 새 라인 앞으로 내보낸다 (전통 追い出し/おいだし).
 
@@ -2225,8 +2225,7 @@ flush 중 파생 relayout이 유실될 수 있는 경로는 없다 — (a) 파�
 - **테이블 셀 프레임**: `findEngineById`가 셀 내부도 순회하므로 배치는
   동작하고, **행 삭제(라벨 시프트) 후 체인·identity 유지는
   `verify-threading.mjs` [18]이 검증한다** (prevCellBoxEnginesById 재사용).
-- **금칙 경계**: ~~프레임 경계의 금칙/걸침 교정은 미처리~~ → **해소**:
-  `ThreadEngine._boundaryCorrection`이 프레임 경계에 라인 경계와 동일한
+- **금칙 경계**: `ThreadEngine._boundaryCorrection`이 프레임 경계에 라인 경계와 동일한
   追い出し 시맨틱을 적용한다 (`ParagraphEngine.shiftVisibleTail`).
   검증: `verify-threading.mjs` [17]. 경계 걸침(행말 닫기 부호 반각 돌출)은
   여전히 미구현 — 프레임 경계는 컬럼 경계와 달리 컬럼 밖이 프레임 밖이라

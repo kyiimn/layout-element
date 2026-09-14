@@ -403,7 +403,7 @@ focus:  { row: currentCell.row, col: maxCol }
 
 ### 5.4 colspan/rowspan과 리사이즈
 
-colspan/rowspan이 있는 행/열도 리사이즈 가능하다. 이전에는 colspan된 영역의 경계가 disabled 처리되었으나, 이는 사용자가 리사이즈할 수 없는 문제를 유발하여 제거되었다. colspan된 셀의 열 너비를 변경하면 `normalizeWidths`가 전체 합을 유지하므로 정상 동작한다.
+colspan/rowspan이 있는 행/열도 리사이즈 가능하다. colspan된 셀의 열 너비를 변경하면 `normalizeWidths`가 전체 합을 유지하므로 정상 동작한다.
 
 ### 5.5 text selection 방지
 
@@ -441,7 +441,7 @@ Tab/Shift+Tab은 `EditManager.navigateByTab(shiftKey)`가 먼저 처리한다. `
 - **Shift+Tab**: 첫 셀에서 Shift+Tab을 누르면 표 이전 영역(표 밖)으로 포커스를 이동한다.
 - 표 밖으로 빠져나갈 때는 브라우저 기본 포커스 이동 흐름을 따른다.
 
-`TableKeyboardController.handleTab(shiftKey)` 메서드는 `navigateByTab`이 직접 호출하므로 유지된다. `handleKeyDown` 내부의 Tab 분기는 window capture에서 Tab이 선점되어 도달 불가능하므로 제거되었다.
+`TableKeyboardController.handleTab(shiftKey)` 메서드는 `navigateByTab`이 직접 호출하므로 유지된다. `handleKeyDown` 내부에 Tab 분기를 두지 않는다 — window capture에서 Tab이 선점되어 도달 불가능하기 때문이다.
 
 ### 6.2 셀 블록 활성 시 동작 (모든 모드)
 
@@ -940,7 +940,7 @@ document 내 여러 표가 있을 때:
 
 ### 12.7 printPostData
 
-DOM 요소의 `printPostData` getter는 제거되었다. `printPostData`는 엔진 전용 API로, `PageEngine.printPostData` → `BoxEngine.printPostData` → `TableEngine.printPostData` 경로로 엔진 트리에서 호출된다. `TableBorderStore.toSegments()`가 생성한 보더 선분의 좌표/크기, 대각선 정보, 배경색 정보를 mm 단위로 후처리(post-processing)용으로 수집한다.
+`printPostData`는 엔진 전용 API로, `PageEngine.printPostData` → `BoxEngine.printPostData` → `TableEngine.printPostData` 경로로 엔진 트리에서 호출된다 — DOM에서 호출하지 않는다. `TableBorderStore.toSegments()`가 생성한 보더 선분의 좌표/크기, 대각선 정보, 배경색 정보를 mm 단위로 후처리(post-processing)용으로 수집한다.
 
 ### 12.8 F5 브라우저 새로고침 충돌
 
