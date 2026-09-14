@@ -67,6 +67,7 @@
 - [8. 캐시 용량 튜닝 가이드](#8-캐시-용량-튜닝-가이드)
 - [9. 최적화되지 않은 영역](#9-최적화되지-않은-영역)
 - [10. 향후 최적화 후보](#10-향후-최적화-후보)
+- [11. 문서 스케일 대응 — 가상화·프로그레시브·페이지 모델](#11-문서-스케일-대응--가상화프로그레시브페이지-모델)
 
 ---
 
@@ -933,8 +934,8 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | 한국어 정적 폭 테이블 | 11,172 한글 음절 균일 폭(970/1000 em) 룩업 테이블 | 콜드 스타트 시 opentype.js 파싱 생략 | 중간 |
 | ~~Skeleton 캐시~~ | ~~Univer 패턴 — 레이아웃 결과 캐시~~ | ~~증분 리플로우~~ | ~~구현됨 (§3.12)~~ |
 | `Promise.all` 병렬 렌더 | `LayoutPageElement.render()` 순차 await (`page.element.ts:506`) → 병렬 | 이미지 로드 블로킹 해소 | 낮음 |
-| 가상화 | ~~뷰포트 밖 컬럼/라인 DOM 지연 생성~~ → **구현됨**: `LayoutPageElement.parkPage()`/`unparkPage()`/`parkedPageIds` + `PageMountManager`(`src/utils/page-mount-manager.ts`). 최상위 박스(페이지) 단위 IntersectionObserver 인덱스 윈도우(±N) 마운트, 플레이스홀더 footprint 유지. 분리 페이지는 엔진 트리에 유지. G1(data 세터 부활)은 보관소 스킵으로, G2(재마운트 커서)는 문단 `connectedCallback` 예약 렌더로, G3(detach 잔류 선택·이미지 포커스)은 `_unregisterLayoutSubtree`로 해소. 상세 설계·감사 기록은 `docs/VIRTUALIZATION.md` 참조 | 다중 페이지 DOM 크기 감소 | 구현됨 |
-| 시분할 프로그레시브 표시 패스 | `progressive` 프로퍼티 (document) — 초기 로드·풀 리플로우의 표시 패스(`page.render()`)를 페이지 단위 청크로 펌프 (8ms 예산 + setTimeout(0) 양보). 엔진 구축은 동기 유지 — `layout()` 반환 시 엔진·스레드·스냅샷 완결. `flushProgressiveLayout()` 편집 진입 관문. 상세는 `docs/VIRTUALIZATION.md` § 8 참조 | 풀렌더 249ms/300p 롱태스크 제거 — 청크당 ~9페이지 | 구현됨 |
+| 가상화 | ~~뷰포트 밖 컬럼/라인 DOM 지연 생성~~ → **구현됨**: `LayoutPageElement.parkPage()`/`unparkPage()`/`parkedPageIds` + `PageMountManager`(`src/utils/page-mount-manager.ts`). 최상위 박스(페이지) 단위 IntersectionObserver 인덱스 윈도우(±N) 마운트, 플레이스홀더 footprint 유지. 분리 페이지는 엔진 트리에 유지. G1(data 세터 부활)은 보관소 스킵으로, G2(재마운트 커서)는 문단 `connectedCallback` 예약 렌더로, G3(detach 잔류 선택·이미지 포커스)은 `_unregisterLayoutSubtree`로 해소. 상세는 § 11.2 참조 | 다중 페이지 DOM 크기 감소 | 구현됨 |
+| 시분할 프로그레시브 표시 패스 | `progressive` 프로퍼티 (document) — 초기 로드·풀 리플로우의 표시 패스(`page.render()`)를 페이지 단위 청크로 펌프 (8ms 예산 + setTimeout(0) 양보). 엔진 구축은 동기 유지 — `layout()` 반환 시 엔진·스레드·스냅샷 완결. `flushProgressiveLayout()` 편집 진입 관문. 상세는 § 11.4 참조 | 풀렌더 249ms/300p 롱태스크 제거 — 청크당 ~9페이지 | 구현됨 |
 | `_getAllColumns()` 캐싱 | `EditCoordinateMapper`에서 컬럼 목록 캐싱 | `querySelectorAll` 호출 감소 | 낮음 |
 | ~~키 입력 O(N) 패스 제거~~ | ~~`_getPlainText()`/`postRender`가 캐시 getter 사용 + `mapper.rebuild()` 증분화~~ | ~~타이핑 O(N) inlineToPlain 제거~~ | ~~구현됨: Phase 1(캐시 getter) + Phase 2(델타 스플라이스 + `rebuildMappingsOnly()`)~~ |
 | ~~부분 증분 `layoutText`~~ | ~~캐럿 이전 라인 재래핑 불변성을 이용한 prefix 라인 캐시 (엔진 단일 소스 원칙 내)~~ | ~~연속 타이핑 중 전체 재래핑 제거~~ | ~~구현됨 (§3.14 — 컬럼 단위 prefix 캐시, `verticalAlign: top` 한정)~~ |
@@ -942,3 +943,219 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | ~~`_layoutColumnsPass()` `flatChars` 제거~~ | ~~`flatMap`+`split("")` 중간 배열 제거, `(runIdx, charIdx)` 이중 인덱스 직접 순회~~ | ~~배치 시 객체 할당 0, 속도 40~60% 개선~~ | ~~구현됨~~ |
 | ~~Skeleton 캐시 키 분리~~ | ~~`fontWeight`/`color` 해시 제외 + `_refreshInlineStylesOnly` 경량 패스~~ | ~~굵게/색상 주입 시 재래핑 생략~~ | ~~구현됨~~ |
 | ~~`_parseContents()` 결과 캐싱~~ | ~~`_parsedContentsCache`: `textContent` 참조 동일성 기반~~ | ~~캐시 미스 시 편집 생략~~ | ~~구현됨~~ |
+| Web Worker 레이아웃 | **재시도 금지** — 과거 수차례 시도 후 전부 철거됨. 구조적 원인: 동기 계약(`renderText`의 즉시 `columnContents` 읽기, `ensureCommitted`), DOM-fed 증분 입력(참조 전달 불가 → structured clone 비용 > layout 비용 + 캐시 콜드), 엔진 트리 이중화(단일 소스 원칙 정면충돌). Worker 유효 틈은 이미지 디코드·printPostData 직렬화뿐 (§ 11.1) | — | 폐기 (§ 11.1) |
+| rgbaData 다운사이징 | 오버랩 판정 진실은 `opaqueRowBitmap`이므로 원본 rgbaData는 판정 완료 후 해제하고 URL 재주입 시 재추출하는 LRU(활성 페이지 기준 10~20장) 도입. "DOM 로드 실패 시 엔진 픽셀 소각 금지" 원칙 유지, 보관 정책만 페이지 스코프화 | 이미지 수 × 상주 픽셀 메모리 감소 | 미구현 |
+| 문서 스케일 스케줄러 | 문단별 `queueMicrotask` 배치를 문서 단위 우선순위 큐로 통합 (뷰포트 내 편집 > 뷰포트 내 갱신 > 뷰포트 밖 > 프리페치 프리레이아웃) | 전역 순회 우선순위화 | 미구현 |
+| 히스토리/상태 스코프화 | undo/redo를 풀 스냅샷 대신 커맨드 패치(run-map 델타 스플라이스 기반) 단위로. EditManager 편집 상태를 활성 페이지로 한정 | 스냅샷 메모리 스파이크 제거 | 미구현 |
+| 보관 트리 eviction | park된 페이지의 분리 DOM을 LRU로 해제 (현행: 분리+보유 — `performance.memory`/DOM counters가 감소하지 않음, § 11.5 방법론 주의) | 프로세스 RSS급 메모리 해제 | 미구현 |
+
+---
+
+## 11. 문서 스케일 대응 — 가상화·프로그레시브·페이지 모델
+
+수백 페이지 문서 처리를 위한 문서 스케일 축(DOM 노드 총량, 전역 O(N) 경로, 메모리 상주 픽셀) 대응.
+단일 페이지 전제(페이지 개념 없는 단일 캔버스 모델) 위의 문단 단위 캐싱·diff 최적화(§1~§6)와 별개 축이다.
+
+### 11.1 진단 — 문서 스케일 문제와 Web Worker 폐기 근거
+
+#### 구조적 문제
+
+| # | 문제 | 근거 |
+|---|---|---|
+| 1.1 | 페이지 추상화 부재 — 페이지 경계·흐름·"현재 페이지"가 데이터 모델에 없음 (→ 11.3에서 `DocumentData.pages`로 해소) | 구 `PageData` = width/height 1개 |
+| 1.2 | 전역 O(N) 경로 — `PageEngine._buildTree()`가 `layout()`마다 전 트리 순회, 자식마다 `findBoxEngineById` 재귀 선형 검색 → 최상위 박스 N개에 O(N²) 성분 | `page-engine.ts` |
+| 1.3 | `_refreshParagraphOverlays` 무조건 전체 갱신 — 한 페이지만 바뀌어도 수백 페이지 문단 전체 `updateOverlayContext` + 해시 재계산 | `page-engine.ts` |
+| 1.4 | 풀 스냅샷 라운드트립 — undo/redo·외부 주입이 `data` setter 전체 reconcile 경로 | AGENTS.md "data setter는 풀 복원용" |
+| 1.5 | 스레딩 체인 순차 feed-forward — 1페이지 타이핑 → 체인 후속 페이지 전부 재배치 (`relayoutThreads(sourceFrameIds)`로 부분 완화) | `page-engine.ts` |
+| 1.6 | EditManager 전역 단일 — 포커스/커서/모드가 문서당 1세트 | AGENTS.md Managers |
+
+#### 성능 문제
+
+| # | 문제 | 규모 환산 |
+|---|---|---|
+| 2.1 | 메인 스레드 글자 단위 래핑 — 풀 리플로우 시 전체 문자 수 비례 점유 | A4 300p × 7,500자 ≈ 225만 자 → 수십 초 블로킹 |
+| 2.2 | 증분 캐시가 문단 단위에서 끝남 — 페이지/문서 스케일 증분 없음 | §3.12, §3.14 |
+| 2.3 | 캐시가 엔진 인스턴스별 — `_charWidthCache`(LRU 5,000)가 `ParagraphEngine`당 존재, 동일 폰트 메트릭 문단마다 중복 계산·보관 | `paragraph-engine.ts` |
+| 2.4 | rgbaData 문서 수명 유지 — A4 300dpi 1장 ≈ 33MB → 이미지 300장이면 ~10GB급 잠재 메모리 | §5, §10 |
+| 2.5 | 렌더 순차 await — 이미지 로드 순차 await로 한 장 지연이 전체 렌더 지연 | §10 후보 |
+| 2.6 | printPostData 전체 직렬화 — 내보내기 시 메모리 스파이크 + `ensureCommitted`까지 전체 커밋 요구 | AGENTS.md 엔진 전용 API |
+
+#### 렌더링 문제
+
+| # | 문제 | 규모 환산 |
+|---|---|---|
+| 3.1 | 글자당 span DOM — 최대 병목 | 225만 글자 = 225만 span |
+| 3.2 | 가상화 부재 — 뷰포트 밖 페이지까지 전부 DOM 생성 | § 11.2에서 해소 |
+| 3.3 | Shadow DOM 수천 개 — 컬럼마다 shadow root + 개별 `<style>` sheet (CSSOM invalidation 방어 코드 존재 자체가 방증) | `column.element.ts` |
+| 3.4 | 좌표 쿼리 강제 리플로우 — span마다 `getBoundingClientRect()`, 대형 선택·스크롤 시 레이아웃 스래싱 | §9 명시 |
+| 3.5 | 문서 단위 렌더 위상 — z-index 정렬 + 재귀 + 문단마다 `render-complete` | box/paragraph render 재귀 |
+
+#### Web Worker 폐기 (역사적 사실 — 재시도 금지)
+
+Web Worker 이관은 과거 수차례 시도 후 모두 철거되었다 (`src/`에 Worker 관련 심볼 0건).
+실패가 필연이었던 구조적 원인:
+
+1. **동기 계약** — `_layoutStructure() → engine.layout() → render() → renderText()` 전부 동기 체인.
+   `TextEditCoordinateMapper`와 커서/선택 배치는 렌더 완료 직후 동기 rect를 요구하고,
+   `DirtyPendingError` 가드(`ensureCommitted()`)의 존재 자체가 "읽는 시점엔 엔진이 커밋돼 있다"는
+   동기 전제다. Worker로 가는 순간 `layoutText()`가 Promise가 되고 모든 소비자가 비동기로 전염된다.
+   특히 IME 조합은 같은 프레임 시각 피드백이 없으면 글자가 깜빡인다.
+2. **입력 측면** — 엔진 트리는 DOM에서 점진적으로 공급된다 (`items.map(e => e._rawData())`,
+   ID-keyed reconcile, `_syncEngineIdsToDom`, `prevCellBoxEnginesById` 스태시,
+   `updateOverlayContext`의 엔진 인스턴스 참조 Map). Worker는 참조를 받을 수 없으므로
+   변경마다 전체 structured clone 필요 → **clone 비용 > layout 비용**, Worker 쪽 엔진은
+   매번 캐시 콜드(`_layoutCache`/`_prefixCache`/`_charWidthCache` 전부 소멸).
+3. **상태 이중화** — Worker용 엔진 트리를 유지하면 엔진 트리가 두 개가 되어
+   "엔진 트리가 단일 소스"(RULES.md §3)가 깨진다.
+
+Worker가 여전히 유효한 좁은 틈 (동기 계약 무관, 입출력 자기완결): **이미지 디코드 +
+rgbaData/opaqueRowBitmap 추출** (입력 URL 바이트 → 출력 다운샘플 비트맵,
+`_feedRgbaToEngine` 비동기 흐름에 자연 결합), **printPostData 직렬화(내보내기)** (풀 문서
+일괄 변환 — 배치 모델이라 Worker 모델과 일치). **레이아웃 자체는 넣지 않는다.**
+
+### 11.2 DOM 가상화 — park/unpark + `PageMountManager` (구현됨)
+
+엔진 트리는 **전체 문서 유지**(엔진은 DOM-free — 이 설계의 수혜자가 가상화),
+**DOM만 뷰포트 근처 페이지 ±1~2개** 마운트. 225만 span → 화면 페이지 분(≈1.5만),
+노드 수 3~4자릿수 절감. API·계약 상세는 AGENTS.md "DOM Virtualization — Parked Pages" 절 참조.
+
+#### 연결/해제 콜백 감사 결과 (설계 근거)
+
+기존 콜백이 겨냥한 것은 data 세터 reconcile 중 appendChild 재정렬의 순간적(ms급)
+disconnect다. 가상화의 장기(분~시간급) detach에는 공백 G1~G4가 있었고 P1~P4 보강으로 해소됐다:
+
+- **G1(치명)** — `data` 세터의 ID-keyed reconcile이 DOM에 있는 자식만 수집 →
+  가상화 detach 상태에서 풀 복원이 페이지 전부 재마운트 (가상화 무효화).
+  → **P2**: `_parkedPages` 보관소 + `data` 세터 스킵 + `_collectChildrenData()` 합류 +
+  `_syncEngineIdsToDom` id 기반 매칭.
+- **G2(중간)** — paragraph `connectedCallback`이 `layout()`만 호출, 재부착 직후 render 미호출 →
+  복원된 커서/선택 좌표가 다음 렌더까지 부정확. → **P1**: `_savedCursorOffset` 복원 시
+  `scheduleRender()` 호출 (`_renderScheduled` 가드로 병합).
+- **G3(중간)** — detach 시 이미지 편집 모드·PlaceGun·Insert 타깃 참조가 자동 해제되지 않음.
+  → **P3**: `EditManager._unregisterLayoutSubtree(root)` — 서브트리 잔류 레이아웃 선택 배치 정리
+  (1회 dispatch) + 포커스 이미지 blur + imageEditMode 종료. PlaceGun/Insert는 라이브 hit-test라
+  호스트 계약으로 남김.
+- **G4(경미, 미대응)** — 재삽입 박스 z-순서. `render()`가 zIndex 정렬을 소유하므로 문서 렌더 1회 후 해소.
+- **P4**: `PageMountManager`(`src/utils/page-mount-manager.ts`) — IntersectionObserver +
+  인덱스 윈도우(가시 ±N) 마운트. 마운트: `unparkPage()` + `void box.render()`.
+  언마운트: 분리 전 footprint를 플레이스홀더에 지정. `pin()`으로 편집 중 페이지 고정
+  (IME 조합 상태 보호 — 호스트가 focusChange에서 pin/unpin).
+
+가상화에 유리한 기존 설계 (그대로 수혜): 엔진 무 splice 원칙(disconnect 시 엔진 트리·
+`_layoutCache`·`columnContents`·rgbaData 생존 → 재마운트 비용 ≈ 0 — Skeleton 해시 히트,
+renderText 전 span 스킵), 커서/선택 save-restore, 엔진 완결성(`findEngineById`, 스레딩
+writeback, `printPostData`/`ensureCommitted`가 언마운트 페이지 포함 전체 문서 동작),
+mm 좌표계(ppm/줌 변화가 언마운트 페이지에 무영향), `items` = 마운트된 자식만.
+
+#### transform: scale 호환성 (검증됨 — 상관없다)
+
+이 코드베이스는 `transform: scale`을 이미 1급 시민으로 다룬다 (호스트 앱 layout-ui가
+프로덕션에서 `transform: scale` + `setScale()` 조합 운영 중). 가상화와 스케일은 서로 다른
+축이라 충돌하지 않는다:
+
+| 계층 | 증거 |
+|---|---|
+| 엔진 | 모든 계산 mm-only — `transform: scale`은 엔진 수학에 전혀 들어가지 않음 |
+| ppm 측정 | `_measurePpm()`이 측정 div를 `document.body`에 직접 부착(호스트 scaled 컨테이너 밖) — 호스트 transform이 ppm을 오염시키지 않음 |
+| EditManager | `_scale` 필드 + `setScale()`/`resetScale()` 전용 API. `screenPxToMm() = px / (ppm × scale)` |
+| 편집 좌표 | `TextEditCoordinateMapper`가 모든 rect 변환에서 `manager.scale`로 나눔 |
+| 드래그/삽입 | PlaceGun·Insert가 `screenPpm = ppm × scale`, reparent 델타도 scale 보정 |
+
+책임 분리: `transform: scale(s)`는 브라우저 컴포지트 단계만 변경(layout/reflow 유발 안 함 —
+엔진·캐시·columnContents 전부 무영향), 가상화는 DOM 마운트/언마운트만 변경(엔진 트리는
+mm-only라 detach 페이지도 계산 유지). 주의점:
+
+1. 마운트 판정은 반드시 `getBoundingClientRect` 기반 (BCR은 transform 반영 좌표 —
+   `scrollTop`/`offsetTop` 역산 방식 금지).
+2. IO `rootMargin`은 스케일 인지 px로 계산 (`mm × ppm × scale`; root 좌표계는 scaled 서브트리 밖).
+3. **ppm과 scale은 다른 것** — 호스트 `transform: scale` → `setScale()`만 (ppm 불변).
+   브라우저 줌/환경 변화 → `resetPpm()`. 이 구분이 흐트러지면 편집 좌표가 이중 보정됨.
+4. 축소에서 동시 가시 페이지 수 증가는 가상화의 본질적 한계 — 전체 조감용은 썸네일 렌더
+   경로(엔진 `printPostData`/축소 canvas)로 분리.
+
+### 11.3 페이지 모델 (구현됨 — 2026-09-14)
+
+`DocumentData.pages` 1급화 + `DocumentEngine`(스레드 문서 소유·페이지 스코프 배치) +
+`<x-layout-document>` (EditManager·park·스레드 소유) + 레거시 호환(`normalizeDocumentData`).
+스레드 정의·EditManager·보관 단위가 문서로 이동했다. 검증: `verify-page-model.mjs` 13항목 ALL PASS.
+
+### 11.4 시분할 프로그레시브 레이아웃 (구현됨 — 2026-09-15)
+
+**원칙**: 엔진 구축은 동기 유지, **표시 패스만 시분할**.
+
+- `document.layout()`이 반환되는 시점에 엔진 트리·스레드 배치·스냅샷 읽기
+  (`extractData`/`printPostData`)가 완결된다 — 단일 소스 불변식·dirty 계약에
+  새 가드 불필요. Worker 폐기 사유(§ 11.1)의 동기 계약을 청크 단위로 지킨다.
+- 청크 내 동기 계약은 기존 `render()`와 동일 — `renderText`가
+  `columnContents`를 즉시 읽고, `flushRender`(Enter/compositionend)는 무변경.
+- **스케줄링**: `setTimeout(0)` + 인라인 8ms 예산 (`performance.now()`).
+  `queueMicrotask`는 렌더링으로 양보하지 않아 실격 (세션이 하나의 롱태스크가
+  된다), `requestIdleCallback`은 배경 탭에서 starve. 300p 기준 페이지당
+  렌더 ~0.83ms → 청크당 ~9페이지, 31청크 ≈ 400ms 벽시계.
+- **공개 API**: `progressive` 프로퍼티 (document, `true` → 표시 패스를 페이지 청크로
+  펌프, `false`/`undefined`는 기존 동기 경로 byte-identical), `flushProgressiveLayout()`
+  (대기열 동기 소진 — 편집 진입 관문, `EditManager._requestFocus`/`focusImage` 상단
+  호출로 전 경로 방어), `progressiveIdleYield(delayMs)`
+  (`src/utils/progressive-layout.ts`, 테스트 훅 `__LAYOUT_ELEMENT_PROGRESSIVE_IDLE__`).
+
+동작 구조:
+
+```
+doc.data = bigData (progressive=true)
+  ├─ reconcile 루프: 각 page.data setter → 엔진 구축은 동기 (page.layout() 유지),
+  │   표시 패스(page.render())만 _deferDisplayPass로 억제
+  ├─ this.layout(): 구조 패스 + adoptPageEngines + 스레드 패스 + frame 동기 (동기)
+  ├─ 최종 render() → _enqueueDisplayPass() → _pumpDisplayPass()
+  │   └─ 시간 예산 내 동기 렌더(void el.render()) → 예산 초과 시 setTimeout(0) 양보 → 반복
+  └─ 펌프 중 park(언마운트)된 페이지는 isConnected skip, IO 재마운트는
+     connectedCallback이 자체 표시 패스 수행 (대기열 중복 항목은 건너뛴다)
+```
+
+- 스레드 확정 시점: `document.layout()` 내 페이지 엔진 편입 → `engine.layout()`(스레드) →
+  `_syncThreadFramesToDom`이 기존과 동일하게 동작하므로 스레드 프레임 문단은
+  **스레드 배치 후** 표시된다 (동기 경로와 동일한 표시 출력).
+- 검증: `verify-progressive-layout.mjs` 21항목 ALL PASS — (a) OFF 기준선
+  byte-identical(span 816), (b) ON 세션 완결(엔진 완결 + 체인 + 패리티),
+  (c) 재주입 3페이지 표시, (d) park/unpark 재마운트 표시 패스 + story 보존,
+  (e) textStyle 교체 DOM 수렴, (f) 타이핑 seam 정합, (g) flush 관문
+  (커서 좌표계 보장).
+
+### 11.5 측정 & 검증 — 문서 스케일 실측 기록
+
+`scripts/README.md` 워크플로 (기준선 측정 → 수정 → 검증 → 재측정) 준수.
+가상화 시나리오 측정은 `benchmark-browser.mjs` 시나리오 8
+(`scripts/README.md` §시나리오 8 참조), 회귀는 `verify-virtualization.mjs`(47항목)·
+`verify-page-model.mjs`(13항목)·`verify-progressive-layout.mjs`(21항목).
+
+#### 스레드 체인 타이핑 비용 귀속 (실측)
+
+30프레임 단일 체인 데모에서 키스트로크당 비용을 위치별·윈도우별로 실측했다
+(헤드리스, `longtask` 합산):
+
+| 조건 | 롱태스크 합 | 엔진 전체 재계산 |
+|---|---|---|
+| head 타이핑, window=1 (3p 마운트) | ~468ms | 30프레임 중 유의미 전체 재계산 다수 |
+| tail 타이핑, window=1 | ~472ms | 1프레임만 전체 재계산 (슬라이스-로컬 해시로 나머지 히트) |
+| head 타이핑, window=0 (2p 마운트) | ~308ms | 동일 체인 (30프레임) |
+
+결론:
+
+- **위치 무관성이 정상이다.** 엔진은 끝쪽이 6배 저렴하지만(50ms→8ms), 전체의
+  90%를 차지하는 마운트 윈도우 DOM 비용(span 쓰기 + 강제 리플로우 + 페인트
+  커밋)이 위치와 무관하므로 체감이 같다.
+- **윈도우 크기가 직접 비례한다.** 마운트 3→2페이지에 490ms→308ms (페이지당
+  약 160ms, 헤드리스). 타이핑 체감의 즉시 레버는 윈도우 축소와 체인 분할이다.
+- 헤드리스(SwiftShader) 수치는 실기보다 5~10배 부풀려져 있다. headed Chromium +
+  RTX 5070 Ti 실측으로 키당 귀속이 닫혔다 (엔진 layoutText 2.7ms·4% 대 DOM측 90% 이상).
+- 시도 후 revert한 것: overflow 카운트 변화 시 span 전체 재생성 제거 —
+  동일 페이지 A/B(강제 recreate vs diff)에서 484ms vs 458ms로 유의미한 차이
+  없음이 실측되어 원복했다 (근거 없는 최적화 금지 원칙).
+
+#### 메모리 방법론 주의
+
+`performance.memory`는 JS 힙만 보고 Blink 측 `Memory.getDOMCounters`도 분리
+보관 트리를 JS 참조로 유지하는 한 감소하지 않는다 (실측: 풀 394,522 →
+윈도우 394,819, +297은 플레이스홀더). 가상화의 메모리 story는 "파괴"가
+아니라 "분리+보유"다 — 즉각 재마운트(~7ms)가 이 보유의 대가이자 효과다.
+프로세스 RSS급 해제를 원하면 보관 트리 eviction(LRU)이 필요하며 미구현이다
+(§10 후보 표 참조).

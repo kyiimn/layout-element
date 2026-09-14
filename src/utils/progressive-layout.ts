@@ -7,7 +7,7 @@
  * 시분할은 표시(pass of `page.render()`)만 담당하므로 각 청크의 동기 계약
  * (`renderText`의 즉시 `columnContents` 읽기, `flushRender`)은 기존과 동일하다.
  *
- * 스케줄링 선택 근거 (VIRTUALIZATION §3 — Web Worker 실패 역사 + §7.1 실측):
+ * 스케줄링 선택 근거 (PERFORMANCE.md § 11.1 — Web Worker 폐기 근거 + § 11.5 실측):
  * - `queueMicrotask`: 렌더링으로 양보하지 않으므로 실격 — 세션이 하나의 롱태스크가 된다.
  * - `requestIdleCallback`: 배경 탭에서 starve (fallback 없으면 세션이 완결되지 않는다).
  * - `setTimeout(0)` + 인라인 시간 예산: 예측 가능하고 환경 무관. 300p 기준

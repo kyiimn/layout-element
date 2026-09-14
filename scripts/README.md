@@ -94,7 +94,7 @@ npx tsx scripts/benchmark-hotloop.mjs
 | 5. 정렬 변경 | `paragraphStyle.textAlign` 전환 | `render-complete` 프레임 시간 |
 | 6. 분해: focus/applyInlineStyle | 각 단계의 순수 동기 시간 | setTimeout 오염 제거 |
 | 7. 분해: 파이프라인 | runMap → textContent → layoutText → renderText | 단계별 동기 시간 + 캐시 히트 여부 |
-| 8. 대규모 가상화(300p) | 빌드·풀렌더·park·재마운트 p95·300p 타이핑·메모리 | bench 문서 교체 — 마지막 실행 (VIRTUALIZATION §7 항목 5) |
+| 8. 대규모 가상화(300p) | 빌드·풀렌더·park·재마운트 p95·300p 타이핑·메모리 | bench 문서 교체 — 마지막 실행 (PERFORMANCE § 11.5) |
 
 **실행**:
 ```bash
@@ -140,7 +140,7 @@ dev server(5175 → 5173 → 자동 스폰)를 자동 탐지한다. `examples/be
 윈도우 394,819, +297은 플레이스홀더). 가상화의 메모리 story는 "파괴"가
 아니라 "분리+보유"다 — 즉각 재마운트(~7ms)가 이 보유의 대가이자 효과다.
 프로세스 RSS급 해제를 원하면 보관 트리 eviction(LRU)이 필요하며 미구현이다
-(향후 과제 후보 — 아래 VIRTUALIZATION §7 참조).
+(향후 과제 후보 — PERFORMANCE.md § 11.5 참조).
 
 ---
 
