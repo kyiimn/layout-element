@@ -11,7 +11,9 @@
 </head>
 <body>
   <div id="ready-flag">LOADING</div>
-  <x-layout-page id="page" style="width: 400mm; height: 220mm;"></x-layout-page>
+  <x-layout-document id="doc">
+    <x-layout-page id="page" style="width: 400mm; height: 220mm;"></x-layout-page>
+  </x-layout-document>
 
   <script type="module">
     import { FontLoader, ColorRegistry } from '/src/index.ts';

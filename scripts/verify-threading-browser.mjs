@@ -115,7 +115,8 @@ const pageUtils = `
   };
   const frameOf = (page, id) => [...page.querySelectorAll('x-layout-paragraph')].find(p => p.id === id);
   const threadFrameIds = (page) => {
-    const engine = page.engine;
+    const docEl = document.querySelector('x-layout-document');
+    const engine = (docEl?.engine ?? page.engine);
     return (engine.data.threads ?? []).flatMap(t => t.paragraphIds ?? []);
   };
 `;
@@ -124,7 +125,8 @@ const r = await page.evaluate(`
   (async () => {
     ${''}${pageUtils}
     const page = document.querySelector('x-layout-page');
-    const engine = page.engine;
+    const docEl = document.querySelector('x-layout-document');
+    const engine = docEl?.engine ?? page.engine;
     const out = {};
 
   // 데모가 완전히 렌더될 때까지 대기
@@ -222,8 +224,9 @@ const r = await page.evaluate(`
   const pageDataSnapshot = JSON.parse(JSON.stringify(engine.extractData));
   pageDataSnapshot.threads = pageDataSnapshot.threads.map((t, i) =>
     i === 0 ? { ...t, content: longStory } : t);
-  page.data = pageDataSnapshot;
-  await page.render();
+  const docTarget = document.querySelector('x-layout-document') ?? page;
+  docTarget.data = pageDataSnapshot;
+  await docTarget.render();
   await new Promise(r => setTimeout(r, 200));
   const bordersOverset = [];
   for (const id of thread1Ids) {
@@ -261,17 +264,18 @@ const r = await page.evaluate(`
     if (ta2) {
       // 큐 깊이 관측: requestThreadRelayout이 스택 큐에 쌓이는 수 = 예약 중복
       let queueEvents = 0;
-      const origRequest = page.requestThreadRelayout.bind(page);
-      page.requestThreadRelayout = (id) => {
-        const pending = page._threadRelayoutSources !== null;
+      const docT = document.querySelector('x-layout-document') ?? page;
+      const origRequest = docT.requestThreadRelayout.bind(docT);
+      docT.requestThreadRelayout = (id) => {
+        const pending = docT._threadRelayoutSources !== null;
         if (pending) queueEvents++;
         origRequest(id);
       };
       let reentryBlocked = 0;
-      const origFlushDesc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(page), 'requestThreadRelayout');
+      const origFlushDesc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(docT), 'requestThreadRelayout');
       // flush 중 재진입 관측: flush 실행 중 requestThreadRelayout 호출 시도 감지
       let inFlush = false;
-      const origFlush = page._flushThreadRelayout?.bind(page);
+      const origFlush = docT._flushThreadRelayout?.bind(docT);
       // 연속 10키
       const keys = ['가', '나', '다', '라', '마', '바', '사', '아', '자', '차'];
       const tailBefore = engine.findEngineById(headId2).overflowContentFrom;
@@ -282,7 +286,7 @@ const r = await page.evaluate(`
       }
       // 마지막 키 flush 완료 대기
       await new Promise(r => setTimeout(r, 250));
-      page.requestThreadRelayout = origRequest;
+      docT.requestThreadRelayout = origRequest;
       const headPe2 = engine.findEngineById(headId2);
       const f2Pe2 = engine.findEngineById(frameIdsStress[1]);
       out.stress = {
@@ -501,8 +505,8 @@ const r = await page.evaluate(`
     const pe = engine.findEngineById(id);
     return { id, from: pe.contentFrom, visible: pe.visibleChars };
   });
-  page.data = snapshot;
-  await page.render();
+  (document.querySelector('x-layout-document') ?? page).data = snapshot;
+  await (document.querySelector('x-layout-document') ?? page).render();
   await new Promise(r => setTimeout(r, 100));
   const afterFrames = threadFrameIds(page).map(id => {
     const pe = engine.findEngineById(id);
@@ -512,7 +516,7 @@ const r = await page.evaluate(`
     id, chars: domTextOf(frameOf(page, id)).flat().join('').length,
   }));
   out.roundTrip = {
-    threadsPreserved: (page.engine.data.threads ?? []).length === 3,
+    threadsPreserved: ((document.querySelector('x-layout-document')?.engine ?? page.engine).data.threads ?? []).length === 3,
     framesEqual: JSON.stringify(beforeFrames) === JSON.stringify(afterFrames),
     beforeFrames, afterFrames, afterDomSpans,
     allSpanned: afterDomSpans.every(f => f.chars > 0),
@@ -683,7 +687,7 @@ console.log('\n[8] f2 클릭(CDP) 진입 → 실제 타이핑 — 컨트롤러 �
       await page.waitForTimeout(500);
       const typed = await page.evaluate(`(() => {
         const page = document.querySelector('x-layout-page');
-        const engine = page.engine;
+        const engine = (document.querySelector('x-layout-document')?.engine ?? page.engine);
         const em = page.editManager;
         const plainOf = (c) => typeof c === 'string' ? c : (c ?? []).map(r => typeof r === 'string' ? r : r.content).join('');
         const f2 = [...document.querySelectorAll('x-layout-paragraph')].find(p => p.id === ${JSON.stringify(r.frameIds[1])});

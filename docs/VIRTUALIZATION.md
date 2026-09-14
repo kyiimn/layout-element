@@ -357,7 +357,11 @@ transform: scale(s)  →  브라우저 컴포지트 단계만 변경 (layout/ref
    "파괴"가 아니라 "분리+보유"이며, 프로세스 RSS급 해제를 원하면 보관
    트리 eviction(LRU)이 필요하다 (미구현 — 향후 과제 후보).
    상세는 `scripts/README.md`의 시나리오 8 섹션 참조.
-6. **[② 페이지 모델]** 위 로드맵대로 — 마운트 단위·데이터 경로·스레딩 통합.
+6. **[② 페이지 모델 — 완료 (2026-09-14)]** `DocumentData.pages` 1급화 +
+ `DocumentEngine`(스레드 문서 소유·페이지 스코프 배치) + `<x-layout-document>`
+ (EditManager·park·스레드 소유) + 레거시 호환(`normalizeDocumentData`).
+ 스레드 정의·EditManager·보관 단위가 문서로 이동했고, threads·EditManager·
+ park을 문서 스코프에서 검증하는 `verify-page-model.mjs` 13항목이 ALL PASS.
 7. **[③′ 이후]** 시분할 프로그레시브 레이아웃 등 순차 적용.
 8. **[근본 원인 분석 완료]** 스레드 체인 타이핑 비용의 결론: shift 편집은
    모든 줄의 텍스트·위치를 바꾸므로 재계산·재쓰기가 필수이며, 남는 레버는

@@ -1,5 +1,5 @@
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
-import { ParagraphEngine } from "@/engine";
+import { ParagraphEngine, DocumentEngine } from "@/engine";
 import { LayoutPageElement } from "@/components/layout/page.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
@@ -20,6 +20,16 @@ import { DEFAULT_SHORTCUT_METRIC_STEPS, TEXT_INLINE_STYLE_FIELDS, type ShortcutM
 
 /** 레이아웃 편집 대상 요소 (box 및 TD) */
 export type LayoutElement = LayoutBoxElement | LayoutTableCellElement;
+
+/**
+ * flatten 순회 컨테이너 최소 계약 (items + localName).
+ *
+ * box/td/page/document 요소를 모두 수용한다. `LayoutElement` 공용체를
+ * 건드리지 않고 이 파일의 순회 함수 시그니처만 넓힌다.
+ */
+interface FlattenContainer {
+  readonly items: { readonly zIndex: number; readonly localName: string }[];
+}
 
 /**
  * 글로벌 편집 관리 이벤트 타입.
@@ -286,6 +296,29 @@ export class EditManager {
    * 대신 이 요소의 하위 트리만 순회한다.
    */
   get pageEl(): LayoutPageElement { return this._pageEl; }
+
+  /**
+   * 스레드 조정 엔진을 해석한다 (문서 엔진 우선, 독립 페이지 폴백).
+   *
+   * 루트가 문서 요소(`LayoutDocumentElement`)면 `DocumentEngine`을 반환하고,
+   * 독립 페이지(레거시 단일 페이지 구성)면 `PageEngine`을 반환한다. 두 엔진은
+   * 스레드 API(`relayoutThreads`/`ensureThreadFramesFresh`/`findEngineById`/
+   * `findEnginesByIds`/`data.threads`)가 구조적으로 동일하므로 호출부는
+   * 구조적 타입으로 소비한다.
+   *
+   * @returns 문서 또는 페이지 엔진. 연결 전이면 undefined.
+   */
+  private get _threadEngine(): DocumentEngine | undefined {
+    // 루트 자체가 문서 요소일 수 있다 (문서가 EditManager를 소유하는 경우).
+    let el: Element | null = this._pageEl;
+    while (el) {
+      if ((el as unknown as { type?: string }).type === 'document') {
+        return (el as unknown as { engine?: DocumentEngine }).engine;
+      }
+      el = el.parentElement;
+    }
+    return (this._pageEl as unknown as { threadEngine?: DocumentEngine }).threadEngine;
+  }
 
   /**
    * 주어진 문서 요소를 관리하는 편집 관리자를 생성한다.
@@ -1116,7 +1149,7 @@ export class EditManager {
     // 이뤄져 다른 프레임의 편집이 덮어써진다 (실측: IME 커밋·경계 backspace
     // 스위트에서 story 소실 재현). 신선화 시 textarea/runMap은 postRender
     // 동기화가 필요하므로 focused 문단을 flush한다.
-    const engine = this._pageEl.engine;
+    const engine = this._threadEngine;
     if (paragraph.id) {
       const refreshed = engine?.ensureThreadFramesFresh(new Set([paragraph.id]));
       if (refreshed) {
@@ -1207,7 +1240,7 @@ export class EditManager {
   private _threadFrameCoverage(
     frameId: string,
   ): { start: number; end: number } | null {
-    const engine = this._pageEl.engine;
+    const engine = this._threadEngine;
     if (!engine) return null;
     const pe = engine.findEngineById(frameId);
     if (!(pe instanceof ParagraphEngine) || !pe.isThreadFrame) return null;
@@ -1244,7 +1277,7 @@ export class EditManager {
     approachDirection: 'left' | 'right' | null = null,
   ): boolean {
     const current = this.focusedParagraph;
-    const engine = this._pageEl.engine;
+    const engine = this._threadEngine;
     if (!engine || !current) return false;
 
     const threads = engine.data.threads ?? [];
@@ -3773,7 +3806,7 @@ export class EditManager {
    * @param items - 정렬할 형제 요소 배열 (box/paragraph/image/table 혼합 가능)
    * @returns zIndex 오름차순으로 정렬된 새 배열 (원본 불변)
    */
-  private _sortSiblings<T extends { zIndex: number }>(items: T[]): T[] {
+  private _sortSiblings<T extends { zIndex: number }>(items: readonly T[]): T[] {
     return [...items].sort((a, b) => a.zIndex - b.zIndex);
   }
 
@@ -3791,7 +3824,7 @@ export class EditManager {
    * @param container - 순회할 컨테이너 (document 또는 box)
    * @param result - 수집 결과를 누적할 배열
    */
-  private _flattenBoxes(container: LayoutElement, result: LayoutElement[]): void {
+  private _flattenBoxes(container: LayoutElement | FlattenContainer, result: LayoutElement[]): void {
     const sorted = this._sortSiblings(container.items);
     for (const child of sorted) {
       if (child instanceof LayoutBoxElement) {
@@ -3803,6 +3836,8 @@ export class EditManager {
         this._flattenBoxes(child, result);
       } else if (child instanceof LayoutTableElement) {
         this._flattenTableBoxes(child, result);
+      } else if (child.localName === 'x-layout-page' || child.localName === 'x-layout-document') {
+        this._flattenBoxes(child as unknown as FlattenContainer, result);
       }
     }
   }
@@ -3819,7 +3854,7 @@ export class EditManager {
    * @param container - 순회할 컨테이너 (document 또는 box)
    * @param result - 수집 결과를 누적할 배열
    */
-  private _flattenParagraphs(container: LayoutElement, result: LayoutParagraphElement[]): void {
+  private _flattenParagraphs(container: LayoutElement | FlattenContainer, result: LayoutParagraphElement[]): void {
     const sorted = this._sortSiblings(container.items);
     for (const child of sorted) {
       if (child instanceof LayoutParagraphElement) {
@@ -3830,6 +3865,8 @@ export class EditManager {
         this._flattenParagraphs(child, result);
       } else if (child instanceof LayoutTableElement) {
         this._flattenTableParagraphs(child, result);
+      } else if (child.localName === 'x-layout-page' || child.localName === 'x-layout-document') {
+        this._flattenParagraphs(child as unknown as FlattenContainer, result);
       }
     }
   }
@@ -3843,7 +3880,7 @@ export class EditManager {
    * @param container - 순회할 컨테이너 (document 또는 box)
    * @param result - 수집 결과를 누적할 배열
    */
-  private _flattenImages(container: LayoutElement, result: LayoutImageElement[]): void {
+  private _flattenImages(container: LayoutElement | FlattenContainer, result: LayoutImageElement[]): void {
     const sorted = this._sortSiblings(container.items);
     for (const child of sorted) {
       if (child instanceof LayoutImageElement) {
@@ -3854,6 +3891,8 @@ export class EditManager {
         this._flattenImages(child, result);
       } else if (child instanceof LayoutTableElement) {
         this._flattenTableImages(child, result);
+      } else if (child.localName === 'x-layout-page' || child.localName === 'x-layout-document') {
+        this._flattenImages(child as unknown as FlattenContainer, result);
       }
     }
   }

@@ -5,9 +5,10 @@ import { LayoutParagraphElement } from "./paragraph.element";
 import { LayoutImageElement } from "./image.element";
 import { LayoutGuideColumnElement } from "./guide-column.element";
 import type { LayoutTableElement } from "./table.element";
+import type { LayoutDocumentElement } from "./document.element";
 import type { FlipLayoutOptions } from "@/engine";
 import { EditManager } from "@/edit/edit-manager";
-import { PageEngine, BoxEngine, ParagraphEngine } from "@/engine";
+import { PageEngine, BoxEngine, DocumentEngine, ParagraphEngine } from "@/engine";
 import type { FontLoaderEngine, ColorRegistryEngine, ParsedFont, GridCalculatorEngine } from "@/engine";
 import { FontLoader } from "@/resource/font-loader";
 import { ColorRegistry } from "@/resource/color-registry";
@@ -18,7 +19,7 @@ import { ColorRegistry } from "@/resource/color-registry";
  * 브라우저 환경에서 `FontLoader`가 `FontFace` 등록과 opentype.js 파싱을
  * 모두 수행하므로, 엔진 계층에 메트릭 조회만 위임한다.
  */
-class FontLoaderSingletonAdapter implements FontLoaderEngine {
+export class FontLoaderSingletonAdapter implements FontLoaderEngine {
   private _fl: FontLoader;
 
   constructor(fl: FontLoader) {
@@ -45,7 +46,7 @@ class FontLoaderSingletonAdapter implements FontLoaderEngine {
 /**
  * `ColorRegistry` 싱글톤을 `ColorRegistryEngine` 인터페이스로 래핑하는 어댑터.
  */
-class ColorRegistrySingletonAdapter implements ColorRegistryEngine {
+export class ColorRegistrySingletonAdapter implements ColorRegistryEngine {
   private _cr: ColorRegistry;
 
   constructor(cr: ColorRegistry) {
@@ -123,6 +124,7 @@ export class LayoutPageElement extends HTMLElement {
 
   private _columns: number | number[] = 1;
   private _gap: number | number[] = 0;
+  private _pageNumber?: number;
 
   private _paragraphStyle: ParagraphStyle = {};
   private _textStyle: TextStyle = {};
@@ -135,19 +137,58 @@ export class LayoutPageElement extends HTMLElement {
   private _threadRelayoutFlushing = false;
 
   /**
+   * 독립 루트용 암묵 문서 엔진. 문서 요소 아래가 아닌 페이지가 threads를
+   * 가지면 문서 스코프 조정을 위해 사용한다 (스레드 단일 소유 원칙 유지 —
+   * PageEngine이 아닌 DocumentEngine이 스레드를 소유).
+   */
+  private _threadDocEngine?: DocumentEngine;
+
+  /**
    * 이 문서 요소 전용 EditManager 인스턴스.
    *
    * constructor에서 생성되어 요소 생명주기 내내 존재한다.
    * 하위 box/paragraph 요소들은 parent 체인을 통해 이 인스턴스에 접근한다.
    */
-  private _editManager: EditManager;
+  private _editManager: EditManager | null = null;
 
   /**
-   * 이 문서 요소 전용 EditManager 인스턴스를 반환한다.
+   * 이 페이지가 소속된 문서(또는 자기 자신이 루트일 때 자기 자신)의
+   * EditManager 인스턴스를 반환한다.
+   *
+   * 문서(`<x-layout-document>`) 아래에 있으면 문서의 인스턴스를 위임받고,
+   * 독립 루트(레거시 단일 페이지 구성)이면 자기 자신의 인스턴스를 소유한다.
    *
    * @returns EditManager 인스턴스.
    */
-  get editManager(): EditManager { return this._editManager; }
+  get editManager(): EditManager {
+    const docEl = this._findDocumentElement();
+    if (docEl) return docEl.editManager;
+    if (!this._editManager) {
+      this._editManager = new EditManager(this);
+    }
+    return this._editManager;
+  }
+
+  /**
+   * 부모 체인을 타고 소속 문서 요소를 찾는다.
+   *
+   * @returns 문서 요소. 문서 아래가 아니면 `null`.
+   */
+  _findDocumentElement(): LayoutDocumentElement | null {
+    // localName + 메서드 존재 여부로 판정한다 (instanceof 금지 —
+    // document.element와 순환 참조 회피. 메서드 검사는 모듈 평가 순서상
+    // page가 먼저 upgrade되어 조상이 아직 미승인 plain Element인 경우를
+    // 제외한다 — 이 경우 standalone 경로로 동작하고 문서 upgrade 후 재확정).
+    let el: Element | null = this.parentElement;
+    while (el) {
+      if (el.localName === 'x-layout-document'
+        && typeof (el as unknown as { confirmThreadChain?: unknown }).confirmThreadChain === 'function') {
+        return el as unknown as LayoutDocumentElement;
+      }
+      el = el.parentElement;
+    }
+    return null;
+  }
 
   /**
    * 이 문서 요소에 연결된 PageEngine 인스턴스를 반환한다.
@@ -190,13 +231,16 @@ export class LayoutPageElement extends HTMLElement {
 
     this._shadowRoot = this.attachShadow({ mode: "open" });
     this._visibleGuide = true;
-    this._editManager = new EditManager(this);
   }
 
   connectedCallback() {
     this._measurePpm();
-    this.addEventListener('mousedown', this._onPlaceGunMouseDown);
-    window.addEventListener('keydown', this._onWindowKeyDown, true);
+    // 문서 아래 페이지는 문서 요소가 전역 리스너를 소유한다 (중복 Tab 이동 방지).
+    // 독립 루트일 때만 자체 등록한다.
+    if (!this._findDocumentElement()) {
+      this.addEventListener('mousedown', this._onPlaceGunMouseDown);
+      window.addEventListener('keydown', this._onWindowKeyDown, true);
+    }
     this.layout();
     this.render();
   }
@@ -204,18 +248,19 @@ export class LayoutPageElement extends HTMLElement {
   disconnectedCallback() {
     this.removeEventListener('mousedown', this._onPlaceGunMouseDown);
     window.removeEventListener('keydown', this._onWindowKeyDown, true);
-    this._editManager.reset();
+    if (this._editManager) this._editManager.reset();
   }
 
   private _onWindowKeyDown = (event: KeyboardEvent): void => {
+    if (this._findDocumentElement()) return;
     const path = event.composedPath();
     const inTable = path.some((el) => el instanceof HTMLElement && el.closest('x-layout-table'));
-    const hasSelectedBoxInTd = this._editManager.selectedLayouts.some(box =>
+    const hasSelectedBoxInTd = this.editManager.selectedLayouts.some(box =>
       box instanceof HTMLElement && box.closest('x-layout-td')
     );
 
     if (event.key === 'F5') {
-      if (this._editManager.layoutEditMode && (inTable || hasSelectedBoxInTd)) {
+      if (this.editManager.layoutEditMode && (inTable || hasSelectedBoxInTd)) {
         event.preventDefault();
       }
     }
@@ -241,7 +286,7 @@ export class LayoutPageElement extends HTMLElement {
       if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
         return;
       }
-      const handled = this._editManager.navigateByTab(event.shiftKey);
+      const handled = this.editManager.navigateByTab(event.shiftKey);
       if (handled) {
         event.preventDefault();
         event.stopPropagation();
@@ -250,7 +295,7 @@ export class LayoutPageElement extends HTMLElement {
   };
 
   private _findFocusedTable(): LayoutTableElement | null {
-    const focused = this._editManager.focusedParagraph;
+    const focused = this.editManager.focusedParagraph;
     if (!focused) return null;
     const td = focused.closest('x-layout-td');
     if (!td) return null;
@@ -266,7 +311,8 @@ export class LayoutPageElement extends HTMLElement {
    * document 빈 공간 클릭 시 element 항목만 주입을 시도한다.
    */
    private _onPlaceGunMouseDown = (event: MouseEvent): void => {
-    const manager = this._editManager;
+    if (this._findDocumentElement()) return;
+    const manager = this.editManager;
     if (!manager.placeGunActive) return;
     const nextItem = manager.placeGunItems[0];
     if (!nextItem || nextItem.contentType !== 'element') return;
@@ -304,8 +350,10 @@ export class LayoutPageElement extends HTMLElement {
 
     this._measurePpm();
 
-    const fontLoader = new FontLoaderSingletonAdapter(FontLoader.getInstance());
-    const colorRegistry = new ColorRegistrySingletonAdapter(ColorRegistry.getInstance());
+    const hostDoc = this._findDocumentElement();
+    const hostRes = hostDoc?.resources;
+    const fontLoader = hostRes?.fontLoader ?? new FontLoaderSingletonAdapter(FontLoader.getInstance());
+    const colorRegistry = hostRes?.colorRegistry ?? new ColorRegistrySingletonAdapter(ColorRegistry.getInstance());
     const docData: PageData = {
       id: this.id,
       width: this._width,
@@ -316,6 +364,7 @@ export class LayoutPageElement extends HTMLElement {
       paddingRight: this._paddingRight,
       columns: this._columns,
       gap: this._gap,
+      pageNumber: this._pageNumber,
       paragraphStyle: this._paragraphStyle,
       textStyle: this._textStyle,
       threads: this._threads,
@@ -552,24 +601,110 @@ export class LayoutPageElement extends HTMLElement {
     this._applyStyle();
     this._renderGuideColumns();
     this._propagateInheritStyle();
-    this._relayoutThreads();
-    this._syncThreadFramesToDom();
+    if (this._findDocumentElement()) {
+      this._delegateThreadChainConfirm();
+    } else {
+      this._relayoutThreads();
+      this._syncThreadFramesToDom();
+    }
     return this;
   }
 
   /**
-   * 스레드 배치를 재실행한다.
+   * 자식 요소를 z-index 역순으로 렌더링한다.
+   * 이미지 로딩 등 비동기 처리를 위해 각 자식의 `render()`를 await한다.
+   */
+  async render() {
+    if (!this.isConnected) return null;
+    const sortedItems = [...this.items].sort((a, b) => b.zIndex - a.zIndex);
+    for (let i = 0; i < sortedItems.length; i++) {
+      await sortedItems[i].render()
+    }
+    // 자식 render가 model을 재생성한 경우(스레드 프레임이 아직 미적용이면)
+    // 스레드 체인을 재확정한다 — 초기 로드의 실질적 확정 지점.
+    // 문서 아래에서는 위임이, 독립 루트에서는 암묵 문서 엔진이 처리한다.
+    if (this._findDocumentElement()) {
+      this._delegateThreadChainConfirm();
+    } else if (this._hasUnsyncedThreadFrames()) {
+      this._relayoutThreads();
+      this._syncThreadFramesToDom();
+    }
+    return this;
+  }
+
+  /**
+   * 스레드 소유 DocumentEngine을 해석한다.
    *
-   * 초기 reconcile 중 paragraph의 connectedCallback이 model을 box 엔진에
-   * push하는 시점이 제각각이므로, 엔진 layout 시점의 `_layoutThreads`가
-   * 일부 프레임만 찾는 경우가 있다. layout() 종료 시점(모든 model이
-   * push된 후)에 재실행해 스레드 체인을 완성한다. threads가 없으면
-   * no-op (기존 동작 byte-identical).
+   * 문서 요소 아래면 null(문서가 소유). 독립 루트이고 threads가 있으면
+   * 암묵 문서 엔진(1페이지 문서 취급)을 구축·갱신해 반환한다. 엔진 인스턴스는
+   * 재사용하므로 ThreadEngine 커밋 기록(범위-증명 스킵 근거)이 유지된다.
+   *
+   * @returns 스레드 소유 엔진. threads가 없으면 undefined.
+   */
+  private _resolveThreadDocEngine(): DocumentEngine | undefined {
+    if (this._findDocumentElement()) return undefined;
+    if (!this._threads || this._threads.length === 0 || !this._engine) return undefined;
+    const hostDoc = this._findDocumentElement();
+    const hostRes = hostDoc?.resources;
+    const fontLoader = hostRes?.fontLoader ?? new FontLoaderSingletonAdapter(FontLoader.getInstance());
+    const colorRegistry = hostRes?.colorRegistry ?? new ColorRegistrySingletonAdapter(ColorRegistry.getInstance());
+    if (!this._threadDocEngine) {
+      this._threadDocEngine = DocumentEngine.create(
+        { id: this.id || undefined, threads: this._threads,
+          width: this._width, height: this._height,
+          columns: this._columns, gap: this._gap,
+          paragraphStyle: this._paragraphStyle, textStyle: this._textStyle },
+        fontLoader,
+        colorRegistry,
+        this._ppm,
+      );
+    } else {
+      this._threadDocEngine.data = {
+        ...this._threadDocEngine.data,
+        threads: this._threads,
+      };
+    }
+    return this._threadDocEngine;
+  }
+
+  /**
+   * 이 페이지의 스레드 소유 DocumentEngine을 반환한다 (EditManager용).
+   *
+   * 문서 아래면 undefined — 문서의 엔진을 사용해야 한다.
+   *
+   * @returns 암묵 문서 엔진 또는 undefined.
+   */
+  get threadEngine(): DocumentEngine | undefined {
+    return this._resolveThreadDocEngine();
+  }
+
+  /**
+   * 스레드 체인 확정(layout 재배치 + 프레임 DOM 동기화).
+   *
+   * 문서 아래의 페이지는 요청을 상위로 전달한다. 독립 루트는 암묵 문서
+   * 엔진을 사용해 자체 확정한다.
+   */
+  private _delegateThreadChainConfirm(): void {
+    const docEl = this._findDocumentElement();
+    if (docEl) {
+      docEl.confirmThreadChain();
+      return;
+    }
+    this._relayoutThreads();
+    this._syncThreadFramesToDom();
+  }
+
+  /**
+   * 스레드 프레임을 배치한다 (독립 루트 전용).
+   *
+   * 독립 루트의 threads는 암묵 문서 엔진이 소유한다. 문서 아래의 페이지는
+   * 문서 요소가 스레드를 담당하므로 이 메서드는 호출되지 않는다.
    */
   private _relayoutThreads(): void {
-    const engine = this._engine;
-    if (!engine?.data?.threads?.length) return;
-    engine.relayoutThreads();
+    const threadEngine = this._resolveThreadDocEngine();
+    if (!threadEngine || !this._engine) return;
+    threadEngine.adoptPageEngines([this._engine]);
+    threadEngine.layout();
   }
 
   /**
@@ -578,11 +713,18 @@ export class LayoutPageElement extends HTMLElement {
    * 편집 중인 프레임의 model.textContent가 story의 새 진실이므로, 체인
    * 재배치 시 threads.content를 소스 프레임의 textContent로 갱신한다
    * (writeback). 마이크로태스크로 통합해 키 입력마다 체인 전체를
-   * 재배치하는 비용을 한 번으로 묶는다.
+   * 재배치하는 비용을 한 번으로 묶는다. 문서 아래의 페이지는 요청을
+   * 소속 문서 요소에 위임한다.
    *
    * @param sourceFrameId - 편집이 발생한 스레드 프레임 id
    */
   requestThreadRelayout(sourceFrameId: string): void {
+    const docEl = this._findDocumentElement();
+    if (docEl) {
+      docEl.requestThreadRelayout(sourceFrameId);
+      return;
+    }
+    if (!this._threads || this._threads.length === 0) return;
     if (!this._threadRelayoutSources) {
       const sources = new Set<string>();
       this._threadRelayoutSources = sources;
@@ -595,28 +737,15 @@ export class LayoutPageElement extends HTMLElement {
   }
 
   /**
-   * 예약된 스레드 체인 재배치를 실행한다.
-   *
-   * 1. story writeback + 체인 재배치 — `PageEngine.relayoutThreads(sources)`
-   *    가 수행한다 (story 소유권은 엔진)
-   * 2. 스레드 프레임 DOM model 동기화
-   * 3. 실제 배치된 프레임 중 소스를 제외한 DOM 재렌더 (소스는 편집 파이프라인이
-   *    렌더). 범위-증명으로 스킵된 프레임은 DOM도 이미 정확하므로 렌더하지
-   *    않는다. `laidOutFrameIds`가 없는 결과(전체 스킵 등)가 하나라도 있으면
-   *    기존 동작(영향 프레임 전체)으로 폴백한다.
+   * 예약된 스레드 체인 재배치를 실행한다 (독립 루트 전용).
    *
    * @param sources - 편집이 발생한 프레임 id 집합
    */
   private _flushThreadRelayout(sources: Set<string>): void {
-    const engine = this._engine;
-    const threads = engine?.data?.threads;
+    const engine = this._resolveThreadDocEngine();
+    const threads = engine?.data.threads;
     if (!engine || !threads || threads.length === 0) return;
 
-    // 재진입 차단: flush 중 실행되는 domPe.render()는 편집 파이프라인이
-    // 소스 model을 이미 커밋한 상태이므로 재요청하지 않지만, flush가
-    // 재렌더한 프레임의 model이 아직 dirty면 requestThreadRelayout이
-    // flush를 재유발할 수 있다 (R4 — 암묵적 종결이 무한 재귀로 변질).
-    // 1회 flush가 체인 전체를 확정하므로 재진입은 결함이다.
     if (this._threadRelayoutFlushing) return;
     this._threadRelayoutFlushing = true;
 
@@ -632,20 +761,13 @@ export class LayoutPageElement extends HTMLElement {
     }
 
     try {
-      // 포커스된 프레임은 범위-증명 스킵에서 제외한다 (pinned): 포커스된
-      // 프레임의 모델이 구 story에 머무르면 이후 커밋이 구 내용 기반으로
-      // 이뤄져 다른 프레임의 편집을 덮어쓴다. 편집 진입점(focusParagraph)의
-      // ensureThreadFramesFresh와 짝을 이룬다.
-      const focusedId = this._editManager.focusedParagraph?.id;
+      const focusedId = this.editManager.focusedParagraph?.id;
       const pinned = focusedId !== undefined && focusedId !== ''
         ? new Set<string>([focusedId])
         : undefined;
       const results = engine.relayoutThreads(sources, pinned);
       this._syncThreadFramesToDom();
 
-      // 소스를 제외한 프레임 재렌더 — 편집 컨트롤러가 소스의 DOM을 관리 중.
-      // 경계 교정(clamp)으로 재배치된 프레임도 포함한다: 교정은 소스와
-      // 무관한 prev 프레임의 배치를 바꾸므로 flush가 화면을 확정해야 한다.
       const correctedFrames = new Set<string>();
       let laidOut: Set<string> | null = new Set<string>();
       for (const result of results) {
@@ -666,10 +788,6 @@ export class LayoutPageElement extends HTMLElement {
         }
       }
 
-      // 명시적 종결 assert (개발 모드 검출): flush가 체인 전체의 dirty를
-      // 소진했는지 확인한다. layoutText()은 _dirty = false로 커밋하므로,
-      // 영향 프레임에 dirty가 남았다면 다음 flush가 필요한 것처럼 보이는
-      // 상태 — relayoutThreads가 일부 프레임을 건너뛰었다는 뜻이다.
       if (typeof console !== 'undefined') {
         const pendingLookup = engine.findEnginesByIds(affectedFrames);
         for (const frameId of affectedFrames) {
@@ -689,17 +807,13 @@ export class LayoutPageElement extends HTMLElement {
   /**
    * 스레딩 프레임 DOM model을 엔진 트리 PE(스레드 배치 완료 상태)로 동기화한다.
    *
-   * 초기 reconcile이 스레드 패스보다 먼저 DOM model을 만들면 엔진 트리 PE와
-   * DOM model이 서로 다른 인스턴스가 되어 DOM 렌더가 스레드 결과를 표시하지
-   * 못한다. 엔진 `layout()` 종료 후(스레드 배치 완료 시점) 프레임 id로 양쪽을
-   * 일치시킨다. threads가 없으면 no-op (기존 동작 byte-identical).
+   * @returns void
    */
   private _syncThreadFramesToDom(): void {
-    const engine = this._engine;
-    const threads = engine?.data?.threads;
-    if (!threads || threads.length === 0) return;
+    const engine = this._resolveThreadDocEngine();
+    const threads = engine?.data.threads;
+    if (!engine || !threads || threads.length === 0) return;
 
-    // 배치 조회: 프레임별 재귀 검색 대신 트리 1회 순회로 전 프레임 엔진을 수집한다.
     const frameIds = new Set<string>();
     for (const thread of threads) {
       for (const frameId of thread.paragraphIds ?? []) {
@@ -725,36 +839,14 @@ export class LayoutPageElement extends HTMLElement {
   }
 
   /**
-   * 자식 요소를 z-index 역순으로 렌더링한다.
-   * 이미지 로딩 등 비동기 처리를 위해 각 자식의 `render()`를 await한다.
-   */
-  async render() {
-    if (!this.isConnected) return null;
-    // 스레드 체인 확정은 layout()과 아래 unsynced 판정이 소유한다(단일
-    // 실행 지점) — render 진입 재실행은 B3 시간차 방어에 불필요하다.
-    const sortedItems = [...this.items].sort((a, b) => b.zIndex - a.zIndex);
-    for (let i = 0; i < sortedItems.length; i++) {
-      await sortedItems[i].render()
-    }
-    // 자식 render가 model을 재생성한 경우(스레드 프레임이 아직 미적용이면)
-    // 스레드 체인을 재확정한다 — 초기 로드의 실질적 확정 지점.
-    if (this._hasUnsyncedThreadFrames()) {
-      this._relayoutThreads();
-      this._syncThreadFramesToDom();
-    }
-    return this;
-  }
-
-  /**
    * 스레드 프레임 중 엔진 트리 PE가 아직 스레드 배치가 적용되지 않은 것이 있는지.
-   * render 이후 재확정이 필요한지 판정한다.
    *
    * @returns 미적용 스레드 프레임이 있으면 true
    */
   private _hasUnsyncedThreadFrames(): boolean {
-    const engine = this._engine;
-    const threads = engine?.data?.threads;
-    if (!threads || threads.length === 0) return false;
+    const engine = this._resolveThreadDocEngine();
+    const threads = engine?.data.threads;
+    if (!engine || !threads || threads.length === 0) return false;
     for (const thread of threads) {
       for (const frameId of thread.paragraphIds ?? []) {
         const enginePe = engine.findEngineById(frameId);
@@ -903,6 +995,7 @@ export class LayoutPageElement extends HTMLElement {
     this._pendingData = data;
     try {
       if (data.id !== undefined) this.id = data.id;
+      if (data.pageNumber !== undefined) this._pageNumber = data.pageNumber;
       if (data.paddingTop !== undefined) this._paddingTop = data.paddingTop;
       if (data.paddingBottom !== undefined) this._paddingBottom = data.paddingBottom;
       if (data.paddingLeft !== undefined) this._paddingLeft = data.paddingLeft;
@@ -932,6 +1025,7 @@ export class LayoutPageElement extends HTMLElement {
         paddingRight: this._paddingRight,
         columns: this._columns,
         gap: this._gap,
+        pageNumber: this._pageNumber,
         paragraphStyle: this._paragraphStyle,
         textStyle: this._textStyle,
         threads: this._threads,
@@ -1113,9 +1207,10 @@ export class LayoutPageElement extends HTMLElement {
       paddingRight: this.paddingRight,
       columns: this.columns,
       gap: this.gap,
+      pageNumber: this._pageNumber,
       paragraphStyle: this.paragraphStyle,
       textStyle: this.textStyle,
-      threads: this._threads,
+      children: this._collectChildrenData(),
     }
   }
 
@@ -1129,6 +1224,8 @@ export class LayoutPageElement extends HTMLElement {
   get innerHeight() { return this._height - this.paddingTop - this.paddingBottom; }
   get columns() { return this._columns; }
   get gap() { return this._gap; }
+  /** 페이지 번호 (1-based, 문서 순서). 미지정 시 undefined. */
+  get pageNumber() { return this._pageNumber; }
   get paragraphStyle() { return this._paragraphStyle; }
   get textStyle() { return this._textStyle; }
   /** 스레딩 정의 (옵셔널) */

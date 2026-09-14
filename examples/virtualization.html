@@ -6,7 +6,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Layout Element Virtualization Demo</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
     body {
       background: #f0f0f0;
@@ -17,7 +21,9 @@
     /* 고정 상태 패널 */
     #vpanel {
       position: fixed;
-      top: 0; left: 0; right: 0;
+      top: 0;
+      left: 0;
+      right: 0;
       z-index: 100000;
       background: #212121;
       color: #eee;
@@ -29,11 +35,21 @@
       flex-wrap: wrap;
     }
 
-    #vpanel .stat b { color: #ffca28; font-size: 15px; }
-    #vpanel .stat.mounted b { color: #69f0ae; }
-    #vpanel .stat.parked b { color: #ffab91; }
+    #vpanel .stat b {
+      color: #ffca28;
+      font-size: 15px;
+    }
 
-    #vpanel select, #vpanel button {
+    #vpanel .stat.mounted b {
+      color: #69f0ae;
+    }
+
+    #vpanel .stat.parked b {
+      color: #ffab91;
+    }
+
+    #vpanel select,
+    #vpanel button {
       padding: 5px 10px;
       border-radius: 4px;
       border: 1px solid #616161;
@@ -43,8 +59,17 @@
       cursor: pointer;
     }
 
-    #vpanel button.off { background: #6d0d0d; border-color: #a33; }
-    #vpanel label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+    #vpanel button.off {
+      background: #6d0d0d;
+      border-color: #a33;
+    }
+
+    #vpanel label {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      cursor: pointer;
+    }
 
     #vlog {
       position: fixed;
@@ -62,11 +87,16 @@
       pointer-events: none;
     }
 
-    #vlog .mount { color: #69f0ae; }
-    #vlog .unmount { color: #ffab91; }
+    #vlog .mount {
+      color: #69f0ae;
+    }
+
+    #vlog .unmount {
+      color: #ffab91;
+    }
 
     /* 마운트된 페이지: 얇은 초록 테두리 */
-    x-layout-page > x-layout-box {
+    x-layout-page>x-layout-box {
       outline: 1px solid rgba(76, 175, 80, 0.55);
       outline-offset: -1px;
     }
@@ -74,8 +104,13 @@
     /* 분리된 페이지 자리: 빗금 + 주황 점선 + id 라벨. 모든 데모 페이지는
        absolute이므로 플레이스홀더도 absolute이며 ::after 라벨이 그 안에 놓인다. */
     x-layout-page div[data-parked-page] {
-      background: repeating-linear-gradient(
-        45deg, #fff3e0, #fff3e0 10px, #ffe0b2 10px, #ffe0b2 20px);
+      background: repeating-linear-gradient(45deg, #fff3e0, #fff3e0 10px, #ffe0b2 10px, #ffe0b2 20px);
+      outline: 2px dashed #ef6c00;
+      outline-offset: -2px;
+    }
+
+    x-layout-document div[data-parked-page] {
+      background: repeating-linear-gradient(45deg, #fff3e0, #fff3e0 10px, #ffe0b2 10px, #ffe0b2 20px);
       outline: 2px dashed #ef6c00;
       outline-offset: -2px;
     }
@@ -111,13 +146,17 @@
     <button id="btn-top">맨 위</button>
     <button id="btn-mid">중간</button>
     <button id="btn-bottom">맨 아래</button>
-    <span class="stat" title="6개 체인이 각 5프레임을 공유합니다. 분리된 프레임도 엔진 체인에 남아 흐름이 유지됩니다. 체인 끝 프레임의 빨간 테두리는 잔여(overset tail) 표시입니다.">스레드 6체인·각 5프레임</span>
+    <span class="stat"
+      title="6개 체인이 각 5프레임을 공유합니다. 분리된 프레임도 엔진 체인에 남아 흐름이 유지됩니다. 체인 끝 프레임의 빨간 테두리는 잔여(overset tail) 표시입니다.">스레드 6체인·각
+      5프레임</span>
     <label><input type="checkbox" id="ck-pin" checked /> 포커스 페이지 고정</label>
     <button id="btn-toggle">가상화 끄기</button>
   </div>
   <div id="vlog"></div>
 
-  <x-layout-page id="page"></x-layout-page>
+  <x-layout-document id="doc">
+    <x-layout-page id="page"></x-layout-page>
+  </x-layout-document>
 
   <script type="module">
     import "/src/index.ts";
@@ -133,8 +172,8 @@
     const PAGE_PITCH_MM = 115;
     const PAGE_HEIGHT_MM = 100;
 
-    const page = document.getElementById("page");
-    const em = page.editManager;
+    const doc = document.getElementById("doc");
+    const em = doc.editManager;
     em.textEditMode = true;
 
     // 6개 스레드 체인 × 5프레임 — 기사 단위 체인 분할의 라이브 예제.
@@ -165,40 +204,52 @@
       threads.push({ id: `story-${c}`, paragraphIds: ids, content: story });
     }
 
-    const children = [];
+    // 2계층 문서 구조: 30개 실 페이지가 각자 박스 1개를 담는다.
+    // 스레드 체인은 페이지를 가로질러 흐른다 (문서 스코프).
+    const pages = [];
     for (let i = 0; i < PAGE_COUNT; i++) {
       const chain = Math.floor(i / FRAMES_PER_CHAIN);
       const frameInChain = i % FRAMES_PER_CHAIN;
-      children.push({
-        type: "box",
+      pages.push({
         id: `vpage-${i}`,
-        position: "absolute",
-        left: 10,
-        top: i * PAGE_PITCH_MM,
-        width: 170,
-        height: PAGE_HEIGHT_MM,
-        children: {
-          type: "paragraph",
-          id: `vpage-${i}-para`,
-          content: frameInChain === 0 ? stories[chain] : "",
-          paragraphStyle: {},
-          textStyle: {},
-        },
+        width: 190,
+        height: PAGE_PITCH_MM,
+        columns: 1,
+        gap: 0,
+        paragraphStyle: { lineGap: 1.2 },
+        textStyle: { fontSize: 4 },
+        children: [{
+          type: "box",
+          id: `vpage-${i}-box`,
+          position: "absolute",
+          left: 10,
+          top: 10,
+          width: 170,
+          height: PAGE_HEIGHT_MM,
+          children: {
+            type: "paragraph",
+            id: `vpage-${i}-para`,
+            content: frameInChain === 0 ? stories[chain] : "",
+            paragraphStyle: {},
+            textStyle: {},
+          },
+        }],
       });
     }
-    page.data = {
+    doc.data = {
       width: 190,
-      height: PAGE_COUNT * PAGE_PITCH_MM,
+      height: PAGE_PITCH_MM,
       columns: 1,
       gap: 0,
+      spreadPages: 3,
       paragraphStyle: { lineGap: 1.2 },
       textStyle: { fontSize: 4 },
       threads,
-      children,
+      pages,
     };
-    await page.render();
+    await doc.render();
     // 편집 가능하게 — 포커스 페이지 pin 동작까지 함께 시연된다
-    for (const p of page.querySelectorAll("x-layout-paragraph")) p.editableText = true;
+    for (const p of doc.querySelectorAll("x-layout-paragraph")) p.editableText = true;
 
     // ── 상태 패널 ──
     const elMounted = document.getElementById("st-mounted");
@@ -209,7 +260,7 @@
 
     function countSpans() {
       let n = 0;
-      for (const p of page.querySelectorAll("x-layout-paragraph")) {
+      for (const p of doc.querySelectorAll("x-layout-paragraph")) {
         for (const col of p.querySelectorAll("x-layout-column")) {
           n += col.shadowRoot.querySelectorAll("span[data-source-offset]").length;
         }
@@ -228,7 +279,7 @@
     function refreshStatus(last) {
       const mounted = mgr.mountedIds;
       elMounted.textContent = `${mounted.length} / ${PAGE_COUNT}`;
-      elParked.textContent = String(page.parkedPageIds.length);
+      elParked.textContent = String(doc.parkedPageIds.length);
       elSpans.textContent = countSpans().toLocaleString();
       if (last) elLast.textContent = last;
     }
@@ -240,7 +291,7 @@
     function createManager(windowSize) {
       if (mgr) mgr.detach();
       mgr = new PageMountManager({
-        page: page,
+        page: doc,
         window: windowSize,
         onMount: (id) => { logEvent("mount", id); refreshStatus(`mount ${id}`); },
         onUnmount: (id) => { logEvent("unmount", id); refreshStatus(`unmount ${id}`); },
@@ -256,8 +307,8 @@
     });
 
     const scrollToPage = (i) => {
-      const box = [...page.querySelectorAll("x-layout-box")].find(b => b.id === `vpage-${i}`);
-      const node = box ?? page.querySelector(`div[data-parked-page="vpage-${i}"]`);
+      const pg = [...doc.querySelectorAll("x-layout-page")].find(b => b.id === `vpage-${i}`);
+      const node = pg ?? doc.querySelector(`div[data-parked-page="vpage-${i}"]`);
       if (node) node.scrollIntoView({ block: "start" });
     };
     document.getElementById("btn-top").addEventListener("click", () => scrollToPage(0));
@@ -269,10 +320,10 @@
       if (!document.getElementById("ck-pin").checked) return;
       const para = em.focusedParagraph;
       let page = para;
-      while (page?.parentElement && page.parentElement.localName !== "x-layout-page") {
+      while (page?.parentElement && page.parentElement.localName !== "x-layout-document") {
         page = page.parentElement;
       }
-      const pageId = page?.localName === "x-layout-box" ? page.id : null;
+      const pageId = page?.localName === "x-layout-page" ? page.id : null;
       if (pinnedId && pinnedId !== pageId) mgr.unpin(pinnedId);
       pinnedId = pageId;
       if (pageId) {
@@ -288,8 +339,8 @@
       enabled = !enabled;
       if (!enabled) {
         mgr.detach();
-        for (const id of [...page.parkedPageIds]) {
-          const el = page.unparkPage(id);
+        for (const id of [...doc.parkedPageIds]) {
+          const el = doc.unparkPage(id);
           if (el) await el.render();
         }
         btnToggle.textContent = "가상화 켜기";

@@ -1,15 +1,30 @@
 import { PARKED_PAGE_ATTR } from "@/constants";
 import type { LayoutBoxElement } from "../components/layout/box.element";
 import type { LayoutPageElement } from "../components/layout/page.element";
+import type { LayoutDocumentElement } from "../components/layout/document.element";
+
+/**
+ * 마운트 루트 계약 (페이지 요소 또는 문서 요소).
+ *
+ * 두 요소는 `parkPage`/`unparkPage`/`parkedPageIds`를 동일 시그니처로
+ * 제공한다 (단위만 다름: 페이지는 박스, 문서는 페이지).
+ */
+export type PageMountRoot =
+  | LayoutPageElement
+  | LayoutDocumentElement;
+
+/** 마운트 추적 단위 노드명. 페이지 루트면 박스, 문서 루트면 페이지. */
+const PAGE_UNIT_TAGS = new Set(['X-LAYOUT-BOX', 'X-LAYOUT-PAGE']);
 
 /**
  * `PageMountManager` 생성 옵션.
  */
 export interface PageMountManagerOptions {
   /**
-   * 가상화를 적용할 문서 요소. 최상위 `x-layout-box`가 페이지 단위이다.
+   * 가상화를 적용할 루트 요소. 페이지 요소면 최상위 `x-layout-box`가,
+   * 문서 요소면 `x-layout-page`가 마운트 단위이다.
    */
-  page: LayoutPageElement;
+  page: PageMountRoot;
   /**
    * IntersectionObserver root (스크롤 컨테이너). 생략 시 뷰포트를 사용한다.
    * scaled 서브트리 밖에 있어야 한다.
@@ -30,7 +45,7 @@ export interface PageMountManagerOptions {
   /**
    * 페이지 마운트 후 호출된다 (비동기 페인트 확정 후가 아니라 교체 직후).
    */
-  onMount?: (id: string, element: LayoutBoxElement) => void;
+  onMount?: (id: string, element: LayoutBoxElement | LayoutPageElement) => void;
   /**
    * 페이지 언마운트(보관) 직후 호출된다.
    */
@@ -75,11 +90,11 @@ export interface PageMountManagerOptions {
  * ```
  */
 export class PageMountManager {
-  private readonly _page: LayoutPageElement;
+  private readonly _page: PageMountRoot;
   private readonly _root: Element | null;
   private readonly _window: number;
   private readonly _scale: () => number;
-  private readonly _onMount?: (id: string, element: LayoutBoxElement) => void;
+  private readonly _onMount?: (id: string, element: LayoutBoxElement | LayoutPageElement) => void;
   private readonly _onUnmount?: (id: string) => void;
 
   private _observer: IntersectionObserver | null = null;
@@ -162,7 +177,7 @@ export class PageMountManager {
     this._visible.clear();
     for (const node of Array.from(this._page.childNodes)) {
       if (!(node instanceof Element)) continue;
-      if (node.nodeName === 'X-LAYOUT-BOX') {
+      if (PAGE_UNIT_TAGS.has(node.nodeName)) {
         const id = node.id;
         if (!id) continue;
         this._track(id, node);
@@ -299,7 +314,7 @@ export class PageMountManager {
    */
   private _unmount(id: string): void {
     const node = this._nodes.get(id);
-    if (!node || node.nodeName !== 'X-LAYOUT-BOX') return;
+    if (!node || !PAGE_UNIT_TAGS.has(node.nodeName)) return;
     const box = node as unknown as LayoutBoxElement;
     // 분리 전 footprint 측정 — 연결 상태에서만 유효하므로 park보다 먼저 수행한다.
     // offsetWidth/Height는 정수 반올림이라 이웃 페이지를 fractional 경계 너머로

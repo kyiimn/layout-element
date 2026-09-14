@@ -84,9 +84,10 @@ Before working on any feature, you **must** read the corresponding documentation
 ### Custom Element Tree
 
 ```
-<x-layout-page>          ← Root. Owns PageEngine, coordinates rendering pipeline
-  <x-layout-guide-column>    ← Debug grid overlay
-  <x-layout-box>             ← Positioned container (static=column-grid | absolute=mm coords)
+<x-layout-document>      ← Root. Owns DocumentEngine + EditManager. Threads + park + global defaults live here
+  <x-layout-page>          ← Page. Owns PageEngine, coordinates rendering pipeline (standalone root keeps own EditManager + implicit thread engine for legacy single-page usage)
+    <x-layout-guide-column>    ← Debug grid overlay
+    <x-layout-box>             ← Positioned container (static=column-grid | absolute=mm coords). Floating element — NOT a page
     <x-layout-paragraph>     ← Multi-column text area with wrapping; owns TextEditController when editableText
       <x-layout-column>      ← Individual text column (rendered text lines)
     <x-layout-image>         ← Canvas-based image crop element

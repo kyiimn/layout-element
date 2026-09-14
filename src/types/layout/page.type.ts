@@ -25,6 +25,13 @@ export type PageData = {
   /** 고유 식별자 (선택) */
   id?: string;
 
+  /**
+   * 페이지 번호 (1-based, 문서 순서). 문서가 reconcile 시 미지정된
+   * 페이지에 문서 순서대로 부여한다 (호스트 지정값 우선). undo/redo·
+   * 썸네일·인쇄 등에서 페이지 식별자로 사용한다.
+   */
+  pageNumber?: number;
+
   /** 용지 너비. 기본값 없음 (필수) */
   width: number;
 
@@ -69,6 +76,11 @@ export type PageData = {
   /**
    * 텍스트 스레딩 정의 (옵셔널 — 생략 시 스레딩 미사용, 기존 동작 byte-identical).
    * thread가 story 콘텐츠의 단일 소스이며, 프레임 문단은 표시 범위만 소유한다.
+   */
+  /**
+   * @deprecated Phase B(페이지 모델)에서 문서 계층으로 이동. 레거시 입력
+   * 호환을 위해 타입에만 유지 — 엔진은 `DocumentData.threads`만 읽는다.
+   * 신규 코드는 문서 데이터의 `threads`를 사용할 것.
    */
   threads?: ThreadData[];
 };

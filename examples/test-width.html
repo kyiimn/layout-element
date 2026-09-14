@@ -16,8 +16,10 @@
   await FontLoader.getInstance().init();
   await ColorRegistry.getInstance().init();
 
+  const docEl = document.createElement('x-layout-document');
+  document.getElementById('test').appendChild(docEl);
   const page = document.createElement('x-layout-page');
-  document.getElementById('test').appendChild(doc);
+  docEl.appendChild(page);
   page.data = exampleData;
   await page.render();
 

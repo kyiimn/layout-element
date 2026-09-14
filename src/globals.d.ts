@@ -3,6 +3,7 @@ import {
   LayoutBoxElement,
   LayoutColumnElement,
   LayoutPageElement,
+  LayoutDocumentElement,
   LayoutGuideColumnElement,
   LayoutImageElement,
   LayoutParagraphElement,
@@ -10,13 +11,14 @@ import {
   LayoutTableRowElement,
   LayoutTableCellElement,
 } from "./components";
-import type { PageData, BoxData, ParagraphData, ImageData, GuideColumnData, TableData, TableRowData, TableCellData, BoxRole } from "./types";
+import type { DocumentData, PageData, BoxData, ParagraphData, ImageData, GuideColumnData, TableData, TableRowData, TableCellData, BoxRole } from "./types";
 
 declare global {
   interface HTMLElementTagNameMap {
     'x-layout-box': LayoutBoxElement;
     'x-layout-guide-column': LayoutGuideColumnElement;
     'x-layout-column': LayoutColumnElement;
+    'x-layout-document': LayoutDocumentElement;
     'x-layout-page': LayoutPageElement;
     'x-layout-image': LayoutImageElement;
     'x-layout-paragraph': LayoutParagraphElement;
@@ -29,6 +31,12 @@ declare global {
 declare module 'react' {
   namespace JSX {
     interface IntrinsicElements {
+      'x-layout-document': DetailedHTMLProps<
+        HTMLAttributes<LayoutDocumentElement> & {
+          data?: DocumentData;
+          guide?: boolean;
+        },
+        LayoutDocumentElement>;
       'x-layout-page': DetailedHTMLProps<
         HTMLAttributes<LayoutPageElement> & {
           data?: PageData;

@@ -106,7 +106,9 @@
     <p>3개의 스레드가 각각 여러 프레임 박스에 걸쳐 흐릅니다 — head 프레임이 story를 소유하고, 넘치는 텍스트가 순서대로 다음 프레임으로 feed-forward됩니다.</p>
   </header>
 
-  <x-layout-page id="page"></x-layout-page>
+  <x-layout-document id="doc">
+    <x-layout-page id="page"></x-layout-page>
+  </x-layout-document>
 
   <div id="panel">
     <strong>스레드 상태</strong>
@@ -133,9 +135,18 @@
       await ColorRegistry.getInstance().init();
       await FontLoader.getInstance().init();
 
+      const doc = document.getElementById("doc");
       const page = document.getElementById("page");
-      page.data = threadingDemoData;
-      await page.render();
+      const { threads, ...pageFields } = threadingDemoData;
+      doc.data = {
+        width: pageFields.width, height: pageFields.height,
+        columns: pageFields.columns, gap: pageFields.gap,
+        paragraphStyle: pageFields.paragraphStyle, textStyle: pageFields.textStyle,
+        threads,
+        pages: [{ ...pageFields, id: 'page' }],
+        spreadPages: 1,
+      };
+      await doc.render();
 
       // 타이핑 테스트: 스레드의 전 프레임 편집 활성화.
       // head에 타이핑하면 overflow가 다음 프레임으로 흐르고, 후속 프레임도
@@ -159,8 +170,8 @@
      * 중간 프레임의 overflow는 소비되므로 tail만 오류로 센다.
      */
     function renderPanel() {
-      const page = document.getElementById("page");
-      const engine = page?.engine;
+      const doc = document.getElementById("doc");
+      const engine = doc?.engine;
       if (!engine) return;
       const threads = engine.data.threads ?? [];
       const rows = document.getElementById("thread-rows");

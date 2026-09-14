@@ -35,6 +35,7 @@ const ttfBase64 = readFileSync(resolve(pkgRoot, 'examples/fonts/KMIBMyoungjo.ttf
 const { FontLoaderEngineImpl } = await import('../src/engine/font-loader-engine.ts');
 const { ColorRegistryEngineImpl } = await import('../src/engine/color-registry-engine.ts');
 const { PageEngine } = await import('../src/engine/page-engine.ts');
+const { DocumentEngine } = await import('../src/engine/document-engine.ts');
 const { ThreadEngine } = await import('../src/engine/thread-engine.ts');
 const { sliceInlineContent } = await import('../src/engine/paragraph-engine.ts');
 
@@ -125,7 +126,6 @@ function buildThreadedDoc({ contents, columns, boxHeight = 8, threads, paragraph
     {
       id: 'page', width: 257, height: 370, columns: 6, gap: 3,
       paragraphStyle: { lineGap: 1.2, ...(paragraphStyle ?? {}) }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' },
-      threads,
     },
     fontLoader, colorRegistry, 3.78,
   );
@@ -149,10 +149,18 @@ function buildThreadedDoc({ contents, columns, boxHeight = 8, threads, paragraph
     },
   }));
   pageEngine.layout(children);
+  // Phase B: 스레드는 문서 스코프 — DocumentEngine이 PageEngine을 편입해 조정한다.
+  const docEngine = DocumentEngine.create(
+    { id: 'doc', threads, width: 257, height: 370, columns: 6, gap: 3,
+      paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
+    fontLoader, colorRegistry, 3.78,
+  );
+  docEngine.adoptPageEngines([pageEngine]);
+  docEngine.layout();
   const frames = contents.map((_, i) =>
     pageEngine.findEngineById(`para-${i}`),
   );
-  return { pageEngine, frames };
+  return { pageEngine, docEngine, frames };
 }
 
 // ═══ 1. 스레드 미사용 회귀 ═══
@@ -251,7 +259,7 @@ console.log('\n[5] 인라인 런 tail 슬라이싱');
 console.log('\n[6] pull-back (story 축소)');
 {
   const longText = '가나다라마바사아자차카타파하'.repeat(40);
-  const { pageEngine, frames } = buildThreadedDoc({
+  const { pageEngine, docEngine, frames } = buildThreadedDoc({
     contents: [longText, ''],
     columns: [1, 1],
     boxHeight: 6,
@@ -263,11 +271,11 @@ console.log('\n[6] pull-back (story 축소)');
 
   // story 축소 — threads.content가 단일 소스이므로 threads 데이터로 갱신한다.
   const shortText = '가나다라';
-  pageEngine.data = {
-    ...pageEngine.data,
+  docEngine.data = {
+    ...docEngine.data,
     threads: [{ id: 't1', paragraphIds: ['para-0', 'para-1'], content: shortText }],
   };
-  pageEngine.layout();
+  docEngine.layout();
 
   check('축소 후 next 프레임 비어 있음 (pull-back)',
     engineText(frames[1]).length === 0,
@@ -282,7 +290,7 @@ console.log('\n[6] pull-back (story 축소)');
 console.log('\n[7] extractData — head만 content 보유');
 {
   const storyText = '가나다라마바사아자차카타파하'.repeat(40);
-  const { pageEngine, frames } = buildThreadedDoc({
+  const { pageEngine, docEngine, frames } = buildThreadedDoc({
     contents: [storyText, ''],
     columns: [1, 1],
     boxHeight: 6,
@@ -295,9 +303,9 @@ console.log('\n[7] extractData — head만 content 보유');
     typeof headData.content === 'string' && headData.content.length === storyText.length);
   check('next extractData content 생략 (undefined)',
     nextData.content === undefined);
-  const pageData = pageEngine.extractData;
+  const docData = docEngine.extractData;
   check('document extractData에 threads 보존',
-    Array.isArray(pageData.threads) && pageData.threads[0].paragraphIds.length === 2);
+    Array.isArray(docData.threads) && docData.threads[0].paragraphIds.length === 2);
 }
 
 // ═══ 8. overset ═══
@@ -388,7 +396,7 @@ console.log('\n[9] thread 검증');
 console.log('\n[8c] 타이핑 전파 — relayoutThreads(sources) story writeback');
 {
   const storyText = '가나다라마바사아자차카타파하'.repeat(60);
-  const { pageEngine, frames } = buildThreadedDoc({
+  const { pageEngine, docEngine, frames } = buildThreadedDoc({
     contents: [storyText, '', ''],
     columns: [1, 1, 1],
     boxHeight: 6,
@@ -403,9 +411,9 @@ console.log('\n[8c] 타이핑 전파 — relayoutThreads(sources) story writebac
   f1._dirty = true;
 
   // 엔진 writeback + 체인 재배치 (DocumentElement._flushThreadRelayout과 동일 경로)
-  pageEngine.relayoutThreads(new Set(['para-0']));
+  docEngine.relayoutThreads(new Set(['para-0']));
 
-  const thread = pageEngine.data.threads.find(t => t.id === 't1');
+  const thread = docEngine.data.threads.find(t => t.id === 't1');
   check('story writeback — thread.content가 head의 편집 textContent로 갱신',
     storyOf(thread.content) === typedStory,
     `len=${storyOf(thread.content).length} vs ${typedStory.length}`);
@@ -430,7 +438,7 @@ console.log('\n[8c] 타이핑 전파 — relayoutThreads(sources) story writebac
   // 미소속 id 호출 시 story 불변 — writeback은 소속 thread에만 발생한다
   {
     const nestedStory = '가나다라마바사아자차카타파하'.repeat(60);
-    const { pageEngine: doc2, frames: frames2 } = buildThreadedDoc({
+    const { pageEngine, docEngine: doc2, frames: frames2 } = buildThreadedDoc({
       contents: [nestedStory, ''],
       columns: [1, 1],
       boxHeight: 6,
@@ -645,7 +653,7 @@ console.log('\n[13] writeback 방어 — 중복 소속 프레임');
 {
   const storyA = '가나다라마바사아자차카타파하'.repeat(30);
   const storyB = '아야어여오요우유으이'.repeat(40);
-  const { pageEngine, frames } = buildThreadedDoc({
+  const { pageEngine, docEngine, frames } = buildThreadedDoc({
     contents: [storyA, '', storyB, ''],
     columns: [1, 1, 1, 1],
     boxHeight: 6,
@@ -656,9 +664,9 @@ console.log('\n[13] writeback 방어 — 중복 소속 프레임');
     ],
   });
   const [f1, , , f3] = frames;
-  const t1 = pageEngine.data.threads.find(t => t.id === 't1');
-  const t2 = pageEngine.data.threads.find(t => t.id === 't2');
-  const t2Frames = pageEngine.data.threads[1].paragraphIds;
+  const t1 = docEngine.data.threads.find(t => t.id === 't1');
+  const t2 = docEngine.data.threads.find(t => t.id === 't2');
+  const t2Frames = docEngine.data.threads[1].paragraphIds;
   check('validate first-claim-wins — 중복 소속 프레임은 첫 thread 소유',
     t2Frames.length === 2 && t2Frames[0] === 'para-0',
     `t2 frames=${JSON.stringify(t2Frames)}`);
@@ -667,7 +675,7 @@ console.log('\n[13] writeback 방어 — 중복 소속 프레임');
   const typedA = '편집' + storyA;
   f1.textContent = typedA;
   f1._dirty = true;
-  pageEngine.relayoutThreads(new Set(['para-0']));
+  docEngine.relayoutThreads(new Set(['para-0']));
 
   check('중복 소속 프레임 편집 — 첫 소속 thread(t1)의 원본 content만 갱신',
     storyOf(t1.content) === typedA, // 원본 객체 참조 유지
@@ -870,7 +878,7 @@ console.log('\n[14] printPostData 패리티 — threaded 프레임');
 console.log('\n[15] 스레드 단위 변경 감지 — 스킵·재배치 분기');
 {
   const storyText = '가나다라마바사아자차카타파하'.repeat(60);
-  const { pageEngine, frames: [f1, f2] } = buildThreadedDoc({
+  const { pageEngine, docEngine, frames: [f1, f2] } = buildThreadedDoc({
     contents: [storyText, ''],
     columns: [1, 1],
     boxHeight: 6,
@@ -889,7 +897,7 @@ console.log('\n[15] 스레드 단위 변경 감지 — 스킵·재배치 분기'
     });
     break; // 프로토타입에 한 번만 패치
   }
-  const r1 = pageEngine.relayoutThreads();
+  const r1 = docEngine.relayoutThreads();
   check('변경 없는 재호출 — 스킵 (skipped: true)',
     r1.every(t => t.skipped === true),
     `results=${JSON.stringify(r1.map(t => !!t.skipped))}`);
@@ -905,7 +913,7 @@ console.log('\n[15] 스레드 단위 변경 감지 — 스킵·재배치 분기'
   const typed = '편집' + storyText;
   f1.textContent = typed;
   f1._dirty = true;
-  const r2 = pageEngine.relayoutThreads(new Set(['para-0']));
+  const r2 = docEngine.relayoutThreads(new Set(['para-0']));
   check('story 편집 후 재배치 (skipped 없음)',
     r2.every(t => t.skipped !== true),
     `results=${JSON.stringify(r2.map(t => !!t.skipped))}`);
@@ -918,13 +926,13 @@ console.log('\n[15] 스레드 단위 변경 감지 — 스킵·재배치 분기'
   //     data setter가 resetIncrementalState로 _layoutCache를 지우면
   //     스킵 판정이 실패해 재배치된다.
   f2.resetIncrementalState();
-  const r3 = pageEngine.relayoutThreads();
+  const r3 = docEngine.relayoutThreads();
   check('캐시 무효화 후 재배치 (hasLayoutCache 변화 감지)',
     r3.every(t => t.skipped !== true),
     `results=${JSON.stringify(r3.map(t => !!t.skipped))}`);
 
   // (d) 재배치 후 다시 스킵 (새 시그니처로 수렴)
-  const r4 = pageEngine.relayoutThreads();
+  const r4 = docEngine.relayoutThreads();
   check('재배치 후 재호출 — 다시 스킵 (시그니처 수렴)',
     r4.every(t => t.skipped === true),
     `results=${JSON.stringify(r4.map(t => !!t.skipped))}`);
@@ -981,7 +989,7 @@ console.log('\n[15] 스레드 단위 변경 감지 — 스킵·재배치 분기'
 console.log('\n[16] relayoutThreads 사이클 — 첫 배치 후 입력 불변 스킵');
 {
   const storyText = '가나다라마바사아자차카타파하'.repeat(40);
-  const { pageEngine, frames: [f1, f2] } = buildThreadedDoc({
+  const { pageEngine, docEngine, frames: [f1, f2] } = buildThreadedDoc({
     contents: [storyText, ''],
     columns: [1, 1],
     boxHeight: 6,
@@ -990,8 +998,8 @@ console.log('\n[16] relayoutThreads 사이클 — 첫 배치 후 입력 불변 �
   // buildThreadedDoc이 layout 1회(배치 확정)를 이미 실행했다.
   // 동일 childrenData로 재layout — 스킵 경로다.
   const beforeF1 = JSON.stringify(f1.columnContents);
-  const r1 = pageEngine.relayoutThreads();
-  const r2 = pageEngine.relayoutThreads();
+  const r1 = docEngine.relayoutThreads();
+  const r2 = docEngine.relayoutThreads();
   check('첫 배치 후 relayoutThreads 2회 연속 — 모두 스킵',
     r1.every(t => t.skipped === true) && r2.every(t => t.skipped === true),
     `r1=${JSON.stringify(r1.map(t => !!t.skipped))} r2=${JSON.stringify(r2.map(t => !!t.skipped))}`);
@@ -1182,14 +1190,26 @@ console.log('\n[18] 테이블 셀 프레임 × 행 삭제');
   const buildTableDoc = (rows, storyRef) => {
     const pageEngine = PageEngine.create(
         { id: 'page', width: 257, height: 370, columns: 6, gap: 3,
-        paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' },
-        threads: [{ id: 'tt', paragraphIds: ['r1-frame1', 'r1-frame2', 'r2-frame1', 'r2-frame2'], content: storyRef }] },
+        paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
       fontLoader, colorRegistry, 3.78,
     );
     pageEngine.layout([{
       type: 'box', id: 'tablebox', position: 'absolute', left: 10, top: 10, width: 120, height: 40, zIndex: 1,
       children: { type: 'table', id: 'tbl', colWidths: [60, 60], children: rows },
     }]);
+    const tableDoc = DocumentEngine.create(
+      { id: 'doc-table', threads: [{ id: 'tt', paragraphIds: ['r1-frame1', 'r1-frame2', 'r2-frame1', 'r2-frame2'], content: storyRef }],
+        width: 257, height: 370, columns: 6, gap: 3,
+        paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
+      fontLoader, colorRegistry, 3.78,
+    );
+    tableDoc.adoptPageEngines([pageEngine]);
+    tableDoc.layout();
+    pageEngine.layout = ((orig) => (childrenData) => {
+      const r = orig.call(pageEngine, childrenData);
+      tableDoc.layout();
+      return r;
+    })(pageEngine.layout.bind(pageEngine));
     return pageEngine;
   };
 
