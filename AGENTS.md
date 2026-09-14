@@ -68,8 +68,8 @@ Before working on any feature, you **must** read the corresponding documentation
 | EditManager events | `docs/EDITING_EVENTS.md` | EditManager event types, payload fields, event dispatch, reentrancy guard |
 | Place Gun | `docs/EDITING_PLACE_GUN.md` | PlaceGunController, item loading/unloading, click-to-place, pause, reorder |
 | Table editing | `docs/EDITING_TABLE.md` | Table element, cell block selection, cell merge/split, table keyboard shortcuts, TableStructureEditor |
-| Rendering performance | `docs/PERFORMANCE.md` | LRU caching, char width cache, style cache, queueMicrotask batch rendering, incremental style sheet update, skeleton layout cache |
-| Multi-page virtualization | `docs/VIRTUALIZATION.md` | Document-scale diagnosis (hundreds of pages), DOM virtualization design + gaps (G1~G4) + pre-implementation patches (P1~P4), Web Worker failure analysis, `transform: scale` compatibility rules |
+| Rendering performance | `docs/PERFORMANCE.md` | LRU caching, char width cache, style cache, queueMicrotask batch rendering, incremental style sheet update, skeleton layout cache, document-scale optimization (virtualization, progressive layout, page model) |
+| Threaded text flush lifecycle | `docs/TEXT_ENGINE.md` § 27 | Thread relayout request → flush scheduling contract (E-2), `ThreadRelayoutCoordinator`, reentrancy deferral |
 | Vanilla JS API reference | `docs/API.md` | Custom Element public API (properties, methods, events), utility functions, constants |
 | React component layer | `docs/REACT_COMPONENT.md` | React wrapper components, props, hooks (`useEditManager`, `useLayoutElement`, `useEditableText`) |
 | Engine layer (Node.js) | `docs/ENGINE.md` | `src/engine/` classes, ppm injection, RGBA data, overlap detection, Node.js compatibility |
@@ -286,7 +286,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 - **`data` setter never resurrects parked pages**: the creation branch skips parked ids (refreshing the stored snapshot + detached element props instead) and drops parked entries missing from the new `children`. `removeChildData(id)` also clears the parked entry + placeholder.
 - **Detach sweep**: `box.disconnectedCallback` calls `EditManager._unregisterLayoutSubtree(this)` after `_unregisterLayout(this)` — batch-removes descendant layout selections (single dispatch) and ends image edit mode when the focused image is inside the detached subtree. Text focus is handled by paragraph controller `destroy()` → `_unregister()`. Fast-path no-op when nothing is active (reconcile churn safe).
 - Mount orchestration: `PageMountManager` (`src/utils/page-mount-manager.ts`) — IntersectionObserver + index-window (±N pages), 2px hysteresis band (`rootMargin`, scale-independent) + direct apply per IO batch (rAF 등 프레임 생산 의존 매커니즘 미사용 — 정적 페이지에서 프레임이 생산되지 않아 apply가 starve될 수 있음; IO 배치마다 직접 적용하되 `changed` 가드로 반복 DOM surgery 방지). Unmount measures footprint as fractional layout px (`getBoundingClientRect / scale`, `scale` option defaulting to 1 — integer `offsetWidth` rounding pushes neighbors across boundaries). Host must `pin()` the focused page and call `refresh()` after out-of-band structural changes.
-- Detail design + audit record: `docs/VIRTUALIZATION.md`.
+- Detail design + audit record: `docs/PERFORMANCE.md` § 11.
 
 ### `HOST_STYLE_ID` — Style Element Identification
 
