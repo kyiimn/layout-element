@@ -35,7 +35,6 @@ export class DocumentEngine {
   private _colorRegistry: ColorRegistryEngine;
   private _pageEngines: PageEngine[] = [];
   private _threadEngine: ThreadEngine | null = null;
-  private _dirty = false;
 
   private constructor(
     data: DocumentData,
@@ -86,7 +85,20 @@ export class DocumentEngine {
   get paragraphStyle(): ParagraphStyle | undefined { return this._data.paragraphStyle; }
   get textStyle(): TextStyle | undefined { return this._data.textStyle; }
 
-  get dirty(): boolean { return this._dirty; }
+  /**
+   * 문서 dirty 여부 — 소유 페이지 엔진 dirty의 집계 (단일 소스: PageEngine._dirty).
+   *
+   * PageEngine은 개별 setter/appendChild 등에서 `_dirty = true`를 세우고
+   * `layout()`에서 해제한다. 문서는 자체 dirty 플래그를 두지 않고 페이지의
+   * 상태를 집계한다 — 이중 소스는 문서 계층에서 가드가 무력화되는 원인이 된다
+   * (감사 A-1: 구현은 있었으나 `_dirty`를 세는 경로가 없어 DirtyPendingError
+   * 가드가 도달 불가능했다).
+   *
+   * @returns 소유 페이지 중 하나라도 dirty이면 true
+   */
+  get dirty(): boolean {
+    return this._pageEngines.some(pageEngine => pageEngine.dirty);
+  }
 
   get pageEngines(): PageEngine[] { return this._pageEngines; }
 
@@ -160,7 +172,7 @@ export class DocumentEngine {
    * @throws DirtyPendingError dirty 페이지가 있으면
    */
   get printPostData(): PrintPostData[] {
-    if (this._dirty) throw createDirtyError('DocumentEngine');
+    if (this.dirty) throw createDirtyError('DocumentEngine');
     const out: PrintPostData[] = [];
     for (const pageEngine of this._pageEngines) {
       out.push(...pageEngine.printPostData);
@@ -183,7 +195,7 @@ export class DocumentEngine {
    * @throws DirtyPendingError dirty 페이지가 있으면
    */
   get extractData(): DocumentData {
-    if (this._dirty) throw createDirtyError('DocumentEngine');
+    if (this.dirty) throw createDirtyError('DocumentEngine');
     return {
       ...this._data,
       pages: this._pageEngines.map(pe => pe.extractData),
@@ -271,13 +283,22 @@ export class DocumentEngine {
     const editPsByThread = new Map<string, number>();
     const threads = this._data.threads;
     if (!threads) return editPsByThread;
-    const claimed = new Set<string>();
-    for (const thread of threads) {
-      const validIds = (thread.paragraphIds ?? []).filter(Boolean)
-        .filter(id => !claimed.has(id));
-      for (const id of validIds) claimed.add(id);
-      const sourceId = validIds.find(id => sourceFrameIds.has(id));
+    // 소속 판정은 ThreadEngine.validate의 first-claim-wins 단일 소스를 소비한다
+    // (RULES §1.10 — validate(정합성)·layoutThreads(배치)·writeback(story 기록)이
+    // 동일 판정을 사용해야 한다. 별도 claimed Set은 발산 원인이므로 금지).
+    // 소속 조회는 **판정된(judged) paragraphIds**로 한다 — 중복 소속 프레임은
+    // 첫 thread만 소유하므로 둘째 thread에서 편집 프레임을 찾지 않는다.
+    // story 기록은 originOf로 되찾은 **원본 객체**에 한다 — validate 복사본에
+    // 기록하면 engine.data.threads 원본에 반영되지 않아 story가 소실된다
+    // (identity 계약).
+    const originThreads = threads;
+    const validThreads = ThreadEngine.validate(threads);
+    for (const judgedThread of validThreads) {
+      const judgedIds = (judgedThread.paragraphIds ?? []).filter(Boolean);
+      const sourceId = judgedIds.find(id => sourceFrameIds.has(id));
       if (sourceId === undefined) continue;
+      const thread = ThreadEngine.originOf(judgedThread, originThreads);
+      if (thread === undefined) continue;
       const sourcePe = this.findEngineById(sourceId);
       if (!(sourcePe instanceof ParagraphEngine)) continue;
       const oldStory = thread.content;

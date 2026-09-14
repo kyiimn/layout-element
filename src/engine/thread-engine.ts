@@ -182,15 +182,21 @@ export class ThreadEngine {
   }
 
   /**
-   * 문서 스레드 데이터를 검증한다.
+   * 문서 스레드 데이터를 검증한다 (first-claim-wins 소속 확정의 단일 소스).
    *
    * - 프레임 id가 1개 미만이면 유효하지 않음
-   * - 중복 프레임 id 금지 (한 문단은 최대 1개 thread 소속)
+   * - 중복 프레임 id 금지 (한 문단은 최대 1개 thread 소속 — 전역 순서 기준
+   *   첫 유효 thread만 소유)
    *
    * 중복 제거가 필요한 스레드만 새 객체를 만들고, 나머지는 **원본 객체
    * 참조를 그대로 반환**한다 — story writeback(`relayoutThreads`)이
    * `engine.data.threads`의 원본에 기록되어야 하므로 객체 identity가
    * 보존되어야 한다.
+   *
+   * RULES §1.10 (first-claim-wins): validate(정합성)·layoutThreads(배치 소유권)·
+   * writeback(story 기록)이 모두 이 단일 판정을 소비한다 — 별도 소유권 구현은
+   * 발산 원인이므로 금지. writeback은 소속 판정 후 기록 대상 **원본 객체**를
+   * `originOf`로 되찾아 기록한다.
    *
    * @param threads - 검증할 스레드 배열
    * @returns 유효한 스레드 배열 (무효 항목 제외)
@@ -211,6 +217,31 @@ export class ThreadEngine {
       valid.push(unique.length === ids.length ? thread : { ...thread, paragraphIds: unique });
     }
     return valid;
+  }
+
+  /**
+   * validate가 반환한 thread의 데이터 원본 객체를 되찾는다.
+   *
+   * validate가 복사본(`{ ...thread, paragraphIds }`)을 반환한 스레드를
+   * writeback이 story 기록 대상으로 삼을 때 사용한다 — 복사본에 기록하면
+   * `engine.data.threads`의 원본에 반영되지 않아 story가 소실된다
+   * (RULES §1.10 원본 identity 계약). id가 동일한 원본을 원본 배열에서
+   * 되찾는다. id가 없는 thread(`threadKeyOf`가 paragraphIds 결합 키)는
+   * 동일 paragraphIds를 가진 원본으로 매칭한다.
+   *
+   * @param validThread - validate 반환값의 thread (원본 또는 복사본)
+   * @param originThreads - 원본 스레드 배열 (engine.data.threads)
+   * @returns 원본 thread 객체. 없으면 undefined (원본이 제거된 경우)
+   */
+  public static originOf(validThread: ThreadData, originThreads: ThreadData[]): ThreadData | undefined {
+    const id = validThread.id;
+    if (id !== undefined) {
+      return originThreads.find(t => t.id === id);
+    }
+    const key = validThread.paragraphIds ?? [];
+    return originThreads.find(t => t.id === undefined
+      && (t.paragraphIds ?? []).length === key.length
+      && (t.paragraphIds ?? []).every((pid, i) => pid === key[i]));
   }
 
   /**
@@ -249,19 +280,12 @@ export class ThreadEngine {
     batchLookup?: ThreadFrameBatchLookup,
     opts?: ThreadLayoutOptions,
   ): ThreadLayoutResult[] {
-    // validate와 동일한 first-claim-wins로 프레임 소속을 확정한다 —
+    // 소속 확정은 ThreadEngine.validate의 first-claim-wins 단일 소스를 소비한다 —
     // 한 프레임이 여러 thread에 중복 소속되면 첫 유효 thread만 소유한다.
     // 소속이 확정되지 않으면 (a) head의 textContent를 다른 thread의 story로
     // 덮어쓰거나 (b) 다른 thread 소유 프레임의 배치를 재배치해 story 소실이
-    // 발생한다 (writeback 방어와 짝을 이루는 소유권 단일 소스).
-    const seenFrames = new Set<string>();
-    const valid = ThreadEngine.validate(threads).map(thread => {
-      const ids = (thread.paragraphIds ?? []).filter(id => !seenFrames.has(id));
-      for (const id of ids) seenFrames.add(id);
-      return ids.length === (thread.paragraphIds ?? []).length
-        ? thread
-        : { ...thread, paragraphIds: ids };
-    }).filter(thread => (thread.paragraphIds ?? []).length > 0);
+    // 발생한다 (writeback이 동일 판정을 소비 — RULES §1.10 first-claim-wins).
+    const valid = ThreadEngine.validate(threads);
     if (valid.length === 0) return [];
 
     // 배치 조회: 전 스레드 프레임 id를 한 번에 수집해 트리 1회 순회로 엔진 맵을

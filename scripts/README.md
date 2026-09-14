@@ -39,6 +39,7 @@
 | `verify-right-indent-tab-single-source.mjs` | 정합성 (원칙) | 탭 좌표 단일 소스: DOM === 엔진 === print | ALL PASS |
 | `verify-engine-node.mjs` | 정합성 (Node) | 엔진 계층 DOM-free 동작 | ALL PASS |
 | `verify-virtualization.mjs` | 정합성 (브라우저) | DOM 가상화 — park/unpark 엔진 완결, data 세터 부활 방지(G1), 재마운트 커서 복원+예약 렌더(P1), detach 서브트리 정리(P3), PageMountManager 윈도우/pin, parked 오버레이 회피(H), 리사이즈 attach/detach(I), 성능 실측(J), 스레드+park story 보존·체인 전파(K) | ALL PASS (47항목, 서버 없으면 자동 기동) |
+| `verify-page-reorder-parked.mjs` | 정합성 (브라우저) | parked placeholder 순서 추적 — parked 페이지 존재 시 data setter가 pages 순서를 재배치하면 placeholder도 이동해 수집 순서(= 엔진 입력 순서)가 데이터 순서와 일치, unpark 후 최종 순서 보존 | ALL PASS (4항목, 서버 없으면 자동 기동) |
 | `verify-obfuscated.mjs` | 정합성 (빌드) | 난독화 IIFE 번들 로딩 | ALL PASS |
 | `obfuscate.mjs` | 빌드 | IIFE 번들 난독화 | build 완료 |
 
