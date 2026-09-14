@@ -692,16 +692,26 @@ if (manager.isParagraphEditable(paragraph)) {
 3. B 단락의 textarea에 focus 발생
    → controllerB._onFocus() → EditManager._requestFocus(controllerB)
 4. _requestFocus 내부:
-   a. previousController = controllerA
-   b. controllerA._clearSelection() ← A 단락의 selection 해제!
-   c. controllerA._blurInternal() → textarea.blur() + _releaseFocus(controllerA)
-   d. _clearBoxSelectionForParagraph(previousParagraph) ← A 부모 box의 selected 제거
-   e. _selectBoxForParagraph(newParagraph) ← B 부모 box를 단일 selected로 설정
-   f. _focusedController = controllerB
-   g. focusChange + layoutSelectionChange 이벤트 발생
+   a. 범위-증명 신선화 가드: B가 스레드 프레임이고 ThreadEngine이 B를
+      범위-증명으로 스킵해 구 story 참조를 보유 중이면
+      engine.ensureThreadFramesFresh({B.id})로 신선화 + B.flushRender()
+      (§포커스 진입의 단일 관문 — 아래 참조)
+   b. previousController = controllerA
+   c. controllerA._clearSelection() ← A 단락의 selection 해제!
+   d. controllerA._blurInternal() → textarea.blur() + _releaseFocus(controllerA)
+   e. _clearBoxSelectionForParagraph(previousParagraph) ← A 부모 box의 selected 제거
+   f. _selectBoxForParagraph(newParagraph) ← B 부모 box를 단일 selected로 설정
+   g. _focusedController = controllerB
+   h. focusChange + layoutSelectionChange 이벤트 발생
 ```
 
 `_onBlur`에서 `_releaseFocus`를 호출하지 않는 이유: `controllerB.focus()`를 호출하면 브라우저가 `controllerA`의 textarea blur를 먼저 처리하고, 그 후 `controllerB`의 textarea focus를 처리한다. 만약 `_onBlur`에서 `_releaseFocus`를 호출하면, `_requestFocus`가 호출될 때 `_focusedController`가 이미 null이 되어 `previousController`를 잡지 못한다.
+
+#### 범위-증명 신선화 가드 — 포커스 진입의 단일 관문
+
+ThreadEngine의 범위-증명 스킵(§ TEXT_ENGINE 스레딩 — 편집 위치보다 앞쪽 slice를 갖는 프레임의 재배치 생략)은 스킵된 프레임이 **구 story 참조**를 보유한 상태로 남긴다. 이 상태에서 그 프레임을 편집 소스로 삼으면 `relayoutThreads(sources)`의 writeback이 구 story로 `threads[].content`를 덮어써 **다른 프레임의 편집이 롤백**된다 (실측 재현: 1→2→3페이지 순편집 후 2페이지 재편집 → 3페이지 편집 소실; IME 커밋·경계 backspace 스위트도 동일 소실).
+
+방어는 `EditManager._requestFocus`에서 수행한다 — 포커스 진입의 모든 경로(텍스트 클릭/더블클릭/`focusParagraph()`/테이블 키보드/커서 이관)가 `textarea focus → _onFocus → _requestFocus`로 수렴하므로 이 관문 하나로 전 경로가 방어된다. 가드는 `engine.ensureThreadFramesFresh({paragraph.id})`로 신선화가 필요하면(`ThreadEngine.hasStaleSkippedFrames`) 체인 전체 재배치 + 대상 프레임 커밋 후 `paragraph.flushRender()`로 textarea/runMap을 신 모델에 동기화한다. 검증: `scripts/verify-threading-browser.mjs` [10] (역방향 편집 — 상류 재편집 후 하류 편집 보존).
 
 #### 포커스 시 부모 box 레이아웃 선택
 
@@ -767,7 +777,7 @@ focusParagraph(
 2. `target`이 `LayoutParagraphElement`이면 그대로 사용한다.
 3. 단락이 텍스트 편집 모드가 아니면 `editableText = true`로 설정하여 `TextEditController`를 생성한다.
 4. 등록된 컨트롤러 중 해당 단락의 컨트롤러를 찾는다.
-5. `controller.focus()`로 textarea에 포커스를 준다.
+5. `controller.focus()`로 textarea에 포커스를 준다. 포커스가 `_onFocus → _requestFocus`로 전달되며, `_requestFocus`의 범위-증명 신선화 가드(§3.6.5)가 스레드 프레임을 신선화한다.
 6. `options.selection`이 있으면 `controller.setSelection(selection)`을 호출한다. `setSelection`은 내부적으로 커서 위치를 `focus.textOffset`으로 이동시킨다.
 7. `options.selection`이 없고 `options.cursorOffset`이 있으면 `controller.setCursor({ textOffset: cursorOffset })`을 호출한다.
 
@@ -2093,6 +2103,8 @@ return new DOMRect(
 4. span 목록에서 y 좌표로 binary search. y가 span rect 안에 들어오면 x 좌표를 확인.
 5. 정확히 span 위에 있으면 해당 span의 `data-offset`을 source offset로 변환해 반환.
 6. span 위가 아니면 같은 행(`top` 동일)의 span 중 x 거리가 가장 가까운 span을 선형 탐색으로 찾는다.
+
+**라인 div 탐색의 포함 판정 우선 (엔터 후 커서 +1 불일치 수정, 2026-09):** 라인 소속 판별의 선행 단계(라인 div 선택)는 두 단계로 동작한다 — (1) 클릭 y가 라인 div rect `[top, top+height)` 내부에 포함되는 라인을 먼저 찾고, (2) 포함 라인이 없을 때만 라인 중심 거리 폴백. 이유: Enter로 쪼개진 다음 블록의 leading space span은 height=0으로 라인 top 경계에만 걸려 rect 중심이 라인 경계와 일치한다. 중심 거리만 쓰면 이전/현재 라인이 동률(dist 동일)이 되어 **위 라인**이 반환되고, 개행 뒤 텍스트 클릭이 한 라인 앞 오프셋으로 매핑되어 커서가 실제보다 +1 어긋났다 (사용자 보고: 2번째 스레드 프레임부터 엔터 후 커서 불일치). 포함 판정 우선으로 경계상 공백 글자 클릭도 소속 라인에 귀속된다. 검증: `scripts/verify-threading-browser.mjs` [11].
 
 ### 9.3 `getNearestOffsetFromPoint()`의 전략
 

@@ -630,6 +630,22 @@ export class EditManager {
     const previousController = this._focusedController;
     const previousParagraph = previousController?.['_paragraph'] as LayoutParagraphElement | undefined;
 
+    // 범위-증명 편집 안전장치 (단일 관문): 스킵되어 구 story 참조를 보유한
+    // 스레드 프레임을 편집 소스로 삼기 전에 신선화한다. 생략하면 커밋이 구
+    // 내용 기반으로 이뤄져 다른 프레임의 편집이 덮어써진다 (실측: IME 커밋·
+    // 경계 backspace·역방향 페이지 편집 시나리오에서 story 소실 재현).
+    // 포커스 진입의 모든 경로(focusParagraph/텍스트 클릭/더블클릭/테이블
+    // 키보드)가 textarea focus → 이 관문으로 수렴하므로 여기서 1회만 검사한다.
+    // 신선화 시 textarea/runMap은 postRender 동기화가 필요하므로 flushRender한다.
+    const newParagraph = controller['_paragraph'] as LayoutParagraphElement;
+    if (newParagraph.id) {
+      const engine = this._threadEngine;
+      const refreshed = engine?.ensureThreadFramesFresh(new Set([newParagraph.id]));
+      if (refreshed) {
+        newParagraph.flushRender();
+      }
+    }
+
     // _blurInternal이 _releaseFocus를 호출하여 focusChange를 dispatch할 수 있으므로,
     // 먼저 _focusedController를 null로 설정하여 _releaseFocus가 no-op이 되도록 한다.
     this._focusedController = null;
@@ -642,7 +658,6 @@ export class EditManager {
     if (previousParagraph) {
       this._clearBoxSelectionForParagraph(previousParagraph);
     }
-    const newParagraph = controller['_paragraph'] as LayoutParagraphElement;
     this._selectBoxForParagraph(newParagraph);
     this._lastFocusedBox = newParagraph.parentElement instanceof LayoutBoxElement
       ? newParagraph.parentElement
@@ -1142,23 +1157,6 @@ export class EditManager {
 
     if (!paragraph.editableText) {
       paragraph.editableText = true;
-    }
-
-    // 범위-증명 편집 안전장치: 스킵되어 구 story 참조를 보유한 스레드 프레임을
-    // 편집 소스로 삼기 전에 신선화한다. 생략하면 커밋이 구 내용 기반으로
-    // 이뤄져 다른 프레임의 편집이 덮어써진다 (실측: IME 커밋·경계 backspace
-    // 스위트에서 story 소실 재현). 신선화 시 textarea/runMap은 postRender
-    // 동기화가 필요하므로 focused 문단을 flush한다.
-    const engine = this._threadEngine;
-    if (paragraph.id) {
-      const refreshed = engine?.ensureThreadFramesFresh(new Set([paragraph.id]));
-      if (refreshed) {
-        if (this.focusedParagraph === paragraph) {
-          paragraph.flushRender();
-        } else {
-          paragraph.scheduleRender();
-        }
-      }
     }
 
     let controller = this._findControllerByParagraph(paragraph);

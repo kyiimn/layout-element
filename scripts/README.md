@@ -606,16 +606,34 @@ npx tsx scripts/verify-threading.mjs   # 104항목 ALL PASS
 8. **f2 클릭(CDP) 진입 → 실제 타이핑 — 컨트롤러 직접 파싱 경로** — `_getSourceOffsetFromEvent`가 span dataset(프레임 로컬)을 직접 파싱한다: 절대 변환이 없으면 f2 클릭이 로컬 오프셋을 커서로 주고, 타이핑이 head 영역에 삽입돼 **"커서만 이동하고 글자가 안 써지는"** 회귀가 난다 (실측 재현). 합성 dispatchEvent로는 span 히트가 재현되지 않으므로 독립 페이지 로드에서 CDP 마우스·키보드로 검증한다: (a) f2 span 클릭 → f2 편집 포커스 (b) 클릭 커서가 절대 오프셋 (c) 실제 타이핑 → f2 화면 렌더 + 포커스 유지
 9. **f2 연속 타이핑 — prefix 캐시 좌표계 (비-헤드 프레임)** — `_buildPrefixCache`가 절대 캐럿과 로컬 컬럼 글자수를 비교하면 전 컬럼이 prefix로 분류돼 재배치가 0회가 된다 — **두 번째 키스트로크부터 새 글자가 화면에 안 쓰지는 회귀** (영문: 커서만 이동 / 한글: 조합 span이 커밋 순간 사라지는 플리커 = "원본으로 돌아갔다가"). (a) 영문 5자 연속 타이핑 → "abcde" 전부 렌더 (b) 한글 2단어 연속 조합 → 커밋 전부 렌더
 
-**검증 항목 확장 (범위-증명 편집 안전장치)**: 브라우저 검증은 35항목으로 확장되었다 (아래 10):
+**검증 항목 확장 (범위-증명 편집 안전장치 + 엔터 커서)**: 브라우저 검증은 45항목으로 확장되었다 (아래 10~12):
 10. **스킵 프레임 편집 소싱 안전장치 (범위-증명 §4.6)** — 스트레스 타이핑으로
     스킵 프레임을 만든 뒤 (a) `focusParagraph` 재포커스가 `ensureThreadFramesFresh`
     가드를 발화(조건부 가드의 재포커스 누락 방어) (b) 신선화 후 focused 문단
     flush로 textarea/runMap이 신 모델 동기 (c) IME 커밋('한')이 story에 정확히
     반영 (구 story 리버트 회귀 방어) (d) 경계 backspace가 head 마지막 글자 삭제
+11. **역방향 편집 — 상류 재편집 후 하류 편집 보존** — 1→2→3페이지 순편집(Q/W/E) 후
+    2페이지 재편집(R) 시 3페이지 편집(E)이 살아있어야 한다. ThreadEngine 범위-증명
+    스킵이 상류 프레임을 스킵해 구 story 참조를 남기면, 그 프레임이 **클릭 경로**
+    (`controller.focus` = textarea focus → `_requestFocus`)의 편집 소스가 될 때
+    writeback이 구 story로 `threads[].content`를 덮어써 하류 편집이 롤백되었다
+    (사용자 보고: 가상화 데모에서 3→2 페이지 역순 편집 시 앞 페이지 편집 소실).
+    신선화 가드가 `focusParagraph`에서 `_requestFocus` 단일 관문으로 이동되어
+    모든 포커스 진입 경로가 방어된다. 검증: story 4문자(Q/W/E/R) 전부 보존 +
+    하류 프레임 엔진·DOM 3계층 편집 보존 + 엔터 직후 커서 offset+1 계약.
+12. **엔터 후 개행 뒤 텍스트 클릭 매핑 — 0높이 공백 span 라인 경계 함정** —
+    Enter로 쪼개진 다음 블록의 leading space span은 height=0으로 라인 top
+    경계에만 걸려 rect 중심이 라인 경계와 일치한다. 라인 div 중심 거리 탐색은
+    이전/현재 라인이 동률(dist 동일)이 되어 **위 라인을 반환** → 개행 뒤
+    텍스트 클릭이 한 라인 앞 오프셋으로 매핑되어 커서가 실제보다 +1 어긋났다
+    (사용자 보고: 2번째 스레드 프레임부터 엔터 후 커서 +1 불일치).
+    `getCharOffsetFromPoint`가 라인 div rect 포함 판정([top, top+height)
+    내부)을 중심 거리보다 우선하도록 수정. 검증: 라인1 첫 span 클릭 매핑 =
+    소속 오프셋 + 엔터 후 커서 offset+1 유지 + 커서가 개행 뒤 라인에 그려짐.
 
 **실행**:
 ```bash
-npx tsx scripts/verify-threading-browser.mjs   # 35항목 ALL PASS (서버 없으면 자동 기동)
+npx tsx scripts/verify-threading-browser.mjs   # 45항목 ALL PASS (서버 없으면 자동 기동)
 ```
 
 ### `verify-print-image-overlap.mjs` — 이미지/오버랩 수정의 print 반영 (엔진)

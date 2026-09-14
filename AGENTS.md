@@ -44,7 +44,7 @@ npx tsx scripts/verify-hanging-punctuation.mjs # 걸침표(행말/행두) 엔진
 npx tsx scripts/verify-hanging-punctuation-browser.mjs # 걸침표 ON 상태 실제 화면 페인트 (파트 밖 span/클리핑/히트테스트)
 npx tsx scripts/verify-word-wrap.mjs # 워드 래핑(영문·숫자 단위 줄바꿈) 엔진 전 파이프라인 정합성
 npx tsx scripts/verify-threading.mjs # 텍스트 스레딩 엔진 전 파이프라인 정합성 (지오메트리 행렬/childrenData 계약/writeback 방어/print 패리티)
-npx tsx scripts/verify-threading-browser.mjs # 스레딩 화면 진실 (타이핑 전파 seam/테두리 tail 분기/round-trip)
+npx tsx scripts/verify-threading-browser.mjs # 스레딩 화면 진실 (타이핑 전파 seam/테두리 tail 분기/round-trip/역방향 편집 보존/엔터 후 클릭 매핑)
 npx tsx scripts/verify-overflow-cursor-clamp.mjs # 오버플로(숨김) 라인 커서 진입 금지 클램프 (화살표·End 이동 경계)
 npx tsx scripts/verify-caret-parking.mjs # 커서 주차 회귀 코퍼스 (End/Home/ArrowUp/Down × 커서 px 좌표+bias — 커서 내비게이션 변경 시 선행 실행)
 ```

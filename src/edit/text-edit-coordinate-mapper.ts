@@ -470,18 +470,35 @@ export class TextEditCoordinateMapper {
       (child): child is HTMLDivElement => child.tagName === 'DIV',
     );
 
-    // y에 가장 가까운 라인 div 찾기
+    // y에 가장 가까운 라인 div 찾기.
+    // 우선 "y가 라인 div rect [top, top+height) 내부"인 라인을 찾는다 —
+    // leading space 공백 span은 height=0으로 라인 top 경계에만 걸려 중심이
+    // 라인 경계와 일치한다. 이 상태에서 중심 거리 판정은 이전/현재 라인이
+    // 동률(dist 동일)이 되어 위 라인을 반환하고, 개행 뒤 텍스트 클릭이
+    // 한 라인 앞 오프셋으로 매핑된다 (사용자 보고: 엔터 후 커서 +1 불일치).
+    // 포함 판정을 우선하면 경계상 공백 글자 클릭도 소속 라인에 귀속된다.
+    // 포함 라인이 없을 때만(컬럼 상하 여백 등) 중심 거리 폴백을 쓴다.
     let closestLineEl: HTMLDivElement | null = null;
     let closestLineIndex = -1;
-    let closestLineDist = Infinity;
     for (let i = 0; i < lineEls.length; i++) {
       const lineRect = lineEls[i].getBoundingClientRect();
-      const lineCenterY = lineRect.top + lineRect.height / 2;
-      const dist = Math.abs(y - lineCenterY);
-      if (dist < closestLineDist) {
-        closestLineDist = dist;
+      if (y >= lineRect.top && y < lineRect.bottom) {
         closestLineEl = lineEls[i];
         closestLineIndex = i;
+        break;
+      }
+    }
+    if (!closestLineEl) {
+      let closestLineDist = Infinity;
+      for (let i = 0; i < lineEls.length; i++) {
+        const lineRect = lineEls[i].getBoundingClientRect();
+        const lineCenterY = lineRect.top + lineRect.height / 2;
+        const dist = Math.abs(y - lineCenterY);
+        if (dist < closestLineDist) {
+          closestLineDist = dist;
+          closestLineEl = lineEls[i];
+          closestLineIndex = i;
+        }
       }
     }
     if (!closestLineEl) return null;

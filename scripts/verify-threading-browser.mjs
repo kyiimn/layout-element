@@ -798,6 +798,171 @@ console.log('\n[9] f2 연속 타이핑 — prefix 캐시 좌표계 (비-헤드 �
   }
 }
 
+// ═══ [10] 역방향 편집 — 후속 프레임 편집 후 상류 재편집 시 하류 편집 보존 ═══
+// ThreadEngine 범위-증명 스킵이 상류 프레임을 스킵해 구 story 참조를 남기면,
+// 그 프레임이 클릭 편집 소스가 될 때 writeback이 구 story로 thread.content를
+// 덮어써 하류 프레임의 편집이 롤백되었다 (사용자 보고: 1→2→3 편집 후 2페이지
+// 재편집 → 3페이지 편집 소실). 신선화 가드가 _requestFocus 단일 관문으로
+// 이동되어 모든 포커스 진입 경로가 방어된다. 클릭 경로(controller.focus)로 검증.
+console.log('\n[10] 역방향 편집 — 상류 재편집 후 하류 편집 보존 (범위-증명 스킵 × 클릭 경로)');
+{
+  await page.goto(`${baseUrl}/${PAGE_PATH}?rev=${Date.now()}`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(2500);
+  const rev = await page.evaluate(`(async () => {
+    ${pageUtils}
+    const page = document.querySelector('x-layout-page');
+    const docEl = document.querySelector('x-layout-document') ?? page;
+    const engine = docEl.engine ?? page.engine;
+    const em = page.editManager;
+    em.textEditMode = true;
+    const ids = threadFrameIds(page);
+    const storyOf = () => plainOf(engine.data.threads[0].content);
+    const waitSettle = () => new Promise(r2 => setTimeout(r2, 700));
+    // 각 프레임의 coverage 내부 위치(contentFrom+3)에 CDP 없이 컨트롤러
+    // focus(= textarea focus → _requestFocus, 실제 클릭과 동일 진입)로 타이핑한다.
+    const typeIn = async (frameId, marker) => {
+      const el = frameOf(page, frameId);
+      if (!el.editableText) { em.addEditableParagraph(frameId); el.editableText = true; }
+      await new Promise(r2 => setTimeout(r2, 150));
+      const ctl = [...em._controllers].find(c2 => c2._paragraph === el);
+      if (!ctl) return false;
+      ctl.focus();
+      await new Promise(r2 => setTimeout(r2, 150));
+      const pe = engine.findEngineById(frameId);
+      ctl.setCursor({ textOffset: pe.contentFrom + 3 });
+      document.execCommand('insertText', false, marker);
+      await waitSettle();
+      return true;
+    };
+    // 정방향 3편집: f0 → f1 → f2 (Q/W/E)
+    const typed1 = await typeIn(ids[0], 'Q');
+    const typed2 = await typeIn(ids[1], 'W');
+    const typed3 = await typeIn(ids[2], 'E');
+    const storyForward = storyOf();
+    // 역방향: 상류 f1 재편집 (R) — 하류 f2의 E가 살아있어야 한다
+    const typed4 = await typeIn(ids[1], 'R');
+    const storyAfter = storyOf();
+    const f2Pe = engine.findEngineById(ids[2]);
+    const f2El = frameOf(page, ids[2]);
+    // 엔터 경계 정합: f1(중간 프레임)에서 Enter 1회 → 삽입 후 커서/매핑 상태 측정.
+    // 삽입 직후 커서는 개행 다음(offset+1)이고, 매핑은 개행 다음 위치에서 라인 rect
+    // 폴백 없이 배치되어야 한다 (사용자 보고: 커서 +1 불일치).
+    await typeIn(ids[1], 'P');
+    const f1Pe2 = engine.findEngineById(ids[1]);
+    const f1Ctl2 = [...em._controllers].find(c2 => c2._paragraph === frameOf(page, ids[1]));
+    const enterBase = f1Pe2.contentFrom + 3;
+    f1Ctl2.setCursor({ textOffset: enterBase });
+    await new Promise(r2 => setTimeout(r2, 150));
+    document.execCommand('insertText', false, String.fromCharCode(10));
+    await waitSettle();
+    const cursorAfterEnter = f1Ctl2._cursorModel.offset;
+    const f1LocalCursor = cursorAfterEnter - f1Pe2.contentFrom;
+    const enterChecks = {
+      cursorAfterEnter,
+      enterBase,
+      f1LocalCursor,
+      // 커서는 개행 다음(삽입점+1)이어야 한다 — 삽입점이 contentFrom+3이므로
+      // story 절대 커서는 contentFrom+4 (= local 4)
+      cursorIsAfterNewline: f1LocalCursor === 4,
+      // 개행 이후 글자의 매핑이 존재하는지 (line rect 폴백으로 커서가 라인 맨앞에
+      // 그려지면 커서가 실제보다 +1 어긋난 것으로 체감된다)
+      mappingAfterNewline: f1Ctl2._mapper.getCursorPlacement(cursorAfterEnter) !== null
+        || f1Ctl2._mapper.getCursorPlacement(cursorAfterEnter + 1) !== null,
+      placementAtCursor: f1Ctl2._mapper.getCursorPlacement(cursorAfterEnter),
+      placementBefore: f1Ctl2._mapper.getCursorPlacement(cursorAfterEnter - 1),
+    };
+    return {
+      typed: [typed1, typed2, typed3, typed4].every(v => v === true),
+      frameIds: ids,
+      forward: {
+        q: storyForward.includes('Q'), w: storyForward.includes('W'), e: storyForward.includes('E'),
+      },
+      after: {
+        q: storyAfter.includes('Q'), w: storyAfter.includes('W'),
+        e: storyAfter.includes('E'), r: storyAfter.includes('R'),
+      },
+      f2EngineE: f2Pe.plainText.includes('E'),
+      f2DomE: domTextOf(f2El).flat().join('').includes('E'),
+      enterChecks,
+    };
+  })()`);
+  check('역방향 시나리오 실행 (4편집 전부 진입 성공)', rev.typed === true);
+  check('정방향 3편집 전부 story 반영 (Q/W/E)',
+    rev.forward.q && rev.forward.w && rev.forward.e, JSON.stringify(rev.forward));
+  check('역방향(상류 재편집) 후 story 전부 보존 (Q/W/E/R)',
+    rev.after.q && rev.after.w && rev.after.e && rev.after.r, JSON.stringify(rev.after));
+  check('하류 프레임 엔진 편집 보존 (E in f2 plain)', rev.f2EngineE === true);
+  check('하류 프레임 화면 편집 보존 (E in f2 DOM)', rev.f2DomE === true);
+  if (rev.enterChecks) {
+    const ec = rev.enterChecks;
+    console.log(`  [enter] cursor=${ec.cursorAfterEnter} base=${ec.enterBase} local=${ec.f1LocalCursor} placement=${JSON.stringify(ec.placementAtCursor)}`);
+    check('엔터 후 커서가 \\n 다음에 위치 (offset+1 계약)', ec.cursorIsAfterNewline === true, JSON.stringify(ec));
+    check('엔터 후 \\n 다음 위치 매핑 존재 (폴백 라인맨앞 아님)', ec.mappingAfterNewline === true, JSON.stringify(ec.mappingAfterNewline));
+  }
+}
+
+console.log('\n[11] 엔터 후 개행 뒤 텍스트 클릭 매핑 — 0높이 공백 span 라인 경계 함정');
+{
+  // 사용자 보고: 2번째 스레드 프레임부터 엔터 1회 → 개행 이후 텍스트에서
+  // 커서가 실제보다 +1. 근복: Enter로 쪼개진 다음 블록의 leading space span은
+  // height=0으로 라인 top 경계에만 걸려 rect 중심이 라인 경계와 일치한다.
+  // 라인 div 근접 탐색(중심 거리)은 이전/현재 라인이 동률이 되어 위 라인을
+  // 반환 → 클릭이 한 라인 앞 오프셋으로 매핑. getCharOffsetFromPoint의
+  // 포함 판정 우선으로 소속 라인에 귀속되도록 수정되었다.
+  await page.goto(`${baseUrl}/${PAGE_PATH}?entm=${Date.now()}`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(2500);
+  const enterMap = await page.evaluate(`(async () => {
+    const em = document.querySelector('x-layout-page').editManager;
+    em.textEditMode = true;
+    const para = [...document.querySelectorAll('x-layout-paragraph')].find(p => p.id === 'thread2-frame2');
+    const engine = document.querySelector('x-layout-document').engine;
+    const pe0 = engine.findEngineById('thread2-frame2');
+    const out = { contentFromBefore: pe0.contentFrom };
+    em.focusParagraph(para);
+    await new Promise(r2 => setTimeout(r2, 300));
+    const ctl = em._focusedController;
+    // 라인 0 중간(로컬 2, 공백 앞)으로 커서 → CDP 없이 Enter 삽입 (keydown 경로)
+    ctl.setCursor({ textOffset: pe0.contentFrom + 2 });
+    await new Promise(r2 => setTimeout(r2, 200));
+    ctl._textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await new Promise(r2 => setTimeout(r2, 900));
+    const pe = engine.findEngineById('thread2-frame2');
+    const paraEl = [...document.querySelectorAll('x-layout-paragraph')].find(p2 => p2.id === 'thread2-frame2');
+    const col = paraEl.querySelector('x-layout-column');
+    const lineEls = [...col.shadowRoot.children].filter(c2 => c2.tagName === 'DIV');
+    const visibleLineEls = lineEls.filter(l2 => l2.style.display !== 'none');
+    // 라인 1(개행 뒤 블록 첫 라인) 첫 span의 소스 오프셋(로컬→절대)
+    const line1 = visibleLineEls[1];
+    const spans = [...line1.querySelectorAll('span[data-source-offset]:not([data-temporary])')];
+    const s = spans[0];
+    const sr = s.getBoundingClientRect();
+    const m = ctl._mapper;
+    const mapped = m.getNearestOffsetFromPoint(sr.left + 1, sr.top + sr.height / 2);
+    const expectAbs = Number(s.dataset.sourceOffset) + pe.contentFrom;
+    // 커서 좌표 정합: 엔터 후 커서(개행 다음)의 px 좌표가 라인 1에 그려지는지
+    const cursorElTop = ctl._cursorEl.top;
+    const line1TopLocal = line1.getBoundingClientRect().top - paraEl.getBoundingClientRect().top;
+    return {
+      line1FirstSpanLocal: Number(s.dataset.sourceOffset),
+      expectAbs,
+      mappedAbs: mapped ? mapped.textOffset : null,
+      offByOne: mapped ? mapped.textOffset - expectAbs : null,
+      cursor: ctl._cursorModel.offset,
+      cursorTop: cursorElTop,
+      line1TopLocal,
+    };
+  })()`);
+  check('엔터 후 라인1 첫 span 클릭 매핑 — 소속 오프셋 반환 (동률 위라인 아님)',
+    enterMap.mappedAbs === enterMap.expectAbs,
+    `mapped=${enterMap.mappedAbs} expect=${enterMap.expectAbs} (spanLocal=${enterMap.line1FirstSpanLocal})`);
+  check('엔터 후 커서가 개행 다음 위치 유지',
+    enterMap.cursor === enterMap.expectAbs + 1,
+    `cursor=${enterMap.cursor} expect=${enterMap.expectAbs + 1}`);
+  check('엔터 후 커서가 개행 뒤 라인(라인1)에 그려짐',
+    Math.abs(enterMap.cursorTop - enterMap.line1TopLocal) < 2,
+    `cursorTop=${enterMap.cursorTop} line1Top=${enterMap.line1TopLocal}`);
+}
+
 console.log('\n[4] round-trip — 직렬화 → 재주입 체인 동등');
 {
   check('threads 3개 보존', r.roundTrip.threadsPreserved);
