@@ -339,6 +339,24 @@ export class ParagraphEngine {
   /** 성능 캐시: 오버랩 요소의 mm rect 캐시. 렌더링 사이클마다 한 번 구성 후 재사용한다. */
   private _overlayRectsMm: Map<BoxEngine, MmRect> | null = null;
 
+  /**
+   * 라인 경계 walk 캐시 (A-9) — `_cursorLineWalk()`의 결과.
+   * `columnContents`는 배치 사이클 사이 불변이므로 walk 결과도 불변이다.
+   * 무효화 지점은 `_layoutCache`와 동일하다 (resetIncrementalState /
+   * updateThreadContext / 배치 완료 저장 시 함께 갱신).
+   */
+  private _cursorLineWalkCache: {
+    ranges: CursorLineRange[][];
+    visibleCount: number;
+    maxCursorOffset: number;
+    /** 마지막 visible 라인 데이터 (A-7 — `lastVisibleLine`의 파생 소스) */
+    lastVisibleLineData: TextLineData | undefined;
+    /** overflow 라인 부재 (A-7 — `_captureThreadTail`의 소진 판정 파생) */
+    overflowHadNoOverflow: boolean;
+    /** tail 산식 visible 카운트 (A-7 — 파트 합계 + endOfBlock마다 +1, `\n` 포함 근사) */
+    threadVisibleCount: number;
+  } | null = null;
+
   /** Skeleton 캐시: 입력 매개변수 해시가 동일하면 _layoutTextIntoColumns() 결과를 재사용. */
   private _layoutCache: {
     hash: string;
@@ -1795,6 +1813,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   private _layoutTextIntoColumns(): void {
     if (this.columnCount < 1) return;
 
+    // A-9/A-7: 배치 사이클 시작 — 이전 배치의 walk 캐시는 무효다.
+    // `_captureThreadTail`(배치 중, 캐시 저장 직전)이 walk를 소비하므로
+    // stale walk를 읽으면 tail이 이전 배치 기준이 된다 (verify-virtualization
+    // K3 실측 결함 — Q 삽입 후 head tail이 stale walk에서 산출됨).
+    this._cursorLineWalkCache = null;
+
     const inputHash = this._computeLayoutInputHash();
     if (this._layoutCache && this._layoutCache.hash === inputHash) {
       this._columnContents = this._layoutCache.columnContents;
@@ -1883,6 +1907,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       effTextStyleRef: this.effectiveTextStyle,
       effParagraphStyleRef: this.effectiveParagraphStyle,
     };
+    // 배치가 columnContents를 재작성했다 — walk 캐시를 무효화한다 (A-9).
+    this._cursorLineWalkCache = null;
 
     if (caretOffset !== undefined && caretOffset > 0 && verticalAlign !== 'center' && verticalAlign !== 'bottom') {
       this._buildPrefixCache(caretOffset);
@@ -2051,29 +2077,16 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       this._overflowContentFrom = -1;
       return;
     }
-    const effectiveColumnHeight = parentHeight + (this._lineHeight - this.fontSize);
-    let visibleCount = 0;
-    let exhausted = true;
-
-    columnLoop: for (let c = 0; c < this._columnContents.length; c++) {
-      const lines = this._columnContents[c] ?? [];
-      let accumulatedHeightMm = 0;
-      let hasOverflowed = false;
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const lineHeightMm = line?.lineHeight ?? this._lineHeight;
-        const isOverflow = hasOverflowed
-          || accumulatedHeightMm + lineHeightMm > effectiveColumnHeight + 1e-6;
-        if (isOverflow) {
-          hasOverflowed = true;
-          exhausted = false;
-          break columnLoop;
-        }
-        accumulatedHeightMm += lineHeightMm;
-        visibleCount += line.parts.reduce((s, p) => s + p.content.length, 0);
-        if (line.endOfBlock) visibleCount++;
-      }
-    }
+    // A-7: visible 카운트와 소진 판정은 라인 경계 walk(`_cursorLineWalk`)에서
+    // 파생한다 — 구 자체 walk(`columnLoop`)는 동일 오버플로 산식의 복제였다.
+    // 파생 산식 대응:
+    // - visibleCount === walk.threadVisibleCount (파트 합계 + endOfBlock마다 +1)
+    // - exhausted === walk.overflowBoundary === null (overflow 라인 부재)
+    //   단, clamp는 "용량은 남았지만 인위적으로 끊는" 입력이므로 walk의
+    //   라인 높이 판정만으로는 exhausted가 true — 아래 clamp 가드가 소유한다.
+    const walk = this._cursorLineWalk();
+    const exhausted = walk.overflowHadNoOverflow;
+    const visibleCount = walk.threadVisibleCount;
 
     // 전체 라인이 수용되면 tail 없음 (마지막 라인의 endOfText는 tail 아님).
     // 단, 경계 교정 clamp가 배치를 제한했으면 tail은 clamp 위치다 —
@@ -2154,8 +2167,10 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * - `threadTail`: 체인 마지막 프레임 여부. 중간 프레임의 overflow는
    *   소비되므로 오류 표시에서 제외한다.
    *
-   * `threadTail`은 표시 전용 시맨틱이다 — 배치 입력이 아니므로 캐시를
-   * 무효화하지 않는다. `contentFrom` 변경과 `isThreadFrame` 전환만 무효화한다
+   * `threadTail`은 P2 overset 컷의 배치 입력이다 — `oversetCutArmed`가
+   * `!threadTail`을 조건으로 하므로 threadTail 전환은 `_overflow` 산출을
+   * 바꾼다. 캐시 무효화 조건에 포함한다 (감사 A-8 — "표시 전용" 주석과의
+   * 모순 해소). `contentFrom` 변경과 `isThreadFrame` 전환도 무효화한다
    * (`isThreadFrame` 전환 시 캐시된 `overflowContentFrom`(-1)이 stale해진다).
    * `_layoutCache` 해시에는 `contentFrom > 0`일 때만 `tf:` 키로 반영된다.
    *
@@ -2171,14 +2186,16 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const contentFrom = ctx.contentFrom ?? this._contentFrom;
     const isThreadFrame = ctx.isThreadFrame ?? this._isThreadFrame;
     const tailClampFrom = ctx.tailClampFrom ?? this._tailClampFrom;
+    const threadTailChanged = ctx.threadTail !== undefined && ctx.threadTail !== this._threadTail;
     if (contentFrom !== this._contentFrom || isThreadFrame !== this._isThreadFrame
-      || tailClampFrom !== this._tailClampFrom) {
+      || tailClampFrom !== this._tailClampFrom || threadTailChanged) {
       this._contentFrom = contentFrom;
       this._isThreadFrame = isThreadFrame;
       this._tailClampFrom = tailClampFrom;
       this._layoutCache = null;
       this._prefixCache = null;
       this._overflowContentFrom = -1;
+      this._cursorLineWalkCache = null;
     }
   }
 
@@ -2328,6 +2345,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       effTextStyleRef: this.effectiveTextStyle,
       effParagraphStyleRef: this.effectiveParagraphStyle,
     };
+    // 배치가 columnContents를 재작성했다 — walk 캐시를 무효화한다 (A-9).
+    this._cursorLineWalkCache = null;
 
     this._buildPrefixCache(caretOffset);
   }
@@ -3625,6 +3644,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     }
     this._layoutCache = null;
     this._overlayRectsMm = null;
+    this._cursorLineWalkCache = null;
   }
 
   /**
@@ -4564,31 +4584,17 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * console.log(model.totalChars - model.visibleChars); // 오버플로우 문자 수
    */
   /**
-   * 마지막 visible 라인 (라인 높이 순회 — `visibleChars`/`_captureThreadTail`
-   * 판정과 동일). 스레딩 경계 교정(ThreadEngine)이 프레임 경계의 금칙
-   * 상태를 읽는 단일 소스다.
+   * 마지막 visible 라인 (라인 경계 walk 파생 — A-7). 스레딩 경계 교정
+   * (ThreadEngine)이 프레임 경계의 금칙 상태를 읽는 단일 소스다.
+   *
+   * 구 자체 walk(`effectiveHeight + 1e-6` 누적)는 `_cursorLineWalk`의 오버플로
+   * 판정과 동일 산식을 복제한 제3 walk였다 — 파생으로 교체해 발산을 구조적으로
+   * 소거한다 (감사 A-7).
    *
    * @returns 마지막 visible 라인 데이터 (visible 라인이 없으면 undefined)
    */
   public get lastVisibleLine(): TextLineData | undefined {
-    const parentHeight = this._inheritStyle?.parentHeight ?? 0;
-    if (parentHeight <= 0) return undefined;
-    const effectiveHeight = parentHeight + (this._lineHeight - this.fontSize);
-    let last: TextLineData | undefined;
-    for (const column of this._columnContents) {
-      let accumulated = 0;
-      let overflowed = false;
-      for (const line of column) {
-        const lineH = line?.lineHeight ?? this._lineHeight;
-        if (overflowed || accumulated + lineH > effectiveHeight + 1e-6) {
-          overflowed = true;
-          break;
-        }
-        accumulated += lineH;
-        last = line;
-      }
-    }
-    return last;
+    return this._cursorLineWalk().lastVisibleLineData;
   }
 
   public get visibleChars(): number {
@@ -4638,11 +4644,14 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * `\n` 소비). `visibleChars`/`maxVisibleCursorOffset`도 이 walk를 소비한다 —
    * 세 walk가 분기하면 배치 불일치가 발생하므로 구조적으로 통합한다.
    *
-   * **소유권 규칙 (경계 offset 이중 소속)**: 라인 i의 `endOffset`은 라인 i+1의
-   * `startOffset`과 같은 값이다 — 이 경계 offset은 편집 커서 기준 다음 라인
-   * 소속(`getLineInfoBySourceOffset` ≥ start 규칙)이며, 시각적으로는 라인 i 끝
-   * (phantom end placement)을 의미할 수 있다. 어느 쪽인지는 커서의 배치
-   * (atEndOfChar/bias)가 결정한다 — 이 게터는 경계 값만 소유한다.
+   * **소유권 규칙 (경계 offset 이중 소속)**: 소프트 래핑된 라인 i의 `endOffset`은
+   * 라인 i+1의 `startOffset`과 같은 값이다 — 이 경계 offset은 편집 커서 기준
+   * 다음 라인 소속(`getLineInfoBySourceOffset` ≥ start 규칙)이며, 시각적으로는
+   * 라인 i 끝 (phantom end placement)을 의미할 수 있다. 어느 쪽인지는 커서의
+   * 배치 (atEndOfChar/bias)가 결정한다 — 이 게터는 경계 값만 소유한다.
+   * endOfBlock 라인은 예외다: `\n`이 실제로 존재하면 endOffset은 `\n` 위치
+   * (다음 라인 startOffset - 1 — `\n`은 라인 i 소유), 텍스트 끝(endOfBlock이면서
+   * `\n`이 없음)이면 endOffset은 텍스트 끝 offset이다.
    *
    * 게터는 프레임 로컬 오프셋을 반환한다 — 비-스레드 문단은 contentFrom이 0이므로
    * story 절대 오프셋과 동일하다. 스레드 프레임의 story 절대 변환은 소비자
@@ -4676,9 +4685,21 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 
   /**
    * 라인 경계 walk의 단일 구현 — visibleChars/maxVisibleCursorOffset/cursorLineRanges가 공유한다.
+   * 결과는 `_cursorLineWalkCache`로 캐싱된다 (columnContents가 배치 사이 불변;
+   * 무효화는 `_layoutCache`와 동일 지점 — 감사 A-9).
    * @private
    */
-  private _cursorLineWalk(): { ranges: CursorLineRange[][]; visibleCount: number; maxCursorOffset: number } {
+  private _cursorLineWalk(): {
+    ranges: CursorLineRange[][];
+    visibleCount: number;
+    maxCursorOffset: number;
+    lastVisibleLineData: TextLineData | undefined;
+    overflowHadNoOverflow: boolean;
+    threadVisibleCount: number;
+  } {
+    if (this._cursorLineWalkCache !== null) {
+      return this._cursorLineWalkCache;
+    }
     const parentHeight = this._inheritStyle?.parentHeight ?? 0;
     const effectiveColumnHeight = parentHeight > 0
       ? parentHeight + (this._lineHeight - this.fontSize)
@@ -4687,6 +4708,10 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 
     const ranges: CursorLineRange[][] = [];
     let visible = 0;
+    // A-7: `_captureThreadTail` 산식과 동일한 plain 공간 visible 카운트 —
+    // walk가 추가로 `\n`을 소비할 때마다 +1 (tail 오프셋은 \n 포함 plain 공간).
+    let threadVisibleCount = 0;
+    let lastVisibleLineData: TextLineData | undefined = undefined;
     let overflowBoundary: number | null = null;
     let offset = 0;
 
@@ -4752,6 +4777,15 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
           for (const part of line.parts) {
             visible += part.content.length;
           }
+          // threadVisibleCount (A-7 — `_captureThreadTail` 산식): 파트 합계 +
+          // endOfBlock마다 +1 (구 산식은 \n 존재를 조건 검사하지 않았다 —
+          // "마지막 라인의 endOfText는 tail 아님" 가드가 소진 판정을 담당하므로
+          // 이 근사를 byte로 보존한다).
+          for (const part of line.parts) {
+            threadVisibleCount += part.content.length;
+          }
+          if (line.endOfBlock) threadVisibleCount++;
+          lastVisibleLineData = line;
         }
         if (line.endOfBlock && offset < plain.length && plain[offset] === '\n') {
           offset++;
@@ -4759,7 +4793,14 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         accumulatedHeightMm += lineHeightMm;
         columnRanges.push({
           startOffset: lineStartOffset,
-          endOffset: line.endOfBlock ? offset - 1 : offset,
+          // endOfBlock + 실제 \n 소비 시: offset이 \n 다음 위치이므로 -1로 \n
+          // 위치를 가리킨다. endOfBlock이지만 \n이 없는 마지막 블록(텍스트 끝)은
+          // offset이 그대로 텍스트 끝이므로 감산하지 않는다 — 감산하면 커서의
+          // 마지막 가시 문자 뒤 offset(텍스트 끝 주차)이 이 라인의 [start, end]
+          // 범위 밖으로 빠진다 (감사 A-5 — docstring 예시와의 모순 해소).
+          endOffset: (line.endOfBlock === true && offset < plain.length)
+            ? offset - 1
+            : offset,
           firstVisible: lineStartOffset + leadingSpaces,
           lastVisible: lastVisibleOffset,
           endOfBlock: line.endOfBlock === true,
@@ -4772,7 +4813,15 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const maxCursorOffset = overflowBoundary !== null
       ? overflowBoundary
       : -1;
-    return { ranges, visibleCount: visible, maxCursorOffset };
+    this._cursorLineWalkCache = {
+      ranges,
+      visibleCount: visible,
+      maxCursorOffset,
+      lastVisibleLineData,
+      overflowHadNoOverflow: overflowBoundary === null,
+      threadVisibleCount,
+    };
+    return this._cursorLineWalkCache;
   }
 
   /** 장평 비율 */

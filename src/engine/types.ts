@@ -301,8 +301,10 @@ export interface CursorLineRange {
   startOffset: number;
   /**
    * 라인에서 커서가 위치할 수 있는 마지막 source offset — endOfBlock 라인은
-   * `\n` 위치, 그 외에는 다음 라인의 `startOffset`과 같은 경계 값. 시각적으로는
-   * 이전 라인 끝(phantom end)을 의미할 수 있으며 어느 쪽인지는 커서 배치가 결정.
+   * `\n`이 실제로 존재하면 `\n` 위치, 텍스트 끝(endOfBlock이지만 `\n` 없음)이면
+   * 텍스트 끝 offset, 그 외(소프트 래핑)에는 다음 라인의 `startOffset`과 같은
+   * 경계 값. 시각적으로는 이전 라인 끝(phantom end)을 의미할 수 있으며 어느 쪽인지는
+   * 커서 배치가 결정.
    */
   endOffset: number;
   /** 라인의 첫 배치 가능 글자 offset (선행 공백 건너뜀). 빈 라인이면 startOffset. */

@@ -716,51 +716,29 @@ export class TextEditCoordinateMapper {
 
   /**
    * 주어진 source 오프셋이 속한 시각적 라인의 시작/끝 오프셋을 반환한다.
+   *
+   * 엔진 레인지 단일 소스(B-2) — `cursorLineRanges`의 `firstVisible`/`lastVisible`
+   * 을 반환한다. 구 rect-top 그룹핑 구현은 (a) 컬럼 전체 span의
+   * `getBoundingClientRect` 루프(O(spans) 레이아웃 스래시)와 (b) 하단 앵커
+   * 렌더(혼합 fontSize 라인에서 span top이 제각각)로 같은 라인의 다른 폰트
+   * span을 누락하는 결함이 있었다. 렌더 가능 글자가 없는 빈 라인이거나 offset이
+   * 매핑 밖(span 부재)이면 기존과 동일하게 null을 반환한다.
+   *
    * @param sourceOffset - source 오프셋
-   * @returns `{ start, end }` 또는 null
+   * @returns `{ start, end }` 또는 null. start = 라인의 첫 배치 가능 글자 offset,
+   *   end = 마지막 배치 가능 글자 offset + 1 (배타적 — 구 시맨틱 유지).
    */
   findVisualLineBounds(sourceOffset: number): { start: number; end: number } | null {
-    const span = this.getSpanByOffset(sourceOffset);
-    if (!span) return null;
-
-    const anchorColumn = this._findColumnBySpan(span);
-    if (anchorColumn === null) return null;
-
-    const anchorRect = span.getBoundingClientRect();
-    const anchorTop = Math.round(anchorRect.top);
-
-    const columnSpans = this._getColumnSpans(anchorColumn);
-    const lineSpans: HTMLSpanElement[] = [];
-    for (const s of columnSpans) {
-      const r = s.getBoundingClientRect();
-      if (r.height <= 1) continue;
-      if (Math.round(r.top) === anchorTop) {
-        lineSpans.push(s);
-      }
-    }
-
-    if (lineSpans.length === 0) return null;
-
-    const firstSpan = lineSpans[0];
-    const lastSpan = lineSpans[lineSpans.length - 1];
-
-    const startSource = parseInt(firstSpan.dataset.sourceOffset ?? '', 10);
-    const endSource = parseInt(lastSpan.dataset.sourceOffset ?? '', 10);
-    if (Number.isNaN(startSource) || Number.isNaN(endSource)) return null;
-
-    // 렌더 로컬 → story 절대
-    return { start: startSource + this._contentFrom, end: endSource + this._contentFrom + 1 };
-  }
-
-  private _findColumnBySpan(span: HTMLSpanElement): LayoutColumnElement | null {
-    const columns = this._getAllColumns();
-    for (const column of columns) {
-      if (!column.shadowRoot) continue;
-      if (column.shadowRoot.contains(span)) {
-        return column;
-      }
-    }
-    return null;
+    const info = this.getLineInfoBySourceOffset(sourceOffset);
+    if (info === null) return null;
+    const column = this._lineRanges[info.columnIndex];
+    const range = column?.[info.lineIndex];
+    if (!range) return null;
+    if (range.firstVisible === null || range.lastVisible === null) return null;
+    return {
+      start: range.firstVisible,
+      end: range.lastVisible + 1,
+    };
   }
 
   /**
