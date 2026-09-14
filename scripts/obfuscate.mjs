@@ -86,7 +86,7 @@ const obfuscatorOptions = {
     '^x-layout-',
     '^x-edit-',
     '^x-layout-vcolumn$',
-    '^x-layout-document$',
+    '^x-layout-page$',
     '^x-layout-box$',
     '^x-layout-paragraph$',
     '^x-layout-column$',

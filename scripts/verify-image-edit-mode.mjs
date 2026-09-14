@@ -140,7 +140,7 @@ const near = (a, b, eps = 0.01) => Math.abs(a - b) <= eps;
  * @returns {Promise<object>} 모드/포커스/선택/속성 상태
  */
 const readState = () => page.evaluate(() => {
-  const em = document.querySelector('x-layout-document').editManager;
+  const em = document.querySelector('x-layout-page').editManager;
   const img1 = document.getElementById('img-1');
   const img2 = document.getElementById('img-2');
   const boxImg1 = document.getElementById('box-img-1');
@@ -172,7 +172,7 @@ const imgCenter = (id) => page.evaluate((elId) => {
 
 /** 편집 상태를 전부 해제한다 (시나리오 격리). */
 const resetModes = () => page.evaluate(() => {
-  const em = document.querySelector('x-layout-document').editManager;
+  const em = document.querySelector('x-layout-page').editManager;
   em.textEditMode = false;
   em.layoutEditMode = false;
   em.imageEditMode = false;
@@ -227,7 +227,7 @@ await page.waitForTimeout(150);
 // ── 3. 레이아웃 편집 모드에서 더블클릭 진입 → ESC 시 레이아웃 복귀 ──
 
 await page.evaluate(() => {
-  document.querySelector('x-layout-document').editManager.layoutEditMode = true;
+  document.querySelector('x-layout-page').editManager.layoutEditMode = true;
 });
 await page.waitForTimeout(100);
 await page.mouse.dblclick(c1.x, c1.y, { delay: 60 });
@@ -253,7 +253,7 @@ await resetModes();
 {
   // 재진입 (프로그래밍 경로 — 드래그 시나리오는 focus 후 신뢰 이벤트로)
   await page.evaluate(() => {
-    document.querySelector('x-layout-document').editManager.focusImage(
+    document.querySelector('x-layout-page').editManager.focusImage(
       document.getElementById('img-1'),
     );
   });
@@ -309,11 +309,11 @@ await resetModes();
   // 밖으로 나간 상태의 3소스 정합성 — 캔버스 클리핑/오버랩 클램핑과 무관하게
   // DOM/extractData/printPostData가 동일한 자유 좌표를 유지하는지
   const outside = await page.evaluate(() => {
-    const doc = document.querySelector('x-layout-document');
+    const page = document.querySelector('x-layout-page');
     const img = document.getElementById('img-1');
-    doc.engine.ensureCommitted();
+    page.engine.ensureCommitted();
     const extract = img.engine.extractData;
-    const posts = doc.engine.printPostData;
+    const posts = page.engine.printPostData;
     const imgPost = posts.find((p) => p.data?.type === 'image' && p.data?.id === 'img-1');
     return {
       dom: { x: img.x, y: img.y, w: img.width, h: img.height },
@@ -350,7 +350,7 @@ await resetModes();
 
 {
   await page.evaluate(() => {
-    document.querySelector('x-layout-document').editManager.focusImage(
+    document.querySelector('x-layout-page').editManager.focusImage(
       document.getElementById('img-1'),
     );
   });
@@ -359,7 +359,7 @@ await resetModes();
   // 이벤트 기록
   await page.evaluate(() => {
     window.__evts = [];
-    const em = document.querySelector('x-layout-document').editManager;
+    const em = document.querySelector('x-layout-page').editManager;
     em.addEventListener('imageResize', (e) => window.__evts.push({ t: 'resize', w: e.imageDetail.width }));
     em.addEventListener('imagePropertyChange', (e) => window.__evts.push({ t: 'prop', p: e.imagePropertyDetail.property }));
     em.addEventListener('imageMove', (e) => window.__evts.push({ t: 'move', c: e.imageDetail.canceled }));
@@ -435,7 +435,7 @@ await resetModes();
 
 {
   await page.evaluate(() => {
-    document.querySelector('x-layout-document').editManager.focusImage(
+    document.querySelector('x-layout-page').editManager.focusImage(
       document.getElementById('img-1'),
     );
   });
@@ -476,7 +476,7 @@ await resetModes();
 
 {
   await page.evaluate(() => {
-    document.querySelector('x-layout-document').editManager.focusImage(
+    document.querySelector('x-layout-page').editManager.focusImage(
       document.getElementById('img-1'),
     );
   });
@@ -513,7 +513,7 @@ await resetModes();
 
 {
   await page.evaluate(() => {
-    document.querySelector('x-layout-document').editManager.focusImage(
+    document.querySelector('x-layout-page').editManager.focusImage(
       document.getElementById('img-2'),
     );
   });
@@ -565,7 +565,7 @@ await resetModes();
   await page.waitForTimeout(150);
 
   const crossState = await page.evaluate(() => {
-    const em = document.querySelector('x-layout-document').editManager;
+    const em = document.querySelector('x-layout-page').editManager;
     return {
       mode: { text: em.textEditMode, image: em.imageEditMode },
       focusedParagraph: em.focusedParagraph?.id ?? null,
@@ -596,7 +596,7 @@ await resetModes();
 async function checkThreeSourceConsistency() {
   // 이미지 편집 진입 (프로그래밍 경로 — 조작 자체는 이미 앞 시나리오에서 신뢰 이벤트로 검증)
   await page.evaluate(() => {
-    const em = document.querySelector('x-layout-document').editManager;
+    const em = document.querySelector('x-layout-page').editManager;
     em.imageEditMode = false;
     em.focusImage(document.getElementById('img-1'));
   });
@@ -616,15 +616,15 @@ async function checkThreeSourceConsistency() {
   await page.waitForTimeout(300);
 
   const r = await page.evaluate(() => {
-    const doc = document.querySelector('x-layout-document');
+    const page = document.querySelector('x-layout-page');
     const img = document.getElementById('img-1');
 
     const dom = { x: img.x, y: img.y, w: img.width, h: img.height, fit: img.objectFit };
 
     // dirty 읽기 계약: 읽기 전에 커밋 보장 (outside an active edit session)
-    doc.engine.ensureCommitted();
+    page.engine.ensureCommitted();
     const extract = img.engine.extractData;
-    const posts = doc.engine.printPostData;
+    const posts = page.engine.printPostData;
     const imgPost = posts.find((p) => p.data?.type === 'image' && p.data?.id === 'img-1');
 
     // document.data (extractData 재귀 조립)에서도 동일 확인
@@ -637,7 +637,7 @@ async function checkThreeSourceConsistency() {
       if (node.children && !Array.isArray(node.children)) return findImg(node.children);
       return null;
     };
-    const docImg = findImg(doc.data);
+    const docImg = findImg(page.data);
 
     return {
       dom,
@@ -645,7 +645,7 @@ async function checkThreeSourceConsistency() {
       print: imgPost
         ? { x: imgPost.data.x, y: imgPost.data.y, w: imgPost.data.width, h: imgPost.data.height, fit: imgPost.data.objectFit }
         : null,
-      docData: docImg
+      pageData: docImg
         ? { x: docImg.x, y: docImg.y, w: docImg.width, h: docImg.height, fit: docImg.objectFit }
         : null,
       // print rect는 이미지 박스 contentAbsRect(mm) — 크롭 컨텍스트 유지 확인
@@ -657,7 +657,7 @@ async function checkThreeSourceConsistency() {
   const domE = r.dom;
   const extE = r.extract;
   const prE = r.print;
-  const ddE = r.docData;
+  const ddE = r.pageData;
 
   check('드래그+휼 후 DOM getter === engine.extractData (x/y/w/h/fit)',
     eq(domE.x, extE.x) && eq(domE.y, extE.y) && eq(domE.w, extE.w) && eq(domE.h, extE.h) && domE.fit === extE.fit,
@@ -667,7 +667,7 @@ async function checkThreeSourceConsistency() {
     prE ? `print=(${prE.x.toFixed(2)},${prE.y.toFixed(2)},${prE.w.toFixed(2)},${prE.h.toFixed(2)},${prE.fit})` : 'print 없음');
   check('드래그+휼 후 document.data의 이미지 === extractData',
     ddE !== null && eq(ddE.x, extE.x) && eq(ddE.y, extE.y) && eq(ddE.w, extE.w) && eq(ddE.h, extE.h) && ddE.fit === extE.fit,
-    ddE ? `docData=(${ddE.x.toFixed(2)},${ddE.y.toFixed(2)},${ddE.w.toFixed(2)},${ddE.h.toFixed(2)},${ddE.fit})` : 'docData 없음');
+    ddE ? `pageData=(${ddE.x.toFixed(2)},${ddE.y.toFixed(2)},${ddE.w.toFixed(2)},${ddE.h.toFixed(2)},${ddE.fit})` : 'pageData 없음');
   check('print rect === 이미지 박스 contentAbsRect (크롭 컨텍스트 유지)',
     r.printRect !== null && r.printRect.width > 0 && r.printRect.height > 0,
     r.printRect ? `rect=(${r.printRect.x},${r.printRect.y},${r.printRect.width},${r.printRect.height})` : 'rect 없음');
@@ -685,7 +685,7 @@ await checkThreeSourceConsistency();
 
 {
   await page.evaluate(() => {
-    document.querySelector('x-layout-document').editManager.focusImage(
+    document.querySelector('x-layout-page').editManager.focusImage(
       document.getElementById('img-1'),
     );
   });
@@ -706,11 +706,11 @@ await checkThreeSourceConsistency();
   await page.waitForTimeout(250);
 
   const r = await page.evaluate(() => {
-    const doc = document.querySelector('x-layout-document');
+    const page = document.querySelector('x-layout-page');
     const img = document.getElementById('img-1');
-    doc.engine.ensureCommitted();
+    page.engine.ensureCommitted();
     const extract = img.engine.extractData;
-    const posts = doc.engine.printPostData;
+    const posts = page.engine.printPostData;
     const imgPost = posts.find((p) => p.data?.type === 'image' && p.data?.id === 'img-1');
     return {
       dom: { x: img.x, y: img.y, w: img.width, h: img.height },
@@ -756,13 +756,13 @@ await checkThreeSourceConsistency();
 async function checkOverlapAvoidPrintChars() {
   // A: 초기 상태 — 회피로 첫 라인이 파트 분할되어 있는지
   const measureA = await page.evaluate(() => {
-    const doc = document.querySelector('x-layout-document');
-    doc.engine.ensureCommitted();
+    const page = document.querySelector('x-layout-page');
+    page.engine.ensureCommitted();
     const para = document.getElementById('para-overlap');
     const engine = para.engine;
     const firstLine = engine.columnContents[0]?.[0];
     const parts = firstLine?.parts ?? [];
-    const posts = doc.engine.printPostData;
+    const posts = page.engine.printPostData;
     const paraPost = posts.find((p) => p.data?.type === 'paragraph' && p.data?.id === 'para-overlap');
     const chars = paraPost?.chars ?? [];
     return {
@@ -778,7 +778,7 @@ async function checkOverlapAvoidPrintChars() {
 
   // B: 이미지 편집 (휠 축소 → 아래 드래그) → 회피 해제 확인
   await page.evaluate(() => {
-    const em = document.querySelector('x-layout-document').editManager;
+    const em = document.querySelector('x-layout-page').editManager;
     em.focusImage(document.getElementById('img-overlap'));
   });
   await page.waitForTimeout(150);
@@ -798,14 +798,14 @@ async function checkOverlapAvoidPrintChars() {
   await page.waitForTimeout(400);
 
   const measureB = await page.evaluate(() => {
-    const doc = document.querySelector('x-layout-document');
-    doc.engine.ensureCommitted();
+    const page = document.querySelector('x-layout-page');
+    page.engine.ensureCommitted();
     const para = document.getElementById('para-overlap');
     const engine = para.engine;
     const firstLine = engine.columnContents[0]?.[0];
     const parts = firstLine?.parts ?? [];
 
-    const posts = doc.engine.printPostData;
+    const posts = page.engine.printPostData;
     const paraPost = posts.find((p) => p.data?.type === 'paragraph' && p.data?.id === 'para-overlap');
     const chars = paraPost?.chars ?? [];
     const paraRect = paraPost?.rect;

@@ -10,7 +10,7 @@
  * 1. 초기 로드 — 전 스레드 프레임 span 존재 + isThreadFrame + span 수 === 엔진 visibleChars 근사
  * 2. 타이핑 전파 — head 타이핑 → story 갱신 + 후속 프레임 DOM 헤드 변경 + seam 문자 일치 + 소스 렌더 유지
  * 3. 테두리 분기 — 중간 프레임 boxShadow 공백 / overset 유도 후 tail만 rgb(255,0,0)
- * 4. round-trip — ensureCommitted → doc.data 직렬화 → 재주입 → 체인·span 동등
+ * 4. round-trip — ensureCommitted → page.data 직렬화 → 재주입 → 체인·span 동등
  *
  * 측정 유틸(plainOf/domTextOf/readBoxShadow)은 스크립트 상단 공용 함수로
  * 모듈화한다 — 측정 코드 자체의 버그(속성명 혼동, 배열 인덱싱)가 seam 판정을
@@ -113,9 +113,9 @@ const pageUtils = `
     const host = paraEl.shadowRoot?.host ?? paraEl;
     return getComputedStyle(host).boxShadow;
   };
-  const frameOf = (doc, id) => [...doc.querySelectorAll('x-layout-paragraph')].find(p => p.id === id);
-  const threadFrameIds = (doc) => {
-    const engine = doc.engine;
+  const frameOf = (page, id) => [...page.querySelectorAll('x-layout-paragraph')].find(p => p.id === id);
+  const threadFrameIds = (page) => {
+    const engine = page.engine;
     return (engine.data.threads ?? []).flatMap(t => t.paragraphIds ?? []);
   };
 `;
@@ -123,23 +123,23 @@ const pageUtils = `
 const r = await page.evaluate(`
   (async () => {
     ${''}${pageUtils}
-    const doc = document.querySelector('x-layout-document');
-    const engine = doc.engine;
+    const page = document.querySelector('x-layout-page');
+    const engine = page.engine;
     const out = {};
 
   // 데모가 완전히 렌더될 때까지 대기
   for (let i = 0; i < 100; i++) {
-    if (doc.querySelectorAll('x-layout-paragraph').length >= 8) break;
+    if (page.querySelectorAll('x-layout-paragraph').length >= 8) break;
     await new Promise(r => setTimeout(r, 100));
   }
-  await doc.render();
+  await page.render();
 
   // ═══ 1. 초기 로드 ═══
-  const frameIds = threadFrameIds(doc);
+  const frameIds = threadFrameIds(page);
   const initial = [];
   for (const id of frameIds) {
     const pe = engine.findEngineById(id);
-    const domPe = frameOf(doc, id);
+    const domPe = frameOf(page, id);
     const cols = domTextOf(domPe);
     const domCharCount = cols.flat().join('').length;
     const colCount = cols.length;
@@ -157,10 +157,10 @@ const r = await page.evaluate(`
   out.initialEngineFrames = frameIds.map(id => engine.findEngineById(id)?.isThreadFrame ?? false);
 
   // ═══ 2. 타이핑 전파 — head 프레임 편집 ═══
-  const em = doc.editManager;
+  const em = page.editManager;
   em.textEditMode = true;
   const headId = frameIds[0]; // thread-1 frame1
-  const headDom = frameOf(doc, headId);
+  const headDom = frameOf(page, headId);
   em.addEditableParagraph(headId);
   headDom.editableText = true;
   await new Promise(r => setTimeout(r, 200));
@@ -172,7 +172,7 @@ const r = await page.evaluate(`
   if (ta) {
     const before = {
       storyLen: plainOf(engine.data.threads[0].content).length,
-      f2Text: domTextOf(frameOf(doc, frameIds[1])).flat().join('').slice(0, 12),
+      f2Text: domTextOf(frameOf(page, frameIds[1])).flat().join('').slice(0, 12),
       f2From: engine.findEngineById(frameIds[1]).contentFrom,
       headTail: engine.findEngineById(headId).overflowContentFrom,
     };
@@ -185,7 +185,7 @@ const r = await page.evaluate(`
     const headPe = engine.findEngineById(headId);
     const f2Pe = engine.findEngineById(frameIds[1]);
     const storyNow = plainOf(engine.data.threads[0].content);
-    const f2DomHead = domTextOf(frameOf(doc, frameIds[1])).flat().join('').slice(0, 12);
+    const f2DomHead = domTextOf(frameOf(page, frameIds[1])).flat().join('').slice(0, 12);
     out.typing = {
       before,
       storyGrew: storyNow.length === before.storyLen + '확장된문장'.length,
@@ -194,7 +194,7 @@ const r = await page.evaluate(`
       f2From: f2Pe.contentFrom,
       headTail: headPe.overflowContentFrom,
       seamOk: f2DomHead.length > 0 && storyNow[f2Pe.contentFrom] === f2DomHead[0],
-      headDomChars: domTextOf(frameOf(doc, headId)).flat().join('').length,
+      headDomChars: domTextOf(frameOf(page, headId)).flat().join('').length,
       headVisible: headPe.visibleChars,
     };
   }
@@ -203,7 +203,7 @@ const r = await page.evaluate(`
   const thread1Ids = engine.data.threads[0].paragraphIds;
   const borders = [];
   for (const id of thread1Ids) {
-    const domPe = frameOf(doc, id);
+    const domPe = frameOf(page, id);
     const pe = engine.findEngineById(id);
     borders.push({
       id,
@@ -215,19 +215,19 @@ const r = await page.evaluate(`
   }
   out.borders = borders;
   // overset 유도: story를 극단적으로 늘려 모든 프레임을 넘친다.
-  // 경로는 공개 API(data setter)로 — engine.data 직접 주입은 doc.layout()의
+  // 경로는 공개 API(data setter)로 — engine.data 직접 주입은 page.layout()의
   // _layoutStructure가 DOM 캐시(_threads)로 되돌리므로 스레딩 story 갱신의
   // 정상 경로가 아니다 (data setter가 _threads 캐시를 갱신한다).
   const longStory = plainOf(engine.data.threads[0].content).repeat(3);
-  const docDataSnapshot = JSON.parse(JSON.stringify(engine.extractData));
-  docDataSnapshot.threads = docDataSnapshot.threads.map((t, i) =>
+  const pageDataSnapshot = JSON.parse(JSON.stringify(engine.extractData));
+  pageDataSnapshot.threads = pageDataSnapshot.threads.map((t, i) =>
     i === 0 ? { ...t, content: longStory } : t);
-  doc.data = docDataSnapshot;
-  await doc.render();
+  page.data = pageDataSnapshot;
+  await page.render();
   await new Promise(r => setTimeout(r, 200));
   const bordersOverset = [];
   for (const id of thread1Ids) {
-    const domPe = frameOf(doc, id);
+    const domPe = frameOf(page, id);
     const pe = engine.findEngineById(id);
     bordersOverset.push({
       id,
@@ -244,10 +244,10 @@ const r = await page.evaluate(`
   // 연속 10키 타이핑으로 (a) flush가 큐를 통합해 깊이 1을 유지하는지
   // (b) flush 중 재진입이 차단되는지 (c) 체인 dirty가 소진되는지 실측한다.
   {
-    const frameIdsStress = threadFrameIds(doc);
+    const frameIdsStress = threadFrameIds(page);
     const headId2 = frameIdsStress[0];
-    const headDom2 = frameOf(doc, headId2);
-    const em2 = doc.editManager;
+    const headDom2 = frameOf(page, headId2);
+    const em2 = page.editManager;
     if (!em2.focusedParagraph || em2.focusedParagraph !== headDom2) {
       em2.textEditMode = true;
       em2.addEditableParagraph(headId2);
@@ -261,17 +261,17 @@ const r = await page.evaluate(`
     if (ta2) {
       // 큐 깊이 관측: requestThreadRelayout이 스택 큐에 쌓이는 수 = 예약 중복
       let queueEvents = 0;
-      const origRequest = doc.requestThreadRelayout.bind(doc);
-      doc.requestThreadRelayout = (id) => {
-        const pending = doc._threadRelayoutSources !== null;
+      const origRequest = page.requestThreadRelayout.bind(page);
+      page.requestThreadRelayout = (id) => {
+        const pending = page._threadRelayoutSources !== null;
         if (pending) queueEvents++;
         origRequest(id);
       };
       let reentryBlocked = 0;
-      const origFlushDesc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(doc), 'requestThreadRelayout');
+      const origFlushDesc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(page), 'requestThreadRelayout');
       // flush 중 재진입 관측: flush 실행 중 requestThreadRelayout 호출 시도 감지
       let inFlush = false;
-      const origFlush = doc._flushThreadRelayout?.bind(doc);
+      const origFlush = page._flushThreadRelayout?.bind(page);
       // 연속 10키
       const keys = ['가', '나', '다', '라', '마', '바', '사', '아', '자', '차'];
       const tailBefore = engine.findEngineById(headId2).overflowContentFrom;
@@ -282,17 +282,17 @@ const r = await page.evaluate(`
       }
       // 마지막 키 flush 완료 대기
       await new Promise(r => setTimeout(r, 250));
-      doc.requestThreadRelayout = origRequest;
+      page.requestThreadRelayout = origRequest;
       const headPe2 = engine.findEngineById(headId2);
       const f2Pe2 = engine.findEngineById(frameIdsStress[1]);
       out.stress = {
         queueEvents, // 통합으로 스킵된 예약 수 (낮을수록 좋음 — 0이면 각 키가 자기 큐를 가짐)
-        dirtyAfterFlush: threadFrameIds(doc).map(id => engine.findEngineById(id)?.hasPendingChanges ?? false),
+        dirtyAfterFlush: threadFrameIds(page).map(id => engine.findEngineById(id)?.hasPendingChanges ?? false),
         headVisible: headPe2.visibleChars,
         f2From: f2Pe2?.contentFrom,
         seamOk: (() => {
           const story2 = plainOf(engine.data.threads[0].content);
-          const f2Dom = domTextOf(frameOf(doc, frameIdsStress[1])).flat().join('');
+          const f2Dom = domTextOf(frameOf(page, frameIdsStress[1])).flat().join('');
           return f2Dom.length > 0 && story2[f2Pe2.contentFrom] === f2Dom[0];
         })(),
         storyLen: plainOf(engine.data.threads[0].content).length,
@@ -306,10 +306,10 @@ const r = await page.evaluate(`
   // 조합 상태(optimistic span/underline)를 훼손하지 않는지, 커밋 후
   // 체인 전파가 정상인지 검증한다 (R9 — Chromium 이벤트 모방).
   {
-    const frameIdsIme = threadFrameIds(doc);
+    const frameIdsIme = threadFrameIds(page);
     const headId3 = frameIdsIme[0];
-    const headDom3 = frameOf(doc, headId3);
-    const em3 = doc.editManager;
+    const headDom3 = frameOf(page, headId3);
+    const em3 = page.editManager;
     if (em3.focusedParagraph !== headDom3) {
       em3.textEditMode = true;
       em3.addEditableParagraph(headId3);
@@ -347,7 +347,7 @@ const r = await page.evaluate(`
       await new Promise(r => setTimeout(r, 250));
       const storyAfter = plainOf(engine.data.threads[0].content);
       const f2After = engine.findEngineById(frameIdsIme[1]);
-      const f2DomAfter = domTextOf(frameOf(doc, frameIdsIme[1])).flat().join('');
+      const f2DomAfter = domTextOf(frameOf(page, frameIdsIme[1])).flat().join('');
       out.ime = {
         composingState,
         storyGrewAfterCommit: storyAfter.length >= beforeStory.length,
@@ -364,11 +364,11 @@ const r = await page.evaluate(`
   // 화살표/Backspace/타이핑이 프레임 coverage를 넘어가면 소유 프레임으로
   // 포커스가 이관된다 — 경계점은 이동 방향이 소유를 결정한다.
   {
-    const ids = threadFrameIds(doc);
-    const em7 = doc.editManager;
+    const ids = threadFrameIds(page);
+    const em7 = page.editManager;
     const f1Id7 = ids[0];
     const f2Id7 = ids[1];
-    const frameOf7 = (id) => frameOf(doc, id);
+    const frameOf7 = (id) => frameOf(page, id);
     for (const id of ids.slice(0, 3)) {
       em7.addEditableParagraph(id);
       const el = frameOf7(id);
@@ -494,25 +494,25 @@ const r = await page.evaluate(`
   // (Node 측 [8] 블록 — round-trip 이후 좌표를 다시 재서 클릭).
 
   // ═══ 4. round-trip — 직렬화 → 재주입 ═══
-  doc.editManager.reset();
+  page.editManager.reset();
   engine.ensureCommitted();
   const snapshot = JSON.parse(JSON.stringify(engine.extractData));
-  const beforeFrames = threadFrameIds(doc).map(id => {
+  const beforeFrames = threadFrameIds(page).map(id => {
     const pe = engine.findEngineById(id);
     return { id, from: pe.contentFrom, visible: pe.visibleChars };
   });
-  doc.data = snapshot;
-  await doc.render();
+  page.data = snapshot;
+  await page.render();
   await new Promise(r => setTimeout(r, 100));
-  const afterFrames = threadFrameIds(doc).map(id => {
+  const afterFrames = threadFrameIds(page).map(id => {
     const pe = engine.findEngineById(id);
     return { id, from: pe.contentFrom, visible: pe.visibleChars };
   });
-  const afterDomSpans = threadFrameIds(doc).map(id => ({
-    id, chars: domTextOf(frameOf(doc, id)).flat().join('').length,
+  const afterDomSpans = threadFrameIds(page).map(id => ({
+    id, chars: domTextOf(frameOf(page, id)).flat().join('').length,
   }));
   out.roundTrip = {
-    threadsPreserved: (doc.engine.data.threads ?? []).length === 3,
+    threadsPreserved: (page.engine.data.threads ?? []).length === 3,
     framesEqual: JSON.stringify(beforeFrames) === JSON.stringify(afterFrames),
     beforeFrames, afterFrames, afterDomSpans,
     allSpanned: afterDomSpans.every(f => f.chars > 0),
@@ -668,8 +668,8 @@ console.log('\n[8] f2 클릭(CDP) 진입 → 실제 타이핑 — 컨트롤러 �
     await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2);
     await page.waitForTimeout(400);
     const click = await page.evaluate(`(() => {
-      const doc = document.querySelector('x-layout-document');
-      const em = doc.editManager;
+      const page = document.querySelector('x-layout-page');
+      const em = page.editManager;
       return { focused: em.focusedParagraph?.id, cursor: em._focusedController?._cursorModel?.offset };
     })()`);
     check('f2 span 클릭 → f2 편집 포커스',
@@ -682,9 +682,9 @@ console.log('\n[8] f2 클릭(CDP) 진입 → 실제 타이핑 — 컨트롤러 �
       await page.keyboard.type('타');
       await page.waitForTimeout(500);
       const typed = await page.evaluate(`(() => {
-        const doc = document.querySelector('x-layout-document');
-        const engine = doc.engine;
-        const em = doc.editManager;
+        const page = document.querySelector('x-layout-page');
+        const engine = page.engine;
+        const em = page.editManager;
         const plainOf = (c) => typeof c === 'string' ? c : (c ?? []).map(r => typeof r === 'string' ? r : r.content).join('');
         const f2 = [...document.querySelectorAll('x-layout-paragraph')].find(p => p.id === ${JSON.stringify(r.frameIds[1])});
         const domText = [...f2.querySelectorAll('x-layout-column')].map(col => {
@@ -730,7 +730,7 @@ console.log('\n[9] f2 연속 타이핑 — prefix 캐시 좌표계 (비-헤드 �
     }
     await page.waitForTimeout(500);
     const en = await page.evaluate(`(() => {
-      const doc = document.querySelector('x-layout-document');
+      const page = document.querySelector('x-layout-page');
       const f2 = [...document.querySelectorAll('x-layout-paragraph')].find(p => p.id === ${JSON.stringify(r.frameIds[1])});
       const domText = [...f2.querySelectorAll('x-layout-column')].map(col => {
         const lines = [...col.shadowRoot.children].filter(c => c.tagName === 'DIV');
@@ -745,8 +745,8 @@ console.log('\n[9] f2 연속 타이핑 — prefix 캐시 좌표계 (비-헤드 �
     const typeComposition = async (syllables, final) => {
       for (const s of syllables) {
         await page.evaluate('(async () => {'
-          + ' const doc = document.querySelector("x-layout-document");'
-          + ' const em = doc.editManager;'
+          + ' const page = document.querySelector("x-layout-page");'
+          + ' const em = page.editManager;'
           + ' const c = em._focusedController;'
           + ' const ta = c._textarea;'
           + ' if (!window.__composing) { window.__composing = true; ta.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })); }'
@@ -764,8 +764,8 @@ console.log('\n[9] f2 연속 타이핑 — prefix 캐시 좌표계 (비-헤드 �
         await page.waitForTimeout(80);
       }
       await page.evaluate('(async () => {'
-        + ' const doc = document.querySelector("x-layout-document");'
-        + ' const em = doc.editManager;'
+        + ' const page = document.querySelector("x-layout-page");'
+        + ' const em = page.editManager;'
         + ' const c = em._focusedController;'
         + ' const ta = c._textarea;'
         + ' const final = ' + JSON.stringify(final) + ';'
@@ -780,7 +780,7 @@ console.log('\n[9] f2 연속 타이핑 — prefix 캐시 좌표계 (비-헤드 �
     await typeComposition(['한', '한글'], '한글');
     await typeComposition(['입', '입력'], '입력');
     const ko = await page.evaluate(`(() => {
-      const doc = document.querySelector('x-layout-document');
+      const page = document.querySelector('x-layout-page');
       const f2 = [...document.querySelectorAll('x-layout-paragraph')].find(p => p.id === ${JSON.stringify(r.frameIds[1])});
       const domText = [...f2.querySelectorAll('x-layout-column')].map(col => {
         const lines = [...col.shadowRoot.children].filter(c => c.tagName === 'DIV');

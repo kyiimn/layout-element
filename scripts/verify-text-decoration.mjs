@@ -42,7 +42,7 @@ const ttfBase64 = readFileSync(resolve(pkgRoot, 'examples/fonts/KMIBMyoungjo.ttf
 
 const { FontLoaderEngineImpl } = await import('../src/engine/font-loader-engine.ts');
 const { ColorRegistryEngineImpl } = await import('../src/engine/color-registry-engine.ts');
-const { DocumentEngine } = await import('../src/engine/document-engine.ts');
+const { PageEngine } = await import('../src/engine/page-engine.ts');
 
 const fontLoader = FontLoaderEngineImpl.create();
 await fontLoader.init([{ family: 'Myoungjo', base64Data: ttfBase64 }]);
@@ -68,11 +68,11 @@ function assert(condition, message) {
 const approx = (a, b, eps = 1e-9) => Math.abs(a - b) < eps;
 
 /**
- * DocumentEngine + 문단 박스로 엔진 트리를 구성하고 layout을 실행한다.
+ * PageEngine + 문단 박스로 엔진 트리를 구성하고 layout을 실행한다.
  *
  * @param {string | object[]} content - 문단 텍스트 (또는 인라인 런 배열)
  * @param {object} [opts] - { boxWidth, boxHeight, columns, fontSize, textStyle }
- * @returns {object} { docEngine, paraEngine } — layoutText까지 완료된 상태
+ * @returns {object} { pageEngine, paraEngine } — layoutText까지 완료된 상태
  */
 function buildPara(content, opts = {}) {
   const {
@@ -85,11 +85,11 @@ function buildPara(content, opts = {}) {
 
   const docTextStyle = { fontSize, fontFamily: 'Myoungjo', ...textStyle };
 
-  const docEngine = DocumentEngine.create(
-    { id: 'doc', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: docTextStyle },
+  const pageEngine = PageEngine.create(
+      { id: 'page', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: docTextStyle },
     fontLoader, colorRegistry, 3.78,
   );
-  docEngine.layout([
+  pageEngine.layout([
     {
       type: 'box',
       id: 'para-box', position: 'absolute', left: 10, top: 10, width: boxWidth, height: boxHeight, zIndex: 1,
@@ -99,9 +99,9 @@ function buildPara(content, opts = {}) {
       },
     },
   ]);
-  const paraEngine = docEngine.findEngineById('para');
+  const paraEngine = pageEngine.findEngineById('para');
   paraEngine.layoutText();
-  return { docEngine, paraEngine };
+  return { pageEngine, paraEngine };
 }
 
 /**
@@ -235,7 +235,7 @@ console.log('\n[6] 캐시 해시 — underline 토글 재계산');
 // ── 7. printPostData decorations ──
 console.log('\n[7] printPostData — decorations 절대 mm export');
 {
-  const { docEngine, paraEngine } = buildPara([
+  const { pageEngine, paraEngine } = buildPara([
     { content: '가나', textInlineStyle: { underline: true } },
   ], { textStyle: { underlineColor: 'red' } });
 
@@ -250,9 +250,9 @@ console.log('\n[7] printPostData — decorations 절대 mm export');
     const part = col.parts[0];
     const engineDeco = part.decorationRects[0];
 
-    // 문서 절대 = absLeft(10+10=box left 10 + doc padding 등) — docEngine 기준
+    // 문서 절대 = absLeft(10+10=box left 10 + doc padding 등) — pageEngine 기준
     // box (10,10) + para padding 0 → 파트 로컬 x + box absLeft
-    const boxAbs = docEngine.findEngineById('para-box').absRect;
+    const boxAbs = pageEngine.findEngineById('para-box').absRect;
     const expectedX = boxAbs.absLeft + part.left + engineDeco.x;
     assert(approx(d.x, expectedX, 1e-6), `print x === box absLeft + part.left + deco.x (${d.x.toFixed(6)} vs ${expectedX.toFixed(6)})`);
 
@@ -270,13 +270,13 @@ console.log('\n[7] printPostData — decorations 절대 mm export');
 // ── 7b. 복수 라인 누적 top — deco.y는 라인 top 기준, 누적은 소비처가 1회만 더한다 ──
 console.log('\n[7b] 복수 라인 — print y === box absTop + align + Σ이전 lineH + deco.y (이중 누적 방지)');
 {
-  const { docEngine, paraEngine } = buildPara(
+  const { pageEngine, paraEngine } = buildPara(
     '가나다라마바사아자차'.split('').map(ch => ({ content: ch, textInlineStyle: { underline: true } })),
     { boxWidth: 24, boxHeight: 100 }, // 좁은 폭 → 복수 라인
   );
 
   const print = paraEngine.printPostData[0];
-  const boxAbs = docEngine.findEngineById('para-box').absRect;
+  const boxAbs = pageEngine.findEngineById('para-box').absRect;
 
   // 엔진 기대 좌표 재구성 (chars 루프와 동일 공식)
   const defaultLineHeightMm = paraEngine.baseLineHeight;
@@ -322,10 +322,10 @@ console.log('\n[8] printPostData — chars.outline em→mm');
 // ── 9. 화면-인쇄 패리티 ──
 console.log('\n[9] 화면 패리티 — DOM이 그릴 rect === print rect (같은 엔진 소스)');
 {
-  const { docEngine, paraEngine } = buildPara([
+  const { pageEngine, paraEngine } = buildPara([
     { content: '가나다', textInlineStyle: { underline: true, breakline: true } },
   ]);
-  const boxAbs = docEngine.findEngineById('para-box').absRect;
+  const boxAbs = pageEngine.findEngineById('para-box').absRect;
   const print = paraEngine.printPostData[0];
 
   // DOM은 part.decorationRects를 part 기준으로 그린다: box absLeft + part.left + deco.x

@@ -22,7 +22,7 @@ const ttfBase64 = readFileSync(resolve(pkgRoot, 'examples/fonts/KMIBMyoungjo.ttf
 
 const { FontLoaderEngineImpl } = await import('../src/engine/font-loader-engine.ts');
 const { ColorRegistryEngineImpl } = await import('../src/engine/color-registry-engine.ts');
-const { DocumentEngine } = await import('../src/engine/document-engine.ts');
+const { PageEngine } = await import('../src/engine/page-engine.ts');
 
 const fontLoader = FontLoaderEngineImpl.create();
 await fontLoader.init([{ family: 'Myoungjo', base64Data: ttfBase64 }]);
@@ -54,8 +54,8 @@ function makeText(charCount, seed) {
 }
 
 function snapshotCase(text, columns) {
-  const engine = DocumentEngine.create(
-    { id: 'doc', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
+  const engine = PageEngine.create(
+      { id: 'page', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
     fontLoader, colorRegistry, 3.78,
   );
   engine.layout([{

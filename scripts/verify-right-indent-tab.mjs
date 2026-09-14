@@ -29,7 +29,7 @@ const ttfBase64 = readFileSync(resolve(pkgRoot, 'examples/fonts/KMIBMyoungjo.ttf
 
 const { FontLoaderEngineImpl } = await import('../src/engine/font-loader-engine.ts');
 const { ColorRegistryEngineImpl } = await import('../src/engine/color-registry-engine.ts');
-const { DocumentEngine } = await import('../src/engine/document-engine.ts');
+const { PageEngine } = await import('../src/engine/page-engine.ts');
 
 const fontLoader = FontLoaderEngineImpl.create();
 await fontLoader.init([{ family: 'Myoungjo', base64Data: ttfBase64 }]);
@@ -51,11 +51,11 @@ function assert(condition, message) {
 const approx = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
 
 /**
- * DocumentEngine + 단일 문단 박스로 엔진 트리를 구성하고 layout을 실행한다.
+ * PageEngine + 단일 문단 박스로 엔진 트리를 구성하고 layout을 실행한다.
  * `children`은 단일 paragraph 객체로 전달한다 (BoxEngine이 content engine으로 구성).
  * @param {string} content - 문단 텍스트
  * @param {object} opts - { boxWidth, boxHeight, paragraphStyle, textStyle, column }
- * @returns {{ docEngine: DocumentEngine, paraEngine: ParagraphEngine }}
+ * @returns {{ pageEngine: PageEngine, paraEngine: ParagraphEngine }}
  */
 function buildDoc(content, opts = {}) {
   const {
@@ -66,12 +66,12 @@ function buildDoc(content, opts = {}) {
     column = 1,
   } = opts;
 
-  const docEngine = DocumentEngine.create(
-    { id: 'doc', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
+  const pageEngine = PageEngine.create(
+      { id: 'page', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
     fontLoader, colorRegistry, 3.78,
   );
 
-  docEngine.layout([
+  pageEngine.layout([
     {
       id: 'body', type: 'box', position: 'absolute', left: 0, top: 0, width: boxWidth, height: boxHeight,
       children: {
@@ -82,10 +82,10 @@ function buildDoc(content, opts = {}) {
     },
   ]);
 
-  const bodyBox = docEngine.childBoxEngines[0];
+  const bodyBox = pageEngine.childBoxEngines[0];
   const paraEngine = bodyBox.childEngines[0];
   paraEngine.layoutText();
-  return { docEngine, paraEngine };
+  return { pageEngine, paraEngine };
 }
 
 /** 문단 엔진의 첫 컬럼 첫 라인 첫 파트를 반환한다. */
@@ -233,11 +233,11 @@ console.log('\n=== 좌우 밀기 탭 Verification ===\n');
 
 // ── 8. 오버랩 환경: 파트 분할 시 탭은 현재 파트 내 정렬 ──
 {
-  const docEngine = DocumentEngine.create(
-    { id: 'doc', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
+  const pageEngine = PageEngine.create(
+      { id: 'page', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
     fontLoader, colorRegistry, 3.78,
   );
-  docEngine.layout([
+  pageEngine.layout([
     {
       id: 'body', type: 'box', position: 'absolute', left: 0, top: 0, width: 60, height: 500,
       children: {
@@ -251,7 +251,7 @@ console.log('\n=== 좌우 밀기 탭 Verification ===\n');
     },
   ]);
 
-  const bodyBox = docEngine.childBoxEngines.find((b) => b.data.id === 'body');
+  const bodyBox = pageEngine.childBoxEngines.find((b) => b.data.id === 'body');
   const paraEngine = bodyBox.childEngines[0];
   paraEngine.layoutText();
 

@@ -23,7 +23,7 @@ const ttfBase64 = readFileSync(ttfPath).toString('base64');
 
 const { FontLoaderEngineImpl } = await import('../src/engine/font-loader-engine.ts');
 const { ColorRegistryEngineImpl } = await import('../src/engine/color-registry-engine.ts');
-const { DocumentEngine } = await import('../src/engine/document-engine.ts');
+const { PageEngine } = await import('../src/engine/page-engine.ts');
 
 const fontLoader = FontLoaderEngineImpl.create();
 await fontLoader.init([
@@ -160,8 +160,8 @@ function buildBoxData(text, columns) {
 }
 
 function createEngine(text, columns) {
-  const docData = {
-    id: 'bench-doc',
+  const pageData = {
+    id: 'bench-page',
     width: 257,
     height: 370,
     columns: 6,
@@ -169,7 +169,7 @@ function createEngine(text, columns) {
     paragraphStyle: { lineGap: 1.2 },
     textStyle: { fontSize: 4, fontFamily: 'Myoungjo' },
   };
-  const engine = DocumentEngine.create(docData, fontLoader, colorRegistry, 3.78);
+  const engine = PageEngine.create(pageData, fontLoader, colorRegistry, 3.78);
   engine.layout([buildBoxData(text, columns)]);
   return engine;
 }
@@ -239,10 +239,10 @@ runTypingBenchmark('1000자/6컬럼', 1000, 6, 200);
     }
   }
 
-  const docData = buildBoxData(runs, 3);
-  const engine = DocumentEngine.create(
+  const pageData = buildBoxData(runs, 3);
+  const engine = PageEngine.create(
     {
-      id: 'bench-doc',
+      id: 'bench-page',
       width: 257,
       height: 370,
       columns: 6,
@@ -254,7 +254,7 @@ runTypingBenchmark('1000자/6컬럼', 1000, 6, 200);
     colorRegistry,
     3.78,
   );
-  engine.layout([docData]);
+  engine.layout([pageData]);
   const boxEngine = engine.childBoxEngines[0];
   const paraEngine = boxEngine.childEngines[0];
 

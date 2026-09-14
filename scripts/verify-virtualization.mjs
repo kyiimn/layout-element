@@ -91,12 +91,12 @@ const r = await page.evaluate(async () => {
 
   const text = (tag) => `${tag} 가상화검증문단입니다.`.repeat(12);
   const para = (content) => ({ type: 'paragraph', content, paragraphStyle: {}, textStyle: {} });
-  const doc = document.createElement('x-layout-document');
-  document.body.appendChild(doc);
+  const page = document.createElement('x-layout-page');
+  document.body.appendChild(page);
   const item = (id, top, children) => ({
     type: 'box', id, position: 'absolute', left: 10, top, width: 170, height: 100, children,
   });
-  doc.data = {
+  page.data = {
     width: 190, height: 700,
     columns: 1, gap: 0,
     paragraphStyle: { lineGap: 1.2 },
@@ -123,12 +123,12 @@ const r = await page.evaluate(async () => {
       },
     ],
   };
-  await doc.render();
+  await page.render();
   await sleep(300);
 
-  const em = doc.editManager;
+  const em = page.editManager;
   em.textEditMode = true;
-  const byId = (id) => doc.querySelector('x-layout-box') && [...doc.querySelectorAll('x-layout-box')].find(b => b.id === id);
+  const byId = (id) => page.querySelector('x-layout-box') && [...page.querySelectorAll('x-layout-box')].find(b => b.id === id);
   const domText = (pageBox) => {
     const p = pageBox.querySelector('x-layout-paragraph');
     if (!p) return null;
@@ -147,50 +147,50 @@ const r = await page.evaluate(async () => {
   });
   const byIds = () => ['page-0', 'page-1', 'page-2', 'page-3', 'page-4', 'page-5'];
   out.A = {
-    items: doc.items.length,
-    engines: doc.engine.childBoxEngines.length,
+    items: page.items.length,
+    engines: page.engine.childBoxEngines.length,
     textMatch: allMatch(),
   };
 
   // ── B. park ──
   const page2 = byId('page-2');
-  const ph2 = doc.parkPage('page-2');
+  const ph2 = page.parkPage('page-2');
   out.B = {
     placeholder: ph2 instanceof HTMLDivElement && ph2.getAttribute('data-parked-page') === 'page-2',
-    items: doc.items.length,
-    parked: JSON.stringify(doc.parkedPageIds),
-    engines: doc.engine.childBoxEngines.length,
-    extractChildren: doc.data.children.length,
-    hasPage2: doc.data.children.some(c => c.id === 'page-2'),
-    placeholderIndex: Array.from(doc.childNodes).indexOf(ph2),
+    items: page.items.length,
+    parked: JSON.stringify(page.parkedPageIds),
+    engines: page.engine.childBoxEngines.length,
+    extractChildren: page.data.children.length,
+    hasPage2: page.data.children.some(c => c.id === 'page-2'),
+    placeholderIndex: Array.from(page.childNodes).indexOf(ph2),
     othersMatch: ['page-0', 'page-1', 'page-3', 'page-4'].every(id => domText(byId(id)) === engText(byId(id))),
   };
 
   // ── C. G1: 보관 중 data 세터 풀 라운드트립 ──
-  doc.data = doc.data;
+  page.data = page.data;
   await sleep(300);
   out.C = {
-    items: doc.items.length,
-    parked: JSON.stringify(doc.parkedPageIds),
-    engines: doc.engine.childBoxEngines.length,
+    items: page.items.length,
+    parked: JSON.stringify(page.parkedPageIds),
+    engines: page.engine.childBoxEngines.length,
     othersMatch: ['page-0', 'page-1', 'page-3', 'page-4'].every(id => domText(byId(id)) === engText(byId(id))),
   };
 
   // ── D. 보관 페이지 편집 후 unpark ──
-  const edited = doc.data;
+  const edited = page.data;
   edited.children.find(c => c.id === 'page-2').children.content = text('P2-EDITED');
-  doc.data = edited;
+  page.data = edited;
   await sleep(300);
-  const stillParked = JSON.stringify(doc.parkedPageIds);
-  const restored = doc.unparkPage('page-2');
+  const stillParked = JSON.stringify(page.parkedPageIds);
+  const restored = page.unparkPage('page-2');
   await restored.render();
   await sleep(300);
   out.D = {
     stillParked,
     restored: restored && restored.id === 'page-2',
-    items: doc.items.length,
-    order: doc.items.map(b => b.id).join(','),
-    parked: JSON.stringify(doc.parkedPageIds),
+    items: page.items.length,
+    order: page.items.map(b => b.id).join(','),
+    parked: JSON.stringify(page.parkedPageIds),
     textMatch: domText(byId('page-2')) === engText(byId('page-2')),
     edited: engText(byId('page-2')).startsWith('P2-EDITED'),
   };
@@ -203,9 +203,9 @@ const r = await page.evaluate(async () => {
   await sleep(200);
   em._focusedController.setCursor({ textOffset: 10 });
   const savedOffset = em._focusedController.cursorOffset;
-  doc.parkPage('page-1');
+  page.parkPage('page-1');
   const focusCleared = em.focusedParagraph === null;
-  const p1el = doc.unparkPage('page-1');
+  const p1el = page.unparkPage('page-1');
   let renderCalls = 0;
   const origRender = p1el.querySelector('x-layout-paragraph').render.bind(p1el.querySelector('x-layout-paragraph'));
   p1el.querySelector('x-layout-paragraph').render = (...a) => { renderCalls++; return origRender(...a); };
@@ -228,12 +228,12 @@ const r = await page.evaluate(async () => {
   let selDispatches = 0;
   const selListener = () => { selDispatches++; };
   em.addEventListener('layoutSelectionChange', selListener);
-  doc.parkPage('page-4');
+  page.parkPage('page-4');
   em.removeEventListener('layoutSelectionChange', selListener);
   const img = byId('page-5').querySelector('x-layout-image');
   em.focusImage(img);
   const imgModeBefore = em.imageEditMode;
-  doc.parkPage('page-5');
+  page.parkPage('page-5');
   out.F = {
     selBefore,
     selAfter: em.selectedLayouts.length,
@@ -242,14 +242,14 @@ const r = await page.evaluate(async () => {
     focusedImageCleared: em.focusedImage === null,
     imgModeOff: em.imageEditMode === false,
   };
-  doc.unparkPage('page-4');
-  doc.unparkPage('page-5');
+  page.unparkPage('page-4');
+  page.unparkPage('page-5');
   await sleep(300);
 
   // ── H. parked 오버레이 회피 (핵심) ──
   // 텍스트 박스(z1)와 교차하는 이미지 박스(z10, box 모드)를 최상위 형제로 둔다.
   // overlayElements는 엔진 트리 기준이므로 이미지 페이지 분리 후에도 회피해야 한다.
-  const docH = document.createElement('x-layout-document');
+  const docH = document.createElement('x-layout-page');
   document.body.appendChild(docH);
   const hovText = '회피검증본문가나다라.'.repeat(40);
   docH.data = {
@@ -315,7 +315,7 @@ const r = await page.evaluate(async () => {
   // parked 스냅샷은 extractData 기반이라 비-head 프레임 content가 undefined다.
   // _buildParagraphEngine의 `?? pe.textContent` 가드가 story를 보존해야 하며,
   // 분리 상태에서도 체인 feed-forward가 parked 프레임 엔진을 갱신해야 한다.
-  const docT = document.createElement('x-layout-document');
+  const docT = document.createElement('x-layout-page');
   document.body.appendChild(docT);
   const kStory = '스레드파크검증본문가나다라.'.repeat(110);
   docT.data = {
@@ -447,19 +447,19 @@ const r = await page.evaluate(async () => {
   // 주의: bench 페이지(상단 bench 문서와 검증 문서를 공유)이므로 절대 스크롤
   // 좌표가 아니라 scrollIntoView로 대상 페이지를 뷰포트에 둔다.
   const { PageMountManager } = await import('/src/utils/page-mount-manager.ts');
-  const mgr = new PageMountManager({ document: doc, window: 1 });
+  const mgr = new PageMountManager({ page: page, window: 1 });
   mgr.attach();
   await sleep(500);
   const scrollPageIntoView = (id, block) => {
     const box = byId(id);
-    const node = box ?? doc.querySelector(`div[data-parked-page="${id}"]`);
+    const node = box ?? page.querySelector(`div[data-parked-page="${id}"]`);
     if (node) node.scrollIntoView({ block: block ?? 'start' });
   };
   const page0H = byId('page-0').offsetHeight;
   scrollPageIntoView('page-5', 'end');
   await sleep(600);
   const mountedBottom = mgr.mountedIds;
-  const ph0 = doc.querySelector('div[data-parked-page="page-0"]');
+  const ph0 = page.querySelector('div[data-parked-page="page-0"]');
   const gBottom = {
     mounted: mountedBottom.join(','),
     page0Parked: !mountedBottom.includes('page-0'),
@@ -482,23 +482,23 @@ const r = await page.evaluate(async () => {
   const unpinnedGone = !mgr.mountedIds.includes('page-1');
   // G1 + 매니저: 플레이스홀더 존재 상태에서 data 세터 — 부활 없음
   const mountedBefore = mgr.mountedIds.length;
-  doc.data = doc.data;
+  page.data = page.data;
   await sleep(300);
   const gRoundTrip = {
     mountedCountStable: mgr.mountedIds.length === mountedBefore,
-    engines: doc.engine.childBoxEngines.length,
-    extractChildren: doc.data.children.length,
+    engines: page.engine.childBoxEngines.length,
+    extractChildren: page.data.children.length,
   };
   mgr.detach();
   // 원복: 전부 마운트
-  for (const id of [...doc.parkedPageIds]) {
-    const el = doc.unparkPage(id);
+  for (const id of [...page.parkedPageIds]) {
+    const el = page.unparkPage(id);
     if (el) await el.render();
   }
   await sleep(300);
   out.G = {
     ...gBottom, ...gTop, pinnedKept, unpinnedGone, ...gRoundTrip,
-    allRemounted: doc.items.length === 6,
+    allRemounted: page.items.length === 6,
     finalMatch: byIds().every(id => {
       const box = byId(id);
       if (!box || !box.querySelector('x-layout-paragraph')) return true;
@@ -507,7 +507,7 @@ const r = await page.evaluate(async () => {
   };
 
   // ── J. 성능 이득 실측 (30페이지) ──
-  const docJ = document.createElement('x-layout-document');
+  const docJ = document.createElement('x-layout-page');
   document.body.appendChild(docJ);
   const jchildren = [];
   for (let i = 0; i < 30; i++) {
@@ -565,7 +565,7 @@ const r = await page.evaluate(async () => {
     sampleMatch,
   };
 
-  window.__vdoc = doc;
+  window.__vdoc = page;
 
   return out;
 });
@@ -576,11 +576,11 @@ const r = await page.evaluate(async () => {
 const ri1 = await page.evaluate(async () => {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const { PageMountManager } = await import('/src/utils/page-mount-manager.ts');
-  const doc = window.__vdoc;
-  const mgr2 = new PageMountManager({ document: doc, window: 1 });
+  const page = window.__vdoc;
+  const mgr2 = new PageMountManager({ page: page, window: 1 });
   mgr2.attach();
   window.__mgr2 = mgr2;
-  const box = [...doc.querySelectorAll('x-layout-box')].find(b => b.id === 'page-2');
+  const box = [...page.querySelectorAll('x-layout-box')].find(b => b.id === 'page-2');
   if (box) box.scrollIntoView({ block: 'center' });
   await sleep(600);
   const domText = (pageBox) => {
@@ -595,10 +595,10 @@ const ri2 = await page.evaluate(async () => {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await sleep(800);
   const m = window.__mgr2;
-  const doc = window.__vdoc;
+  const page = window.__vdoc;
   let smallMatch = true;
   if (m.mountedIds.includes('page-2')) {
-    const box = [...doc.querySelectorAll('x-layout-box')].find(b => b.id === 'page-2');
+    const box = [...page.querySelectorAll('x-layout-box')].find(b => b.id === 'page-2');
     const p = box.querySelector('x-layout-paragraph');
     const dom = [...p.querySelectorAll('x-layout-column')]
       .map(col => [...col.shadowRoot.querySelectorAll('span[data-source-offset]')].map(s => s.textContent).join('')).join('');

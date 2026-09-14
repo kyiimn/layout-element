@@ -7,7 +7,7 @@
  *
  * 핵심 함정: `overflow: hidden`은 `getBoundingClientRect()`(레이아웃
  * 기하)에는 영향을 주지 않고 **페인트만 클립**한다. 따라서 rect 비교로는
- * 클리핑을 감지할 수 없고, 실제 hit-test인 `document.elementFromPoint`로
+ * 클리핑을 감지할 수 없고, 실제 hit-test인 `page.elementFromPoint`로
  * 걸침 글자 위의 최상위 페인트 요소가 걸침 span 자체인지를 확인해야 한다
  * (클립되었다면 hit이 span에 도달할 수 없다).
  *

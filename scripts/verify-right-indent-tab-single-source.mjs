@@ -123,7 +123,7 @@ const r = await page.evaluate(async () => {
 
   // 2. printPostData x좌표 vs 엔진 charOffsets (part.left 누적 포함)
   const printData = engine.printPostData;
-  const doc = document.querySelector('x-layout-document');
+  const page = document.querySelector('x-layout-page');
   const colW = engine.columnWidths;
   const gaps = engine.gaps;
   let colLeft = 0;
@@ -177,22 +177,22 @@ console.log('\n=== Node 정밀 비교 (print 좌표 vs 엔진 charOffsets) ===')
 const ttfBase64 = readFileSync('examples/fonts/KMIBMyoungjo.ttf').toString('base64');
 const { FontLoaderEngineImpl } = await import('../src/engine/font-loader-engine.ts');
 const { ColorRegistryEngineImpl } = await import('../src/engine/color-registry-engine.ts');
-const { DocumentEngine } = await import('../src/engine/document-engine.ts');
+const { PageEngine } = await import('../src/engine/page-engine.ts');
 
 const fontLoader = FontLoaderEngineImpl.create();
 await fontLoader.init([{ family: 'Myoungjo', base64Data: ttfBase64 }]);
 const colorRegistry = ColorRegistryEngineImpl.create();
 colorRegistry.init({});
 
-const docEngine = DocumentEngine.create(
-  { id: 'doc', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
+const pageEngine = PageEngine.create(
+    { id: 'page', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
   fontLoader, colorRegistry, 3.78,
 );
-docEngine.layout([{
+pageEngine.layout([{
   id: 'body', type: 'box', position: 'absolute', left: 0, top: 0, width: 120.333, height: 500,
   children: { id: 'p1', type: 'paragraph', content: '더 긴 기사 이름들이 들어가는\t─ 홍길동·김철수 기자', column: 1, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
 }]);
-const pe = docEngine.childBoxEngines[0].childEngines[0];
+const pe = pageEngine.childBoxEngines[0].childEngines[0];
 pe.layoutText();
 
 const part = pe.columnContents[0][0].parts[0];

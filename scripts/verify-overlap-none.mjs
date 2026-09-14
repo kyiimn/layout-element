@@ -24,7 +24,7 @@ const ttfBase64 = readFileSync(resolve(pkgRoot, 'examples/fonts/KMIBMyoungjo.ttf
 
 const { FontLoaderEngineImpl } = await import(`${pkgRoot}/src/engine/font-loader-engine.ts`);
 const { ColorRegistryEngineImpl } = await import(`${pkgRoot}/src/engine/color-registry-engine.ts`);
-const { DocumentEngine } = await import(`${pkgRoot}/src/engine/document-engine.ts`);
+const { PageEngine } = await import(`${pkgRoot}/src/engine/page-engine.ts`);
 const { ImageEngine } = await import(`${pkgRoot}/src/engine/image-engine.ts`);
 const { computeOverlapSizeMm } = await import(`${pkgRoot}/src/engine/overlap-engine.ts`);
 
@@ -77,11 +77,11 @@ console.log('\nTest 2: ImageEngine.computeOverlap overlapMode none');
 console.log('\nTest 3: end-to-end — overlapMode 전환별 문단 라인 수 변화');
 {
   const SYLLABLES = '가나다라마바사아자차카타파하';
-  const docEngine = DocumentEngine.create(
-    { id: 'doc', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
+  const pageEngine = PageEngine.create(
+      { id: 'page', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
     fontLoader, colorRegistry, 3.78,
   );
-  docEngine.layout([
+  pageEngine.layout([
     {
       type: 'box', id: 'para-box', position: 'absolute', left: 10, top: 10, width: 70, height: 60, zIndex: 1,
       children: { id: 'para', type: 'paragraph', content: SYLLABLES.repeat(30), column: 2, gap: 3, paragraphStyle: {}, textStyle: {} },
@@ -92,14 +92,14 @@ console.log('\nTest 3: end-to-end — overlapMode 전환별 문단 라인 수 �
       children: { id: 'img', type: 'image', url: '', dpi: 72, overlapMode: 'box', objectFit: 'none', x: 0, y: 0, width: 40, height: 30 },
     },
   ]);
-  const paraEngine = docEngine.findEngineById('para');
-  const imgEngine = docEngine.findEngineById('img');
+  const paraEngine = pageEngine.findEngineById('para');
+  const imgEngine = pageEngine.findEngineById('img');
   const lineCount = () => paraEngine.columnContents.reduce((sum, col) => sum + col.length, 0);
 
   const linesBox = lineCount();
   check('box 모드: 회피로 라인 수 증가 확인', linesBox > 0, `라인 ${linesBox}`);
 
-  // 개별 setter 경로 시뮬레이션 — DocumentEngine.layout 재호출 없음
+  // 개별 setter 경로 시뮬레이션 — PageEngine.layout 재호출 없음
   imgEngine.data = { ...imgEngine.data, overlapMode: 'none' };
   imgEngine.layout();
   paraEngine.layoutText();

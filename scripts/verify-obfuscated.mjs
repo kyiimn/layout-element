@@ -101,9 +101,9 @@ try {
   // 참고: 과거 심볼 GridCalculator/TextLayoutEngine은 각각
   // GridCalculatorEngine/ParagraphEngine으로 개명되어 engine 레이어로 이동했다.
   const expected = [
-    'LayoutDocumentElement', 'LayoutBoxElement', 'LayoutParagraphElement',
+    'LayoutPageElement', 'LayoutBoxElement', 'LayoutParagraphElement',
     'LayoutImageElement', 'LayoutTableElement',
-    'GridCalculatorEngine', 'ParagraphEngine', 'DocumentEngine',
+    'GridCalculatorEngine', 'ParagraphEngine', 'PageEngine',
     'ColorRegistry', 'FontLoader', 'EditManager',
   ];
   let missing = [];

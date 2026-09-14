@@ -27,7 +27,7 @@ const ttfBase64 = readFileSync(resolve(pkgRoot, 'examples/fonts/KMIBMyoungjo.ttf
 
 const { FontLoaderEngineImpl } = await import(`${pkgRoot}/src/engine/font-loader-engine.ts`);
 const { ColorRegistryEngineImpl } = await import(`${pkgRoot}/src/engine/color-registry-engine.ts`);
-const { DocumentEngine } = await import(`${pkgRoot}/src/engine/document-engine.ts`);
+const { PageEngine } = await import(`${pkgRoot}/src/engine/page-engine.ts`);
 
 const fontLoader = FontLoaderEngineImpl.create();
 await fontLoader.init([{ family: 'Myoungjo', base64Data: ttfBase64 }]);
@@ -43,12 +43,12 @@ function check(name, cond, detail = '') {
 const SYLLABLES = '가나다라마바사아자차카타파하';
 const text = SYLLABLES.repeat(30);
 
-const docEngine = DocumentEngine.create(
-  { id: 'doc', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
+const pageEngine = PageEngine.create(
+    { id: 'page', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
   fontLoader, colorRegistry, 3.78,
 );
 
-docEngine.layout([
+pageEngine.layout([
   {
     type: 'box', id: 'para-box', position: 'absolute', left: 10, top: 10, width: 70, height: 60, zIndex: 1,
     children: { id: 'para', type: 'paragraph', content: text, column: 2, gap: 3, paragraphStyle: {}, textStyle: {} },
@@ -60,8 +60,8 @@ docEngine.layout([
   },
 ]);
 
-const paraEngine = docEngine.findEngineById('para');
-const imgEngine = docEngine.findEngineById('img');
+const paraEngine = pageEngine.findEngineById('para');
+const imgEngine = pageEngine.findEngineById('img');
 if (!paraEngine || !imgEngine) { console.log('FAIL: engines not found'); process.exit(1); }
 
 // overlapParts가 split된 라인 수로 회피 강도를 측정한다

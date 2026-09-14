@@ -30,7 +30,7 @@ const ttfBase64 = readFileSync(resolve(pkgRoot, 'examples/fonts/KMIBMyoungjo.ttf
 
 const { FontLoaderEngineImpl } = await import('../src/engine/font-loader-engine.ts');
 const { ColorRegistryEngineImpl } = await import('../src/engine/color-registry-engine.ts');
-const { DocumentEngine } = await import('../src/engine/document-engine.ts');
+const { PageEngine } = await import('../src/engine/page-engine.ts');
 
 const fontLoader = FontLoaderEngineImpl.create();
 await fontLoader.init([{ family: 'Myoungjo', base64Data: ttfBase64 }]);
@@ -77,12 +77,12 @@ function makeRow(rowId, texts) {
 }
 
 function buildDocument(rows) {
-  const docEngine = DocumentEngine.create(
-    { id: 'doc', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
+  const pageEngine = PageEngine.create(
+      { id: 'page', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
     fontLoader, colorRegistry, 3.78,
   );
-  docEngine.layout([tableBoxData(rows)]);
-  return docEngine;
+  pageEngine.layout([tableBoxData(rows)]);
+  return pageEngine;
 }
 
 function tableBoxData(rows) {
@@ -98,8 +98,8 @@ function tableBoxData(rows) {
   };
 }
 
-function findTableEngine(docEngine) {
-  const tableBox = docEngine.childBoxEngines[0];
+function findTableEngine(pageEngine) {
+  const tableBox = pageEngine.childBoxEngines[0];
   const te = tableBox.childEngines.find(e => e.constructor.name === 'TableEngine');
   return te ?? null;
 }
@@ -125,11 +125,11 @@ console.log('Test 1: 무변경 재레이아웃 — 모든 셀 박스 엔진 동�
     makeRow('r1', ['셀A', '셀B']),
     makeRow('r2', ['셀C', '셀D']),
   ];
-  const doc = buildDocument(rows);
-  const te = findTableEngine(doc);
+  const page = buildDocument(rows);
+  const te = findTableEngine(page);
   const before = snapshotCellBoxEngines(te);
 
-  doc.layout(rows);
+  page.layout(rows);
   const after = snapshotCellBoxEngines(te);
 
   assert(before.size === 4, `셀 박스 엔진 4개 (got ${before.size})`);
@@ -147,11 +147,11 @@ console.log('\nTest 2: 마지막 행 삭제 — 라벨 복원 경로에서 동�
     makeRow('r1', ['첫째', '둘째']),
     makeRow('r2', ['셋째', '넷째']),
   ];
-  const doc = buildDocument(rows);
-  const te = findTableEngine(doc);
+  const page = buildDocument(rows);
+  const te = findTableEngine(page);
   const before = snapshotCellBoxEngines(te);
 
-  doc.layout([tableBoxData([rows[0]])]);
+  page.layout([tableBoxData([rows[0]])]);
   const after = snapshotCellBoxEngines(te);
 
   assert(after.size === 2, `삭제 후 셀 박스 엔진 2개 (got ${after.size})`);
@@ -170,8 +170,8 @@ console.log('\nTest 3: 첫 행 삭제 — 라벨 시프트 후 stash로 셀 박�
     makeRow('r1', ['위텍스트입니다', '위텍스트이에요']),
     makeRow('r2', ['아래텍스트', '아래텍스트2']),
   ];
-  const doc = buildDocument(rows);
-  const te = findTableEngine(doc);
+  const page = buildDocument(rows);
+  const te = findTableEngine(page);
   const before = snapshotCellBoxEngines(te);
   const beforeParagraphs = new Map();
   for (const rowEngine of te.rowEngines) {
@@ -182,7 +182,7 @@ console.log('\nTest 3: 첫 행 삭제 — 라벨 시프트 후 stash로 셀 박�
   }
 
   // 'r2'의 셀 라벨은 A1/B1 → A2/B2로 시프트된다 (첫 행 삭제).
-  doc.layout([tableBoxData([rows[1]])]);
+  page.layout([tableBoxData([rows[1]])]);
   const after = snapshotCellBoxEngines(te);
   const afters = [...after.values()];
 
@@ -217,12 +217,12 @@ console.log('\nTest 3b: 라벨 복원 경로 — 동일 데이터 참조 재레�
     makeRow('r1', ['동일내용셀A', '동일내용셀B']),
     makeRow('r2', ['동일내용셀C', '동일내용셀D']),
   ];
-  const doc = buildDocument(rows);
-  const te = findTableEngine(doc);
+  const page = buildDocument(rows);
+  const te = findTableEngine(page);
   const prevPara = te.rowEngines[0].cellEngines[0].boxEngine.childEngines
     .find(e => e.constructor.name === 'ParagraphEngine');
 
-  doc.layout([tableBoxData(rows)]);
+  page.layout([tableBoxData(rows)]);
   const curPara = te.rowEngines[0].cellEngines[0].boxEngine.childEngines
     .find(e => e.constructor.name === 'ParagraphEngine');
 
@@ -237,13 +237,13 @@ console.log('\nTest 4: 행 삭제 후 extractData 데이터 유실 없음');
     makeRow('r1', ['가나', '다라']),
     makeRow('r2', ['마바', '사아']),
   ];
-  const doc = buildDocument(rows);
-  doc.layout([tableBoxData([rows[0], rows[1]])]);
+  const page = buildDocument(rows);
+  page.layout([tableBoxData([rows[0], rows[1]])]);
 
-  const extract1 = JSON.stringify(doc.extractData.children.map(c => c.id));
+  const extract1 = JSON.stringify(page.extractData.children.map(c => c.id));
 
-  doc.layout([tableBoxData([rows[1]])]);
-  const te = findTableEngine(doc);
+  page.layout([tableBoxData([rows[1]])]);
+  const te = findTableEngine(page);
   const cellLabels = te.rowEngines.flatMap(re => re.cellEngines.map(ce => ce.cellLabel));
   const contents = te.rowEngines.flatMap(re =>
     re.cellEngines.map(ce => {

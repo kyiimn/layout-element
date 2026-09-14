@@ -232,7 +232,7 @@ console.log('\n=== 실제 화면 렌더 검증 (verify-visual-render) ===\n');
 // ── E. 타이핑 → 화면에 실제 글자 추가 (렌더 체인 실측) ──
 {
   const r = await page.evaluate(async () => {
-    const em = document.querySelector('x-layout-document').editManager;
+    const em = document.querySelector('x-layout-page').editManager;
     const p = [...document.querySelectorAll('x-layout-paragraph')].find(x => typeof x.content === 'string' && x.content.length > 20);
     if (!p) return null;
     em.textEditMode = true;

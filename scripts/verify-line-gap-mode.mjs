@@ -48,7 +48,7 @@ const ttfBase64 = readFileSync(resolve(pkgRoot, 'examples/fonts/KMIBMyoungjo.ttf
 
 const { FontLoaderEngineImpl } = await import('../src/engine/font-loader-engine.ts');
 const { ColorRegistryEngineImpl } = await import('../src/engine/color-registry-engine.ts');
-const { DocumentEngine } = await import('../src/engine/document-engine.ts');
+const { PageEngine } = await import('../src/engine/page-engine.ts');
 const { computeLineHeightMm } = await import('../src/engine/line-height.ts');
 
 const fontLoader = FontLoaderEngineImpl.create();
@@ -88,7 +88,7 @@ function assert(condition, message) {
 const approx = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
 
 /**
- * DocumentEngine + 단일 문단 박스로 엔진 트리를 구성하고 layout을 실행한다.
+ * PageEngine + 단일 문단 박스로 엔진 트리를 구성하고 layout을 실행한다.
  *
  * @param {string | object[]} content - 문단 텍스트
  * @param {object} [opts] - { boxWidth, boxHeight, columns, fontSize,
@@ -111,14 +111,14 @@ function buildPara(content, opts = {}) {
   const docParagraphStyle = Object.prototype.hasOwnProperty.call(opts, 'docLineGap')
     ? (opts.docLineGap === undefined ? { lineGapMode: 'ratio' } : { lineGap: opts.docLineGap })
     : { lineGap: 1.2 };
-  const docEngine = DocumentEngine.create(
+  const pageEngine = PageEngine.create(
     {
-      id: 'doc', width: 257, height: 370, columns: 6, gap: 3,
+      id: 'page', width: 257, height: 370, columns: 6, gap: 3,
       paragraphStyle: docParagraphStyle, textStyle: { fontSize, fontFamily: 'Myoungjo' },
     },
     fontLoader, colorRegistry, 3.78,
   );
-  docEngine.layout([
+  pageEngine.layout([
     {
       type: 'box',
       id: 'box', position: 'absolute', left: 10, top: 10, width: boxWidth, height: boxHeight, zIndex: 1,
@@ -126,9 +126,9 @@ function buildPara(content, opts = {}) {
     },
     ...siblings,
   ]);
-  const paraEngine = docEngine.findEngineById('para');
+  const paraEngine = pageEngine.findEngineById('para');
   paraEngine.layoutText();
-  return { paraEngine, docEngine };
+  return { paraEngine, pageEngine };
 }
 
 /**
@@ -170,18 +170,18 @@ console.log('\nTest 2: fixed — lineHeight === lineGap (fontSize 무시)');
   const FIXED_GAP = 6;
   const content = '가'.repeat(30);
   // static 박스 + 컬럼 기반 그리드로 구성 (absHeight 공식은 static 대상)
-  const docEngine = DocumentEngine.create(
+  const pageEngine = PageEngine.create(
     {
-      id: 'doc', width: 257, height: 370, columns: 6, gap: 3,
+      id: 'page', width: 257, height: 370, columns: 6, gap: 3,
       paragraphStyle: { lineGap: FIXED_GAP, lineGapMode: 'fixed' }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' },
     },
     fontLoader, colorRegistry, 3.78,
   );
-  docEngine.layout([
+  pageEngine.layout([
     { type: 'box', id: 'box', position: 'static', left: 0, top: 0, width: 1, height: 26, zIndex: 1,
       children: { id: 'para', type: 'paragraph', content, textStyle: {} } },
   ]);
-  const paraEngine = docEngine.findEngineById('para');
+  const paraEngine = pageEngine.findEngineById('para');
   paraEngine.layoutText();
 
   const lines = paraEngine.columnContents[0];
@@ -192,7 +192,7 @@ console.log('\nTest 2: fixed — lineHeight === lineGap (fontSize 무시)');
     `maxFontSize는 문단 fontSize 4 유지 (수직 앵커 근거)`);
 
   // BoxEngine.absHeight = lineHeight × N − (lineHeight − fontSize) — RULES §1.8
-  const boxEngine = docEngine.findEngineById('box');
+  const boxEngine = pageEngine.findEngineById('box');
   const N = boxEngine.height;
   assert(approx(boxEngine.absHeight, FIXED_GAP * N - (FIXED_GAP - 4)),
     `absHeight === ${FIXED_GAP}×${N} − (${FIXED_GAP}−4) = ${(FIXED_GAP * N - (FIXED_GAP - 4)).toFixed(2)} (got ${boxEngine.absHeight.toFixed(2)})`);
@@ -288,20 +288,20 @@ console.log('\nTest 6: 오버플로우 — effectiveColumnHeight ↔ absHeight �
   ]) {
     const content = '가'.repeat(200);
     // static 박스 — absHeight 공식의 대상
-    const docEngine = DocumentEngine.create(
+    const pageEngine = PageEngine.create(
       {
-        id: 'doc', width: 257, height: 370, columns: 6, gap: 3,
+        id: 'page', width: 257, height: 370, columns: 6, gap: 3,
         paragraphStyle: ps, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' },
       },
       fontLoader, colorRegistry, 3.78,
     );
-    docEngine.layout([
+    pageEngine.layout([
       { type: 'box', id: 'box', position: 'static', left: 0, top: 0, width: 1, height: 26, zIndex: 1,
         children: { id: 'para', type: 'paragraph', content, textStyle: {} } },
     ]);
-    const paraEngine = docEngine.findEngineById('para');
+    const paraEngine = pageEngine.findEngineById('para');
     paraEngine.layoutText();
-    const boxEngine = docEngine.findEngineById('box');
+    const boxEngine = pageEngine.findEngineById('box');
     const L = paraEngine.baseLineHeight;
     const fs = paraEngine.fontSize;
     const label = `[lg=${ps.lineGap}, mode=${ps.lineGapMode ?? 'ratio'}]`;
@@ -434,15 +434,15 @@ console.log('\nTest 10: 개별 setter — paragraphStyle 주입 + layoutText →
 // ═══ 11. GC 정합 — 문서 수준 fixed → gridCalculator.lineHeight ═══
 console.log('\nTest 11: GC — 문서 수준 fixed 모드 → gridCalculator.lineHeight === lineGap');
 {
-  const docEngine = DocumentEngine.create(
+  const pageEngine = PageEngine.create(
     {
-      id: 'doc', width: 257, height: 370, columns: 6, gap: 3,
+      id: 'page', width: 257, height: 370, columns: 6, gap: 3,
       paragraphStyle: { lineGap: 6, lineGapMode: 'fixed' }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' },
     },
     fontLoader, colorRegistry, 3.78,
   );
-  docEngine.layout([]);
-  const gc = docEngine.gridCalculator;
+  pageEngine.layout([]);
+  const gc = pageEngine.gridCalculator;
   assert(approx(gc.lineHeight, 6), `gridCalculator.lineHeight === 6 (got ${gc.lineHeight})`);
   assert(approx(gc.lineHeight, computeLineHeightMm(6, 'fixed', 4)), 'computeLineHeightMm 단일 소스 정합');
   // editableTextHeight: height/padding 기반이므로 불변 — lineHeight가 fixed여도 동일
@@ -452,30 +452,30 @@ console.log('\nTest 11: GC — 문서 수준 fixed 모드 → gridCalculator.lin
 // ═══ 12. 두 층위 — GC는 문서 스타일, PE는 문단 스타일 ═══
 console.log('\nTest 12: 두 층위 — 카스케이드 정합 (문서 fixed + 문단 오버라이드)');
 {
-  const docEngine = DocumentEngine.create(
+  const pageEngine = PageEngine.create(
     {
-      id: 'doc', width: 257, height: 370, columns: 6, gap: 3,
+      id: 'page', width: 257, height: 370, columns: 6, gap: 3,
       paragraphStyle: { lineGap: 8, lineGapMode: 'fixed' }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' },
     },
     fontLoader, colorRegistry, 3.78,
   );
-  docEngine.layout([
+  pageEngine.layout([
     {
       type: 'box', id: 'box', position: 'absolute', left: 10, top: 10, width: 40, height: 60, zIndex: 1,
       children: { id: 'para', type: 'paragraph', content: '가'.repeat(30), column: 1, gap: 3,
         paragraphStyle: { lineGap: 1.5, lineGapMode: 'ratio' }, textStyle: {} },
     },
   ]);
-  const pe = docEngine.findEngineById('para');
+  const pe = pageEngine.findEngineById('para');
   pe.layoutText();
-  assert(approx(docEngine.gridCalculator.lineHeight, 8), 'GC lineHeight === 문서 fixed 8');
+  assert(approx(pageEngine.gridCalculator.lineHeight, 8), 'GC lineHeight === 문서 fixed 8');
   assert(approx(pe.baseLineHeight, 4 * 1.5), 'PE baseLineHeight === 문단 ratio 6 (독립)');
   assert(pe.columnContents[0].every(l => approx(l.lineHeight, 6)), '문단 라인 높이 === 6 (문단 스타일)');
 
   // 카스케이드: 문단이 lineGap만 오버라이드하고 모드를 생략 → 문서 모드(fixed) 상속
-  const docEngine2 = DocumentEngine.create(
+  const docEngine2 = PageEngine.create(
     {
-      id: 'doc', width: 257, height: 370, columns: 6, gap: 3,
+      id: 'page', width: 257, height: 370, columns: 6, gap: 3,
       paragraphStyle: { lineGap: 8, lineGapMode: 'fixed' }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' },
     },
     fontLoader, colorRegistry, 3.78,
@@ -496,19 +496,19 @@ console.log('\nTest 12: 두 층위 — 카스케이드 정합 (문서 fixed + �
 // ═══ 13. flipLayout — fixed 모드 heightLines ═══
 console.log('\nTest 13: flipLayout — fixed 모드에서 수직 반전 정합');
 {
-  const docEngine = DocumentEngine.create(
+  const pageEngine = PageEngine.create(
     {
-      id: 'doc', width: 257, height: 200, columns: 6, gap: 3,
+      id: 'page', width: 257, height: 200, columns: 6, gap: 3,
       paragraphStyle: { lineGap: 6, lineGapMode: 'fixed' }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' },
     },
     fontLoader, colorRegistry, 3.78,
   );
-  docEngine.layout([
+  pageEngine.layout([
     { type: 'box', id: 'b1', position: 'static', left: 0, top: 1, width: 2, height: 5, zIndex: 1,
       children: { id: 'p1', type: 'paragraph', content: '가'.repeat(30), textStyle: {} } },
   ]);
   // FlipLayoutOptions는 { axis } 객체 — 문자열 전달은 axis undefined로 무동작
-  const flipped = docEngine.flipLayout({ axis: 'vertical' });
+  const flipped = pageEngine.flipLayout({ axis: 'vertical' });
   const flippedBox = flipped.children.find(b => b.id === 'b1');
   // heightLines = innerHeight / lineHeight = 200 / 6 — fixed 모드로 계산
   const expectedTop = 200 / 6 - 1 - 5;
@@ -516,9 +516,9 @@ console.log('\nTest 13: flipLayout — fixed 모드에서 수직 반전 정합')
   assert(approx(flippedBox.top, expectedTop),
     `수직 반전 top === heightLines − top − height = ${expectedTop.toFixed(3)} (got ${flippedBox.top})`);
   // ratio 모드와의 차이 검증: fixed 6은 heightLines = 33.33, ratio 1.25는 40
-  const docEngineRatio = DocumentEngine.create(
+  const docEngineRatio = PageEngine.create(
     {
-      id: 'doc', width: 257, height: 200, columns: 6, gap: 3,
+      id: 'page', width: 257, height: 200, columns: 6, gap: 3,
       paragraphStyle: { lineGap: 1.25 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' },
     },
     fontLoader, colorRegistry, 3.78,
@@ -583,9 +583,9 @@ console.log('\nTest 16: fixed/fixed-min lineGap 생략 → 기본 6mm (배율 �
     'mode만 주입 fixed-min → 라인 높이 === 6 (기본값)');
 
   // 문서 자체가 fixed 명시 6 → GC도 6mm (GC getter resolveLineGap)
-  const docFixed = DocumentEngine.create(
+  const docFixed = PageEngine.create(
     {
-      id: 'doc', width: 257, height: 370, columns: 6, gap: 3,
+      id: 'page', width: 257, height: 370, columns: 6, gap: 3,
       paragraphStyle: { lineGap: 6, lineGapMode: 'fixed' }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' },
     },
     fontLoader, colorRegistry, 3.78,
@@ -594,9 +594,9 @@ console.log('\nTest 16: fixed/fixed-min lineGap 생략 → 기본 6mm (배율 �
   assert(approx(docFixed.gridCalculator.lineHeight, 6), '문서 fixed 명시 6 → GC lineHeight === 6');
 
   // 문서가 mode만 주입(fixed) → GC도 기본 6mm
-  const docFixedDefault = DocumentEngine.create(
+  const docFixedDefault = PageEngine.create(
     {
-      id: 'doc', width: 257, height: 370, columns: 6, gap: 3,
+      id: 'page', width: 257, height: 370, columns: 6, gap: 3,
       paragraphStyle: { lineGapMode: 'fixed' }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' },
     },
     fontLoader, colorRegistry, 3.78,

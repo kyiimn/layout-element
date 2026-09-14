@@ -34,7 +34,7 @@ const ttfBase64 = readFileSync(resolve(pkgRoot, 'examples/fonts/KMIBMyoungjo.ttf
 
 const { FontLoaderEngineImpl } = await import('../src/engine/font-loader-engine.ts');
 const { ColorRegistryEngineImpl } = await import('../src/engine/color-registry-engine.ts');
-const { DocumentEngine } = await import('../src/engine/document-engine.ts');
+const { PageEngine } = await import('../src/engine/page-engine.ts');
 
 const fontLoader = FontLoaderEngineImpl.create();
 await fontLoader.init([{ family: 'Myoungjo', base64Data: ttfBase64 }]);
@@ -63,7 +63,7 @@ function makeText(n) {
 }
 
 /**
- * DocumentEngine + 문단 박스로 엔진 트리를 구성하고 layout을 실행한다.
+ * PageEngine + 문단 박스로 엔진 트리를 구성하고 layout을 실행한다.
  *
  * 문단은 박스의 children이 단일 객체일 때만 ParagraphEngine으로 생성되므로
  * (배열이면 전부 BoxEngine 취급), 문단 박스와 오버랩 박스를 document의
@@ -83,11 +83,11 @@ function buildPara(content, siblingBoxes = [], opts = {}) {
     fontSize = 4,
   } = opts;
 
-  const docEngine = DocumentEngine.create(
-    { id: 'doc', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize, fontFamily: 'Myoungjo' } },
+  const pageEngine = PageEngine.create(
+      { id: 'page', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize, fontFamily: 'Myoungjo' } },
     fontLoader, colorRegistry, 3.78,
   );
-  docEngine.layout([
+  pageEngine.layout([
     {
       type: 'box',
       id: 'para-box', position: 'absolute', left: 10, top: 10, width: boxWidth, height: boxHeight, zIndex: 1,
@@ -98,7 +98,7 @@ function buildPara(content, siblingBoxes = [], opts = {}) {
     },
     ...siblingBoxes,
   ]);
-  const paraEngine = docEngine.findEngineById('para');
+  const paraEngine = pageEngine.findEngineById('para');
   paraEngine.layoutText();
   return paraEngine;
 }

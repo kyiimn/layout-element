@@ -171,7 +171,7 @@ diff /tmp/opencode/snapshot-before.json /tmp/opencode/snapshot-after.json
 
 **검증 방식**: DOM 가시 텍스트(라인별) === 엔진 가시 텍스트(strip 규칙 반영). **주의 — 오탐 교훈**: 엔진 `part.content`는 `string[]`(글자 배열)이므로 `join('')` 필요, 첫/마지막 파트의 leading/trailing space strip 규칙을 renderText와 동일하게 적용해야 한다.
 
-**dev server 방어 (포트 오인 사고 교훈)**: 포트만으로 서버를 판별하면 **다른 앱의 Vite 서버**(예: `apps/layout-ui`, 5173)를 layout-element 서버로 오인한다 — SPA fallback이 존재하지 않는 경로에도 앱 index를 200으로 반환하므로 `res.ok`로는 판별 불가 (실제 사고: BENCH_READY 타임아웃 30초, `x-layout-document` null TypeError). probe는 **HTML title까지 검증**(`Layout Element Benchmark`)하고, 어느 포트에도 정상 서버가 없으면 **자체 스폰**(포트 5198) 후 종료 시 정리한다.
+**dev server 방어 (포트 오인 사고 교훈)**: 포트만으로 서버를 판별하면 **다른 앱의 Vite 서버**(예: `apps/layout-ui`, 5173)를 layout-element 서버로 오인한다 — SPA fallback이 존재하지 않는 경로에도 앱 index를 200으로 반환하므로 `res.ok`로는 판별 불가 (실제 사고: BENCH_READY 타임아웃 30초, `x-layout-page` null TypeError). probe는 **HTML title까지 검증**(`Layout Element Benchmark`)하고, 어느 포트에도 정상 서버가 없으면 **자체 스폰**(포트 5198) 후 종료 시 정리한다.
 
 **실행**:
 ```bash
@@ -460,7 +460,7 @@ npx tsx scripts/verify-hanging-punctuation.mjs   # 55항목 ALL PASS
 
 **목적**: 기존 브라우저 검증(dom-diff/visual-render/...)은 걸침 OFF 상태로 동작하므로(회귀 방어), 걸침 ON의 **화면 결과** — 파트 밖 span 페인트, 컬럼/호스트 overflow 해제 — 는 별도 검증이 필요하다.
 
-**핵심 함정**: `overflow: hidden`은 `getBoundingClientRect()`(레이아웃 기하)에 영향 없이 **페인트만 클립**한다. rect 비교로는 클리핑을 감지할 수 없고, 실제 hit-test로 확인해야 한다. 또한 `document.elementFromPoint`는 오픈 섀도우 루트 내부 히트를 **호스트로 리타기팅**한다 — 컬럼 밖 지점에서 `X-LAYOUT-COLUMN`이 반환된 것 자체가 걸침 span이 페인트되었다는 방증(클립되면 뒤의 문단/바디가 나옴)이며, 확정 검증은 `shadowRoot.elementFromPoint`로 섀도우 내부 요소를 직접 조회한다.
+**핵심 함정**: `overflow: hidden`은 `getBoundingClientRect()`(레이아웃 기하)에 영향 없이 **페인트만 클립**한다. rect 비교로는 클리핑을 감지할 수 없고, 실제 hit-test로 확인해야 한다. 또한 `page.elementFromPoint`는 오픈 섀도우 루트 내부 히트를 **호스트로 리타기팅**한다 — 컬럼 밖 지점에서 `X-LAYOUT-COLUMN`이 반환된 것 자체가 걸침 span이 페인트되었다는 방증(클립되면 뒤의 문단/바디가 나옴)이며, 확정 검증은 `shadowRoot.elementFromPoint`로 섀도우 내부 요소를 직접 조회한다.
 
 **검증 항목** (11항목): OFF 기준(hangs 없음 + overflow hidden) → ON 토글(부호 run 당겨짐 + 스택형 오프셋) → computed overflow visible → 걸침 span DOM(`data-char-offset === partWidth`) → 화면 rect 컬럼 밖 연장 → shadowRoot 히트 도달 → OFF 재토글 원상 복구.
 
@@ -549,7 +549,7 @@ npx tsx scripts/verify-overlap-none.mjs   # 7항목 ALL PASS
 
 ### `verify-threading.mjs` — 텍스트 스레딩 엔진 전 파이프라인 (엔진)
 
-**목적**: `DocumentData.threads`(스레드 = story 콘텐츠 단일 소스 + 프레임 순차 feed-forward)가 전 소비 경로에서 정확히 동작하는지. 스레딩이 없는 문서와의 byte-identical 회귀를 최우선으로 방어한다.
+**목적**: `PageData.threads`(스레드 = story 콘텐츠 단일 소스 + 프레임 순차 feed-forward)가 전 소비 경로에서 정확히 동작하는지. 스레딩이 없는 문서와의 byte-identical 회귀를 최우선으로 방어한다.
 
 **핵심 설계 교훈 — 지오메트리 행렬**: B1(이중 스킵)·B5(소진 조합)는 단일 시나리오를 우회 통과했다 — 프레임 용량이 잔여보다 작으면 이중 스킵이 배치를 소진시키지 않아 `visibleChars>0` 어설션이 통과한다. 스레딩은 **지오메트리 변수**(컬럼 수·높이·프레임 수·story 길이)가 결함을 은폐할 수 있는 도메인이므로 [11]은 81조합 행렬(columns×height×frames×story)에 공통 어설션 5종을 일괄 적용한다. 이 행렬이 실제로 발견한 결함: 소진 경로의 잔여 중간 프레임까지 `threadTail: true`로 마킹되어 tail이 다중 생성되는 것([8b]의 f=3 단일 시나리오는 이를 우회했다).
 
@@ -595,7 +595,7 @@ npx tsx scripts/verify-threading.mjs   # 104항목 ALL PASS
 **측정 유틸 모듈화** (`plainOf`/`domTextOf`/`readBoxShadow`/`frameOf`/`threadFrameIds`): 측정 코드 자체의 버그(속성명 혼동, 배열 인덱싱)가 seam 판정을 오측한 실패 모드를 종지한다 — 전 시나리오가 동일 함수를 재사용한다.
 
 **이 스크립트가 잡은 실제 버그 (작성 과정)**:
-- **문서 요소 id 덮어쓰기** — `LayoutDocumentElement.data` setter가 id 없는 문서 데이터에 `genUUID()`를 자동 생성해 `this.id`를 덮어써, HTML 마크업이 부여한 `id="doc"`이 난수로 바뀌고 `document.getElementById('doc')`가 null을 반환했다. 수정: 문서 요소 자신의 id는 자동 생성하지 않는다(자식 박스/문단은 reconcile 키로 쓰이므로 유지).
+- **문서 요소 id 덮어쓰기** — `LayoutPageElement.data` setter가 id 없는 문서 데이터에 `genUUID()`를 자동 생성해 `this.id`를 덮어써, HTML 마크업이 부여한 `id="doc"`이 난수로 바뀌고 `document.getElementById('doc')`가 null을 반환했다. 수정: 문서 요소 자신의 id는 자동 생성하지 않는다(자식 박스/문단은 reconcile 키로 쓰이므로 유지).
 
 **dev server 방어**: `verify-multicolumn.mjs`와 동일한 2중 방어 — probe가 HTML title(`Threading Demo — 텍스트 스레딩`)까지 검증하고, 정상 서버가 없으면 자체 스폰(포트 5202) 후 종료 시 정리한다.
 

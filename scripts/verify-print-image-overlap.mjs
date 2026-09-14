@@ -29,7 +29,7 @@ const ttfBase64 = readFileSync(resolve(pkgRoot, 'examples/fonts/KMIBMyoungjo.ttf
 
 const { FontLoaderEngineImpl } = await import(`${pkgRoot}/src/engine/font-loader-engine.ts`);
 const { ColorRegistryEngineImpl } = await import(`${pkgRoot}/src/engine/color-registry-engine.ts`);
-const { DocumentEngine } = await import(`${pkgRoot}/src/engine/document-engine.ts`);
+const { PageEngine } = await import(`${pkgRoot}/src/engine/page-engine.ts`);
 
 const fontLoader = FontLoaderEngineImpl.create();
 await fontLoader.init([{ family: 'Myoungjo', base64Data: ttfBase64 }]);
@@ -46,11 +46,11 @@ const approx = (a, b, eps = 1e-9) => Math.abs(a - b) < eps;
 
 /** 문서를 만들고 print에서 이미지 항목을 찾는 헬퍼. */
 function buildDoc(imageChild) {
-  const docEngine = DocumentEngine.create(
-    { id: 'doc', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
+  const pageEngine = PageEngine.create(
+      { id: 'page', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
     fontLoader, colorRegistry, 3.78,
   );
-  docEngine.layout([
+  pageEngine.layout([
     {
       type: 'box', id: 'para-box', position: 'absolute', left: 10, top: 10, width: 70, height: 60, zIndex: 1,
       children: { id: 'para', type: 'paragraph', content: '가나다라마바사아자차카타파하'.repeat(30), column: 2, gap: 3, paragraphStyle: {}, textStyle: {} },
@@ -61,7 +61,7 @@ function buildDoc(imageChild) {
       children: imageChild,
     },
   ]);
-  return docEngine;
+  return pageEngine;
 }
 
 /** print 배열에서 이미지 항목(data.type === 'image')을 추출한다. */
@@ -102,9 +102,9 @@ console.log('\nTest 1: 이미지 print 좌표 === displayRect (모드별)');
   ];
 
   for (const c of cases) {
-    const docEngine = buildDoc(c.child);
-    const imgEngine = docEngine.findEngineById('img');
-    const imgPrint = findImagePrint(docEngine.printPostData);
+    const pageEngine = buildDoc(c.child);
+    const imgEngine = pageEngine.findEngineById('img');
+    const imgPrint = findImagePrint(pageEngine.printPostData);
     if (!imgPrint) { check(`${c.name}: print 이미지 항목 존재`, false); continue; }
 
     const d = imgPrint.data;
@@ -115,7 +115,7 @@ console.log('\nTest 1: 이미지 print 좌표 === displayRect (모드별)');
 
     // displayRect와의 직접 일치 (상대 좌표 = displayRect - contentAbsRect)
     const dr = imgEngine.displayRect;
-    const box = docEngine.findEngineById('img-box');
+    const box = pageEngine.findEngineById('img-box');
     const content = box.contentAbsRect;
     check(`${c.name}: print 좌표 === displayRect - contentAbsRect`,
       approx(d.x, dr.absLeft - content.absLeft) && approx(d.y, dr.absTop - content.absTop)
@@ -126,18 +126,18 @@ console.log('\nTest 1: 이미지 print 좌표 === displayRect (모드별)');
 // ── Test 2: objectFit 변경 → print 좌표 갱신 (stale print 방지) ──
 console.log('\nTest 2: objectFit 변경 시 print 좌표 갱신');
 {
-  const docEngine = buildDoc({ id: 'img', type: 'image', url: '', dpi: 72, objectFit: 'cover', originalWidth: 80, originalHeight: 40 });
-  const imgEngine = docEngine.findEngineById('img');
+  const pageEngine = buildDoc({ id: 'img', type: 'image', url: '', dpi: 72, objectFit: 'cover', originalWidth: 80, originalHeight: 40 });
+  const imgEngine = pageEngine.findEngineById('img');
 
-  const before = findImagePrint(docEngine.printPostData).data;
+  const before = findImagePrint(pageEngine.printPostData).data;
   check('초기 cover: print 반영', approx(before.width, 60) && approx(before.height, 30) && approx(before.x, -10),
     `(${before.x},${before.y},${before.width},${before.height})`);
 
   // objectFit contain으로 변경 (개별 data setter 경로)
   imgEngine.data = { ...imgEngine.data, objectFit: 'contain' };
   imgEngine.layout();
-  docEngine.ensureCommitted();
-  const after = findImagePrint(docEngine.printPostData).data;
+  pageEngine.ensureCommitted();
+  const after = findImagePrint(pageEngine.printPostData).data;
   check('contain 변경: print 좌표 갱신', approx(after.width, 40) && approx(after.height, 20) && approx(after.y, 5),
     `(${after.x},${after.y},${after.width},${after.height}) — 변경 전 (${before.width},${before.height})`);
 }
@@ -177,10 +177,10 @@ console.log('\nTest 3: overlapMode none → print chars 라인 배치 반영');
 // ── Test 4: print rect === 이미지 박스 contentAbsRect ──
 console.log('\nTest 4: print rect === 이미지 박스 contentAbsRect');
 {
-  const docEngine = buildDoc({ id: 'img', type: 'image', url: '', dpi: 72, objectFit: 'cover', originalWidth: 80, originalHeight: 40 });
-  const box = docEngine.findEngineById('img-box');
+  const pageEngine = buildDoc({ id: 'img', type: 'image', url: '', dpi: 72, objectFit: 'cover', originalWidth: 80, originalHeight: 40 });
+  const box = pageEngine.findEngineById('img-box');
   const content = box.contentAbsRect;
-  const imgPrint = findImagePrint(docEngine.printPostData);
+  const imgPrint = findImagePrint(pageEngine.printPostData);
 
   check('print rect === contentAbsRect (박스 영역)',
     approx(imgPrint.rect.x, content.absLeft) && approx(imgPrint.rect.y, content.absTop)

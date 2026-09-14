@@ -32,7 +32,7 @@ const ttfBase64 = readFileSync(resolve(pkgRoot, 'examples/fonts/KMIBMyoungjo.ttf
 
 const { FontLoaderEngineImpl } = await import('../src/engine/font-loader-engine.ts');
 const { ColorRegistryEngineImpl } = await import('../src/engine/color-registry-engine.ts');
-const { DocumentEngine } = await import('../src/engine/document-engine.ts');
+const { PageEngine } = await import('../src/engine/page-engine.ts');
 const { ParagraphEngine } = await import('../src/engine/paragraph-engine.ts');
 
 const fontLoader = FontLoaderEngineImpl.create();
@@ -55,7 +55,7 @@ function assert(condition, message) {
 const approx = (a, b, eps = 1e-9) => Math.abs(a - b) < eps;
 
 /**
- * DocumentEngine + 문단 박스로 엔진 트리를 구성하고 layout을 실행한다.
+ * PageEngine + 문단 박스로 엔진 트리를 구성하고 layout을 실행한다.
  *
  * 문단은 박스의 children이 단일 객체일 때만 ParagraphEngine으로 생성되므로
  * (배열이면 전부 BoxEngine 취급), 문단을 단일 children 객체로 둔다.
@@ -63,7 +63,7 @@ const approx = (a, b, eps = 1e-9) => Math.abs(a - b) < eps;
  * @param {string | object[]} content - 문단 텍스트 (또는 인라인 런 배열)
  * @param {object[]} [siblingBoxes] - document 형제 박스 (오버랩 요소, document 절대좌표)
  * @param {object} [opts] - { boxWidth, boxHeight, columns, fontSize, docLetterSpacing, docWidthRatio, docSpaceRatio }
- * @returns {object} { docEngine, paraEngine } — layoutText까지 완료된 상태
+ * @returns {object} { pageEngine, paraEngine } — layoutText까지 완료된 상태
  */
 function buildPara(content, siblingBoxes = [], opts = {}) {
   const {
@@ -81,11 +81,11 @@ function buildPara(content, siblingBoxes = [], opts = {}) {
   if (docWidthRatio !== undefined) docTextStyle.widthRatio = docWidthRatio;
   if (docSpaceRatio !== undefined) docTextStyle.spaceRatio = docSpaceRatio;
 
-  const docEngine = DocumentEngine.create(
-    { id: 'doc', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: docTextStyle },
+  const pageEngine = PageEngine.create(
+      { id: 'page', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: docTextStyle },
     fontLoader, colorRegistry, 3.78,
   );
-  docEngine.layout([
+  pageEngine.layout([
     {
       type: 'box',
       id: 'para-box', position: 'absolute', left: 10, top: 10, width: boxWidth, height: boxHeight, zIndex: 1,
@@ -96,9 +96,9 @@ function buildPara(content, siblingBoxes = [], opts = {}) {
     },
     ...siblingBoxes,
   ]);
-  const paraEngine = docEngine.findEngineById('para');
+  const paraEngine = pageEngine.findEngineById('para');
   paraEngine.layoutText();
-  return { docEngine, paraEngine };
+  return { pageEngine, paraEngine };
 }
 
 /**

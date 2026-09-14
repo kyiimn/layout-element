@@ -96,7 +96,7 @@ const r = await page.evaluate(async () => {
   const { SelectionRange } = await import('/src/types/edit/selection.type');
 
   // 문단 자체 스타일: 기본 상속값과 동일하게 (회귀 판정 조건)
-  // bench doc 상속: fontSize 4, fontFamily 중앙신문명조, fontWeight 400, fontStyle normal
+  // bench page 상속: fontSize 4, fontFamily 중앙신문명조, fontWeight 400, fontStyle normal
   const inheritStyle = p.model.inheritStyle;
   const out = { inherit: { fontSize: inheritStyle.fontSize, fontWeight: inheritStyle.fontWeight, fontStyle: inheritStyle.fontStyle } };
 

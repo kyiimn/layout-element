@@ -33,7 +33,7 @@ const ttfBase64 = readFileSync(resolve(pkgRoot, 'examples/fonts/KMIBMyoungjo.ttf
 
 const { FontLoaderEngineImpl } = await import('../src/engine/font-loader-engine.ts');
 const { ColorRegistryEngineImpl } = await import('../src/engine/color-registry-engine.ts');
-const { DocumentEngine } = await import('../src/engine/document-engine.ts');
+const { PageEngine } = await import('../src/engine/page-engine.ts');
 
 const fontLoader = FontLoaderEngineImpl.create();
 await fontLoader.init([{ family: 'Myoungjo', base64Data: ttfBase64 }]);
@@ -55,7 +55,7 @@ function assert(condition, message) {
 const approx = (a, b, eps = 1e-9) => Math.abs(a - b) < eps;
 
 /**
- * DocumentEngine + 단일 문단 박스로 엔진 트리를 구성하고 layout을 실행한다.
+ * PageEngine + 단일 문단 박스로 엔진 트리를 구성하고 layout을 실행한다.
  *
  * @param {string | object[]} content - 문단 텍스트 (또는 인라인 런 배열)
  * @param {object} [opts] - { boxWidth, boxHeight, columns, fontSize, fontFamily }
@@ -70,11 +70,11 @@ function buildPara(content, opts = {}) {
     fontFamily = 'Myoungjo',
   } = opts;
 
-  const docEngine = DocumentEngine.create(
-    { id: 'doc', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize, fontFamily } },
+  const pageEngine = PageEngine.create(
+      { id: 'page', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize, fontFamily } },
     fontLoader, colorRegistry, 3.78,
   );
-  docEngine.layout([{
+  pageEngine.layout([{
     type: 'box',
     id: 'box', position: 'absolute', left: 10, top: 10, width: boxWidth, height: boxHeight, zIndex: 1,
     children: {
@@ -82,7 +82,7 @@ function buildPara(content, opts = {}) {
       paragraphStyle: {}, textStyle: {},
     },
   }]);
-  const paraEngine = docEngine.childBoxEngines[0].childEngines[0];
+  const paraEngine = pageEngine.childBoxEngines[0].childEngines[0];
   paraEngine.layoutText();
   return paraEngine;
 }
@@ -220,16 +220,16 @@ console.log('\nTest 7: 한글 미지원 폰트 — 폴백 포기 → minWidthMm'
     getFontFamily: () => 'Myoungjo',
   };
 
-  const docEngine = DocumentEngine.create(
-    { id: 'doc', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
+  const pageEngine = PageEngine.create(
+      { id: 'page', width: 257, height: 370, columns: 6, gap: 3, paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4, fontFamily: 'Myoungjo' } },
     latinOnlyLoader, colorRegistry, 3.78,
   );
-  docEngine.layout([{
+  pageEngine.layout([{
     type: 'box',
     id: 'box', position: 'absolute', left: 10, top: 10, width: 57.7, height: 500, zIndex: 1,
     children: { id: 'para', type: 'paragraph', content: '핳', column: 1, gap: 3, paragraphStyle: {}, textStyle: {} },
   }]);
-  const paraEngine = docEngine.childBoxEngines[0].childEngines[0];
+  const paraEngine = pageEngine.childBoxEngines[0].childEngines[0];
   paraEngine.layoutText();
   const w = paraEngine.getCharWidths('핳').rawWidth;
   // '가' 글리프가 없으면 폴백 헬퍼가 null → _charWidthMm의 minWidthMm (spaceRatio 0.5 × 4 = 2.0)
