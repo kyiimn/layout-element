@@ -144,7 +144,10 @@ export class LayoutColumnElement extends HTMLElement {
           renderedOffset += content.length;
           sourceOffset += content.length;
         }
-        if (line.endOfBlock && sourceOffset < model.plainText.length && model.plainText[sourceOffset] === '\n') sourceOffset++;
+        // plainText는 story 전체, walk 오프셋은 프레임 로컬 — \n 판정은
+        // 절대 인덱싱(+contentFrom). data-source-offset 키는 로컬 공간 유지.
+        const cf = model.isThreadFrame ? model.contentFrom : 0;
+        if (line.endOfBlock && sourceOffset < model.plainText.length && model.plainText[cf + sourceOffset] === '\n') sourceOffset++;
       }
     }
     return { renderedOffset, sourceOffset };
@@ -781,7 +784,7 @@ export class LayoutColumnElement extends HTMLElement {
 
       if (line.parts.length === 0) {
         while (lineEl.firstChild) lineEl.firstChild.remove();
-        if (endOfBlock && curSourceOffset < this.model!.plainText.length && this.model!.plainText[curSourceOffset] === '\n') curSourceOffset++;
+        if (endOfBlock && curSourceOffset < this.model!.plainText.length && this.model!.plainText[(this.model!.isThreadFrame ? this.model!.contentFrom : 0) + curSourceOffset] === '\n') curSourceOffset++;
         continue;
       }
 
@@ -916,7 +919,7 @@ export class LayoutColumnElement extends HTMLElement {
         existingPartEls[p].remove();
       }
 
-      if (endOfBlock && curSourceOffset < this.model!.plainText.length && this.model!.plainText[curSourceOffset] === '\n') curSourceOffset++;
+      if (endOfBlock && curSourceOffset < this.model!.plainText.length && this.model!.plainText[(this.model!.isThreadFrame ? this.model!.contentFrom : 0) + curSourceOffset] === '\n') curSourceOffset++;
     }
 
     for (let i = lines.length; i < existingLineEls.length; i++) {
@@ -979,7 +982,7 @@ export class LayoutColumnElement extends HTMLElement {
       }
     }
 
-    if (line.endOfBlock && curSource < this.model!.plainText.length && this.model!.plainText[curSource] === '\n') {
+    if (line.endOfBlock && curSource < this.model!.plainText.length && this.model!.plainText[(this.model!.isThreadFrame ? this.model!.contentFrom : 0) + curSource] === '\n') {
       curSource++;
     }
 

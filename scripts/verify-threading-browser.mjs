@@ -989,11 +989,92 @@ console.log('\n[11] 엔터 후 개행 뒤 텍스트 클릭 매핑 — 0높이 �
     enterMap.mappedAbs === enterMap.expectAbs,
     `mapped=${enterMap.mappedAbs} expect=${enterMap.expectAbs} (spanLocal=${enterMap.line1FirstSpanLocal})`);
   check('엔터 후 커서가 개행 다음 위치 유지',
-    enterMap.cursor === enterMap.expectAbs + 1,
-    `cursor=${enterMap.cursor} expect=${enterMap.expectAbs + 1}`);
+    // 라인1 첫 span의 절대 오프셋 === 개행 다음 첫 글자 위치. 커서는 Enter
+    // 삽입점+1(개행 다음 첫 글자 앞)이므로 === expectAbs. (옛 기대값
+    // expectAbs+1은 span key가 -1 시프트된 버그 상태를 인코딩한 것이었다.)
+    enterMap.cursor === enterMap.expectAbs,
+    `cursor=${enterMap.cursor} expect=${enterMap.expectAbs}`);
   check('엔터 후 커서가 개행 뒤 라인(라인1)에 그려짐',
     Math.abs(enterMap.cursorTop - enterMap.line1TopLocal) < 2,
     `cursorTop=${enterMap.cursorTop} line1Top=${enterMap.line1TopLocal}`);
+}
+
+console.log('\n[13] 엔터 후 커서 +1 불일치 — 절대 위치 기준 (라인 레인지 \\n 소비 시프트)');
+{
+  // 근본(재발 방어): _cursorLineWalk/renderText의 \n 소비 판정이 프레임 로컬
+  // 오프셋을 story 절대 plain 인덱스로 사용하면 contentFrom > 0 프레임에서
+  // \n이 소비되지 않아 이후 라인 레인지와 span key가 -1 시프트된다. 시프트가
+  // 렌더/엔진 양측에 자기일관적이라 [11]류의 상대 비교(spanKey 기대값)는
+  // 이 결함을 잡지 못한다 — 기대값을 story 문자에서 직접 산출한다.
+  await page.goto(`${baseUrl}/${PAGE_PATH}?abs=${Date.now()}`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(2500);
+  const absCheck = await page.evaluate(`(async () => {
+    const em = document.querySelector('x-layout-page').editManager;
+    em.textEditMode = true;
+    const para = [...document.querySelectorAll('x-layout-paragraph')].find(p => p.id === 'thread2-frame2');
+    const engine = document.querySelector('x-layout-document').engine;
+    const pe0 = engine.findEngineById('thread2-frame2');
+    const out = { contentFrom: pe0.contentFrom };
+    em.focusParagraph(para);
+    await new Promise(r2 => setTimeout(r2, 300));
+    const ctl = em._focusedController;
+    const insertAt = pe0.contentFrom + 2;
+    ctl.setCursor({ textOffset: insertAt });
+    await new Promise(r2 => setTimeout(r2, 200));
+    ctl._textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await new Promise(r2 => setTimeout(r2, 900));
+    const pe = engine.findEngineById('thread2-frame2');
+    const plain = pe.plainText;
+    const C = pe.contentFrom;
+    // story 절대 insertAt 위치의 직후 문자 = 개행 뒤 라인1 첫 글자.
+    // 렌더 span은 로컬 key를 가지므로 절대 오프셋 = key + C로 복원한다.
+    const paraEl = [...document.querySelectorAll('x-layout-paragraph')].find(p2 => p2.id === 'thread2-frame2');
+    const col = paraEl.querySelector('x-layout-column');
+    const lineEls = [...col.shadowRoot.children].filter(c2 => c2.tagName === 'DIV' && c2.style.display !== 'none');
+    const line1 = lineEls[1];
+    const spans = [...line1.querySelectorAll('span[data-source-offset]:not([data-temporary])')];
+    const firstSpan = spans[0];
+    const firstAbs = Number(firstSpan.dataset.sourceOffset) + C;
+    // 매핑(클릭)도 절대 기준으로 정합해야 함
+    const m = ctl._mapper;
+    const sr = firstSpan.getBoundingClientRect();
+    const mapped = m.getNearestOffsetFromPoint(sr.left + 1, sr.top + sr.height / 2);
+    return {
+      newlineAt: plain[insertAt],
+      firstVisibleStoryChar: plain[firstAbs],
+      firstAbs,
+      storyCharAtLine1First: plain[insertAt + 1],
+      // 커서 렌더 절대 위치 정합: 커서 offset의 placement가 가리키는 story 문자가
+      // 실제 그 문자여야 함 (시프트 시 한 글자 뒤 문자를 참조 → 커서 +1)
+      cursor: ctl._cursorModel.offset,
+      cursorPlacement: ctl._mapper.getCursorPlacement(ctl._cursorModel.offset),
+      cursorPlacementChar: (() => {
+        const pl = ctl._mapper.getCursorPlacement(ctl._cursorModel.offset, true);
+        return pl ? plain[pl.sourceOffset] : null;
+      })(),
+      line1TextStartsWith: plain[insertAt + 1],
+      mappedAbs: mapped ? mapped.textOffset : null,
+    };
+  })()`);
+
+  // Enter 삽입 위치 직후 = '\n'
+  check('삽입 위치에 \\n 존재', absCheck.newlineAt === String.fromCharCode(10),
+    `plain[${absCheck.cursor - 1}]=${JSON.stringify(absCheck.newlineAt)}`);
+  // 라인1 첫 span의 절대 오프셋 위치 story 문자가 실제 가시 글자
+  check('라인1 첫 span 절대 오프셋의 story 문자 = 개행 다음 글자 (시프트 없음)',
+    absCheck.firstVisibleStoryChar === absCheck.storyCharAtLine1First
+      && absCheck.firstVisibleStoryChar !== '\\n'
+      && absCheck.firstVisibleStoryChar !== undefined,
+    `firstAbs=${absCheck.firstAbs} char=${JSON.stringify(absCheck.firstVisibleStoryChar)} expect=${JSON.stringify(absCheck.storyCharAtLine1First)}`);
+  // 커서 placement가 가리키는 story 문자가 커서 직전 글자(\n 다음 첫 글자)여야
+  // 커서가 실제 삽입점에 그려진 것 (시프트 시 한 글자 뒤를 참조 → +1)
+  check('커서 placement 참조 문자 = 커서 위치의 실제 글자 (커서 +1 없음)',
+    absCheck.cursorPlacementChar === absCheck.storyCharAtLine1First,
+    `cursor=${absCheck.cursor} placementChar=${JSON.stringify(absCheck.cursorPlacementChar)} expect=${JSON.stringify(absCheck.storyCharAtLine1First)}`);
+  // 클릭 매핑 절대 정합
+  check('라인1 첫 span 클릭 매핑 = 절대 오프셋 (시프트 없음)',
+    absCheck.mappedAbs === absCheck.firstAbs,
+    `mapped=${absCheck.mappedAbs} expect=${absCheck.firstAbs}`);
 }
 
 console.log('\n[4] round-trip — 직렬화 → 재주입 체인 동등');

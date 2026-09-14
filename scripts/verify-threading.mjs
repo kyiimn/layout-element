@@ -1306,6 +1306,83 @@ console.log('\n[18] 테이블 셀 프레임 × 행 삭제');
     `visible=${f3After?.visibleChars}`);
 }
 
+// ═══ 19. 프레임 내부 \n 커서 레인지 정합 (엔터 후 커서 +1 회귀) ═══
+console.log('\n[19] 2번째 프레임 내부 \\n — cursorLineRanges 로컬/절대 인덱싱 정합');
+{
+  // 사용자 보고: 2번째 스레드 프레임부터 엔터 1회 → 개행 이후 텍스트에서 커서가
+  // 실제보다 +1. 근본: _cursorLineWalk/renderText가 프레임 로컬 오프셋을
+  // story 절대 plain 인덱스에 그대로 사용해 contentFrom > 0 프레임에서 \n
+  // 소비 판정이 어긋나고, \n 이후 라인 레인지와 span key가 -1 시프트.
+  // 체인 배치(contentFrom, 파트 합산 기반)는 무영향 — "배치는 맞는데 커서만
+  // +1"인 증상과 일치. 수정: 판정 인덱싱에 +contentFrom (결과는 로컬 유지).
+  const storyText = '가'.repeat(3000);
+  const probe = buildThreadedDoc({ contents: [storyText, '', ''], columns: [1, 1, 1], boxHeight: 6,
+    threads: [{ id: 't1', paragraphIds: ['para-0', 'para-1', 'para-2'] }] });
+  const headCap = probe.frames[0].overflowContentFrom;
+
+  // f1(contentFrom = headCap) 영역 내부에 \n이 오는 story 구성
+  const NL_AT = headCap + 20;
+  const nlStory = '가'.repeat(NL_AT) + '\n' + '나'.repeat(1000);
+  const { frames } = buildThreadedDoc({ contents: [nlStory, '', ''], columns: [1, 1, 1], boxHeight: 6,
+    threads: [{ id: 't1', paragraphIds: ['para-0', 'para-1', 'para-2'] }] });
+  const [head, f1] = frames;
+
+  check('head 배치 동일 (story 앞부분 불변 → tail 동일)', head.overflowContentFrom === headCap,
+    `tail=${head.overflowContentFrom} cap=${headCap}`);
+  check('f1 contentFrom === headCap (체인 배치는 무영향)',
+    f1.contentFrom === headCap, `f1.from=${f1.contentFrom}`);
+
+  const C = f1.contentFrom;
+  const plain = f1.plainText;
+  const nlLocal = NL_AT - C;
+  check(`f1 로컬 ${nlLocal} 위치에 '\\n' 존재 (전제)`, plain[C + nlLocal] === '\n');
+
+  // 정합식: 모든 visible 라인의 firstVisible(로컬)이 가시 글자를 가리켜야 함
+  // (시프트 상태에서는 \n이나 undefined를 가리킴)
+  let shifted = 0;
+  for (const columnRanges of f1.cursorLineRanges) {
+    for (const r of columnRanges) {
+      if (r.firstVisible === null) continue;
+      const ch = plain[C + r.firstVisible];
+      if (ch === '\n' || ch === undefined) shifted++;
+    }
+  }
+  check('라인 firstVisible이 전부 가시 글자 (\\n/undefined 시프트 없음)',
+    shifted === 0, `${shifted}개 라인 시프트`);
+
+  // 정밀: \n 소비 — 다음 라인 startOffset === nlLocal + 1 (버그 시 nlLocal)
+  const flat = f1.cursorLineRanges.flat();
+  const nlLine = flat.find(r => r.endOfBlock === true && r.endOffset === nlLocal);
+  check(`\\n 라인 존재 (endOfBlock, endOffset === ${nlLocal})`, nlLine !== undefined);
+  if (nlLine) {
+    const nextLine = flat[flat.indexOf(nlLine) + 1];
+    check(`\\n 다음 라인 startOffset === ${nlLocal + 1} (\\n 소비)`,
+      nextLine !== undefined && nextLine.startOffset === nlLocal + 1
+      && nextLine.firstVisible === nlLocal + 1,
+      `next=${nextLine ? JSON.stringify({ s: nextLine.startOffset, fv: nextLine.firstVisible }) : 'null'}`);
+  }
+
+  // maxVisibleCursorOffset 경계도 절대 인덱싱으로 산출됨 (오버플로 프레임)
+  const ovf = buildThreadedDoc({
+    contents: ['가'.repeat(headCap + 20) + '\n' + '나'.repeat(2000), '', ''],
+    columns: [1, 1, 1], boxHeight: 6,
+    threads: [{ id: 't1', paragraphIds: ['para-0', 'para-1', 'para-2'] }],
+  });
+  const f1ovf = ovf.frames[1];
+  const C2 = f1ovf.contentFrom;
+  const plain2 = f1ovf.plainText;
+  let shifted2 = 0;
+  for (const columnRanges of f1ovf.cursorLineRanges) {
+    for (const r of columnRanges) {
+      if (r.firstVisible === null) continue;
+      const ch = plain2[C2 + r.firstVisible];
+      if (ch === '\n' || ch === undefined) shifted2++;
+    }
+  }
+  check('오버플로 f1도 레인지 정합 (경계/firstVisible 절대 인덱싱)',
+    shifted2 === 0, `${shifted2}개 라인 시프트`);
+}
+
 console.log(`\n${'='.repeat(60)}`);
 console.log(`verify-threading: ${passed} passed, ${failed} failed`);
 if (failed > 0) {

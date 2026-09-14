@@ -4383,11 +4383,15 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
           // 바로 앞 문자가 \n이면 그 \n 위치(endOfBlock phantom placement 존재),
           // 아니면 후행 공백을 건너뛴 첫 공백/마지막 가시 문자 다음 offset
           // (trailing space atEndOfChar 또는 라인 끝 phantom end placement 존재).
-          if (lineStartOffset > 0 && plain[lineStartOffset - 1] === '\n') {
+          // walk 오프셋은 프레임 로컬(0 = contentFrom 글자)이고 plain은 story
+          // 전체이므로 판정 인덱싱은 contentFrom을 더한 절대 공간으로 읽는다
+          // (결과값 overflowBoundary는 로컬 공간을 유지 — 비-스레드 문단은
+          // contentFrom 0이라 항등이므로 기존 동작 byte-identical).
+          if (lineStartOffset > 0 && plain[this._contentFrom + lineStartOffset - 1] === '\n') {
             overflowBoundary = lineStartOffset - 1;
           } else {
             let b = lineStartOffset;
-            while (b > 0 && plain[b - 1] === ' ') b--;
+            while (b > 0 && plain[this._contentFrom + b - 1] === ' ') b--;
             overflowBoundary = b;
           }
         }
@@ -4436,7 +4440,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
           if (line.endOfBlock) threadVisibleCount++;
           lastVisibleLineData = line;
         }
-        if (line.endOfBlock && offset < plain.length && plain[offset] === '\n') {
+        // plain 인덱싱은 절대 공간 (walk 오프셋 로컬 + contentFrom).
+        if (line.endOfBlock && offset < plain.length && plain[this._contentFrom + offset] === '\n') {
           offset++;
         }
         accumulatedHeightMm += lineHeightMm;
