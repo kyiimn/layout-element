@@ -41,6 +41,7 @@
 | `verify-engine-node.mjs` | 정합성 (Node) | 엔진 계층 DOM-free 동작 | ALL PASS |
 | `verify-virtualization.mjs` | 정합성 (브라우저) | DOM 가상화 — park/unpark 엔진 완결, data 세터 부활 방지(G1), 재마운트 커서 복원+예약 렌더(P1), detach 서브트리 정리(P3), PageMountManager 윈도우/pin, parked 오버레이 회피(H), 리사이즈 attach/detach(I), 성능 실측(J), 스레드+park story 보존·체인 전파(K) | ALL PASS (47항목, 서버 없으면 자동 기동) |
 | `verify-page-reorder-parked.mjs` | 정합성 (브라우저) | parked placeholder 순서 추적 — parked 페이지 존재 시 data setter가 pages 순서를 재배치하면 placeholder도 이동해 수집 순서(= 엔진 입력 순서)가 데이터 순서와 일치, unpark 후 최종 순서 보존 | ALL PASS (4항목, 서버 없으면 자동 기동) |
+| `verify-progressive-layout.mjs` | 정합성 (브라우저) | ③′ 시분할 프로그레시브 표시 패스 — OFF 기준선 byte-identical, ON 세션 완결(엔진 완결+체인+패리티), 재주입 표시, park/unpark 재마운트 표시 패스, 풀 리플로우 DOM 수렴, 타이핑 seam, flush 관문 | ALL PASS (21항목, 서버 없으면 자동 기동 — 포트 5205) |
 | `verify-edit-manager-introspect.mjs` | 정합성 (브라우저) | EditManager introspect 로직 핀 — placeGun 상태 머신(load/unload/reorder/remove/pause × getter × placeGunChange 페이로드)/reorder RangeError 경계/unload 거듭 호출 이벤트 횟수/threadFrameCoverage 소속 판정(coverage 내부 이관 없음/경계점 방향 편입/클램프). **edit-manager-introspect 추출 전후 실행** | ALL PASS (22항목, 서버 없으면 자동 기동) |
 | `verify-obfuscated.mjs` | 정합성 (빌드) | 난독화 IIFE 번들 로딩 | ALL PASS |
 | `obfuscate.mjs` | 빌드 | IIFE 번들 난독화 | build 완료 |

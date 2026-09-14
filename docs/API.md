@@ -155,11 +155,13 @@ class LayoutPageElement extends HTMLElement
 | `flipLayout(options)` | `(options: FlipLayoutOptions): void` | 문서 또는 지정된 박스의 **하위 요소** 배치를 좌우/상하/상하좌우 반전. 엔진의 `PageEngine.flipLayout()`을 호출하여 엔진 트리에서 직접 반전을 수행하고, 반환된 `PageData`를 `data` setter에 적용. `targetId` 지정 시 해당 박스가 root, 생략 시 문서가 root. 반전 전 편집 상태(포커스, 선택)를 해제. |
 | `parkPage(id)` | `(id: string): HTMLDivElement \| null` | 페이지 박스를 DOM에서 분리하고 보관 (DOM 가상화). `data-parked-page` 플레이스홀더로 교체. 엔진 트리에는 유지되므로 스레딩·추출·내보내기가 정상 동작. 반환된 플레이스홀더에 분리 전 footprint 크기를 지정해야 스크롤이 유지된다. |
 | `unparkPage(id)` | `(id: string): LayoutBoxElement \| null` | 보관된 페이지를 플레이스홀더 자리에 복원. `connectedCallback → layout()`으로 기존 엔진에 재연결 (캐시 히트). 비동기 페인트 확정이 필요하면 반환 요소의 `render()`를 호출. |
+| `flushProgressiveLayout()` | `(): void` | 시분할 표시 패스 대기열을 동기 소진 (③′). `progressive` 활성 문서에서 편집(포커스/클릭) 진입 전에 호출하여 커서 좌표계(렌더된 컬럼/span)를 보장. 비활성 문서나 빈 대기열이면 no-op. |
 
 #### 데이터 프로퍼티 (setter / getter)
 
 | 이름 | 타입 | 단위 | 설명 |
 |---|---|---|---|
+| `progressive` | `boolean` | — | 시분할 표시 패스 (③′, document 전용). `true`면 초기 로드·풀 리플로우의 표시 패스를 페이지 청크로 펌프 (8ms 예산). `false`/`undefined`는 동기 경로 (byte-identical). |
 | `data` | `PageData` | — | 한 번에 모든 필드 갱신. 자식 박스는 ID 기반 diff로 재구성 (같은 ID는 in-place 업데이트, 새 ID는 생성, 없는 ID는 제거). `data.id`가 `undefined`이면 `data` setter에서 `genUUID()`로 자동 생성. `data` getter는 `engine.extractData`를 반환 (엔진 우선 원칙). |
 | `id` | `string` | — | 요소 고유 식별자. `data` setter에서 `data.id`가 `undefined`이면 `genUUID()`로 자동 할당. 엔진에서 생성된 id는 `_syncEngineIdsToDom()`을 통해 DOM에 write-back. |
 | `width` | `number` | mm | 문서 너비. |

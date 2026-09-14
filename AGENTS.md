@@ -48,6 +48,7 @@ npx tsx scripts/verify-threading-browser.mjs # 스레딩 화면 진실 (타이�
 npx tsx scripts/verify-overflow-cursor-clamp.mjs # 오버플로(숨김) 라인 커서 진입 금지 클램프 (화살표·End 이동 경계)
 npx tsx scripts/verify-caret-parking.mjs # 커서 주차 회귀 코퍼스 (End/Home/ArrowUp/Down × 커서 px 좌표+bias — 커서 내비게이션 변경 시 선행 실행)
 npx tsx scripts/verify-page-reorder-parked.mjs # parked placeholder 순서 추적 (parked 중 pages 재배치 → 수집 순서 일치/unpark 후 보존)
+npx tsx scripts/verify-progressive-layout.mjs # 시분할 프로그레시브 표시 패스 (OFF byte-identical/ON 세션 완결/park 조합/flush 관문)
 ```
 
 각 스크립트의 목적·측정 원칙·오탐 주의사항·워크플로는 **`scripts/README.md`** 참조. 성능 작업 시 `scripts/README.md`의 워크플로(기준선 측정 → 수정 → 검증 → 재측정)를 따른다.

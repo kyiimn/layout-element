@@ -10,6 +10,7 @@ import type { FontLoaderEngine, ColorRegistryEngine } from "@/engine";
 import { FontLoader } from "@/resource/font-loader";
 import { ColorRegistry } from "@/resource/color-registry";
 import { flushThreadRelayout, syncThreadFramesToDom, hasUnsyncedThreadFrames, type ThreadRelayoutContext } from "@/utils/thread-relayout-coordinator";
+import { resolveProgressiveOptions, progressiveIdleYield, type ProgressiveLayoutResolvedOptions } from "@/utils/progressive-layout";
 
 const HOST_STYLE_ID = '__layout_host_style__';
 
@@ -86,6 +87,22 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
 
   /** 자기 layout() 진행 중 페이지의 조기 thread 확정 요청을 흡수한다. */
   private _suppressThreadConfirm = false;
+
+  /** ③′ 시분할 표시 패스 옵션 — `progressive` 프로퍼티 값 (undefined/false → 동기 경로). */
+  private _progressive?: boolean;
+  private _progressiveOptions: ProgressiveLayoutResolvedOptions = resolveProgressiveOptions(undefined);
+
+  /**
+   * 문서 `data` 세터 reconcile 중 페이지의 조기 표시 패스를 억제하는 플래그.
+   * 세터 진입에서 인상되어 세터 반환 시점(동기 범위)에 해제된다 — 비동기 청크 펌프와 겹치지 않는다.
+   */
+  private _deferDisplayPass = false;
+
+  /** 시분할 표시 대상 페이지 id 대기열 (삽입 순서 보존). */
+  private _displayPassQueue = new Set<string>();
+
+  /** 시분할 펌프 단일 비행 가드 — 동시 펌프 2개로 이중 렌더를 막는다. */
+  private _displayPassActive = false;
 
   /**
    * 문서 소유 리소스 어댑터 (fontLoader/colorRegistry — 문서에서 관리).
@@ -277,9 +294,20 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
 
   /**
    * 자식 페이지를 문서 순서로 렌더링한다.
+   *
+   * progressive 활성 시 표시 패스를 페이지 단위 청크로 분할해 펌프한다.
+   * 대기열은 Set(삽입 순서)이므로 펌프 도중 재주입된 id도 소진 범위에 합류한다.
    */
   async render() {
     if (!this.isConnected) return null;
+    const opts = this._progressiveOptions;
+    if (opts.enabled) {
+      await this._pumpDisplayPass(opts);
+      if (this._hasUnsyncedThreadFrames()) {
+        this.confirmThreadChain();
+      }
+      return this;
+    }
     for (const page of this.items) {
       await page.render();
     }
@@ -287,6 +315,67 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
       this.confirmThreadChain();
     }
     return this;
+  }
+
+  /**
+   * 시분할 표시 대상 페이지 id를 문서 순서로 대기열에 합류시킨다.
+   * 이미 마운트되어 있지 않은(parked) 페이지는 대상에서 제외한다 —
+   * 재마운트 시 connectedCallback이 자체 표시 패스를 수행한다.
+   */
+  private _enqueueDisplayPass(): void {
+    for (const page of this.items) {
+      if (page.id) this._displayPassQueue.add(page.id);
+    }
+  }
+
+  /**
+   * 대기열을 페이지 단위 청크로 비운다. 한 청크는 시간 예산 내에서
+   * 가능한 만큼의 페이지를 동기 렌더(`void el.render()`)하고, 예산 초과 시
+   * 다음 태스크로 양보한다. 펌프 중 park(언마운트)된 페이지는 건너뛴다.
+   *
+   * @param opts - 스케줄링 옵션 (예산/지연)
+   */
+  private async _pumpDisplayPass(opts: ProgressiveLayoutResolvedOptions): Promise<void> {
+    if (this._displayPassActive) return;
+    if (this._displayPassQueue.size === 0) return;
+    this._displayPassActive = true;
+    try {
+      for (;;) {
+        const t0 = performance.now();
+        for (const id of this._displayPassQueue) {
+          if (performance.now() - t0 >= opts.chunkBudgetMs) break;
+          this._displayPassQueue.delete(id);
+          const page = this.items.find(p => p.id === id);
+          if (!page || !page.isConnected) continue;
+          void page.render();
+        }
+        if (this._displayPassQueue.size === 0) break;
+        await progressiveIdleYield(opts.chunkDelayMs);
+        if (!this.isConnected) break;
+      }
+    } finally {
+      this._displayPassActive = false;
+    }
+  }
+
+  /**
+   * 남은 시분할 표시 대기열을 동기로 소진한다 (편집 진입·세션 해제 경로).
+   *
+   * 포커스/클릭이 대기열에 남은 페이지를 겨냥할 때 커서 좌표계(렌더된
+   * 컬럼/span)를 보장하기 위한 관문이다. 타이핑·IME는 포커스를 요하므로
+   * `EditManager.focusParagraph`/`focusImage` 상단에서 이 메서드를 호출하면
+   * 전 경로가 방어된다.
+   */
+  flushProgressiveLayout(): void {
+    this._deferDisplayPass = false;
+    if (this._displayPassQueue.size === 0) return;
+    const ids = [...this._displayPassQueue];
+    this._displayPassQueue.clear();
+    for (const id of ids) {
+      const page = this.items.find(p => p.id === id);
+      if (!page || !page.isConnected) continue;
+      void page.render();
+    }
   }
 
   private _applyStyle() {
@@ -740,6 +829,7 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
         this._engine.data = docData;
         this._engine.ppm = this._ppm;
       }
+      this._deferDisplayPass = this._progressiveOptions.enabled;
       const existingPages = this.items;
       const existingById = new Map<string, LayoutPageElement>();
       for (const page of existingPages) {
@@ -822,10 +912,17 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
       } finally {
         this._rebuildingChildren = false;
       }
-      this.render();
+      this._deferDisplayPass = false;
+      if (this._progressiveOptions.enabled) {
+        this._enqueueDisplayPass();
+        this.render();
+      } else {
+        this.render();
+      }
     } finally {
       this._rebuildingChildren = false;
       this._pendingData = null;
+      this._deferDisplayPass = false;
     }
   }
 
@@ -904,18 +1001,53 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
     }
   }
 
+  /**
+   * ③′ 시분할 표시 패스 활성화 여부.
+   *
+   * `true`면 초기 로드·풀 리플로우의 표시 패스(`page.render()`)를 페이지
+   * 단위 청크로 분할해 비동기 펌프로 처리한다. 엔진 구축은 동기 유지 —
+   * `layout()` 반환 시점에 엔진·스레드·스냅샷 읽기가 완결된다.
+   * `false`/`undefined`는 기존 동기 경로(byte-identical).
+   *
+   * 세터는 플래그만 갱신한다 — 재배치/재렌더를 트리거하지 않는다. 세션 중
+   * 해제하면 남은 대기열을 동기로 소진해 즉시 일관 상태로 수렴한다.
+   */
+  get progressive(): boolean { return this._progressive === true; }
+
+  /** 페이지 요소의 표시 패스 억제 게이트 — 문서 `data` 세터 reconcile 중에만 true. */
+  get isDisplayPassDeferred(): boolean { return this._deferDisplayPass; }
+
+  set progressive(value: boolean) {
+    if (this._progressive === value) return;
+    this._progressive = value;
+    this._progressiveOptions = resolveProgressiveOptions(value);
+    if (!this._progressiveOptions.enabled && (this._displayPassQueue.size > 0 || this._deferDisplayPass)) {
+      this.flushProgressiveLayout();
+    }
+  }
+
   set paragraphStyle(value: ParagraphStyle) {
     if (this._paragraphStyle === value) return;
     this._paragraphStyle = value;
     this.layout();
-    this.render();
+    if (this._progressiveOptions.enabled) {
+      this._enqueueDisplayPass();
+      void this.render();
+    } else {
+      this.render();
+    }
   }
 
   set textStyle(value: TextStyle) {
     if (this._textStyle === value) return;
     this._textStyle = value;
     this.layout();
-    this.render();
+    if (this._progressiveOptions.enabled) {
+      this._enqueueDisplayPass();
+      void this.render();
+    } else {
+      this.render();
+    }
   }
 }
 

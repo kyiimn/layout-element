@@ -334,6 +334,24 @@ export class EditManager {
   }
 
   /**
+   * 문서 요소의 시분할 표시 패스 대기열을 동기 소진한다 (③′).
+   *
+   * 포커스는 렌더된 컬럼/span 좌표계를 요구하므로 편집 진입 전에 대기열을
+   * 소진한다. 문서 요소가 없거나(독립 페이지) 시분할이 비활성이면 no-op.
+   */
+  private _flushProgressiveDisplay(): void {
+    let el: Element | null = this._pageEl;
+    while (el) {
+      const docEl = el as unknown as { flushProgressiveLayout?: () => void };
+      if (typeof docEl.flushProgressiveLayout === 'function') {
+        docEl.flushProgressiveLayout();
+        return;
+      }
+      el = el.parentElement;
+    }
+  }
+
+  /**
    * 주어진 문서 요소를 관리하는 편집 관리자를 생성한다.
    *
    * 문서별로 하나의 인스턴스를 생성하며, `LayoutPageElement.connectedCallback`
@@ -642,6 +660,8 @@ export class EditManager {
 
     const previousController = this._focusedController;
     const previousParagraph = previousController?.['_paragraph'] as LayoutParagraphElement | undefined;
+
+    this._flushProgressiveDisplay();
 
     // 범위-증명 편집 안전장치 (단일 관문): 스킵되어 구 story 참조를 보유한
     // 스레드 프레임을 편집 소스로 삼기 전에 신선화한다. 생략하면 커밋이 구
@@ -1801,6 +1821,7 @@ export class EditManager {
       image = target;
     }
     if (!image || !image.isConnected) return false;
+    this._flushProgressiveDisplay();
     if (this._isAncestorBoxLocked(image)) return false;
     if (!this._isWithinEditableRoot(image)) return false;
 

@@ -362,8 +362,10 @@ transform: scale(s)  →  브라우저 컴포지트 단계만 변경 (layout/ref
  (EditManager·park·스레드 소유) + 레거시 호환(`normalizeDocumentData`).
  스레드 정의·EditManager·보관 단위가 문서로 이동했고, threads·EditManager·
  park을 문서 스코프에서 검증하는 `verify-page-model.mjs` 13항목이 ALL PASS.
-7. **[③′ 이후]** 시분할 프로그레시브 레이아웃 등 순차 적용.
-8. **[근본 원인 분석 완료]** 스레드 체인 타이핑 비용의 결론: shift 편집은
+7. **[③′ 시분할 프로그레시브 레이아웃 — 완료 (2026-09-15)]** `progressive`
+   프로퍼티 + 페이지 단위 청크 표시 패스 구현 — 상세는 § 8 참조.
+8. **[③′ 이후]** rgbaData 다운사이징 등 순차 적용.
+9. **[근본 원인 분석 완료]** 스레드 체인 타이핑 비용의 결론: shift 편집은
    모든 줄의 텍스트·위치를 바꾸므로 재계산·재쓰기가 필수이며, 남는 레버는
    범위(체인 분할·마운트 윈도우 축소)뿐이다. 텍스트 동일성 기반 라인 캐시
    초안은 shift 편집에서 성립하지 않음이 증명되어 폐기됐다.
@@ -391,3 +393,53 @@ transform: scale(s)  →  브라우저 컴포지트 단계만 변경 (layout/ref
 - 시도 후 revert한 것: overflow 카운트 변화 시 span 전체 재생성 제거 —
   동일 페이지 A/B(강제 recreate vs diff)에서 484ms vs 458ms로 유의미한 차이
   없음이 실측되어 원복했다 (근거 없는 최적화 금지 원칙).
+
+---
+
+## 8. ③′ 시분할 프로그레시브 레이아웃 — 구현 기록 (2026-09-15)
+
+### 8.1 설계 (Oracle 리뷰 반영)
+
+**원칙**: 엔진 구축은 동기 유지, **표시 패스만 시분할**.
+
+- `document.layout()`이 반환되는 시점에 엔진 트리·스레드 배치·스냅샷 읽기
+  (`extractData`/`printPostData`)가 완결된다 — 단일 소스 불변식·dirty 계약에
+  새 가드 불필요. Worker 이관 실패(§ 3)의 동기 계약을 청크 단위로 지킨다.
+- 청크 내 동기 계약은 기존 `render()`와 동일 — `renderText`가
+  `columnContents`를 즉시 읽고, `flushRender`(Enter/compositionend)는 무변경.
+- **스케줄링**: `setTimeout(0)` + 인라인 8ms 예산 (`performance.now()`).
+  `queueMicrotask`는 렌더링으로 양보하지 않아 실격 (세션이 하나의 롱태스크가
+  된다), `requestIdleCallback`은 배경 탭에서 starve. 300p 기준 페이지당
+  렌더 ~0.83ms → 청크당 ~9페이지, 31청크 ≈ 400ms 벽시계.
+
+### 8.2 공개 API
+
+| API | 위치 | 계약 |
+| --- | --- | --- |
+| `progressive` 프로퍼티 (document) | `document.element.ts` | `true` → 초기 로드·풀 리플로우의 표시 패스를 페이지 청크로 펌프. `false`/`undefined`는 기존 동기 경로 (byte-identical). 세터는 플래그만 갱신 (재배치 트리거 없음), 세션 중 해제 시 남은 대기열 동기 소진. |
+| `flushProgressiveLayout()` (document) | `document.element.ts` | 대기열을 동기 소진하는 편집 진입 관문. 타이핑·IME는 포커스를 요하므로 `EditManager._requestFocus`/`focusImage` 상단 호출로 전 경로 방어. |
+| `progressiveIdleYield(delayMs)` | `src/utils/progressive-layout.ts` | 청크 사이 양보 Promise. 테스트 훅 `__LAYOUT_ELEMENT_PROGRESSIVE_IDLE__ = true`로 즉시 resolve (검증 스크립트의 타이밍 의존 제거). |
+
+### 8.3 동작 구조
+
+```
+doc.data = bigData (progressive=true)
+  ├─ reconcile 루프: 각 page.data setter → 엔진 구축은 동기 (page.layout() 유지),
+  │   표시 패스(page.render())만 _deferDisplayPass로 억제
+  ├─ this.layout(): 구조 패스 + adoptPageEngines + 스레드 패스 + frame 동기 (동기)
+  ├─ 최종 render() → _enqueueDisplayPass() → _pumpDisplayPass()
+  │   └─ 시간 예산 내 동기 렌더(void el.render()) → 예산 초과 시 setTimeout(0) 양보 → 반복
+  └─ 펌프 중 park(언마운트)된 페이지는 isConnected skip, IO 재마운트는
+     connectedCallback이 자체 표시 패스 수행 (대기열 중복 항목은 건너뛴다)
+```
+
+- **스레드 확정 시점**: `document.layout()` 내에서 페이지 엔진 편입 →
+  `engine.layout()`(스레드) → `_syncThreadFramesToDom`이 기존과 동일하게
+  동작하므로 스레드 프레임 문단은 **스레드 배치 후** 표시된다 (동기 경로와
+  동일한 표시 출력). `PageMountManager` 없이 progressive 단독 사용 시
+  언마운트 페이지가 없으므로 전 페이지가 펌프로 표시된다.
+- **verify-progressive-layout.mjs 21항목 ALL PASS** — (a) OFF 기준선
+  byte-identical(span 816), (b) ON 세션 완결(엔진 완결 + 체인 + 패리티),
+  (c) 재주입 3페이지 표시, (d) park/unpark 재마운트 표시 패스 + story 보존,
+  (e) textStyle 교체 DOM 수렴, (f) 타이핑 seam 정합, (g) flush 관문
+  (커서 좌표계 보장).

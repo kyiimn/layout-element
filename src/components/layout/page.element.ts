@@ -244,6 +244,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
       window.addEventListener('keydown', this._onWindowKeyDown, true);
     }
     this.layout();
+    if (this._isDisplayPassDeferred()) return;
     this.render();
   }
 
@@ -425,7 +426,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
             // detached 상태라 소유 경쟁이 없으므로 layoutText()로 커밋한다.
             this._engine?.ensureCommitted();
             for (const p of parked.element.querySelectorAll('x-layout-paragraph')) {
-              const eng = p.engine;
+              const eng = (p as LayoutParagraphElement).engine;
               if (eng?.hasPendingChanges) eng.layoutText();
             }
             out.push(parked.element.data as BoxData);
@@ -608,6 +609,16 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
         parentWidth: grid.editableWidth,
       };
     });
+  }
+
+  /**
+   * 문서 소유 시분할 표시 패스 억제 여부 (③′).
+   * 문서 `data` 세터 reconcile 중에만 문서 요소가 플래그를 인상한다.
+   *
+   * @returns 문서가 reconcile 중이면 true (자체 render 억제)
+   */
+  private _isDisplayPassDeferred(): boolean {
+    return this._findDocumentElement()?.isDisplayPassDeferred === true;
   }
 
   /**
@@ -1061,6 +1072,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
       } finally {
         this._rebuildingChildren = false;
       }
+      if (this._isDisplayPassDeferred()) return;
       this.render();
     } finally {
       this._rebuildingChildren = false;
