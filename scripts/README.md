@@ -27,9 +27,9 @@
 | `verify-image-displayrect-cache.mjs` | 정합성 (엔진) | 이미지 displayRect(objectFit/none x/y/w/h) 변화 시 오버랩 회피 재계산 — layout input hash 무효화 | ALL PASS |
 | `verify-image-edit-mode.mjs` | 정합성 (브라우저) | 이미지 편집 모드 전 동작 — dblclick 진입(일반/레이아웃 모드), 부모 box 빨간테두리+라벨 숨김, 드래그/objectFit 자동전환, 휠 비율 유지, ESC 취소/복귀, Tab 순회, selection 이동 시 포커스 상실, 클램핑, **extractData/printPostData 3소스 일치, 오버랩 회피 갱신 A/B** | ALL PASS |
 | `verify-overlap-none.mjs` | 정합성 (엔진) | overlapMode 'none' 시맨틱 — 단일 관문(computeOverlapSizeMm)에서 NONE 조기 반환, box/path 회피 유지 | ALL PASS |
-| `verify-threading.mjs` | 정합성 (엔진) | 텍스트 스레딩 — 비-스레드 회귀/단일 프레임 기준선/feed-forward/콘텐츠 무결성/런 슬라이싱/pull-back/extractData round-trip/overset/threadTail 마킹/**지오메트리 행렬 81조합**/childrenData 삼분 계약/writeback 방어/printPostData 패리티/**변경 감지 스킵**/**프레임 경계 금칙 교정**/**테이블 셀 프레임 행 삭제** | ALL PASS |
+| `verify-threading.mjs` | 정합성 (엔진) | 텍스트 스레딩 — 비-스레드 회귀/단일 프레임 기준선/feed-forward/콘텐츠 무결성/런 슬라이싱/pull-back/extractData round-trip/overset/threadTail 마킹/**지오메트리 행렬 81조합**/childrenData 삼분 계약/writeback 방어/printPostData 패리티/**변경 감지 스킵**/**프레임 경계 금칙 교정**/**테이블 셀 프레임 행 삭제**/**프레임 내부 \n 커서 레인지 정합([19] — 엔터 후 커서 +1 회귀 방어)** | ALL PASS |
 | `verify-story-reference-refresh.mjs` | 정합성 (엔진) | 스킵 프레임 참조 신선화(A-6) — 폴백 판정(스킵 판정 참조 비교 통과)/hasLayoutCache·dirty 불변/해시 무영향 캐시 히트 유지/내용 변경 자가 치유/구 story 참조 시스템 소멸/writeback 롤백 방어/직접 유도 메모 무효화 | ALL PASS (30항목) |
-| `verify-threading-browser.mjs` | 정합성 (브라우저) | 스레딩 화면 진실 — 초기 로드 3계층(엔진↔DOM span)/타이핑 전파 seam/테두리 tail 분기/round-trip 체인 동등/**타이핑 스트레스 flush 통합**/**IME 조합 × flush**/**키보드 프레임 경계 이동(절대 좌표계)** | ALL PASS |
+| `verify-threading-browser.mjs` | 정합성 (브라우저) | 스레딩 화면 진실 — 초기 로드 3계층(엔진↔DOM span)/타이핑 전파 seam/테두리 tail 분기/round-trip 체인 동등/**타이핑 스트레스 flush 통합**/**IME 조합 × flush**/**키보드 프레임 경계 이동(절대 좌표계)**/**엔터 후 커서 +1 절대 위치 기준([13] — 레인지 \n 소비 시프트 방어)** | ALL PASS |
 | `verify-overflow-cursor-clamp.mjs` | 정합성 (브라우저) | 오버플로(숨김) 라인 커서 진입 금지 클램프 — 엔진 경계(`maxVisibleCursorOffset`)/경계 placement 보장/ArrowRight 반복·수렴·bias 'end' 주차 유지/Shift·Ctrl 변형/ArrowDown·Up 방향성/오버플로 해제 비활성/\n 경계/Ctrl+End/End·Shift+End | ALL PASS (서버 없으면 자동 기동) |
 | `verify-caret-parking.mjs` | 정합성 (브라우저) | 커서 주차 회귀 코퍼스 — 키 시퀀스 × 커서 px 좌표 + bias: End/Home 단일·연타(제자리)/라인 맨앞→Up/라인 끝→Down·Up/라인 맨앞→Down 전 라인 스캔 + End 반복 입력 이벤트 스트림(cursorMove 발화·styleChange dedupe). **커서 내비게이션 변경 시 선행 실행** — bias 이행·placement 리졸버 변경의 동작 동일성 증명망 | ALL PASS (28항목, 서버 없으면 자동 기동) |
 | `verify-print-image-overlap.mjs` | 정합성 (엔진) | 이미지/오버랩 수정의 printPostData 반영 — 모드별 print 좌표 === displayRect, objectFit 갱신, overlapMode none 관통 | ALL PASS |
@@ -628,7 +628,7 @@ npx tsx scripts/verify-story-reference-refresh.mjs   # 30항목 ALL PASS
 8. **f2 클릭(CDP) 진입 → 실제 타이핑 — 컨트롤러 직접 파싱 경로** — `_getSourceOffsetFromEvent`가 span dataset(프레임 로컬)을 직접 파싱한다: 절대 변환이 없으면 f2 클릭이 로컬 오프셋을 커서로 주고, 타이핑이 head 영역에 삽입돼 **"커서만 이동하고 글자가 안 써지는"** 회귀가 난다 (실측 재현). 합성 dispatchEvent로는 span 히트가 재현되지 않으므로 독립 페이지 로드에서 CDP 마우스·키보드로 검증한다: (a) f2 span 클릭 → f2 편집 포커스 (b) 클릭 커서가 절대 오프셋 (c) 실제 타이핑 → f2 화면 렌더 + 포커스 유지
 9. **f2 연속 타이핑 — prefix 캐시 좌표계 (비-헤드 프레임)** — `_buildPrefixCache`가 절대 캐럿과 로컬 컬럼 글자수를 비교하면 전 컬럼이 prefix로 분류돼 재배치가 0회가 된다 — **두 번째 키스트로크부터 새 글자가 화면에 안 쓰지는 회귀** (영문: 커서만 이동 / 한글: 조합 span이 커밋 순간 사라지는 플리커 = "원본으로 돌아갔다가"). (a) 영문 5자 연속 타이핑 → "abcde" 전부 렌더 (b) 한글 2단어 연속 조합 → 커밋 전부 렌더
 
-**검증 항목 확장 (범위-증명 편집 안전장치 + 엔터 커서)**: 브라우저 검증은 45항목으로 확장되었다 (아래 10~12):
+**검증 항목 확장 (범위-증명 편집 안전장치 + 엔터 커서)**: 브라우저 검증은 49항목으로 확장되었다 (아래 10~13):
 10. **스킵 프레임 편집 소싱 안전장치 (범위-증명 §4.6)** — 스트레스 타이핑으로
     스킵 프레임을 만든 뒤 (a) `focusParagraph` 재포커스가 `ensureThreadFramesFresh`
     가드를 발화(조건부 가드의 재포커스 누락 방어) (b) 신선화 후 focused 문단
@@ -651,11 +651,23 @@ npx tsx scripts/verify-story-reference-refresh.mjs   # 30항목 ALL PASS
     (사용자 보고: 2번째 스레드 프레임부터 엔터 후 커서 +1 불일치).
     `getCharOffsetFromPoint`가 라인 div rect 포함 판정([top, top+height)
     내부)을 중심 거리보다 우선하도록 수정. 검증: 라인1 첫 span 클릭 매핑 =
-    소속 오프셋 + 엔터 후 커서 offset+1 유지 + 커서가 개행 뒤 라인에 그려짐.
+    소속 오프셋 + 엔터 후 커서 개행 다음 위치 유지 + 커서가 개행 뒤 라인에 그려짐.
+13. **엔터 후 커서 +1 불일치 — 절대 위치 기준 (라인 레인지 \n 소비 시프트)** —
+    [12]의 클릭 교정은 근본이 아니었다: 엔진 `_cursorLineWalk`와 렌더
+    `renderText`의 `\n` 소비 판정이 **프레임 로컬 오프셋을 story 절대 plain
+    인덱스에 그대로 사용**해, contentFrom > 0인 2번째 프레임부터 프레임 내부
+    `\n`(엔터)이 소비되지 않고 이후 라인 레인지와 span key가 -1 시프트됐다.
+    시프트가 렌더/엔진 양측에 **자기일관적**이라 span key 상대 비교([11]류,
+    기대값 = spanKey + contentFrom)는 이 결함을 잡지 못한다 — [13]은 기대값을
+    **story 문자에서 직접** 산출한다: 라인1 첫 span 절대 오프셋의 story 문자,
+    커서 placement 참조 문자, 클릭 매핑 절대 오프셋. 수정: 판정 인덱싱에
+    `+contentFrom` (결과값은 로컬 공간 유지 — 비-스레드 문단은 항등, 스냅샷
+    byte-identical). 체인 배치(contentFrom)는 파트 합산 기반이라 무영향 —
+    "배치는 맞는데 커서만 +1"인 증상과 일치. 엔진 정합은 `verify-threading.mjs` [19].
 
 **실행**:
 ```bash
-npx tsx scripts/verify-threading-browser.mjs   # 45항목 ALL PASS (서버 없으면 자동 기동)
+npx tsx scripts/verify-threading-browser.mjs   # 49항목 ALL PASS (서버 없으면 자동 기동)
 ```
 
 ### `verify-print-image-overlap.mjs` — 이미지/오버랩 수정의 print 반영 (엔진)
