@@ -691,11 +691,11 @@ if (manager.isParagraphEditable(paragraph)) {
    → controllerA._onBlur() (시각적 상태만 업데이트, _releaseFocus 호출 안 함)
 3. B 단락의 textarea에 focus 발생
    → controllerB._onFocus() → EditManager._requestFocus(controllerB)
-4. _requestFocus 내부:
-   a. 범위-증명 신선화 가드: B가 스레드 프레임이고 ThreadEngine이 B를
-      범위-증명으로 스킵해 구 story 참조를 보유 중이면
-      engine.ensureThreadFramesFresh({B.id})로 신선화 + B.flushRender()
-      (§포커스 진입의 단일 관문 — 아래 참조)
+ 4. _requestFocus 내부:
+    a. 범위-증명 신선화 가드: B가 스레드 프레임이고 ThreadEngine이 B를
+       범위-증명 스킵으로 DOM 동기를 건너뛴 상태면
+       engine.ensureThreadFramesFresh({B.id})로 동기 + B.flushRender()
+       (§포커스 진입의 단일 관문 — 아래 참조)
    b. previousController = controllerA
    c. controllerA._clearSelection() ← A 단락의 selection 해제!
    d. controllerA._blurInternal() → textarea.blur() + _releaseFocus(controllerA)
@@ -709,9 +709,9 @@ if (manager.isParagraphEditable(paragraph)) {
 
 #### 범위-증명 신선화 가드 — 포커스 진입의 단일 관문
 
-ThreadEngine의 범위-증명 스킵(§ TEXT_ENGINE 스레딩 — 편집 위치보다 앞쪽 slice를 갖는 프레임의 재배치 생략)은 스킵된 프레임이 **구 story 참조**를 보유한 상태로 남긴다. 이 상태에서 그 프레임을 편집 소스로 삼으면 `relayoutThreads(sources)`의 writeback이 구 story로 `threads[].content`를 덮어써 **다른 프레임의 편집이 롤백**된다 (실측 재현: 1→2→3페이지 순편집 후 2페이지 재편집 → 3페이지 편집 소실; IME 커밋·경계 backspace 스위트도 동일 소실).
+ThreadEngine의 범위-증명 스킵(§ TEXT_ENGINE 스레딩 — 편집 위치보다 앞쪽 slice를 갖는 프레임의 재배치 생략)은 step-1에서 clean 프레임의 참조를 `ParagraphEngine.refreshStoryReference(storyContent)`로 신선화한다 (A-6 근본 해소) — 스킵 프레임은 **현재 story 참조를 소유**하며, 구 story 참조를 보유한 채 편집 소스가 되어 writeback이 구 내용으로 `threads[].content`를 덮어쓰는 롤백 결함(실측 재현: 1→2→3페이지 순편집 후 2페이지 재편집 → 3페이지 편집 소실; IME 커밋·경계 backspace 스위트)이 상태 자체에서 소멸했다. `refreshStoryReference`는 참조 키 없는 직접 유도 메모(`_plainTextCache`·`_styleRuns`)만 무효화하고 `_dirty`·`_layoutCache`는 불변이라 step-2 스킵 판정이 그대로 성립한다.
 
-방어는 `EditManager._requestFocus`에서 수행한다 — 포커스 진입의 모든 경로(텍스트 클릭/더블클릭/`focusParagraph()`/테이블 키보드/커서 이관)가 `textarea focus → _onFocus → _requestFocus`로 수렴하므로 이 관문 하나로 전 경로가 방어된다. 가드는 `engine.ensureThreadFramesFresh({paragraph.id})`로 신선화가 필요하면(`ThreadEngine.hasStaleSkippedFrames`) 체인 전체 재배치 + 대상 프레임 커밋 후 `paragraph.flushRender()`로 textarea/runMap을 신 모델에 동기화한다. 검증: `scripts/verify-threading-browser.mjs` [10] (역방향 편집 — 상류 재편집 후 하류 편집 보존).
+남는 위험은 **DOM 렌더·textarea/runMap 동기의 스킵**이다 — 배치를 스킵한 프레임은 span diff·postRender 동기도 건너뛰므로, 편집 진입 전 DOM 컨트롤러를 신 모델에 동기해야 한다. 방어는 `EditManager._requestFocus`에서 수행한다 — 포커스 진입의 모든 경로(텍스트 클릭/더블클릭/`focusParagraph()`/테이블 키보드/커서 이관)가 `textarea focus → _onFocus → _requestFocus`로 수렴하므로 이 관문 하나로 전 경로가 방어된다. 가드는 `engine.ensureThreadFramesFresh({paragraph.id})`로 동기가 필요하면(`ThreadEngine.hasStaleSkippedFrames` — 참조가 아닌 **동기 스킵** 기록) 체인 전체 재배치 + 대상 프레임 커밋 후 `paragraph.flushRender()`로 textarea/runMap을 신 모델에 동기화한다. 검증: `scripts/verify-threading-browser.mjs` [10] (역방향 편집 — 상류 재편집 후 하류 편집 보존), `scripts/verify-story-reference-refresh.mjs` (30항목 — 참조 소멸/스킵 판정 유지/writeback 롤백 방어).
 
 #### 포커스 시 부모 box 레이아웃 선택
 

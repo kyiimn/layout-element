@@ -722,6 +722,16 @@ static create(): ColorRegistryEngineImpl
 
 ---
 
+### 2.9b 문서 전용 계약 (`document-engine.ts` — D-7)
+
+| 심볼 | 종류 | 설명 |
+|------|------|------|
+| `DocumentEngineParent` | 인터페이스 | 문서 엔진의 실제 표면 계약 (`absRect`/`relayoutThreads`/`ensureCommitted`). BoxEngineParent 스텁 격리 — 문서는 페이지의 부모가 아니므로 페이지 트리 엔진의 parent는 PageEngine이며, 문서를 BoxEngineParent로 기대하는 호출부는 존재하지 않는다. 스텁(`childBoxEngines`[]/`appendChildBoxEngine` no-op/`findBoxEngineById` undefined)은 제거됐고 `gridCalculator`는 불변 빈 싱글턴(`_EMPTY_GRID`)으로 교체 |
+| `DocumentEngine.relayoutThreads` | 메서드 | story writeback + 체인 재배치 (스레드 조정 단일 소스 — RULES §1.10) |
+| `DocumentEngine.ensureThreadFramesFresh` | 메서드 | 범위-증명 스킵 프레임의 DOM 동기 (A-6 — 참조는 step-1에서 신선화됨) |
+
+---
+
 ### 2.10 공유 타입 (`types.ts`)
 
 | 타입 | 정의 |

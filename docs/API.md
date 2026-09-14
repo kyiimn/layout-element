@@ -1205,8 +1205,20 @@ class ParagraphEngine {
   set textContent(value: string): void;
   set overlapMode(v: ParagraphOverlapMode): void;
   set scale(v: number): void;
+
+  // 참조 신선화 (스레딩 전용 — 배치·캐시·dirty 불변)
+  refreshStoryReference(value: string | (string | TextInlineData)[]): void;
 }
 ```
+
+#### `refreshStoryReference(value)`
+
+텍스트 콘텐츠의 **참조만** 교체한다 — `textContent` setter가 세우는 `_dirty`·
+파생 배치 무효화를 우회한다. `ThreadEngine` 범위-증명 스킵 프레임의 구 story
+참조를 현재 story로 신선화하는 전용 경로 (A-6 — 호출자는 slice 불변을 보증).
+참조 키 없는 직접 유도 메모(`_plainTextCache`·`_styleRuns`)만 무효화하고
+`_layoutCache`·`_dirty`는 보존해 스킵 판정을 유지한다.
+검증: `scripts/verify-story-reference-refresh.mjs`.
 
 #### `ParagraphEngineData`
 
@@ -1454,9 +1466,11 @@ class ParagraphEngine {
 > 소스 `textContent`의 평문 공간 prefix/suffix 비교로 편집 범위 `[Ps, Pe)`를
 > 산출하고, `committedTail(F) < Ps`인 프레임(레이아웃 캐시 보유, 최후 프레임 제외,
 > `pinnedFrameIds` 제외)의 재주입·`layoutText`를 스킵한다 — O(체인 전체) →
-> O(편집점 이후). 스킵 프레임이 편집 소스가 되기 전에는
-> `ensureThreadFramesFresh(ids): boolean`으로 신선화해야 한다 (true 반환 시
-> 호출자는 focused 문단을 flush해야 한다 — `EditManager.focusParagraph` 참조).
+> O(편집점 이후). 스킵 프레임은 step-1에서 `refreshStoryReference`로 참조가
+> 이미 신선하다 (구 story 참조 소멸 — A-6). 스킵 프레임을 편집 소스로 삼기
+> 전에는 `ensureThreadFramesFresh(ids): boolean`으로 DOM 렌더·textarea/runMap
+> 동기를 수행해야 한다 (true 반환 시 호출자는 focused 문단을 flush해야 한다 —
+> `EditManager.focusParagraph` 참조).
 
 ---
 
