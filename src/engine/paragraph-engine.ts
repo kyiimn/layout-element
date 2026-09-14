@@ -4432,6 +4432,53 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   }
 
   /**
+   * 텍스트 콘텐츠의 **참조만** 신선화한다 — 배치 상태·dirty·스킵 판정은 불변.
+   *
+   * ThreadEngine 범위-증명 스킵 프레임이 구 story 참조를 보유한 채 남는
+   * 것(편집 소싱 시 하류 롤백 — f2bbe8b)을 상태 자체에서 제거하는 전용
+   * 경로다 (감사 A-6). `textContent` setter가 세우는 `_dirty`·파생 캐시
+   * 무효화를 우회하므로, 호출 후에도 `_isFrameClean` 스킵 판정 3조건
+   * (`hasLayoutCache`·`hasPendingChanges === false`·contentFrom 불변)이
+   * 그대로 성립한다.
+   *
+   * 무효화하는 것 (2종 — 참조 키가 없는 직접 유도 메모):
+   * - `_plainTextCache` — `_boundaryCorrection`이 `plainText[contentFrom]`으로
+   *   금칙 판정을 하고 편집 진입 시 textarea/runMap 동기가 소비한다. 참조만
+   *   교체하면 구 story plain이 남아 (i) 경계 교정이 구 글자를 읽고 (ii)
+   *   편집 커밋이 구 plain을 story에 writeback한다 (f2bbe8b의 메모 경로).
+   * - `_styleRuns` — `getInlineStyleAt`·`getCommonStyleInRange`의 런 인덱스.
+   *   신 참조의 런 구조와 어긋나면 인라인 스타일 조회가 구 런 경계를 반환한다.
+   *
+   * 보존하는 것:
+   * - `_dirty`/`_layoutCache`/`_parsedContentsCache` — 스킵 판정에 필요한
+   *   배치 상태. `_parsedContentsCache`는 참조 비교(`textContent === this._textContent`)
+   *   로 스스로 치유되고, `_layoutCache`는 해시가 digest를 포함해 내용 변경
+   *   참조는 자연 미스된다 (해시 무영향 참조는 히트 유지 — R-T2 same-ref 게이트가
+   *   재매핑을 소유).
+   * - digest 캐시(`_TEXT_DIGEST_BY_REF`)는 참조를 키로 하므로 다음 해시에서
+   *   1회 재계산 후 정적 WeakMap에 수렴한다 (체인당 O(N) 1회).
+   *
+   * @param value - 신선화할 텍스트 콘텐츠 참조 (호출자가 slice 불변을 보증)
+   * @throws TypeError value가 문자열도 런 배열도 아닐 때
+   * @example
+   * ```ts
+   * // ThreadEngine step-1: clean 프레임의 구 story 참조를 현재 story로 신선화
+   * if (engine.textContent !== storyContent && this._isFrameClean(...)) {
+   *   engine.refreshStoryReference(storyContent); // dirty·캐시 불변 → 스킵 유지
+   * }
+   * ```
+   */
+  public refreshStoryReference(value: string | (string | TextInlineData)[]): void {
+    if (typeof value !== "string" && !Array.isArray(value)) {
+      throw new TypeError("refreshStoryReference: value must be a string or inline run array");
+    }
+    this._textContent = value;
+    // 참조 키 없는 직접 유도 메모만 무효화 — 재산출은 정적 참조 캐시로 수렴.
+    this._plainTextCache = null;
+    this._styleRuns = null;
+  }
+
+  /**
    * 편집 위치 힌트를 설정한다. `layoutText()`가 prefix 캐시 적용 시도에 사용.
    * `textContent` setter 후, `layoutText()` 호출 전에 설정. 소비 후 자동 리셋.
    */

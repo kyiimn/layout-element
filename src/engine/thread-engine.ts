@@ -102,9 +102,12 @@ export class ThreadEngine {
   private readonly _committedByThread = new Map<string, ThreadCommitRecord>();
 
   /**
-   * 범위-증명으로 스킵된(구 story 참조를 보유한) 프레임 id — 스레드 키별.
-   * 배치 패스가 직접 기록한다. 편집 안전장치(`ensureThreadFramesFresh`)가
-   * 이 집합으로 신선화 필요성을 판정한다. 전체 재배치(스킵 없음)면 삭제된다.
+   * 범위-증명으로 스킵된 프레임 id — 스레드 키별. 배치 패스가 직접 기록한다.
+   * step-1 참조 신선화(감사 A-6)로 스킵 프레임은 현재 story 참조를 소유하므로
+   * 이 집합의 의미는 "구 story 참조 보유"가 아니라 **"배치를 스킵해 DOM
+   * 렌더·textarea/runMap 동기가 건너뛴 프레임"**이다 — 편집 안전장치
+   * (`ensureThreadFramesFresh`)가 포커스 진입 시 이 집합으로 동기 필요성을
+   * 판정한다 (잔여 경로 방어). 전체 재배치(스킵 없음)면 삭제된다.
    */
   private readonly _staleSkippedByThread = new Map<string, Set<string>>();
 
@@ -122,9 +125,9 @@ export class ThreadEngine {
   }
 
   /**
-   * 지정 스레드 프레임들 중 범위-증명으로 스킵되어 구 story 참조를 보유한
-   * 것이 있는지 반환한다. `PageEngine.ensureThreadFramesFresh`가
-   * 편집 진입 전 신선화 필요성을 판정하는 데 사용한다.
+   * 지정 스레드 프레임들 중 범위-증명으로 스킵되어 DOM 렌더·동기가
+   * 건너뛴 것이 있는지 반환한다. `ensureThreadFramesFresh`가 편집 진입
+   * 전 동기 필요성을 판정하는 데 사용한다 (참조는 step-1에서 이미 신선화).
    *
    * @param threadKey - 스레드 키
    * @returns 스킵 프레임이 하나라도 있으면 true
@@ -359,10 +362,10 @@ export class ThreadEngine {
     //    tail 슬라이싱 주입과 contentFrom 스킵을 함께 쓰면 이중으로 건너뛴다.
     //    head의 contentFrom = 0 (pull-back의 근거: story 축소 시 이후 프레임이
     //    자연히 비워진다).
-    //    범위-증명으로 clean한 프레임은 재주입을 생략한다 — 재주입은
-    //    `_dirty`를 세워 스킵 판정을 무력화하므로, 생략해야 스킵이 성립한다.
-    //    clean 프레임은 구 story 참조 + 구 배치를 함께 유지한다 (유효한 과거
-    //    스냅샷 — 자기모순 없음).
+    //    범위-증명 clean 프레임은 참조만 신선화한다 (감사 A-6): setter가 세우는
+    //    `_dirty`·캐시 무효화를 우회하므로 step-2의 스킵 판정이 그대로 성립하고,
+    //    프레임이 구 story 참조를 보유한 채 남는 상태(편집 소싱 시 하류 롤백,
+    //    f2bbe8b)가 구조적으로 소멸한다. slice 불변은 _isFrameClean이 보증한다.
     const head = engines[0];
     const storyContent = thread.content ?? head.textContent;
     const committedForAssign = this._committedByThread.get(threadKey);
@@ -372,8 +375,10 @@ export class ThreadEngine {
       : null;
     for (let ei = 0; ei < engines.length; ei++) {
       const engine = engines[ei];
-      if (engine.textContent !== storyContent
-        && (committedChain === null || !this._isFrameClean(committedChain, engines, ei, editPs, pinned))) {
+      if (engine.textContent === storyContent) continue;
+      if (committedChain !== null && this._isFrameClean(committedChain, engines, ei, editPs, pinned)) {
+        engine.refreshStoryReference(storyContent);
+      } else {
         engine.textContent = storyContent;
       }
     }
@@ -437,10 +442,10 @@ export class ThreadEngine {
       // 범위-증명 스킵: 커밋 tail이 편집 시작점보다 완전히 앞이면 이 프레임의
       // slice는 불변임이 보장된다 (편집이 뒤에서 일어났으므로). textContent
       // 재주입·updateThreadContext·layoutText를 모두 생략하고 커밋값을
-      // 그대로 쓴다 (step-1에서도 동일 판정으로 재주입을 생략했으므로
-      // `_dirty`·캐시가 그대로다). 스킵 프레임은 구 story 참조를 보유하므로
-      // stale 집합에 기록한다 — 그 프레임이 편집 소스가 되기 전에 신선화가
-      // 반드시 선행되어야 한다 (ensureThreadFramesFresh).
+      // 그대로 쓴다 (step-1 참조 신선화는 `_dirty`·캐시를 건드리지 않으므로
+      // 스킵 판정이 그대로 성립한다). 스킵 프레임은 참조가 이미 신선하므로
+      // stale 집합의 의미는 "DOM 렌더·textarea/runMap 동기 스킵"이다 —
+      // 포커스 진입 시 ensureThreadFramesFresh가 동기한다 (잔여 경로 방어).
       if (committedChain !== null
         && this._isFrameClean(committedChain, engines, i, editPs, pinned)) {
         contentFromChain.push(committedChain.contentFrom[i]);
