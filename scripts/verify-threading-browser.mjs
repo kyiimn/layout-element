@@ -266,16 +266,34 @@ const r = await page.evaluate(`
       let queueEvents = 0;
       const docT = document.querySelector('x-layout-document') ?? page;
       const origRequest = docT.requestThreadRelayout.bind(docT);
+      // E-2 계약 관측: flush 중 파생 relayout이 (i) 차단되고 (ii) 이월되는지.
+      // flush 본체 진입 시점에 파생 요청을 1회 유도한다 — 재진입 차단 플래그
+      // (_threadRelayoutFlushing)가 이 요청을 이번 flush에 실행시키지 않는다.
+      let derivedDuringFlush = 0;
+      let flushEnter = 0;
+      const docProto = Object.getPrototypeOf(docT);
+      const origFlushMethod = docProto._flushThreadRelayout;
+      Object.defineProperty(docProto, '_flushThreadRelayout', {
+        value: function (sources) {
+          flushEnter++;
+          if (!docT._threadRelayoutFlushing && flushEnter === 1) {
+            // 첫 flush 진입 시점에 파생 요청을 microtask로 유도한다 — 이 요청은
+            // 이번 flush에 재진입하지 않고 다음 microtask로 이월된다 (E-2 계약).
+            // 무한 재귀 없음 + 다음 flush에서 소진을 flushEnter/소진 상태로 관측.
+            Promise.resolve().then(() => {
+              origRequest('para-0');
+              derivedDuringFlush++;
+            });
+          }
+          return origFlushMethod.call(this, sources);
+        },
+        configurable: true,
+      });
       docT.requestThreadRelayout = (id) => {
         const pending = docT._threadRelayoutSources !== null;
         if (pending) queueEvents++;
         origRequest(id);
       };
-      let reentryBlocked = 0;
-      const origFlushDesc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(docT), 'requestThreadRelayout');
-      // flush 중 재진입 관측: flush 실행 중 requestThreadRelayout 호출 시도 감지
-      let inFlush = false;
-      const origFlush = docT._flushThreadRelayout?.bind(docT);
       // 연속 10키
       const keys = ['가', '나', '다', '라', '마', '바', '사', '아', '자', '차'];
       const tailBefore = engine.findEngineById(headId2).overflowContentFrom;
@@ -284,9 +302,12 @@ const r = await page.evaluate(`
         document.execCommand('insertText', false, ch);
         await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
       }
-      // 마지막 키 flush 완료 대기
+      // 마지막 키 flush 완료 대기 (이월된 파생 flush 소진까지 포함)
       await new Promise(r => setTimeout(r, 250));
       docT.requestThreadRelayout = origRequest;
+      Object.defineProperty(docProto, '_flushThreadRelayout', {
+        value: origFlushMethod, writable: true, configurable: true,
+      });
       const headPe2 = engine.findEngineById(headId2);
       const f2Pe2 = engine.findEngineById(frameIdsStress[1]);
       out.stress = {
@@ -301,6 +322,9 @@ const r = await page.evaluate(`
         })(),
         storyLen: plainOf(engine.data.threads[0].content).length,
         tailBefore,
+        // E-2 어설션 데이터: flush 중 유도 파생 요청의 이월·소진 관측
+        flushEnter,
+        derivedDuringFlush,
       };
     }
   }
@@ -599,6 +623,15 @@ console.log('\n[5] 타이핑 스트레스 — flush 통합·재진입 차단 (P1
     check('스트레스 후에도 seam 정합 유지',
       r.stress.seamOk,
       `f2.from=${r.stress.f2From}`);
+    // E-2 (INCREMENTAL_REFLOW.md §2): flush 중 유도된 파생 relayout은
+    // 무한 재귀 없이 다음 microtask로 이월·소진된다 — 유도 1회 + 재진입
+    // 차단(이번 flush가 이월 요청을 즉시 실행하지 않음) + 이월 flush도
+    // 정상 소진(dirty 잔존 없음)을 함께 실측한다.
+    check('flush 중 파생 relayout — 이월 소진 (무한 재귀 없음, E-2)',
+      r.stress.derivedDuringFlush === 1
+      && r.stress.flushEnter >= 1
+      && r.stress.dirtyAfterFlush.every(d => d === false),
+      `flushEnter=${r.stress.flushEnter} derived=${r.stress.derivedDuringFlush}`);
   } else {
     check('스트레스 시나리오 실행 (textarea 진입)', false, 'stress 시나리오 미실행');
   }

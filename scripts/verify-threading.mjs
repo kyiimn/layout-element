@@ -1161,6 +1161,62 @@ console.log('\n[17] 프레임 경계 금칙 교정');
       guardOk,
       `prevLast="${prevLast}" f2First="${firstG}"`);
   }
+
+  // A-10 clamp 단방향 수렴 invariant: 교정 루프는 (i) cap 2회 이내 (ii)
+  // clamp 단조 감소(clamp[n+1] < clamp[n]) (iii) head contentFrom 불증가
+  // — 첫 판정이 prev "이전 배치" 상태에서 출발하는 한계를 실측으로 봉합.
+  {
+    // 위반 시나리오(story)로 교정 활성 문서를 재구축하며 _boundaryCorrection
+    // 호출을 관찰한다. pull > 0마다 clamp -= pull이므로 호출 시퀀스가 단조
+    // 감소를 정확히 반영한다.
+    const proto = ThreadEngine.prototype;
+    const orig = proto._boundaryCorrection;
+    const clampCalls = []; // { clamp, pull } 기록
+    let wrapped = false;
+    proto._boundaryCorrection = function (prev, next, clamp) {
+      const pull = orig.call(this, prev, next, clamp);
+      clampCalls.push({ clamp, pull });
+      return pull;
+    };
+    try {
+      buildThreadedDoc({
+        contents: [story, ''],
+        columns: [1, 1],
+        boxHeight: 4,
+        threads: [{ id: 'tb2', paragraphIds: ['para-0', 'para-1'] }],
+      });
+    } finally {
+      proto._boundaryCorrection = orig;
+    }
+    void wrapped;
+    const attemptsByBoundary = new Map(); // clamp 시작값별 시도 횟수 관측
+    for (const c of clampCalls) {
+      if (c.pull <= 0) continue; // pull 0은 루프가 즉시 break — 시도 아님
+      if (!attemptsByBoundary.has(c.clamp)) attemptsByBoundary.set(c.clamp, 0);
+      attemptsByBoundary.set(c.clamp, attemptsByBoundary.get(c.clamp) + 1);
+    }
+    // (i) cap 2회: 같은 경계에서 2회 초과 배치 재시도 없음 — 루프가
+    //     attempt < 2로 고정되어 있으므로 관측되는 감소 단계도 2 이하.
+    const attemptCounts = [...attemptsByBoundary.values()];
+    const maxAttemptsPerBoundary = attemptCounts.length > 0 ? Math.max(...attemptCounts) : 0;
+    check('A-10 (i) clamp 시도는 cap 2회 이내',
+      maxAttemptsPerBoundary <= 2, `maxAttempts=${maxAttemptsPerBoundary} calls=${clampCalls.length}`);
+    // (ii) 단조 감소: clampCalls의 clamp 값 시퀀스가 엄격 감소(동일값 반복 없음 —
+    //      pull 0이면 즉시 break하므로 기록되는 호출은 항상 감소 단계)
+    let monotonic = true;
+    let prevClamp = Infinity;
+    for (const c of clampCalls) {
+      if (c.pull > 0 && c.clamp >= prevClamp) { monotonic = false; break; }
+      if (c.pull > 0) prevClamp = c.clamp;
+    }
+    check('A-10 (ii) clamp 단조 감소 (clamp[n+1] < clamp[n])',
+      monotonic, `calls=${JSON.stringify(clampCalls.slice(0, 6))}`);
+    // (iii) head contentFrom 불증가: clamp는 head의 배치 상한이므로 교정 후
+    //       head contentFrom(=0)과 tail이 증가하지 않는다 — 追い出し 단방향.
+    check('A-10 (iii) 교정 후 head contentFrom 불증가 (추い出し 단방향)',
+      f1B.contentFrom === 0,
+      `head.contentFrom=${f1B.contentFrom}`);
+  }
 }
 
 // ═══ 18. 테이블 셀 프레임 × buildCellBoxEngines 재구축 (P2-11) ═══

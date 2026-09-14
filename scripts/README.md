@@ -28,6 +28,7 @@
 | `verify-image-edit-mode.mjs` | 정합성 (브라우저) | 이미지 편집 모드 전 동작 — dblclick 진입(일반/레이아웃 모드), 부모 box 빨간테두리+라벨 숨김, 드래그/objectFit 자동전환, 휠 비율 유지, ESC 취소/복귀, Tab 순회, selection 이동 시 포커스 상실, 클램핑, **extractData/printPostData 3소스 일치, 오버랩 회피 갱신 A/B** | ALL PASS |
 | `verify-overlap-none.mjs` | 정합성 (엔진) | overlapMode 'none' 시맨틱 — 단일 관문(computeOverlapSizeMm)에서 NONE 조기 반환, box/path 회피 유지 | ALL PASS |
 | `verify-threading.mjs` | 정합성 (엔진) | 텍스트 스레딩 — 비-스레드 회귀/단일 프레임 기준선/feed-forward/콘텐츠 무결성/런 슬라이싱/pull-back/extractData round-trip/overset/threadTail 마킹/**지오메트리 행렬 81조합**/childrenData 삼분 계약/writeback 방어/printPostData 패리티/**변경 감지 스킵**/**프레임 경계 금칙 교정**/**테이블 셀 프레임 행 삭제** | ALL PASS |
+| `verify-story-reference-refresh.mjs` | 정합성 (엔진) | 스킵 프레임 참조 신선화(A-6) — 폴백 판정(스킵 판정 참조 비교 통과)/hasLayoutCache·dirty 불변/해시 무영향 캐시 히트 유지/내용 변경 자가 치유/구 story 참조 시스템 소멸/writeback 롤백 방어/직접 유도 메모 무효화 | ALL PASS (30항목) |
 | `verify-threading-browser.mjs` | 정합성 (브라우저) | 스레딩 화면 진실 — 초기 로드 3계층(엔진↔DOM span)/타이핑 전파 seam/테두리 tail 분기/round-trip 체인 동등/**타이핑 스트레스 flush 통합**/**IME 조합 × flush**/**키보드 프레임 경계 이동(절대 좌표계)** | ALL PASS |
 | `verify-overflow-cursor-clamp.mjs` | 정합성 (브라우저) | 오버플로(숨김) 라인 커서 진입 금지 클램프 — 엔진 경계(`maxVisibleCursorOffset`)/경계 placement 보장/ArrowRight 반복·수렴·bias 'end' 주차 유지/Shift·Ctrl 변형/ArrowDown·Up 방향성/오버플로 해제 비활성/\n 경계/Ctrl+End/End·Shift+End | ALL PASS (서버 없으면 자동 기동) |
 | `verify-caret-parking.mjs` | 정합성 (브라우저) | 커서 주차 회귀 코퍼스 — 키 시퀀스 × 커서 px 좌표 + bias: End/Home 단일·연타(제자리)/라인 맨앞→Up/라인 끝→Down·Up/라인 맨앞→Down 전 라인 스캔 + End 반복 입력 이벤트 스트림(cursorMove 발화·styleChange dedupe). **커서 내비게이션 변경 시 선행 실행** — bias 이행·placement 리졸버 변경의 동작 동일성 증명망 | ALL PASS (28항목, 서버 없으면 자동 기동) |
@@ -581,6 +582,24 @@ npx tsx scripts/verify-overlap-none.mjs   # 7항목 ALL PASS
 **실행**:
 ```bash
 npx tsx scripts/verify-threading.mjs   # 104항목 ALL PASS
+```
+
+### `verify-story-reference-refresh.mjs` — 스킵 프레임 참조 신선화 전제 실증 (엔진)
+
+**목적**: `ParagraphEngine.refreshStoryReference` + `ThreadEngine` step-1 참조 신선화(감사 A-6, 5단계 W1)의 전제를 실증한다. 범위-증명 스킵이 프레임에 남기던 **구 story 참조**(편집 소싱 시 하류 롤백 — f2bbe8b)를 상태에서 제거하는 수정의 착수/폴백 판정을 이 스크립트가 소유한다.
+
+검증 항목 (30항목, 5그룹):
+1. **폴백 판정 지점** — 참조 신선화 후 `relayoutThreads` 재호출이 시그니처 재수렴 → 스킵(skipped: true)으로 수렴한다. 스킵 판정(`_threadInputUnchanged`)은 참조 비교를 소비하므로, 이 항목이 FAIL하면 W1은 폴백(3종 봉합의 계약화)으로 전환해야 한다.
+2. **캐시·dirty 불변** — 신선화 후 `hasLayoutCache` 유지(스킵 판정 전제) + `hasPendingChanges` false 불변(setter와 달리 `_dirty`를 세우지 않음) + 배치 상태 byte 보존.
+3. **해시 무영향 참조 교체** — 동일 직렬화 새 참조는 `_layoutCache` 히트 유지(재래핑 0회 — `_layoutColumnsPass` 카운터 실측), 내용 변경 참조는 재래핑(해시 미스 자가 치유). R-T2 same-ref 게이트가 재매핑 소유.
+4. **시스템 소멸** — 4프레임 체인에서 하류 편집 패스 후 (i) 전 프레임이 현재 story 참조 소유 (ii) stale 집합 소멸 (iii) 다음 재호출 전체 스킵 (iv) 스킵 프레임 편집 소싱 시 신 story 기록 + 하류 편집 보존(f2bbe8b 회귀 방어).
+5. **직접 유도 메모** — `_plainTextCache`/`_styleRuns`는 참조 키 없는 메모라 신선화가 무효화해야 한다(무효화 누락 시 `_boundaryCorrection`의 `plainText[contentFrom]` 금칙 오판정 + textarea/runMap 구 plain 공급). 신 참조에서 재산출됨을 실증.
+
+**측정 주의 — 캐시 히트 판정 위치**: 캐시 히트 조기 반환은 `_layoutTextIntoColumns` 내부에 있으므로 그 함수의 진입 카운터로는 히트/미스를 구분할 수 없다. 실제 재래핑 작업(`_layoutColumnsPass`)을 카운트해야 한다 (첫 시도의 측정 오류 교훈).
+
+**실행**:
+```bash
+npx tsx scripts/verify-story-reference-refresh.mjs   # 30항목 ALL PASS
 ```
 
 ### `verify-threading-browser.mjs` — 스레딩 화면 진실 (브라우저)
