@@ -72,9 +72,7 @@
 
 ## 1. LRU 캐시 인프라
 
-### `LRU<K, V>` 제네릭 캐시 (`src/utils/lru-cache.ts`)
-
-모든 캐시의 기반이 되는 제네릭 LRU 클래스. `Map`의 삽입 순서를 활용하여 eviction을 구현한다.
+ParagraphEngine은 자체 `_LRU` 제네릭 클래스(`paragraph-engine.ts`)를 사용한다 — `Map`의 삽입 순서를 활용하여 eviction을 구현한다.
 
 | 항목 | 값 |
 |---|---|
@@ -86,6 +84,8 @@
 | `set(key, value)` | 기존 키면 갱신(위치 이동), 신규 키면 용량 체크 후 삽입 |
 | `delete(key)` | 특정 키 삭제 |
 | `clear()` | 전체 삭제 |
+
+> **변경 이력**: 2026-09에 `src/utils/lru-cache.ts`가 삭제되었다 — 어떤 모듈도 import하지 않은 데드 파일이었고(엔진은 자체 `_LRU`를 사용), 엔진 계층은 `src/utils`를 import하지 않는 관례를 유지한다.
 
 ### 도입 배경
 
@@ -100,7 +100,7 @@
 | 항목 | 값 |
 |---|---|
 | 위치 | `ParagraphEngine._charWidthCache` (`paragraph-engine.ts:69`) |
-| 타입 | `LRU<string, number>` |
+| 타입 | `_LRU<string, number>` |
 | 용량 | 5000 |
 | 키 | `${char}\|${fontName}\|${fontSize}` |
 | 값 | 원본 폰트 메트릭 폭 (mm, 장평 미적용) |
@@ -125,7 +125,7 @@
 | 항목 | 값 |
 |---|---|
 | 위치 | `ParagraphEngine._charOuterStyleCache` (`paragraph-engine.ts:66`) |
-| 타입 | `LRU<string, Partial<CSSStyleDeclaration>>` |
+| 타입 | `_LRU<string, Partial<CSSStyleDeclaration>>` |
 | 용량 | 5000 |
 | 키 | `${char}\|${widthRatio}\|${letterSpacing}\|${spaceRatio}\|${fontSize}\|${lineMaxFontSize}\|${fontName}` |
 | 값 | `genCharStyle()` 결과 CSS 스타일 객체 |
@@ -910,6 +910,18 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | 오버랩 픽셀 스캔 | `computePixelOverlap()` | 재래핑마다 겹침 밴드의 rgbaData/비트맵 재스캔. `getImageData()`는 아니지만(오버랩 경로에서 제거됨) 큰 이미지 × 다수 라인에서 비용 발생 |
 | `overlayElements` 게터 | `LayoutBoxElement` | 호출마다 오버랩 요소 목록 재계산. `overlapMode === 'none'` 이미지/paragraph는 `checkOverlap()` 이전에 제외. `checkOverlap()`은 mm 좌표(`absLeft`/`absTop`/`absWidth`/`absHeight`) 기반으로 동작하므로 `getBoundingClientRect()` 강제 리플로우 비용이 발생하지 않음 |
 | 키 입력 O(N) 패스 | `TextEditController` | Phase 2로 해소: 모든 텍스트 편집 지점이 `insertTextIntoInline`/`deleteTextFromInline` 델타 스플라이스 사용 (`run-map.ts`). 편집 비용이 문단 길이가 아닌 **변경 런 수**에 비례. 잔존: `_computeLayoutInputHash`(해시용 문자열 조립) + 렌더 diff |
+
+### 9.1 스레드 flush 경로 (2026-09 개선 — `ThreadRelayoutCoordinator`)
+
+`_flushThreadRelayout`/`_syncThreadFramesToDom`의 본체가 `src/utils/thread-relayout-coordinator.ts`로 통합되었다 (document/page 이중 사본 소거 — C-1). 개선 내용 (감사 B-1):
+
+| 항목 | 이전 | 이후 |
+|---|---|---|
+| DOM 문단 조회 | `querySelectorAll` 후 루프 내 `Array.from(...).find(...)` — 프레임당 O(P), 키 입력당 O(F×P) | `querySelectorAll` 1회 + `Map` 구축 1회 — O(P + F) |
+| dirty 소진 assert | `typeof console !== 'undefined'`(브라우저에서 항상 true) — **프로덕션** 키 입력마다 `findEnginesByIds`(엔진 트리 전체 순회) 실행 | `THREAD_RELAYOUT_ASSERT` 전역 플래그 게이트 — 기본 false, `globalThis.__LAYOUT_ELEMENT_DEBUG_THREAD_FLUSH__ = true`로 옵트인 |
+| 중복 유지보수 | document/page 사본 ~120줄 × 2 | coordinator 단일 소스 + 요소별 위임(~10줄 × 2) |
+
+재진입 차단 플래그(`_threadRelayoutFlushing`)는 요소별 인스턴스 상태로 유지한다 — flush 중 파생 relayout 이월 계약(E-2)은 요소 수명 주기와 결합되어 있다.
 
 ---
 
