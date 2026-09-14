@@ -157,10 +157,10 @@
 |---|---|
 | 위치 | `GridCalculatorEngine._ppm` (`grid-calculator-engine.ts:40, 71`) — 인스턴스 필드 |
 | 주입 경로 | `GridCalculatorEngine.create(data, ppm?)` — 생성 시 1회 주입 |
-| 측정 | `LayoutDocumentElement._measurePpm()` (`document.element.ts:268-280`) — 100mm `<div>`를 DOM에 추가해 `getBoundingClientRect()`로 측정 후 `px/100` |
-| 재측정 | `LayoutDocumentElement.resetPpm()` (`document.element.ts:175`) |
+| 측정 | `LayoutPageElement._measurePpm()` (`page.element.ts:268-280`) — 100mm `<div>`를 DOM에 추가해 `getBoundingClientRect()`로 측정 후 `px/100` |
+| 재측정 | `LayoutPageElement.resetPpm()` (`page.element.ts:175`) |
 
-> **변경 이력**: 과거에는 `GridCalculatorEngine`이 `static _ppm` 싱글톤 캐시를 보유하고 최초 접근 시 직접 DOM을 측정했다. Node.js 호환(엔진 레이어 DOM-free) 원칙에 따라 DOM 측정은 `LayoutDocumentElement`로 이동했고, 엔진은 주입받은 `ppm`을 인스턴스 필드로만 보유한다. `grid-calculator-engine.ts` 헤더에 `document.createElement` / `getBoundingClientRect` 사용 금지가 명시되어 있다. ppm은 줌/CSS transform 등으로 변할 수 있으므로 `resetPpm()`으로 재측정한다.
+> **변경 이력**: 과거에는 `GridCalculatorEngine`이 `static _ppm` 싱글톤 캐시를 보유하고 최초 접근 시 직접 DOM을 측정했다. Node.js 호환(엔진 레이어 DOM-free) 원칙에 따라 DOM 측정은 `LayoutPageElement`로 이동했고, 엔진은 주입받은 `ppm`을 인스턴스 필드로만 보유한다. `grid-calculator-engine.ts` 헤더에 `document.createElement` / `getBoundingClientRect` 사용 금지가 명시되어 있다. ppm은 줌/CSS transform 등으로 변할 수 있으므로 `resetPpm()`으로 재측정한다.
 
 ### 2.5 이미지 3단계 캐시
 
@@ -343,7 +343,7 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 
 | 요소 | 위치 |
 |---|---|
-| `LayoutDocumentElement.data` | `document.element.ts` (`data` setter) |
+| `LayoutPageElement.data` | `page.element.ts` (`data` setter) |
 | `LayoutBoxElement.data` | `box.element.ts` (`data` setter, `_rebuildingChildren` 가드) |
 | `LayoutTableElement.data` | `table.element.ts` (ID-keyed reconcile) |
 | `LayoutTableRowElement.data` | `tr.element.ts` (ID-keyed reconcile) |
@@ -353,7 +353,7 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 
 #### `_pendingData` getter 캐시
 
-`box.element.ts:89-92, 1084-1085`, `document.element.ts:101-104, 695-696` — 데이터 세터 실행 중 `_rebuildingChildren = true`일 때 getter가 `_pendingData`를 반환하여 외부 코드가 중간 상태를 읽지 않도록 방지.
+`box.element.ts:89-92, 1084-1085`, `page.element.ts:101-104, 695-696` — 데이터 세터 실행 중 `_rebuildingChildren = true`일 때 getter가 `_pendingData`를 반환하여 외부 코드가 중간 상태를 읽지 않도록 방지.
 
 #### `_rebuildingChildren` 재귀 가드
 
@@ -410,7 +410,7 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 
 | 항목 | 위치 |
 |---|---|
-| 길이 + 속성 비교 | `document.element.ts:227-250` |
+| 길이 + 속성 비교 | `page.element.ts:227-250` |
 | 비가시 조기 반환 | `guide-column.element.ts:53-58` |
 
 기존 가이드 컬럼 수와 새 컬럼 수가 같으면 기존 요소를 재사용하고 `rect`/`fontSize`/`lineHeight`/`visible` 중 변경된 속성만 갱신. 비가시 시 `innerHTML = ''` 후 즉시 반환.
@@ -462,7 +462,7 @@ renderText() diff 루프에서 재사용 span의 오프셋/내용/charOffset(절
 
 - `resetIncrementalState()` 호출 시 `_layoutCache = null` (구조 변경 시)
 - `data` setter 호출 시 → `resetIncrementalState()` → `_layoutCache = null`
-- **`updateOverlayContext()`는 `_layoutCache`를 보존** — overlay 위치만 변경 시 사용. `_overlayRectsMm`만 null로 리셋. `DocumentEngine._refreshParagraphOverlays()`와 `LayoutParagraphElement.render()` else 분기에서 사용.
+- **`updateOverlayContext()`는 `_layoutCache`를 보존** — overlay 위치만 변경 시 사용. `_overlayRectsMm`만 null로 리셋. `PageEngine._refreshParagraphOverlays()`와 `LayoutParagraphElement.render()` else 분기에서 사용.
 - 입력 매개변수 변경 시 자동으로 해시가 달라져 캐시 미스 → 전체 재배치
 - **이미지 로드 완료 시**: `LayoutImageElement.render()`의 캐시 미스(첫 로드) 경로 완료 후 `_notifyOverlapParagraphs()`가 부모 박스의 `requestRerenderAffectedParagraphs()`를 호출 → `markStructureChangedAndRender()` → `resetIncrementalState()` → 캐시 무효화 → 재배치. 최초 로딩 시 이미지 canvas가 비어 있는 상태에서 단락이 먼저 렌더링되어 오버랩 판정이 누락되는 문제를 해결.
 
@@ -550,7 +550,7 @@ flexbox 폴백 경로(`charOffsets === undefined`, 외부에서 임의로 `TextP
 
 #### `printPostData` 엔진 전용 API
 
-`buildParagraphPrintPostData()`가 엔진의 `columnContents`/`charOffsets`에서 직접 char 데이터를 생성한다. DOM span에서 추출하던 이전 방식(inner span 존재 여부 분기)은 제거되었다. `printPostData`는 엔진 전용 API로, DOM 요소에서는 제거되었으며 `DocumentEngine.printPostData` 엔진 트리가 단일 소스다 (mm 단위).
+`buildParagraphPrintPostData()`가 엔진의 `columnContents`/`charOffsets`에서 직접 char 데이터를 생성한다. DOM span에서 추출하던 이전 방식(inner span 존재 여부 분기)은 제거되었다. `printPostData`는 엔진 전용 API로, DOM 요소에서는 제거되었으며 `PageEngine.printPostData` 엔진 트리가 단일 소스다 (mm 단위).
 
 ---
 
@@ -797,9 +797,9 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 
 | 항목 | 값 |
 |---|---|
-| 위치 | `document-engine.ts: _collectBoxMetrics()` |
+| 위치 | `page-engine.ts: _collectBoxMetrics()` |
 
-박스 mm 메트릭을 `metricsById` Map으로 미리 수집하여 레이아웃 플립 중 재계산을 방지. `DocumentEngine.flipLayout()`이 `_collectBoxMetrics()`로 엔진 트리에서 `absWidth`/`absHeight`를 수집한 후 `BoxEngine.flipLayout()`에 전달. `box.lock === true`인 서브트리는 변경 없이 원본 반환.
+박스 mm 메트릭을 `metricsById` Map으로 미리 수집하여 레이아웃 플립 중 재계산을 방지. `PageEngine.flipLayout()`이 `_collectBoxMetrics()`로 엔진 트리에서 `absWidth`/`absHeight`를 수집한 후 `BoxEngine.flipLayout()`에 전달. `box.lock === true`인 서브트리는 변경 없이 원본 반환.
 
 ### 6.6 테이블 seen Set 중복 셀 제거
 
@@ -920,8 +920,8 @@ marquee 선택 시 3px 이동 임계값 통과 후에만 `requestAnimationFrame`
 | Web Worker 레이아웃 | `_layoutTextIntoColumns()`를 Web Worker로 이관 | 메인 스레드 블로킹 제거 | 중간-높음 |
 | 한국어 정적 폭 테이블 | 11,172 한글 음절 균일 폭(970/1000 em) 룩업 테이블 | 콜드 스타트 시 opentype.js 파싱 생략 | 중간 |
 | ~~Skeleton 캐시~~ | ~~Univer 패턴 — 레이아웃 결과 캐시~~ | ~~증분 리플로우~~ | ~~구현됨 (§3.12)~~ |
-| `Promise.all` 병렬 렌더 | `LayoutDocumentElement.render()` 순차 await (`document.element.ts:506`) → 병렬 | 이미지 로드 블로킹 해소 | 낮음 |
-| 가상화 | ~~뷰포트 밖 컬럼/라인 DOM 지연 생성~~ → **구현됨**: `LayoutDocumentElement.parkPage()`/`unparkPage()`/`parkedPageIds` + `PageMountManager`(`src/utils/page-mount-manager.ts`). 최상위 박스(페이지) 단위 IntersectionObserver 인덱스 윈도우(±N) 마운트, 플레이스홀더 footprint 유지. 분리 페이지는 엔진 트리에 유지. G1(data 세터 부활)은 보관소 스킵으로, G2(재마운트 커서)는 문단 `connectedCallback` 예약 렌더로, G3(detach 잔류 선택·이미지 포커스)은 `_unregisterLayoutSubtree`로 해소. 상세 설계·감사 기록은 `docs/VIRTUALIZATION.md` 참조 | 다중 페이지 DOM 크기 감소 | 구현됨 |
+| `Promise.all` 병렬 렌더 | `LayoutPageElement.render()` 순차 await (`page.element.ts:506`) → 병렬 | 이미지 로드 블로킹 해소 | 낮음 |
+| 가상화 | ~~뷰포트 밖 컬럼/라인 DOM 지연 생성~~ → **구현됨**: `LayoutPageElement.parkPage()`/`unparkPage()`/`parkedPageIds` + `PageMountManager`(`src/utils/page-mount-manager.ts`). 최상위 박스(페이지) 단위 IntersectionObserver 인덱스 윈도우(±N) 마운트, 플레이스홀더 footprint 유지. 분리 페이지는 엔진 트리에 유지. G1(data 세터 부활)은 보관소 스킵으로, G2(재마운트 커서)는 문단 `connectedCallback` 예약 렌더로, G3(detach 잔류 선택·이미지 포커스)은 `_unregisterLayoutSubtree`로 해소. 상세 설계·감사 기록은 `docs/VIRTUALIZATION.md` 참조 | 다중 페이지 DOM 크기 감소 | 구현됨 |
 | `_getAllColumns()` 캐싱 | `EditCoordinateMapper`에서 컬럼 목록 캐싱 | `querySelectorAll` 호출 감소 | 낮음 |
 | ~~키 입력 O(N) 패스 제거~~ | ~~`_getPlainText()`/`postRender`가 캐시 getter 사용 + `mapper.rebuild()` 증분화~~ | ~~타이핑 O(N) inlineToPlain 제거~~ | ~~구현됨: Phase 1(캐시 getter) + Phase 2(델타 스플라이스 + `rebuildMappingsOnly()`)~~ |
 | ~~부분 증분 `layoutText`~~ | ~~캐럿 이전 라인 재래핑 불변성을 이용한 prefix 라인 캐시 (엔진 단일 소스 원칙 내)~~ | ~~연속 타이핑 중 전체 재래핑 제거~~ | ~~구현됨 (§3.14 — 컬럼 단위 prefix 캐시, `verticalAlign: top` 한정)~~ |

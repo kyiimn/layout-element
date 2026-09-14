@@ -2,7 +2,7 @@
 
 
 
-> 작성 기준: `src/components/layout/table.element.ts`, `src/components/layout/tr.element.ts`, `src/components/layout/td.element.ts`, `src/edit/table-keyboard-controller.ts`, `src/edit/table-structure-editor.ts`, `src/edit/layout-selection-controller.ts`, `src/edit/layout-edit-controller.ts`, `src/components/layout/box.element.ts`, `src/components/layout/document.element.ts`, `src/engine/table-grid-resolver.ts`, `src/engine/border-store.ts`, `src/types/layout/table.type.ts`, `src/types/edit/table-selection.type.ts`, `src/constants/defaults.ts`
+> 작성 기준: `src/components/layout/table.element.ts`, `src/components/layout/tr.element.ts`, `src/components/layout/td.element.ts`, `src/edit/table-keyboard-controller.ts`, `src/edit/table-structure-editor.ts`, `src/edit/layout-selection-controller.ts`, `src/edit/layout-edit-controller.ts`, `src/components/layout/box.element.ts`, `src/components/layout/page.element.ts`, `src/engine/table-grid-resolver.ts`, `src/engine/border-store.ts`, `src/types/layout/table.type.ts`, `src/types/edit/table-selection.type.ts`, `src/constants/defaults.ts`
 >
 > 본 문서는 `layout-element` 라이브러리의 표(table) 요소 렌더링, 셀 블록 선택, 마우스 리사이즈, 키보드 단축키, 구조 편집(병합/삽입/삭제), 이벤트 충돌 처리, 구현 제약사항을 상세히 기술한다.
 >
@@ -431,7 +431,7 @@ F5/F7/F8은 `_getCurrentCellCoord()`로 현재 셀을 결정한 후 처리한다
 | Tab      | textEditMode + focusedParagraph이 표 내부  | 다음 셀 단락으로 포커스 이동 (마지막 셀 이후 표 밖으로) |
 | Shift+Tab | textEditMode + focusedParagraph이 표 내부  | 이전 셀 단락으로 포커스 이동 (첫 셀 이전 표 밖으로) |
 
-Tab/Shift+Tab은 `EditManager.navigateByTab(shiftKey)`가 먼저 처리한다. `document.element.ts`의 window capture `_onWindowKeyDown`에서 Tab 키를 선점하며, 이벤트 전파를 `stopPropagation()`으로 차단한다. 따라서 실제로 `table.element.ts`의 document capture `_onTableKeyDown`이나 `TableKeyboardController.handleTab(shiftKey)`에는 도달하지 않는다.
+Tab/Shift+Tab은 `EditManager.navigateByTab(shiftKey)`가 먼저 처리한다. `page.element.ts`의 window capture `_onWindowKeyDown`에서 Tab 키를 선점하며, 이벤트 전파를 `stopPropagation()`으로 차단한다. 따라서 실제로 `table.element.ts`의 document capture `_onTableKeyDown`이나 `TableKeyboardController.handleTab(shiftKey)`에는 도달하지 않는다.
 
 표 내부 이동 규칙은 기존과 동일하게 동작한다. `gridResolution.placements`를 `(gridRow, gridCol)` 오름차순 정렬하고 현재 셀의 placement 인덱스를 찾아 ±1로 이동한다. 머지된 셀은 하나의 placement로 취급되어 자연스럽게 건너뛴다. 포커스는 `editManager.focusParagraph(target)`로 이동한다.
 
@@ -622,7 +622,7 @@ tableEl.structureEditor.deleteCol();
 
 `data` setter → `_layoutStructure()` → `TableEngine.layout()` 흐름에서 `layout()`은 `_rowEngines`와 `TableCellEngine`을 재구축하지만, **셀 내부 박스 엔진(`TableCellEngine.boxEngine`)은 재구축하지 않는다.** 셀 박스 엔진은 부모 `BoxEngine._buildTableEngine()`에서만 생성되기 때문이다.
 
-구조 편집(merge/split/insert/delete) 후 `syncDocumentDataFromElement()`가 `document.data` getter를 통해 `extractData`를 호출하면, `TableCellEngine.extractData`가 `this._boxEngine ? [this._boxEngine.extractData] : []`를 반환하므로, `boxEngine`이 null인 셀은 `children`이 빈 배열이 되어 셀 내용 데이터가 손실된다.
+구조 편집(merge/split/insert/delete) 후 `syncPageDataFromElement()`가 `page.data` getter를 통해 `extractData`를 호출하면, `TableCellEngine.extractData`가 `this._boxEngine ? [this._boxEngine.extractData] : []`를 반환하므로, `boxEngine`이 null인 셀은 `children`이 빈 배열이 되어 셀 내용 데이터가 손실된다.
 
 이를 방지하기 위해 `TableElement._layoutStructure()`에서 `engine.layout()` 호출 직후 `engine.buildCellBoxEngines(parentBoxEngine, ctx)`를 호출하여 셀 박스 엔진을 재구축한다. `buildCellBoxEngines`는 `gridResolution.placements`를 기반으로 각 셀의 `boxEngine`을 ID 기반 재사용 또는 새로 생성한다.
 
@@ -633,7 +633,7 @@ tableEl.structureEditor.deleteCol();
 1. `cellEngine.findBoxEngineById(id)` — `TableEngine.layout()`이 `cellLabel`을 키로 복원한 엔진(구조 불변 시 대부분 여기서 히트)
 2. `ctx.prevCellBoxEnginesById.get(id)` — **box-ID stash 폴백**. 행/열 삭제, merge/split으로 `cellLabel`이 시프트되어 1단 매칭이 실패한 셀에서 기존 `BoxEngine`을 box ID로 복원한다. 이때 단락 `_layoutCache`와 이미지 `rgbaData`가 보존되어 구조 편집 1회당 전체 셀 재래핑 비용이 발생하지 않는다.
 
-stash는 상위에서 주입된다: `TableElement._layoutStructure()`는 `TableEngine.collectPrevCellBoxEngines()`(현재 셀 박스 엔진을 box ID로 수집)을 `ctx.prevCellBoxEnginesById`에 채우고, `DocumentEngine._buildTree()`는 `_collectPrevCellBoxEngines()`로 트리 전체(중첩 셀 박스 포함)를 수집한다. 재사용된 엔트리는 consume 시 삭제되어 이중 재사용을 방지한다.
+stash는 상위에서 주입된다: `TableElement._layoutStructure()`는 `TableEngine.collectPrevCellBoxEngines()`(현재 셀 박스 엔진을 box ID로 수집)을 `ctx.prevCellBoxEnginesById`에 채우고, `PageEngine._buildTree()`는 `_collectPrevCellBoxEngines()`로 트리 전체(중첩 셀 박스 포함)를 수집한다. 재사용된 엔트리는 consume 시 삭제되어 이중 재사용을 방지한다.
 
 ---
 
@@ -821,7 +821,7 @@ TD에 요소를 삽입/배치/재부모할 때의 룰:
 ### 11.1 keydown 이벤트 흐름
 
 ```
-window capture (document.element.ts _onWindowKeyDown)
+window capture (page.element.ts _onWindowKeyDown)
   → F5: layoutEditMode && (inTable || hasSelectedBoxInTd) → preventDefault
   → Alt+arrow: hasSelectedBoxInTd → preventDefault (모든 table 순회)
   ↓
@@ -831,7 +831,7 @@ document capture (table.element.ts _onTableKeyDown)
 target element (기본 동작 또는 무시)
 ```
 
-**window keydown 블로커** (`document.element.ts`):
+**window keydown 블로커** (`page.element.ts`):
 - F5: `layoutEditMode`가 true이고, 이벤트가 table 내부에서 발생했거나 TD 내부 box가 선택되어 있을 때만 `preventDefault`
 - Alt+arrow: TD 내부 box가 선택되어 있을 때만 `preventDefault` (모든 table 순회하여 selection 확인)
 - table 외부에서는 브라우저 기본 동작이 차단되지 않는다
@@ -940,7 +940,7 @@ document 내 여러 표가 있을 때:
 
 ### 12.7 printPostData
 
-DOM 요소의 `printPostData` getter는 제거되었다. `printPostData`는 엔진 전용 API로, `DocumentEngine.printPostData` → `BoxEngine.printPostData` → `TableEngine.printPostData` 경로로 엔진 트리에서 호출된다. `TableBorderStore.toSegments()`가 생성한 보더 선분의 좌표/크기, 대각선 정보, 배경색 정보를 mm 단위로 후처리(post-processing)용으로 수집한다.
+DOM 요소의 `printPostData` getter는 제거되었다. `printPostData`는 엔진 전용 API로, `PageEngine.printPostData` → `BoxEngine.printPostData` → `TableEngine.printPostData` 경로로 엔진 트리에서 호출된다. `TableBorderStore.toSegments()`가 생성한 보더 선분의 좌표/크기, 대각선 정보, 배경색 정보를 mm 단위로 후처리(post-processing)용으로 수집한다.
 
 ### 12.8 F5 브라우저 새로고침 충돌
 

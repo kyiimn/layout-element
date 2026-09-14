@@ -262,7 +262,7 @@
 
   <div id="hint"></div>
 
-  <x-layout-document id="doc"></x-layout-document>
+  <x-layout-page id="page"></x-layout-page>
 
   <div id="info-panel">
     <h3>📊 상태 패널</h3>
@@ -295,8 +295,8 @@
       await ColorRegistry.getInstance().init();
       await FontLoader.getInstance().init();
 
-      const doc = document.getElementById("doc");
-      doc.data = {
+      const page = document.getElementById("page");
+      page.data = {
         id: "74ihr3te7qfx",
         width: 391,
         height: 545,
@@ -1177,7 +1177,7 @@
         ],
       };
 
-      await doc.render();
+      await page.render();
 
       const btnRead = document.getElementById("btn-read");
       const btnEdit = document.getElementById("btn-edit");
@@ -1316,11 +1316,11 @@
       let aiActive = false;
 
       function getAllParagraphs() {
-        return Array.from(doc.querySelectorAll("x-layout-paragraph"));
+        return Array.from(page.querySelectorAll("x-layout-paragraph"));
       }
 
       function getAllImages() {
-        return Array.from(doc.querySelectorAll("x-layout-image"));
+        return Array.from(page.querySelectorAll("x-layout-image"));
       }
 
       function setAiOverlay(paragraphs, images, active) {
@@ -1378,7 +1378,7 @@
       });
 
       // EditManager 이벤트 수신 (문서 요소에서 per-document 인스턴스 획득)
-      const docEl = document.querySelector("x-layout-document");
+      const docEl = document.querySelector("x-layout-page");
       const em = docEl?.editManager;
       if (!em) return;
 
@@ -1574,7 +1574,7 @@
       const btnTblCheck = document.getElementById("btn-tbl-check");
 
       function getTableAndKc() {
-        const table = doc.querySelector("x-layout-table");
+        const table = page.querySelector("x-layout-table");
         if (!table) {
           hint.textContent = "테이블이 없습니다.";
           return null;
@@ -1695,7 +1695,7 @@
       });
 
       btnTblCheck.addEventListener("click", () => {
-        const table = doc.querySelector("x-layout-table");
+        const table = page.querySelector("x-layout-table");
         if (!table) {
           hint.textContent = "테이블이 없습니다.";
           return;
@@ -1723,7 +1723,7 @@
       const flipTarget = document.getElementById("flip-target");
 
       function refreshFlipTargetOptions() {
-        const boxes = doc.querySelectorAll("x-layout-box");
+        const boxes = page.querySelectorAll("x-layout-box");
         const currentVal = flipTarget.value;
         flipTarget.innerHTML = '<option value="">문서 전체</option>';
         boxes.forEach((box) => {
@@ -1745,7 +1745,7 @@
       function doFlip(axis) {
         const targetId = flipTarget.value || undefined;
         try {
-          doc.flipLayout({ axis, targetId });
+          page.flipLayout({ axis, targetId });
           hint.textContent = `반전 완료: ${axis}${targetId ? ` (대상: ${targetId})` : " (문서 전체)"}`;
           refreshFlipTargetOptions();
         } catch (e) {
@@ -1779,7 +1779,7 @@
         const start = HANG_START_STATES[hangStartIdx].value;
         // 둘 다 같은 boolean이면 boolean으로 정규화, 아니면 방향별 객체
         const value = end === start ? end : { lineEnd: end, lineStart: start };
-        doc.paragraphStyle = { ...doc.paragraphStyle, hangingPunctuation: value };
+        page.paragraphStyle = { ...page.paragraphStyle, hangingPunctuation: value };
         btnHangEnd.textContent = HANG_END_STATES[hangEndIdx].label;
         btnHangStart.textContent = HANG_START_STATES[hangStartIdx].label;
         btnHangEnd.classList.toggle("active", hangEndIdx !== 0);
@@ -1835,9 +1835,9 @@
       document.addEventListener(
         "keydown",
         function (e) {
-          const doc = document.querySelector("x-layout-document");
-          if (!doc || !doc.editManager?.layoutEditMode) return;
-          const table = doc.querySelector("x-layout-table");
+          const page = document.querySelector("x-layout-page");
+          if (!page || !page.editManager?.layoutEditMode) return;
+          const table = page.querySelector("x-layout-table");
           if (!table) return;
 
           const key = e.key;

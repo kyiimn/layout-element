@@ -4,7 +4,7 @@
 
 Newspaper layout engine implemented as Web Components (Custom Elements). Renders document layouts in the browser — multi-column text, character-by-character text wrapping with overlap avoidance around images, and proportional font width (장평) control — features CSS cannot properly handle.
 
-**Engine-first principle**: The engine tree (`DocumentEngine` → `BoxEngine` → `ParagraphEngine`/`ImageEngine`/`TableEngine`) is the single source of truth for all layout calculations and data. DOM elements delegate `data` getter to `engine.extractData` — they do not independently assemble data from their own properties. When editing occurs, DOM properties are updated, `_layoutStructure()` collects data via `_rawData()` (bypassing `data` getter to avoid circular reference), the engine reprocesses it, and the result propagates back to the DOM through `extractData`.
+**Engine-first principle**: The engine tree (`PageEngine` → `BoxEngine` → `ParagraphEngine`/`ImageEngine`/`TableEngine`) is the single source of truth for all layout calculations and data. DOM elements delegate `data` getter to `engine.extractData` — they do not independently assemble data from their own properties. When editing occurs, DOM properties are updated, `_layoutStructure()` collects data via `_rawData()` (bypassing `data` getter to avoid circular reference), the engine reprocesses it, and the result propagates back to the DOM through `extractData`.
 
 **Editing support**: Cursor, selection, IME composition, and inline run style editing (bold/italic/size/color/letterSpacing/widthRatio/spaceRatio via `EditManager.applyInlineStyle`/`toggleInlineStyle`) are implemented in `TextEditController` and `TextEditCoordinateMapper`. Inline run editing uses `RunMap` (`src/edit/run-map.ts`) to map plain-text offsets (textarea) ↔ inline runs (`model.textContent`); every text change syncs the run map first, then rebuilds `model.textContent` via `plainToInline`. Text/paragraph style injection goes through `EditManager.applyTextStyle(textPatch?, paragraphPatch?)` — the single entry point decides the injection target by edit state: selection → inline run range; cursor inside a run → that run only; cursor on plain text → paragraph style + cascade to all runs; focused-out selected paragraph/paragraph-box → paragraph style + full cascade. Non-inlinable fields (textAlign, lineGap, verticalAlign, indent, hangingPunctuation) always go to the paragraph. `TextInlineStyle` supports per-run overrides of `letterSpacing`/`widthRatio`/`spaceRatio` (undefined → paragraph effective fallback); every width consumer (`_charWidthMm`, `_layoutColumnsPass`, `_computeCharOffsets`, `genCharStyle*`, `genCharInnerStyle`, `getCharWidths`, `getCharRect`, `buildParagraphPrintPostData`) and both cache hashes (`_computeLayoutInputHash`, `_computePrefixHash`) use the per-run values — verification: `scripts/verify-inline-metrics.mjs`. `normalizeRunMap` unwraps runs identical to the paragraph effective style and merges adjacent same-style runs (auto-run on focus/blur/after injection); cursor and selection positions are preserved. Edit state (focus, events) is managed by per-document `EditManager` instances.
 
@@ -68,7 +68,6 @@ Before working on any feature, you **must** read the corresponding documentation
 | Table editing | `docs/EDITING_TABLE.md` | Table element, cell block selection, cell merge/split, table keyboard shortcuts, TableStructureEditor |
 | Rendering performance | `docs/PERFORMANCE.md` | LRU caching, char width cache, style cache, queueMicrotask batch rendering, incremental style sheet update, skeleton layout cache |
 | Multi-page virtualization | `docs/VIRTUALIZATION.md` | Document-scale diagnosis (hundreds of pages), DOM virtualization design + gaps (G1~G4) + pre-implementation patches (P1~P4), Web Worker failure analysis, `transform: scale` compatibility rules |
-| Incremental reflow (thread typing cost) | `docs/INCREMENTAL_REFLOW.md` | Root-cause analysis of thread-chain typing cost (measured attribution), impossibility results for shift edits, viable levers (chain splitting, mount window, scope-proof demand — implemented, §4.6), discarded alternatives |
 | Vanilla JS API reference | `docs/API.md` | Custom Element public API (properties, methods, events), utility functions, constants |
 | React component layer | `docs/REACT_COMPONENT.md` | React wrapper components, props, hooks (`useEditManager`, `useLayoutElement`, `useEditableText`) |
 | Engine layer (Node.js) | `docs/ENGINE.md` | `src/engine/` classes, ppm injection, RGBA data, overlap detection, Node.js compatibility |
@@ -85,7 +84,7 @@ Before working on any feature, you **must** read the corresponding documentation
 ### Custom Element Tree
 
 ```
-<x-layout-document>          ← Root. Owns DocumentEngine, coordinates rendering pipeline
+<x-layout-page>          ← Root. Owns PageEngine, coordinates rendering pipeline
   <x-layout-guide-column>    ← Debug grid overlay
   <x-layout-box>             ← Positioned container (static=column-grid | absolute=mm coords)
     <x-layout-paragraph>     ← Multi-column text area with wrapping; owns TextEditController when editableText
@@ -111,7 +110,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 
 ### Key Domain Concepts
 
-- **All measurements are in mm** (millimeters). `LayoutDocumentElement.ppm` (pixels-per-mm, measured from a 100mm `<div>`) is injected into `DocumentEngine.ppm`. Engine computations are mm-only — ppm is optional and only needed for browser display.
+- **All measurements are in mm** (millimeters). `LayoutPageElement.ppm` (pixels-per-mm, measured from a 100mm `<div>`) is injected into `PageEngine.ppm`. Engine computations are mm-only — ppm is optional and only needed for browser display.
 - **Column grid system**: `columns: number` = equal-width columns; `columns: number[]` = explicit per-column widths. Same for `gap`.
 - **`position: 'static'`** (default): `left` = column index (0-based), `width` = column span count, `height` = line count. **Not mm.**
 - **`position: 'absolute'`**: `left`/`top`/`width`/`height` are actual mm values.
@@ -119,7 +118,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **InheritStyle cascade**: `TextStyle` + `ParagraphStyle` + parent dimensions flow downward. Children override individual fields.
 - **Text overflow**: `render-error` CustomEvent with `{ type: 'text-overflow', overflow: number }`. `:host` gets `inset 0 -8px 0 0 #ff0000` when overflow.
 - **Render complete**: `render-complete` CustomEvent after every `LayoutParagraphElement.render()`. Payload: `RenderCompleteEventDetail`.
-- **printPostData 엔진 전용 API**: 엔진 트리(`DocumentEngine.printPostData`)가 단일 소스. DOM 요소의 `printPostData` getter는 제거되었다. `printPostData`는 엔진 전용 API로, DOM에서 호출하지 않는다. 모든 rect/char 좌표는 **mm 단위 number**. ppm 곱셈은 외부 후처리 시스템이 수행한다.
+- **printPostData 엔진 전용 API**: 엔진 트리(`PageEngine.printPostData`)가 단일 소스. DOM 요소의 `printPostData` getter는 제거되었다. `printPostData`는 엔진 전용 API로, DOM에서 호출하지 않는다. 모든 rect/char 좌표는 **mm 단위 number**. ppm 곱셈은 외부 후처리 시스템이 수행한다.
 - **`BoxEngine.contentAbsRect`**: padding 제외한 콘텐츠 영역 절대 사각형 (mm). `ImageEngine.contentAbsRect`로 주입되어 object-fit 계산에 사용.
 - **`BoxEngine.absHeight` 테이블 셀 stretch**: 부모가 `TableCellEngine`인 static box는 `gc.contentHeight`(셀 높이 - 셀 패딩)를 반환. DOM `box.element.ts _applyStyle`가 `tdContentHeight`를 height로 사용하는 것과 일치. 일반 static box는 `lineHeight × height - (lineHeight - fontSize)` 공식 유지.
 - **`ImageEngine.displayRect`**: 표시 위치/크기의 모드별 단일 소스. `cover`/`contain`/`fill`이면 `contentAbsRect` + `objectFit` + `originalWidth/Height`로 자동 계산 (입력 x/y/w/h 무시), `none`이면 입력 x/y/w/h 그대로 사용 (width/height 생략 시 원본 크기 폴백). 엔진이 단일 소스이며, 브라우저는 이 결과로 canvas에 표시.
@@ -131,7 +130,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 - **워드 래핑 (word wrap)**: `ParagraphStyle.wordWrap` (`boolean`, 기본 `false`, 비인라인 문단 필드). ON이면 영문 대소문자·숫자 토큰이 줄 끝에서 분리되지 않고 통째로 다음 라인/파트/컬럼으로 이동한다. 조인터 `.`/`,`는 앞뒤가 모두 alnum일 때만 워드 소속("3.14", "1,000" 비분리; 단일 소스 `isWordChar(prev, char, next)` — `src/constants/line-break.ts`). **eager lookahead** 방식: `_layoutColumnsPass` charLoop가 워드 시작을 감지하면 워드 전체 폭을 미리 측정해 분기한다 — (a) 현재 파트 잔여에 들어감 → 기존 경로, (b) 라인 내 다음 파트가 품음 → 파트 이동(건너뛴 구간 비움), (c) 어느 파트에도 못 들어감 → **강제 분할**(현재 파트 기준, 최소 1자 — `overflow-wrap: break-word`). 측정은 charLoop와 동일 공식·캐시(`_charWidthCache`)·epsilon(1e-6)이라 통째 배치 후 mid-word 넘침이 구조적으로 발생하지 않고 되돌리기(un-place)가 존재하지 않는다. 워드 무결성은 run 경계를 관통한다(인라인 스타일 변경이 워드를 쪼개지 않음)하고 block(`\n`) 경계에서 종료한다. **워드 무결성 > 금칙·걸침**: 배치 追い出し pop 후보, 금칙 pull-up 대상/폴백 outChar, 걸침 행말 pull-up 런/강제 마킹 대상이 워드 글자이면 교정을 건너뛴다(행두 위반 잔존 허용). OFF 시 기존 배치와 byte-identical. `_computeLayoutInputHash`·`_computePrefixHash`에 `ww:` 키 포함(양쪽 동일). 검증: `scripts/verify-word-wrap.mjs`. 상세: `docs/TEXT_ENGINE.md` §24.
 - **Overlap padding**: `overlapPadding` on `ImageData` — mm values, `number` or `{ top?, right?, bottom?, left? }`. Ellipse-based detection: `ndx² + ndy² ≤ 1`.
 - **Overlap mode**: `overlapMode` on `ImageData` — `'path'` (default, pixel contour), `'box'` (solid box), `'none'` (no avoidance). Paragraph-level: `ParagraphData.overlapMode` — `'box'` (default), `'none'` (excludes box from overlay targets).
-- **Node.js base64 이미지 자동 디코딩**: `DocumentEngine._buildImageEngine()`에서 `ImageData.url`이 base64 data URI인 경우 pngjs로 자동 디코딩하여 `ImageEngine.rgbaData`에 주입. ESM 환경에서는 `await engine.prepareImageDecoder()` 사전 호출 필요.
+- **Node.js base64 이미지 자동 디코딩**: `PageEngine._buildImageEngine()`에서 `ImageData.url`이 base64 data URI인 경우 pngjs로 자동 디코딩하여 `ImageEngine.rgbaData`에 주입. ESM 환경에서는 `await engine.prepareImageDecoder()` 사전 호출 필요.
 - **object-fit 엔진 우선**: `ImageEngine.displayRect`가 표시 위치/크기의 단일 소스. `cover`/`contain`/`fill`은 입력 x/y/w/h를 무시하고 `src/engine/object-fit-engine.ts`의 `computeObjectFit()`으로 자동 계산, `none`은 입력값 그대로 사용. `image.element.ts`(`_drawImage`)는 엔진의 `displayRect` 결과를 소비만 한다 — DOM은 `computeObjectFit`을 직접 호출하지 않는다. `src/utils/image-fit.ts`는 제거되었다.
 - **이미지 속성 변경 시 재렌더링**: `overlapPadding`, `overlapMode`, `objectFit`, `originalWidth`, `originalHeight` setter가 `_updateEngine()` + `requestRerenderAffectedParagraphs()`를 호출하여 엔진 데이터 갱신과 paragraph 재렌더링을 트리거.
 - **AI processing overlay**: `<x-layout-paragraph>` and `<x-layout-image>` have volatile `aiProcessing: boolean` property. `true` → semi-transparent overlay with shimmer + spinner. Not included in `data` getter. Implemented in `src/utils/ai-processing-overlay.ts`.
@@ -145,7 +144,7 @@ Edit mode elements (in shadow DOM of <x-layout-paragraph>):
 
 - **`ColorRegistry`**: Loads `color.json` → CMYK→RGB→hex. `getCSSColor(name)` returns hex. **`'default'` name is prohibited** — throws `Error`. Fallback: `_defaultColor` (K100 black).
 - **`FontLoader`**: Loads `fonts.json` → registers `FontFace` objects. `base64Data` takes precedence over `ttfFilename`. Uses `opentype.js` for char width measurement. `getFontFamily(fontName?)` returns dynamic `FontFace.family`.
-- **`EditManager`**: Per-document instance created in `LayoutDocumentElement` constructor. Dispatches events: `focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`, `layoutSelectionChange`, `layoutMove`, `layoutResize`, `layoutAdd`, `layoutRemove`, `insert`, `insertCancel`, `modeChange`, `boxPropertyChange`, `contextMenu`, `placeGunChange`, `placeGunBefore`, `placeGunAfter`, `cellSelectionChange`, `imageMove`, `imageResize`, `imagePropertyChange`. Provides `focusParagraph()` / `blurParagraph()` and `focusImage()` / `blurImage()` API. `reset()` clears all edit state (not event listeners).
+- **`EditManager`**: Per-document instance created in `LayoutPageElement` constructor. Dispatches events: `focusChange`, `textChange`, `styleChange`, `selectionStart`, `selectionEnd`, `cursorMove`, `layoutSelectionChange`, `layoutMove`, `layoutResize`, `layoutAdd`, `layoutRemove`, `insert`, `insertCancel`, `modeChange`, `boxPropertyChange`, `contextMenu`, `placeGunChange`, `placeGunBefore`, `placeGunAfter`, `cellSelectionChange`, `imageMove`, `imageResize`, `imagePropertyChange`. Provides `focusParagraph()` / `blurParagraph()` and `focusImage()` / `blurImage()` API. `reset()` clears all edit state (not event listeners).
 
 ## Important Constraints
 
@@ -178,7 +177,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 
 2. **Engines MUST NOT store `children` in `_data`.** `engine.layout(childrenData)` receives children as a **parameter** — a pure data array. `engine.data` setter receives only the element's own properties (no `children` field). This prevents stale `_data.children` synchronization bugs.
 
-3. **`engine.layout()` signature**: `layout(ctx, childrenData, resources?, docStyle?)` for `BoxEngine`; `layout(childrenData?)` for `DocumentEngine` and `TableEngine`. The `childrenData` parameter is the **only** source of child data during layout.
+3. **`engine.layout()` signature**: `layout(ctx, childrenData, resources?, docStyle?)` for `BoxEngine`; `layout(childrenData?)` for `PageEngine` and `TableEngine`. The `childrenData` parameter is the **only** source of child data during layout.
 
 4. **DOM elements pass children data to engine**: `engine.layout(this.items.map(e => e._rawData()))`. This is a **temporary** DOM-era pattern. When canvas rendering replaces DOM, the engine will read from its own child engine tree directly.
 
@@ -192,7 +191,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 
 - The engine tree is the single source of truth for all layout calculations **and data extraction**. DOM elements delegate `data` getter to `engine.extractData` — they do not independently assemble data from their own properties.
 - When editing occurs: DOM property update → `_layoutStructure()` → `_rawData()` (not `data` getter, to avoid circular reference) → `engine.data` setter (own props only) → `engine.layout(childrenData)` → `extractData` returns updated data.
-- **`extractData` getter**: Every engine type (`DocumentEngine`, `BoxEngine`, `ParagraphEngine`, `ImageEngine`, `TableEngine`, `TableCellEngine`) has an `extractData` getter that assembles the current engine state into the corresponding data type (`DocumentData`, `BoxData`, etc.). Children are dynamically assembled from child engines' `extractData`, not from `_data.children`.
+- **`extractData` getter**: Every engine type (`PageEngine`, `BoxEngine`, `ParagraphEngine`, `ImageEngine`, `TableEngine`, `TableCellEngine`) has an `extractData` getter that assembles the current engine state into the corresponding data type (`PageData`, `BoxData`, etc.). Children are dynamically assembled from child engines' `extractData`, not from `_data.children`.
 - **`_rawData()` method**: Every DOM element has a `_rawData()` method that assembles data from DOM properties without engine dependency. For elements with child engines (`Box`, `Document`, `Table`), `_rawData()` excludes `children`. Used by `_layoutStructure()` to avoid circular reference when `data` getter delegates to `engine.extractData`.
 - **`data` getter delegation**: `get data()` returns `engine.extractData` if engine exists, otherwise falls back to `_rawData()`.
 - **Default values via effective getters**: Engine getters (`effectiveParagraphStyle`, `effectiveTextStyle`, `effectiveOverlapMode`, etc.) merge injected values → inherited values → default values. These getters are for **internal layout computation only** — they are NOT used by `extractData`. DOM receives data from the engine where `paragraphStyle`/`textStyle` contain injected values only (not merged with inherited/default).
@@ -211,7 +210,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
    실패일 뿐 엔진 픽셀을 소각하지 않는다 (`_clearImageCache()`는 DOM 캐시만 지운다).
    `rgbaData = null`은 **실제 URL 변경 시에만** 허용된다.
 3. **데이터 추출**: 스냅샷(`extractData`/`printPostData`)은 오직 엔진에서 조립된다. 읽기는
-   자가 치유하지 않는다 (`DirtyPendingError` 계약, `DocumentEngine.ensureCommitted()` 참조).
+   자가 치유하지 않는다 (`DirtyPendingError` 계약, `PageEngine.ensureCommitted()` 참조).
 4. **ID 발급**: 인덱스 기반이 아닌 `id` 키 재사용(부모 자식 reconcile, `findBoxEngineById`,
    `prevCellBoxEnginesById`의 key)은 엔진이 소유한 id를 기준으로 판정한다. 엔진 발급 id는
    `_syncEngineIdsToDom`을 통해 DOM에 write-back되어 id가 양방향으로 어긋나지 않는다.
@@ -225,7 +224,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 
 ### `extractData` — Engine Data Extraction
 
-- **`DocumentEngine.extractData`**: Returns `DocumentData` with `children` dynamically assembled from `childBoxEngines.map(e => e.extractData)`. Padding values use getter defaults (`?? 0`).
+- **`PageEngine.extractData`**: Returns `PageData` with `children` dynamically assembled from `childBoxEngines.map(e => e.extractData)`. Padding values use getter defaults (`?? 0`).
 - **`BoxEngine.extractData`**: Returns `BoxData` with all fields defaulted via getters (`position ?? 'static'`, `zIndex ?? 0`, `role ?? 'none'`, `borderTopWidth ?? 0`, `borderStyle ?? DEFAULT_BORDER_STYLE`, `priority ?? 0`, `backgroundOpacity ?? 1`, `lock ?? false`, etc.). `children` dynamically assembled from `childEngines.map(e => e.extractData)`.
 - **`ParagraphEngine.extractData`**: Returns `ParagraphData` assembled from the engine's actual internal state — **not** the merged `effectiveParagraphStyle`/`effectiveTextStyle`. `paragraphStyle`/`textStyle` iterate over the injected `_paragraphStyle`/`_textStyle` objects only (주입값 only, excludes inherited and default values), returning `undefined` when the injected object is empty. `column`/`gap` are the adjusted `_columnWidths`/`_gaps` (in table cells, parent `gridCalculator` values; outside, injected values). `overlapMode ?? 'box'`, `zIndex ?? 0`. No caching — a fresh `ParagraphData` object is built on every access.
 - **`ImageEngine.extractData`**: Returns `ImageData` with defaults (`dpi ?? DEFAULT_IMAGE_DPI`, `overlapMode ?? 'path'`, `objectFit ?? 'cover'`, `zIndex ?? 0`). `x`/`y`/`width`/`height` are derived from `displayRect` (mode-based single source), not from injected data.
@@ -235,7 +234,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 
 ### `findEngineById()` — Engine Tree Search
 
-- **`DocumentEngine.findEngineById(id)`**: Recursively searches the entire engine tree (BoxEngine, ParagraphEngine, ImageEngine, TableEngine). Traverses nested boxes and table cell boxes.
+- **`PageEngine.findEngineById(id)`**: Recursively searches the entire engine tree (BoxEngine, ParagraphEngine, ImageEngine, TableEngine). Traverses nested boxes and table cell boxes.
 - **`BoxEngine.findEngineById(id)`**: Searches self + child engines + nested child boxes + table cell boxes.
 - **`TableCellEngine.findEngineById(id)`**: Delegates to `boxEngine.findEngineById()`.
 - **`TableCellEngine.findBoxEngineById(id)`**: Returns `this._boxEngine` if `this._boxEngine.data.id === id` (the cell's own boxEngine, not a child). `BoxEngine.findBoxEngineById` searches `childEngines` only, so it cannot find the cell's boxEngine itself — `LayoutBoxElement._findParentEngine()` returns the `TableCellEngine` (not its `boxEngine`) to ensure the correct lookup.
@@ -260,7 +259,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 
 - **`disconnectedCallback` must NOT splice the element's engine from the parent's `childEngines`/`childBoxEngines`.**
 - Reason: `data` setter's ID-keyed reconcile uses `appendChild` to reorder existing children. `appendChild` fires `disconnectedCallback` → `connectedCallback` within the same parent. Splicing the engine during this transient disconnect causes `_buildTree`'s `findBoxEngineById` to miss the existing engine and create a new one, losing engine state (rgbaData, _layoutCache, etc.).
-- `DocumentEngine._buildTree()` rebuilds the entire engine tree on every `layout()` call, so manual splice is redundant.
+- `PageEngine._buildTree()` rebuilds the entire engine tree on every `layout()` call, so manual splice is redundant.
 - Applied to: `LayoutBoxElement`, `LayoutParagraphElement`, `LayoutImageElement`.
 
 ### `disconnectedCallback` — Image Cache Preservation
@@ -279,7 +278,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 
 ### DOM Virtualization — Parked Pages
 
-- `LayoutDocumentElement.parkPage(id)` detaches a top-level page box, leaving a `PARKED_PAGE_ATTR` (`data-parked-page`) placeholder div at its DOM index, and stores `{ element, data }` in `_parkedPages`. `unparkPage(id)` restores via `replaceWith` (position-preserving). Shared contract constant lives in `src/constants/defaults.ts`.
+- `LayoutPageElement.parkPage(id)` detaches a top-level page box, leaving a `PARKED_PAGE_ATTR` (`data-parked-page`) placeholder div at its DOM index, and stores `{ element, data }` in `_parkedPages`. `unparkPage(id)` restores via `replaceWith` (position-preserving). Shared contract constant lives in `src/constants/defaults.ts`.
 - **Engine keeps parked pages**: `document._layoutStructure()` builds `childrenData` via `_collectChildrenData()` — mounted boxes contribute `_rawData()` in DOM order, placeholders contribute the stored snapshot at their index. With zero parked pages this is byte-identical to `items.map(e => e._rawData())`. Never revert to items-only assembly — parked pages would drop from the engine tree (threads, printPostData, overlay refresh) on the next document layout.
 - **`data` setter never resurrects parked pages**: the creation branch skips parked ids (refreshing the stored snapshot + detached element props instead) and drops parked entries missing from the new `children`. `removeChildData(id)` also clears the parked entry + placeholder.
 - **Detach sweep**: `box.disconnectedCallback` calls `EditManager._unregisterLayoutSubtree(this)` after `_unregisterLayout(this)` — batch-removes descendant layout selections (single dispatch) and ends image edit mode when the focused image is inside the detached subtree. Text focus is handled by paragraph controller `destroy()` → `_unregister()`. Fast-path no-op when nothing is active (reconcile churn safe).
@@ -298,16 +297,16 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 - `updateOverlayContext(overlayEngines, parentAbsRect, inheritStyle)` updates overlay context while preserving `_layoutCache`.
 - Use this instead of `data` setter (which calls `resetIncrementalState()` → `_layoutCache = null`) when only overlay positions changed.
 - `_computeLayoutInputHash()` includes overlay positions, so if positions are unchanged, `layoutText()` returns cached result in O(1).
-- Used in: `LayoutParagraphElement.render()` else branch, `DocumentEngine._refreshParagraphOverlays()`.
+- Used in: `LayoutParagraphElement.render()` else branch, `PageEngine._refreshParagraphOverlays()`.
 
-### `DocumentEngine._refreshParagraphOverlays()` — Overlay Refresh
+### `PageEngine._refreshParagraphOverlays()` — Overlay Refresh
 
 - Called after `_buildTree()`. Updates all paragraph overlay contexts.
 - Uses `updateOverlayContext()` (not `data` setter) to preserve `_layoutCache`.
 - **Traverses `TableEngine` children**: `rowEngines` → `cellEngines` → `cellEngine.boxEngine` → recursive `_refreshParagraphOverlays([cellBox])`. TableEngine is not in `BoxEngine.childBoxEngines`, so explicit traversal is required.
 - **No `overlayEngines.length > 0` guard**: All paragraphs are refreshed, including those with zero overlays. This ensures paragraphs that previously had overlays but no longer do are updated (stale overlayEngines cleared).
 
-### `DocumentEngine._buildParagraphEngine()` — No `layoutText()`
+### `PageEngine._buildParagraphEngine()` — No `layoutText()`
 
 - `_buildParagraphEngine` does NOT call `layoutText()`. It only calls `layoutStructure()`.
 - `layoutText()` is executed once in `_refreshParagraphOverlays()`.
@@ -318,7 +317,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 - The `data` setter checks `options.parentBox?.parent.isTableCellEngine` and, if true, uses `parentBox.gridCalculator.columnWidth`/`gaps` instead of `options.column`/`options.gap`.
 - This ensures table cell paragraphs use the cell's actual width (from `TableEngine.layout()`) regardless of any explicit `column`/`gap` stored in `ParagraphData`.
 - The adjustment happens entirely in the engine — DOM (`LayoutParagraphElement._layoutStructure`) passes `parentBox` via `ParagraphEngineData` and does not perform any cell-width adjustment itself.
-- `extractData` returns the adjusted `_columnWidths`/`_gaps`, so `document.data` round-trips preserve the cell-width-corrected values.
+- `extractData` returns the adjusted `_columnWidths`/`_gaps`, so `page.data` round-trips preserve the cell-width-corrected values.
 - `TableCellEngine` exposes `readonly isTableCellEngine = true` as a duck-type identifier (used instead of `instanceof` to avoid a circular import between `paragraph-engine.ts` and `table-engine.ts`).
 
 ### `TableEngine.buildCellBoxEngines()` — Post-Layout Cell Box Engine Rebuild
@@ -327,26 +326,26 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 - After table structure edits (merge/split/insert/delete via `TableStructureEditor`), `TableElement._layoutStructure()` calls `engine.layout()` but the parent `BoxEngine.layout()` is never called, so `boxEngine` stays `null` for cells where `prevBoxEngines` label-based restoration fails.
 - `TableCellEngine.extractData` returns `this._boxEngine ? [this._boxEngine.extractData] : []` — when `boxEngine` is null, `children` is an empty array, losing cell content data.
 - `TableEngine.buildCellBoxEngines(parentBox, ctx)` iterates `gridResolution.placements`, finds matching `TableCellEngine`, and calls `parentBox.buildCellBoxEngine(cellData, cellEngine, ctx)` for each cell to rebuild its `boxEngine`. Reuse chain: (1) `cellEngine.findBoxEngineById(id)` (label restoration in `TableEngine.layout()`), (2) `ctx.prevCellBoxEnginesById` box-ID stash, then create new if both miss.
-- `BoxBuildContext.prevCellBoxEnginesById`: `Map<boxId, BoxEngine>` stash of previous cell box engines. `DocumentEngine._buildTree()` collects it recursively via `_collectPrevCellBoxEngines()` (including table cell boxes and nested boxes inside them). `TableElement._layoutStructure()` builds it via `TableEngine.collectPrevCellBoxEngines()`. `buildCellBoxEngine` deletes a map entry when consumed, preventing double reuse. This preserves paragraph `_layoutCache` and image `rgbaData` across label shifts (row/col delete, merge/split).
+- `BoxBuildContext.prevCellBoxEnginesById`: `Map<boxId, BoxEngine>` stash of previous cell box engines. `PageEngine._buildTree()` collects it recursively via `_collectPrevCellBoxEngines()` (including table cell boxes and nested boxes inside them). `TableElement._layoutStructure()` builds it via `TableEngine.collectPrevCellBoxEngines()`. `buildCellBoxEngine` deletes a map entry when consumed, preventing double reuse. This preserves paragraph `_layoutCache` and image `rgbaData` across label shifts (row/col delete, merge/split).
 - `BoxEngine.buildCellBoxEngine(data, cellEngine, ctx)` is the public alias of `_buildCellBoxEngine`, exposing cell box engine construction for `TableEngine` to call after its own `layout()`.
 - `TableElement._layoutStructure()` calls `this._engine.buildCellBoxEngines(parentBoxEngine, ctx)` immediately after `this._engine.layout(...)`, with `ctx.prevCellBoxEnginesById` populated by `TableEngine.collectPrevCellBoxEngines()` (snapshot taken before `TableEngine.layout()` rebuilds cell engines), ensuring `extractData` always returns complete cell content after structure edits without losing engine state.
 
-### `DocumentEngine._buildBoxEngine()` — GC Reuse
+### `PageEngine._buildBoxEngine()` — GC Reuse
 
 - `_buildBoxEngine` checks if the existing `GridCalculatorEngine` has the same parameters via `_gcParamsEqual()`. If equal, the GC instance is reused (skipping `_calcColumnGridCoords`).
 - Compared fields: `width`, `height`, `paddingTop/Right/Bottom/Left`, `columns`, `gap` (via `valueEqual`), `paragraphStyle` (reference equality), `textStyle` (reference equality), `isBox`.
-- `paragraphStyle`/`textStyle` are from `this._data` (DocumentData), so they are stable references within a single `layout()` call.
+- `paragraphStyle`/`textStyle` are from `this._data` (PageData), so they are stable references within a single `layout()` call.
 
 ### `appendChildData()` — Incremental Addition
 
-- `LayoutBoxElement.appendChildData(child)` and `LayoutDocumentElement.appendChildData(child)` use `_appendChildData(child)` + `requestRerenderAffectedParagraphs()` — NOT `this.data = {...}` round-trip.
+- `LayoutBoxElement.appendChildData(child)` and `LayoutPageElement.appendChildData(child)` use `_appendChildData(child)` + `requestRerenderAffectedParagraphs()` — NOT `this.data = {...}` round-trip.
 - The `data` setter round-trip reconciles ALL existing children (`.data = child` → each child's `layout()` + `render()`), causing O(N) redundant rendering for a single child addition.
 - Incremental path: O(1) — only the new child is created + rendered, then affected paragraphs re-render.
 - The `data` setter is still used for full-document restores (undo/redo, external data assignment) where ID-keyed reconciliation is needed.
 
 ### Diff-based `data` Setter (ID-keyed child reconciliation)
 
-- `LayoutDocumentElement` and `LayoutBoxElement` `data` setters reconcile children by `id`:
+- `LayoutPageElement` and `LayoutBoxElement` `data` setters reconcile children by `id`:
   0. Refresh own `GridCalculatorEngine` (`_layoutStructure()`) before any `appendChild` (children's `connectedCallback` reads `parentModel.columnCoords`).
   1. Build `Map<id, element>` from existing children.
   2. For each child: if `id` matches existing element of same tag type → reuse (`element.data = child`), else create new.
@@ -384,7 +383,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 - **`contentElement` getter**: Recursively follows `contentType` path to return deepest non-box child. Used by `computeOverlapSizeMm` for safe `overlapPadding`/`canvas`/mm coordinate access in nested box structures.
 - **Reparent mode**: `layoutEditMode = { type: 'reparent' }`. `_tryReparent` extracts `box.data`, converts coordinates, clamps via `clampStaticToContainer`/`clampAbsoluteToContainer`, sets zIndex to new container's max + 1, calls `newContainer.appendChildData()`.
 - **Container clamp**: `clampStaticToContainer`/`clampAbsoluteToContainer` applied in reparent, insert, and placegun.
-- **Tab key interception**: `LayoutDocumentElement._onWindowKeyDown` at `window` capture phase calls `editManager.navigateByTab(shiftKey)`. Returns early if `activeElement` is input/textarea/button/select.
+- **Tab key interception**: `LayoutPageElement._onWindowKeyDown` at `window` capture phase calls `editManager.navigateByTab(shiftKey)`. Returns early if `activeElement` is input/textarea/button/select.
 - **LRU char width cache**: `ParagraphEngine._charWidthCache` (capacity 5000), key: `${char}|${fontName}|${fontSize}`.
 - **LRU char outer style cache**: `ParagraphEngine._charOuterStyleCache` (capacity 5000), key: `${char}|${widthRatio}|${letterSpacing}|${spaceRatio}|${fontSize}|${lineMaxFontSize}|${fontName}` — per-run inline values when overridden.
 - **Skeleton layout cache**: `ParagraphEngine._layoutCache` — input-parameter hash. `resetIncrementalState()` clears it. `updateOverlayContext()` preserves it.
@@ -403,7 +402,7 @@ src/
     layout/
       box.element.ts
       column.element.ts
-      document.element.ts
+      page.element.ts
       guide-column.element.ts
       image.element.ts
       paragraph.element.ts
@@ -424,7 +423,7 @@ src/
     box-engine.ts
     table-engine.ts
     paragraph-engine.ts
-    document-engine.ts
+    page-engine.ts
     font-loader-engine.ts
     color-registry-engine.ts
     index.ts
@@ -446,7 +445,7 @@ src/
     font-loader.ts
     index.ts
   types/
-    layout/                  # DocumentData, BoxData, ParagraphData, ImageData, etc.
+    layout/                  # PageData, BoxData, ParagraphData, ImageData, etc.
     style/                   # TextStyle, ParagraphStyle, InheritStyle, etc.
     print/                   # PrintPostData
     edit/                    # CursorPosition, SelectionRange, InsertMode, etc.
@@ -455,7 +454,7 @@ src/
   utils/                     # genUUID, ai-processing-overlay, valueEqual, LRU, containment clamp
   examples/                  # exampleData (demo content for dev)
   react/                     # React wrapper layer (separate ESM build)
-    components/              # LayoutDocument, LayoutBox, LayoutParagraph, LayoutImage, LayoutTable, etc.
+    components/              # LayoutPage, LayoutBox, LayoutParagraph, LayoutImage, LayoutTable, etc.
     hooks/                   # useEditableText, useEditManager, useLayoutElement
     context.tsx
     index.ts
@@ -479,6 +478,6 @@ examples/
 - React build does **not** empty `dist/`, preserving IIFE bundle and `.d.ts`.
 
 ```ts
-import { LayoutDocumentElement } from 'layout-element';
-import { LayoutDocument, LayoutBox, LayoutParagraph, LayoutImage, useEditableText } from 'layout-element/react';
+import { LayoutPageElement } from 'layout-element';
+import { LayoutPage, LayoutBox, LayoutParagraph, LayoutImage, useEditableText } from 'layout-element/react';
 ```

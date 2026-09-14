@@ -2,7 +2,7 @@
 
 > **문서 성격**: 분석·설계 + 구현 기록. **P1~P4 보강은 구현 완료**
 > (사용자 지시로 하위 에이전트 위임 없이 직접 구현 — `paragraph.element.ts`,
-> `edit-manager.ts`/`box.element.ts`, `document.element.ts`,
+> `edit-manager.ts`/`box.element.ts`, `page.element.ts`,
 > `src/utils/page-mount-manager.ts`, `src/constants/defaults.ts`).
 > 이 문서는 세션 전체에서 실측·검증된 사실만을 담는다. 모든 줄 번호·시그니처는 작성 시점
 > (main 브랜치) 기준이며, 구현 전 최신 코드와 대조할 것.
@@ -35,20 +35,20 @@
 
 ### 1.1 전제
 
-`DocumentData`는 **페이지 개념이 없는 단일 캔버스 모델**이다 — `src/types/layout`에
+`PageData`는 **페이지 개념이 없는 단일 캔버스 모델**이다 — `src/types/layout`에
 `page` 심볼 0건 (grep 실측). `width`/`height` 한 세트. 수백 페이지 문서는
 "최상위 박스 수백 개"라는 **관례**로만 표현되고, 이 전부가 하나의
-`<x-layout-document>` shadow DOM 안에 산다.
+`<x-layout-page>` shadow DOM 안에 산다.
 
 ### 1.2 구조적 문제
 
 | #   | 문제                                                                                                                                                                                                                                     | 근거                                        |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| 1.1 | **페이지 추상화 부재** — 페이지 경계, 페이지 간 흐름, "현재 페이지"가 데이터 모델에 없음. 페이지 단위 편집 UI(이동/썸네일/잠금)를 만들 근거가 엔진에 없음                                                                                      | `DocumentData` = width/height 1개             |
-| 1.2 | **전역 O(N) 경로 다수** — `DocumentEngine._buildTree()`가 `layout()`마다 전 트리를 순회하며 자식마다 `findBoxEngineById`(재귀 선형 검색) → 최상위 박스 N개에 O(N²) 성분                                                                          | `document-engine.ts:938-978`                  |
-| 1.3 | **`_refreshParagraphOverlays` 무조건 전체 갱신** — overlay 수와 무관하게 모든 문단을 순회. 한 페이지만 바뀌어도 수백 페이지 문단 전체에 `updateOverlayContext` + 해시 재계산 호출                                                              | `document-engine.ts:976`, AGENTS.md 명시        |
+| 1.1 | **페이지 추상화 부재** — 페이지 경계, 페이지 간 흐름, "현재 페이지"가 데이터 모델에 없음. 페이지 단위 편집 UI(이동/썸네일/잠금)를 만들 근거가 엔진에 없음                                                                                      | `PageData` = width/height 1개             |
+| 1.2 | **전역 O(N) 경로 다수** — `PageEngine._buildTree()`가 `layout()`마다 전 트리를 순회하며 자식마다 `findBoxEngineById`(재귀 선형 검색) → 최상위 박스 N개에 O(N²) 성분                                                                          | `page-engine.ts:938-978`                  |
+| 1.3 | **`_refreshParagraphOverlays` 무조건 전체 갱신** — overlay 수와 무관하게 모든 문단을 순회. 한 페이지만 바뀌어도 수백 페이지 문단 전체에 `updateOverlayContext` + 해시 재계산 호출                                                              | `page-engine.ts:976`, AGENTS.md 명시        |
 | 1.4 | **풀 스냅샷 라운드트립** — undo/redo·외부 데이터 주입이 `data` setter 전체 reconcile 경로. 문서 1회 교체 = 전 페이지 reconciliation + 전 엔진 `layout()`                                                                                         | AGENTS.md "data setter는 풀 복원용"         |
-| 1.5 | **스레딩 체인 순차 배치** — `ThreadEngine.layoutThreads()`가 프레임(=페이지)을 순차 feed-forward. 1페이지 타이핑 → 체인 후속 페이지 전부 재배치. `relayoutThreads(sourceFrameIds)`로 편집점 이후만 제한하는 부분 완화 존재                       | `document-engine.ts:987-1024`                 |
+| 1.5 | **스레딩 체인 순차 배치** — `ThreadEngine.layoutThreads()`가 프레임(=페이지)을 순차 feed-forward. 1페이지 타이핑 → 체인 후속 페이지 전부 재배치. `relayoutThreads(sourceFrameIds)`로 편집점 이후만 제한하는 부분 완화 존재                       | `page-engine.ts:987-1024`                 |
 | 1.6 | **EditManager 전역 단일** — 포커스/커서/모드가 문서당 1세트. 페이지 단위 활성화 개념 없음                                                                                                                                                        | AGENTS.md Managers                          |
 
 ### 1.3 성능 문제
@@ -59,7 +59,7 @@
 | 2.2 | **증분 캐시가 문단 단위에서 끝남** — Skeleton(`_layoutCache`)/prefix 캐시는 문단 내부 최적화. 페이지/문서 스케일 증분 없음. 1.3과 결합해 국소 변경이 전역 순회를 유발                                                          | PERFORMANCE.md §3.12                                      |
 | 2.3 | **캐시가 엔진 인스턴스별** — `_charWidthCache`(LRU 5,000)가 `ParagraphEngine`당 존재. 문단 수백 개면 동일 폰트 메트릭을 문단마다 중복 계산+보관 (전역 공유 아님)                                                                   | `paragraph-engine.ts:69`                                    |
 | 2.4 | **rgbaData 문서 수명 유지** — 오버랩 판정용 RGBA 픽셀 배열을 엔진이 계속 보유. A4 300dpi 1장 ≈ 33MB → 이미지 300장이면 ~10GB급 잠재 메모리. `opaqueRowBitmap`만으로 판정 가능한데 원본이 같이 살아 있음                              | AGENTS.md rgbaData 계약                                   |
-| 2.5 | **렌더 순차 await** — `LayoutDocumentElement.render()`가 이미지 로드를 순차 await → 한 장 지연이 전체 렌더 지연                                                                                                            | `document.element.ts:661-663`, PERFORMANCE.md §10 후보       |
+| 2.5 | **렌더 순차 await** — `LayoutPageElement.render()`가 이미지 로드를 순차 await → 한 장 지연이 전체 렌더 지연                                                                                                            | `page.element.ts:661-663`, PERFORMANCE.md §10 후보       |
 | 2.6 | **printPostData 전체 직렬화** — 스냅샷이 문서 전체 char 좌표 조립. 내보내기 시 메모리 스파이크 + `ensureCommitted`까지 전체 커밋 요구                                                                                             | AGENTS.md 엔진 전용 API                                   |
 
 ### 1.4 렌더링 문제
@@ -84,7 +84,7 @@
 
 ### ② 페이지 모델
 
-- `DocumentData`에 `pages: PageData[]` 추가(각 page = 기존 박스 컨테이너 데이터), `DocumentEngine` → `PageEngine[]` → 기존 `BoxEngine` 트리.
+- `PageData`에 `pages: PageData[]` 추가(각 page = 기존 박스 컨테이너 데이터), `PageEngine` → `PageEngine[]` → 기존 `BoxEngine` 트리.
 - 1.2/1.3/1.4의 O(N) 경로가 **페이지 단위로 스코프다운**. 스레딩은 이미 페이지 간 흐름 개념이라 `relayoutThreads(sourceFrameIds)`를 페이지 진입점으로 승격.
 - 마이그레이션: 기존 `children`(최상위 박스)을 단일 page로 래핑하는 호환 레이어 → 검증 스크립트(verify-threading, verify-multicolumn)로 byte-identical 확인.
 
@@ -173,7 +173,7 @@ Worker용 엔진 트리를 유지하면 **엔진 트리가 두 개**가 된다. 
 
 | 요소        | connectedCallback                                                                                                            | disconnectedCallback                                                                                                                                            | 대칭성                 | detach 시 생존 상태                                                            |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------ |
-| **document**    | ppm 측정, placeGun mousedown, **window keydown(capture)**, layout+render (`document.element.ts:186-192`)                           | 3개 리스너 전부 제거 + `editManager.reset()` (`:194-198`)                                                                                                            | ✅ 완전                | — (루트는 detach 안 함)                                                            |
+| **document**    | ppm 측정, placeGun mousedown, **window keydown(capture)**, layout+render (`page.element.ts:186-192`)                           | 3개 리스너 전부 제거 + `editManager.reset()` (`:194-198`)                                                                                                            | ✅ 완전                | — (루트는 detach 안 함)                                                            |
 | **box**         | editManager 캐싱, 마우스 리스너 3개, layout, td-static 속성 (`box.element.ts:108-118`)                                           | 리스너 3개 제거, `_unregisterLayout(this)`(선택 해제), ref 해제 (`:147-161`)                                                                                          | ✅ 완전                | **엔진 유지**(splice 안 함), 렌더 결과 유지                                            |
 | **paragraph**   | editManager 캐싱, layout, AI 오버레이, **TextEditController 재생성 + 커서/선택 복원** (`paragraph.element.ts:78-95`)                 | AI 오버레이 제거, **커서 offset/bias/selection 저장 → controller.destroy()**(전 리스너·textarea·커서·선택 요소 정리, `text-edit-controller.ts:305-365`), 엔진 splice 안 함 (`:124-137`) | ✅ 완전                | 엔진+`_layoutCache`+`columnContents` 유지, 편집 상태 save/restore 이관                       |
 | **image**       | AI 오버레이 생성 (`image.element.ts:125-128`)                                                                                    | AI 오버레이 제거만. 캐시 보존이 주석으로 명시된 설계 ("disconnectedCallback은 DOM 분리일 뿐 파괴가 아니다", `:130-153`)                                                  | ✅ 완전                | 3단계 이미지 캐시 + rgbaData 전부 유지                                                  |
@@ -187,7 +187,7 @@ Worker용 엔진 트리를 유지하면 **엔진 트리가 두 개**가 된다. 
 
 ### 4.2 가상화 관점의 공백 (G1~G4, 심각도 순)
 
-#### G1 — `document.data` 세터가 언마운트된 박스를 "부활"시킴 (치명)
+#### G1 — `page.data` 세터가 언마운트된 박스를 "부활"시킴 (치명)
 
 `data` 세터의 ID-keyed reconcile은 **DOM에 있는 자식**만 `existingById`에 수집한다.
 가상화로 페이지를 떼어내면 그 id가 맵에 없어 → 새 요소를 생성해 **전부 다시 마운트**한다.
@@ -215,7 +215,7 @@ rebuild는 `paragraph.render()`의 postRender에서 일어나는데, 재부착 �
 #### G4 — 재부착 시 z-순서 (경미)
 
 재삽입된 박스는 DOM 끝에 붙지만, `render()`가 zIndex 정렬을 소유하므로
-(`document.element.ts:660-663`) 문서 렌더 1회 후 해소. 페이지 단위 마운트에서 z 겹침은
+(`page.element.ts:660-663`) 문서 렌더 1회 후 해소. 페이지 단위 마운트에서 z 겹침은
 드물어 실질 영향 작음.
 
 ### 4.3 가상화에 유리한 기존 설계 (그대로 수혜)
@@ -231,7 +231,7 @@ rebuild는 `paragraph.render()`의 postRender에서 일어나는데, 재부착 �
 | 보강 | 내용 | 범위 |
 | ---- | ---- | ---- |
 | **P1** ✅ | G2 — paragraph `connectedCallback`에서 `_savedCursorOffset` 복원 시 `scheduleRender()` 호출 (`paragraph.element.ts`). `_renderScheduled` 가드로 병합되며 캐시 히트 시 span diff 스킵. 계획안(`queueMicrotask` 직접 호출)과 동일 효과이며 기존 배치 메커니즘을 재사용. | paragraph.element.ts 수 줄 |
-| **P2** ✅ (계획보다 강하게 구현) | G1 — 호스트 계약 문서화에 그치지 않고 **분리 보관소(`_parkedPages`) + `parkPage()`/`unparkPage()`/`parkedPageIds` 공개 API**를 `LayoutDocumentElement`에 구현. `data` setter는 보관 id의 DOM 재생성을 스킵하고 보관 스냅샷·분리 요소 프로퍼티를 갱신하며, 보관 중 삭제된 페이지는 보관소·플레이스홀더와 함께 정리. `_layoutStructure()`는 `_collectChildrenData()`로 플레이스홀더 위치의 보관 데이터를 합류시켜 엔진 자식 순서를 보존 (보관 0건이면 기존 경로와 byte-identical). `_syncEngineIdsToDom()`은 위치 기반 → id 기반 매칭으로 전환 (보관 항목 스킵 + id-less DOM write-back 폴백 유지). 공유 계약 상수 `PARKED_PAGE_ATTR`는 `src/constants/defaults.ts`에 위치 (임포트 사이클 방지). | document.element.ts + constants |
+| **P2** ✅ (계획보다 강하게 구현) | G1 — 호스트 계약 문서화에 그치지 않고 **분리 보관소(`_parkedPages`) + `parkPage()`/`unparkPage()`/`parkedPageIds` 공개 API**를 `LayoutPageElement`에 구현. `data` setter는 보관 id의 DOM 재생성을 스킵하고 보관 스냅샷·분리 요소 프로퍼티를 갱신하며, 보관 중 삭제된 페이지는 보관소·플레이스홀더와 함께 정리. `_layoutStructure()`는 `_collectChildrenData()`로 플레이스홀더 위치의 보관 데이터를 합류시켜 엔진 자식 순서를 보존 (보관 0건이면 기존 경로와 byte-identical). `_syncEngineIdsToDom()`은 위치 기반 → id 기반 매칭으로 전환 (보관 항목 스킵 + id-less DOM write-back 폴백 유지). 공유 계약 상수 `PARKED_PAGE_ATTR`는 `src/constants/defaults.ts`에 위치 (임포트 사이클 방지). | page.element.ts + constants |
 | **P3** ✅ | G3 — `EditManager._unregisterLayoutSubtree(root)` 신설 + `box.disconnectedCallback`에서 호출. 서브트리 내 잔류 레이아웃 선택을 배치 정리(1회 dispatch)하고, 분리 서브트리 안의 포커스 이미지는 `blurImage()` + `imageEditMode = false`로 종료. 텍스트 포커스는 문단 컨트롤러 destroy → `_unregister()` 기존 경로가 담당. 활성 상태가 없으면 fast path 즉시 복귀로 reconcile churn 무비용. PlaceGun/Insert 타깃은 라이브 hit-test 방식이라 detach 시 참조 불가 — 호스트 계약으로 남김 (당초 계획에서 축소). | edit-manager.ts + box.element.ts |
 | **P4** ✅ (라이브러리 유틸로 구현) | `src/utils/page-mount-manager.ts` — `PageMountManager` 클래스 (attach/detach/refresh/pin/unpin/mountedIds/pinnedIds). IntersectionObserver + **인덱스 윈도우(가시 ±N)** 방식이라 rootMargin 스케일 환산이 불필요 (§5.3 항목 2의 대안 채택). 마운트: `unparkPage()` + `void box.render()` (텍스트·테이블은 connectedCallback 자가 복원, 비동기 페인트만 확정). 언마운트: 분리 전 `offsetWidth/offsetHeight` + absolute 위치를 플레이스홀더에 지정. 요소 클래스 런타임 임포트 없이 `import type` + `localName` 판정으로 utils 배럴 순환 방지. `pin()`으로 편집 중 페이지 고정 (IME 조합 상태 보호 — 호스트가 focusChange에서 pin/unpin). | src/utils/page-mount-manager.ts (신규) |
 
@@ -256,7 +256,7 @@ G4(z-순서)는 미대응 — 문서 렌더 1회 후 해소되며 페이지 단�
 | 계층               | 증거                                                                                                                                                                                                                                      |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **엔진**               | 모든 계산이 mm-only. `transform: scale`은 엔진 수학에 전혀 들어가지 않음 (`grid-calculator-engine.ts:9`)                                                                                                                                          |
-| **ppm 측정**           | `_measurePpm()`이 측정 div를 `document.body`에 직접 붙임(`position:absolute; top:-10000px`, `document.element.ts:270-286`) — **호스트의 scaled 컨테이너 밖**에서 측정하므로 호스트 transform이 ppm을 오염시키지 않음                                       |
+| **ppm 측정**           | `_measurePpm()`이 측정 div를 `document.body`에 직접 붙임(`position:absolute; top:-10000px`, `page.element.ts:270-286`) — **호스트의 scaled 컨테이너 밖**에서 측정하므로 호스트 transform이 ppm을 오염시키지 않음                                       |
 | **EditManager**        | `_scale` 필드 + `setScale()`/`resetScale()` 전용 API (`edit-manager.ts:243-498`). `screenPxToMm() = px / (ppm × scale)`                                                                                                                              |
 | **편집 좌표**          | `TextEditCoordinateMapper`가 모든 rect 변환에서 `manager.scale`로 나눔(6지점: 292, 396, 417, 561, 688행). 커서/textarea 배치도 동일 (`text-edit-controller.ts:2643-2671`)                                                                               |
 | **드래그/삽입**        | PlaceGun·Insert가 `screenPpm = ppm × scale` (`place-gun-controller.ts:860`, `insert-controller.ts:757`), reparent 델타도 scale 보정 (`layout-edit-controller.ts:2554`)                                                                                  |
@@ -359,11 +359,10 @@ transform: scale(s)  →  브라우저 컴포지트 단계만 변경 (layout/ref
    상세는 `scripts/README.md`의 시나리오 8 섹션 참조.
 6. **[② 페이지 모델]** 위 로드맵대로 — 마운트 단위·데이터 경로·스레딩 통합.
 7. **[③′ 이후]** 시분할 프로그레시브 레이아웃 등 순차 적용.
-8. **[근본 원인 분석 완료]** 스레드 체인 타이핑 비용의 분석과 유효 레버가
-   `docs/INCREMENTAL_REFLOW.md`에 있다 (실측 귀속·불가능 결과 3종·체인 분할/
-   윈도우 축소·폐기 대안 기록). 라인 캐시 초안은 shift 편집에서 성립하지
-   않음이 증명되어 폐기됐다. 본 문서는 진단·가상화 기록으로 유지하고,
-   타이핑 비용 후속 작업의 기준 문서는 `INCREMENTAL_REFLOW.md`로 한다.
+8. **[근본 원인 분석 완료]** 스레드 체인 타이핑 비용의 결론: shift 편집은
+   모든 줄의 텍스트·위치를 바꾸므로 재계산·재쓰기가 필수이며, 남는 레버는
+   범위(체인 분할·마운트 윈도우 축소)뿐이다. 텍스트 동일성 기반 라인 캐시
+   초안은 shift 편집에서 성립하지 않음이 증명되어 폐기됐다.
 
 ### 7.1 스레드 체인 타이핑 비용 귀속 (실측)
 
@@ -383,9 +382,8 @@ transform: scale(s)  →  브라우저 컴포지트 단계만 변경 (layout/ref
 - **윈도우 크기가 직접 비례한다.** 마운트 3→2페이지에 490ms→308ms (페이지당
   약 160ms, 헤드리스). 타이핑 체감의 즉시 레버는 윈도우 축소와 체인 분할이다.
 - 헤드리스(SwiftShader) 수치는 실기보다 5~10배 부풀려져 있다. 실기 분할은
-  P1에서 완료했다 — headed Chromium + RTX 5070 Ti 실측으로 키당 귀속이
-  닫혔다 (엔진 layoutText 2.7ms·4% 대 DOM측 90% 이상). 상세는
-  `docs/INCREMENTAL_REFLOW.md` §4.3 실측 기록 참조.
+   P1에서 완료했다 — headed Chromium + RTX 5070 Ti 실측으로 키당 귀속이
+   닫혔다 (엔진 layoutText 2.7ms·4% 대 DOM측 90% 이상).
 - 시도 후 revert한 것: overflow 카운트 변화 시 span 전체 재생성 제거 —
   동일 페이지 A/B(강제 recreate vs diff)에서 484ms vs 458ms로 유의미한 차이
   없음이 실측되어 원복했다 (근거 없는 최적화 금지 원칙).

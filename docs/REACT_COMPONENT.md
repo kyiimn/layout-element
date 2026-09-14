@@ -17,7 +17,7 @@
    - [`LayoutProvider`](#layoutprovider)
    - [`useLayoutContext`](#uselayoutcontext)
 4. [컴포넌트](#컴포넌트)
-   - [`<LayoutDocument>`](#layoutdocument)
+   - [`<LayoutPage>`](#layoutdocument)
    - [`<LayoutBox>`](#layoutbox)
    - [`<LayoutParagraph>`](#layoutparagraph)
    - [`<LayoutImage>`](#layoutimage)
@@ -40,7 +40,7 @@
 ```tsx
 import {
   LayoutProvider, useLayoutContext,
-  LayoutDocument, LayoutBox, LayoutParagraph, LayoutImage,
+  LayoutPage, LayoutBox, LayoutParagraph, LayoutImage,
   useEditManager,
 } from 'layout-element/react';
 import { exampleData } from 'layout-element';
@@ -53,9 +53,9 @@ function App() {
   );
 }
 
-function Newspaper({ data }: { data: DocumentData }) {
+function Newspaper({ data }: { data: PageData }) {
   return (
-    <LayoutDocument
+    <LayoutPage
       data={data}
       width={data.width}
       height={data.height}
@@ -78,7 +78,7 @@ npm install layout-element
 // ESM (권장)
 import {
   LayoutProvider,
-  LayoutDocument, LayoutBox, LayoutParagraph, LayoutImage, LayoutGuideColumn,
+  LayoutPage, LayoutBox, LayoutParagraph, LayoutImage, LayoutGuideColumn,
   useEditManager, useLayoutElement, useEditableText,
 } from 'layout-element/react';
 ```
@@ -86,7 +86,7 @@ import {
 ```tsx
 // 타입 (TypeScript 사용 시)
 import type {
-  LayoutDocumentProps, LayoutBoxProps, LayoutParagraphProps,
+  LayoutPageProps, LayoutBoxProps, LayoutParagraphProps,
   LayoutImageProps, LayoutGuideColumnProps,
   UseEditManagerReturn, UseEditManagerOptions,
   LayoutContextValue, LayoutProviderProps,
@@ -191,23 +191,23 @@ function LoadingGate({ children }: { children: ReactNode }) {
 
 ## 컴포넌트
 
-### `<LayoutDocument>`
+### `<LayoutPage>`
 
-**문서 루트** 컴포넌트. `<x-layout-document>`를 감쌉니다.
+**문서 루트** 컴포넌트. `<x-layout-page>`를 감쌉니다.
 
 ```tsx
-import { LayoutDocument } from 'layout-element/react';
-import type { LayoutDocumentProps } from 'layout-element/react';
+import { LayoutPage } from 'layout-element/react';
+import type { LayoutPageProps } from 'layout-element/react';
 
-const ref = useRef<LayoutDocumentElement>(null);
-<LayoutDocument ref={ref} {...props} />;
+const ref = useRef<LayoutPageElement>(null);
+<LayoutPage ref={ref} {...props} />;
 ```
 
-#### Props: `LayoutDocumentProps`
+#### Props: `LayoutPageProps`
 
 | Prop | 타입 | 단위 | 필수 | 설명 |
 |---|---|---|---|---|
-| `data` | `DocumentData` | — | **필수** | 문서 전체 데이터. 변경 시 자식 트리 재구축. |
+| `data` | `PageData` | — | **필수** | 문서 전체 데이터. 변경 시 자식 트리 재구축. |
 | `width` | `number` | mm | 선택 | `data.width` 미지정 시 폴백. |
 | `height` | `number` | mm | 선택 | `data.height` 미지정 시 폴백. |
 | `paddingTop` | `number` | mm | 선택 | 상단 여백. |
@@ -250,10 +250,10 @@ const ref = useRef<LayoutDocumentElement>(null);
 
 #### Ref
 
-`forwardRef<LayoutDocumentElement, LayoutDocumentProps>` — 내부 요소에 직접 접근:
+`forwardRef<LayoutPageElement, LayoutPageProps>` — 내부 요소에 직접 접근:
 
 ```tsx
-const ref = useRef<LayoutDocumentElement>(null);
+const ref = useRef<LayoutPageElement>(null);
 useEffect(() => {
   console.log(ref.current?.items); // LayoutBoxElement[]
 }, []);
@@ -262,7 +262,7 @@ useEffect(() => {
 #### 이벤트
 
 ```tsx
-<LayoutDocument
+<LayoutPage
   data={data}
   onRenderError={(e) => {
     const detail = e.detail as { id: string; overflow: number };
@@ -274,9 +274,9 @@ useEffect(() => {
 #### 예제
 
 ```tsx
-function Newspaper({ data }: { data: DocumentData }) {
+function Newspaper({ data }: { data: PageData }) {
   return (
-    <LayoutDocument
+    <LayoutPage
       data={data}
       onInnerSizeChange={(w, h) => console.log('inner:', w, h)}
       onRenderError={(e) => console.warn('overflow', e.detail)}
@@ -473,7 +473,7 @@ import type { LayoutGuideColumnProps } from 'layout-element/react';
 
 `forwardRef<LayoutGuideColumnElement, LayoutGuideColumnProps>`
 
-> 일반적으로 사용자가 직접 사용하지 않습니다. `<LayoutDocument>`가 자동으로
+> 일반적으로 사용자가 직접 사용하지 않습니다. `<LayoutPage>`가 자동으로
 > 자식으로 만듭니다.
 
 ---
@@ -833,12 +833,12 @@ function EditableParagraph({ data }: { data: ParagraphData }) {
 
 ## 타입 재노출
 
-`layout-element/react`는 바닐라 API의 모든 타입을 다시 export합니다. 엔진 클래스(`DocumentEngine`, `BoxEngine`, `ParagraphEngine`, `ImageEngine`, `TableEngine`, `GridCalculatorEngine`, `FontLoaderEngineImpl`, `ColorRegistryEngineImpl`)도 `layout-element/react`에서 재노출되어 바닐라 진입점과 동일하게 import할 수 있습니다.
+`layout-element/react`는 바닐라 API의 모든 타입을 다시 export합니다. 엔진 클래스(`PageEngine`, `BoxEngine`, `ParagraphEngine`, `ImageEngine`, `TableEngine`, `GridCalculatorEngine`, `FontLoaderEngineImpl`, `ColorRegistryEngineImpl`)도 `layout-element/react`에서 재노출되어 바닐라 진입점과 동일하게 import할 수 있습니다.
 
 ```ts
 // Components
 export type {
-  LayoutDocumentElement, LayoutBoxElement, LayoutParagraphElement,
+  LayoutPageElement, LayoutBoxElement, LayoutParagraphElement,
   LayoutImageElement, LayoutGuideColumnElement, LayoutColumnElement,
   LayoutCursorElement, LayoutSelectionElement,
 };
@@ -859,7 +859,7 @@ export type {
 
 // Layout types
 export type {
-  DocumentData, BoxData, ParagraphData, TextData, ImageData, GuideColumnData,
+  PageData, BoxData, ParagraphData, TextData, ImageData, GuideColumnData,
   TextInlineData, TextPartData, TextLineData, OverlapParts,
   BoxPosition, BoxBorderStyle, BoxRole,
 };
@@ -912,10 +912,10 @@ export {
 ```tsx
 import {
   LayoutProvider, useLayoutContext,
-  LayoutDocument, LayoutBox, LayoutParagraph, LayoutImage,
+  LayoutPage, LayoutBox, LayoutParagraph, LayoutImage,
   useEditManager,
 } from 'layout-element/react';
-import { exampleData, type DocumentData } from 'layout-element';
+import { exampleData, type PageData } from 'layout-element';
 import { useState } from 'react';
 
 export function App() {
@@ -928,14 +928,14 @@ export function App() {
 
 function EditorShell() {
   const { ready, error } = useLayoutContext();
-  const [data, setData] = useState<DocumentData>(exampleData);
+  const [data, setData] = useState<PageData>(exampleData);
 
   if (error) return <div>Error: {error.message}</div>;
   if (!ready) return <div>Loading...</div>;
 
   return (
     <div style={{ display: 'flex' }}>
-      <LayoutDocument
+      <LayoutPage
         data={data}
         onRenderError={(e) => console.warn('overflow', e.detail)}
       />
@@ -944,7 +944,7 @@ function EditorShell() {
   );
 }
 
-function Toolbar({ onChange }: { onChange: (d: DocumentData) => void }) {
+function Toolbar({ onChange }: { onChange: (d: PageData) => void }) {
   const {
     focusedParagraph, currentStyle, cursorOffset, selection,
     selectedLayouts,
@@ -1002,12 +1002,12 @@ function Toolbar({ onChange }: { onChange: (d: DocumentData) => void }) {
 
 ```tsx
 import { useState, useEffect } from 'react';
-import { LayoutDocument, LayoutBox, LayoutParagraph } from 'layout-element/react';
-import type { DocumentData } from 'layout-element';
+import { LayoutPage, LayoutBox, LayoutParagraph } from 'layout-element/react';
+import type { PageData } from 'layout-element';
 
 function DynamicNewspaper() {
   const [columns, setColumns] = useState(5);
-  const [data, setData] = useState<DocumentData>({
+  const [data, setData] = useState<PageData>({
     width: 210, height: 297,
     columns: 5, gap: 3,
     paddingTop: 10, paddingRight: 10, paddingBottom: 10, paddingLeft: 10,
@@ -1026,7 +1026,7 @@ function DynamicNewspaper() {
         type="range" min={2} max={10} value={columns}
         onChange={(e) => setColumns(+e.target.value)}
       />
-      <LayoutDocument
+      <LayoutPage
         data={data}
         columns={columns}
         gap={3}
@@ -1040,7 +1040,7 @@ function DynamicNewspaper() {
 ### 외부 데이터 주입
 
 ```tsx
-import { LayoutProvider, LayoutDocument } from 'layout-element/react';
+import { LayoutProvider, LayoutPage } from 'layout-element/react';
 import type { CMYKColorSet, Font } from 'layout-element';
 
 const externalColors: CMYKColorSet = {
@@ -1052,10 +1052,10 @@ const externalFonts: Font[] = [
   // base64 인코딩된 TTF 데이터
 ];
 
-function ExternalDataView({ documentData }: { documentData: DocumentData }) {
+function ExternalDataView({ pageData }: { pageData: PageData }) {
   return (
     <LayoutProvider colorSet={externalColors} fonts={externalFonts}>
-      <LayoutDocument data={documentData} />
+      <LayoutPage data={pageData} />
     </LayoutProvider>
   );
 }
@@ -1066,14 +1066,14 @@ function ExternalDataView({ documentData }: { documentData: DocumentData }) {
 ```tsx
 import { useRef, useEffect } from 'react';
 import {
-  LayoutDocument, LayoutBox, LayoutParagraph,
+  LayoutPage, LayoutBox, LayoutParagraph,
 } from 'layout-element/react';
 import type {
-  LayoutDocumentElement, LayoutBoxElement, LayoutParagraphElement,
+  LayoutPageElement, LayoutBoxElement, LayoutParagraphElement,
 } from 'layout-element';
 
 function WithRefs() {
-  const docRef = useRef<LayoutDocumentElement>(null);
+  const docRef = useRef<LayoutPageElement>(null);
   const boxRef = useRef<LayoutBoxElement>(null);
   const paragraphRef = useRef<LayoutParagraphElement>(null);
 
@@ -1084,14 +1084,14 @@ function WithRefs() {
   }, []);
 
   return (
-    <LayoutDocument ref={docRef} data={exampleData}>
+    <LayoutPage ref={docRef} data={exampleData}>
       <LayoutBox ref={boxRef} data={{ type: 'box', left: 0, top: 0, width: 3, height: 12 }}>
         <LayoutParagraph
           ref={paragraphRef}
           data={{ type: 'paragraph', content: 'Hello' }}
         />
       </LayoutBox>
-    </LayoutDocument>
+    </LayoutPage>
   );
 }
 ```
@@ -1102,7 +1102,7 @@ function WithRefs() {
 
 | React API | Vanilla JS 대응 |
 |---|---|
-| `<LayoutDocument>` | `<x-layout-document>` (LayoutDocumentElement) |
+| `<LayoutPage>` | `<x-layout-page>` (LayoutPageElement) |
 | `<LayoutBox>` | `<x-layout-box>` (LayoutBoxElement) |
 | `<LayoutParagraph>` | `<x-layout-paragraph>` (LayoutParagraphElement) |
 | `<LayoutImage>` | `<x-layout-image>` (LayoutImageElement) |
@@ -1118,14 +1118,14 @@ function WithRefs() {
 
 ## 주의사항
 
-1. **JSX Intrinsic Elements**: `globals.d.ts`가 `<x-layout-document>` 등 7개 태그를
+1. **JSX Intrinsic Elements**: `globals.d.ts`가 `<x-layout-page>` 등 7개 태그를
    `DetailedHTMLProps`로 등록합니다. `data` 속성과 `role`/`groupMember`/`priority`/
-   `lock`/`onTextOverflow`가 자동 인식됩니다. wrapper 컴포넌트(`<LayoutDocument>`)를
+   `lock`/`onTextOverflow`가 자동 인식됩니다. wrapper 컴포넌트(`<LayoutPage>`)를
    사용하면 이런 한계를 우회할 수 있습니다.
 
 2. **forwardRef**: 모든 wrapper는 `forwardRef`로 작성되어 `ref` prop을 지원합니다.
 
-3. **effect 의존성**: `<LayoutDocument>`의 모든 prop은 **단일 `useEffect`** 에
+3. **effect 의존성**: `<LayoutPage>`의 모든 prop은 **단일 `useEffect`** 에
    의해 동기화됩니다. prop이 같으면 Custom Element setter가 동일값 조기 반환하므로
    실제 DOM 조작은 발생하지 않습니다 (strict equality).
 
@@ -1135,7 +1135,7 @@ function WithRefs() {
 5. **데이터 동기화 트랩**: `data` prop을 매 렌더마다 새 객체로 전달하면 setter가
    항상 호출되어 자식 트리가 재구축됩니다. 안정 참조를 유지하세요.
 
-6. **children vs data.children**: `<LayoutDocument>`에 `data`로 트리를 주입할 때
+6. **children vs data.children**: `<LayoutPage>`에 `data`로 트리를 주입할 때
    children prop도 같이 주면 안 됩니다. 한 가지 경로만 사용하세요.
 
 7. **외부 데이터 주입**: `LayoutProvider`에 `colorSet`/`fonts`를 주입하면 지정한 데이터로

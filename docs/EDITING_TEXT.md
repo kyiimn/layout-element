@@ -476,7 +476,7 @@ InheritStyle (부모에서 상속)
 
 ## 3.6 `EditManager` — 문서 단위 편집 관리자
 
-`EditManager`는 문서 전체의 편집 상태를 중앙에서 관리하는 **per-document 인스턴스**이다. `ColorRegistry`, `FontLoader`와 달리 싱글톤이 아니며, 각 `LayoutDocumentElement`가 자체 `EditManager`를 소유한다.
+`EditManager`는 문서 전체의 편집 상태를 중앙에서 관리하는 **per-document 인스턴스**이다. `ColorRegistry`, `FontLoader`와 달리 싱글톤이 아니며, 각 `LayoutPageElement`가 자체 `EditManager`를 소유한다.
 
 ### 3.6.1 역할
 
@@ -491,7 +491,7 @@ InheritStyle (부모에서 상속)
 
 | API | 타입 | 설명 |
 |-----|------|------|
-| `getInstance()` | — | (제거됨) per-document 인스턴스는 `LayoutDocumentElement.editManager`로 접근 |
+| `getInstance()` | — | (제거됨) per-document 인스턴스는 `LayoutPageElement.editManager`로 접근 |
 | `focusedParagraph` | `LayoutParagraphElement \| null` get | 현재 포커스된 단락 요소. 없으면 `null`. |
 | `focusedController` | `TextEditController \| null` get | 현재 포커스된 편집 컨트롤러. 없으면 `null`. |
 | `cursorOffset` | `number \| null` get | 현재 커서 위치. 포커스된 단락이 없으면 `null`. |
@@ -972,7 +972,7 @@ flowchart TD
 
 ### 4.1 Tab / Shift+Tab: 단락 간 포커스 이동
 
-텍스트 편집 모드에서 `Tab`과 `Shift+Tab`은 문서 내 모든 편집 가능한 단락 사이를 순환하며 포커스를 이동한다. 이 단축키는 `LayoutDocumentElement._onWindowKeyDown`이 `window`의 capture 단계에서 먼저 가로채며, `EditManager.navigateByTab(shiftKey)`를 호출한다. 호스트 프로그램은 동일한 공개 API를 프로그래밍 방식으로 호출할 수 있다.
+텍스트 편집 모드에서 `Tab`과 `Shift+Tab`은 문서 내 모든 편집 가능한 단락 사이를 순환하며 포커스를 이동한다. 이 단축키는 `LayoutPageElement._onWindowKeyDown`이 `window`의 capture 단계에서 먼저 가로채며, `EditManager.navigateByTab(shiftKey)`를 호출한다. 호스트 프로그램은 동일한 공개 API를 프로그래밍 방식으로 호출할 수 있다.
 
 > **편집 중 키 라우팅 (중요)**: 단락의 편집 textarea는 paragraph shadow DOM 내부에 있어 `document.activeElement`가 host(`x-layout-paragraph`)로 retarget된다. 따라서 `_onWindowKeyDown`의 `document.activeElement instanceof HTMLTextAreaElement` 검사만으로는 편집 중을 감지할 수 없다 — **`event.composedPath()[0]`이 textarea/input인지 추가 검사**하여 편집 중에는 이벤트를 textarea의 bubble 핸들러(`TextEditController._onKeydown`)로 넘긴다. 편집 중: `Shift+Tab` → 탭 문자 삽입(§4.1.5), `Tab` → `navigateByTab(false)` 호출(포커스 이동 유지). 편집 중이 아닐 때는 `navigateByTab(shiftKey)`이 양방향 모두 처리한다.
 
@@ -1746,7 +1746,7 @@ selection 없이 paragraph 스타일을 수정할 때(포커스 유무 무관), 
 
 #### undo/redo 스냅샷과 런 배열 — 스냅샷은 자연 반영, 복원에는 가드 우회 필요
 
-**스냅샷 반영은 자동이다.** 런 배열(`TextInlineData[]`)은 `ParagraphEngine.extractData`가 `ParagraphData.content`에 원본 그대로 담아 반환하므로(순수 JSON 구조 — 직렬화 무손실), 호스트가 `element.data`(DocumentData)를 스냅샷으로 찍으면 런 구조가 별도 처리 없이 포함된다. 텍스트 입력/삭제/IME/스타일 주입 등 모든 편집 경로가 `model.textContent = plainToInline(...)`으로 끝나므로 직렬화 시점의 런 구조는 항상 최신이다.
+**스냅샷 반영은 자동이다.** 런 배열(`TextInlineData[]`)은 `ParagraphEngine.extractData`가 `ParagraphData.content`에 원본 그대로 담아 반환하므로(순수 JSON 구조 — 직렬화 무손실), 호스트가 `element.data`(PageData)를 스냅샷으로 찍으면 런 구조가 별도 처리 없이 포함된다. 텍스트 입력/삭제/IME/스타일 주입 등 모든 편집 경로가 `model.textContent = plainToInline(...)`으로 끝나므로 직렬화 시점의 런 구조는 항상 최신이다.
 
 **복원 경로(`element.data = snapshot`)에서의 런 구조 보존:**
 
@@ -1756,14 +1756,14 @@ selection 없이 paragraph 스타일을 수정할 때(포커스 유무 무관), 
 
 **⚠️ 호스트 구현 주의 — 편집 중 복원의 `isEditingThis` 가드:**
 
-`paragraph.data` setter는 `manager.focusedParagraph === this`이면 **편집 컨트롤러의 `applyExternalContent(content)`로 위임한다**. 이 경로는 model.textContent 갱신과 함께 편집 상태(textarea/런 맵 재구축, 커서·selection 클램핑)까지 재동기화하되, **어떤 편집 이벤트도 발행하지 않는다** — 주 용도가 undo/redo 복원이므로 주입 자체가 새 변경으로 기록되어 히스토리 스택을 오염하는 것을 방지한다. 렌더 갱신(`render-complete`)만 발생한다. 편집 중 외부 주입(documentData 재주입, undo 복원 등)은 포커스 유지 상태에서 정상 반영된다. IME 조합 중에는 조합 커밋과 충돌하지 않도록 무시된다(조합 종료 후 다음 주입부터 적용).
+`paragraph.data` setter는 `manager.focusedParagraph === this`이면 **편집 컨트롤러의 `applyExternalContent(content)`로 위임한다**. 이 경로는 model.textContent 갱신과 함께 편집 상태(textarea/런 맵 재구축, 커서·selection 클램핑)까지 재동기화하되, **어떤 편집 이벤트도 발행하지 않는다** — 주 용도가 undo/redo 복원이므로 주입 자체가 새 변경으로 기록되어 히스토리 스택을 오염하는 것을 방지한다. 렌더 갱신(`render-complete`)만 발생한다. 편집 중 외부 주입(pageData 재주입, undo 복원 등)은 포커스 유지 상태에서 정상 반영된다. IME 조합 중에는 조합 커밋과 충돌하지 않도록 무시된다(조합 종료 후 다음 주입부터 적용).
 
-편집 중 주입 시 `paragraph.data` setter는 즉시 `layout()`을 수행하지 않는다(`_promoStructureChanged` + `scheduleRender()`만). 이 시점 부모 BoxEngine의 `childEngines`에 이전 트리가 남아 있어 `_layoutStructure`의 existing 교체가 방금 갱신한 model을 구 content의 엔진으로 되돌릴 수 있기 때문이다 — 상위(`document.data` setter)의 최종 `layout()`이 모든 자식 갱신 완료 후 엔진 트리를 재구축한다.
+편집 중 주입 시 `paragraph.data` setter는 즉시 `layout()`을 수행하지 않는다(`_promoStructureChanged` + `scheduleRender()`만). 이 시점 부모 BoxEngine의 `childEngines`에 이전 트리가 남아 있어 `_layoutStructure`의 existing 교체가 방금 갱신한 model을 구 content의 엔진으로 되돌릴 수 있기 때문이다 — 상위(`page.data` setter)의 최종 `layout()`이 모든 자식 갱신 완료 후 엔진 트리를 재구축한다.
 
 단, 컨트롤러가 없는 상태(editableText 미활성)에서 포커스만 있는 경우는 기존과 같이 `model.textContent = data.content` 직접 반영을 유지한다. 호스트가 취하는 blur→복원→재포커스 순서(권장)와 별개로 편집 중 주입은 위 위임 경로로 안전하다:
 
 1. `manager.blurParagraph()` — (권장) 가드 상태 명시적 정리
-2. `element.data = snapshot.documentData` — 런 배열 포함 전체 복원 (`applyExternalContent` 경로)
+2. `element.data = snapshot.pageData` — 런 배열 포함 전체 복원 (`applyExternalContent` 경로)
 3. `manager.focusParagraph(focusedParagraphId, { selection })` — 커서/selection 재복원 (스냅샷의 `cursorOffset`/`selectionOffsets` 이용)
 
 추가 방어: 복원 후 커서 오프셋이 새 content 길이를 초과하면 컨트롤러의 오프셋 클램프(`setCursor`의 maxOffset 처리)가 방어한다. 런 배열이 바뀌어도 평문 오프셋 체계는 유지되므로, 길이가 다른 스냅샷(텍스트 편집 undo)에서만 클램프가 발동한다.
@@ -1946,7 +1946,7 @@ paragraph.render();
 
 #### 7.4.2a dirty 계약과 스냅샷 읽기
 
-`extractData`/`printPostData`는 **순수 읽기**다 — dirty 상태에서 조회하면 `DirtyPendingError`(`e.name === 'DirtyPendingError'`)를 throw하며 자가 치유하지 않는다. 편집 중 단락의 dirty는 이 rAF 디바운스 커밋(커밋 → 이벤트 발행 순서)이 소유하므로, 일관 스냅샷이 필요한 외부 소비자(저장/내보내기/print)는 읽기 전에 `DocumentEngine.ensureCommitted()`를 호출한다 — `hasPendingChanges`인 **편집 중** 단락은 커밋하지 않고 건너뛰며(편집 파이프라인의 dirty 소유 보호), 나머지 트리(테이블 셀 내부 포함)의 pending 변경을 타입별 커밋한다(Box/Image → `layout()`, Table → `layout()` + `buildCellBoxEngines()`; 셀 하강에서도 단락은 건너뜀). 이 에러가 정상 편집 흐름에서 관찰되면 커밋 순서 버그 신호이며, 자가 치유로 흡수하지 않는다.
+`extractData`/`printPostData`는 **순수 읽기**다 — dirty 상태에서 조회하면 `DirtyPendingError`(`e.name === 'DirtyPendingError'`)를 throw하며 자가 치유하지 않는다. 편집 중 단락의 dirty는 이 rAF 디바운스 커밋(커밋 → 이벤트 발행 순서)이 소유하므로, 일관 스냅샷이 필요한 외부 소비자(저장/내보내기/print)는 읽기 전에 `PageEngine.ensureCommitted()`를 호출한다 — `hasPendingChanges`인 **편집 중** 단락은 커밋하지 않고 건너뛰며(편집 파이프라인의 dirty 소유 보호), 나머지 트리(테이블 셀 내부 포함)의 pending 변경을 타입별 커밋한다(Box/Image → `layout()`, Table → `layout()` + `buildCellBoxEngines()`; 셀 하강에서도 단락은 건너뜀). 이 에러가 정상 편집 흐름에서 관찰되면 커밋 순서 버그 신호이며, 자가 치유로 흡수하지 않는다.
 
 #### 7.4.3 편집 델타 경로 (run-map 스플라이스)
 
@@ -2457,9 +2457,9 @@ async function initDocument() {
   await ColorRegistry.getInstance().init();
   await FontLoader.getInstance().init();
 
-  const doc = document.createElement('x-layout-document');
+  const doc = document.createElement('x-layout-page');
   document.body.appendChild(doc);
-  doc.data = documentData; // DocumentData
+  doc.data = pageData; // PageData
 }
 
 // 2. 텍스트 편집 모드 활성화
@@ -2494,7 +2494,7 @@ paragraph.editableText = false;
 
 1. `ColorRegistry.getInstance().init()` — `color.json`을 fetch하여 CSS 변수 `--colorman-{name}`을 주입.
 2. `FontLoader.getInstance().init()` — `fonts.json`을 fetch하여 `FontFace`를 등록.
-3. `<x-layout-document>`를 생성하고 `data` 속성에 `DocumentData`를 설정.
+3. `<x-layout-page>`를 생성하고 `data` 속성에 `PageData`를 설정.
 4. `document.render()`를 호출. `connectedCallback`에서 자동으로 `layout()`은 실행되지만, 첫 렌더링을 보장하려면 수동 호출이 필요할 수 있다.
 5. 편집할 `<x-layout-paragraph>` 요소를 찾는다.
 6. `paragraph.editableText = true`로 텍스트 편집 모드를 활성화.

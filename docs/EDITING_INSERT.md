@@ -10,7 +10,7 @@
 
 ## 1. 개요 (Overview)
 
-삽입 모드는 문서 표면에서 마우스로 드래그하여 새 요소를 생성하는 기능이다. 사용자가 삽입할 요소의 종류와 배치 모드를 선택하면, `<x-layout-document>` 위에서 드래그한 영역만큼 새 요소가 만들어진다.
+삽입 모드는 문서 표면에서 마우스로 드래그하여 새 요소를 생성하는 기능이다. 사용자가 삽입할 요소의 종류와 배치 모드를 선택하면, `<x-layout-page>` 위에서 드래그한 영역만큼 새 요소가 만들어진다.
 
 - **삽입 가능한 요소**: `box`, `text`, `paragraph`, `image`, `table`
 - **배치 모드**: `absolute`(mm 좌표) 또는 `static`(컬럼/라인 그리드)
@@ -25,7 +25,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ <x-layout-document>                                                  │
+│ <x-layout-page>                                                  │
 │                                                                      │
 │  EditManager (per-document instance)                                             │
 │  ├── insertMode: InsertMode | null                                    │
@@ -34,11 +34,11 @@
 │  └── insert / insertCancel 이벤트 발송                                │
 │                                                                      │
 │  InsertController (삽입 전용)                                          │
-│  ├── _document: LayoutDocumentElement                                 │
+│  ├── _document: LayoutPageElement                                 │
 │  ├── _mode: InsertMode | null                                          │
 │  ├── _isDragging: boolean                                             │
 │  ├── _lastPreviewRect: { left, top, width, height } | null             │
-│  ├── _insertHighlightTarget: LayoutBoxElement | LayoutDocumentElement | null │
+│  ├── _insertHighlightTarget: LayoutBoxElement | LayoutPageElement | null │
 │  ├── startDrag(event)                                                  │
 │  ├── _findTargetContainer(startX, startY, endX, endY)                  │
 │  ├── _finishInsert()                                                   │
@@ -51,7 +51,7 @@
 
 ### 1.2 사전 조건
 
-- 삽입 모드는 `<x-layout-document>` 요소가 DOM에 존재해야 한다. 없으면 `Error`가 발생한다.
+- 삽입 모드는 `<x-layout-page>` 요소가 DOM에 존재해야 한다. 없으면 `Error`가 발생한다.
 - 편집 가능 box가 없는 빈 문서에서도 활성화할 수 있다. 이 경우 `InsertController`가 document를 삽입 컨테이너로 사용하여 첫 box를 그려 넣을 수 있다.
 - 비활성화 시에는 `editable-layout` DOM 속성이 있는 box의 커서를 `grab`으로 복원한다.
 
@@ -81,7 +81,7 @@ const mode = manager.insertMode; // InsertMode | null
 | 반복 설정 | 동일한 모드로 다시 설정하면 무시된다 |
 | 드래그 중 non-null 설정 | `InsertController.isDragging === true` 중에 다른 타입으로 전환하면(예: static → absolute), 진행 중인 드래그를 중단하지 않고 `_mode`만 갱신하여 드래그를 이어간다. 단, 다른 편집 모드(`layoutEditMode`/`textEditMode`) 비활성화는 드래그 중에도 항상 실행된다. 커서 변경과 `clearLayoutSelection`은 드래그 중에는 생략된다(드래그 방해 방지) |
 
-`x-layout-document` 요소가 DOM에 없으면 `Error`가 throw된다. 편집 가능 `<x-layout-box>`가 없어도 삽입 모드는 활성화되며, 이 경우 document가 삽입 컨테이너가 된다.
+`x-layout-page` 요소가 DOM에 없으면 `Error`가 throw된다. 편집 가능 `<x-layout-box>`가 없어도 삽입 모드는 활성화되며, 이 경우 document가 삽입 컨테이너가 된다.
 
 ### 2.2 `activateInsert(mode)` / `deactivateInsert()`
 
@@ -331,9 +331,9 @@ export interface InsertEventDetail {
     │
     ├── 2. 각 꼭짓점에서 elementsFromPoint 호출하여 후보 수집
     │   for each corner:
-    │     elements = document.elementsFromPoint(corner.x, corner.y)
+    │     elements = page.elementsFromPoint(corner.x, corner.y)
     │     for each el in elements:
-    │       if el instanceof LayoutBoxElement || el instanceof LayoutDocumentElement:
+    │       if el instanceof LayoutBoxElement || el instanceof LayoutPageElement:
     │         candidates[el] = (candidates[el] ?? 0) + 1
     │         break (첫 번째 hit만)
     │
@@ -381,7 +381,7 @@ export interface InsertEventDetail {
 
 | 현재 요소 | 조건 | 결과 |
 |-----------|------|------|
-| `<x-layout-document>` | 항상 | 유효한 컨테이너로 간주 (최후보) |
+| `<x-layout-page>` | 항상 | 유효한 컨테이너로 간주 (최후보) |
 | `<x-layout-td>` | static 모드, `items.length === 0` | 유효한 컨테이너 (box보다 우선) |
 | `<x-layout-td>` | static 모드, 자식이 있음 | 유효하지 않음 |
 | `<x-layout-td>` | absolute 모드 | 제한 없이 유효 |
@@ -396,7 +396,7 @@ export interface InsertEventDetail {
 
 ### 5.4 폴백: `_getRootContainer()`
 
-드래그 사각형을 완전히 포함하는 컨테이너가 하나도 없으면, `EditManager.editableRootId`로 지정된 루트 box를 반환한다. `editableRootId`가 없으면 문서 루트(`<x-layout-document>`)를 반환한다.
+드래그 사각형을 완전히 포함하는 컨테이너가 하나도 없으면, `EditManager.editableRootId`로 지정된 루트 box를 반환한다. `editableRootId`가 없으면 문서 루트(`<x-layout-page>`)를 반환한다.
 
 ### 5.5 `editableRootId` 제한 — root box 밖으로 삽입 금지
 
@@ -414,7 +414,7 @@ export interface InsertEventDetail {
 **핵심**: `editableRootId` 설정 시 document는 절대 컨테이너로 반환되지 않으며, root box가 최종 클램핑 대상이 된다. root box 자체는 편집 불가(`isBoxEditable`이 `false`)하지만 삽입 컨테이너로는 사용된다.
 
 ```typescript
-private _getRootContainer(): LayoutDocumentElement | LayoutBoxElement {
+private _getRootContainer(): LayoutPageElement | LayoutBoxElement {
   const manager = layoutDocEl.editManager;
   const rootId = manager.editableRootId;
   if (rootId) {
@@ -799,7 +799,7 @@ ESC 키 이외의 입력은 무시한다.
 
 ## 14. 주의사항
 
-- 삽입 모드는 `<x-layout-document>`가 DOM에 있을 때만 활성화할 수 있다. 없으면 `Error`가 발생한다.
+- 삽입 모드는 `<x-layout-page>`가 DOM에 있을 때만 활성화할 수 있다. 없으면 `Error`가 발생한다.
 - 삽입 모드는 편집 가능 box가 없는 빈 문서에서도 활성화할 수 있다. 이 경우 `InsertController._findTargetContainer()`가 document를 삽입 컨테이너로 반환하여 첫 box를 document에 직접 그려 넣을 수 있다. 드래그 영역이 어느 box보다 크면 `EditManager.editableRootId`로 지정된 루트 box 또는 document 루트로 폴백한다. 비활성화 시에는 `x-layout-box[editable-layout]` DOM 속성이 있는 box들의 커서를 `grab`으로 복원한다.
 - 삽입된 요소는 항상 `<x-layout-box>`로 감싸진다. `text`, `paragraph`, `image` 타입도 마찬가지이다.
 - `static` 모드로 삽입할 때 `model`이 없으면 `{ left: 0, top: 0, width: 1, height: 1 }` 기본값을 사용한다.

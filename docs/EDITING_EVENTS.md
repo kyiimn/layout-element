@@ -626,7 +626,7 @@ manager.addEventListener('layoutAdd', (event) => {
 | `paragraph` | `null` | 항상 `null` |
 | `controller` | `null` | 항상 `null` |
 | `layoutAddDetail.element` | `HTMLElement` | 추가된 요소 (`LayoutBoxElement` \| `LayoutParagraphElement` \| `LayoutImageElement`) |
-| `layoutAddDetail.container` | `HTMLElement` | 부모 컨테이너 (`LayoutDocumentElement` \| `LayoutBoxElement`) |
+| `layoutAddDetail.container` | `HTMLElement` | 부모 컨테이너 (`LayoutPageElement` \| `LayoutBoxElement`) |
 | `layoutAddDetail.source` | `'insert' \| 'reparent' \| 'programmatic'` | 추가 방식 |
 
 **발생 트리거**:
@@ -657,7 +657,7 @@ manager.addEventListener('layoutRemove', (event) => {
 | `paragraph` | `null` | 항상 `null` |
 | `controller` | `null` | 항상 `null` |
 | `layoutRemoveDetail.element` | `HTMLElement` | 제거된 요소 (`LayoutBoxElement` \| `LayoutParagraphElement` \| `LayoutImageElement`) |
-| `layoutRemoveDetail.previousContainer` | `HTMLElement` | 제거되기 전 부모 컨테이너 (`LayoutDocumentElement` \| `LayoutBoxElement`) |
+| `layoutRemoveDetail.previousContainer` | `HTMLElement` | 제거되기 전 부모 컨테이너 (`LayoutPageElement` \| `LayoutBoxElement`) |
 | `layoutRemoveDetail.source` | `'reparent' \| 'programmatic'` | 제거 방식 |
 
 **발생 트리거**:
@@ -696,7 +696,7 @@ interface LayoutRemoveEventDetail {
 
 ### 8.6 프로그래매틱 `data` 세터 중간 상태 보호
 
-`LayoutDocumentElement`와 `LayoutBoxElement` 모두 `data` 세터에서 기존 자식을 `remove()`한 후 새 자식을 `appendChild()`하는 방식으로 자식을 재구축한다. 이 과정에서 중간 상태(자식이 모두 제거된 상태)에서 `element.data` getter가 `children: []`를 반환하는 것을 방지하기 위해 두 가지 메커니즘이 적용된다.
+`LayoutPageElement`와 `LayoutBoxElement` 모두 `data` 세터에서 기존 자식을 `remove()`한 후 새 자식을 `appendChild()`하는 방식으로 자식을 재구축한다. 이 과정에서 중간 상태(자식이 모두 제거된 상태)에서 `element.data` getter가 `children: []`를 반환하는 것을 방지하기 위해 두 가지 메커니즘이 적용된다.
 
 **`_rebuildingChildren` 플래그 + `_pendingData` 캐시**: `data` 세터 실행 전 `_rebuildingChildren = true`와 `_pendingData = data`를 설정하고, `try/finally` 블록에서 항상 둘을 복원한다(`_rebuildingChildren = false`, `_pendingData = null`). 이 플래그가 `true`인 동안:
 
@@ -814,7 +814,7 @@ manager.addEventListener('contextMenu', (event) => {
 | 필드 | 타입 | 설명 |
 |------|------|------|
 | `type` | `'contextMenu'` | 이벤트 타입 |
-| `contextMenuDetail.element` | `LayoutBoxElement \| LayoutDocumentElement \| null` | 우클릭한 요소 (box, document, 또는 빈 공간 `null`) |
+| `contextMenuDetail.element` | `LayoutBoxElement \| LayoutPageElement \| null` | 우클릭한 요소 (box, document, 또는 빈 공간 `null`) |
 | `contextMenuDetail.mouseX` | `number` | 뷰포트 기준 마우스 X 좌표 (clientX) |
 | `contextMenuDetail.mouseY` | `number` | 뷰포트 기준 마우스 Y 좌표 (clientY) |
 | `contextMenuDetail.selectedLayouts` | `LayoutBoxElement[]` | 이벤트 발생 시 선택된 레이아웃 요소들 (선택 갱신 후) |
@@ -823,7 +823,7 @@ manager.addEventListener('contextMenu', (event) => {
 
 1. **이미 선택된 box에서 우클릭** → 기존 selection 유지 (멀티 선택 포함)
 2. **선택되지 않은 box 우클릭** → `selectLayoutExclusive(box)`로 기존 selection 해제 후 해당 box만 단일 선택 (`layoutSelectionChange` 1회 발생)
-3. **빈 공간 우클릭** (document 내부, box 외부) → selection 해제, `element`는 `LayoutDocumentElement`
+3. **빈 공간 우클릭** (document 내부, box 외부) → selection 해제, `element`는 `LayoutPageElement`
 4. **document 외부 우클릭** → 이벤트 디스패치하지 않음
 
 **재진입 보호**: 다른 이벤트 디스패치 중에는 `contextMenu` 이벤트가 발생하지 않는다 (`_dispatching` 플래그).

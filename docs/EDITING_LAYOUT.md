@@ -15,7 +15,7 @@
 
 ## 1. 개요 (Overview)
 
-레이아웃 편집 모드는 `<x-layout-box>` 요소를 시각적으로 선택하고 드래그하여 이동할 수 있는 기능이다. 텍스트 편집 모드(`editableText`)가 단락 내부의 텍스트를 수정하는 기능이라면, 레이아웃 편집 모드는 레이아웃 구조 요소 자체를 선택·이동하는 기능이다. `<x-layout-document>`는 레이아웃 편집 대상이 아니며, 오직 `<x-layout-box>`만 편집 대상이 된다.
+레이아웃 편집 모드는 `<x-layout-box>` 요소를 시각적으로 선택하고 드래그하여 이동할 수 있는 기능이다. 텍스트 편집 모드(`editableText`)가 단락 내부의 텍스트를 수정하는 기능이라면, 레이아웃 편집 모드는 레이아웃 구조 요소 자체를 선택·이동하는 기능이다. `<x-layout-page>`는 레이아웃 편집 대상이 아니며, 오직 `<x-layout-box>`만 편집 대상이 된다.
 
 이전에는 각 `<x-layout-box>`의 `editableLayout` 속성으로 개별적으로 편집 모드를 켰지만, 현재는 `EditManager`의 글로벌 `layoutEditMode`와 필터(`editableRoles`, `editableBoxIds`)를 통해 한 번에 제어한다. 개별 `editableLayout` 속성은 이제 DOM 속성/커서 표시용으로만 동작하며, 실제 판단은 `EditManager.isBoxEditable()`이 수행한다.
 
@@ -36,7 +36,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ <x-layout-document>                                                  │
+│ <x-layout-page>                                                  │
 │   ┌────────────────────┐    ┌────────────────────┐                  │
 │   │ <x-layout-box      │    │ <x-layout-box      │                  │
 │   │  role="title"      │    │  role="body"       │                  │
@@ -307,7 +307,7 @@ element.editableLayout = false;
 
 > **설계**: `editableLayout` 속성은 더 이상 이벤트 리스너를 직접 등록하지 않는다. `connectedCallback`은 `mouseenter`와 `mouseleave`만 등록하고, `click`/`mousedown`/리사이즈 핸들 이벤트는 `LayoutEditController`가 문서 수준에서 처리한다. 개별 box에 `editableLayout = true`를 설정하면 `EditManager.isBoxEditable()`은 아니지만 `LayoutEditController`가 이전 버전과의 호환을 위해 여전히 편집 가능한 것으로 간주한다.
 
-> **참고**: `<x-layout-document>`는 레이아웃 편집 대상이 아니므로 `editableLayout` 속성이 없다. 드래그와 선택은 `<x-layout-box>`에서만 동작한다.
+> **참고**: `<x-layout-page>`는 레이아웃 편집 대상이 아니므로 `editableLayout` 속성이 없다. 드래그와 선택은 `<x-layout-box>`에서만 동작한다.
 
 #### 선택 동작
 
@@ -330,7 +330,7 @@ element.editableLayout = false;
 
 #### Tab / Shift+Tab으로 selection 이동
 
-`Tab` 키와 `Shift+Tab` 키로 선택 가능한 box 사이를 키보드로 순환 이동할 수 있다. 이 동작은 일반 모드와 레이아웃 편집 모드 모두에서 동작하며, `<x-layout-document>`의 `_onWindowKeyDown`이 `window` capture phase에서 `Tab` 이벤트를 가로채 `EditManager.navigateByTab(shiftKey)`를 호출한다. 이벤트가 처리되면 `preventDefault()`와 `stopPropagation()`이 적용되어 브라우저 기본 Tab 포커스 이동이나 문서 내 다른 핸들러(`_onTableKeyDown` 포함)로 전파되지 않는다.
+`Tab` 키와 `Shift+Tab` 키로 선택 가능한 box 사이를 키보드로 순환 이동할 수 있다. 이 동작은 일반 모드와 레이아웃 편집 모드 모두에서 동작하며, `<x-layout-page>`의 `_onWindowKeyDown`이 `window` capture phase에서 `Tab` 이벤트를 가로채 `EditManager.navigateByTab(shiftKey)`를 호출한다. 이벤트가 처리되면 `preventDefault()`와 `stopPropagation()`이 적용되어 브라우저 기본 Tab 포커스 이동이나 문서 내 다른 핸들러(`_onTableKeyDown` 포함)로 전파되지 않는다.
 
 | 입력 | 동작 |
 |------|------|
@@ -461,7 +461,7 @@ manager.navigateByTab(true);     // Shift+Tab: 이전 요소
 
 **라벨 드래그 이동** — 라벨은 `pointer-events: auto`이므로 `mousedown`을 받는다. `LayoutEditController`는 document 레벨의 `mousedown` capture phase 리스너에서 `composedPath()`로 shadow DOM 내부의 box까지 추적하므로, 라벨에서 mousedown이 발생해도 동일한 흐름으로 box 드래그가 시작된다. 즉 **레이아웃 편집 모드에서 박스의 라벨을 잡고 끌어 이동**할 수 있다. 비편집 모드에서는 라벨이 클릭/드래그 이벤트를 받지만 `_isBoxEditable()`이 `false`라 드래그가 시작되지 않고, `LayoutSelectionController._onClick`만 거쳐 단순 클릭으로 선택된다. 커서는 `cursor: grab` → 드래그 중 `grabbing`으로 전환된다.
 
-`▲` 버튼(`<span class="parent-btn">`)은 `pointer-events: auto`로 클릭 가능하며, 라벨의 드래그 동작과 별개로 동작한다. `LayoutEditController._onMouseDown`은 mousedown 시점에 `composedPath()`로 `parent-btn`을 감지하여 `_startDrag`로의 진입을 건너뛴다 (line 363 가드). 이는 mousedown의 `preventDefault()`가 click 이벤트 발생을 막을 수 있고, mouseup의 단순 클릭 분기에서 `selectLayout`이 호출되어 부모 선택을 덮어쓸 위험을 방지하기 위함이다. 결과적으로 `parent-btn`의 click 핸들러(`stopPropagation` → `_selectParent()`)가 정상 실행되어, 현재 선택을 모두 해제하고(`EditManager.clearLayoutSelection(false)`) 이 박스의 부모 박스를 선택한다(`EditManager.selectLayout(parent)`) — 멀티 선택이거나 다른 박스가 선택되어 있어도 모두 해제되고 부모만 단일 선택된다. 부모가 `<x-layout-document>`인 경우(루트 박스) 부모 선택이 무시된다. `LayoutSelectionController._onClick`도 `composedPath()`로 `parent-btn`을 감지하여 자체 selectLayout 호출을 건너뛴다.
+`▲` 버튼(`<span class="parent-btn">`)은 `pointer-events: auto`로 클릭 가능하며, 라벨의 드래그 동작과 별개로 동작한다. `LayoutEditController._onMouseDown`은 mousedown 시점에 `composedPath()`로 `parent-btn`을 감지하여 `_startDrag`로의 진입을 건너뛴다 (line 363 가드). 이는 mousedown의 `preventDefault()`가 click 이벤트 발생을 막을 수 있고, mouseup의 단순 클릭 분기에서 `selectLayout`이 호출되어 부모 선택을 덮어쓸 위험을 방지하기 위함이다. 결과적으로 `parent-btn`의 click 핸들러(`stopPropagation` → `_selectParent()`)가 정상 실행되어, 현재 선택을 모두 해제하고(`EditManager.clearLayoutSelection(false)`) 이 박스의 부모 박스를 선택한다(`EditManager.selectLayout(parent)`) — 멀티 선택이거나 다른 박스가 선택되어 있어도 모두 해제되고 부모만 단일 선택된다. 부모가 `<x-layout-page>`인 경우(루트 박스) 부모 선택이 무시된다. `LayoutSelectionController._onClick`도 `composedPath()`로 `parent-btn`을 감지하여 자체 selectLayout 호출을 건너뛴다.
 
 라벨 텍스트는 박스의 `contentType`과 `role`에 의해 결정된다 (`LayoutBoxElement._updateLabelText()`):
 
@@ -475,7 +475,7 @@ manager.navigateByTab(true);     // Shift+Tab: 이전 요소
 - 라벨은 `layout()` 호출 시, `role` 속성 변경 시(`attributeChangedCallback`), `appendChildData`/`data` 세터로 자식이 변경될 때(=`_childObserver` → `layout()` 흐름) 자동 갱신된다.
 - **`content-type-null` 속성**: `_updateLabelText()`는 `contentType === null`인 경우 `content-type-null` DOM 속성을 설정하고, 아닌 경우 제거한다. 이 속성은 `:host([content-type-null][selected])` CSS 규칙과 함께 `contentType`이 `null`인 box가 선택되었을 때 3px 두께의 빨간색 테두리를 적용하기 위해 사용된다. `td-static` 박스에도 동일한 3px 규칙이 적용된다(`:host([td-static][content-type-null][selected])`).
 
-**지면 라벨** — `<x-layout-document>`에도 동일한 `.type-label` 요소가 shadow DOM(루트 div 내부)에 존재하며, `reparent-target` 속성이 설정된 경우에만 `지면`이라는 텍스트로 표시된다. reparent/insert 드래그 중 후보 컨테이너가 document일 때 주황색 라벨이 노출된다.
+**지면 라벨** — `<x-layout-page>`에도 동일한 `.type-label` 요소가 shadow DOM(루트 div 내부)에 존재하며, `reparent-target` 속성이 설정된 경우에만 `지면`이라는 텍스트로 표시된다. reparent/insert 드래그 중 후보 컨테이너가 document일 때 주황색 라벨이 노출된다.
 
 | 상태 | 색상 | 적용 대상 | 라벨 텍스트 |
 |------|------|----------|-----------|
@@ -576,7 +576,7 @@ this._layoutEditController.attach();
 
 ### 2.3 `LayoutSelectionController` 클릭 선택 처리
 
-`LayoutSelectionController`는 per-document `EditManager`가 생성자에서 자신이 관리하는 `<x-layout-document>` 요소(`docEl`)에 부착한다. 문서(document) 요소 수준에서 `click`/`mousedown`/`dblclick`/`contextmenu` 이벤트를 캡처 단계로 처리하며, 편집 모드(`layoutEditMode`)와 무관하게 동작하고 **선택만** 처리한다. 드래그/리사이즈는 `LayoutEditController`가 담당한다. EditManager가 per-document 인스턴스이므로, 셀 블록 해제 순회 등은 모두 `docEl` 하위 트리로 한정되며 다른 문서 요소와 간섭하지 않는다.
+`LayoutSelectionController`는 per-document `EditManager`가 생성자에서 자신이 관리하는 `<x-layout-page>` 요소(`docEl`)에 부착한다. 문서(document) 요소 수준에서 `click`/`mousedown`/`dblclick`/`contextmenu` 이벤트를 캡처 단계로 처리하며, 편집 모드(`layoutEditMode`)와 무관하게 동작하고 **선택만** 처리한다. 드래그/리사이즈는 `LayoutEditController`가 담당한다. EditManager가 per-document 인스턴스이므로, 셀 블록 해제 순회 등은 모두 `docEl` 하위 트리로 한정되며 다른 문서 요소와 간섭하지 않는다.
 
 ```typescript
 // EditManager 생성자에서 항상 부착됨 (edit-manager.ts)
@@ -776,7 +776,7 @@ manager.setEditableRootId(null);
 
 #### 화면 scale 보정 (`EditManager.setScale`/`screenPxToMm`)
 
-미리보기 영역에 CSS `transform: scale(s)`이 적용된 환경에서는 `MouseEvent.clientX/clientY` 및 `Element.getBoundingClientRect()`가 변환된 픽셀 좌표를 반환한다. 이때 `LayoutDocumentElement.ppm`을 그대로 사용하면 `mm ↔ px` 환산이 어긋나 영역 그리기, 드래그 이동, 리사이즈의 좌표가 모두 어긋난다. 단 `LayoutDocumentElement.ppm` 자체를 보정하면 `text-layout-engine`의 `fontSizePx = fontSize * ppm` 계산까지 절반/두배로 줄어드는 부작용이 생긴다.
+미리보기 영역에 CSS `transform: scale(s)`이 적용된 환경에서는 `MouseEvent.clientX/clientY` 및 `Element.getBoundingClientRect()`가 변환된 픽셀 좌표를 반환한다. 이때 `LayoutPageElement.ppm`을 그대로 사용하면 `mm ↔ px` 환산이 어긋나 영역 그리기, 드래그 이동, 리사이즈의 좌표가 모두 어긋난다. 단 `LayoutPageElement.ppm` 자체를 보정하면 `text-layout-engine`의 `fontSizePx = fontSize * ppm` 계산까지 절반/두배로 줄어드는 부작용이 생긴다.
 
 해결: `EditManager`가 별도의 `_scale` 보정 계수를 보관하고, `screenPxToMm(px)` / `screenDeltaToMm(deltaPx)` 헬퍼가 `px / (manager.docEl.ppm * _scale)`로 환산한다. `manager.docEl.ppm`은 항상 `originalPpm`을 반환하므로 폰트 크기/column 폭 계산은 정상이다. `InsertController`/`LayoutEditController`의 모든 mm 환산은 이 헬퍼를 통해 정확하게 동작한다.
 
@@ -814,7 +814,7 @@ React.useEffect(() => {
 type LayoutElement = LayoutBoxElement;
 ```
 
-`LayoutElement`은 `EditManager`에서 레이아웃 선택 대상이 되는 요소의 타입이다. `<x-layout-document>`은 레이아웃 편집 대상이 아니며, `<x-layout-paragraph>`도 레이아웃 선택 대상이 아니다.
+`LayoutElement`은 `EditManager`에서 레이아웃 선택 대상이 되는 요소의 타입이다. `<x-layout-page>`은 레이아웃 편집 대상이 아니며, `<x-layout-paragraph>`도 레이아웃 선택 대상이 아니다.
 
 #### 2.4.1 BoxRole (박스 역할)
 
@@ -923,7 +923,7 @@ function MyComponent() {
 #### 컴포넌트 Props
 
 ```tsx
-<LayoutDocument>
+<LayoutPage>
   {/* 권장: EditManager의 글로벌 모드 + 필터로 제어 */}
   <LayoutBox role="body" id="body-1">
     {/* ... */}
@@ -931,7 +931,7 @@ function MyComponent() {
   <LayoutBox role="image" id="image-1">
     {/* ... */}
   </LayoutBox>
-</LayoutDocument>
+</LayoutPage>
 ```
 
 | Prop | 타입 | 설명 |
@@ -1257,8 +1257,8 @@ LayoutEditController._onMouseUp(event)
 deltaPxX, deltaPxY (마우스 이동 픽셀)
     │
     ▼
-deltaMmX = deltaPxX / LayoutDocumentElement.ppm     ← 픽셀 → mm 변환
-deltaMmY = deltaPxY / LayoutDocumentElement.ppm
+deltaMmX = deltaPxX / LayoutPageElement.ppm     ← 픽셀 → mm 변환
+deltaMmY = deltaPxY / LayoutPageElement.ppm
     │
     ▼
 startX = columnCoords[dragStartLeft].x1         ← 시작 컬럼의 mm 좌표
@@ -1299,8 +1299,8 @@ return { left: newLeft, top: newTop }
 deltaPxX, deltaPxY (마우스 이동 픽셀)
     │
     ▼
-deltaMmX = deltaPxX / LayoutDocumentElement.ppm     ← 픽셀 → mm 변환
-deltaMmY = deltaPxY / LayoutDocumentElement.ppm
+deltaMmX = deltaPxX / LayoutPageElement.ppm     ← 픽셀 → mm 변환
+deltaMmY = deltaPxY / LayoutPageElement.ppm
     │
     ▼
 newLeft = dragStartLeft + deltaMmX              ← 시작 위치 + 이동량
@@ -1546,7 +1546,7 @@ _tryReparent(box, clientX, clientY, state)
 
 **id 보존**: `box.data`의 `id`가 그대로 전달되므로, 새 box도 동일한 `id`를 갖는다.
 
-**`appendChildData`**: `LayoutBoxElement`, `LayoutDocumentElement`, `LayoutTableCellElement`의 public 메서드로, `BoxData`를 받아 `<x-layout-box>` 요소를 생성하고 `data` setter의 전체 초기화 파이프라인(`_layoutStructure` → `_applyStyle` → `_renderBorder` → `_propagateInheritStyle` → `render`)을 실행하여 반환한다.
+**`appendChildData`**: `LayoutBoxElement`, `LayoutPageElement`, `LayoutTableCellElement`의 public 메서드로, `BoxData`를 받아 `<x-layout-box>` 요소를 생성하고 `data` setter의 전체 초기화 파이프라인(`_layoutStructure` → `_applyStyle` → `_renderBorder` → `_propagateInheritStyle` → `render`)을 실행하여 반환한다.
 
 **레이아웃 추가/제거 이벤트**: `_tryReparent`는 기존 box 제거 후 `_dispatchLayoutRemove`, 새 box 생성 후 `_dispatchLayoutAdd`를 호출하여 레이아웃 변경을 외부에 알린다. `source` 필드는 `'reparent'`로 설정된다.
 
@@ -1746,7 +1746,7 @@ overlapPadding: 5
 overlapPadding: { top: 2, right: 5, bottom: 2, left: 5 }
 ```
 
-- 값은 mm 단위이며, 내부적으로 `LayoutDocumentElement.ppm`을 사용해 픽셀로 변환된다.
+- 값은 mm 단위이며, 내부적으로 `LayoutPageElement.ppm`을 사용해 픽셀로 변환된다.
 - 타원형 패딩(`ndx² + ndy² ≤ 1`)을 사용하여 자연스럽게 둥근 회피 영역을 만든다.
 - 투명 픽셀은 텍스트를 차단하지 않는다.
 
@@ -2048,10 +2048,10 @@ private _onKeyDown = (event: KeyboardEvent): void => {
 ## 9. 제한 사항
 
 - **드래그 대상**: `<x-layout-box>`만 드래그 이동할 수 있다.
-- **리사이즈 대상**: `<x-layout-box>`만 리사이즈할 수 있다. `<x-layout-document>`는 리사이즈할 수 없다.
+- **리사이즈 대상**: `<x-layout-box>`만 리사이즈할 수 있다. `<x-layout-page>`는 리사이즈할 수 없다.
 - **리사이즈 방향**: 상/하/좌/우 4방향만 지원한다. 대각선 리사이즈는 지원하지 않는다.
 - **리사이즈 단일 요소**: 리사이즈는 항상 단일 요소에만 적용된다. 다중 선택 상태에서도 리사이즈 핸들을 드래그하면 해당 요소만 크기가 변경된다.
-- **선택 대상**: `<x-layout-box>`만 선택할 수 있다. `<x-layout-document>`, `<x-layout-paragraph>`, `<x-layout-image>`, `<x-layout-column>`은 레이아웃 선택 대상이 아니다.
+- **선택 대상**: `<x-layout-box>`만 선택할 수 있다. `<x-layout-page>`, `<x-layout-paragraph>`, `<x-layout-image>`, `<x-layout-column>`은 레이아웃 선택 대상이 아니다.
 - **중첩 요소 무시**: 다중 선택 드래그 시 선택된 요소들 중 ancestor-descendant 관계에 있으면 가장 상위(ancestor) 요소만 이동하고 하위(descendant) 요소는 무시된다. 하위 요소는 상위 요소와 함께 자연스럽게 이동하므로 별도 이동 처리가 불필요하다. `EditManager.getTopLevelDragTargets()`가 이 필터링을 수행한다.
 - **텍스트 편집과 독립**: 레이아웃 선택은 텍스트 편집 포커스와 무관하게 동작한다. 한 단락이 텍스트 편집 중이더라도 레이아웃 요소를 선택할 수 있다.
 - **시각적 피드백**: 선택 표시는 `box-shadow`를 사용하므로 요소의 레이아웃에 영향을 주지 않는다. `outline`은 기존 `border`와 충돌할 수 있어 사용하지 않는다.
@@ -2288,7 +2288,7 @@ mouseup
 - **`_structureDirty`**: `paragraph.render()`에서 이 플래그가 `true`이면 `layout()`과 `ParagraphEngine.create()`를 재실행한다. `false`이면 기존 모델을 재사용하여 `layoutText()`만 재실행한다. 드래그 중에는 박스 위치가 변하므로 항상 `true`로 설정해야 한다.
 - **`_overlayRectsMm`**: `ParagraphEngine`이 `_layoutTextIntoColumns()` 시작 시 `null`로 초기화한다. `paragraph.render()`에서 `ParagraphEngine.create()` 호출 시 `computeOverlapSizeMm()`를 통해 새로 계산된다.
 - **`layoutMove` 이벤트**: 드래그 완료(mouseup) 또는 취소(ESC) 시 `EditManager._dispatchLayoutMove()`를 통해 발생한다. 단순 클릭(이동 임계값 3px 미만)에서는 발생하지 않는다. `canceled` 필드로 완료와 취소를 구분할 수 있다.
-- **호버 표시 (`hovered`)**: `<x-layout-box>`에만 적용되며, `<x-layout-document>`는 호버 표시를 지원하지 않는다. `mouseenter` 시 조상 요소의 `hovered`를 모두 제거하여 가장 안쪽 요소만 호버 표시가 보이도록 한다. `mouseleave` 시 `elementFromPoint`로 마우스 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다. 이 동작은 중첩된 박스에서 자식→부모로 마우스가 돌아갈 때 부모의 호버가 복원되도록 보장한다.
+- **호버 표시 (`hovered`)**: `<x-layout-box>`에만 적용되며, `<x-layout-page>`는 호버 표시를 지원하지 않는다. `mouseenter` 시 조상 요소의 `hovered`를 모두 제거하여 가장 안쪽 요소만 호버 표시가 보이도록 한다. `mouseleave` 시 `elementFromPoint`로 마우스 아래의 가장 가까운 `LayoutBoxElement`를 찾아 호버를 복원한다. 이 동작은 중첩된 박스에서 자식→부모로 마우스가 돌아갈 때 부모의 호버가 복원되도록 보장한다.
 - **호버와 선택의 우선순위**: `selected`가 있는 요소는 `hovered`를 표시하지 않는다. `LayoutBoxElement._onLayoutMouseEnter`에서 `hasAttribute('selected')`를 먼저 검사하여, 이미 선택된 요소 위에 마우스가 있을 때 파란색 호버 테두리가 빨간색 선택 테두리와 겹치지 않도록 한다. 조상의 `hovered` 제거는 `selected` 체크 전에 수행되어, 선택된 요소 위에서 마우스가 움직일 때 조상 요소의 호버 표시도 제거된다. **lock이 `true`인 box도 호버가 억제된다** — `_onLayoutMouseEnter`에서 `this._lock`이 `true`이면 조상 `hovered` 제거 없이 즉시 early return하여 호버 표시가 나타나지 않는다.
 - **드래그/리사이즈 중 hover 차단**: `EditManager._isDraggingLayout()` 또는 `_isResizingLayout()`이 `true`이면 `LayoutBoxElement._onLayoutMouseEnter`와 `_onLayoutMouseLeave`가 early return하여 hover 표시가 전혀 나타나지 않는다. 드래그 이동 중이나 크기 조정 중에 마우스가 다른 박스 위로 이동해도 방해가 되지 않도록 한다. 드래그/리사이즈가 종료되면 `EditManager._endLayoutDrag()`/`_endLayoutResize()`에서 플래그가 해제되어 hover가 정상 동작한다.
 
@@ -2389,7 +2389,7 @@ mouseup
 #### 11.4.1 absolute 모드 (mm 좌표)
 
 ```
-deltaPxX, deltaPxY → deltaMmX/Y = px / LayoutDocumentElement.ppm
+deltaPxX, deltaPxY → deltaMmX/Y = px / LayoutPageElement.ppm
 padL/R/T/B = inheritStyle padding values
 parentWidth/Height = inheritStyle parent dimensions
 
@@ -2419,7 +2419,7 @@ top handle:
 #### 11.4.2 static 모드 (컬럼/라인 그리드)
 
 ```
-deltaPxX, deltaPxY → deltaMmX/Y = px / LayoutDocumentElement.ppm
+deltaPxX, deltaPxY → deltaMmX/Y = px / LayoutPageElement.ppm
 deltaCols = round(deltaMmX / avgColWidth)
 deltaLines = round(deltaMmY / lineHeight)
 avgColWidth = parentModel.editableWidth / parentModel.columnCount

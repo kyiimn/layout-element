@@ -2,7 +2,7 @@
 
 이 문서는 `layout-element` 패키지의 **바닐라 JavaScript API**(Custom Element 기반)에 대한
 전체 레퍼런스입니다. 모든 측정은 **mm(밀리미터)** 단위이며, 픽셀 변환 비율(`ppm`)은 런타임에
-`LayoutDocumentElement.ppm`(100mm div 측정)을 통해 주입되어 `DocumentEngine.ppm`으로 전파됩니다.
+`LayoutPageElement.ppm`(100mm div 측정)을 통해 주입되어 `PageEngine.ppm`으로 전파됩니다.
 엔진 계층의 모든 연산은 mm 단위로만 동작하므로 ppm은 브라우저 화면 렌더링용도이며 Node.js에서는 불필요합니다.
 엔진 계층에 대한 상세 문서는 [`ENGINE.md`](./ENGINE.md)를 참고하세요.
 
@@ -17,7 +17,7 @@
 
 1. [빠른 시작](#빠른-시작)
 2. [Custom Elements](#custom-elements)
-   - [`<x-layout-document>`](#x-layout-document)
+   - [`<x-layout-page>`](#x-layout-page)
    - [`<x-layout-box>`](#x-layout-box)
    - [`<x-layout-paragraph>`](#x-layout-paragraph)
    - [`<x-layout-image>`](#x-layout-image)
@@ -32,7 +32,7 @@
    - [`GridCalculatorEngine`](#gridcalculatorengine)
    - [`ParagraphEngine`](#paragraphengine)
    - [`BoxEngine`](#boxengine)
-   - [`DocumentEngine`](#documentengine)
+   - [`PageEngine`](#documentengine)
    - [`ImageEngine`](#imageengine)
    - [`TableEngine`](#tableengine)
    - [`FontLoaderEngineImpl`](#fontloaderengineimpl)
@@ -72,7 +72,7 @@
   <script src="./dist/layout-element.iife.js"></script>
 </head>
 <body>
-  <x-layout-document id="doc"></x-layout-document>
+  <x-layout-page id="doc"></x-layout-page>
   <script>
     // 1. 리소스 매니저 초기화 (필수)
     await LayoutElement.ColorRegistry.getInstance().init();
@@ -103,7 +103,7 @@
 > **ESM 사용 시**:
 > ```ts
 > import {
->   LayoutDocumentElement, ColorRegistry, FontLoader,
+>   LayoutPageElement, ColorRegistry, FontLoader,
 > } from 'layout-element';
 > ```
 
@@ -113,27 +113,27 @@
 
 모든 요소는 Shadow DOM(`mode: 'open'`)을 사용하며, 자동 등록을 위해 모듈을 import만 하면
 `customElements.define`이 호출됩니다. React 환경이 아니라면 `useLayoutElement` 훅이 없으므로
-직접 `<x-layout-document>` 마크업을 사용하세요.
+직접 `<x-layout-page>` 마크업을 사용하세요.
 
-### `<x-layout-document>`
+### `<x-layout-page>`
 
 **루트 컨테이너**. 문서 전체의 사이즈, 컬럼 그리드, 기본 스타일을 정의하고 자식 박스 트리를
 조율합니다.
 
-#### Class: `LayoutDocumentElement`
+#### Class: `LayoutPageElement`
 
 ```ts
 /**
- * 문서 루트 요소. `<x-layout-document>` 커스텀 엘리먼트.
+ * 문서 루트 요소. `<x-layout-page>` 커스텀 엘리먼트.
  *
- * `DocumentData`를 받아 전체 렌더링 파이프라인을 조율한다.
+ * `PageData`를 받아 전체 렌더링 파이프라인을 조율한다.
  *
  * 렌더링 파이프라인:
- * 1. `layout()` (동기) — DOM 트리 구축, 자식 박스 생성, `DocumentEngine` 생성 (`GridCalculatorEngine` 포함)
+ * 1. `layout()` (동기) — DOM 트리 구축, 자식 박스 생성, `PageEngine` 생성 (`GridCalculatorEngine` 포함)
  * 2. `render()` (비동기) — 이미지 로딩 후 자식 박스 렌더링
  *
  * @example
- * const doc: LayoutDocumentElement = document.querySelector('x-layout-document')!;
+ * const doc: LayoutPageElement = document.querySelector('x-layout-page')!;
  * doc.data = {
  *   width: 210, height: 297,
  *   columns: 6, gap: 3,
@@ -142,7 +142,7 @@
  *   children: [/* ... *\/],
  * };
  */
-class LayoutDocumentElement extends HTMLElement
+class LayoutPageElement extends HTMLElement
 ```
 
 #### 메서드
@@ -152,7 +152,7 @@ class LayoutDocumentElement extends HTMLElement
 | `layout()` | `(): this \| null` | DOM 트리/스타일/가이드 컬럼을 재구성. `connectedCallback`에서 자동 호출. |
 | `render()` | `(): Promise<this \| null>` | 자식 박스를 z-index 역순으로 비동기 렌더링. `layout()` 완료 후 호출. |
 | `appendChild<T>(node)` | `(node: T): T` | 박스/단락/이미지 자식에 `InheritStyle` 자동 전파. |
-| `flipLayout(options)` | `(options: FlipLayoutOptions): void` | 문서 또는 지정된 박스의 **하위 요소** 배치를 좌우/상하/상하좌우 반전. 엔진의 `DocumentEngine.flipLayout()`을 호출하여 엔진 트리에서 직접 반전을 수행하고, 반환된 `DocumentData`를 `data` setter에 적용. `targetId` 지정 시 해당 박스가 root, 생략 시 문서가 root. 반전 전 편집 상태(포커스, 선택)를 해제. |
+| `flipLayout(options)` | `(options: FlipLayoutOptions): void` | 문서 또는 지정된 박스의 **하위 요소** 배치를 좌우/상하/상하좌우 반전. 엔진의 `PageEngine.flipLayout()`을 호출하여 엔진 트리에서 직접 반전을 수행하고, 반환된 `PageData`를 `data` setter에 적용. `targetId` 지정 시 해당 박스가 root, 생략 시 문서가 root. 반전 전 편집 상태(포커스, 선택)를 해제. |
 | `parkPage(id)` | `(id: string): HTMLDivElement \| null` | 페이지 박스를 DOM에서 분리하고 보관 (DOM 가상화). `data-parked-page` 플레이스홀더로 교체. 엔진 트리에는 유지되므로 스레딩·추출·내보내기가 정상 동작. 반환된 플레이스홀더에 분리 전 footprint 크기를 지정해야 스크롤이 유지된다. |
 | `unparkPage(id)` | `(id: string): LayoutBoxElement \| null` | 보관된 페이지를 플레이스홀더 자리에 복원. `connectedCallback → layout()`으로 기존 엔진에 재연결 (캐시 히트). 비동기 페인트 확정이 필요하면 반환 요소의 `render()`를 호출. |
 
@@ -160,7 +160,7 @@ class LayoutDocumentElement extends HTMLElement
 
 | 이름 | 타입 | 단위 | 설명 |
 |---|---|---|---|
-| `data` | `DocumentData` | — | 한 번에 모든 필드 갱신. 자식 박스는 ID 기반 diff로 재구성 (같은 ID는 in-place 업데이트, 새 ID는 생성, 없는 ID는 제거). `data.id`가 `undefined`이면 `data` setter에서 `genUUID()`로 자동 생성. `data` getter는 `engine.extractData`를 반환 (엔진 우선 원칙). |
+| `data` | `PageData` | — | 한 번에 모든 필드 갱신. 자식 박스는 ID 기반 diff로 재구성 (같은 ID는 in-place 업데이트, 새 ID는 생성, 없는 ID는 제거). `data.id`가 `undefined`이면 `data` setter에서 `genUUID()`로 자동 생성. `data` getter는 `engine.extractData`를 반환 (엔진 우선 원칙). |
 | `id` | `string` | — | 요소 고유 식별자. `data` setter에서 `data.id`가 `undefined`이면 `genUUID()`로 자동 할당. 엔진에서 생성된 id는 `_syncEngineIdsToDom()`을 통해 DOM에 write-back. |
 | `width` | `number` | mm | 문서 너비. |
 | `height` | `number` | mm | 문서 높이. |
@@ -181,7 +181,7 @@ class LayoutDocumentElement extends HTMLElement
 |---|---|---|
 | `items` | `LayoutBoxElement[]` | 직속 자식 박스 (`<x-layout-box>`) 배열. |
 | `model` | `GridCalculatorEngine \| undefined` | 컬럼 그리드 계산기. |
-| `engine` | `DocumentEngine \| undefined` | 문서 루트 엔진 (ppm, 리소스, 트리 관리). |
+| `engine` | `PageEngine \| undefined` | 문서 루트 엔진 (ppm, 리소스, 트리 관리). |
 | `editManager` | `EditManager` | 이 문서 요소 전용 `EditManager` 인스턴스. constructor에서 생성되어 요소 생명주기 내내 존재한다. |
 | `visibleGuide` | `boolean` | 가이드 컬럼 표시 여부. |
 | `type` | `'document'` | 타입 리터럴. |
@@ -243,7 +243,7 @@ manager.attach();
 editManager.addEventListener('focusChange', () => {
   const para = editManager.focusedParagraph;
   let page: Element | null = para;
-  while (page?.parentElement && page.parentElement.localName !== 'x-layout-document') {
+  while (page?.parentElement && page.parentElement.localName !== 'x-layout-page') {
     page = page.parentElement;
   }
   const pageId = page?.localName === 'x-layout-box' ? (page as Element).id : null;
@@ -768,7 +768,7 @@ class LayoutTableElement extends HTMLElement
 | `items` | `LayoutTableRowElement[]` | 직계 자식 TR 요소 배열. |
 | `type` | `'table'` | 요소 타입 식별자. |
 | `zIndex` | `number` | 항상 `0` — 부모 box의 zIndex를 따르므로 정렬에 영향 없음. |
-| `editManager` | `EditManager \| null` | 부모 체인에서 `LayoutDocumentElement.editManager` 조회. |
+| `editManager` | `EditManager \| null` | 부모 체인에서 `LayoutPageElement.editManager` 조회. |
 | `absLeft` | `number` | 문서 기준 절대 X 좌표(mm). 부모 box에서 상속. |
 | `absTop` | `number` | 문서 기준 절대 Y 좌표(mm). 부모 box에서 상속. |
 | `absWidth` | `number` | 절대 너비(mm). 부모 box의 콘텐츠 영역 너비. |
@@ -1339,26 +1339,26 @@ class BoxEngine {
   ): void;
 }
 
-type BoxEngineParent = DocumentEngine | BoxEngine | TableCellEngine;
+type BoxEngineParent = PageEngine | BoxEngine | TableCellEngine;
 ```
 
 ---
 
-### `DocumentEngine`
+### `PageEngine`
 
 문서 루트 엔진. ppm, 폰트, 색상 리소스를 주입받아 하위 엔진으로 전파.
 
 ```ts
-class DocumentEngine {
+class PageEngine {
   static create(
-    data: DocumentData,
+    data: PageData,
     fontLoader: FontLoaderEngine,
     colorRegistry: ColorRegistryEngine,
     ppm?: number,
-  ): DocumentEngine;
+  ): PageEngine;
 
-  get data: DocumentData;
-  get extractData: DocumentData;
+  get data: PageData;
+  get extractData: PageData;
   get ppm: number;
   get width: number;
   get height: number;
@@ -1371,7 +1371,7 @@ class DocumentEngine {
   get resources: { ppm, fontLoader, colorRegistry };
   get printPostData: PrintPostData[];
 
-  set data(d: DocumentData): void;
+  set data(d: PageData): void;
   set ppm(v: number): void;
   set childBoxEngines(engines: BoxEngine[]): void;
 
@@ -1384,7 +1384,7 @@ class DocumentEngine {
 >
 > **dirty 계약**: 개별 setter는 `_dirty`만 설정하고 `extractData`/`printPostData` 조회 시 `DirtyPendingError`(`e.name === 'DirtyPendingError'`로 판별 가능)를 throw한다 — 읽기는 자가 치유하지 않는다. 일관 스냅샷이 필요한 소비자(저장/내보내기/print)는 읽기 전에 `ensureCommitted()`를 호출한다. `engine.layout()` 등 커밋 연산 후에는 조회가 정상화된다.
 
-> **스레딩**: `DocumentData.threads`가 정의되면 `layout()` 종료 시 스레드 프레임이 순차 feed-forward 배치된다 (`ThreadEngine` 위임). head 프레임이 story 전체를 소유하고 후속 프레임은 `contentFrom` 이후부터 배치된다. 상세: `TEXT_ENGINE.md` §26, 검증: `scripts/verify-threading.mjs`.
+> **스레딩**: `PageData.threads`가 정의되면 `layout()` 종료 시 스레드 프레임이 순차 feed-forward 배치된다 (`ThreadEngine` 위임). head 프레임이 story 전체를 소유하고 후속 프레임은 `contentFrom` 이후부터 배치된다. 상세: `TEXT_ENGINE.md` §26, 검증: `scripts/verify-threading.mjs`.
 
 ---
 
@@ -1444,10 +1444,10 @@ class ParagraphEngine {
 }
 ```
 
-> **타이핑 전파**: `DocumentEngine.relayoutThreads(sourceFrameIds?, pinnedFrameIds?)` —
+> **타이핑 전파**: `PageEngine.relayoutThreads(sourceFrameIds?, pinnedFrameIds?)` —
 > 편집 프레임 id 집합을 전달하면 `_writebackThreadStory`가 소스 프레임의
 > `textContent`를 소속 thread의 story(`content`)에 기록한 뒤 체인을 재배치한다.
-> story writeback은 엔진이 소유한다 (엔진-우선 원칙). DOM `LayoutDocumentElement`는
+> story writeback은 엔진이 소유한다 (엔진-우선 원칙). DOM `LayoutPageElement`는
 > `requestThreadRelayout(sourceFrameId)`로 이 경로를 예약(마이크로태스크 통합)한다.
 >
 > **범위-증명 스킵 (§4.6)**: 키스트로크 시 `_writebackThreadStory`가 구 story vs
@@ -1889,7 +1889,7 @@ FontLoader.getInstance().getFontFamily('serif'); // → 등록된 첫 폰트
 ### `EditManager`
 
 편집 상태를 관리하는 **문서(document)별 인스턴스**. 포커스, 선택, 편집 모드, 레이아웃 선택, 삽입 모드
-모두를 이 매니저로 제어합니다. `LayoutDocumentElement.editManager`로 접근한다.
+모두를 이 매니저로 제어합니다. `LayoutPageElement.editManager`로 접근한다.
 
 ```ts
 class EditManager {
@@ -2443,7 +2443,7 @@ window.addEventListener('keydown', (e) => {
 });
 ```
 
-> **참고**: `<x-layout-document>`는 `window` capture phase에서 Tab 키를 가로채서
+> **참고**: `<x-layout-page>`는 `window` capture phase에서 Tab 키를 가로채서
 > `navigateByTab`을 자동 호출하므로, 일반적으로 외부에서 별도 핸들러를 달 필요는 없다.
 
 #### 삽입 모드
@@ -2780,7 +2780,7 @@ getSpanByOffset(offset: number): HTMLSpanElement | null;
 
 ```ts
 class InsertController {
-  constructor(document: LayoutDocumentElement);
+  constructor(document: LayoutPageElement);
 
   get mode: InsertMode | null;
   setMode(mode: InsertMode | null): void;
@@ -2978,10 +2978,10 @@ class TableStructureEditor {
 
 ### Layout Types
 
-#### `DocumentData`
+#### `PageData`
 
 ```ts
-type DocumentData = {
+type PageData = {
   id?: string;                         // 고유 식별자 (선택). 미지정 시 data setter에서 genUUID()로 자동 생성.
   width: number;                       // mm (필수)
   height: number;                      // mm (필수)
@@ -3284,7 +3284,7 @@ type ParagraphStyle = {
 
 > **UI 권고 — 모드 전환 시 값 단위 변환**: `lineGapMode`만 전환하고 `lineGap`을 그대로 두면 상속/명시 값이 새 모드로 재해석된다 (예: 1.2 배율 → 1.2mm 고정). UI에서 모드를 전환할 때는 값을 함께 변환해야 한다 (ratio → fixed: 현재 fontSize 곱셈, fixed → ratio: 나눗셈 — 호스트 앱 책임).
 >
-> **두 층위 소스**: static box 그리드 좌표·`absHeight`·insert 스냅·가이드 컬럼은 **문서 수준** `DocumentData.paragraphStyle`의 모드를 따르고, 문단 텍스트 라인 높이는 문단 자체 effective 스타일의 모드를 따른다. 두 층위가 다른 모드이면 그리드 단위와 텍스트 행간이 어긋날 수 있다 (기존 `lineGap`과 동일한 구조).
+> **두 층위 소스**: static box 그리드 좌표·`absHeight`·insert 스냅·가이드 컬럼은 **문서 수준** `PageData.paragraphStyle`의 모드를 따르고, 문단 텍스트 라인 높이는 문단 자체 effective 스타일의 모드를 따른다. 두 층위가 다른 모드이면 그리드 단위와 텍스트 행간이 어긋날 수 있다 (기존 `lineGap`과 동일한 구조).
 
 #### `TextInlineStyle`
 
@@ -3663,7 +3663,7 @@ function removeAiProcessingOverlay(shadowRoot: ShadowRoot): void;
 `@/examples`에서 export되는 데모 데이터:
 
 ```ts
-export const exampleData: DocumentData;  // 신문 1면 데모
+export const exampleData: PageData;  // 신문 1면 데모
 ```
 
 `exampleData`는 5-컬럼 신문 레이아웃으로, 다음을 포함합니다:
@@ -3674,7 +3674,7 @@ export const exampleData: DocumentData;  // 신문 1면 데모
 ```ts
 import { exampleData } from 'layout-element';
 
-const doc = document.querySelector('x-layout-document')!;
+const doc = document.querySelector('x-layout-page')!;
 doc.data = exampleData;
 ```
 
@@ -3704,9 +3704,9 @@ doc.data = exampleData;
 
 ## 후처리 데이터 export 가이드
 
-`printPostData`는 엔진 전용 API입니다. `DocumentEngine.printPostData`에서 계산된 **mm 단위** 좌표를 반환합니다. 외부 후처리 시스템(PDF 생성 등)이 엔진에서 직접 호출합니다. DOM에서는 `printPostData`를 호출하지 않습니다.
+`printPostData`는 엔진 전용 API입니다. `PageEngine.printPostData`에서 계산된 **mm 단위** 좌표를 반환합니다. 외부 후처리 시스템(PDF 생성 등)이 엔진에서 직접 호출합니다. DOM에서는 `printPostData`를 호출하지 않습니다.
 
-1. **엔진 전용 API**: `printPostData`는 `DocumentEngine`의 getter로, DOM 요소에서는 제거되었다.
+1. **엔진 전용 API**: `printPostData`는 `PageEngine`의 getter로, DOM 요소에서는 제거되었다.
 2. **mm 단위**: 모든 rect/char 좌표는 mm 단위 number. 화면 표시용 ppm 변환은 외부에서 수행한다.
 3. **DOM 독립**: DOM `getBoundingClientRect()`에 의존하지 않는다.
 4. **z-index 오름차순**: 자식 요소를 z-index **오름차순**(낮은 것부터)으로 재귀 수집한다.
@@ -3714,8 +3714,8 @@ doc.data = exampleData;
 
 ```ts
 // Headless 환경에서 엔진 직접 사용
-const engine = DocumentEngine.create(documentData, fontLoader, colorRegistry);
-engine.childrenData = documentData.children ?? [];
+const engine = PageEngine.create(pageData, fontLoader, colorRegistry);
+engine.childrenData = pageData.children ?? [];
 engine.layout();
 const postData = engine.printPostData;
 // → 외부 후처리 시스템에 전달

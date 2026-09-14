@@ -5,27 +5,27 @@
   <title>Image Edit Verify</title>
   <style>
     body { margin: 16px; font-family: sans-serif; }
-    x-layout-document { display: block; border: 1px solid #ccc; }
+    x-layout-page { display: block; border: 1px solid #ccc; }
     #ready-flag { position: fixed; top: 4px; right: 4px; font-size: 11px; color: #888; }
   </style>
 </head>
 <body>
   <div id="ready-flag">LOADING</div>
-  <x-layout-document id="doc" style="width: 400mm; height: 220mm;"></x-layout-document>
+  <x-layout-page id="page" style="width: 400mm; height: 220mm;"></x-layout-page>
 
   <script type="module">
     import { FontLoader, ColorRegistry } from '/src/index.ts';
 
-    const doc = document.getElementById('doc');
+    const page = document.getElementById('page');
     const flag = document.getElementById('ready-flag');
 
     async function init() {
       await FontLoader.getInstance().init();
       await ColorRegistry.getInstance().init();
 
-      doc.data = {
+      page.data = {
         type: 'document',
-        id: 'img-verify-doc',
+        id: 'img-verify-page',
         width: 400, height: 220,
         columns: 4, gap: 5,
         paragraphStyle: { lineGap: 1.25, textAlign: 'justify', verticalAlign: 'top' },
@@ -89,7 +89,7 @@
           },
         ],
       };
-      await doc.render();
+      await page.render();
       flag.textContent = 'IMG_VERIFY_READY';
     }
 

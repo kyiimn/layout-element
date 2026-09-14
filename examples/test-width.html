@@ -16,10 +16,10 @@
   await FontLoader.getInstance().init();
   await ColorRegistry.getInstance().init();
 
-  const doc = document.createElement('x-layout-document');
+  const page = document.createElement('x-layout-page');
   document.getElementById('test').appendChild(doc);
-  doc.data = exampleData;
-  await doc.render();
+  page.data = exampleData;
+  await page.render();
 
   setTimeout(() => {
     const paras = document.querySelectorAll('x-layout-paragraph');

@@ -64,10 +64,10 @@ flowchart TD
 
 ### 2.2 Phase 2: 구조 측정 (`layoutStructure` / `_initStructureAndMeasureColumns`)
 
-`_initStructureAndMeasureColumns()`에서 컬럼 폭, 간격, 줄 높이를 계산하고, `DocumentEngine.ppm`을 직접 사용한다.
+`_initStructureAndMeasureColumns()`에서 컬럼 폭, 간격, 줄 높이를 계산하고, `PageEngine.ppm`을 직접 사용한다.
 
 - `_columnWidths`, `_gaps`, `_lineHeight` 초기화
-- `DocumentEngine.ppm`으로 mm→px 변환 비율 확보 (DOM 측정 불필요)
+- `PageEngine.ppm`으로 mm→px 변환 비율 확보 (DOM 측정 불필요)
 
 ### 2.3 Phase 3: 텍스트 배치 (`layoutText` / `_layoutTextIntoColumns`)
 
@@ -722,7 +722,7 @@ type FreeRegion = { start: number; end: number };
 ### 10.1 전체 트리
 
 ```text
-<x-layout-document>
+<x-layout-page>
   └── <x-layout-box>
         └── <x-layout-paragraph>
               ├── #shadow-root
@@ -1018,7 +1018,7 @@ CSS `transform: scale(s)`가 적용된 환경에서 `getBoundingClientRect()`는
 이를 방지하기 위해 모든 `getBoundingClientRect()` 결과는 `EditManager.scale`로 나누어 **scale=1 기준 픽셀 좌표**로 정규화한 뒤 사용한다. 정규화는 다음 경로에 적용된다:
 
 1. **ppm 측정** (`_initStructureAndMeasureColumns`): 가상 컬럼의 렌더링 폭을 scale로 나누어 ppm을 계산한다. 폰트 메트릭 기반 `_charWidthMm()`은 ppm에 무관하게 동일한 mm 값을 반환하므로, 오버랩이 없는 라인의 글자 배치도 일관된다.
-2. **오버랩 rect 캐시** (`_detectOverlapWithCache`): 오버랩 요소의 mm rect(`absLeft`/`absTop`/`absWidth`/`absHeight`)를 사용한다. 이 값들은 모델 기반 mm 좌표이므로 `getBoundingClientRect()`를 호출하지 않으며, scale에 무관하게 동일한 겹침 판정 결과를 보장한다. `computeOverlapSizeMm()`도 mm 좌표계에서 직접 동작하므로 canvas 픽셀 매핑만 `DocumentEngine.ppm`을 통해 수행된다.
+2. **오버랩 rect 캐시** (`_detectOverlapWithCache`): 오버랩 요소의 mm rect(`absLeft`/`absTop`/`absWidth`/`absHeight`)를 사용한다. 이 값들은 모델 기반 mm 좌표이므로 `getBoundingClientRect()`를 호출하지 않으며, scale에 무관하게 동일한 겹침 판정 결과를 보장한다. `computeOverlapSizeMm()`도 mm 좌표계에서 직접 동작하므로 canvas 픽셀 매핑만 `PageEngine.ppm`을 통해 수행된다.
 
 `ParagraphEngine.scale` 프로퍼티를 통해 scale 값을 받으며, `LayoutParagraphElement.render()`가 `layoutDocEl.editManager.scale`을 읽어 `model.scale`에 설정한 후 `layoutStructure()`/`layoutText()`를 호출한다. `EditManager.setScale()`은 모든 paragraph의 `markStructureChangedAndRender()`를 호출하므로, scale 변경 시 자동으로 재렌더링되어 새 scale이 반영된다.
 
@@ -1148,7 +1148,7 @@ this._lineHeight = computeLineHeightMm(lineGap, lineGapMode, fontSize);
 - **`'fixed'` + `lineGap < fontSize`**: 글자의 행 간 겹침을 허용한다 (InDesign 패리티). 이때 오버랩 회피 rect도 고정 높이를 사용하므로, 고정값을 초과하는 큰 글리프의 시각적 돌출부는 회피 계산에 반영되지 않는다.
 - **`'fixed'` 균일 경로**: 인라인 fontSize 오버라이드가 있어도 모든 라인 높이가 균일(lineGap)하므로 `_layoutColumnsPass`가 항상 균일 경로로 배치한다 (fast-path).
 - **캐시 해시**: `_computeLayoutInputHash`/`_computePrefixHash`에 원시 `lg:`(lineGap)·`lgm:`(mode) 키를 포함한다 — fixed/fixed-min에서 base lineHeight가 결정적이지 않으므로 모드·값 변경 시 stale 캐시 히트를 방어한다. 검증: `scripts/verify-line-gap-mode.mjs` (58항목).
-- **두 층위 소스**: static box 그리드(`GridCalculatorEngine.lineHeight` — `absHeight`, containment, insert 스냅, 가이드 컬럼)는 **문서 수준** `DocumentData.paragraphStyle`의 모드를 따르고, 문단 텍스트 라인 높이는 문단 effective 스타일의 모드를 따른다 (기존 `lineGap`과 동일 구조).
+- **두 층위 소스**: static box 그리드(`GridCalculatorEngine.lineHeight` — `absHeight`, containment, insert 스냅, 가이드 컬럼)는 **문서 수준** `PageData.paragraphStyle`의 모드를 따르고, 문단 텍스트 라인 높이는 문단 effective 스타일의 모드를 따른다 (기존 `lineGap`과 동일 구조).
 - **모드별 lineGap 기본값**: `resolveLineGap()`(`src/engine/line-height.ts`)이 effective 병합 후 기본값을 채운다 — `'ratio'` 생략 시 `DEFAULT_LINE_GAP`(1.25 배율), `'fixed'`/`'fixed-min'` 생략 시 `DEFAULT_LINE_GAP_FIXED`(6mm). 주입/상속값이 있으면 항상 그 값이 모드로 해석된다 (카스케이드 우선). `effectiveParagraphStyle`은 `DEFAULT_PARAGRAPH_STYLE_NO_LINE_GAP` 스키마로 병합(기본값이 먼저 채워지면 생략 판정 불가) 후 보정한다. 검증: `scripts/verify-line-gap-mode.mjs` (69항목).
 - **개별 setter 계약**: `ParagraphEngine.textStyle`/`paragraphStyle` 개별 setter는 `_initLayoutMetrics()`를 호출해 `_lineHeight`를 즉시 재계산한다 (Node.js 엔진 직접 경로에서 stale `_lineHeight` + stale 캐시 히트 방어).
 
@@ -1250,7 +1250,7 @@ lineRectMm (라인, mm)       overlayElement (이미지 박스, mm)
 overlapPadding?: number | { top?: number; right?: number; bottom?: number; left?: number }
 ```
 
-값은 mm 단위이며, `DocumentEngine.ppm`을 통해 화면 픽셀로 변환된다. `number`이면 상하좌우 동일하게 적용된다.
+값은 mm 단위이며, `PageEngine.ppm`을 통해 화면 픽셀로 변환된다. `number`이면 상하좌우 동일하게 적용된다.
 
 #### 알고리즘
 
@@ -1575,7 +1575,7 @@ textAlign = 'justify' (space-between)
 | 폰트 메트릭 측정 + LRU 폭 캐시 | `_charWidthMm()` | `glyph.advanceWidth / unitsPerEm * fontSize`로 mm 직접 계산 + `_charWidthCache`(LRU 5000)로 캐싱. DOM 조작 없이 순수 계산, 환경 무관, 재레이아웃 시 폰트 호출 비용 제거 |
 | LRU 스타일 캐시 | `genCharStyle()` | `_charOuterStyleCache`를 `Map`에서 `LRU`(5000)로 교체. 안정적 적중률, 성능 cliff 제거 |
 | 오버랩 rect 캐시 | `_detectOverlapWithCache()` | `Map`에 오버랩 요소 mm rect 캐싱. 리플로우 0회 (mm 직접 계산) |
-| mm 좌표계 직접 계산 | `_initStructureAndMeasureColumns()` / `_layoutTextIntoColumns()` | mm 좌표로 직접 계산, `DocumentEngine.ppm` 사용. 강제 리플로우 0회 |
+| mm 좌표계 직접 계산 | `_initStructureAndMeasureColumns()` / `_layoutTextIntoColumns()` | mm 좌표로 직접 계산, `PageEngine.ppm` 사용. 강제 리플로우 0회 |
 | key 기반 증분 렌더링 + span 스킵 | `renderText()` | `data-source-offset` key로 span 재사용 + `_skipSpanStyleIfUnchanged()`로 변경 없는 span 스타일 적용 스킵 |
 | 스타일 시트 증분 갱신 | `renderText()` `:host` rule | `_cachedColStyleKey`로 `JSON.stringify` 비교 후 변경 시에만 재구축 |
 | queueMicrotask 배치 렌더링 | `LayoutParagraphElement.render()` | `scheduleRender()` + `queueMicrotask`로 다중 `render()` 호출 통합 |
@@ -2030,7 +2030,7 @@ span에 적용한다. 캐시 키(`_charOuterStyleCache`)에 outline 값이 포�
 
 검증: `npx tsx scripts/verify-text-decoration.mjs` (55항목).
 
-## 26. 텍스트 스레딩 (`DocumentData.threads`)
+## 26. 텍스트 스레딩 (`PageData.threads`)
 
 여러 문단 프레임이 하나의 연속 텍스트 흐름(story)을 공유하는 InDesign 텍스트 스레딩 모델이다.
 thread가 story 콘텐츠의 단일 소스이며, 프레임 문단은 표시 범위(window)만 소유한다.
@@ -2045,7 +2045,7 @@ type ThreadData = {
 };
 ```
 
-- `DocumentData.threads?: ThreadData[]` — 스레딩 정의 (옵셔널, 생략 시 기존 동작 byte-identical).
+- `PageData.threads?: ThreadData[]` — 스레딩 정의 (옵셔널, 생략 시 기존 동작 byte-identical).
 - **head 프레임**(paragraphIds[0])이 `content` 전체를 `textContent`로 소유한다.
 - 후속 프레임은 `ParagraphData.content`를 소유하지 않는다 — `extractData`가
   `content: undefined`를 반환하여 직렬화 round-trip에서 중복 소유를 방지한다
@@ -2053,7 +2053,7 @@ type ThreadData = {
 
 ### 26.2 순차 feed-forward 배치
 
-`DocumentEngine.layout()` 종료 시 `_layoutThreads()`가 실행되어,
+`PageEngine.layout()` 종료 시 `_layoutThreads()`가 실행되어,
 `ThreadEngine.layoutThreads()`가 프레임을 순서대로 배치한다:
 
 1. head 프레임 `textContent` = story 전체 (pull-back의 단일 근거 — story 축소 시
@@ -2106,11 +2106,11 @@ thread의 story가 head `textContent` 배치 시점에 첫 thread story로
 
 ### 26.5 DOM 레이어
 
-- `LayoutDocumentElement`의 `data` setter가 `threads`를 `_threads`에 저장하여
+- `LayoutPageElement`의 `data` setter가 `threads`를 `_threads`에 저장하여
   엔진 `docData`에 전달한다 (`_rawData()`도 포함 — round-trip 보존).
 - 스레드 프레임(`isThreadFrame`)의 `LayoutParagraphElement.content` setter는
   외부 주입을 무시한다 — story 단일 소스 계약을 유지한다.
-- `LayoutDocumentElement.layout()`/`render()`이 스레드 체인을 완성한다
+- `LayoutPageElement.layout()`/`render()`이 스레드 체인을 완성한다
   (`relayoutThreads` + `_syncThreadFramesToDom`): 초기 reconcile에서 paragraph
   model이 box 엔진에 push되는 시점이 제각각이라 엔진 `layout()` 시점의
   `_layoutThreads`가 일부 프레임만 찾을 수 있기 때문이다.
@@ -2119,8 +2119,8 @@ thread의 story가 head `textContent` 배치 시점에 첫 thread story로
 
 - **타이핑 전파**: 편집(rAF 커밋)이 스레드 프레임의 `model.textContent`를
   갱신하면 `LayoutParagraphElement.render()` 진입 시 `hasPendingChanges`로
-  이를 포착해 `LayoutDocumentElement.requestThreadRelayout(sourceFrameId)`을
-  호출한다. 문서는 마이크로태스크로 통합한 뒤 `DocumentEngine.relayoutThreads(sourceFrameIds)`
+  이를 포착해 `LayoutPageElement.requestThreadRelayout(sourceFrameId)`을
+  호출한다. 문서는 마이크로태스크로 통합한 뒤 `PageEngine.relayoutThreads(sourceFrameIds)`
   에 위임한다: (1) `_writebackThreadStory` — 소스 프레임의 `textContent`를
   소속 thread의 `content`(story)에 기록, (2) 체인 재배치, (3) 문서가 소스를
   제외한 프레임 DOM을 재렌더한다. **story writeback은 엔진이 소유한다**
@@ -2204,7 +2204,7 @@ thread의 story가 head `textContent` 배치 시점에 첫 thread story로
   R-T2 게이트(입력 불변 프레임의 캐시 히트를 O(1)화)가 대신 수행한다.
 - **스레드 프레임 배치 조회 (`findEnginesByIds`, P2-2)**: 체인 배치·DOM
   동기화·flush가 프레임마다 `findEngineById`(재귀 검색)를 호출하면 조회 수 ×
-  트리 크기로 증폭된다 — `DocumentEngine.findEnginesByIds(ids)`가 트리를
+  트리 크기로 증폭된다 — `PageEngine.findEnginesByIds(ids)`가 트리를
   1회만 순회해 전 프레임 엔진을 수집한다(순회 순서·첫 일치 우선 시맨틱 동일).
   캐시가 아니므로 reparent/제거의 직접 splice(generation 미증가 변이 경로)에도
   무효화 문제가 없다 — generation 기반 id→engine 맵 캐시는 무효화 누수 위험으로

@@ -110,7 +110,7 @@ containerLineCount = floor(editableHeight / lineHeight) + 1
 
 ### 1.10 텍스트 스레딩(threading) 불변식
 
-- **story 단일 소스**: 스레드(`DocumentData.threads`)의 `content`가 story 전체의 단일 소스다. head 프레임만 `textContent`로 전체를 소유하고, 후속 프레임은 `extractData`가 `content: undefined`를 반환한다 (중복 소유 → restore 시 텍스트 중복 버그 방지). 새 필드 추가 시 이 계약을 유지한다. 범위-증명 스킵 중에는 head의 `textContent`가 `threads[].content`보다 구 story일 수 있다 (한시적 불일치 — 복원 시 thread가 이기므로 자가 치유). story 권위는 항상 `threads[].content`이며 `head.content`를 진실로 취급하면 안 된다.
+- **story 단일 소스**: 스레드(`PageData.threads`)의 `content`가 story 전체의 단일 소스다. head 프레임만 `textContent`로 전체를 소유하고, 후속 프레임은 `extractData`가 `content: undefined`를 반환한다 (중복 소유 → restore 시 텍스트 중복 버그 방지). 새 필드 추가 시 이 계약을 유지한다. 범위-증명 스킵 중에는 head의 `textContent`가 `threads[].content`보다 구 story일 수 있다 (한시적 불일치 — 복원 시 thread가 이기므로 자가 치유). story 권위는 항상 `threads[].content`이며 `head.content`를 진실로 취급하면 안 된다.
 - **tail의 단일 소스는 라인 높이 순회**: `_captureThreadTail()`은 `columnContents`를 라인 높이 순서로 순회해 visible 라인 글자 수(`endOfBlock` 라인 뒤 `\n` 1자 포함)를 tail 시작점으로 기록한다. 배치 커서(`_layoutColumnsPass` 종료 상태)는 배치 완료 시 블록 범위를 벗어나므로 **배치 커서 기반 tail 산출은 금지** — 이 엔진의 `overflow`는 라인 높이 판정이지 배치 중단이 아니다.
 - **tail 오프셋은 story plain 공간 절대값**: `overflowContentFrom` = `contentFrom + visible 라인 글자 수`. 다음 프레임의 `contentFrom`과 정확히 일치해야 한다 (체인 무중복).
 - **`contentFrom > 0` 조건부 해시 키**: `_computeLayoutInputHash`/`_computePrefixHash`의 `tf:` 키는 `contentFrom > 0`일 때만 포함한다 — 비-스레딩 문단의 해시가 기존과 byte 동일해야 한다. 검증: `snapshot-layout.mjs` byte 비교.
@@ -119,15 +119,15 @@ containerLineCount = floor(editableHeight / lineHeight) + 1
 - **`updateThreadContext` 변경 시 캐시 무효화**: `contentFrom`/`isThreadFrame` 변경은 배치 입력의 변화이므로 `_layoutCache`/`_prefixCache`를 무효화한다.
 - **스레드 없으면 no-op**: `_layoutThreads()`는 threads가 없으면 즉시 반환한다. 모든 스레딩 코드 경로는 threads 존재 게이트를 유지해야 한다. 검증: `scripts/verify-threading.mjs` (104항목).
 - **중간 프레임 overflow는 오류가 아니다 (`isThreadTail`)**: 스레드 중간 프레임의 overflow는 다음 프레임으로 흘러 소비된다. 빨간 테두리(`_hasOverflow`)/`render-error`는 `isThreadTail === true`(체인 마지막 또는 소진 지점)에서만 발동한다. 기본값 `true`로 비-스레드 프레임의 기존 동작을 보존한다. DOM 게이트를 제거하면 모든 스레드 프레임에 허위 테두리가 표시된다.
-- **타이핑 전파는 story writeback으로**: 편집 프레임의 `model.textContent`가 story의 새 진실이다 — `DocumentEngine.relayoutThreads(sourceFrameIds)`가 `_writebackThreadStory`로 `thread.content`에 기록한 뒤 체인을 재배치한다. **story writeback은 엔진이 소유한다** (엔진-우선 원칙) — DOM 계층이 threads 데이터를 직접 mutate하면 안 된다. 편집 프레임 자체의 DOM은 편집 파이프라인이 소유하므로 재렌더 대상에서 제외한다.
+- **타이핑 전파는 story writeback으로**: 편집 프레임의 `model.textContent`가 story의 새 진실이다 — `PageEngine.relayoutThreads(sourceFrameIds)`가 `_writebackThreadStory`로 `thread.content`에 기록한 뒤 체인을 재배치한다. **story writeback은 엔진이 소유한다** (엔진-우선 원칙) — DOM 계층이 threads 데이터를 직접 mutate하면 안 된다. 편집 프레임 자체의 DOM은 편집 파이프라인이 소유하므로 재렌더 대상에서 제외한다.
 - **`ThreadEngine.validate`는 원본 identity를 보존**: 중복 프레임 제거가 필요한 스레드만 복사본을 만든다. 무조건 복사하면 writeback이 복사본에 기록되어 `engine.data.threads` 원본에 반영되지 않는다 (story 소실 버그). 검증: `scripts/verify-threading.mjs` [9].
-- **중복 소속 프레임은 first-claim-wins (배치·writeback 동일 소속 판정)**: 한 프레임이 여러 thread에 소속되면 첫 유효 thread만 그 프레임을 소유한다 — `ThreadEngine.validate`(데이터 정합성)와 `layoutThreads`(배치 소유권 확정)과 `DocumentEngine._writebackThreadStory`(story 기록)가 동일한 소속 판정을 사용해야 한다. 하나라도 다르면 (a) 다른 thread의 story가 head textContent로 덮어써지거나 (b) 편집 writeback이 다른 thread의 story를 오염시킨다 (실측 재현: verify-threading [13]). 검증: `scripts/verify-threading.mjs` [13].
+- **중복 소속 프레임은 first-claim-wins (배치·writeback 동일 소속 판정)**: 한 프레임이 여러 thread에 소속되면 첫 유효 thread만 그 프레임을 소유한다 — `ThreadEngine.validate`(데이터 정합성)와 `layoutThreads`(배치 소유권 확정)과 `PageEngine._writebackThreadStory`(story 기록)가 동일한 소속 판정을 사용해야 한다. 하나라도 다르면 (a) 다른 thread의 story가 head textContent로 덮어써지거나 (b) 편집 writeback이 다른 thread의 story를 오염시킨다 (실측 재현: verify-threading [13]). 검증: `scripts/verify-threading.mjs` [13].
 - **BoxEngine `childrenData` 삼분 계약**: `childrenData` setter/`layout(ctx)` 주입값의 의미는 3분기다 — **`undefined` = 보존** (DOM `_rawData()` 경로가 children을 의도적으로 제외하므로 이미 구축된 자식 엔진—스레드 프레임 포함—을 유지한다) / **`[]` = 명시적 소거** (childEngines를 비운다) / **데이터 주입 = 구축·재사용** (id 키 reconcile). 이 가드는 `=== undefined`로 판정한다 — falsy 체크(`!childrenData`)는 `[]` 소거를 보존으로 오분류해 자기 계약을 위반한다 (실측 재현: verify-threading [12]). 소거의 실제 경로는 문서 레벨 `[]` 주입이 아니라 **박스 제외 재주입**(DOM `removeChildData` 등가)이다. 새 가드는 자기 경계의 반대 시나리오(소거)를 반드시 같이 테스트한다. 검증: `scripts/verify-threading.mjs` [12].
 - **소진 경로의 threadTail은 마지막 프레임에만**: story 소진 시 잔여 프레임은 `contentFrom = storyPlainLen`으로 빈 배치를 확정한다. 이때 `threadTail`은 **마지막 프레임에만** 마킹한다 — 소진 잔여 중간 프레임까지 `true`로 마킹하면 체인에 tail이 여러 개 생겨 "tail 정확히 1개" 계약이 깨지고 테두리가 여러 프레임에 표시된다 (지오메트리 행렬이 발견: frames≥3 × 소진 조합). 검증: `scripts/verify-threading.mjs` [11] (행렬 어설션 5).
 - **스레드 단위 변경 감지는 참조 동등성**: `ThreadEngine`은 스레드당 마지막 배치 시그니처(story 참조 + contentFrom 연쇄)를 기록하고, 재호출 시 **참조 비교**(textContent 참조 + contentFrom + `hasLayoutCache`)로 재배치를 스킵한다. `layoutText()`의 내부 캐시 히트조차 해시 구성에 story 전체 직렬화 비용을 지불하므로(R3), 입력 불변 스킵은 `layoutText` 호출 자체를 건너뛴다. 캐시 무효화 경로(data setter의 `resetIncrementalState`)가 `hasLayoutCache`를 지우므로, 캐시 존재가 "지오메트리·스타일·오버랩·story 모두 불변"의 증명이다. 검증: `scripts/verify-threading.mjs` [15] (래핑 카운터 0회 실측).
 - **텍스트 파생 캐시는 참조 단위 공유 — 주입 배열 in-place 변이 금지 (R-T1/T3)**: 해시의 텍스트 직렬화(`_textContentDigest`), `plainText` 플래트닝, `_parseContents` 결과는 **정적 WeakMap에 소스 참조 단위**로 캐시한다. 스레드 체인의 전 프레임이 동일 스토리 참조를 소유하므로 체인당 1회만 O(N) 작업을 수행한다 — 인스턴스 캐시는 `textContent` setter마다 무효화되어 체인에서 F×O(N)으로 증폭된다(실측: 캐시 히트 재매핑 체인 Σ 6.12ms → 0.02ms). 전제는 **내용 변경은 항상 새 참조 주입**(편집 파이프라인이 새 배열/문자열을 만들어 주입 — 현재 코드베이스 계약)이며, 주입 배열을 소비자가 in-place 변이하면 다이제스트·파싱·플래트닝이 stale해진다. 이 전제는 기존 `_parsedContentsCache`/`_plainTextCache`가 이미 사용하던 참조 동등성 전제와 동일하다. 비-스레딩 문단은 동일 입력에 캐시 히트만 반복하므로 해시가 byte 동일하다. 검증: 스냅샷 byte 동일 + `verify-threading.mjs` [15](e).
 - **캐시 히트 재매핑은 same-ref 게이트 (R-T2)**: `_layoutCache`는 `textContentRef`와 effective 스타일 참조(`effTextStyleRef`/`effParagraphStyleRef`)를 함께 저장하고, 히트 시 전부 동일 참조면 `_refreshInlineStylesOnly`(O(placed) 스트림 재매핑 + 장식 재계산)를 생략한다. 해시 일치만으로는 불충분하다 — `tf:` 키가 `contentFrom > 0` 조건부라 비-헤드 프레임은 소스 참조가 달라도 해시가 동일할 수 있고, 굵기·색상 같은 해시 무영향 스타일 변경은 effective 게터가 새 병합 객체를 만들어 effective 참조만 바뀐다. 참조 미저장 캐시는 `undefined !== value`로 안전 폴백(재매핑 실행)한다. 게이트가 stale을 만들지 않는 것은 `verify-threading.mjs` [15](e)가 증명한다 (해시 무영향 스타일 변경 → 재매핑 강제 + inlineStyles 최신화).
-- **스레드 프레임 조회는 배치 조회로 — id→engine 맵 캐시 금지 (P2-2)**: 체인 배치(`ThreadEngine.layoutThreads`의 `batchLookup`)·DOM 동기화(`_syncThreadFramesToDom`)·flush는 `DocumentEngine.findEnginesByIds(ids)`로 트리를 **1회만 순회**해 전 프레임 엔진을 수집한다. generation 기반 id→engine 맵 캐시는 금지다 — `_removeBoxFromParent` 등 엔진 트리 변이 경로 중 generation을 증가시키지 않는 직접 splice가 있어 무효화 누수로 stale 엔진을 반환할 수 있다. 배치 조회는 순회 순서·첫 일치 우선 시맨틱이 `findEngineById`와 동일하므로 조회 결과가 동등하다. 검증: `verify-threading.mjs` 전 시나리오(체인 seam·identity).
+- **스레드 프레임 조회는 배치 조회로 — id→engine 맵 캐시 금지 (P2-2)**: 체인 배치(`ThreadEngine.layoutThreads`의 `batchLookup`)·DOM 동기화(`_syncThreadFramesToDom`)·flush는 `PageEngine.findEnginesByIds(ids)`로 트리를 **1회만 순회**해 전 프레임 엔진을 수집한다. generation 기반 id→engine 맵 캐시는 금지다 — `_removeBoxFromParent` 등 엔진 트리 변이 경로 중 generation을 증가시키지 않는 직접 splice가 있어 무효화 누수로 stale 엔진을 반환할 수 있다. 배치 조회는 순회 순서·첫 일치 우선 시맨틱이 `findEngineById`와 동일하므로 조회 결과가 동등하다. 검증: `verify-threading.mjs` 전 시나리오(체인 seam·identity).
 - **overset 소비 상한은 중간 프레임 한정 (P2)**: 스토리가 체인 용량을 초과하면 중간 프레임의 배치 패스가 잔여를 전부 방문해 `overflow++`로 카운트한다 — 프레임당 O(N)이 체인에서 F×O(N)으로 증폭된다. 중간 프레임(`threadTail === false`이고 clamp 재배치가 아닌 프레임)은 첫 overflow 라인 생성 시점에서 배치를 종료하고(`_oversetCutFrom` 기록 — 라인 생성 루프 + 배치 루프 4사이트), `_captureThreadTail`이 cut 이후의 non-newline 잔여를 해석적으로 산출한다. **tail 프레임(`threadTail === true`)과 비-스레드 문단은 컷이 없다** — 단일 프레임 기준선(byte-identical)과 overset tail 계약이 이 경로에 의존한다. cut 후 `_overflow`는 해석 산출(잔여 non-newline + 1)로 대체되며, 소비처가 `> 0` 판정뿐(테두리 게이트는 별도 라인 순회)이므로 계약이 유지된다. clamp 재배치 프레임도 컷에서 제외다 — clamp 이후 글자는 다음 프레임 소속이라 잔여 해석이 성립하지 않는다. 검증: `verify-threading.mjs` (단일 프레임 기준선 [2] byte-identical + 행렬 [11] + print 패리티 [14]), 스냅샷 byte 동일.
 - **프레임 경계 금칙 교정은 배치 입력 인코딩(출력 변이 금지)**: 프레임 배치는 독립 실행되므로 `_applyLineBreakRules`가 프레임 경계(head 마지막 visible 라인 ↔ f2 첫 라인)를 교정하지 못한다 (R7). 교정은 **`tailClampFrom`(배치 상한)을 지정해 prev를 재배치**하는 방식이다 — 배치 결과는 항상 입력의 순수 함수이고 `charOffsets`·tail·`contentFrom`이 전부 재파생되어 체인 무중복이 구조적으로 성립한다. **배치된 출력(`columnContents`)을 사후 변이하는 교정은 금지** — 과거 구현(`shiftVisibleTail`)이 `charOffsets` 평행 배열을 소거해 getCharRect/print 좌표가 x=0 폴백으로 붕괴한 실측 회귀가 있다. clamp가 배치를 제한하면 `_captureThreadTail`의 소진(-1) 판정은 우회하고 tail은 clamp 위치로 확정된다 (해시 키 `tc:`, 캐시 저장 포함). 워드 글자는 clamp하지 않는다 (워드 무결성 > 금칙). DOM flush는 교정된 prev(`correctedFrames`)를 소스 제외에서 제외하고 재렌더한다. 검증: `scripts/verify-threading.mjs` [17] (A/B + seam + **charOffsets 파생 유지·print 폴백 방어**).
 - **`updateOverlayContext`는 parentWidth 변화 시 컬럼 폭을 재계산한다**: `columnWidths`는 `data` setter의 `_applyColumnGapFromData`에서만 계산된다 — 경량 갱신(`updateOverlayContext`)이 `inheritStyle.parentWidth`만 바꾸면, 초기 reconcile 시간차에 parentWidth 0으로 생성된 PE의 **음수 columnWidths((0-Σgap)/N)**가 REUSE 판정(`structureUnchanged`는 갱신된 parentWidth를 비교하므로 통과)을 우회해 영구 고착된다 — 실측 회귀: 1322자 문단이 315개 빈 라인(음수 폭)으로 렌더, verify-ime 전 항목 붕괴 (bisect: childrenData 보존 가드가 치유용 wipe 재생성을 막으면서 발화). 재계산 조건은 `oldParentWidth !== newParentWidth` — 실제 폭 변화에만 O(N) 비용을 지불한다. 검증: `scripts/verify-ime.mjs` (전 시나리오), 스냅샷 byte 비교 (비-변화 경로 무영향).
@@ -209,7 +209,7 @@ containerLineCount = floor(editableHeight / lineHeight) + 1
 
 4. **`engine.layout()` 시그니처:**
    - `BoxEngine.layout(ctx, childrenData, resources?, docStyle?)`
-   - `DocumentEngine.layout(childrenData?)`
+   - `PageEngine.layout(childrenData?)`
    - `TableEngine.layout(rowsData?)`
    - `childrenData`는 순수 데이터 배열만 허용. DOM 요소 배열(`HTMLElement[]`) 전달 금지.
 
@@ -233,7 +233,7 @@ containerLineCount = floor(editableHeight / lineHeight) + 1
 
 - 엔진 트리가 모든 레이아웃 계산의 단일 소스다. DOM은 엔진을 보완/대체하지 않는다.
 - DOM은 엔진 결과를 소비만 한다. 엔진을 생성/수정하지 않는다.
-- 편집 발생 시: 편집된 내용 → `DocumentData`/`BoxData` 직렬화 → 엔진 재처리 → 결과 DOM 전파.
+- 편집 발생 시: 편집된 내용 → `PageData`/`BoxData` 직렬화 → 엔진 재처리 → 결과 DOM 전파.
 - DOM에서 엔진 `childEngines`을 수동으로 채우지 말 것.
 - **DOM 요소는 `this._children`/`this._rows`/`this._cells`를 저장하지 않는다.** 자식 데이터는 `this.items.map(e => e._rawData())`로 그때그때 수집. 저장 시 부모-자식 동기화 버그 발생.
 - **엔진은 `_data.children`을 저장하지 않는다.** `engine.layout(childrenData)` 파라미터로만 자식 데이터 수신.
@@ -242,7 +242,7 @@ containerLineCount = floor(editableHeight / lineHeight) + 1
 
 - `disconnectedCallback`에서 엔진을 부모의 `childEngines`/`childBoxEngines`에서 splice하지 않는다.
 - `data` setter의 ID-keyed reconcile이 `appendChild`로 자식을 재배치할 때 `disconnectedCallback` → `connectedCallback`이 같은 부모 내에서 발생. splice 시 `findBoxEngineById`가 기존 엔진을 못 찾아 새 엔진 생성 → 엔진 상태(rgbaData, _layoutCache 등) 손실.
-- `DocumentEngine._buildTree()`가 전체 트리를 재구축하므로 splice는 불필요.
+- `PageEngine._buildTree()`가 전체 트리를 재구축하므로 splice는 불필요.
 
 ### 3.3 `disconnectedCallback` — 이미지 캐시 보존
 
@@ -302,7 +302,7 @@ containerLineCount = floor(editableHeight / lineHeight) + 1
 
 ### 4.2 모든 레이아웃 요소는 `printPostData` 게터 필요
 
-- `LayoutDocumentElement`, `LayoutBoxElement`, `LayoutParagraphElement`, `LayoutImageElement`, `LayoutGuideColumnElement`, `LayoutTableElement`, `LayoutTableRowElement`, `LayoutTableCellElement` — 모두 `printPostData` 게터.
+- `LayoutPageElement`, `LayoutBoxElement`, `LayoutParagraphElement`, `LayoutImageElement`, `LayoutGuideColumnElement`, `LayoutTableElement`, `LayoutTableRowElement`, `LayoutTableCellElement` — 모두 `printPostData` 게터.
 - 엔진 mm 좌표를 `ppm`으로 환산한 픽셀 rect + 원본 데이터. DOM `getBoundingClientRect()` 미의존.
 - 새 레이아웃 요소 추가 시 반드시 구현.
 
@@ -348,7 +348,7 @@ containerLineCount = floor(editableHeight / lineHeight) + 1
 | `91000` | 광고 역할 고정 (`role: 'ad'`) | `box.element.ts` |
 | `91001` | 면머리 역할 고정 (`role: 'header'`) | `box.element.ts` |
 | `99999` | 리사이즈 핸들 | `box.element.ts` |
-| `99998` | 타입 라벨 | `box.element.ts`, `document.element.ts` |
+| `99998` | 타입 라벨 | `box.element.ts`, `page.element.ts` |
 | `99997` | 삽입 미리보기 오버레이 | `insert-controller.ts` |
 | `9999` | 텍스트 편집 textarea (IME) | `text-edit-controller.ts` |
 
