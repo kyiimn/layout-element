@@ -937,6 +937,8 @@ flowchart TD
 
 `TextEditController`는 다음 키보드 단축키를 처리한다. 대부분은 `_onKeydown()` 메서드에서 처리하며, 인쇄 가능한 문자 입력은 숨겨진 `textarea`의 `input` 이벤트로 처리한다.
 
+> **소재 파일**: 커서 이동 분기(Arrow/Home/End)의 본체는 `src/edit/text-navigation.ts` 모듈 함수(`navigateArrowLeft`/`navigateArrowRight`/`navigateVertical`/`navigateHome`/`navigateEnd`)로 추출되어 있다. `_onKeydown()`은 dispatch 라우팅만 유지하며, 컨트롤러 상태는 `NavContext` 인터페이스로 주입된다 (bias 시맨틱은 RULES §2.4 — 위치 값의 소속 소유권).
+
 | 키 | 보조키 | 동작 |
 |---|--------|------|
 | `ArrowLeft` | 없음 | 커서를 왼쪽으로 한 문자 이동. 시각적 라인 시작에 도달하면 2단계로 멈추고(sticking→crossed), 세 번째 누름에서 이전 라인 끝으로 이동 |

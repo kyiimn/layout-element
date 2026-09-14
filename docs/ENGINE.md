@@ -991,6 +991,12 @@ src/engine/
   box-engine.ts               # 박스 좌표/오버랩 요소 계산 + flipLayout
   table-engine.ts             # 테이블 그리드 해석 + TableCellEngine (BoxEngineParent 구현)
   paragraph-engine.ts         # 텍스트 래핑 + 엔진 쿼리 API + printPostData (mm) + flipLayout
+  paragraph-text-utils.ts     # 순수 헬퍼 (strip 범위/인라인 스타일 동등성/trailing 공백/firstNonEmpty)
+  lru-engine.ts               # LRU 캐시 컨테이너 (_LRU)
+  paragraph-hanging.ts        # 걸침표(행말/행두) 패스 모듈 함수 (HangPassContext 주입)
+  paragraph-print.ts          # printPostData 빌더 모듈 함수 (mm 좌표 단일 소스)
+  paragraph-hash.ts           # 참조 단위 캐시 WeakMap + 해시 키 구성 본체 (digest/prefix)
+  paragraph-overlap.ts        # 오버랩 회피 서브모듈 (자유 영역/판정 캐시/오버랩 해시 키)
   page-engine.ts          # 문서 루트 (ppm/리소스 관리, 트리 자동 구축, base64 이미지 자동 디코딩, flipLayout, _collectBoxMetrics)
   font-loader-engine.ts       # opentype.js 전용 (FontFace 없음, atob 전역 사용 — Node.js 16+ 필요, module.createRequire 지원)
   color-registry-engine.ts    # CMYK→RGB 변환 + get() (fetch 없음)

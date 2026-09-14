@@ -24,7 +24,9 @@ const BASE = 'http://localhost:5175';
 
 // ── 정적 검증: 엔진 외부(DOM/print)에 정렬 재계산 로직이 없는지 ──
 const columnSrc = readFileSync('src/components/layout/column.element.ts', 'utf-8');
-const printSrc = readFileSync('src/engine/paragraph-engine.ts', 'utf-8');
+// print 소스는 모듈 분해로 두 파일에 분산되었다: 엔진(printPostData 게터 + _computeCharOffsets) + 빌더(buildParagraphPrintPostData)
+const engineSrc = readFileSync('src/engine/paragraph-engine.ts', 'utf-8');
+const printSrc = engineSrc + '\n' + readFileSync('src/engine/paragraph-print.ts', 'utf-8');
 
 let staticPass = 0;
 let staticFail = 0;

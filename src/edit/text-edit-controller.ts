@@ -10,6 +10,7 @@ import { EditManager } from "./edit-manager";
 import { DEFAULT_TEXT_ALIGN, Z_INDEX_TEXTAREA, SHORTCUT_BOLD_WEIGHT, SHORTCUT_OUTLINE_THICKNESS, SHORTCUT_MIN_FONT_SIZE, SHORTCUT_MIN_SPACE_RATIO, DECORATION_THICKNESS_RATIO, DECORATION_MIN_THICKNESS_MM, TEXT_INLINE_STYLE_FIELDS } from "@/constants";
 import { firstNonEmpty } from "@/engine/paragraph-engine";
 import { RunMap, inlineToPlain, plainToInline, getStyleAtOffset, applyStyleToRange, normalizeRunMap, normalizeInlineContent, resolvePatchAgainstInherit, stripRunFields, insertTextIntoInline, deleteTextFromInline, runMapFromContent, adjustStyleInRange, NumericInlineMetricField } from "./run-map";
+import { navigateArrowLeft, navigateArrowRight, navigateVertical, navigateHome, navigateEnd, type NavContext } from "./text-navigation";
 import { ColorRegistry } from "@/resource/color-registry";
 
 /**
@@ -844,6 +845,47 @@ export class TextEditController {
     this._cursorEl.visible = false;
   }
 
+  /**
+   * 키 네비게이션 모듈 함수에 주입할 컨트롤러 상태·동작 경계를 구성한다.
+   *
+   * `text-navigation.ts`의 모듈 함수들이 `this._*` 직접 접근 대신 소비하는
+   * 최소 집합이다 — 상태(`_cursorModel`/`_mapper`), 키보드 수식어
+   * (Ctrl/Meta·Shift), 이동 후 갱신 메서드를 바인딩해 넘긴다.
+   *
+   * @param event - 현재 처리 중인 keydown 이벤트 (수식어 상태 원본)
+   * @param isCursorKey - 커서 키 여부 (cursorMove 발화 조건 — 커서 키 경로는 항상 true)
+   * @returns 네비게이션 컨텍스트
+   */
+  private _navContext(event: KeyboardEvent, isCursorKey: boolean): NavContext {
+    return {
+      content: this._textarea.value,
+      offset: this._cursorModel.offset,
+      hasShortcut: event.ctrlKey || event.metaKey,
+      isShift: event.shiftKey,
+      cursor: this._cursorModel,
+      mapper: this._mapper,
+      isThreadFrame: this._paragraph.model?.isThreadFrame ?? false,
+      cursorMaxOffset: () => this._cursorMaxOffset(),
+      extendSelection: (newOffset) => this._extendSelection(newOffset),
+      releasePendingOnCursorMove: () => this._releasePendingOnCursorMove(),
+      transferCursorAcrossThreadBoundary: (dir) => this._transferCursorAcrossThreadBoundary(dir),
+      computeVerticalOffset: (dir) => this._computeVerticalOffset(dir),
+      threadBoundaryDown: () => this._threadBoundaryDown(),
+      threadBoundaryUp: () => this._threadBoundaryUp(),
+      findLineStart: (content, offset) => this._findLineStart(content, offset),
+      findLineEnd: (content, offset) => this._findLineEnd(content, offset),
+      getLogicalLineStart: (offset) => this._getLogicalLineStart(offset),
+      getEndKeyOffset: (offset) => this._getEndKeyOffset(offset),
+      syncTextareaSelection: () => this._syncTextareaSelection(),
+      updateCursorPosition: () => this._updateCursorPosition(),
+      updateSelection: () => this._updateSelection(),
+      emitStyleChange: () => this._emitStyleChange(),
+      notifyCursorMove: () => {
+        if (isCursorKey) this._manager._notifyCursorMove(this);
+      },
+    };
+  }
+
   private _onKeydown(event: KeyboardEvent): void {
     if (this._isComposing) {
       if (event.key === "Escape") {
@@ -903,163 +945,21 @@ export class TextEditController {
     switch (event.key) {
       case "ArrowLeft": {
       event.preventDefault();
-      let targetLeft: number;
-      if (hasShortcut) {
-        targetLeft = this._findWordStart(content, offset);
-      } else if (isShift) {
-        targetLeft = offset > 0 ? offset - 1 : offset;
-      } else {
-        // bias 기반 순수 머신 (라인 시작 주차 → 이전 라인 끝 → 전진의 3단계를
-        // bias가 위치 값으로 소유한다 — 히스토리 플래그 없음):
-        // - {X, 'end'} (라인 시작 주차=이전 라인 끝)에서 Left → 이전 라인 마지막 문자 {X-1, 'start'}
-        //   (X가 라인 경계 = 이전 라인 끝+1이므로 X-1은 이전 라인의 마지막 가시 문자).
-        // - {X, 'start'}에서 Left → {X-1, 'start'}. 단, X-1이 라인 끝 문자면
-        //   그 문자의 우측이 라인 끝이므로 {X, 'end'}로 주차한다 (ArrowRight의
-        //   atLastChar와 대칭 — 라인 내 이동과 경계 주차가 양방향 순환).
-        const lineBounds = this._mapper.findVisualLineBounds(offset);
-        const atLineStart = lineBounds && offset === lineBounds.start;
-        if (this._cursorModel.bias === 'end' && atLineStart) {
-          targetLeft = offset > 0 ? offset - 1 : offset;
-        } else if (atLineStart) {
-          targetLeft = offset;
-        } else {
-          targetLeft = offset > 0 ? offset - 1 : offset;
-        }
-      }
-      if (isShift) {
-        this._extendSelection(targetLeft);
-      } else {
-        this._releasePendingOnCursorMove();
-        // ArrowLeft bias: 라인 시작에서 제자리 이동이면 이전 라인 끝 주차('end'),
-        // 실제 이동이면 다음 글자 왼쪽('start').
-        this._cursorModel.offset = targetLeft;
-        this._cursorModel.bias = targetLeft === offset ? 'end' : 'start';
-        this._cursorModel.selection = null;
-        // 스레드 경계: 커서가 이 프레임 coverage를 벗어났으면 소유 프레임으로 이관.
-        if (this._transferCursorAcrossThreadBoundary('left')) {
-          if (isCursorKey) this._manager._notifyCursorMove(this);
-          break;
-        }
-      }
-      this._syncTextareaSelection();
-      this._updateCursorPosition();
-      this._updateSelection();
-      if (!isShift) {
-        this._emitStyleChange();
-      }
-      if (isCursorKey) {
-        this._manager._notifyCursorMove(this);
-      }
+      navigateArrowLeft(this._navContext(event, isCursorKey));
       break;
     }
     case "ArrowRight": {
       event.preventDefault();
-      let targetRight: number;
-      if (hasShortcut) {
-        targetRight = this._findWordEnd(content, offset);
-      } else if (isShift) {
-        targetRight = offset < content.length ? offset + 1 : offset;
-      } else {
-        // bias 기반 순수 머신 (ArrowLeft와 대칭):
-        // - {X, 'end'}에서 Right: X가 라인 끝 주차(이전 라인 끝+1)이므로 다음 라인
-        //   첫 글자 {X, 'start'}로 전환 (경계 소속 전환 — 렌더가 다음 라인 시작으로).
-        // - {X, 'start'}에서 Right: {X+1, 'start'}. 단, X가 마지막 가시 문자면
-        //   라인 끝 주차 {X+1, 'end'} (라인 끝 문자 우측).
-        const lineBounds = offset > 0 ? this._mapper.findVisualLineBounds(offset - 1) : null;
-        const atLineEnd = lineBounds && offset === lineBounds.end;
-        const atLastChar = lineBounds && offset === lineBounds.end - 1;
-        if (this._cursorModel.bias === 'end' && atLineEnd) {
-          targetRight = offset;
-        } else if (atLastChar) {
-          targetRight = offset + 1;
-        } else {
-          targetRight = offset < content.length ? offset + 1 : offset;
-        }
-      }
-      // 오버플로(숨김) 라인 진입 금지: 착지가 maxVisibleCursorOffset 경계에
-      // 도달/초과하면 경계로 되돌린다 — 경계 밖 배치는 숨김 라인의 span
-      // placement를 참조하므로 커서 렌더 폴백이 깨진다.
-      const maxOffset = this._cursorMaxOffset();
-      if (maxOffset !== null && targetRight >= maxOffset) {
-        targetRight = maxOffset;
-      }
-      if (isShift) {
-        this._extendSelection(targetRight);
-      } else {
-        this._releasePendingOnCursorMove();
-        this._cursorModel.offset = targetRight;
-        // ArrowRight bias: 제자리 이동(라인 끝 주차)이면 'end' 유지, 실제 이동 중
-        // 라인 끝 문자 우측 착지면 'end', 그 외 'start'.
-        const lineBounds2 = targetRight > 0 ? this._mapper.findVisualLineBounds(targetRight - 1) : null;
-        const targetAtLineEnd = lineBounds2 && targetRight === lineBounds2.end;
-        this._cursorModel.bias = targetAtLineEnd ? 'end' : 'start';
-        this._cursorModel.selection = null;
-        // 스레드 경계: 커서가 이 프레임 coverage를 벗어났으면 소유 프레임으로
-        // 이관한다. 이관되면 이 컨트롤러는 blur 상태가 되므로 갱신을 마친다.
-        if (this._transferCursorAcrossThreadBoundary('right')) {
-          if (isCursorKey) this._manager._notifyCursorMove(this);
-          break;
-        }
-      }
-      this._syncTextareaSelection();
-      this._updateCursorPosition();
-      this._updateSelection();
-      if (!isShift) {
-        this._emitStyleChange();
-      }
-      if (isCursorKey) {
-        this._manager._notifyCursorMove(this);
-      }
+      navigateArrowRight(this._navContext(event, isCursorKey));
       break;
     }
     case "ArrowUp":
     case "ArrowDown": {
       event.preventDefault();
       const direction = event.key === "ArrowUp" ? -1 : 1;
-      let newOffset = this._computeVerticalOffset(direction);
-      // 아래 방향만 클램프 — 위 방향은 오버플로 영역으로 진입하지 않는다.
-      // 스레드 프레임은 _cursorMaxOffset가 null이므로 클램프 없이 이관 로직이 그대로 동작한다.
-      if (direction > 0) {
-        const cursorMax = this._cursorMaxOffset();
-        if (newOffset !== null && cursorMax !== null && newOffset > cursorMax) {
-          newOffset = cursorMax;
-        }
-      }
-      // 출발 소속(bias) 보존: bias 'start'(라인 시작 소속)에서 Up/Down하면 착지도
-      // 라인 시작에 그려지고, bias 'end'(라인 끝 소속)에서 Up/Down하면 착지도
-      // 라인 끝 근처에 그려진다 — 아래 bias-carry(L1038-1040)가 그 소유이며,
-      // 수직 이동에서 bias는 유지된다 (착지 렌더가 기본 경로(preferLineEnd)로
-      // 돌아가 라인 경계 offset이 이웃 라인을 참조하는 것을 방지).
-      if (isShift) {
-        this._extendSelection(newOffset ?? offset);
-      } else {
-        if (newOffset !== null) {
-          this._cursorModel.offset = newOffset;
-          // 수직 이동 bias-carry: End 주차('end')에서 착지도 라인 끝 근처('end'),
-          // Home 주차/일반('start')에서 착지도('start') — 착지 렌더 소속 유지.
-          this._cursorModel.bias = this._cursorModel.bias === 'end' ? 'end' : 'start';
-        }
-        this._cursorModel.selection = null;
-        // 스레드 경계 (수직): 프레임 첫/마지막 라인에서 이동이 끝나면(null)
-        // 이전/다음 프레임의 끝/시작 라인으로 커서를 넘긴다.
-        if (newOffset === null && !this._isComposing) {
-          const model = this._paragraph.model;
-          if (model?.isThreadFrame) {
-            const verticalTarget = direction > 0
-              ? this._threadBoundaryDown()
-              : this._threadBoundaryUp();
-            if (verticalTarget !== null) {
-              this._cursorModel.offset = verticalTarget;
-              if (this._transferCursorAcrossThreadBoundary(direction > 0 ? 'right' : 'left')) {
-                if (isCursorKey) this._manager._notifyCursorMove(this);
-                break;
-              }
-            }
-          }
-        } else if (newOffset !== null && this._transferCursorAcrossThreadBoundary(direction > 0 ? 'right' : 'left')) {
-          if (isCursorKey) this._manager._notifyCursorMove(this);
-          break;
-        }
+      const transferred = navigateVertical(this._navContext(event, isCursorKey), direction);
+      if (transferred) {
+        break;
       }
       this._syncTextareaSelection();
       this._updateCursorPosition();
@@ -1074,32 +974,9 @@ export class TextEditController {
     }
     case "Home": {
       event.preventDefault();
-      if (hasShortcut) {
-        const lineStart = this._findLineStart(content, offset);
-        if (isShift) { this._extendSelection(lineStart); } else { this._cursorModel.offset = lineStart; this._cursorModel.selection = null; }
-      } else if (isShift) {
-        const lineStart = this._getLogicalLineStart(offset);
-        this._extendSelection(lineStart);
-      } else {
-        // bias 기반 순수 머신 (End case와 대칭):
-        // - {X, 'end'} (End 주차 = 이전 라인 끝+1)에서 Home → 출발 라인 시작.
-        //   출발 라인은 bias가 소유한다 — offset-1로 이전 라인을 찾아 시작으로 이동.
-        //   (라인 끝 경계 offset은 getLineInfoBySourceOffset 기준 다음 라인 소속이므로
-        //   offset-1로 출발 라인을 찾는다 — 이중 소속 함정).
-        // - {X, 'start'}에서 Home → 라인 시작으로 이동, 'start' 유지.
-        // - 이미 라인 시작 주차 {X, 'start'} (X === 라인 시작)에서 Home → 제자리.
-        if (this._cursorModel.bias === 'end') {
-          const sourceLineStart = this._getLogicalLineStart(Math.max(0, offset - 1));
-          this._cursorModel.offset = sourceLineStart === offset ? offset : sourceLineStart;
-        } else {
-          const lineStart = this._getLogicalLineStart(offset);
-          if (lineStart === offset && offset === 0) {
-            break;
-          }
-          this._cursorModel.offset = lineStart;
-        }
-        this._cursorModel.selection = null;
-        this._cursorModel.bias = 'start';
+      const earlyExit = navigateHome(this._navContext(event, isCursorKey));
+      if (earlyExit) {
+        break;
       }
       this._syncTextareaSelection();
       this._updateCursorPosition();
@@ -1110,42 +987,7 @@ export class TextEditController {
     }
     case "End": {
       event.preventDefault();
-      if (hasShortcut) {
-        let lineEnd = this._findLineEnd(content, offset);
-        // Ctrl+End는 라인이 아닌 문서 끝으로 이동하므로 단일 블록 텍스트에서
-        // 숨김 영역(오버플로 라인)에 착지할 수 있다 — 경계로 클램프한다.
-        const endMax = this._cursorMaxOffset();
-        if (endMax !== null && lineEnd > endMax) lineEnd = endMax;
-        if (isShift) { this._extendSelection(lineEnd); } else { this._cursorModel.offset = lineEnd; this._cursorModel.selection = null; }
-      } else if (isShift) {
-        let lineEnd = this._getEndKeyOffset(offset);
-        // Shift+End가 커서 경계(offset)의 논리 라인이 아닌 오버플로 라인의 끝을
-        // 계산하는 케이스를 경계로 되돌린다 (커서가 숨김 영역의 offset 위에 있으면
-        // getLineInfoBySourceOffset가 오버플로 라인을 반환한다).
-        const shiftEndMax = this._cursorMaxOffset();
-        if (shiftEndMax !== null && lineEnd > shiftEndMax) lineEnd = shiftEndMax;
-        this._extendSelection(lineEnd);
-      } else {
-        // bias 기반 순수 머신 (Home case와 대칭):
-        // - {X, 'end'}에서 End → 제자리 (이미 라인 끝 주차).
-        // - {X, 'start'}에서 End → 라인 끝으로 이동. 단, X가 이미 라인 끝
-        //   (X === 라인 끝 경계)이면 제자리.
-        // - 착지는 항상 'end' 주차 (라인 끝 문자 우측, phantom end placement 참조).
-        if (this._cursorModel.bias === 'end') {
-          // 제자리
-        } else {
-          let endOffset = this._getEndKeyOffset(offset);
-          // 커서가 경계(마지막 visible 라인 끝)에 있으면 논리 라인이 오버플로
-          // 라인이라 그 끝이 숨김 영역에 착지한다 — 경계로 되돌린다. 경계 offset은
-          // line-end phantom placement를 참조하므로 커서는 마지막 visible 문자
-          // 오른쪽에 그려진다.
-          const endKeyMax = this._cursorMaxOffset();
-          if (endKeyMax !== null && endOffset > endKeyMax) endOffset = endKeyMax;
-          this._cursorModel.offset = endOffset;
-        }
-        this._cursorModel.selection = null;
-        this._cursorModel.bias = 'end';
-      }
+      navigateEnd(this._navContext(event, isCursorKey));
       this._syncTextareaSelection();
       this._updateCursorPosition();
       this._updateSelection();
@@ -1711,32 +1553,6 @@ export class TextEditController {
       }
     }
     return lineEnd;
-  }
-
-  /** Ctrl+ArrowLeft: 이전 단어의 시작 위치로 이동 */
-  private _findWordStart(content: string, offset: number): number {
-    if (offset <= 0) return 0;
-    let pos = offset;
-    while (pos > 0 && /\s/.test(content[pos - 1])) {
-      pos--;
-    }
-    while (pos > 0 && !/\s/.test(content[pos - 1])) {
-      pos--;
-    }
-    return pos;
-  }
-
-  /** Ctrl+ArrowRight: 다음 단어의 시작 위치로 이동 */
-  private _findWordEnd(content: string, offset: number): number {
-    if (offset >= content.length) return content.length;
-    let pos = offset;
-    while (pos < content.length && !/\s/.test(content[pos])) {
-      pos++;
-    }
-    while (pos < content.length && /\s/.test(content[pos])) {
-      pos++;
-    }
-    return pos;
   }
 
   private _getPlainText(): string {

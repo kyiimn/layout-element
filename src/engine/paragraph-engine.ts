@@ -31,8 +31,6 @@ import {
   DEFAULT_OUTLINE_COLOR,
   DECORATION_MIN_THICKNESS_MM,
   DECORATION_THICKNESS_RATIO,
-  isHangableLineEnd,
-  isHangableLineStart,
   isLineEndForbidden,
   isLineStartForbidden,
   isWordChar,
@@ -52,8 +50,6 @@ import {
   OverlapParts,
   ParagraphData,
   PrintPostData,
-  PrintPostDataChar,
-  PrintPostDecoration,
 } from "@/types";
 import type { BoxEngine } from "./box-engine";
 import {
@@ -62,16 +58,23 @@ import {
   CursorPlacement,
   CursorPosition,
   EngineResources,
-  ImageEngineRef,
   MmRect,
-  OverlapMode,
   ParagraphOverlapMode,
   ParsedFont,
   createDirtyError,
   createNoParentError,
 } from "./types";
-import { computeOverlapSizeMm, mergeOverlapParts } from "./overlap-engine";
-import type { ImageEngine } from "./image-engine";
+import { _LRU } from "./lru-engine";
+import { inlineStyleEqual, countTrailingSpaces, computeStripRange, firstNonEmpty } from "./paragraph-text-utils";
+import { applyHangingPass, hangingConfig, computeHangExtents } from "./paragraph-hanging";
+import { buildParagraphPrintPostData, sliceInlineContent } from "./paragraph-print";
+import { _TEXT_DIGEST_BY_REF, _PLAIN_TEXT_BY_REF, _PARSED_CONTENTS_BY_REF, textContentSegs, computePrefixHashKey, overlayKeysFor } from "./paragraph-hash";
+import { computeFreeRegions, detectOverlapWithCache, overlayHashKey, FreeRegion } from "./paragraph-overlap";
+
+// 순수 헬퍼 재-export — 기존 소비처 import 경로(`@/engine/paragraph-engine`) 호환 유지
+export { firstNonEmpty, inlineStyleEqual, countTrailingSpaces, computeStripRange };
+export { _LRU };
+export { buildParagraphPrintPostData, sliceInlineContent };
 
 /**
  * effective 스타일 병합 시 lineGap의 "주입/상속 생략"을 판정하기 위한
@@ -122,8 +125,6 @@ export interface ParagraphEngineData {
   resources: EngineResources;
   parentBox?: BoxEngine;
 }
-
-type FreeRegion = { start: number; end: number };
 
 /**
  * 좌우 밀기 탭 문자 (`\t`).
@@ -294,7 +295,7 @@ export class ParagraphEngine {
    * 동일 참조 반복 조회(레이아웃 캐시 히트, ThreadEngine 스킵 판정)는
    * 인스턴스 필드 2비교로 끝난다.
    */
-  private static readonly _TEXT_DIGEST_BY_REF = new WeakMap<object, string>();
+  private static get _TEXT_DIGEST_BY_REF() { return _TEXT_DIGEST_BY_REF; }
 
   /**
    * plainText 플래트닝 결과 공유 캐시 (참조 단위). 스레드 체인의 전 프레임이
@@ -302,7 +303,7 @@ export class ParagraphEngine {
    * 인스턴스 캐시는 textContent setter마다 무효화되어 체인에서 F×O(N)으로
    * 증폭됐다. 문자열 textContent는 내용 자체가 plainText이므로 캐시 불필요.
    */
-  private static readonly _PLAIN_TEXT_BY_REF = new WeakMap<object, string>();
+  private static get _PLAIN_TEXT_BY_REF() { return _PLAIN_TEXT_BY_REF; }
 
   /**
    * `_parseContents` 결과(라인 × 런 블록) 공유 캐시 (참조 단위). 파싱 결과는
@@ -310,7 +311,7 @@ export class ParagraphEngine {
    * 체인 엔진 간 배열 공유가 안전하다 — 기존 인스턴스 캐시(`_parsedContentsCache`)
    * 도 동일한 참조 동등성 전제로 동작한다.
    */
-  private static readonly _PARSED_CONTENTS_BY_REF = new WeakMap<object, TextInlineData[][]>();
+  private static get _PARSED_CONTENTS_BY_REF() { return _PARSED_CONTENTS_BY_REF; }
 
   private _lastDigestKey: unknown = undefined;
   private _lastDigest: string | undefined = undefined;
@@ -556,32 +557,14 @@ export class ParagraphEngine {
 
   /**
    * 오버랩 영역의 여집합으로부터 텍스트가 배치될 수 있는 자유 영역을 계산한다.
-   * 오버랩이 없으면 `[{ start: 0, end: lineWidth }]`를 반환한다.
+   * `paragraph-overlap.ts`의 `computeFreeRegions` 모듈 함수에 위임한다.
    *
    * @param lineWidth - 라인 너비 (mm)
    * @param overlapParts - 오버랩 구간 배열
    * @returns 자유 영역 배열
    */
   private _computeFreeRegions(lineWidth: number, overlapParts: OverlapParts[]): FreeRegion[] {
-    if (overlapParts.length === 0) {
-      return [{ start: 0, end: lineWidth }];
-    }
-
-    const freeRegions: FreeRegion[] = [];
-    let prevEnd = 0;
-
-    for (const overlap of overlapParts) {
-      if (overlap.x1 > prevEnd) {
-        freeRegions.push({ start: prevEnd, end: overlap.x1 });
-      }
-      prevEnd = Math.max(prevEnd, overlap.x2);
-    }
-
-    if (prevEnd < lineWidth) {
-      freeRegions.push({ start: prevEnd, end: lineWidth });
-    }
-
-    return freeRegions;
+    return computeFreeRegions(lineWidth, overlapParts);
   }
 
   /**
@@ -744,49 +727,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * ```
    */
   private _hangingConfig(): { lineEnd: boolean; lineStart: boolean; lineEndAlways: boolean } {
-    const v = this.effectiveParagraphStyle.hangingPunctuation;
-    if (v === true) return { lineEnd: true, lineStart: true, lineEndAlways: false };
-    if (typeof v === "object" && v !== null) {
-      const lineEndAlways = v.lineEnd === "always";
-      return { lineEnd: v.lineEnd === true || lineEndAlways, lineStart: v.lineStart === true, lineEndAlways };
-    }
-    return { lineEnd: false, lineStart: false, lineEndAlways: false };
-  }
-
-  /**
-   * 라인의 마지막 파트가 컬럼 우측 끝까지 도달하는지 확인한다 (걸침 엣지 게이트).
-   *
-   * `part.left`는 첫 파트에서 절대 start, 이후 파트에서는 이전 파트 끝에서의
-   * 갭이므로, 절대 우측 끝은 `Σ(모든 파트 left) + Σ(모든 파트 width)`로
-   * 누적 계산해야 한다.
-   *
-   * @param line - 검사할 라인
-   * @param columnWidth - 컬럼 폭 (mm)
-   * @returns 마지막 파트의 절대 우측 끝이 컬럼 폭과 일치하면 `true`
-   *
-   * @example
-   * // 파트 left/width가 [{left: 10, width: 20}, {left: 10, width: 20}]이고
-   * // 컬럼 폭 60mm: (10+10)+(20+20) = 60 → true
-   * @throws 없음
-   */
-  private _isLastPartAtColumnRightEdge(line: TextLineData, columnWidth: number): boolean {
-    let absRight = 0;
-    for (const part of line.parts) absRight += part.left + part.width;
-    return Math.abs(absRight - columnWidth) < 1e-6;
-  }
-
-  /**
-   * 라인의 첫 파트가 컬럼 좌측 끝에서 시작하는지 확인한다 (걸침 엣지 게이트).
-   *
-   * 문단 indent가 적용된 첫 줄은 `parts[0].left`가 indentMm(> 0)이므로
-   * 게이트가 실패한다 — 들여쓴 줄의 왼쪽은 컬럼 밖이 아니기 때문이다.
-   *
-   * @param line - 검사할 라인
-   * @returns 첫 파트의 left가 0이면 `true`
-   * @throws 없음
-   */
-  private _isFirstPartAtColumnLeftEdge(line: TextLineData): boolean {
-    return Math.abs(line.parts[0].left) < 1e-6;
+    return hangingConfig(this.effectiveParagraphStyle.hangingPunctuation);
   }
 
   /**
@@ -847,186 +788,13 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * ```
    */
   private _applyHangingPunctuation(): ReadonlySet<string> {
-    const cfg = this._hangingConfig();
-    const corrected = new Set<string>();
-    if (!cfg.lineEnd && !cfg.lineStart) return corrected;
-
-    for (let col = 0; col < this._columnContents.length; col++) {
-      const columnContent = this._columnContents[col];
-      const columnWidth = this._columnWidths[col] ?? 0;
-      for (let i = 0; i < columnContent.length - 1; i++) {
-        const curLine = columnContent[i];
-        const nextLine = columnContent[i + 1];
-
-        if (curLine.parts.length === 0) continue;
-        if (nextLine.parts.length === 0) continue;
-
-        const curLastPart = curLine.parts[curLine.parts.length - 1];
-        const nextFirstPart = nextLine.parts[0];
-        if (curLastPart.content.length === 0 || nextFirstPart.content.length === 0) continue;
-
-        if (curLine.endOfBlock === true || nextLine.firstOfBlock === true) continue;
-
-        const key = `${col}:${i}`;
-        const curLastChar = curLastPart.content[curLastPart.content.length - 1]!;
-
-        const curHasTab = curLastPart.content.includes(RIGHT_INDENT_TAB_CHAR);
-        const nextHasTab = nextFirstPart.content.includes(RIGHT_INDENT_TAB_CHAR);
-
-        // 1) 행두 걸침: 열기 부호를 아래 줄 앞으로 내보내 왼쪽 밖에 건다.
-        if (
-          cfg.lineStart &&
-          isHangableLineStart(curLastChar) &&
-          curLastPart.content.length >= 2 &&
-          !curHasTab &&
-          !nextHasTab &&
-          this._isFirstPartAtColumnLeftEdge(nextLine)
-        ) {
-          const movedStyle = curLastPart.inlineStyles?.pop();
-          curLastPart.hangs?.pop();
-          curLastPart.content.pop();
-
-          nextFirstPart.content.unshift(curLastChar);
-          if (nextFirstPart.inlineStyles) {
-            nextFirstPart.inlineStyles.unshift(movedStyle);
-          } else if (movedStyle !== undefined) {
-            nextFirstPart.inlineStyles = new Array(nextFirstPart.content.length).fill(undefined);
-            nextFirstPart.inlineStyles[0] = movedStyle;
-          }
-          nextFirstPart.hangs ??= new Array(nextFirstPart.content.length - 1).fill(undefined);
-          nextFirstPart.hangs.unshift('start');
-
-          corrected.add(key);
-          continue;
-        }
-
-        // 2) 행말 걸침: 아래 줄 선행 닫기 부호 run을 위 줄 끝으로 당겨
-        //    파트 우측 경계에 건다 — 렌더링 시 첫 부호는 폭의 50%만 밖으로
-        //    돌출되고(반각 돌출, _computeCharOffsets), 이후 run은 스택형.
-        if (
-          cfg.lineEnd &&
-          isHangableLineEnd(nextFirstPart.content[0]!) &&
-          // word-wrap: 당겨올 글자가 워드 글자(alnum·조인터)면 걸침 교정을
-          // 하지 않는다 — 워드 무결성 > 걸침. `undefined` prev의 `.`/`,`
-          // 시작 잔여는 isWordChar 계약상 항상 false이므로 이 가드는
-          // alnum 시작 잔여만 걸러낸다(조인터 시작 잔여는 eager lookahead상
-          // 발생하지 않음).
-          !(this.wordWrap &&
-            isWordChar(undefined, nextFirstPart.content[0]!, nextFirstPart.content[1])) &&
-          !curHasTab &&
-          !nextHasTab &&
-          this._isLastPartAtColumnRightEdge(curLine, columnWidth)
-        ) {
-          let run = 0;
-          while (
-            run < nextFirstPart.content.length &&
-            isHangableLineEnd(nextFirstPart.content[run]!)
-          ) {
-            run++;
-          }
-          if (run > 0 && run < nextFirstPart.content.length) {
-            for (let r = 0; r < run; r++) {
-              const movedChar = nextFirstPart.content[0]!;
-              const movedStyle = nextFirstPart.inlineStyles?.shift();
-              nextFirstPart.hangs?.shift();
-              nextFirstPart.content.shift();
-
-              curLastPart.content.push(movedChar);
-              if (curLastPart.inlineStyles) {
-                curLastPart.inlineStyles.push(movedStyle);
-              } else if (movedStyle !== undefined) {
-                curLastPart.inlineStyles = new Array(curLastPart.content.length - 1).fill(undefined);
-                curLastPart.inlineStyles.push(movedStyle);
-              }
-              curLastPart.hangs ??= new Array(curLastPart.content.length - 1).fill(undefined);
-              curLastPart.hangs.push('end');
-            }
-            corrected.add(key);
-          }
-        }
-      }
-    }
-
-    // 4) 행말 강제 걸침 (lineEnd: 'always'): 블록의 마지막 줄이 아닌 줄의
-    //    끝에서, 이미 들어맞은 닫기 부호 run도 컬럼 우측 밖으로 내보낸다.
-    //    글자 이동 없이 hangs 마킹만 추가한다. 페어 패스(케이스 2)가 당겨온
-    //    run과 자연 병합된다 — 뒤에서 앞으로 스캔하며 연속 닫기 부호를
-    //    한 번에 마킹한다.
-    if (cfg.lineEndAlways) {
-      for (let col = 0; col < this._columnContents.length; col++) {
-        const columnContent = this._columnContents[col];
-        const columnWidth = this._columnWidths[col] ?? 0;
-        for (let i = 0; i < columnContent.length; i++) {
-          const line = columnContent[i];
-          // 블록의 마지막 줄(endOfBlock/endOfText)은 좌측 정렬로 렌더링되어
-          // 우측 끝을 채우지 않는다 — 강제 걸침하면 텍스트 가장자리가
-          // 어긋나므로 제외한다.
-          if (line.endOfBlock === true || line.endOfText === true) continue;
-          if (!this._isLastPartAtColumnRightEdge(line, columnWidth)) continue;
-
-          const lastPart = line.parts[line.parts.length - 1];
-          if (lastPart.content.includes(RIGHT_INDENT_TAB_CHAR)) continue;
-
-          // 뒤에서 앞으로 연속 닫기 부호 run을 찾아 마킹한다.
-          // 기존 hangs='end' 슬롯(케이스 2가 채운 것) 위에서 자연히
-          // 멈춘다 — 마킹된 run은 이미 걸침 상태이므로 중복 마킹하지
-          // 않고, 그 앞의 미마킹 부호만 추가로 걸친다.
-          let k = lastPart.content.length - 1;
-          while (k >= 0 && isHangableLineEnd(lastPart.content[k]!)) {
-            if (lastPart.hangs?.[k] !== undefined) break;
-            k--;
-          }
-          const runStart = k + 1;
-          if (runStart === lastPart.content.length) continue;
-          // 최소 1자의 visible 글자가 남아야 한다.
-          if (runStart === 0) continue;
-          // word-wrap: 마킹 대상 마지막 글자가 워드 글자면 skip — 강제
-          // 분할로 인해 라인이 워드 글자로 끝나는 경우, 그 글자를 컬럼
-          // 밖으로 내보내면 워드가 시각적으로 쪼개진다.
-          if (this.wordWrap &&
-            isWordChar(
-              lastPart.content[runStart - 1],
-              lastPart.content[lastPart.content.length - 1]!,
-              undefined,
-            )) {
-            continue;
-          }
-
-          lastPart.hangs ??= new Array(lastPart.content.length).fill(undefined);
-          for (let m = runStart; m < lastPart.content.length; m++) {
-            lastPart.hangs[m] = 'end';
-          }
-          corrected.add(`${col}:${i}`);
-        }
-      }
-    }
-
-    // 5) 행두 걸침 (라인 첫 글자 열기 부호): 라인 시작 파트의 첫 글자가
-    //    열기 부호면 좌측 밖으로 내보내 마킹한다 (CSS hanging-punctuation:
-    //    first의 전 라인 확장 — 신문 조판 관례). 글자 이동은 없다.
-    //    케이스 1이 이미 마킹한 슬롯은 건드리지 않는다. 가드: 첫 파트가
-    //    컬럼 좌측 끝(left === 0)에서 시작, 탭 파트 제외, 잔여 1자 파트는
-    //    마킹하면 visible 글자가 없어지므로 제외.
-    if (cfg.lineStart) {
-      for (let col = 0; col < this._columnContents.length; col++) {
-        const columnContent = this._columnContents[col];
-        for (let i = 0; i < columnContent.length; i++) {
-          const line = columnContent[i];
-          const firstPart = line.parts[0];
-          if (firstPart === undefined || firstPart.content.length < 2) continue;
-          if (firstPart.content[0] === RIGHT_INDENT_TAB_CHAR) continue;
-          if (firstPart.content.includes(RIGHT_INDENT_TAB_CHAR)) continue;
-          if (firstPart.left !== 0) continue;
-          if (!isHangableLineStart(firstPart.content[0]!)) continue;
-          if (firstPart.hangs?.[0] !== undefined) continue;
-
-          firstPart.hangs ??= new Array(firstPart.content.length).fill(undefined);
-          firstPart.hangs[0] = 'start';
-          corrected.add(`${col}:${i}`);
-        }
-      }
-    }
-    return corrected;
+    return applyHangingPass({
+      hangingPunctuation: this.effectiveParagraphStyle.hangingPunctuation,
+      columns: this._columnContents,
+      columnWidths: this._columnWidths,
+      wordWrap: this.wordWrap,
+      measureChar: (char, inlineStyle) => this.getCharWidths(char, inlineStyle).swidth,
+    });
   }
 
   /**
@@ -1538,71 +1306,17 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 
   /**
    * 오버랩 요소(이미지 등)와의 겹침 계산.
-   * 성능 최적화: `_overlayRectsMm` 캐시를 사용하여 렌더링 사이클마다
-   * 오버랩 요소의 mm rect를 한 번 구성 후 재사용한다.
-   * COVER면 라인 전체가 덮인 것이고, PART면 일부만 덮인 것이다.
+   * `paragraph-overlap.ts`의 `detectOverlapWithCache` 모듈 함수에 위임한다.
+   * rect 캐시(`_overlayRectsMm`) 소유권은 클래스에 유지 — 모듈이 구성한
+   * 캐시를 반환값으로 받아 write-back한다 (무효화(null) 이후 재구성 반영).
    *
    * @param lineRectMm - 라인 사각형 (mm)
    * @returns cover 여부와 오버랩 구간 배열
    */
   private _detectOverlapWithCache(lineRectMm: MmRect): { cover: boolean; overlapParts: OverlapParts[] } {
-    const overlapEls = this._data.overlayEngines;
-    let cover = false;
-    let parts: OverlapParts[] = [];
-
-    if (this._overlayRectsMm === null) {
-      this._overlayRectsMm = new Map();
-      for (const el of overlapEls) {
-        const rect = el.absRect;
-        this._overlayRectsMm.set(el, {
-          left: rect.absLeft,
-          right: rect.absLeft + rect.absWidth,
-          top: rect.absTop,
-          bottom: rect.absTop + rect.absHeight,
-          width: rect.absWidth,
-          height: rect.absHeight,
-        });
-      }
-    }
-
-    for (const el of overlapEls) {
-      const elRect = this._overlayRectsMm.get(el);
-      if (!elRect) continue;
-
-      if (lineRectMm.bottom <= elRect.top || lineRectMm.top >= elRect.bottom) {
-        continue;
-      }
-
-      let mode: OverlapMode | ParagraphOverlapMode = "path";
-      let padding: number | { top?: number; right?: number; bottom?: number; left?: number } | undefined;
-
-      const contentType = el.contentType;
-      let type: { direction: "NONE" | "COVERS" | "PART"; parts: OverlapParts[] };
-
-      if (contentType === "image") {
-        const img = el.contentElement as ImageEngine | null;
-        if (img) {
-          mode = img.overlapMode;
-          padding = img.overlapPadding;
-          type = img.computeOverlap(lineRectMm);
-        } else {
-          type = { direction: 'NONE', parts: [] };
-        }
-      } else {
-        type = computeOverlapSizeMm(lineRectMm, {
-          absRect: el.absRect,
-          overlapMode: mode,
-          overlapPadding: padding,
-          image: null,
-          contentType: contentType ?? 'paragraph',
-        });
-      }
-
-      if (type.direction === "COVERS") cover = true;
-      if (type.direction === "PART") parts = parts.concat(type.parts);
-    }
-
-    return { cover, overlapParts: mergeOverlapParts(parts) };
+    const result = detectOverlapWithCache(this._data.overlayEngines, lineRectMm, this._overlayRectsMm);
+    this._overlayRectsMm = result.rectsMm;
+    return { cover: result.cover, overlapParts: result.overlapParts };
   }
 
   /**
@@ -1986,72 +1700,31 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * 이전 키스트로크의 prefix와 현재 텍스트의 동일 구간을 비교한다.
    */
   private _computePrefixHash(caretOffset: number): string {
-    const parts: string[] = [];
-    const plain = this.plainText;
-    const prefixText = plain.slice(0, caretOffset);
-    parts.push("pt:" + prefixText);
-
-    const tc = this._textContent;
-    if (typeof tc !== "string") {
-      let consumed = 0;
-      for (const block of tc) {
-        const content = typeof block === "string" ? block : block.content;
-        const blockLen = content.length;
-        if (consumed >= caretOffset) break;
-        const end = Math.min(consumed + blockLen, caretOffset);
-        const slice = content.slice(0, end - consumed);
-        parts.push(slice);
-        if (typeof block !== "string") {
-          const s = block.textInlineStyle;
-          if (s) {
-            parts.push(
-              "s:" + (s.fontFamily ?? "") + "," +
-                    (s.fontSize ?? "") + "," +
-                    (s.fontStyle ?? "") + "," +
-                    (s.letterSpacing ?? "") + "," +
-                    (s.widthRatio ?? "") + "," +
-                    (s.spaceRatio ?? ""),
-            );
-          }
-        }
-        consumed += blockLen;
-      }
-    }
-
     const pAbsLeft = this._data.parentAbsRect.absLeft;
     const pAbsTop = this._data.parentAbsRect.absTop;
-    const overlapEls = this._data.overlayEngines;
-    for (const el of overlapEls) {
-      parts.push(this._overlayHashKey(el, pAbsLeft, pAbsTop));
-    }
-
-    parts.push(
-      "cw:" + this._columnWidths.join(","),
-      "g:" + this._gaps.join(","),
-      "lh:" + this._lineHeight,
-      // lineGap/lineGapMode 원시 키 — _computeLayoutInputHash와 동일 키.
-      // fixed/fixed-min에서 base lineHeight가 결정적이지 않으므로 원시 값 필수.
-      "lg:" + this.effectiveParagraphStyle.lineGap!,
-      "lgm:" + (this.effectiveParagraphStyle.lineGapMode ?? DEFAULT_LINE_GAP_MODE),
-      "wr:" + this.widthRatio,
-      "ls:" + this.effectiveTextStyle.letterSpacing!,
-      "sr:" + this.spaceRatio,
-      "fs:" + this.effectiveTextStyle.fontSize!,
-      "ph:" + (this._inheritStyle?.parentHeight ?? 0),
-      "ta:" + this.effectiveParagraphStyle.textAlign!,
-      "va:" + this.effectiveParagraphStyle.verticalAlign!,
-      "in:" + this.indent,
-      "hp:" + JSON.stringify(this.effectiveParagraphStyle.hangingPunctuation ?? false),
-      // word-wrap 여부는 워드 단위 라인 브레이크(래핑)에 직접 개입하므로
-      // 해시에 포함해야 한다. _computeLayoutInputHash와 동일 키.
-      "ww:" + (this.effectiveParagraphStyle.wordWrap ?? false),
-      // 스레딩 contentFrom — _computeLayoutInputHash와 동일 조건부 키.
-      ...(this._contentFrom > 0 ? ["tf:" + this._contentFrom] : [] as string[]),
-      // 경계 교정 clamp — 배치 상한이 배치 결과를 직접 결정하므로 포함.
-      ...(this._tailClampFrom >= 0 ? ["tc:" + this._tailClampFrom] : [] as string[]),
-    );
-
-    return parts.join("|");
+    return computePrefixHashKey({
+      caretOffset,
+      plainText: this.plainText,
+      textContent: this._textContent,
+      columnWidths: this._columnWidths,
+      gaps: this._gaps,
+      lineHeight: this._lineHeight,
+      lineGap: this.effectiveParagraphStyle.lineGap!,
+      lineGapMode: this.effectiveParagraphStyle.lineGapMode ?? DEFAULT_LINE_GAP_MODE,
+      widthRatio: this.widthRatio,
+      letterSpacing: this.effectiveTextStyle.letterSpacing!,
+      spaceRatio: this.spaceRatio,
+      fontSize: this.effectiveTextStyle.fontSize!,
+      parentHeight: this._inheritStyle?.parentHeight ?? 0,
+      textAlign: this.effectiveParagraphStyle.textAlign!,
+      verticalAlign: this.effectiveParagraphStyle.verticalAlign!,
+      indent: this.indent,
+      hangingPunctuation: this.effectiveParagraphStyle.hangingPunctuation,
+      wordWrap: this.effectiveParagraphStyle.wordWrap ?? false,
+      contentFrom: this._contentFrom,
+      tailClampFrom: this._tailClampFrom,
+      overlayKeys: this._data.overlayEngines.map((el) => this._overlayHashKey(el, pAbsLeft, pAbsTop)),
+    });
   }
 
   /**
@@ -3395,6 +3068,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
 
   /**
    * 오버랩 요소 하나의 해시 키(배치에 영향을 주는 모든 요소)를 생성한다.
+   * `paragraph-overlap.ts`의 `overlayHashKey` 모듈 함수에 위임한다.
    *
    * `_computeLayoutInputHash`와 `_computePrefixHash`가 동일 키를 사용해야
    * prefix 캐시와 전체 캐시가 일관되게 무효화되므로 단일 소스로 추출했다.
@@ -3412,37 +3086,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * @returns 오버랩 요소 해시 키
    */
   private _overlayHashKey(el: BoxEngine, pAbsLeft: number, pAbsTop: number): string {
-    let mode: OverlapMode | ParagraphOverlapMode = "path";
-    let hasRgba = false;
-    let paddingKey = "";
-    let displayRectKey = "";
-    if (el.contentType === "image") {
-      const img = el.contentElement as ImageEngineRef | null;
-      if (img) {
-        mode = img.overlapMode;
-        hasRgba = img.rgbaData !== null;
-        const pad = img.overlapPadding;
-        if (pad === undefined) {
-          paddingKey = "0";
-        } else if (typeof pad === "number") {
-          paddingKey = "n" + pad;
-        } else {
-          paddingKey = "o" + (pad.top ?? 0) + "," + (pad.right ?? 0) + "," + (pad.bottom ?? 0) + "," + (pad.left ?? 0);
-        }
-        // 오버랩 판정의 실제 기준 영역. objectFit/'none' x/y/w/h 변경 감지용.
-        // ImageEngineRef.displayRect는 optional이지만 ImageEngine 구현은 항상
-        // 반환하므로, 미제공(레거시 stub) 시 빈 키로 폴백한다.
-        const dr = img.displayRect;
-        displayRectKey = dr
-          ? "d:" + (dr.absLeft - pAbsLeft) + "," + (dr.absTop - pAbsTop) + "," + dr.absWidth + "," + dr.absHeight
-          : "d:-";
-      }
-    }
-    const rect = el.absRect;
-    const relLeft = rect.absLeft - pAbsLeft;
-    const relTop = rect.absTop - pAbsTop;
-    return "o:" + relLeft + "," + relTop + "," + rect.absWidth + "," + rect.absHeight
-      + "," + mode + "," + (hasRgba ? 1 : 0) + "," + paddingKey + "," + displayRectKey;
+    return overlayHashKey(el, pAbsLeft, pAbsTop);
   }
 
   /**
@@ -3472,27 +3116,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       this._lastDigest = cached;
       return cached;
     }
-    const segs: string[] = [];
-    for (const block of tc) {
-      if (typeof block === "string") {
-        segs.push(block);
-      } else {
-        segs.push(block.content);
-        const s = block.textInlineStyle;
-        if (s) {
-          segs.push(
-            "s:" +
-              (s.fontFamily ?? "") + "," +
-              (s.fontSize ?? "") + "," +
-              (s.fontStyle ?? "") + "," +
-              (s.letterSpacing ?? "") + "," +
-              (s.widthRatio ?? "") + "," +
-              (s.spaceRatio ?? ""),
-          );
-        }
-      }
-    }
-    const digest = segs.join("|");
+    const digest = textContentSegs(tc).join("|");
     ParagraphEngine._TEXT_DIGEST_BY_REF.set(tc, digest);
     this._lastDigestKey = tc;
     this._lastDigest = digest;
@@ -3520,9 +3144,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     const pAbsLeft = this._data.parentAbsRect.absLeft;
     const pAbsTop = this._data.parentAbsRect.absTop;
 
-    const overlapEls = this._data.overlayEngines;
-    for (const el of overlapEls) {
-      parts.push(this._overlayHashKey(el, pAbsLeft, pAbsTop));
+    for (const overlayKey of overlayKeysFor(this._data.overlayEngines, (el) => this._overlayHashKey(el, pAbsLeft, pAbsTop))) {
+      parts.push(overlayKey);
     }
 
     parts.push(
@@ -4153,32 +3776,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
    * @throws 없음
    */
   private _computeHangExtents(): { left: number; right: number }[] {
-    const extents = this._columnWidths.map(() => ({ left: 0, right: 0 }));
-    for (let c = 0; c < this._columnContents.length; c++) {
-      const column = this._columnContents[c];
-      const ext = extents[c];
-      if (!column || !ext) continue;
-      for (const line of column) {
-        for (const part of line.parts) {
-          const hangs = part.hangs;
-          if (hangs === undefined) continue;
-          if (hangs[0] === "start") {
-            const w = this.getCharWidths(part.content[0]!, part.inlineStyles?.[0]).swidth;
-            if (w > ext.left) ext.left = w;
-          }
-          let runRight = 0;
-          let firstHangOfRun = true;
-          for (let k = part.content.length - 1; k >= 0 && hangs[k] === "end"; k--) {
-            const w = this.getCharWidths(part.content[k]!, part.inlineStyles?.[k]).swidth;
-            // 반각 돌출: 첫 부호는 폭의 50%만 밖으로 나가므로 나머지 절반 제외
-            runRight += firstHangOfRun ? w * 0.5 : w;
-            firstHangOfRun = false;
-          }
-          if (runRight > ext.right) ext.right = runRight;
-        }
-      }
-    }
-    return extents;
+    return computeHangExtents({
+      columns: this._columnContents,
+      columnWidths: this._columnWidths,
+      measureChar: (char, inlineStyle) => this.getCharWidths(char, inlineStyle).swidth,
+    });
   }
 
   /**
@@ -5252,391 +4854,4 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
       this._inheritStyle?.parentHeight ?? 0,
     );
   }
-}
-
-/**
- * ParagraphEngine 내부 전용 LRU 캐시.
- * `@/utils` DOM 의존성을 피하기 위해 엔진 파일에 최소 구현.
- *
- * @template K - 키 타입
- * @template V - 값 타입
- */
-class _LRU<K, V> {
-  private readonly _map: Map<K, V> = new Map();
-  private readonly _capacity: number;
-
-  constructor(capacity: number) {
-    if (capacity <= 0) {
-      throw new RangeError("LRU capacity must be a positive integer");
-    }
-    this._capacity = capacity;
-  }
-
-  get(key: K): V | undefined {
-    if (!this._map.has(key)) return undefined;
-    const value = this._map.get(key)!;
-    this._map.delete(key);
-    this._map.set(key, value);
-    return value;
-  }
-
-  set(key: K, value: V): void {
-    if (this._map.has(key)) {
-      this._map.delete(key);
-    } else if (this._map.size >= this._capacity) {
-      const oldest = this._map.keys().next();
-      if (!oldest.done) {
-        this._map.delete(oldest.value);
-      }
-    }
-    this._map.set(key, value);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────
-// printPostData — DOM 없이 columnContents 기반으로 생성
-// ─────────────────────────────────────────────────────────────
-
-/**
- * 두 인라인 스타일이 필드 단위로 동일한지 비교한다.
- * `undefined`와 빈 객체는 모두 "스타일 없음"으로 동일 취급한다.
- */
-function inlineStyleEqual(a: TextInlineStyle | undefined, b: TextInlineStyle | undefined): boolean {
-  if (a === b) return true;
-  if (a === undefined || b === undefined) {
-    return (a === undefined || Object.keys(a).length === 0) && (b === undefined || Object.keys(b).length === 0);
-  }
-  return (
-    a.fontFamily === b.fontFamily &&
-    a.fontSize === b.fontSize &&
-    a.fontWeight === b.fontWeight &&
-    a.fontStyle === b.fontStyle &&
-    a.color === b.color &&
-    a.letterSpacing === b.letterSpacing &&
-    a.widthRatio === b.widthRatio &&
-    a.spaceRatio === b.spaceRatio &&
-    a.underline === b.underline &&
-    a.breakline === b.breakline &&
-    a.outline === b.outline &&
-    a.underlineColor === b.underlineColor &&
-    a.breaklineColor === b.breaklineColor &&
-    a.outlineColor === b.outlineColor
-  );
-}
-
-/**
- * 배열 콘텐츠의 후행 공백 개수 — strip 규칙 계산용.
- * @private
- */
-function countTrailingSpaces(content: string[]): number {
-  let n = 0;
-  for (let k = content.length - 1; k >= 0 && content[k] === ' '; k--) n++;
-  return n;
-}
-
-/**
- * ParagraphEngine의 printPostData를 생성한다.
- * columnContents를 순회하여 글자별 위치·폰트·색상을 픽셀 좌표로 변환한다.
- *
- * @param engine - ParagraphEngine 인스턴스
- * @param ppm - pixels-per-mm
- * @param colorRegistry - 색상 레지스트리 엔진
- * @param fontLoader - 폰트 로더 엔진
- * @param paragraphData - 단락 원본 데이터
- * @param absLeftMm - 단락 절대 X (mm)
- * @param absTopMm - 단락 절대 Y (mm)
- * @param parentWidthMm - 부모 너비 (mm)
- * @param parentHeightMm - 부모 높이 (mm)
- * @returns PrintPostData 배열
- */
-function computeStripRange(part: TextPartData, line: TextLineData, partIdx: number): { stripStart: number; stripEnd: number } {
-  const content = part.content;
-  const isFirst = partIdx === 0;
-  const isLast = partIdx === line.parts.length - 1;
-  const firstOfLine = line.firstOfBlock === true;
-  const endOfLine = line.endOfBlock === true;
-  let stripStart = 0;
-  let stripEnd = content.length;
-  if (isFirst && !firstOfLine) {
-    while (stripStart < stripEnd && content[stripStart] === " ") stripStart++;
-  }
-  if (isLast && !endOfLine) {
-    while (stripEnd > stripStart && content[stripEnd - 1] === " ") stripEnd--;
-  }
-  return { stripStart, stripEnd };
-}
-
-/**
- * 인자 중 첫 번째 비-빈 문자열을 반환한다.
- *
- * 스타일 색상 필드는 `undefined`(미지정)와 `''`(DEFAULT_TEXT_STYLE 기본값)가
- * 모두 "값 없음"이므로 `??` 체인으로는 폴백할 수 없다 — `''`가 nullish가
- * 아니기 때문이다. 엔진(`_computeDecorations`, `buildParagraphPrintPostData`)과
- * 편집 레이어(`_applyOptimisticDecorations`)가 동일 색상 폴백 체인을
- * 구성하는 단일 소스다.
- *
- * @param values - 우선순위 순 문자열들 (undefined 허용)
- * @returns 첫 번째 비-빈 문자열. 모두 비었으면 `''`
- */
-export function firstNonEmpty(...values: (string | undefined)[]): string {
-  for (const v of values) {
-    if (v !== undefined && v !== '') return v;
-  }
-  return '';
-}
-
-export function buildParagraphPrintPostData(
-  engine: ParagraphEngine,
-  colorRegistry: { get: (name: string) => { c: number; m: number; y: number; k: number } },
-  fontLoader: { getFontFamily: (name?: string) => string },
-  paragraphData: ParagraphData,
-  absLeftMm: number,
-  absTopMm: number,
-  parentWidthMm: number,
-  parentHeightMm: number,
-): PrintPostData[] {
-  const chars: PrintPostDataChar[] = [];
-  const columnContents = engine.columnContents;
-  const columnWidths = engine.columnWidths;
-  const gaps = engine.gaps;
-  const inheritStyle = engine.inheritStyle;
-  const textStyle = engine.textStyle;
-  const defaultLineHeightMm = engine.baseLineHeight;
-
-  for (let colIdx = 0; colIdx < columnContents.length; colIdx++) {
-    const col = columnContents[colIdx];
-    if (!col) continue;
-
-    let colLeftMm = absLeftMm;
-    for (let i = 0; i < colIdx; i++) {
-      colLeftMm += (columnWidths[i] ?? 0) + (gaps[i] ?? 0);
-    }
-
-    const baseFontSizeMm = engine.fontSize;
-    const effectiveColumnHeightMm = parentHeightMm > 0
-      ? parentHeightMm + (defaultLineHeightMm - baseFontSizeMm)
-      : 0;
-
-    const columnHeightMm = parentHeightMm;
-    const alignOffsetMm = engine._computeAlignOffsetMm(col, effectiveColumnHeightMm, baseFontSizeMm, columnHeightMm);
-
-    let cumulativeTopMm = 0;
-    let hasOverflowed = false;
-    for (let li = 0; li < col.length; li++) {
-      const lineData = col[li];
-      if (!lineData) continue;
-
-      const lineH = lineData.lineHeight ?? defaultLineHeightMm;
-      const lineMaxFs = lineData.maxFontSize ?? baseFontSizeMm;
-
-      if (hasOverflowed) break;
-      if (effectiveColumnHeightMm > 0 && cumulativeTopMm + lineH > effectiveColumnHeightMm + 1e-6) {
-        hasOverflowed = true;
-        break;
-      }
-
-      const lineTopMm = absTopMm + alignOffsetMm + cumulativeTopMm;
-
-      let partStartMm = 0;
-      for (let pi = 0; pi < lineData.parts.length; pi++) {
-        const part = lineData.parts[pi];
-        if (!part || part.content.length === 0) {
-          if (part) partStartMm += part.left + part.width;
-          continue;
-        }
-
-        partStartMm += part.left;
-        const partAbsLeftMm = partStartMm;
-
-        const { content, charOffsets, inlineStyles } = part;
-
-        const { stripStart, stripEnd } = computeStripRange(part, lineData, pi);
-
-        for (let j = stripStart; j < stripEnd; j++) {
-          const char = content[j];
-          if (!char || char.length === 0) continue;
-          if (char === RIGHT_INDENT_TAB_CHAR) continue;
-
-          const inlineStyle = inlineStyles?.[j];
-
-          const k = j - stripStart;
-          const charOffsetMm = charOffsets !== undefined && k < charOffsets.length
-            ? (charOffsets[k] ?? 0)
-            : 0;
-          const charXMm = colLeftMm + partAbsLeftMm + charOffsetMm;
-
-          const { swidth } = engine.getCharWidths(char, inlineStyle);
-          const charWidthMm = swidth;
-
-          const widthRatio = inlineStyle?.widthRatio
-            ?? engine.widthRatio;
-          const letterSpacing = inlineStyle?.letterSpacing
-            ?? engine.effectiveTextStyle.letterSpacing!;
-          const spaceRatio = inlineStyle?.spaceRatio
-            ?? engine.spaceRatio;
-
-          const charFontFamilyName = inlineStyle?.fontFamily
-            ?? textStyle?.fontFamily
-            ?? inheritStyle?.fontFamily;
-          const charFontFamily = charFontFamilyName !== undefined
-            ? fontLoader.getFontFamily(charFontFamilyName)
-            : fontLoader.getFontFamily();
-          const charFontSize = inlineStyle?.fontSize
-            ?? engine.effectiveTextStyle.fontSize!;
-          const charFontWeight = inlineStyle?.fontWeight
-            ?? textStyle?.fontWeight
-            ?? inheritStyle?.fontWeight
-            ?? 400;
-          const charFontStyle = inlineStyle?.fontStyle
-            ?? textStyle?.fontStyle
-            ?? inheritStyle?.fontStyle
-            ?? DEFAULT_FONT_STYLE;
-          const colorName = firstNonEmpty(
-            inlineStyle?.color,
-            textStyle?.color,
-            inheritStyle?.color,
-          );
-          const cmyk = colorName !== ''
-            ? colorRegistry.get(colorName)
-            : { c: 0, m: 0, y: 0, k: 255 };
-
-          const outlineEm = inlineStyle?.outline
-            ?? textStyle?.outline
-            ?? inheritStyle?.outline
-            ?? 0;
-          const outlineColorName = firstNonEmpty(
-            inlineStyle?.outlineColor,
-            textStyle?.outlineColor,
-            inheritStyle?.outlineColor,
-            colorName,
-          );
-          const outlineCmyk = outlineColorName !== ''
-            ? colorRegistry.get(outlineColorName)
-            : { c: 0, m: 0, y: 0, k: 255 };
-
-          chars.push({
-            char,
-            rect: {
-              x: charXMm,
-              y: lineTopMm + engine._getCharVerticalOffset(lineMaxFs, charFontSize),
-              width: charWidthMm,
-              height: charFontSize,
-            },
-            fontFamily: charFontFamily,
-            fontSize: charFontSize,
-            fontWeight: charFontWeight,
-            fontStyle: charFontStyle,
-            widthRatio,
-            letterSpacing,
-            spaceRatio,
-            color: cmyk,
-            outline: outlineEm * charFontSize,
-            outlineColor: outlineCmyk,
-          });
-        }
-        partStartMm += part.width;
-      }
-
-      cumulativeTopMm += lineH;
-    }
-  }
-
-  const decorations: PrintPostDecoration[] = [];
-  for (let colIdx = 0; colIdx < columnContents.length; colIdx++) {
-    const col = columnContents[colIdx];
-    if (!col) continue;
-
-    let colLeftMm = absLeftMm;
-    for (let i = 0; i < colIdx; i++) {
-      colLeftMm += (columnWidths[i] ?? 0) + (gaps[i] ?? 0);
-    }
-
-    const baseFontSizeMm2 = engine.fontSize;
-    const effectiveColumnHeightMm2 = parentHeightMm > 0
-      ? parentHeightMm + (defaultLineHeightMm - baseFontSizeMm2)
-      : 0;
-    const alignOffsetMm2 = engine._computeAlignOffsetMm(col, effectiveColumnHeightMm2, baseFontSizeMm2, parentHeightMm);
-
-    let cumulativeTopMm = 0;
-    for (const lineData of col) {
-      if (!lineData) continue;
-      const lineH = lineData.lineHeight ?? defaultLineHeightMm;
-      for (const part of lineData.parts) {
-        if (!part || part.content.length === 0) continue;
-        for (const deco of part.decorationRects ?? []) {
-          const decoCmyk = deco.colorName !== ''
-            ? colorRegistry.get(deco.colorName)
-            : { c: 0, m: 0, y: 0, k: 255 };
-          decorations.push({
-            kind: deco.kind,
-            x: colLeftMm + part.left + deco.x,
-            y: absTopMm + alignOffsetMm2 + cumulativeTopMm + deco.y,
-            width: deco.width,
-            height: deco.height,
-            color: decoCmyk,
-          });
-        }
-      }
-      cumulativeTopMm += lineH;
-    }
-  }
-
-  return [{
-    data: paragraphData,
-    rect: {
-      x: absLeftMm,
-      y: absTopMm,
-      width: parentWidthMm,
-      height: parentHeightMm,
-    },
-    chars,
-    decorations,
-  }];
-}
-
-/**
- * inline 콘텐츠를 plain 오프셋 범위로 슬라이싱한다 (런 경계 보존).
- *
- * 스레딩 feed-forward가 tail을 잘라 다음 프레임에 전달할 때 사용한다.
- * plain 오프셋은 `\n`을 포함한 편집 공간(plainText getter와 동일) 기준이다.
- * 런의 절반 지점 분할은 스타일이 동일한 문자열 런 내부에서만 발생하므로
- * 배치 결과에 영향이 없다.
- *
- * @param content - 원본 콘텐츠 (string 또는 인라인 런 배열)
- * @param start - 시작 plain 오프셋 (포함)
- * @param end - 끝 plain 오프셋 (제외)
- * @returns 슬라이스된 콘텐츠 배열. 빈 범위면 빈 배열.
- */
-export function sliceInlineContent(
-  content: string | (string | TextInlineData)[] | undefined,
-  start: number,
-  end: number,
-): (string | TextInlineData)[] {
-  if (content === undefined) return [];
-  const raw: (string | TextInlineData)[] = typeof content === 'string'
-    ? [content]
-    : content;
-  const result: (string | TextInlineData)[] = [];
-  let offset = 0;
-  for (const item of raw) {
-    if (offset >= end) break;
-    const text = typeof item === 'string' ? item : item.content;
-    const itemEnd = offset + text.length;
-    if (itemEnd <= start) {
-      offset += text.length;
-      continue;
-    }
-    const sliceStart = Math.max(0, start - offset);
-    const sliceEnd = Math.min(text.length, end - offset);
-    const slice = text.slice(sliceStart, sliceEnd);
-    if (slice.length > 0) {
-      if (typeof item === 'string' || item.textInlineStyle === undefined) {
-        result.push(slice);
-      } else {
-        result.push({ content: slice, textInlineStyle: item.textInlineStyle });
-      }
-    }
-    offset += text.length;
-  }
-  return result;
 }

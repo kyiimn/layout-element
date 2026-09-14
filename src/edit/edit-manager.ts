@@ -1,5 +1,5 @@
 import { LayoutParagraphElement } from "@/components/layout/paragraph.element";
-import { ParagraphEngine, DocumentEngine } from "@/engine";
+import { DocumentEngine } from "@/engine";
 import { LayoutPageElement } from "@/components/layout/page.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
@@ -12,6 +12,7 @@ import { InsertController } from "./insert-controller";
 import { LayoutEditController } from "./layout-edit-controller";
 import { LayoutSelectionController } from "./layout-selection-controller";
 import { PlaceGunController } from "./place-gun-controller";
+import { threadFrameCoverage, filterTopLevelLayouts } from "./edit-manager-introspect";
 import type { SelectionRange } from "@/types/edit";
 import type { InsertMode, InsertEventDetail, InsertPosition, LayoutEditType, LayoutEditModeInput, LayoutAddEventDetail, LayoutRemoveEventDetail, EditModeState, BoxPropertyChangeEventDetail, ContextMenuEventDetail, PlaceGunItem, PlaceGunChangeEventDetail, PlaceGunBeforeEventDetail, PlaceGunAfterEventDetail, TableCellSelectionChangeDetail, TableCellSelection, ImagePropertyChangeEventDetail } from "@/types/edit";
 import type { BoxRole } from "@/types/layout";
@@ -1243,23 +1244,12 @@ export class EditManager {
 
   /**
    * 스레드 프레임의 story 절대 오프셋 커버리지.
-   *
-   * `contentFrom`부터 visible 끝까지가 프레임이 표시하는 story 구간이다.
-   * tail이 있으면 tail까지, 없으면(소진) story 끝까지가 visible 연속 구간이다.
+   * `edit-manager-introspect.ts`의 `threadFrameCoverage` 모듈 함수에 위임한다.
    */
   private _threadFrameCoverage(
     frameId: string,
   ): { start: number; end: number } | null {
-    const engine = this._threadEngine;
-    if (!engine) return null;
-    const pe = engine.findEngineById(frameId);
-    if (!(pe instanceof ParagraphEngine) || !pe.isThreadFrame) return null;
-    const start = pe.contentFrom;
-    // tail(overflow)가 있으면 tail이 visible 끝이다. 소진(tail -1)이면
-    // 남은 story 전체를 배치했으므로 story 끝이 visible 끝이다.
-    // (visibleChars는 strip 공백을 제외한 수라 end 산정에 부적합하다)
-    const end = pe.overflowContentFrom >= 0 ? pe.overflowContentFrom : pe.totalChars;
-    return end > start ? { start, end } : null;
+    return threadFrameCoverage(this._threadEngine, frameId);
   }
 
   /**
@@ -2809,29 +2799,13 @@ export class EditManager {
   /**
    * 주어진 레이아웃 요소 목록에서 중첩 관계의 하위 요소를 제거하고
    * 최상위 요소만 필터링한다.
+   * `edit-manager-introspect.ts`의 `filterTopLevelLayouts` 모듈 함수에 위임한다.
    *
    * @param elements - 필터링할 레이아웃 요소 목록
    * @returns 중첩 하위 요소가 제거된 LayoutBoxElement 배열.
    */
   private _filterTopLevelLayouts(elements: LayoutElement[]): LayoutBoxElement[] {
-    const boxes = elements.filter(
-      (el): el is LayoutBoxElement => el instanceof LayoutBoxElement
-    );
-    if (boxes.length <= 1) return boxes;
-
-    const result: LayoutBoxElement[] = [];
-    for (const box of boxes) {
-      if (result.some(existing => existing.contains(box))) continue;
-
-      for (let i = result.length - 1; i >= 0; i--) {
-        if (box.contains(result[i])) {
-          result.splice(i, 1);
-        }
-      }
-
-      result.push(box);
-    }
-    return result;
+    return filterTopLevelLayouts(elements);
   }
 
   /**

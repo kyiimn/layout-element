@@ -1797,6 +1797,8 @@ effective 체인(주입값 → 상속값 → 기본값 `false`)을 따르며, �
 
 ### 23.3 후처리 알고리즘 (`_applyHangingPunctuation`)
 
+> **소재 파일**: 걸침 패스 본체는 `src/engine/paragraph-hanging.ts` 모듈 함수(`applyHangingPass`/`hangingConfig`/`computeHangExtents`)로 추출되어 있다. `ParagraphEngine._applyHangingPunctuation()`은 위임자로 남아 호출부 시그니처를 유지하며, 클래스 상태는 `HangPassContext` 인자로 주입된다.
+
 `_layoutTextIntoColumns()`에서 vertical-align 반복 뒤, `_applyLineBreakRules()` 직전에 실행된다 (prefix 캐시 경로 `_applyPrefixCache`에도 동일 배선). 교정을 적용한 페어(인접 두 줄) 키(`${col}:${lineIdx}`)의 `ReadonlySet<string>`을 반환하고, 금칙 패스는 이 집합을 `skipPairs` 파라미터로 받아 **같은 페어를 재교정하지 않는다** — 걸침 마킹을 금칙 이동이 훼손하는 것을 원천 차단한다.
 
 페어별 결정 순서 (한 페어에 최대 1회 교정):
