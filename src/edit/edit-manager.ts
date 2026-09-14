@@ -4,6 +4,7 @@ import { LayoutPageElement } from "@/components/layout/page.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
 import { LayoutTableElement } from "@/components/layout/table.element";
+import type { EditManagerHost } from "./edit-manager-host";
 import type { TextEditController, CurrentStyle } from "./text-edit-controller";
 import type { TextInlineStyle, TextStyle, ParagraphStyle } from "@/types/style";
 import { inlineToPlain, plainToInline, normalizeRunMap, resolvePatchAgainstInherit, stripRunFields, type NumericInlineMetricField, type RunMap } from "./run-map";
@@ -217,7 +218,13 @@ export type EditManagerEventListener = (event: EditManagerEvent) => void;
  * ```
  */
 export class EditManager {
-  private _pageEl: LayoutPageElement;
+  /**
+   * 이 EditManager가 관리하는 호스트 요소 (page/document 공통 계약 — E-1).
+   *
+   * 실제 소비 표면(`querySelector*`/`ppm`/`visibleGuide` + Element 기능)만
+   * 요구한다 — document 요소가 페이지로 위장하는 타입 거짓말을 제거한다.
+   */
+  private _pageEl: EditManagerHost & HTMLElement;
   private _controllers: Set<TextEditController> = new Set();
   private _focusedController: TextEditController | null = null;
   private _lastFocusedBox: LayoutBoxElement | null = null;
@@ -290,12 +297,14 @@ export class EditManager {
   shortcutSteps: ShortcutMetricSteps = { ...DEFAULT_SHORTCUT_METRIC_STEPS };
 
   /**
-   * 이 EditManager가 관리하는 문서 요소.
+   * 이 EditManager가 관리하는 호스트 요소.
    *
    * 문서별로 독립적인 인스턴스이므로, 전역 DOM 순회(`document.querySelectorAll`)
-   * 대신 이 요소의 하위 트리만 순회한다.
+   * 대신 이 요소의 하위 트리만 순회한다. page/document 공통 계약(`EditManagerHost`)
+   * 으로 반환한다 — 호출부 6곳이 Element 기능(getBoundingClientRect 등)을 함께
+   * 쓰므로 인터섹션 타입을 유지한다 (E-1, 호환 유지).
    */
-  get pageEl(): LayoutPageElement { return this._pageEl; }
+  get pageEl(): EditManagerHost & HTMLElement { return this._pageEl; }
 
   /**
    * 스레드 조정 엔진을 해석한다 (문서 엔진 우선, 독립 페이지 폴백).
@@ -310,9 +319,12 @@ export class EditManager {
    */
   private get _threadEngine(): DocumentEngine | undefined {
     // 루트 자체가 문서 요소일 수 있다 (문서가 EditManager를 소유하는 경우).
+    // 문서 식별은 duck-typing `type === 'document'`가 아닌 isDocumentHost 계약으로
+    // 정식화한다 (E-1) — host 인터페이스에 문서 식별 메서드가 없으면 이 우회
+    // 판정이 계약 밖 구조 지식으로 남는다.
     let el: Element | null = this._pageEl;
     while (el) {
-      if ((el as unknown as { type?: string }).type === 'document') {
+      if ((el as unknown as { isDocumentHost?: () => boolean }).isDocumentHost?.() === true) {
         return (el as unknown as { engine?: DocumentEngine }).engine;
       }
       el = el.parentElement;
@@ -328,9 +340,9 @@ export class EditManager {
    * 프로퍼티로 할당한다. 생성 시 `LayoutSelectionController`를 즉시 생성하고
    * attach하여 클릭/더블클릭/컨텍스트메뉴 이벤트를 문서 연결과 동시에 처리한다.
    *
-   * @param pageEl - 이 EditManager가 관리할 `LayoutPageElement`
+   * @param pageEl - 이 EditManager가 관리할 호스트 요소 (page/document 공통)
    */
-  constructor(pageEl: LayoutPageElement) {
+  constructor(pageEl: EditManagerHost & HTMLElement) {
     this._pageEl = pageEl;
     this._selectionController = new LayoutSelectionController(this._pageEl, this);
     this._selectionController.attach();

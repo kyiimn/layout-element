@@ -554,7 +554,11 @@ export class PlaceGunController {
     if (rootBox && !rootBox.lock) {
       return rootBox;
     }
-    return manager.pageEl;
+    // 호스트는 page 또는 document 요소다 — document 호스트는 자체적으로
+    // 주입 컨테이너가 아니다 (page 하위 트리만 주입 대상 — EditManager
+    // per-document 계약). document 호스트면 컨테이너 미발견(null)로 본다.
+    const host = manager.pageEl;
+    return host instanceof LayoutPageElement ? host : null;
   }
 
   /**
@@ -855,7 +859,13 @@ export class PlaceGunController {
     const rootEl = rootId
       ? manager.pageEl.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null
       : null;
-    const root = (rootEl && !rootEl.lock) ? rootEl : manager.pageEl;
+    const pageHost = manager.pageEl instanceof LayoutPageElement ? manager.pageEl : null;
+    const root = (rootEl && !rootEl.lock) ? rootEl : pageHost;
+    if (!root) {
+      // document 호스트는 자체적으로 주입 컨테이너가 아니다 (page 폴백 불가)
+      this._previewEl.style.display = 'none';
+      return;
+    }
     const rect = root.getBoundingClientRect();
     const screenPpm = manager.pageEl.ppm * manager.scale;
 

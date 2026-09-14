@@ -1,5 +1,6 @@
 import { Z_INDEX_INSERT_PREVIEW, Z_INDEX_MAX_LAYOUT, Z_INDEX_ROLE_AD, Z_INDEX_ROLE_HEADER } from "@/constants";
 import { EditManager } from "./edit-manager";
+import type { EditManagerHost } from "./edit-manager-host";
 import { LayoutPageElement } from "@/components/layout/page.element";
 import { LayoutBoxElement } from "@/components/layout/box.element";
 import { LayoutTableCellElement } from "@/components/layout/td.element";
@@ -9,7 +10,7 @@ import type { InsertMode, InsertEventDetail } from "@/types/edit";
 
 /** 드래그-삽입을 통한 새 요소 생성을 관리하는 컨트롤러. */
 export class InsertController {
-  private _document: LayoutPageElement;
+  private _document: EditManagerHost & HTMLElement;
   private _manager: EditManager;
   private _mode: InsertMode | null = null;
   private _isDragging = false;
@@ -37,7 +38,7 @@ export class InsertController {
    * @param document - 삽입 대상 문서 요소
    * @param manager - 이 컨트롤러가 속한 EditManager 인스턴스
    */
-  constructor(document: LayoutPageElement, manager: EditManager) {
+  constructor(document: EditManagerHost & HTMLElement, manager: EditManager) {
     this._document = document;
     this._manager = manager;
     this._boundStartDrag = this.startDrag.bind(this);
@@ -298,7 +299,7 @@ export class InsertController {
    * @param endY - 드래그 영역 아래쪽 화면 y좌표 (px)
    * @returns 유효한 컨테이너 요소, 또는 루트 요소
    */
-  private _findTargetContainer(startX: number, startY: number, endX: number, endY: number): LayoutPageElement | LayoutBoxElement | LayoutTableCellElement {
+  private _findTargetContainer(startX: number, startY: number, endX: number, endY: number): LayoutPageElement | LayoutBoxElement | LayoutTableCellElement | null {
     const manager = this._manager;
     const rootId = manager.editableRootId;
     const rootBox = rootId
@@ -380,7 +381,9 @@ export class InsertController {
       if (deepest) return deepest;
 
       if (rootBox && !rootBox.lock) return rootBox;
-      return this._document;
+      // document 호스트는 page 컨테이너 소비(model 등)와 양립하지 않는다 —
+      // 기존에도 document의 model은 undefined로 0 크기 폴백(사실상 실패)이었다.
+      return this._document instanceof LayoutPageElement ? this._document : null;
     }
 
     const corners = [
@@ -511,7 +514,10 @@ export class InsertController {
         // root box 영역을 벗어나면 root box 자체로 클램핑
         return rootBox;
       }
-      return this._document;
+      {
+        const pageHost = this._document instanceof LayoutPageElement ? this._document : null;
+        if (pageHost) return pageHost;
+      }
     }
 
     // 드래그 영역이 어느 컨테이너보다 크면 EditManager 루트로 폴백
@@ -533,7 +539,11 @@ export class InsertController {
       const rootBox = this._document.querySelector(`#${CSS.escape(rootId)}`) as LayoutBoxElement | null;
       if (rootBox) return rootBox;
     }
-    return this._document;
+    // document 호스트는 주입 컨테이너 계약(구체 model 소비)과 양립하지 않는다 —
+    // page 호스트 폴백만 반환한다 (기존 document 폴백은 model undefined로
+    // 0 크기 폴백의 사실상 실패 경로였다).
+    if (this._document instanceof LayoutPageElement) return this._document;
+    throw new Error('InsertController: page host fallback unavailable (document host).');
   }
 
   /** 화면 좌표를 컨테이너 내부 mm 좌표로 변환한다. */

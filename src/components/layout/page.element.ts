@@ -8,6 +8,7 @@ import type { LayoutTableElement } from "./table.element";
 import type { LayoutDocumentElement } from "./document.element";
 import type { FlipLayoutOptions } from "@/engine";
 import { EditManager } from "@/edit/edit-manager";
+import type { EditManagerHost } from "@/edit/edit-manager-host";
 import { PageEngine, BoxEngine, DocumentEngine } from "@/engine";
 import type { FontLoaderEngine, ColorRegistryEngine, ParsedFont, GridCalculatorEngine } from "@/engine";
 import { FontLoader } from "@/resource/font-loader";
@@ -90,7 +91,7 @@ export class ColorRegistrySingletonAdapter implements ColorRegistryEngine {
  * - 최상위 `InheritStyle` 생성 및 자식에게 전파
  * - 컬럼 가이드(`<x-layout-guide-column>`) 렌더링
  */
-export class LayoutPageElement extends HTMLElement {
+export class LayoutPageElement extends HTMLElement implements EditManagerHost {
   private _engine?: PageEngine;
   private _ppm: number = 0;
 
@@ -1183,6 +1184,15 @@ export class LayoutPageElement extends HTMLElement {
   get visibleGuide() { return this._visibleGuide; }
   get type() { return 'page' as const; }
   get zIndex() { return 0; }
+
+  /**
+   * EditManagerHost 문서 식별 계약 (E-1).
+   *
+   * 독립 페이지(레거시 단일 페이지 구성)는 문서 호스트가 아니므로 false —
+   * EditManager의 스레드 엔진 해석이 `threadEngine` 폴백 경로로 간다.
+   * @returns 문서 호스트가 아니므로 항상 false
+   */
+  isDocumentHost(): boolean { return false; }
 
   set visibleGuide(value: boolean) {
     this._visibleGuide = value;

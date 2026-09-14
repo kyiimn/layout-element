@@ -4,6 +4,7 @@ import { normalizeDocumentData } from "@/types";
 import { LayoutPageElement, FontLoaderSingletonAdapter, ColorRegistrySingletonAdapter } from "./page.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { EditManager } from "@/edit/edit-manager";
+import type { EditManagerHost } from "@/edit/edit-manager-host";
 import { DocumentEngine, PageEngine } from "@/engine";
 import type { FontLoaderEngine, ColorRegistryEngine } from "@/engine";
 import { FontLoader } from "@/resource/font-loader";
@@ -35,7 +36,7 @@ const HOST_STYLE_ID = '__layout_host_style__';
  * - 페이지 엔진은 각 페이지 요소가 소유하며, 문서 엔진은 `adoptPageEngines()`
    으로 편입한다 (엔진 복제 방지 — 단일 소스 유지).
  */
-export class LayoutDocumentElement extends HTMLElement {
+export class LayoutDocumentElement extends HTMLElement implements EditManagerHost {
   private _shadowRoot: ShadowRoot;
   private _engine?: DocumentEngine;
   private _ppm: number = 0;
@@ -131,7 +132,8 @@ export class LayoutDocumentElement extends HTMLElement {
     super();
     this._shadowRoot = this.attachShadow({ mode: "open" });
     this._visibleGuide = true;
-    this._editManager = new EditManager(this as unknown as LayoutPageElement);
+    // EditManagerHost 계약 구현 선언 — 페이지 위장 캐스팅 제거 (E-1).
+    this._editManager = new EditManager(this);
   }
 
   connectedCallback() {
@@ -884,6 +886,15 @@ export class LayoutDocumentElement extends HTMLElement {
   get visibleGuide() { return this._visibleGuide; }
   get type() { return 'document' as const; }
   get zIndex() { return 0; }
+
+  /**
+   * EditManagerHost 문서 식별 계약 (E-1).
+   *
+   * EditManager의 스레드 엔진 해석(`_threadEngine`)이 duck-typing
+   * `type === 'document'` 우회 판정 대신 이 메서드로 문서 루트를 식별한다.
+   * @returns 문서 호스트이므로 항상 true
+   */
+  isDocumentHost(): boolean { return true; }
 
   set visibleGuide(value: boolean) {
     if (this._visibleGuide === value) return;
