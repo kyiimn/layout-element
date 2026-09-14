@@ -976,9 +976,9 @@ export class TextEditController {
           targetRight = offset < content.length ? offset + 1 : offset;
         }
       }
-      // 오버플로 라인 진입 금지: 착지가 경계에 도달/초과하면 경계로 되돌리고 cross
-      // 상태 진행(sticking→crossed)도 차단한다 — crossed 배치는 다음 라인 첫 글자
-      // (숨김 span) placement를 참조하므로 커서 렌더 폴백이 깨진다.
+      // 오버플로(숨김) 라인 진입 금지: 착지가 maxVisibleCursorOffset 경계에
+      // 도달/초과하면 경계로 되돌린다 — 경계 밖 배치는 숨김 라인의 span
+      // placement를 참조하므로 커서 렌더 폴백이 깨진다.
       const maxOffset = this._cursorMaxOffset();
       if (maxOffset !== null && targetRight >= maxOffset) {
         targetRight = maxOffset;
@@ -1025,11 +1025,11 @@ export class TextEditController {
           newOffset = cursorMax;
         }
       }
-      // 출발 주차 상태 보존: Home 주차(crossLeft sticking)에서 Up/Down하면 착지도
-      // 라인 시작에 그려지고, End 주차(crossRight sticking)에서 Up/Down하면 착지도
-      // 라인 끝에 그려진다 — sticking 상태를 리셋하면 착지 렌더가 기본 경로
-      // (preferLineEnd)로 돌아가 라인 경계 offset이 이웃 라인을 참조한다.
-      // crossed(라인 경계 미리보기 잔존 상태)만 리셋한다.
+      // 출발 소속(bias) 보존: bias 'start'(라인 시작 소속)에서 Up/Down하면 착지도
+      // 라인 시작에 그려지고, bias 'end'(라인 끝 소속)에서 Up/Down하면 착지도
+      // 라인 끝 근처에 그려진다 — 아래 bias-carry(L1038-1040)가 그 소유이며,
+      // 수직 이동에서 bias는 유지된다 (착지 렌더가 기본 경로(preferLineEnd)로
+      // 돌아가 라인 경계 offset이 이웃 라인을 참조하는 것을 방지).
       if (isShift) {
         this._extendSelection(newOffset ?? offset);
       } else {
@@ -1498,8 +1498,8 @@ export class TextEditController {
     if (currentLineInfo === null) return null;
 
     // 라인 끝 주차(End 착지) offset은 내부적으로 '다음 라인 시작'과 같은 값이므로
-    // getLineInfoBySourceOffset가 다음 라인을 소속 라인으로 판정한다. 직전 입력이
-    // End(crossRight sticking)였으면 커서가 그려진 라인은 이전 라인이므로 출발 라인을
+    // getLineInfoBySourceOffset가 다음 라인을 소속 라인으로 판정한다. bias가
+    // 'end'(End 착지 주차)였으면 커서가 그려진 라인은 이전 라인이므로 출발 라인을
     // 한 라인 되돌려 판정한다 — 그렇지 않으면 ArrowDown이 2 라인 아래로, ArrowUp이
     // 같은 라인(순환)으로 이동한다. isAtLineStart/isAtLineEnd도 다음 라인 기준으로
     // 판정되었으므로(라인 시작 경계는 findVisualLineBounds가 다음 라인 소속으로 본다)
@@ -2673,7 +2673,6 @@ export class TextEditController {
       return;
     }
 
-    // cross state가 커서 배치를 오버라이드하는 경우
     // 기본 조회에서 preferLineEnd=true: 라인 끝 문자 다음 offset에서 phantom end placement를 우선하여
     // 커서가 라인 끝 문자의 오른쪽에 배치되도록 한다.
     let placement = this._mapper.getCursorPlacement(offset, true);
@@ -3676,10 +3675,10 @@ export class TextEditController {
  * (다음 첫 글자 왼쪽)으로 그려진다. 경계가 아닌 offset에서는 bias가
  * 렌더에 영향을 주지 않는다 (일반 placement가 채움).
  *
- * 기존 cross-state 플래그(`_crossRightState`/`_crossLeftState`)와의 대응
- * (Phase 2 이중 기록 — Phase 3에서 플래그 삭제 시 이 규칙이 단일 소스가 된다):
- * right-sticking / End 주차 / left-crossed → 'end';
- * left-sticking(라인 시작 주차) / Home 주차 / right-crossed / 타이핑·편집 후 → 'start'.
+ * 기존 cross-state 플래그 머신(e13532a에서 삭제)을 대체한 규칙이며,
+ * 현행 단일 소스다:
+ * End 주차(라인 끝 소속) → 'end';
+ * 라인 시작 주차 / Home 주차 / 타이핑·편집 후 → 'start'.
  */
 type CursorBias = 'start' | 'end';
 

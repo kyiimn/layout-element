@@ -1000,7 +1000,6 @@ src/engine/
 | `DEFAULT_LINE_GAP` | `1.25` | 기본 라인 갭 |
 | `DEFAULT_LINE_GAP_MODE` | `'ratio'` | 기본 행간 모드 (기존 동작 byte-identical) |
 | `DEFAULT_LINE_GAP_FIXED` | `6` | fixed/fixed-min 모드에서 lineGap 생략 시 기본 행 높이 (mm) |
-| `DEFAULT_PPM` | `96 / 25.4` | 기본 ppm (96 DPI) |
 | `DEFAULT_IMAGE_DPI` | `72` | 기본 이미지 DPI |
 | `DEFAULT_SPACE_RATIO` | `0.5` | 기본 스페이스 비율 |
 | `DEFAULT_LETTER_SPACING` | `-0.1` | 기본 자간 |

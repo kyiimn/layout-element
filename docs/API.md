@@ -3485,7 +3485,6 @@ type PlaceGunChangeEventDetail = {
 | `DEFAULT_FONT_STYLE` | `'normal'` | — | 폰트 스타일 기본값. |
 | `DEFAULT_FONT_WEIGHT` | `400` | — | 폰트 굵기 기본값. |
 | `DEFAULT_LINE_GAP` | `1.25` | — | `lineHeight = fontSize × lineGap`. |
-| `DEFAULT_PPM` | `96 / 25.4` | px/mm | 화면 DPI 기준 픽셀/mm 비율. |
 | `DEFAULT_IMAGE_DPI` | `72` | DPI | 이미지 기본 해상도. |
 | `DEFAULT_SPACE_RATIO` | `0.5` | em | 공백 최소 너비. |
 | `DEFAULT_LETTER_SPACING` | `-0.1` | em | 자간. |

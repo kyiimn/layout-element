@@ -47,6 +47,7 @@ npx tsx scripts/verify-threading.mjs # 텍스트 스레딩 엔진 전 파이프�
 npx tsx scripts/verify-threading-browser.mjs # 스레딩 화면 진실 (타이핑 전파 seam/테두리 tail 분기/round-trip/역방향 편집 보존/엔터 후 클릭 매핑)
 npx tsx scripts/verify-overflow-cursor-clamp.mjs # 오버플로(숨김) 라인 커서 진입 금지 클램프 (화살표·End 이동 경계)
 npx tsx scripts/verify-caret-parking.mjs # 커서 주차 회귀 코퍼스 (End/Home/ArrowUp/Down × 커서 px 좌표+bias — 커서 내비게이션 변경 시 선행 실행)
+npx tsx scripts/verify-page-reorder-parked.mjs # parked placeholder 순서 추적 (parked 중 pages 재배치 → 수집 순서 일치/unpark 후 보존)
 ```
 
 각 스크립트의 목적·측정 원칙·오탐 주의사항·워크플로는 **`scripts/README.md`** 참조. 성능 작업 시 `scripts/README.md`의 워크플로(기준선 측정 → 수정 → 검증 → 재측정)를 따른다.
@@ -283,7 +284,7 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 - **Engine keeps parked pages**: `document._layoutStructure()` builds `childrenData` via `_collectChildrenData()` — mounted boxes contribute `_rawData()` in DOM order, placeholders contribute the stored snapshot at their index. With zero parked pages this is byte-identical to `items.map(e => e._rawData())`. Never revert to items-only assembly — parked pages would drop from the engine tree (threads, printPostData, overlay refresh) on the next document layout.
 - **`data` setter never resurrects parked pages**: the creation branch skips parked ids (refreshing the stored snapshot + detached element props instead) and drops parked entries missing from the new `children`. `removeChildData(id)` also clears the parked entry + placeholder.
 - **Detach sweep**: `box.disconnectedCallback` calls `EditManager._unregisterLayoutSubtree(this)` after `_unregisterLayout(this)` — batch-removes descendant layout selections (single dispatch) and ends image edit mode when the focused image is inside the detached subtree. Text focus is handled by paragraph controller `destroy()` → `_unregister()`. Fast-path no-op when nothing is active (reconcile churn safe).
-- Mount orchestration: `PageMountManager` (`src/utils/page-mount-manager.ts`) — IntersectionObserver + index-window (±N pages), 2px hysteresis band (`rootMargin`, scale-independent) + rAF-coalesced apply (no per-batch DOM surgery — fixes IO flapping at fractional px boundaries). Unmount measures footprint as fractional layout px (`getBoundingClientRect / scale`, `scale` option defaulting to 1 — integer `offsetWidth` rounding pushes neighbors across boundaries). Host must `pin()` the focused page and call `refresh()` after out-of-band structural changes.
+- Mount orchestration: `PageMountManager` (`src/utils/page-mount-manager.ts`) — IntersectionObserver + index-window (±N pages), 2px hysteresis band (`rootMargin`, scale-independent) + direct apply per IO batch (rAF 등 프레임 생산 의존 매커니즘 미사용 — 정적 페이지에서 프레임이 생산되지 않아 apply가 starve될 수 있음; IO 배치마다 직접 적용하되 `changed` 가드로 반복 DOM surgery 방지). Unmount measures footprint as fractional layout px (`getBoundingClientRect / scale`, `scale` option defaulting to 1 — integer `offsetWidth` rounding pushes neighbors across boundaries). Host must `pin()` the focused page and call `refresh()` after out-of-band structural changes.
 - Detail design + audit record: `docs/VIRTUALIZATION.md`.
 
 ### `HOST_STYLE_ID` — Style Element Identification
@@ -379,7 +380,6 @@ The engine layer is designed for future **canvas rendering** — it must remain 
 - **Optimistic spans**: `data-temporary="true"` spans stripped at start of every `renderText()`.
 - **Edited text flows through `model.textContent`**: `paragraph.data.content` getter and `_layoutStructure()` use `this._model?.textContent ?? this._sourceContent`.
 - **`paragraph.data` setter triggers `scheduleRender()`**: `layout()` + `_perfStructureChanged = true` + `scheduleRender()`.
-- **TextEditContextAdapter** (`@deprecated`): `create()` always returns `null`. Textarea-based fallback is used in all browsers.
 - **Box `_rebuildingChildren` flag (MutationObserver removed)**: Direct DOM `appendChild`/`remove` on a box does NOT sync the engine — the flag-based guard alone (with `_pendingData` cache) suppresses double layout/render during `data` setter reconcile. External code must use `appendChildData()`/`removeChildData()`, never raw DOM `appendChild`, or the engine tree diverges. Performance docs (`docs/PERFORMANCE.md` §3.4) reflect the same history.
 - **`contentElement` getter**: Recursively follows `contentType` path to return deepest non-box child. Used by `computeOverlapSizeMm` for safe `overlapPadding`/`canvas`/mm coordinate access in nested box structures.
 - **Reparent mode**: `layoutEditMode = { type: 'reparent' }`. `_tryReparent` extracts `box.data`, converts coordinates, clamps via `clampStaticToContainer`/`clampAbsoluteToContainer`, sets zIndex to new container's max + 1, calls `newContainer.appendChildData()`.
@@ -429,7 +429,6 @@ src/
     color-registry-engine.ts
     index.ts
   edit/
-    text-edit-context-adapter.ts
     text-edit-controller.ts
     text-edit-coordinate-mapper.ts
     edit-manager.ts

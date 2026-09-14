@@ -161,7 +161,7 @@ containerLineCount = floor(editableHeight / lineHeight) + 1
 - trailing space 없이 끝나는 라인의 마지막 가시 문자 다음 offset은 다음 라인 첫 글자의 offset과 동일.
 - `_lineEndPlacements` 맵에 phantom end placement를 별도 저장.
 - `getCursorPlacement(offset, preferLineEnd=true)`로 조회 시 라인 끝 배치 우선 반환.
-- `crossRightState === 'crossed'`일 때만 `preferLineEnd=false`로 다음 라인 첫 글자 왼쪽에 배치.
+- **소유 판정은 bias가 소유한다 (e13532a — cross-state 플래그 머신 삭제)**: bias `'end'`(라인 끝 소속 주차)면 phantom end placement가 정상이고, bias `'start'`(다음 라인 시작 소속)면 same-line 가드가 phantom placement가 이전 라인을 참조하는 경우 `preferLineEnd=false` 폴백으로 다음 라인 첫 글자 왼쪽에 배치한다 (`text-edit-controller.ts` `_updateCursorPosition` — bias 'start' same-line 가드).
 
 ### 2.5 스페이스 문자 커서 배치
 

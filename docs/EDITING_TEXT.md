@@ -308,7 +308,7 @@ flowchart LR
 2. `this._optimisticSpan = null` — 낙관적 span 참조 제거. 실제 렌더링된 span으로 대체된다.
 3. 조합 중이 아닌 경우 `textarea.value`를 `model.textContent`로 동기화.
 4. `_syncTextareaSelection()` — textarea의 선택 영역을 `_cursorModel` 상태에 맞춘다.
-5. `_updateCursorPosition()` — 커서를 새 DOM 위치에 재배치. `getCursorPlacement(offset, preferLineEnd=true)`를 통해 커서 배치 정보(`sourceOffset`, `atEndOfChar`)를 얻는다. `_sourceToPlacement` 맵은 `_rebuildMappings()`에서 모든 source offset에 대해 채워진다 — 가시 문자는 `atEndOfChar: false`, trailing space는 `atEndOfChar: true` + 누적 스페이스 폭, `\n` 위치는 `atEndOfChar: true`, 매핑 구멍(빈 줄 등)은 역방향으로 가장 가까운 placement로 채워진다. 단, `\n` 바로 다음 위치(새 라인 시작)는 line rect 폴백으로 처리된다. `endOfBlock`에서 `textContent`에 실제 `\n`이 있을 때만 `sourceOffset++`를 수행하여 phantom offset을 방지한다. **phantom end placement**: trailing space 없이 끝나는 라인의 마지막 가시 문자 다음 offset(= 다음 라인 첫 글자 offset)은 `_lineEndPlacements`에 별도 저장되며, `preferLineEnd=true`로 조회 시 우선 반환되어 커서가 라인 끝 문자의 오른쪽에 배치된다. `crossRightState === 'crossed'`일 때는 `preferLineEnd=false`로 다음 라인 첫 글자의 왼쪽에 배치한다. `getCursorPlacement()`가 null을 반환하는 경우(빈 줄 시작, offset=0 등) line rect 또는 first column rect로 폴백한다. **height≈0 span(공백 문자) 처리**: `getCharRect(placement.sourceOffset)`의 `rect.height <= 1`이면 `useFallback=true`로 전환하여 `_resolveFallbackTop()`으로 커서 top을 결정한다. `_resolveFallbackTop`은 (1) 인접 가시 문자의 `rect.top`, (2) `getLineRect()`의 라인 div top, (3) span 자체 `rect.top`, (4) `getFirstColumnRect().top` 순서로 폴백한다. `rect.top - cursorHeight`를 사용하지 않는다 — 라인 끝 스페이스에서 위 라인으로 커서가 올라가는 버그를 방지.
+5. `_updateCursorPosition()` — 커서를 새 DOM 위치에 재배치. `getCursorPlacement(offset, preferLineEnd=true)`를 통해 커서 배치 정보(`sourceOffset`, `atEndOfChar`)를 얻는다. `_sourceToPlacement` 맵은 `_rebuildMappings()`에서 모든 source offset에 대해 채워진다 — 가시 문자는 `atEndOfChar: false`, trailing space는 `atEndOfChar: true` + 누적 스페이스 폭, `\n` 위치는 `atEndOfChar: true`, 매핑 구멍(빈 줄 등)은 역방향으로 가장 가까운 placement로 채워진다. 단, `\n` 바로 다음 위치(새 라인 시작)는 line rect 폴백으로 처리된다. `endOfBlock`에서 `textContent`에 실제 `\n`이 있을 때만 `sourceOffset++`를 수행하여 phantom offset을 방지한다. **phantom end placement**: trailing space 없이 끝나는 라인의 마지막 가시 문자 다음 offset(= 다음 라인 첫 글자 offset)은 `_lineEndPlacements`에 별도 저장되며, `preferLineEnd=true`로 조회 시 우선 반환되어 커서가 라인 끝 문자의 오른쪽에 배치된다. bias가 `'start'`(다음 라인 시작 소속)이고 same-line 가드가 phantom placement의 이전 라인 참조를 검출하면 `preferLineEnd=false` 폴백으로 다음 라인 첫 글자의 왼쪽에 배치한다 (RULES §2.4 — bias가 소유권을 판정). `getCursorPlacement()`가 null을 반환하는 경우(빈 줄 시작, offset=0 등) line rect 또는 first column rect로 폴백한다. **height≈0 span(공백 문자) 처리**: `getCharRect(placement.sourceOffset)`의 `rect.height <= 1`이면 `useFallback=true`로 전환하여 `_resolveFallbackTop()`으로 커서 top을 결정한다. `_resolveFallbackTop`은 (1) 인접 가시 문자의 `rect.top`, (2) `getLineRect()`의 라인 div top, (3) span 자체 `rect.top`, (4) `getFirstColumnRect().top` 순서로 폴백한다. `rect.top - cursorHeight`를 사용하지 않는다 — 라인 끝 스페이스에서 위 라인으로 커서가 올라가는 버그를 방지.
 6. `_updateSelection()` — 선택 영역을 새 DOM 위치에 재배치.
 - 조합 중이면 `_applyCompositionUnderline()`로 조합 범위 span에 underline/breakline 장식(`_applyOptimisticDecorations` — 엔진 mm rect 규칙, 색상도 엔진과 동일 4단계 `firstNonEmpty` 체인) 적용. 조합이 종료된 직후면 `_clearCompositionUnderline()`로 임시 장식 div(`div[data-deco-key^="opt-"]`) 제거 — 구 CSS `text-decoration` 정리 분기는 설정 경로 소멸로 no-op이 되어 2026-09 정리에서 삭제되었다.
 8. `_wasFocused`가 true면 `textarea.focus({ preventScroll: true })`로 포커스 복원. `preventScroll: true`로 스크롤 컨테이너의 좌상단 점프를 방지한다.
@@ -1322,7 +1322,7 @@ paragraph가 오버플로된 경우(마지막 컬럼에 배치되지 못한 라�
 
 | 경로 | 동작 |
 | --- | --- |
-| `ArrowRight` (plain/Shift/Ctrl) | 착지가 경계에 도달·초과하면 경계로 되돌리고 `_crossRightState`를 `'none'`으로 되돌린다 — crossed 주차 상태의 커서 배치는 다음 라인 첫 글자(숨김 span) placement를 참조하므로 렌더 폴백이 깨진다. 경계에서 반복 입력은 제자리(sticking/crossed 진행 차단) |
+| `ArrowRight` (plain/Shift/Ctrl) | 착지가 경계에 도달·초과하면 경계로 되돌린다 — 경계 밖 배치는 숨김 라인의 span placement를 참조하므로 렌더 폴백이 깨진다. 경계에서 반복 입력은 제자리(진행 차단) |
 | `ArrowDown` (plain/Shift) | 착지가 경계를 넘으면 경계로 되돌린다. `ArrowUp`은 위 방향으로 오버플로 영역에 진입하지 않으므로 클램프하지 않는다 |
 | `End` (plain/Shift) | 커서가 경계 offset 위에 있으면 논리 라인이 오버플로 라인이라 그 끝(숨김 영역)을 계산한다 — 결과가 경계를 넘으면 경계로 되돌린다. 경계 offset은 phantom end placement를 참조해 커서가 마지막 visible 문자 오른쪽에 그려진다 |
 | `Ctrl`/`Cmd`+`End` (plain/Shift) | 단일 블록 텍스트에서 문서 끝 자체가 숨김 영역이므로 경계로 클램프한다 |
@@ -2093,7 +2093,7 @@ return new DOMRect(
 
 > **transform: scale 환경에서의 보정**: 부모 요소에 CSS `transform: scale(s)`가 적용되어 있으면 `getBoundingClientRect()`는 transform 적용 후의 viewport 픽셀을 반환한다. 그런데 커서/선택 DOM 요소는 paragraph의 shadow root 자식이라 paragraph local coordinate(transform 적용 전 픽셀)를 기대한다. 따라서 `getCharRect` / `getFirstColumnRect` / `getTextRange`가 반환하는 top/left/width/height는 모두 `EditManager.scale`로 나누어 local coordinate로 변환한다. 단 `fontSize`는 `getComputedStyle`에서 오므로 local coordinate와 동일하여 보정하지 않는다.
 >
-> ~EditContext API(`TextEditContextAdapter`)는 viewport coordinate를 요구하므로, adapter에서 `getCharRect` 결과에 다시 `scale`을 곱하고 `paragraphRect.left/top`을 더해 viewport 좌표로 복원한다.~ **사용 중단**: `TextEditContextAdapter`는 Safari에서 EditContext API가 구현될 때까지 사용하지 않습니다. 모든 브라우저에서 textarea 기반 경로로 동작합니다.
+> EditContext API 어댑터(`TextEditContextAdapter`)는 2026-09에 삭제되었다 — Chromium 122+ 전용·Safari 미지원으로 활성화된 적이 없었고(deprecated, `create()` always `null`), 모든 브라우저에서 textarea 기반 경로로 동작한다.
 
 ### 9.2 `getCharOffsetFromPoint()`의 binary search 전략
 
@@ -2312,7 +2312,7 @@ flowchart LR
 
 ### 11.1 `_updateCursorPosition()` 전체 로직
 
-`_updateCursorPosition()`은 현재 `_cursorModel.offset`과 스틱 상태(`_crossRightState`/`_crossLeftState`)를 기준으로 커서의 DOM 위치를 결정한다. 다음 우선순위로 처리한다.
+`_updateCursorPosition()`은 현재 `_cursorModel.offset`과 소속(`bias`)을 기준으로 커서의 DOM 위치를 결정한다 (e13532a — 구 `_crossRightState`/`_crossLeftState` 플래그 머신은 bias 모델로 대체되어 삭제됨). 다음 우선순위로 처리한다.
 
 #### 11.1.1 낙관적 span 경로 (최우선)
 
@@ -2331,18 +2331,16 @@ flowchart LR
 11. `textarea` 위치도 span rect 기준으로 동기화 (IME 입력기가 커서 근처에 떠 있도록).
 12. 선택 영역이 있으면 커서 숨김, 아니면 `visible = _isFocused`.
 
-#### 11.1.2 스틱 상태 기반 커서 위치 보정
+#### 11.1.2 bias 기반 커서 위치 보정
 
-낙관적 span이 없으면, 스틱 상태에 따라 `renderedOffset`과 `atEndOfChar`를 보정한다. 기본은 `renderedOffset(offset)`, `atEndOfChar = false`.
+낙관적 span이 없으면, `_cursorModel.bias`에 따라 phantom end placement의 소유를 판정한다. 기본 조회는 `getCursorPlacement(offset, preferLineEnd=true)` — 라인 끝 주차 offset에서 phantom end placement(이전 라인 끝 문자의 오른쪽, `atEndOfChar: true`)를 우선한다.
 
-- **`_crossRightState === 'sticking'` + `offset > 0`**: `renderedOffset(offset - 1)` 사용, `atEndOfChar = true`. → 이전 문자의 오른쪽(현재 라인 끝)에 커서 표시.
-- **`_crossRightState === 'crossed'`**: `renderedOffset(offset)` 사용. null이면 `renderedOffset(offset + 1)` 폴백. `atEndOfChar = false`. → 다음 라인 첫 번째 문자 왼쪽에 커서 표시.
-- **`_crossLeftState === 'crossed'` + `offset > 0`**: `renderedOffset(offset - 1)` 사용, `atEndOfChar = true`. → 이전 라인 마지막 문자의 오른쪽에 커서 표시.
-- **`_crossLeftState === 'sticking'`**: `renderedOffset(offset)` 사용, `atEndOfChar = false`. → 현재 라인 첫 번째 문자 왼쪽에 커서 표시.
+- **bias `'end'`** (라인 끝 소속 — End 착지 주차 등): phantom placement가 정상이므로 가드하지 않는다. 커서가 이전 라인 끝 문자의 오른쪽에 그려진다.
+- **bias `'start'` same-line 가드** (라인 시작/다음 라인 소속): preferLineEnd가 반환한 phantom placement가 이전 라인을 참조하면(라인 끝 경계 offset을 이전 라인 끝으로 채우는 케이스) same-line 검사에 실패하여 `preferLineEnd=false` 기본 placement로 폴백하고, 폴백 placement도 소속 라인이 다르면 line rect 폴백으로 떨어뜨린다 — 커서가 2 라인 위 끝이나 이웃 라인 경계에 그려지는 것을 방지한다.
 
 #### 11.1.3 `renderedOffset === null` 폴백 (3단계)
 
-스틱 상태 보정 후에도 `renderedOffset`이 null이면(`\n` 위치, trailing space, 빈 줄 시작 등), 다음 3단계 폴백으로 커서 위치를 결정한다.
+placement 조회 후에도 렌더 가능한 배치가 null이면(`\n` 위치, trailing space, 빈 줄 시작 등), 다음 3단계 폴백으로 커서 위치를 결정한다.
 
 1. **이전 문자 폴백** (`atEndOfChar = true`): `offset > 0`이면 `renderedOffset(offset - 1)`을 시도. 존재하면 이전 문자 rect의 오른쪽 끝에 커서 표시. 일반 라인 끝의 `\n` 위치(라인 마지막 글자 다음)에서 커서가 라인 끝에 표시되는 것이 이 경로이다.
 2. **다음 문자 폴백** (`atEndOfChar = false`): 이전 문자도 없으면 `offset < content.length`이면 `renderedOffset(offset + 1)`을 시도. 존재하면 다음 문자 rect의 왼쪽에 커서 표시.

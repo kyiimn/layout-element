@@ -4,10 +4,11 @@ import { normalizeDocumentData } from "@/types";
 import { LayoutPageElement, FontLoaderSingletonAdapter, ColorRegistrySingletonAdapter } from "./page.element";
 import { LayoutParagraphElement } from "./paragraph.element";
 import { EditManager } from "@/edit/edit-manager";
-import { DocumentEngine, PageEngine, ParagraphEngine } from "@/engine";
+import { DocumentEngine, PageEngine } from "@/engine";
 import type { FontLoaderEngine, ColorRegistryEngine } from "@/engine";
 import { FontLoader } from "@/resource/font-loader";
 import { ColorRegistry } from "@/resource/color-registry";
+import { flushThreadRelayout, syncThreadFramesToDom, hasUnsyncedThreadFrames, type ThreadRelayoutContext } from "@/utils/thread-relayout-coordinator";
 
 const HOST_STYLE_ID = '__layout_host_style__';
 
@@ -50,7 +51,7 @@ export class LayoutDocumentElement extends HTMLElement {
    * DOM 재생성 대상에서 제외되지만, `_collectPagesData()`가 엔진에 보관
    * 스냅샷을 합류시켜 스레딩·printPostData는 완결을 유지한다.
    */
-  private _parkedPages = new Map<string, { element: LayoutPageElement; data: PageData }>();
+  private _parkedPages = new Map<string, { element: LayoutPageElement }>();
 
   private _visibleGuide: boolean;
 
@@ -125,8 +126,6 @@ export class LayoutDocumentElement extends HTMLElement {
 
   /** 측정된 pixels-per-mm (표시 전용) */
   get ppm(): number { return this._ppm; }
-
-  resetPpm(): void { this._ppm = 0; }
 
   constructor() {
     super();
@@ -351,7 +350,7 @@ export class LayoutDocumentElement extends HTMLElement {
       } else if (node instanceof HTMLDivElement) {
         const parkedId = node.getAttribute(PARKED_PAGE_ATTR);
         if (parkedId) {
-          const num = this._parkedPages.get(parkedId)?.data.pageNumber;
+          const num = this._parkedPages.get(parkedId)?.element.pageNumber;
           entries.push({ id: parkedId, num, node, parked: true });
         }
       }
@@ -368,14 +367,14 @@ export class LayoutDocumentElement extends HTMLElement {
 
     const pageWidthOf = (en: Entry): number => {
       if (en.parked) {
-        const w = this._parkedPages.get(en.id)?.data.width ?? 0;
+        const w = this._parkedPages.get(en.id)?.element.width ?? 0;
         return w > 0 ? w : docWidth;
       }
       return Math.max(docWidth, (en.node as unknown as LayoutPageElement).width || docWidth);
     };
     const pageHeightOf = (en: Entry): number => {
       if (en.parked) {
-        const h = this._parkedPages.get(en.id)?.data.height ?? 0;
+        const h = this._parkedPages.get(en.id)?.element.height ?? 0;
         return h > 0 ? h : docHeight;
       }
       return (en.node as unknown as LayoutPageElement).height || docHeight;
@@ -484,8 +483,21 @@ export class LayoutDocumentElement extends HTMLElement {
       } else if (node instanceof HTMLDivElement) {
         const parkedId = node.getAttribute(PARKED_PAGE_ATTR);
         if (parkedId) {
+          // 수집은 element.data(= engine.extractData)로 한다 — 분리 중에도
+          // 페이지 엔진이 살아 있고 스레드 writeback이 상태를 갱신하므로
+          // park 시점 스냅숏이 아닌 현재 엔진 상태가 진실이다 (감사 A-3).
+          // flush-then-read (멱등): ensureCommitted가 서브트리를 커밋하고,
+          // 편집 소유 PE를 건너뛰는 예외는 parked 요소에 적용되지 않는다
+          // (컨트롤러 destroy된 detached 상태) — PE pending을 직접 커밋.
           const parked = this._parkedPages.get(parkedId);
-          if (parked) out.push(parked.data);
+          if (parked) {
+            parked.element.engine?.ensureCommitted();
+            for (const p of parked.element.querySelectorAll('x-layout-paragraph')) {
+              const eng = p.engine;
+              if (eng?.hasPendingChanges) eng.layoutText();
+            }
+            out.push(parked.element.data as PageData);
+          }
         }
       }
     }
@@ -530,127 +542,47 @@ export class LayoutDocumentElement extends HTMLElement {
   }
 
   /**
-   * 예약된 스레드 체인 재배치를 실행한다.
+   * 예약된 스레드 체인 재배치를 실행한다 — 공용 coordinator 위임 (C-1).
    *
-   * 1. story writeback + 체인 재배치 — `DocumentEngine.relayoutThreads(sources)`
-   * 2. 스레드 프레임 DOM model 동기화
-   * 3. 실제 배치된 프레임 중 소스를 제외한 DOM 재렌더 (소스는 편집 파이프라인이
-   *    렌더). `laidOutFrameIds`가 없는 결과(전체 스킵 등)가 하나라도 있으면
-   *    기존 동작(영향 프레임 전체)으로 폴백한다.
+   * 본체 로직(writeback·동기화·렌더 범위·재진입 차단)은
+   * `thread-relayout-coordinator.ts`가 소유한다. 재진입 차단 플래그는
+   * 요소별 인스턴스 상태로 유지한다 (flush 중 파생 relayout 이월 계약 — E-2).
    *
    * @param sources - 편집이 발생한 프레임 id 집합
    */
   private _flushThreadRelayout(sources: Set<string>): void {
-    const engine = this._engine;
-    const threads = engine?.data.threads;
-    if (!engine || !threads || threads.length === 0) return;
-
     if (this._threadRelayoutFlushing) return;
     this._threadRelayoutFlushing = true;
-
-    const affectedFrames = new Set<string>();
-    for (const thread of threads) {
-      const frameIds = thread.paragraphIds ?? [];
-      if (!frameIds.some(id => sources.has(id))) continue;
-      for (const id of frameIds) affectedFrames.add(id);
-    }
-    if (affectedFrames.size === 0) {
-      this._threadRelayoutFlushing = false;
-      return;
-    }
-
     try {
-      const focusedId = this._editManager.focusedParagraph?.id;
-      const pinned = focusedId !== undefined && focusedId !== ''
-        ? new Set<string>([focusedId])
-        : undefined;
-      const results = engine.relayoutThreads(sources, pinned);
-      this._syncThreadFramesToDom();
-
-      const correctedFrames = new Set<string>();
-      let laidOut: Set<string> | null = new Set<string>();
-      for (const result of results) {
-        for (const id of result.correctedFrames ?? []) correctedFrames.add(id);
-        if (result.laidOutFrameIds === undefined) {
-          laidOut = null;
-        } else if (laidOut !== null) {
-          for (const id of result.laidOutFrameIds) laidOut.add(id);
-        }
-      }
-      const renderSet = laidOut ?? affectedFrames;
-      const domParagraphs = this.querySelectorAll<LayoutParagraphElement>('x-layout-paragraph');
-      for (const frameId of renderSet) {
-        if (sources.has(frameId) && !correctedFrames.has(frameId)) continue;
-        const domPe = Array.from(domParagraphs).find(p => p.id === frameId);
-        if (domPe) {
-          domPe.render();
-        }
-      }
-
-      if (typeof console !== 'undefined') {
-        const pendingLookup = engine.findEnginesByIds(affectedFrames);
-        for (const frameId of affectedFrames) {
-          const pe = pendingLookup.get(frameId);
-          if (pe instanceof ParagraphEngine && pe.hasPendingChanges) {
-            console.error(
-              `[layout-element] thread relayout incomplete: frame ${frameId} still has pending changes after flush`,
-            );
-          }
-        }
-      }
+      flushThreadRelayout(this._threadRelayoutContext(), sources);
     } finally {
       this._threadRelayoutFlushing = false;
     }
   }
 
-  /**
-   * 스레딩 프레임 DOM model을 엔진 트리 PE(스레드 배치 완료 상태)로 동기화한다.
-   */
-  private _syncThreadFramesToDom(): void {
-    const engine = this._engine;
-    const threads = engine?.data.threads;
-    if (!threads || threads.length === 0) return;
-
-    const frameIds = new Set<string>();
-    for (const thread of threads) {
-      for (const frameId of thread.paragraphIds ?? []) {
-        if (frameId) frameIds.add(frameId);
-      }
-    }
-    const engineLookup = engine.findEnginesByIds(frameIds);
-
-    const domParagraphs = this.querySelectorAll<LayoutParagraphElement>('x-layout-paragraph');
-    const synced = new Set<string>();
-    for (const thread of threads) {
-      for (const frameId of thread.paragraphIds ?? []) {
-        if (synced.has(frameId)) continue;
-        synced.add(frameId);
-        const enginePe = engineLookup.get(frameId);
-        if (!(enginePe instanceof ParagraphEngine) || !enginePe.isThreadFrame) continue;
-        const domPe = Array.from(domParagraphs).find(p => p.id === frameId);
-        if (domPe) {
-          domPe.syncThreadEngine(enginePe);
-        }
-      }
-    }
+  /** coordinator 주입 컨텍스트. */
+  private _threadRelayoutContext(): ThreadRelayoutContext {
+    return {
+      engine: this._engine,
+      focusedParagraphId: this._editManager.focusedParagraph?.id,
+      queryParagraphs: () => this.querySelectorAll<LayoutParagraphElement>('x-layout-paragraph'),
+    };
   }
 
   /**
-   * 스레드 프레임 중 엔진 트리 PE가 아직 스레드 배치가 적용되지 않은 것이 있는지.
+   * 스레딩 프레임 DOM model을 엔진 트리 PE(스레드 배치 완료 상태)로 동기화한다
+   * — 공용 coordinator 위임 (C-1).
+   */
+  private _syncThreadFramesToDom(): void {
+    syncThreadFramesToDom(this._threadRelayoutContext());
+  }
+
+  /**
+   * 스레드 프레임 중 엔진 트리 PE가 아직 스레드 배치가 적용되지 않은 것이 있는지
+   * — 공용 coordinator 위임 (C-1).
    */
   private _hasUnsyncedThreadFrames(): boolean {
-    const engine = this._engine;
-    const threads = engine?.data.threads;
-    if (!threads || threads.length === 0) return false;
-    for (const thread of threads) {
-      for (const frameId of thread.paragraphIds ?? []) {
-        const enginePe = engine.findEngineById(frameId);
-        if (enginePe instanceof ParagraphEngine && !enginePe.isThreadFrame) {
-          return true;
-        }
-      }
-    }
-    return false;
+    return hasUnsyncedThreadFrames(this._threadRelayoutContext());
   }
 
   /**
@@ -703,6 +635,12 @@ export class LayoutDocumentElement extends HTMLElement {
   /**
    * 페이지 요소를 DOM에서 분리하고 보관한다 (DOM 가상화 — 페이지 단위).
    *
+   * 보관소는 요소 참조만 유지한다 — 페이지 엔진(`LayoutPageElement.engine`)이
+   * 분리 중에도 계속 살아 있고 스레드 writeback이 그 상태를 갱신하므로,
+   * park 시점 데이터 스냅숏을 별도로 저장하면 제2의 진실 소스가 되어 수집 시
+   * 엔진 상태를 롤백시킨다 (감사 A-3). 수집 경로는 `element.data`
+   * (engine.extractData)를 읽는다.
+   *
    * @param id - 분리할 페이지의 id
    * @returns 생성된 플레이스홀더. 이미 보관 중이면 기존 플레이스홀더,
    *   대상이 없으면 `null`
@@ -713,11 +651,15 @@ export class LayoutDocumentElement extends HTMLElement {
     }
     const child = this.items.find(e => e.id === id);
     if (!child) return null;
-    const data = child.data as PageData;
+    // 보관 경계에서 pending 개별 setter 변경을 커밋한다 — 수집 경로가
+    // element.data(= engine.extractData)를 읽는데 extractData는 dirty를
+    // 자가 치유하지 않고 throw한다 (DirtyPendingError 계약 — flush-then-read).
+    // 스냅숏 저장은 제2의 진실 소스라 금지 (감사 A-3).
+    child.engine?.ensureCommitted();
     const placeholder = document.createElement('div');
     placeholder.setAttribute(PARKED_PAGE_ATTR, id);
     child.replaceWith(placeholder);
-    this._parkedPages.set(id, { element: child, data });
+    this._parkedPages.set(id, { element: child });
     return placeholder;
   }
 
@@ -832,10 +774,19 @@ export class LayoutDocumentElement extends HTMLElement {
         } else {
           if (childId && this._parkedPages.has(childId)) {
             // G1(가상화): 분리 보관 중인 페이지는 DOM을 재생성하지 않는다.
+            // 요소 props만 갱신한다 — 스냅숏은 없고 엔진이 진실 소스다 (A-3).
             const parked = this._parkedPages.get(childId)!;
-            parked.data = child;
             usedIds.add(childId);
             parked.element.data = child;
+            // A-4: placeholder도 reconcile 순서에 맞춰 이동한다 — mounted
+            // 페이지의 appendChild 재정렬이 placeholder를 건드리지 않으면
+            // DOM 순서(_collectPagesData의 수집 순서)가 데이터 순서와 어긋나
+            // 엔진에 잘못된 페이지 순서가 주입된다. appendChild는 이미 올바른
+            // 순서(마지막 자식)일 때도 안전(no-op 위치)이다.
+            const placeholder = this.querySelector<HTMLDivElement>(
+              `div[${PARKED_PAGE_ATTR}="${CSS.escape(childId)}"]`,
+            );
+            if (placeholder) this.appendChild(placeholder);
             continue;
           }
           const pageEl = document.createElement('x-layout-page') as LayoutPageElement;

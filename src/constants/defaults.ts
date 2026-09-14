@@ -15,7 +15,6 @@ export const DEFAULT_LINE_GAP_MODE: 'ratio' | 'fixed' | 'fixed-min' = 'ratio';
  * 해석된다 (기존 lineGap이 명시되어 있으면 그 값을 유지).
  */
 export const DEFAULT_LINE_GAP_FIXED = 6;
-export const DEFAULT_PPM = 96 / 25.4;
 export const DEFAULT_IMAGE_DPI = 72;
 export const DEFAULT_SPACE_RATIO = 0.5;
 export const DEFAULT_LETTER_SPACING = -0.1;
