@@ -657,7 +657,7 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
           if (parked) {
             parked.element.engine?.ensureCommitted();
             for (const p of parked.element.querySelectorAll('x-layout-paragraph')) {
-              const eng = p.engine;
+              const eng = (p as LayoutParagraphElement).engine;
               if (eng?.hasPendingChanges) eng.layoutText();
             }
             out.push(parked.element.data as PageData);
