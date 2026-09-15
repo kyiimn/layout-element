@@ -134,6 +134,16 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
   /** 스레딩 정의 (옵셔널). `data` 세터에서 설정되어 엔진에 전달된다. */
   private _threads?: ThreadData[];
 
+  /**
+   * 페이지 구조 변경 플래그 — 문서 `layout()`의 페이지 루프 게이트가 소비한다.
+   *
+   * 페이지 데이터 주입(`set data`), 페이지 프로퍼티 setter, 자식 데이터
+   * 증감(`appendChildData`/`removeChildData`)이 세우고, `layout()`이 소각한다.
+   * 문서 루프는 이 플래그(또는 엔진 dirty)가 있는 페이지만 `_layoutStructure()`
+   * 재실행한다.
+   */
+  _structureDirty = true;
+
   /** 스레드 체인 재배치 예약 소스(편집 프레임 id) 집합. 마이크로태스크에서 소비. */
   private _threadRelayoutSources: Set<string> | null = null;
   private _threadRelayoutFlushing = false;
@@ -630,6 +640,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
     if (!this.isConnected) return null;
 
     this._layoutStructure();
+    this._structureDirty = false;
     this._applyStyle();
     this._renderGuideColumns();
     this._propagateInheritStyle();
@@ -654,7 +665,9 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
     }
     // 자식 render가 model을 재생성한 경우(스레드 프레임이 아직 미적용이면)
     // 스레드 체인을 재확정한다 — 초기 로드의 실질적 확정 지점.
-    // 문서 아래에서는 위임이, 독립 루트에서는 암묵 문서 엔진이 처리한다.
+    // 문서 소속 페이지의 위임 게이트는 _delegateThreadChainConfirm이 소유한다
+    // (ctx.engine이 문서 소속 시 undefined — 검사 주체는 문서 요소).
+    // 독립 루트에서는 암묵 문서 엔진이 처리한다.
     if (this._findDocumentElement()) {
       this._delegateThreadChainConfirm();
     } else if (this._hasUnsyncedThreadFrames()) {
@@ -713,13 +726,17 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
   /**
    * 스레드 체인 확정(layout 재배치 + 프레임 DOM 동기화).
    *
-   * 문서 아래의 페이지는 요청을 상위로 전달한다. 독립 루트는 암묵 문서
-   * 엔진을 사용해 자체 확정한다.
+   * 문서 아래의 페이지는 문서 요소에 `hasUnsyncedThreadFrames` 판정을
+   * 위임하고, 미동기화 프레임이 있을 때만 확정을 전달한다. 흡수 플래그
+   * (문서 layout()/render() 시리즈) 동안은 판정 비용 O(트리) 자체를
+   * 생략한다. 독립 루트는 암묵 문서 엔진을 사용해 자체 확정한다.
    */
   private _delegateThreadChainConfirm(): void {
     const docEl = this._findDocumentElement();
     if (docEl) {
-      docEl.confirmThreadChain();
+      if (!docEl.isThreadConfirmSuppressed && docEl.hasUnsyncedThreadFrames()) {
+        docEl.confirmThreadChain();
+      }
       return;
     }
     this._relayoutThreads();
@@ -839,6 +856,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
    * @returns 생성된 LayoutBoxElement
    */
   appendChildData(child: BoxData): LayoutBoxElement {
+    this._structureDirty = true;
     const boxEl = document.createElement('x-layout-box') as LayoutBoxElement;
     boxEl.data = child;
     this.appendChild(boxEl);
@@ -856,6 +874,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
    * @param id - 삭제할 box의 id
    */
   removeChildData(id: string): void {
+    this._structureDirty = true;
     if (this._parkedPages.has(id)) {
       this._parkedPages.delete(id);
       this.querySelector(`div[${PARKED_PAGE_ATTR}="${CSS.escape(id)}"]`)?.remove();
@@ -947,6 +966,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
   }
 
   set data(data: PageData) {
+    this._structureDirty = true;
     // 문서 요소 자신의 id는 자동 생성하지 않는다 — HTML 마크업이 부여한
     // id(`<x-layout-page id="doc">`)를 data 주입이 난수로 덮어쓰면
     // document.getElementById가 요소를 못 찾는다. 엔진은 _rawData()에서
@@ -1083,6 +1103,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
   set width(value: number) {
     if (this._width === value) return;
     this._width = value;
+    this._structureDirty = true;
     this.layout();
     this.render();
   }
@@ -1090,6 +1111,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
   set height(value: number) {
     if (this._height === value) return;
     this._height = value;
+    this._structureDirty = true;
     this.layout();
     this.render();
   }
@@ -1097,6 +1119,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
   set paddingTop(value: number) {
     if (this._paddingTop === value) return;
     this._paddingTop = value;
+    this._structureDirty = true;
     this.layout();
     this.render();
   }
@@ -1104,6 +1127,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
   set paddingBottom(value: number) {
     if (this._paddingBottom === value) return;
     this._paddingBottom = value;
+    this._structureDirty = true;
     this.layout();
     this.render();
   }
@@ -1111,6 +1135,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
   set paddingLeft(value: number) {
     if (this._paddingLeft === value) return;
     this._paddingLeft = value;
+    this._structureDirty = true;
     this.layout();
     this.render();
   }
@@ -1118,6 +1143,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
   set paddingRight(value: number) {
     if (this._paddingRight === value) return;
     this._paddingRight = value;
+    this._structureDirty = true;
     this.layout();
     this.render();
   }
@@ -1125,6 +1151,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
   set columns(value: number | number[]) {
     if (this._columns === value) return;
     this._columns = value;
+    this._structureDirty = true;
     this.layout();
     this.render();
   }
@@ -1132,6 +1159,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
   set gap(value: number | number[]) {
     if (this._gap === value) return;
     this._gap = value;
+    this._structureDirty = true;
     this.layout();
     this.render();
   }
@@ -1139,6 +1167,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
   set paragraphStyle(value: ParagraphStyle) {
     if (this._paragraphStyle === value) return;
     this._paragraphStyle = value;
+    this._structureDirty = true;
     this.layout();
     this.render();
   }
@@ -1146,6 +1175,7 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
   set textStyle(value: TextStyle) {
     if (this._textStyle === value) return;
     this._textStyle = value;
+    this._structureDirty = true;
     this.layout();
     this.render();
   }

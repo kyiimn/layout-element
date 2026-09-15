@@ -266,6 +266,12 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
 
   /**
    * 레이아웃 오케스트레이터. 페이지 자가 배치 → 엔진 편입 → 스레드 체인 순서.
+   *
+   * 페이지 루프는 변경이 없는 페이지의 재구축을 생략한다 — 페이지가 소유하는
+   * `_structureDirty`(데이터 주입·프로퍼티 변경·자식 증감) 또는 엔진 dirty
+   * (개별 setter pending)가 있을 때만 `page.layout()`을 실행한다 (감사 결함 3).
+   * `_layoutPageOrder`·`adoptPageEngines`·스레드 패스는 전 페이지 대상이라
+   * 무조건 실행한다.
    */
   layout() {
     if (!this.isConnected) return null;
@@ -275,7 +281,9 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
       this._layoutStructure();
       this._applyStyle();
       for (const page of this.items) {
-        page.layout();
+        if (page._structureDirty || page.engine?.dirty || !page.engine) {
+          page.layout();
+        }
       }
       this._layoutPageOrder();
       this._engine?.adoptPageEngines(
@@ -297,19 +305,25 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
    *
    * progressive 활성 시 표시 패스를 페이지 단위 청크로 분할해 펌프한다.
    * 대기열은 Set(삽입 순서)이므로 펌프 도중 재주입된 id도 소진 범위에 합류한다.
+   *
+   * 페이지 렌더 시리즈 동안 페이지별 `confirmThreadChain` 위임을 흡수 플래그로
+   * 조기 반환시키고, 종료 시점 1회만 확정한다 (감사 결함 1 — 페이지당 전체
+   * 트리 순회 + 문서 전체 querySelectorAll의 O(P²) 중복 제거).
    */
   async render() {
     if (!this.isConnected) return null;
     const opts = this._progressiveOptions;
-    if (opts.enabled) {
-      await this._pumpDisplayPass(opts);
-      if (this._hasUnsyncedThreadFrames()) {
-        this.confirmThreadChain();
+    this._suppressThreadConfirm = true;
+    try {
+      if (opts.enabled) {
+        await this._pumpDisplayPass(opts);
+      } else {
+        for (const page of this.items) {
+          await page.render();
+        }
       }
-      return this;
-    }
-    for (const page of this.items) {
-      await page.render();
+    } finally {
+      this._suppressThreadConfirm = false;
     }
     if (this._hasUnsyncedThreadFrames()) {
       this.confirmThreadChain();
@@ -333,6 +347,14 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
    * 가능한 만큼의 페이지를 동기 렌더(`void el.render()`)하고, 예산 초과 시
    * 다음 태스크로 양보한다. 펌프 중 park(언마운트)된 페이지는 건너뛴다.
    *
+   * 공간 우선순위 (감사 T2-2 — LO SwLayAction IsShortCut의 동기=가시 대응):
+   * 각 청크 시작 시 뷰포트와 교차하는 페이지를 대기열 앞으로 우선 소진한다.
+   * 뷰포트 밖 페이지는 문서 순서를 유지한 채 뒤로 밀린다 — 최종 수렴 상태는
+   * 순서 무관(전 대기열 소진)이므로 표시 결과는 동일하고, 사용자가 보는
+   * 페이지의 표시 시점만 앞당겨진다. 인터럽트는 입력 기반 — flush 관문
+   * (`EditManager.focusParagraph` 상단)이 포커스 페이지를 즉시 소진하므로
+   * 펌프 자체의 타이머 기반 중단은 두지 않는다 (tdf#141556 교훈).
+   *
    * @param opts - 스케줄링 옵션 (예산/지연)
    */
   private async _pumpDisplayPass(opts: ProgressiveLayoutResolvedOptions): Promise<void> {
@@ -342,7 +364,16 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
     try {
       for (;;) {
         const t0 = performance.now();
-        for (const id of this._displayPassQueue) {
+        const viewport = this._viewportRect();
+        const batch = [...this._displayPassQueue];
+        // 뷰포트 교차 페이지를 청크 앞순위로 — 예산이 끊기더라도 가시 페이지가
+        // 먼저 렌더된다. 교차 판정 실패(측정 불가) 시 원래 순서를 유지한다.
+        batch.sort((a, b) => {
+          const pa = this._displayPriority(a, viewport);
+          const pb = this._displayPriority(b, viewport);
+          return pa - pb;
+        });
+        for (const id of batch) {
           if (performance.now() - t0 >= opts.chunkBudgetMs) break;
           this._displayPassQueue.delete(id);
           const page = this.items.find(p => p.id === id);
@@ -356,6 +387,48 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
     } finally {
       this._displayPassActive = false;
     }
+  }
+
+  /**
+   * 청크 소진 우선순위 — 뷰포트 교차 페이지가 0, 밖은 1.
+   * 교차 판정은 `_layoutPageOrder`가 부여한 절대 mm 좌표의 스타일 값과
+   * 페이지 footprint를 `getBoundingClientRect`로 읽어 수행한다 (마운트
+   * 윈도우 경계에서 플레이스홀더/실제 요소 모두 footprint를 유지하므로
+   * park/unpark 상태와 무관하게 판정 가능).
+   *
+   * @param id - 페이지 id
+   * @param viewport - 뷰포트 사각형 (px). 측정 불가 시 null
+   * @returns 우선순위 (작을수록 먼저 소진)
+   */
+  private _displayPriority(id: string, viewport: DOMRect | null): number {
+    if (!viewport) return 1;
+    const page = this.items.find(p => p.id === id)
+      ?? this._parkedPages.get(id)?.element;
+    if (!page) return 1;
+    const rect = page.getBoundingClientRect();
+    if (rect.width <= 0 && rect.height <= 0) return 1;
+    const intersects = rect.left < viewport.right && rect.right > viewport.left
+      && rect.top < viewport.bottom && rect.bottom > viewport.top;
+    return intersects ? 0 : 1;
+  }
+
+  /**
+   * 현재 뷰포트 사각형을 반환한다. 스크롤 컨테이너(문서 자체가 스크롤되는
+   * 구성)과 윈도우 뷰포트 모두를 커버하기 위해 `visualViewport`가 있으면
+   * 그 rect를, 없으면 뷰포트 크기로 만든다.
+   */
+  private _viewportRect(): DOMRect | null {
+    const vv = (globalThis as { visualViewport?: VisualViewport | null }).visualViewport;
+    if (vv) {
+      return {
+        left: vv.pageLeft, top: vv.pageTop,
+        right: vv.pageLeft + vv.width, bottom: vv.pageTop + vv.height,
+        width: vv.width, height: vv.height, x: vv.pageLeft, y: vv.pageTop,
+      } as DOMRect;
+    }
+    const w = (globalThis as { innerWidth?: number }).innerWidth ?? 0;
+    const h = (globalThis as { innerHeight?: number }).innerHeight ?? 0;
+    return { left: 0, top: 0, right: w, bottom: h, width: w, height: h, x: 0, y: 0 } as DOMRect;
   }
 
   /**
@@ -605,14 +678,41 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
   }
 
   /**
-   * 스레드 체인 확정 — layout 종료 시점(모든 페이지 model push 후) 재실행.
+   * 스레드 체인 확정 — layout·render 종료 시점(모든 페이지 model push 후) 재실행.
    * 페이지 요소의 요청(`page._delegateThreadChainConfirm`)이 도달하는 진입점.
-   * 자기 layout() 중에는 흡수 플래그로 무시된다 (문서 layout 종료 시 1회 실행).
+   * 자기 layout()·render() 중에는 흡수 플래그로 무시되고, 종료 시점에 1회 실행된다.
    */
   confirmThreadChain(): void {
     if (this._suppressThreadConfirm) return;
     this._relayoutThreads();
     this._syncThreadFramesToDom();
+  }
+
+  /**
+   * 페이지 위임 게이트용 — 문서 render()/layout() 시리즈 흡수 여부.
+   * 흡수 중에는 페이지가 unsynced 판정(O(트리))을 실행하지 않는다.
+   */
+  get isThreadConfirmSuppressed(): boolean {
+    return this._suppressThreadConfirm;
+  }
+
+  /**
+   * 페이지 위임 게이트용 — 미동기화 스레드 프레임 존재 판정을 문서 스코프로
+   * 수행한다. 페이지의 `ctx.engine`은 문서 소속 시 undefined이므로 검사
+   * 주체는 문서 요소다.
+   */
+  hasUnsyncedThreadFrames(): boolean {
+    return this._hasUnsyncedThreadFrames();
+  }
+
+  /**
+   * 전체 페이지의 구조 변경 플래그를 세운다 — 페이지 재구축이 필요한
+   * 문서 레벨 변경(paragraphStyle/textStyle 기본값 주입)용.
+   */
+  private _markAllPagesStructureDirty(): void {
+    for (const page of this.items) {
+      page._structureDirty = true;
+    }
   }
 
   /**
@@ -757,6 +857,10 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
   /**
    * 보관된 페이지 요소를 플레이스홀더 자리에 복원한다.
    *
+   * 복원된 페이지는 재마운트 상태라 재구축 대상으로 마킹한다 — 이전 루프에서
+   * 소각된 `_structureDirty`가 복원 경로에서 재세팅되어야 다음 문서
+   * layout()이 플레이스홀더→실제 요소 전환을 엔진 트리에 반영한다.
+   *
    * @param id - 복원할 페이지의 id
    * @returns 복원된 페이지 요소. 보관 내역이 없고 이미 마운트되어 있으면 그 요소,
    *   둘 다 없으면 `null`
@@ -771,6 +875,7 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
       this.appendChild(parked.element);
     }
     this._parkedPages.delete(id);
+    parked.element._structureDirty = true;
     return parked.element;
   }
 
@@ -1029,6 +1134,7 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
   set paragraphStyle(value: ParagraphStyle) {
     if (this._paragraphStyle === value) return;
     this._paragraphStyle = value;
+    this._markAllPagesStructureDirty();
     this.layout();
     if (this._progressiveOptions.enabled) {
       this._enqueueDisplayPass();
@@ -1041,6 +1147,7 @@ export class LayoutDocumentElement extends HTMLElement implements EditManagerHos
   set textStyle(value: TextStyle) {
     if (this._textStyle === value) return;
     this._textStyle = value;
+    this._markAllPagesStructureDirty();
     this.layout();
     if (this._progressiveOptions.enabled) {
       this._enqueueDisplayPass();

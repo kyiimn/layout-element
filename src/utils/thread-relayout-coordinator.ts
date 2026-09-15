@@ -146,6 +146,10 @@ export function syncThreadFramesToDom(ctx: ThreadRelayoutContext): void {
  * 스레드 프레임 중 엔진 트리 PE가 아직 스레드 배치가 적용되지 않은 것이 있는지
  * (document/page 공용 본체).
  *
+ * 프레임 전체를 `findEnginesByIds` 일괄 조회로 검사한다 — 프레임당
+ * `findEngineById`(전체 엔진 트리 탐색)를 반복하면 검사 자체가 O(트리×F)가
+ * 되므로(감사 결함 1 수정 방향 b), 트리 순회 1회로 줄인다.
+ *
  * @param ctx - 스레드 소유 엔진이 있는 컨텍스트
  * @returns 미적용 스레드 프레임이 있으면 true
  */
@@ -153,12 +157,18 @@ export function hasUnsyncedThreadFrames(ctx: ThreadRelayoutContext): boolean {
   const engine = ctx.engine;
   const threads = engine?.data.threads;
   if (!engine || !threads || threads.length === 0) return false;
+  const frameIds = new Set<string>();
   for (const thread of threads) {
     for (const frameId of thread.paragraphIds ?? []) {
-      const enginePe = engine.findEngineById(frameId);
-      if (enginePe instanceof PEClass && !enginePe.isThreadFrame) {
-        return true;
-      }
+      if (frameId) frameIds.add(frameId);
+    }
+  }
+  if (frameIds.size === 0) return false;
+  const engineLookup = engine.findEnginesByIds(frameIds);
+  for (const frameId of frameIds) {
+    const enginePe = engineLookup.get(frameId);
+    if (enginePe instanceof PEClass && !enginePe.isThreadFrame) {
+      return true;
     }
   }
   return false;
