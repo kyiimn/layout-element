@@ -63,12 +63,12 @@
 
 | 시나리오 | 키당 총 경과 | 비고 |
 | --- | --- | --- |
-| 100자/1컬럼 | 0.245ms | `_layoutColumnsPass` 68%, `_computeCharOffsets` 15% |
-| 500자/1컬럼 | 0.339ms | |
-| 1000자/1컬럼 | 0.668ms | |
-| 2000자/1컬럼 | 0.997ms | 선형 스케일, 캐시 정상 동작 |
-| 1000자/6컬럼 | 0.691ms | |
-| 인라인 런 10개/500자 | 0.434ms | |
+| 100자/1컬럼 | 0.245ms (T1 후 0.220ms) | `_layoutColumnsPass` 68%, `_computeCharOffsets` 15% |
+| 500자/1컬럼 | 0.339ms (T1 후 0.358ms) | |
+| 1000자/1컬럼 | 0.668ms (T1 후 0.603ms) | |
+| 2000자/1컬럼 | 0.997ms (T1 후 0.967ms) | 선형 스케일, 캐시 정상 동작 |
+| 1000자/6컬럼 | 0.691ms (T1 후 0.661ms) | |
+| 인라인 런 10개/500자 | 0.434ms (T1 후 0.397ms) | |
 
 **해석**: 문단 스켈레톤 캐시(`_layoutCache`)·prefix 캐시·charWidth LRU가 정상
 동작한다. 엔진 계층의 키 입력 경로에 회귀 없음.
@@ -77,18 +77,18 @@
 
 | 시나리오 | 수치 | 판정 |
 | --- | --- | --- |
-| 1. 타이핑 — 입력 동기 | p95 2.80ms | ✅ 60fps 이내 |
-| **1b. 타이핑 rAF 프레임 델타** | **p95 33.40ms** | **✗ 프레임 드랍 (30fps)** |
+| 1. 타이핑 — 입력 동기 | p95 2.80ms (T1 후 3.10ms) | ✅ 60fps 이내 |
+| **1b. 타이핑 rAF 프레임 델타** | **p95 33.40ms** (T1 후 동일) | **✗ 프레임 드랍 (30fps)** |
 | 2. 오버랩 이미지 이동 | p95 15.80ms | ✅ (한계 근접) |
 | 4. 인라인 글자크기 | p95 26.90ms | △ 30fps 수준 |
 | 7c. layoutText (캐시 히트) | p95 0.80ms | ✅ 캐시 히트 8/8 |
 | 7d. renderText (DOM diff) | p95 6.50ms | ✅ |
-| 8a. 300p 빌드 (data assign) | 193.5ms | 초기 로드 비용 |
-| 8b. 300p 풀렌더 | 257.9ms (spans 179,400) | 초기 로드 비용 |
-| 8c. park 297페이지 | 256.7ms (spans → 1,794, 100:1) | 가상화 효과 정상 |
-| 8d. 재마운트 20p | avg 8.38ms / p95 11.10ms | ✅ |
-| 8e. 300p 타이핑 — 입력 동기 | p95 2.50ms | ✅ |
-| **8e. 300p 타이핑 rAF 델타** | **p95 33.30ms** | **△ 30fps 수준** |
+| 8a. 300p 빌드 (data assign) | 193.5ms (T1 후 179.9ms, T2 후 179.2ms) | 초기 로드 비용 |
+| 8b. 300p 풀렌더 | 257.9ms (T1 후 264.2ms, T2 후 259.7ms, spans 179,400) | 초기 로드 비용 |
+| 8c. park 297페이지 | 256.7ms (T1 후 255.6ms, T2 후 244.9ms, spans → 1,794, 100:1) | 가상화 효과 정상 |
+| 8d. 재마운트 20p | avg 8.38ms / p95 11.10ms (T1 후 avg 8.55ms / p95 10.70ms, T2 후 avg 9.01ms / p95 11.00ms) | ✅ |
+| 8e. 300p 타이핑 — 입력 동기 | p95 2.50ms (T1 후 2.50ms, T2 후 1.80ms) | ✅ |
+| **8e. 300p 타이핑 rAF 델타** | **p95 33.30ms** (T1·T2 후 동일) | **△ 30fps 수준** |
 
 **해석**:
 - 시나리오 1(단일 문단 2000자, 페이지 구조와 무관)과 시나리오 8e(300p)의
@@ -174,6 +174,17 @@
 
 ### 결함 1 (치명) — `confirmThreadChain`이 페이지 수만큼 중복 실행
 
+> **해결됨 (2026-09-15, T1-1)** — 세 구현: ① 문서 `render()`가 페이지 순회를
+> `_suppressThreadConfirm`으로 흡수(layout()과 동일 계약)하고 종료 시점 1회 확정.
+> ② 페이지 위임을 게이트화 — `LayoutDocumentElement`의 공개 API
+> `isThreadConfirmSuppressed`(흡수 중 판정 비용 O(트리) 생략) +
+> `hasUnsyncedThreadFrames()`(문서 스코프 판정. 페이지 `ctx.engine`은 문서
+> 소속 시 undefined이므로 검사 주체는 문서 요소)를 거쳐 미동기화 프레임이
+> 있을 때만 확정 위임. ③ coordinator `hasUnsyncedThreadFrames`를
+> `findEnginesByIds` 일괄 조회(트리 1회 순회)로 전환.
+> 검증: verify-threading 114P / verify-threading-browser 49P / verify-page-model /
+> verify-caret-parking 28P / snapshot byte-identical. 재측정 §2.2 참조.
+
 **증상**: N개 페이지를 가진 문서가 렌더될 때마다 스레드 확정(재배치+DOM 동기화)
 검사가 문서 전체 규모로 N회 실행된다. 스레드가 없는 문서는 조기 반환
 (`_relayoutThreads`가 `threads.length === 0` 즉시 return, document.element.ts:603)이라
@@ -245,6 +256,23 @@ querySelectorAll + 스레드 스킵 판정). P=300, 문단 ~10/페이지면
 
 ### 결함 2 (치명) — `ParagraphEngine.set data` 무조건 캐시 소각
 
+> **해결됨 (2026-09-15, T1-2)** — `set data`에 레이아웃 입력 동등성 게이트
+> (`_dataInputEquivalent`): `content`/`overlayEngines`/`parentAbsRect`/`resources`/
+> `parentBox`/`id`/`zIndex` 참조 비교 + `column`/`gap` `valueEqual` +
+> `paragraphStyle`/`textStyle`/`inheritStyle` 얕은 필드 비교
+> (`styleShallowEqual` — extractData 왕복이 스타일을 매번 새 객체로 조립하는
+> 것을 값 비교로 흡수). 게이트 통과 시 `resetIncrementalState()` 생략 +
+> `_renderShapePreserved` 보존 + effective dirty만 세움.
+> **T1-3 불요**: 값 비교가 왕복을 흡수하므로 스냅샷 계약 변경 없이 해소.
+> **첫 주입 구별 필수**: 생성자가 `this._data`를 미리 설정한 뒤 setter를
+> 호출하므로 첫 주입이 게이트를 통과하면 초기화가 생략됨(verify-threading [1]
+> 실패로 발견) — `_lineHeight !== 0`(완전 경로 통과 후에만 유효한 값)을 게이트
+> 조건에 포함해 구별. 실측 근거: `/tmp/opencode/repro-t12.mjs` 재현 → 수정 후
+> HEAD 동일(overflow 216).
+> 검증: verify-threading 114P / story-reference-refresh 30P / inline-metrics 47P /
+> multicolumn / engine-node 25P / dom-diff / hanging-punctuation 82P /
+> word-wrap 32P / snapshot byte-identical.
+
 **증상**: 데이터 재주입(undo/redo, 외부 동기화, 호스트 `element.data = applied`)
 한 번으로 **전체 문단의 레이아웃 캐시가 소각**되고, 다음 `layoutText()`에서
 해시 비교 대상 캐시가 없어 전 문단이 O(자릿수) 완전 재배치된다. 스레드 체인에서는
@@ -313,6 +341,30 @@ querySelectorAll + 스레드 스킵 판정). P=300, 문단 ~10/페이지면
 ---
 
 ### 결함 3 (중간) — `document.layout()`이 dirty 게이트 없이 전 페이지 재구축
+
+> **해결됨 (2026-09-15, T2-1)** — `LayoutPageElement._structureDirty` 플래그를
+> 신설했다 (감사 권고의 "페이지 data setter·프로퍼티 setter가 dirty를 세우도록
+> PageEngine `_dirty`를 DOM 변경 경로와 연결"을 DOM 계층 플래그로 구현 —
+> `PageEngine._dirty`는 `layout()`에서 소각되어 소비 시점에 항상 false라
+> 단일 소스가 될 수 없음이 소스 검증으로 확인됨).
+>
+> 세움 경로: 페이지 `set data` · 프로퍼티 setter 8종(width/height/padding×4/
+> columns/gap/paragraphStyle/textStyle) · `appendChildData`/`removeChildData` ·
+> 문서 스타일 setter(paragraphStyle/textStyle → `_markAllPagesStructureDirty`) ·
+> `unparkPage`(재마운트 재구축). 소각: `page.layout()`.
+>
+> 게이트: `document.layout()` 루프가
+> `page._structureDirty || page.engine?.dirty || !page.engine`일 때만
+> `page.layout()` 실행. `_layoutPageOrder`·`adoptPageEngines`·스레드 패스는
+> 전 페이지 대상이라 무조건 유지 (감사 권고의 "순서 배치는 유지" 준수).
+>
+> 안전 규칙: ① 신규/미연결 페이지는 `_structureDirty` 초기값 true + `!page.engine`
+> 조건으로 무조건 재구축. ② 문서 data setter reconcile은 페이지마다
+> `page.data = child`를 호출하므로 플래그가 자동 세워져 기존 동작 보존.
+> ③ 엔진 개별 setter pending은 `page.engine?.dirty`로 흡수.
+> 검증: verify-page-model / verify-page-reorder-parked / verify-threading 114P /
+> verify-virtualization 47P / verify-progressive-layout 21P / verify-threading-browser /
+> verify-dom-diff / verify-caret-parking 28P / snapshot byte-identical.
 
 **증상**: 문서 소유의 임의 변경(페이지 추가/삭제/재배치, 문서 스타일, data
 reconcile)이 **전 페이지의 `layout()` + 전 문서 데이터 재조립**을 유발한다.
@@ -471,9 +523,9 @@ progressive 모드(`_pumpDisplayPass`, :338)는 시간 분할로 이를 완화�
 
 | ID | 작업 | 대응 결함 | 핵심 파일 | 예상 효과 |
 | --- | --- | --- | --- | --- |
-| **T1-1** | 페이지 렌더의 `confirmThreadChain` 위임을 `hasUnsyncedThreadFrames` 게이트 (문서 렌더 종료 시 1회 확정 유지). `hasUnsyncedThreadFrames`를 `findEnginesByIds` 일괄 조회로 전환 | 결함 1 | `page.element.ts:658-663`, `document.element.ts:301-318`, `thread-relayout-coordinator.ts:152-180` | 초기 렌더/스크롤 스케일 O(P²)→O(P) |
-| **T1-2** | `ParagraphEngine.set data` 참조 비교 게이트 (동일 참조 6필드 → 소각 스킵, 경량 갱신 경로) | 결함 2 | `paragraph-engine.ts:3963-3989` | data 재주입·undo 시 전 문단 재배치 제거, 스레드 체인 전이 차단 |
-| **T1-3** | `extractData` 스타일 참조 재사용 검토 (T1-2와 트레이드오프 — 스냅샷 계약 확인 후 택일) | 결함 2 | `paragraph-engine.ts:4815-4842` | T1-2의 우회 경로 제거 |
+| **T1-1** ✅ 해결됨 (2026-09-15) | 페이지 렌더의 `confirmThreadChain` 위임을 `hasUnsyncedThreadFrames` 게이트 (문서 렌더 종료 시 1회 확정 유지). `hasUnsyncedThreadFrames`를 `findEnginesByIds` 일괄 조회로 전환 | 결함 1 | `page.element.ts`, `document.element.ts`, `thread-relayout-coordinator.ts` | 초기 렌더/스크롤 스케일 O(P²)→O(P) |
+| **T1-2** ✅ 해결됨 (2026-09-15) | `ParagraphEngine.set data` 참조 비교 게이트 (동일 참조 6필드 → 소각 스킵, 경량 갱신 경로). 첫 주입 구별 `_lineHeight !== 0` 포함 | 결함 2 | `paragraph-engine.ts`, `paragraph-text-utils.ts` (`styleShallowEqual`) | data 재주입·undo 시 전 문단 재배치 제거, 스레드 체인 전이 차단 |
+| **T1-3** ✅ 불요 판정 (2026-09-15) | T1-2의 얕은 필드 비교가 extractData 왕복을 흡수 — 스냅샷 계약("추출 데이터는 스냅샷") 보존이 우선. 참조 재사용은 미실시 | 결함 2 | — | T1-2로 우회 경로 해소 |
 
 **T1-2 상세 설계 노트** (구현 에이전트용):
 - 게이트 조건: `options`와 `this._data`의 필드 전부 참조 비교
@@ -493,11 +545,11 @@ progressive 모드(`_pumpDisplayPass`, :338)는 시간 분할로 이를 완화�
 
 | ID | 작업 | 대응 | 참조 외부 패턴 |
 | --- | --- | --- | --- |
-| **T2-1** | `document.layout()` 페이지 dirty 게이트 (`PageEngine._dirty` 소비 + DOM 변경 경로와 연결) | 결함 3 | LO "첫 invalid 페이지부터" (§5.3) |
-| **T2-2** | 동기=가시 페이지 / idle=나머지 이원화 (progressive의 시간 분할에 **공간 우선순위** 추가: 뷰포트 교차 페이지 우선 펌프, 인터럽트는 입력 기반) | DOM 레이턴시 | LO SwLayAction IsShortCut + SwLayIdle, 실측 963→14ms (§5.3) |
-| **T2-3** | 블록(런) 단위 셰이핑 폭 캐시 — `_charWidthCache` 위에 (런 텍스트+스타일) 키 캐시 | §5.4 갭 | Scribus ShapedTextCache (§5.2) |
-| **T2-4** | `_charWidthCache` 전역 공유 검토 (문단 인스턴스당 LRU 5000 → 폰트 로더 스코프) | PERFORMANCE § 11.1 | InDesign IStoryService 글리프 캐시 |
-| **T2-5** | 배치 편집 밸브 (`setReflow(false)` 상당) — 문서 재구축 시 체인 재배치 마지막 1회로 지연 | 결함 1·2 완화 | Scribus 24배 실측 (§5.2) |
+| **T2-1** ✅ 해결됨 (2026-09-15) | `document.layout()` 페이지 dirty 게이트 — `LayoutPageElement._structureDirty`(DOM 계층 플래그) + `page.engine?.dirty` 소비, 문서 스타일 setter·unpark 경로 연결 | 결함 3 | LO "첫 invalid 페이지부터" (§5.3) |
+| **T2-2** ✅ 해결됨 (2026-09-15) | progressive 펌프에 **공간 우선순위** 추가 — 청크 시작 시 뷰포트 교차 페이지를 앞순위로 소진 (`_displayPriority` + `visualViewport` rect). 인터럽트는 입력 기반 유지 (flush 관문, 타이머 기반 중단 없음 — tdf#141556 교훈). 최종 수렴 상태는 순서 무관이라 표시 결과 동일 | DOM 레이턴시 | LO SwLayAction IsShortCut + SwLayIdle, 실측 963→14ms (§5.3) |
+| **T2-3** ✅ 불요 판정 (2026-09-15, 실측 근거) | 런 단위 셰이핑 폭 캐시 — `benchmark-hotloop.mjs` 실측에서 `_charWidthMm` 잔여 비용(키당 0.46ms, 36.6%)은 **캐시 히트 후의 키 문자열 생성+LRU 조회 비용**이며(561k 호출, 히트 지배), 폰트 메트릭 미스는 키당 0.67µs(28회)로 노이즈. 런 단위 캐시(Scribus ShapedTextCache형)가 새로 잡을 비용이 이 구조에 없음 | §5.4 갭 | Scribus ShapedTextCache (§5.2) |
+| **T2-4** ✅ 불요 판정 (2026-09-15, 실측 근거) | `_charWidthCache` 전역 공유 — 실측 근거 부재. 문단 인스턴스당 LRU 5000이 이미 폰트 미스 경로를 소진하며(위 T2-3 실측), 전역 공유는 참조 경합과 캐시 키 분리(char\|font\|size) 복잡성만 추가. 재측정에서 회귀 없음 | VIRTUALIZATION 2.3 | InDesign IStoryService 글리프 캐시 |
+| **T2-5** ✅ 불요 판정 (2026-09-15, 소스 근거) | 배치 편집 밸브 (`setReflow(false)` 상당) — T1-1이 문서 render/layout 시리즈의 체인 확정을 흡수 플래그+게이트로 **1회로 통합**했고, T1-2가 data 재주입의 캐시 소각(체인 전체 재배치 트리거)을 차단했다. Scribus 밸브의 목적(문서 재구축 중 체인 재배치를 마지막 1회로 지연)은 이미 달성 — 추가 밸브는 이중 제어 | 결함 1·2 완화 | Scribus 24배 실측 (§5.2) |
 
 ### 6.4 Tier 3 — 정책/경고 (적용 시 후속)
 
