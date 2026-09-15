@@ -172,6 +172,24 @@ paragraph.editableText = false;
 
 > **더블클릭 진입 계약**: 레이아웃 편집 모드에서도 paragraph 더블클릭으로 텍스트 편집 모드 진입이 가능하다 — mousedown `preventDefault()`와 무관하게 Chromium은 click/dblclick을 정상 생성한다 (CDP 신뢰 이벤트 검증). 텍스트 편집 진입 시 `textEditMode = true`가 `layoutEditMode = false`를 자동 수행하므로 모드 상호 배타는 유지된다. `lock`이 `true`인 조상 box 아래의 더블클릭은 무시된다.
 
+### 2.2.1 텍스트 편집 모드에서 단일 클릭으로 포커스 이동
+
+텍스트 편집 모드(`textEditMode === true`)에서는 **미포커스 paragraph를 단일 클릭만으로** 즉시 포커스가 이동하고 클릭 위치에 커서가 설정된다 — 더블클릭 진입이 불필요하다. `LayoutSelectionController._onClick`이 처리한다.
+
+**동작 순서:**
+
+1. `LayoutSelectionController._onClick`이 선택 가능한 box를 찾고, 텍스트 편집 모드이면 `composedPath()`에서 `LayoutParagraphElement`를 찾는다 (`_findParagraphFromEvent`).
+2. `EditManager.isParagraphEditable(paragraph)`가 참이면:
+   - `manager.focusParagraph(paragraph)`로 즉시 포커스를 이동한다 (컨트롤러 생성 + `_requestFocus` 관문 — 스레드 프레임 신선화 포함).
+   - `controller.getOffsetFromPoint(event.clientX, event.clientY)`로 클릭 위치의 소스 오프셋을 구해 `controller.setCursor({ textOffset: offset })`로 커서를 설정한다.
+3. 편집 불가 paragraph(lock 등)이거나 paragraph가 없는 box 클릭이면 기존 box 선택 경로로 진행한다.
+
+**제약:**
+
+- **이미 포커스된 paragraph의 클릭**: `box.hasAttribute('text-focused')` 가드로 기존 `TextEditController._onClick/_onMouseDown` 경로가 소유한다 (커서 이동·드래그 선택·더블클릭 워드 선택).
+- **레이아웃 편집 모드**: `manager.layoutEditMode && manager.isBoxEditable(box)` 가드가 먼저 적용되어 레이아웃 편집 드래그가 우선이다.
+- **검증**: `scripts/verify-text-click-focus.mjs`.
+
 ```ts
 // 사용자가 paragraph를 더블클릭하면:
 // 1. 텍스트 편집 모드로 자동 전환

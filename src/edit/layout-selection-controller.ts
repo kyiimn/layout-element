@@ -756,6 +756,27 @@ export class LayoutSelectionController {
 
     if (box.hasAttribute('text-focused')) return;
 
+    // 텍스트 편집 모드: 미포커스 paragraph box를 단일 클릭하면 즉시 포커스가
+    // 이동하고 클릭 위치에 커서가 설정된다 (더블클릭 진입 불필요).
+    // 클릭 지점 아래 paragraph를 찾아 편집 가능하면 텍스트 편집으로 전환하고,
+    // 없으면 기존 box 선택 경로를 유지한다.
+    if (manager.textEditMode) {
+      const paragraph = this._findParagraphFromEvent(event);
+      if (paragraph && manager.isParagraphEditable(paragraph)) {
+        event.stopPropagation();
+        manager.focusParagraph(paragraph);
+        const controller = manager.focusedController;
+        if (controller) {
+          const offset = controller.getOffsetFromPoint(event.clientX, event.clientY);
+          if (offset !== null) {
+            controller.setCursor({ textOffset: offset });
+          }
+        }
+        return;
+      }
+      // 편집 불가 paragraph/paragraph 없는 box 클릭은 기존 선택 경로로 진행한다.
+    }
+
     // stopPropagation()이 textarea blur 전파를 차단하므로, _focusedController가
     // 갱신되지 않는다. 클릭한 box가 포커스된 paragraph의 부모가 아니면 명시적으로 blur.
     const focusedParagraph = manager.focusedParagraph;
