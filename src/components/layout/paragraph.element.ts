@@ -52,6 +52,9 @@ export class LayoutParagraphElement extends HTMLElement {
    */
   private _renderMode: 'dom' | 'canvas' = DEFAULT_PARAGRAPH_RENDER_MODE;
 
+  /** canvas 내부 드로잉 방식 (`x-layout-canvas.drawMode` 위임 보존 값). */
+  private _drawMode: 'fillText' | 'glyph' = 'fillText';
+
   private _editableText: boolean = false;
   private _editController: TextEditController | null = null;
   private _editManagerRef: EditManager | null = null;
@@ -552,6 +555,7 @@ export class LayoutParagraphElement extends HTMLElement {
       }
     }
     canvasEl.engine = this._model ?? null;
+    canvasEl.drawMode = this._drawMode;
     canvasEl.paint();
     if (this._editController) {
       this._editController.postRender(false, 0);
@@ -1152,6 +1156,24 @@ export class LayoutParagraphElement extends HTMLElement {
   /** 렌더 모드 (기본 'dom'). */
   get renderMode(): 'dom' | 'canvas' {
     return this._renderMode;
+  }
+
+  /**
+   * canvas 내부 텍스트 드로잉 방식 전환 — `x-layout-canvas.drawMode` 위임.
+   * `'fillText'`(기본)는 브라우저 래스터라이저, `'glyph'`은 opentype.js 글리프
+   * 경로(Path2D)로 그린다 — 배치와 래스터화가 동일 폰트 소스에서 수렴해
+   * 인쇄 패리티에 유리하다 (CANVAS_RENDERING.md §4.1 B안).
+   * canvas 모드가 아닌 문단(renderMode='dom'/편집 포커스)에는 무효이며, 값은
+   * 보존되어 canvas 복귀 시 적용된다.
+   */
+  set drawMode(value: 'fillText' | 'glyph') {
+    const canvasEl = this.querySelector('x-layout-canvas') as LayoutCanvasElement | null;
+    if (canvasEl) canvasEl.drawMode = value;
+    this._drawMode = value;
+  }
+
+  get drawMode(): 'fillText' | 'glyph' {
+    return this._drawMode;
   }
 
   /**

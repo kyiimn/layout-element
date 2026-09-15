@@ -204,6 +204,12 @@ export interface FontLoaderEngine {
 /**
  * opentype.js 파싱 결과 타입 (최소 인터페이스).
  * `opentype.Font`의 `charToGlyph`/`charToGlyphIndex`/`unitsPerEm`/`advanceWidth`만 사용.
+ *
+ * glyph path 경로(CANVAS_RENDERING.md §4.1 B안)는 `charToGlyph()`가 반환하는
+ * 글리프 객체의 `getPath()`를 소비한다 — opentype.js 2.x의 `Glyph.getPath(x, y,
+ * fontSize, options, font)`는 y-up 폰트 좌표계를 y-down 캔버스 좌표계로 변환한
+ * Path(`commands: M/L/Q/C/Z`)를 반환한다. `xScale`/`yScale` 옵션으로 스케일을
+ * 고정해 unitsPerEm 좌표계 경로를 얻을 수 있다 (글리프당 Path2D 캐시의 근거).
  */
 export interface ParsedFont {
   /** 폰트의 units per em */

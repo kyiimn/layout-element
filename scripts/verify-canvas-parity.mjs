@@ -339,6 +339,123 @@ check('B5. bleed 확장 — backing 폭 ≥ 표시 폭 (bleed 확장)', r.canvas
   })(), `domH=${selParity.domMm[0]?.height} engH=${selParity.engMm[0]?.height}`);
 }
 
+// ── G. glyph path 모드 (§4.1 B안) — opentype 글리프 Path2D 페인트 ──
+{
+  const glyphMode = await page.evaluate(async () => {
+    const raf2 = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const paraBox = window.bench.getParaBox();
+    const p = paraBox.querySelector('x-layout-paragraph');
+    const out = {};
+
+    // 컨트롤러 해제 상태(canvas 경로)에서 전환한다.
+    p.editableText = false;
+    p.renderMode = 'canvas';
+    p.flushRender();
+    await raf2();
+    await raf2();
+
+    const canvasEl = p.querySelector('x-layout-canvas');
+    out.hasCanvas = !!canvasEl;
+
+    // G1: drawMode 기본값 + fillText 기준 픽셀 스냅샷
+    const canvas = canvasEl?.shadowRoot?.querySelector('canvas');
+    out.defaultMode = canvasEl?.drawMode;
+    const snapshot = () => {
+      const ctx = canvas.getContext('2d');
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let ink = 0;
+      for (let i = 3; i < data.length; i += 4) { if (data[i] > 0) ink++; }
+      return { inkPixels: ink, data: data.slice() };
+    };
+    const fillSnap = snapshot();
+    out.fillTextInk = fillSnap.inkPixels;
+
+    // G2: glyph 모드 전환 (스위칭 API 계약 — setter가 즉시 재페인트)
+    canvasEl.drawMode = 'glyph';
+    await raf2();
+    out.afterToggleMode = canvasEl.drawMode;
+    const glyphSnap = snapshot();
+    out.glyphInk = glyphSnap.inkPixels;
+
+    // a11y 텍스트는 모드와 무관 유지
+    out.glyphA11y = canvasEl.shadowRoot?.querySelector('div[aria-hidden="false"]')?.textContent ?? '';
+
+    // G3: 미등록 글자(ힳ — KMIBMyoungjo cmap 미등록) 포함 텍스트로 전환해
+    // 폴백(fillText 경로)으로 그려지는지 검증 — .notdef 사각 박스가 아니다.
+    const engine = p.engine;
+    const d = p.data;
+    d.content = '가나다ힳ라마바'.repeat(6);
+    p.data = d;
+    p.flushRender();
+    await raf2();
+    await raf2();
+    const snapAfterUnmapped = snapshot();
+    out.unmappedInk = snapAfterUnmapped.inkPixels;
+    // 원본 텍스트 복원
+    const d2 = p.data;
+    d2.content = '가나다라마바사아자차카타파하거너더러머버서어저처커터퍼허혀호'.repeat(4);
+    p.data = d2;
+    p.renderMode = 'dom';
+    p.flushRender();
+    await raf2();
+    return out;
+  });
+
+  check('G1. canvas 요소 존재 (glyph 전환 전제)', glyphMode.hasCanvas === true);
+  check('G2. drawMode 기본값 fillText', glyphMode.defaultMode === 'fillText',
+    `default=${glyphMode.defaultMode}`);
+  check('G3. fillText 모드 실제 잉크 존재', glyphMode.fillTextInk > 0,
+    `ink=${glyphMode.fillTextInk}px`);
+  check('G4. glyph 전환 후 모드 유지 (스위칭)', glyphMode.afterToggleMode === 'glyph',
+    `mode=${glyphMode.afterToggleMode}`);
+  check('G5. glyph 모드 실제 잉크 존재 (Path2D 페인트)', glyphMode.glyphInk > 0,
+    `ink=${glyphMode.glyphInk}px`);
+  check('G6. glyph vs fillText 잉크 밀도 근접 (±40% — 래스터화 차이 허용)',
+    glyphMode.fillTextInk > 0 && Math.abs(glyphMode.glyphInk - glyphMode.fillTextInk) / glyphMode.fillTextInk <= 0.4,
+    `fillText=${glyphMode.fillTextInk} glyph=${glyphMode.glyphInk}`);
+  check('G7. glyph 모드 a11y 텍스트 유지', (glyphMode.glyphA11y ?? '').length > 0,
+    `a11y=${glyphMode.glyphA11y.length}자`);
+  check('G8. 미등록 글자(ힳ) 포함 페인트 — 폴백 경로 잉크 존재', glyphMode.unmappedInk > 0,
+    `ink=${glyphMode.unmappedInk}px`);
+}
+
+// ── H. paragraph 레벨 drawMode 위임 — dom↔canvas 스위칭과 동일 계층 API ──
+{
+  const paraLevel = await page.evaluate(async () => {
+    const raf2 = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const paraBox = window.bench.getParaBox();
+    const p = paraBox.querySelector('x-layout-paragraph');
+    const out = {};
+    p.editableText = false;
+    p.renderMode = 'canvas';
+    p.flushRender();
+    await raf2();
+    await raf2();
+    // canvas 복귀 시 _renderCanvas가 _drawMode를 위임한다 — canvas 없이 설정한
+    // 값이 보존되어 복귀 후 적용되는지 검증한다.
+    p.renderMode = 'dom';
+    p.flushRender();
+    await raf2();
+    p.drawMode = 'glyph'; // dom 모드에서 설정 — canvas 요소 없이 보존
+    p.renderMode = 'canvas';
+    p.flushRender();
+    await raf2();
+    await raf2();
+    const canvasEl = p.querySelector('x-layout-canvas');
+    out.canvasDrawMode = canvasEl?.drawMode;
+    out.paraDrawMode = p.drawMode;
+    // 원복
+    p.drawMode = 'fillText';
+    p.renderMode = 'dom';
+    p.flushRender();
+    await raf2();
+    return out;
+  });
+  check('H1. paragraph.drawMode가 canvas 복귀 후에도 적용 (값 보존)',
+    paraLevel.canvasDrawMode === 'glyph' && paraLevel.paraDrawMode === 'glyph',
+    `canvas=${paraLevel.canvasDrawMode} para=${paraLevel.paraDrawMode}`);
+}
+
 await browser.close();
 if (server) server.kill();
 console.log(failed === 0 ? `\nALL PASS (${passed} checks)` : `\n${failed} FAILURES: ${failures.join(' | ')}`);

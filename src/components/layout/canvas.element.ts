@@ -35,6 +35,95 @@ const MAX_DEVICE_PIXEL_RATIO = 2;
 /** 걸침 돌출 bleed (mm) — 행두/행말 돌출량 상한 근사(글자 폭 ≤ 라인 폭 전제). */
 const HANG_BLEED_MM = 20;
 
+/** 글리프 Path2D LRU 캐시 용량 — 폰트×글자 조합 (문서 스케일에서 충분). */
+const GLYPH_PATH_CACHE_CAPACITY = 8000;
+
+/** 글리프 Path2D 캐시 — `(fontId|char)` 키, unitsPerEm 좌표계 경로. */
+const glyphPathCache = new Map<string, Path2D | null>();
+
+/** cmap 미등록 글자 판정 캐시 — `(fontId|char)` → gid 0 여부. */
+const unmappedCharCache = new Map<string, boolean>();
+
+/** 파싱 폰트 객체 → 안정적 캐시 키. WeakMap으로 객체 수명에 추종한다. */
+const parsedFontIds = new WeakMap<object, number>();
+let parsedFontIdSeq = 0;
+function fontIdOf(parsedFont: object): number {
+  let id = parsedFontIds.get(parsedFont);
+  if (id === undefined) {
+    id = parsedFontIdSeq++;
+    parsedFontIds.set(parsedFont, id);
+  }
+  return id;
+}
+
+/**
+ * opentype 글리프 경로를 unitsPerEm 좌표계 Path2D로 변환해 캐시한다.
+ *
+ * opentype `getPath(x, y, fontSize, { xScale, yScale })`의 기본 스케일은
+ * `fontSize / unitsPerEm`이고 `xScale: 1, yScale: 1`을 지정하면 폰트 원본
+ * 좌표(unitsPerEm 스케일)가 유지된다. `getPath`가 이미 y-up 폰트 좌표계를
+ * y-down 캔버스 좌표계로 반전(`-cmd.y`)하므로, 이 경로를 baseline 기준
+ * 페인트에 그대로 쓸 수 있다. 폰트 크기 무관 재사용 — 페인트가
+ * `ctx.scale(fontSizePx / unitsPerEm)`으로 변환한다.
+ *
+ * @param parsedFont - 파싱된 폰트
+ * @param char - 글자
+ * @returns 캐시된 Path2D. 경로 없는 글리프(빈 명령)면 null
+ */
+function glyphPathOf(parsedFont: NonNullable<ReturnType<FontLoader['getParsedFont']>>, char: string): Path2D | null {
+  const key = `${fontIdOf(parsedFont)}|${char}`;
+  const cached = glyphPathCache.get(key);
+  if (cached !== undefined) return cached;
+
+  let result: Path2D | null = null;
+  try {
+    const glyph = parsedFont.charToGlyph(char) as unknown as {
+      toPathData(options?: object): string;
+    };
+    const d = glyph.toPathData({ decimalPlaces: 3, optimize: false });
+    if (d.length > 0) {
+      result = new Path2D(d);
+    }
+  } catch {
+    result = null;
+  }
+
+  if (glyphPathCache.size >= GLYPH_PATH_CACHE_CAPACITY) {
+    const oldest = glyphPathCache.keys().next();
+    if (!oldest.done) glyphPathCache.delete(oldest.value);
+  }
+  glyphPathCache.set(key, result);
+  return result;
+}
+
+/**
+ * cmap 미등록 글자 판정 (엔진 `_isUnmappedHangulSyllable`과 동일 판정을
+ * 페인트 측에서 수행 — 결과만 캐시한다). 미등록이면 `.notdef`(사각형 박스
+ * 글리프) 대신 기준 글자 `가` 글리프로 그린다 — 엔진 폭 폴백(`가` 폭 대체)
+ * 과 화면 기하의 정합 계약.
+ *
+ * @param parsedFont - 파싱된 폰트
+ * @param char - 글자
+ * @returns 미등록 글자 여부
+ */
+function isUnmappedChar(parsedFont: NonNullable<ReturnType<FontLoader['getParsedFont']>>, char: string): boolean {
+  const key = `${fontIdOf(parsedFont)}|${char}`;
+  const cached = unmappedCharCache.get(key);
+  if (cached !== undefined) return cached;
+  let result = false;
+  try {
+    result = parsedFont.charToGlyphIndex(char) === 0;
+  } catch {
+    result = false;
+  }
+  if (unmappedCharCache.size >= GLYPH_PATH_CACHE_CAPACITY) {
+    const oldest = unmappedCharCache.keys().next();
+    if (!oldest.done) unmappedCharCache.delete(oldest.value);
+  }
+  unmappedCharCache.set(key, result);
+  return result;
+}
+
 export class LayoutCanvasElement extends HTMLElement {
   private _shadowRoot: ShadowRoot;
   private _canvas: HTMLCanvasElement;
@@ -44,6 +133,16 @@ export class LayoutCanvasElement extends HTMLElement {
   private _resolutionListener: (() => void) | null = null;
 
   private _engine: ParagraphEngine | null = null;
+
+  /**
+   * 텍스트 드로잉 방식 (CANVAS_RENDERING.md §4.1 A안/B안).
+   * - `'fillText'`(기본): 브라우저 래스터라이저에 위임 — 힌팅·서브픽셀을
+   *   얻지만 DOM 렌더와 래스터화 차이가 남을 수 있다.
+   * - `'glyph'`: opentype.js 글리프 경로를 Path2D로 fill — 배치(advanceWidth)와
+   *   래스터화(글리프 윤곽)가 동일 소스. 인쇄 패리티에 유리, 힌팅 없음.
+   * 전환 시 `drawMode` setter가 재페인트를 예약한다.
+   */
+  private _drawMode: 'fillText' | 'glyph' = 'fillText';
 
   constructor() {
     super();
@@ -85,6 +184,17 @@ export class LayoutCanvasElement extends HTMLElement {
 
   get engine(): ParagraphEngine | null {
     return this._engine;
+  }
+
+  /** 텍스트 드로잉 방식 전환 — 변경 시 즉시 재페인트한다. */
+  set drawMode(mode: 'fillText' | 'glyph') {
+    if (this._drawMode === mode) return;
+    this._drawMode = mode;
+    if (this._engine) this.paint();
+  }
+
+  get drawMode(): 'fillText' | 'glyph' {
+    return this._drawMode;
   }
 
   private _applyHostStyle(): void {
@@ -178,11 +288,95 @@ export class LayoutCanvasElement extends HTMLElement {
     void absTopMm;
 
     for (const cmd of drawList.chars as Extract<DrawCommand, { kind: 'char' }>[]) {
-      this._paintChar(ctx, cmd, engine, colorRegistry, ppm, bleedMm);
+      if (this._drawMode === 'glyph') {
+        this._paintCharGlyph(ctx, cmd, engine, colorRegistry, ppm, bleedMm, fontLoader);
+      } else {
+        this._paintChar(ctx, cmd, engine, colorRegistry, ppm, bleedMm);
+      }
     }
     for (const cmd of drawList.decos as Extract<DrawCommand, { kind: 'deco' }>[]) {
       this._paintDeco(ctx, cmd, colorRegistry, ppm, bleedMm);
     }
+  }
+
+  /**
+   * glyph 모드: opentype.js 글리프 경로(Path2D)로 글자를 fill한다
+   * (CANVAS_RENDERING.md §4.1 B안).
+   *
+   * - 경로는 **unitsPerEm 좌표계**로 글리프당 1개 캐시(glyphPathOf) — 페인트가
+   *   `ctx.scale(fontSizePx / unitsPerEm)`으로 변환한다. 배치(advanceWidth)와
+   *   래스터화(글리프 윤곽)가 동일 폰트 소스에서 나온다.
+   * - 장평은 fillText 경로와 동일 계수 `scale(wr × 0.88)` — DOM span transform
+   *   재현.
+   * - cmap 미등록 글자(gid 0)는 엔진 폭 폴백(`가` 폭 대체)과의 기하 정합을 위해
+   *   기준 글자 `가` 글리프로 그린다 — `.notdef` 사각 박스가 화면에 그려지는
+   *   것을 방지한다.
+   * - 파싱 폰트 부재/경로 없음/폰트 로더 미준비면 fillText로 폴백한다 —
+   *   브라우저 시스템 폴백 글리프가 그 책임을 이어받는다.
+   */
+  private _paintCharGlyph(
+    ctx: CanvasRenderingContext2D,
+    cmd: Extract<DrawCommand, { kind: 'char' }>,
+    engine: ParagraphEngine,
+    colorRegistry: ColorRegistry,
+    ppm: number,
+    bleedMm: number,
+    fontLoader: FontLoader,
+  ): void {
+    const rs = cmd.runStyle;
+    const inline = rs.inlineStyle;
+    const ts: TextStyle = rs.paragraph.textStyle ?? {};
+    const inherit = (rs.paragraph.inheritStyle ?? {}) as Partial<InheritStyle>;
+
+    const fontFamilyName = inline?.fontFamily ?? ts.fontFamily ?? inherit.fontFamily;
+    let parsedFont: ReturnType<FontLoader['getParsedFont']> = null;
+    try {
+      parsedFont = fontLoader.getParsedFont(fontFamilyName || undefined);
+    } catch {
+      parsedFont = null;
+    }
+
+    const colorName = inline?.color ?? ts.color ?? inherit.color ?? '';
+    const cssColor = colorName !== '' ? colorRegistry.getCSSColor(colorName) : '#000000';
+
+    const xPx = (bleedMm + cmd.lineLeftMm + cmd.charOffsetMm) * ppm;
+    const fontSizeMm = cmd.fontSizeMm;
+    const boxTopMm = cmd.lineTopMm + engine._getCharVerticalOffset(cmd.lineMaxFontSizeMm, fontSizeMm);
+    const ascentMm = engine.getCharAscentMm(inline, fontSizeMm);
+    const baselinePx = (boxTopMm + ascentMm) * ppm;
+
+    const wr = inline?.widthRatio ?? engine.widthRatio;
+    const ol = (inline?.outline ?? ts.outline ?? inherit.outline ?? 0) * fontSizeMm;
+
+    const path = parsedFont
+      ? (isUnmappedChar(parsedFont, cmd.char)
+        ? glyphPathOf(parsedFont, '가')
+        : glyphPathOf(parsedFont, cmd.char))
+      : null;
+
+    if (!path || !parsedFont) {
+      // 폴백: 파싱 폰트/경로 부재 글자만 브라우저 래스터라이저로 그린다 —
+      // 시스템 폴백 글리프가 DOM 경로와 동일한 선택을 따른다.
+      this._paintChar(ctx, cmd, engine, colorRegistry, ppm, bleedMm);
+      return;
+    }
+
+    const unitsPerEm = parsedFont.unitsPerEm > 0 ? parsedFont.unitsPerEm : 1000;
+    const fontSizePx = fontSizeMm * ppm;
+
+    ctx.save();
+    ctx.fillStyle = cssColor;
+    ctx.translate(xPx, baselinePx);
+    // 단일 scale 조합: 글자 크기(unitsPerEm→px) × 장평(0.88 계수 — DOM과 동일).
+    ctx.scale((fontSizePx / unitsPerEm) * wr * 0.88, fontSizePx / unitsPerEm);
+    if (ol > 0) {
+      const outlineColorName = inline?.outlineColor ?? inline?.color ?? ts.color ?? inherit.color ?? colorName;
+      ctx.strokeStyle = outlineColorName !== '' ? colorRegistry.getCSSColor(outlineColorName) : cssColor;
+      ctx.lineWidth = ol * 2 * ppm;
+      ctx.stroke(path);
+    }
+    ctx.fill(path);
+    ctx.restore();
   }
 
   /**

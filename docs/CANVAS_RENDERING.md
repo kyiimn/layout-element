@@ -203,6 +203,27 @@ canvas.paint():
 | **A. ctx.fillText** (1단계) | `ctx.font = '700 15px Myoungjo'` + `document.fonts` 로드 폰트 사용. 장평은 글자별 `ctx.scale`+translate로 구현 | 브라우저 서브픽셀 렌더(힌팅·LCD 서브픽셀)를 그대로 얻는다. 단 현재 DOM 경로의 `scale(wr*0.88)` 정밀 재현과 글자별 정밀 mm 배치 검증 필요 |
 | **B. glyph path** (2단계, 필요 시) | `getParsedFont()`의 opentype glyph path를 `ctx.fillPath`로 드로잉 — 인쇄(printPostData)와 동일 소스 | 폰트 메트릭과 100% 일치, subpixel 안 함 — 대량 텍스트에서 느릴 수 있음. 인쇄 패리티에는 유리 |
 
+> **✅ B안 구현 완료 (2026-09-15) — `drawMode` 스위칭으로 A/B 병행**:
+> `x-layout-canvas.drawMode: 'fillText' | 'glyph'` (기본 `'fillText'` — 기존
+> 동작 byte-identical) + `LayoutParagraphElement.drawMode` 위임 속성
+> (dom↔canvas 전환 계층과 동일 계약 — dom 모드에서 설정한 값은 보존되어
+> canvas 복귀 시 적용). glyph 모드 구현:
+> - 글리프 경로는 **unitsPerEm 좌표계 Path2D**로 글리프당 1개 캐시
+>   (`toPathData` → `new Path2D(d)`, 캡 8000 LRU) — 페인트가
+>   `ctx.scale((fontSizePx / unitsPerEm) × wr × 0.88, fontSizePx / unitsPerEm)`
+>   단일 조합으로 변환. 폰트 크기별 캐시 분열이 없다.
+> - 장평은 fillText와 동일 0.88 계수 — DOM span transform 재현.
+> - cmap 미등록 글자(gid 0)는 **기준 글자 `가` 글리프로 그린다** — 엔진 폭
+>   폴백(`_isUnmappedHangulSyllable` → `가` 폭 대체)과 화면 기하 정합.
+>   `.notdef` 사각 박스 노출 방지.
+> - 파싱 폰트 부재/경로 없음 글자는 **fillText 폴백** — 시스템 폴백 글리프가
+>   DOM 경로와 동일 선택을 따른다.
+> - outline은 `ctx.stroke(path)` — fill과 stroke 동일 경로 소비.
+> - 실측 (bench, 4mm/확대): 잉크 총량 fillText 대비 +12% (힌팅 없는 원본
+>   윤곽 → 획이 인쇄와 동일하게 약간 두껍게 보임), 픽셀 알파 diff 81%는
+>   래스터라이저 AA 차이 — 글리프 기하·위치는 동일. tofu/깨짐 없음
+>   (verify-canvas-parity G1~H1 10항목 ALL PASS).
+
 **폰트 로딩 계약**: `FontLoader`가 `document.fonts`에 등록한 `FontFace`를 canvas
 `fillText`가 그대로 사용한다(패밀리명 동일). 로드 완료 전 그리면 폴백 폰트로
 그려지므로, **`document.fonts.ready` 또는 폰트별 loaded 이후에만 paint**를
