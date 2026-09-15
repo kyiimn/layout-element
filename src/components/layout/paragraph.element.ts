@@ -641,9 +641,12 @@ export class LayoutParagraphElement extends HTMLElement {
         }
         editingPath = true;
       } else if (!isEditingThis && !this._model.isThreadFrame) {
-        // 스레드 프레임의 content는 문서 스레드 feed-forward가 소유한다 —
-        // data 주입('')이 엔진 story를 소거하지 않도록 건너뛴다.
         this._model.textContent = data.content;
+      } else if (!isEditingThis && this._model.isThreadFrame) {
+        // 스레드 프레임 — 비어 있지 않은 data 주입은 새 story로 전달한다
+        // (프레임 = story 전체 소유 계약). '' 주입은 기존 계약대로 no-op —
+        // 엔진 data 세터의 빈 주입 story 보존 가드와 정합.
+        this._injectThreadStory(data.content);
       }
     }
 
@@ -732,8 +735,39 @@ export class LayoutParagraphElement extends HTMLElement {
    */
   set content(value: string | (string | TextInlineData)[]) {
     this._sourceContent = value;
-    if (this._model && !this._model.isThreadFrame) this._model.textContent = value;
+    const model = this._model;
+    if (model && !model.isThreadFrame) {
+      model.textContent = value;
+    } else if (model?.isThreadFrame && value !== '' && model.textContent !== value) {
+      this._injectThreadStory(value);
+    }
     this.markStructureChangedAndRender();
+  }
+
+  /**
+   * 스레드 프레임에 비어 있지 않은 콘텐츠를 story 주입으로 전달한다.
+   *
+   * 프레임의 textContent는 story 전체를 소유한다 (_layoutOneThread step-1
+   * 참조 주입 계약). 어떤 프레임에 주입했든 value가 곧 새 story이므로,
+   * textContent를 갱신한 뒤 requestThreadRelayout으로 스레드 체인
+   * 재배치(writeback → feed-forward → DOM 동기화)를 예약한다 — 타이핑
+   * 전파 경로와 동일 파이프라인.
+   *
+   * @param value - 새 story 콘텐츠. 호출부에서 `''` no-op 가드 선행 요구.
+   * @throws 없음
+   *
+   * @example
+   * ```ts
+   * // tail 프레임에 story 주입 → head부터 전체 재배치
+   * tailParagraph.content = '새 기사 본문';
+   * ```
+   */
+  private _injectThreadStory(value: string | (string | TextInlineData)[]): void {
+    const model = this._model;
+    if (!model || model.textContent === value) return;
+    model.textContent = value;
+    const pageEl = this._findPageElement();
+    if (pageEl) pageEl.requestThreadRelayout(this.id);
   }
 
   get columnEl(): LayoutColumnElement[] {
