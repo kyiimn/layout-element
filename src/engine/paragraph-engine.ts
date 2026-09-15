@@ -38,6 +38,7 @@ import {
   TEXT_INLINE_STYLE_FIELDS,
 } from "@/constants";
 import { computeLineHeightMm, resolveLineGap } from "./line-height";
+import { valueEqual } from "@/utils/value-equal";
 import {
   InheritStyle,
   TextInlineData,
@@ -65,7 +66,7 @@ import {
   createNoParentError,
 } from "./types";
 import { _LRU } from "./lru-engine";
-import { inlineStyleEqual, countTrailingSpaces, computeStripRange, firstNonEmpty } from "./paragraph-text-utils";
+import { inlineStyleEqual, countTrailingSpaces, computeStripRange, firstNonEmpty, styleShallowEqual } from "./paragraph-text-utils";
 import { applyHangingPass, hangingConfig, computeHangExtents } from "./paragraph-hanging";
 import { buildParagraphPrintPostData, sliceInlineContent } from "./paragraph-print";
 import { _TEXT_DIGEST_BY_REF, _PLAIN_TEXT_BY_REF, _PARSED_CONTENTS_BY_REF, textContentSegs, computePrefixHashKey, overlayKeysFor } from "./paragraph-hash";
@@ -3960,7 +3961,37 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     return this._data;
   }
 
+  /**
+   * 데이터 재주입 게이트 — 레이아웃 입력이 불변이면 캐시 소각을 생략한다.
+   *
+   * `ParagraphEngineData`는 엔진이 소유한 객체 참조를 받는 내부 주입 계약이지만,
+   * `extractData` 왕복(round-trip)은 `paragraphStyle`/`textStyle`을 매번 새
+   * 객체로 재조립하므로 순수 참조 비교만으로는 재주입을 잡지 못한다. 스타일 3종
+   * (paragraphStyle/textStyle/inheritStyle)은 얕은 필드 비교로 보완하고, 나머지는
+   * 참조 비교한다 (감사 결함 2 — 무조건 소각이 스레드 체인 `_threadInputUnchanged`의
+   * `hasLayoutCache` 조건까지 깨는 전이 차단).
+   *
+   * 게이트 통과 시 `resetIncrementalState()`를 생략해 `_layoutCache`·`_prefixCache`·
+   * `_renderShapePreserved`를 보존하고, effective 스타일 dirty만 세운다.
+   * `_applyColumnGapFromData`는 부모 그리드 파생값이므로 항상 재계산한다.
+   *
+   * 게이트는 재주입에만 발화한다 — 생성자가 `this._data`를 미리 설정한 뒤 setter를
+   * 호출하는 첫 주입은 `_lineHeight === 0`(초기값)으로 구별해 항상 완전 경로로
+   * 흐른다 (`_initLayoutMetrics`만이 `_lineHeight`를 계산하므로).
+   *
+   * 진짜 편집 경로(`textContent` setter)는 이 게이트와 무관하게 기존 무효화를 유지한다.
+   */
   set data(options: ParagraphEngineData) {
+    if (this._lineHeight !== 0 && this._dataInputEquivalent(options, this._data)) {
+      this._data = options;
+      this._resources = options.resources;
+      this._inheritStyle = options.inheritStyle;
+      this._effectivePsDirty = true;
+      this._effectiveTsDirty = true;
+      this._applyColumnGapFromData();
+      return;
+    }
+
     this._lineHeight = 0;
 
     this._data = options;
@@ -3986,6 +4017,36 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     this._applyColumnGapFromData();
     this._initLayoutMetrics();
     this.resetIncrementalState();
+  }
+
+  /**
+   * 새 `data`가 현재 `_data`와 레이아웃 입력으로 동등한지 판정한다.
+   *
+   * 비교 방식은 레이아웃 입력 해시의 소비 필드 커버리지를 기준으로 한다:
+   * - `content`, `overlayEngines`, `parentAbsRect`, `resources`, `parentBox`, `id`, `zIndex` — 참조 비교
+   * - `column`, `gap` — `valueEqual` (number | number[] 값 비교)
+   * - `paragraphStyle`, `textStyle`, `inheritStyle` — 얕은 필드 비교
+   *   (`extractData` 왕복이 스타일을 매번 새 객체로 조립하는 것을 흡수)
+   *
+   * @param next - 새로 주입될 데이터
+   * @param prev - 현재 `_data`
+   * @returns 레이아웃 입력이 동등하면 true (캐시 소각 생략 가능)
+   */
+  private _dataInputEquivalent(next: ParagraphEngineData, prev: ParagraphEngineData): boolean {
+    return (
+      next.content === prev.content
+      && next.overlayEngines === prev.overlayEngines
+      && next.parentAbsRect === prev.parentAbsRect
+      && next.resources === prev.resources
+      && next.parentBox === prev.parentBox
+      && next.id === prev.id
+      && next.zIndex === prev.zIndex
+      && valueEqual(next.column, prev.column)
+      && valueEqual(next.gap, prev.gap)
+      && styleShallowEqual(next.paragraphStyle, prev.paragraphStyle)
+      && styleShallowEqual(next.textStyle, prev.textStyle)
+      && styleShallowEqual(next.inheritStyle as Record<string, unknown>, prev.inheritStyle as Record<string, unknown>)
+    );
   }
 
   /**

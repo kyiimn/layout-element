@@ -108,3 +108,52 @@ export function firstNonEmpty(...values: (string | undefined)[]): string {
   }
   return '';
 }
+
+/**
+ * 두 스타일 객체가 얕은 필드 단위로 동일한지 비교한다.
+ *
+ * `ParagraphEngine.set data`의 재주입 게이트가 `extractData` 왕복에서
+ * 매번 새로 조립되는 스타일 객체(paragraphStyle/textStyle/inheritStyle)를
+ * 값 동등으로 흡수하기 위한 헬퍼다. 필드 값은 원시값과 원시값 배열만 가정하며
+ * 중첩 객체(hangingPunctuation 등)는 참조 비교로 처리한다 — 중첩 객체까지
+ * 다르면 게이트가 실패하고 기존 소각 경로로 떨어지는 안전한 방향이다.
+ *
+ * @param a - 비교 대상 A (undefined 허용)
+ * @param b - 비교 대상 B (undefined 허용)
+ * @returns 필드 집합과 값이 모두 동일하면 true
+ * @throws 없음
+ *
+ * @example
+ * ```ts
+ * styleShallowEqual({ fontSize: 4 }, { fontSize: 4 });  // true
+ * styleShallowEqual({ fontSize: 4 }, { fontSize: 5 });  // false
+ * styleShallowEqual(undefined, {});                      // true (없음 === 빈 객체)
+ * styleShallowEqual({ lineGap: 1.25 }, undefined);       // false
+ * ```
+ */
+export function styleShallowEqual(
+  a: Record<string, unknown> | undefined,
+  b: Record<string, unknown> | undefined,
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) {
+    return (a === undefined || Object.keys(a).length === 0)
+      && (b === undefined || Object.keys(b).length === 0);
+  }
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    const av = a[key];
+    const bv = b[key];
+    if (Array.isArray(av) && Array.isArray(bv)) {
+      if (av.length !== bv.length) return false;
+      for (let i = 0; i < av.length; i++) {
+        if (av[i] !== bv[i]) return false;
+      }
+      continue;
+    }
+    if (av !== bv) return false;
+  }
+  return true;
+}
