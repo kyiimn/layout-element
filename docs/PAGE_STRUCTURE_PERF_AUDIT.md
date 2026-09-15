@@ -749,6 +749,11 @@ this._root.style.contain = 'layout paint style';
 
 ## 6.7 인계 과제 2 — 체인 분할 (다른 에이전트 처리용 설계)
 
+> **상태 (2026-09-15)**: **옵션 B(자동 감지 분할) 구현 완료** —
+> `src/engine/auto-thread-splitter.ts` + `DocumentEngine._ensureAutoThreads()`,
+> 검증 `verify-chain-split.mjs` 33P + 전수 회귀 PASS. 구현 기록 §6.7.5-a.
+> 이 장은 설계 배경·계약을 남긴다. 남은 것은 **체감 측정**(실기)뿐이다.
+
 > **배경**: §2.2a + L-1/L-2 완료 후 남은 유일한 구조 레버. §7.1 결론("shift
 > 편집의 재쓰기는 필수 — 남는 레버는 체인 분할·윈도우 축소")과 L-2 한계 실측이
 > 모두 이 레버를 가리킨다. **윈도우 축소와 엔진·DOM 최적화는 소진됐다.**
@@ -804,7 +809,7 @@ L-2 전제 실측(이 문서 §6.4a)도 재확인: head 시프트 시 하류 프
 | 옵션 | 방법 | 위치 | 검증 상태 |
 | --- | --- | --- | --- |
 | **A** | 문서 작성 시 기사별로 `threads[]` 분할 정의 | 호스트 데이터 생성 | **✅ 이미 검증** — `virtualization.html`이 A 구조로 동작 중 (6체인×5프레임), `verify-threading` 114P·`verify-threading-browser` 49P·`verify-page-model` 13P가 이 구조를 방어 |
-| **B** | 자동 분할 — 기사 박스 감지로 프레임 그룹별 체인 생성 | 라이브러리 정책 | **미구현 — 본 과제** |
+| **B** | 자동 분할 — 기사 박스 감지로 프레임 그룹별 체인 생성 | 라이브러리 정책 | **✅ 구현 완료 (2026-09-15)** — `src/engine/auto-thread-splitter.ts` 신설 + `DocumentEngine._ensureAutoThreads()` 주입. 검증 `verify-chain-split.mjs` 33P. 상세 §6.7.5-a |
 | C | 편집 UI에서 사용자가 체인 끊기 (InDesign UX) | 호스트 UI | 미착수 (호스트 영역) |
 
 ### 6.7.5 옵션 B 설계 — 자동 감지 분할
@@ -861,6 +866,65 @@ L-2 전제 실측(이 문서 §6.4a)도 재확인: head 시프트 시 하류 프
 롱태스크 합을 체인 길이(30/5/3프레임)별로 측정 — 체인 길이와 비례하는지 확인
 (§11.5의 윈도우 비례 실측과 대칭 구조).
 
+### 6.7.5-a 옵션 B 구현 기록 (2026-09-15)
+
+**구현 파일**:
+
+| 파일 | 역할 |
+| --- | --- |
+| `src/engine/auto-thread-splitter.ts` (신설) | `collectAutoThreadChains(pages, existingThreads)` — 순수 함수. group-article 감지 → body 박스(트리 선순회·테이블 셀 관통)의 첫 문단을 그룹핑 키별 수집 → 문서 순서 체인 조립. DOM 참조 0 (Node.js 호환) |
+| `src/engine/document-engine.ts` | `_ensureAutoThreads()` — `layout()` 진입 시 자동 체인을 `engine.data.threads`에 materialize. **명시적 threads 존재 시 정책 OFF** (기존 동작 byte-identical) |
+| `scripts/verify-chain-split.mjs` (신설) | 33항목 — N체인 생성/체인 스코프 타이핑 스킵/페이지 경계 그룹핑/정책 OFF byte-identical/보수 게이트 5종/writeback identity/print 패리티 |
+
+**핵심 설계 결정**:
+
+1. **주입점 = `DocumentEngine.layout()`** — 모든 스레드 소비자
+   (thread-relayout-coordinator 3곳, document.element `_relayoutThreads`,
+   edit-manager `transferCursorToOwningThreadFrame`)가 `engine.data.threads`를
+   직접 읽으므로, 엔진 데이터에 materialize하면 소비자 변경 0건으로 자동 체인이
+   타이핑 전파·story writeback·커서 이관 전 경로에 보인다. 호스트 데이터 객체는
+   변이하지 않는다 (엔진-우선, RULES §3).
+2. **story 무발명** — 자동 체인의 `content`는 `undefined`이며
+   `ThreadEngine` step-1 폴백(`thread.content ?? head.textContent`)이 head
+   프레임이 소유한 텍스트를 story로 쓴다. Place Gun이 주입한 기사 본문이
+   그대로 story가 된다. 이후 편집 writeback은 `originOf`가 materialize된
+   객체를 되찾아 기록한다 (materialize는 최초 1회, 이후 재사용 — identity 계약,
+   verify-chain-split [6d] 실측).
+3. **그룹핑 키** — body 박스의 `contentUid`(기사 UID) 우선: 페이지 경계를
+   넘는 동일 기사를 하나의 체인으로 묶는다 ([3] 실측). contentUid가 없으면
+   소속 group-article 박스 id로 폴백 ([7] 실측).
+4. **head 선규칙** — 첫 "내용이 있는" 프레임을 head로 (비어 있는 head는
+   story 폴백이 ''를 소멸시키는 것을 방지).
+5. **보수 게이트** — ① 체인 ≥2프레임 ② 기존 threads 소속 프레임 제외
+   (first-claim-wins) ③ id 없는 문단 제외 ④ 전 프레임 빈 기사 제외 ⑤
+   보호 게이트: head 이후 프레임이 비-스레드 + 비어있지 않으면(사용자가 넣은
+   독립 콘텐츠) 체인에서 제외. 이전 분할 결과는 `isThreadFrame`이라 재수집됨
+   (멱등).
+
+**검증 결과 (2026-09-15)**:
+
+| 검증 | 결과 |
+| --- | --- |
+| `verify-chain-split.mjs` (신설) | **33P** — §6.7.5 검증 계획 1·2·3·6 + 보수 게이트 |
+| `verify-threading.mjs` | 114P — 기존 스레딩 회귀 없음 |
+| `verify-story-reference-refresh.mjs` | 30P |
+| `verify-engine-node.mjs` | 25P — 순수 함수 DOM-free 유지 |
+| `snapshot-layout.mjs` | **byte-identical** (스냅샷 시나리오는 group-article 미사용 문서 — 정책 OFF 경로 확인) |
+| `verify-threading-browser.mjs` | ALL PASS (49항목) |
+| `verify-virtualization.mjs` | ALL PASS (47항목 — K 시나리오 park × 스레드 포함) |
+| `verify-dom-diff.mjs` / `verify-multicolumn.mjs` / `verify-page-model.mjs` | ALL PASS |
+
+**§6.7.5 검증 계획 대조**: 1(기사별 N체인)·2(체인 스코프 타이핑 스킵)·
+3(tail 유일성)·6(print 패리티)은 verify-chain-split으로 통과. 4(단일 체인
+문서 byte-identical)는 정책 OFF 게이트 + snapshot으로 통과. 5(park/unpark ×
+분할 체인)는 기존 verify-virtualization K 시나리오가 명시적 체인을 방어하며,
+자동 체인은 materialize가 엔진 데이터에만 존재하므로 park(엔진 생존)과
+무충돌 — 별도 확장 시나리오는 향후 필요 시 추가.
+
+**미해결 후속**: 체인 길이별 체감 측정(§6.7.5 측정 판정 — virtualization.html
+30p 체인 vs 기사 분할 체인 비교)은 실기 사용자 워크플로에서 판단 (L-3 contain과
+동일 — 호스트 마이그레이션 후 측정 의미가 있다).
+
 ### 6.7.6 순서 권고
 
 1. **A 구조 확인**(기존): `virtualization.html` — 이미 동작.
@@ -891,6 +955,9 @@ doc.data = {
 
 **옵션 B(§6.7.5)는 이 "명시적 정의"를 라이브러리 자동화로 대체하는 신기능이며
 미구현이다.** B 구현 전까지는 데이터에서 명시적으로 구분지어줘야 한다.
+
+> **업데이트 (2026-09-15)** — 옵션 B 구현 완료. 이제 호스트가 `threads`를
+> 넘기지 않아도 `group-article` 감지로 자동 체인화된다. 아래 §6.7.5-a 참조.
 
 ### 6.7.8 사용자 UI 흐름의 생태계 실측 (B가 왜 필수적인가)
 

@@ -29,6 +29,7 @@
 | `verify-overlap-none.mjs` | 정합성 (엔진) | overlapMode 'none' 시맨틱 — 단일 관문(computeOverlapSizeMm)에서 NONE 조기 반환, box/path 회피 유지 | ALL PASS |
 | `verify-threading.mjs` | 정합성 (엔진) | 텍스트 스레딩 — 비-스레드 회귀/단일 프레임 기준선/feed-forward/콘텐츠 무결성/런 슬라이싱/pull-back/extractData round-trip/overset/threadTail 마킹/**지오메트리 행렬 81조합**/childrenData 삼분 계약/writeback 방어/printPostData 패리티/**변경 감지 스킵**/**프레임 경계 금칙 교정**/**테이블 셀 프레임 행 삭제**/**프레임 내부 \n 커서 레인지 정합([19] — 엔터 후 커서 +1 회귀 방어)** | ALL PASS |
 | `verify-story-reference-refresh.mjs` | 정합성 (엔진) | 스킵 프레임 참조 신선화(A-6) — 폴백 판정(스킵 판정 참조 비교 통과)/hasLayoutCache·dirty 불변/해시 무영향 캐시 히트 유지/내용 변경 자가 치유/구 story 참조 시스템 소멸/writeback 롤백 방어/직접 유도 메모 무효화 | ALL PASS (30항목) |
+| `verify-chain-split.mjs` | 정합성 (엔진) | 자동 체인 분할(옵션 B) — group-article 감지 N체인/contentUid·박스 id 그룹핑(페이지 경계 기사 통합)/체인 스코프 타이핑(타 체인 skipped)/feed-forward·tail 유일성/정책 OFF byte-identical/보수 게이트(1프레임·빈 기사·독립 콘텐츠·id 없는 문단)/재호출 멱등+writeback identity/print 패리티 | ALL PASS (33항목) |
 | `verify-threading-browser.mjs` | 정합성 (브라우저) | 스레딩 화면 진실 — 초기 로드 3계층(엔진↔DOM span)/타이핑 전파 seam/테두리 tail 분기/round-trip 체인 동등/**타이핑 스트레스 flush 통합**/**IME 조합 × flush**/**키보드 프레임 경계 이동(절대 좌표계)**/**엔터 후 커서 +1 절대 위치 기준([13] — 레인지 \n 소비 시프트 방어)** | ALL PASS |
 | `verify-overflow-cursor-clamp.mjs` | 정합성 (브라우저) | 오버플로(숨김) 라인 커서 진입 금지 클램프 — 엔진 경계(`maxVisibleCursorOffset`)/경계 placement 보장/ArrowRight 반복·수렴·bias 'end' 주차 유지/Shift·Ctrl 변형/ArrowDown·Up 방향성/오버플로 해제 비활성/\n 경계/Ctrl+End/End·Shift+End | ALL PASS (서버 없으면 자동 기동) |
 | `verify-caret-parking.mjs` | 정합성 (브라우저) | 커서 주차 회귀 코퍼스 — 키 시퀀스 × 커서 px 좌표 + bias: End/Home 단일·연타(제자리)/라인 맨앞→Up/라인 끝→Down·Up/라인 맨앞→Down 전 라인 스캔 + End 반복 입력 이벤트 스트림(cursorMove 발화·styleChange dedupe). **커서 내비게이션 변경 시 선행 실행** — bias 이행·placement 리졸버 변경의 동작 동일성 증명망 | ALL PASS (28항목, 서버 없으면 자동 기동) |
@@ -602,6 +603,27 @@ npx tsx scripts/verify-threading.mjs   # 104항목 ALL PASS
 **실행**:
 ```bash
 npx tsx scripts/verify-story-reference-refresh.mjs   # 30항목 ALL PASS
+```
+
+### `verify-chain-split.mjs` — 자동 체인 분할 (옵션 B, 엔진)
+
+**목적**: `collectAutoThreadChains`(src/engine/auto-thread-splitter.ts) + `DocumentEngine._ensureAutoThreads()`의 정합성. 호스트가 `threads`를 명시하지 않은 문서에서 `group-article` 박스 감지로 기사별 체인을 자동 조립하는 기능의 전 계약을 검증한다. 상세 설계·구현 기록은 `docs/PAGE_STRUCTURE_PERF_AUDIT.md` §6.7.5-a.
+
+검증 항목 (33항목, 8그룹):
+1. **N체인 생성** — group-article N개 → 기사별 N체인, contentUid 그룹핑([p1,p1b] 결합), story 무발명(`content: undefined` → head `textContent` 폴백)
+2. **체인 스코프 타이핑** — 기사 A head 편집 소싱 시 기사 B 체인 `skipped: true`(재배치 0) + A만 재배치
+3. **페이지 경계 그룹핑** — 동일 contentUid가 2페이지 body에 걸쳐도 1체인 + feed-forward(contentFrom === head tail) + threadTail 마지막 프레임만
+4. **정책 OFF** — 명시적 threads 존재 시 자동 분할 미발동 + 명시적 체인 배치 === 자동 분할 배치 (전 프레임 byte-identical)
+5. **기존 동작 보존** — group-article 없는 문서는 threads undefined 유지, 비-스레드 배치
+6. **보수 게이트** — 1프레임 기사/전 프레임 빈 기사/독립 콘텐츠 body 제외/재호출 멱등(threads 참조 동일 — writeback identity)/writeback이 materialize 객체에 story 기록
+7. **contentUid 폴백** — contentUid 없으면 group-article 박스 id가 그룹핑 키
+8. **print 패리티** — 자동 체인 printPostData === 명시적 체인 printPostData (글자·좌표 1e-9)
+
+**작성 교훈**: 박스 `children`에 단일 BoxData 객체는 콘텐츠(문단/이미지)로 해석되고 중첩 박스는 **배열**이어야 한다 — fixture 오류로 group-article이 자식을 잃는 사례. 픽스처는 반드시 `children: [BoxData, ...]` 배열 구조로.
+
+**실행**:
+```bash
+npx tsx scripts/verify-chain-split.mjs   # 33항목 ALL PASS
 ```
 
 ### `verify-threading-browser.mjs` — 스레딩 화면 진실 (브라우저)
