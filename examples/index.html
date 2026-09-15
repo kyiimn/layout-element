@@ -207,7 +207,6 @@
       <button id="btn-ai-paragraph">🤖 단락에만 표시</button>
       <button id="btn-ai-image">🤖 이미지에만 표시</button>
       <button id="btn-ai-clear">🤖 모두 해제</button>
-      <button id="btn-canvas-toggle">🖼️ canvas 렌더 (실험)</button>
     </div>
     <div style="
           display: flex;
@@ -1193,7 +1192,6 @@
       const btnAiParagraph = document.getElementById("btn-ai-paragraph");
       const btnAiImage = document.getElementById("btn-ai-image");
       const btnAiClear = document.getElementById("btn-ai-clear");
-      const btnCanvasToggle = document.getElementById("btn-canvas-toggle");
       const insertType = document.getElementById("insert-type");
       const insertPosition = document.getElementById("insert-position");
       const hint = document.getElementById("hint");
@@ -1381,27 +1379,10 @@
         hint.textContent = "";
       });
 
-      // canvas 렌더 토글 (CANVAS_RENDERING.md 단계 2 실험 플래그) — 비-포커스
-      // 문단을 canvas로 전환한다. 하이브리드 계약(§6): canvas 문단을 클릭하면
-      // 그 문단만 즉시 DOM으로 복귀해 편집된다 (엔진 getOffsetFromPoint가
-      // canvas 좌표의 클릭 매핑을 소유). 포커스 해제(blur) 시 다시 canvas로
-      // 돌아간다 — 타이핑 핫패스의 span 재스타일 비용이 비-포커스 문단에서
-      // 소멸하는 것이 이 전환의 이득이다.
-      //
-      // 주의: em은 아래 "EditManager 이벤트 수신" 블록에서 선언된다 —
-      // 이 블록은 em 선언 이후에 배치해야 한다 (TDZ — const는 호이스팅되지만
-      // 초기화 전 접근은 ReferenceError).
-      let canvasMode = false;
-      btnCanvasToggle.addEventListener("click", () => {
-        canvasMode = !canvasMode;
-        for (const p of getAllParagraphs()) {
-          p.renderMode = canvasMode ? "canvas" : "dom";
-        }
-        btnCanvasToggle.classList.toggle("active-ai", canvasMode);
-        hint.textContent = canvasMode
-          ? "canvas 렌더 ON — 문단 클릭 시 그 문단만 DOM 복귀 후 편집"
-          : "";
-      });
+      // 문단 렌더 모드는 기본값(DEFAULT_PARAGRAPH_RENDER_MODE='canvas')을 그대로
+      // 사용한다 — 하이브리드 계약(§6): canvas 문단을 클릭하면 그 문단만 즉시
+      // DOM으로 복귀해 편집되고, 포커스 해제(blur) 시 다시 canvas로 돌아간다.
+      // 실험 토글 버튼은 철거되었다 — 기본값이 상용 경로다.
 
       // EditManager 이벤트 수신 (문서 요소에서 per-document 인스턴스 획득)
       const docEl = document.querySelector("x-layout-page");
@@ -1412,7 +1393,6 @@
       // focusChange에서 이전 포커스 문단이 비-포커스가 되면 canvas로 되돌리고,
       // 새 포커스 문단은 editableText를 활성화한다 (게이트가 DOM으로 되돌림).
       em.addEventListener("focusChange", (event) => {
-        if (!canvasMode) return;
         const prev = event.previousParagraph;
         if (prev && prev.editableText) {
           prev.editableText = false;

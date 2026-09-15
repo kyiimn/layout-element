@@ -87,9 +87,10 @@
 
       const em = page.editManager;
       em.textEditMode = true;
-      // 단계 5 canvas 기본값화 — 벤치마크가 DOM 경로 수치를 전제하므로 'dom' 고정.
-      // canvas 실측은 시나리오 8f가 renderMode를 전환해 수행한다.
-      for (const p of page.querySelectorAll("x-layout-paragraph")) p.renderMode = "dom";
+      // 벤치마크 시나리오 1~7이 DOM 경로 수치(span 재스타일·노드 수)를 전제하므로
+      // 'dom' 고정이 필요하다. 300p 시나리오 8의 비-포커스 문단은 기본값
+      // (DEFAULT_PARAGRAPH_RENDER_MODE='canvas')을 그대로 소비하며, canvas
+      // 전환 실측은 시나리오 8f가 담당한다.
 
       const paraBox = [...page.querySelectorAll("x-layout-box")].find(b => b.id === "bench-body-box");
       const imageBox = [...page.querySelectorAll("x-layout-box")].find(b => b.id === "bench-image-box");
@@ -483,6 +484,9 @@
           // CANVAS_RENDERING.md 단계 4 — 윈도우 3p의 비-포커스 문단을 canvas로
           // 전환한다(하이브리드 계약: 포커스 문단은 자동 DOM 복귀). 전환 후
           // span 수와 전환 시간을 반환한다.
+          // 기본값화 이후 이 전환은 "기본값이 이미 canvas"인 상태로 수렴한다 —
+          // bench 문서가 dom 고정(시나리오 1~7 전제)이라 이 API가 8f 실측용
+          // 전환을 소유한다.
           async canvasSwitch() {
             const t0 = performance.now();
             let canvases = 0;

@@ -73,6 +73,13 @@ const check = (name, ok, detail = '') => {
 await page.evaluate(async () => {
   const em = window.bench.getEditManager();
   em.textEditMode = true;
+  // 클릭 대상이 DOM span(data-source-offset)이다 — bench 문단이 기본 canvas
+  // 모드면 컬럼이 없어 클릭 대상을 찾을 수 없다. dom 고정이 계약이다.
+  for (const p of document.querySelectorAll('x-layout-paragraph')) {
+    p.renderMode = 'dom';
+    p.flushRender();
+  }
+  await new Promise(r => setTimeout(r, 300));
   em.blurParagraph();
   await new Promise(r => setTimeout(r, 200));
 });

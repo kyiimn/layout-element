@@ -92,6 +92,10 @@ const r = await page.evaluate(async () => {
   const em = window.bench.getEditManager();
   const p = window.bench.getParaBox().querySelector('x-layout-paragraph');
   em.textEditMode = true;
+  // 시나리오 D가 포커스 전 비-편집 상태의 DOM span(data-source-offset)을 직접
+  // 조회한다 — bench 문단이 기본 canvas 모드면 컬럼이 없어 FAIL한다.
+  // 이 검증기의 대상은 DOM span 기반 상호작용이므로 dom 고정이 계약이다.
+  p.renderMode = 'dom';
   p.editableText = true;
   await new Promise(r => setTimeout(r, 200));
   const wait2 = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));

@@ -79,6 +79,9 @@ const r = await page.evaluate(async () => {
   const p = window.bench.getParaBox().querySelector('x-layout-paragraph');
   const engine = p.engine;
   em.textEditMode = true;
+  // DOM dataset.charOffset 수집이 검증 본체다 — bench 문단이 기본 canvas 모드면
+  // 컬럼이 없어 빈 배열로 공허 통과한다. dom 고정이 계약이다.
+  p.renderMode = 'dom';
   p.editableText = true;
   await new Promise(res => setTimeout(res, 200));
   em.blurParagraph();

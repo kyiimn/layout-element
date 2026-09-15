@@ -119,6 +119,17 @@ const pageUtils = `
     const engine = (docEl?.engine ?? page.engine);
     return (engine.data.threads ?? []).flatMap(t => t.paragraphIds ?? []);
   };
+  // 이 검증기는 DOM span 트리(3계층: 엔진 게터 → 섀도우 span → :host)를 측정
+  // 본체로 한다 — threading.html 문단이 기본 canvas 모드면 span이 없어 측정이
+  // 공허 통과한다. 데모 문단 전체를 dom으로 고정하는 계약 헬퍼다.
+  const applyDomMode = async (page) => {
+    for (const p of page.querySelectorAll('x-layout-paragraph')) {
+      p.renderMode = 'dom';
+      p.flushRender();
+    }
+    await page.render();
+    await new Promise(r => setTimeout(r, 300));
+  };
 `;
 
 const r = await page.evaluate(`
@@ -135,6 +146,7 @@ const r = await page.evaluate(`
     await new Promise(r => setTimeout(r, 100));
   }
   await page.render();
+  await applyDomMode(page);
 
   // ═══ 1. 초기 로드 ═══
   const frameIds = threadFrameIds(page);
@@ -694,6 +706,7 @@ console.log('\n[8] f2 클릭(CDP) 진입 → 실제 타이핑 — 컨트롤러 �
   // (1) f2 span CDP 클릭 → 절대 커서 (2) 실제 타이핑 → f2 화면 렌더.
   await page.goto(`${baseUrl}/${PAGE_PATH}?cdp=${Date.now()}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(2500);
+  await page.evaluate(`(async () => { ${pageUtils} const page = document.querySelector('x-layout-page'); await applyDomMode(page); })()`);
   const rect = await page.evaluate(`(() => {
     const f2 = [...document.querySelectorAll('x-layout-paragraph')].find(p => p.id === ${JSON.stringify(r.frameIds[1])});
     const mid = f2?.querySelector('x-layout-column')?.shadowRoot?.querySelector('span[data-source-offset="10"]');
@@ -750,6 +763,7 @@ console.log('\n[9] f2 연속 타이핑 — prefix 캐시 좌표계 (비-헤드 �
   // 배치에 반영 안 됨 ("커서만 이동"). 영문 5자 + 한글 2단어 조합 모두 검증.
   await page.goto(`${baseUrl}/${PAGE_PATH}?pfx=${Date.now()}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(2500);
+  await page.evaluate(`(async () => { ${pageUtils} const page = document.querySelector('x-layout-page'); await applyDomMode(page); })()`);
   const rect = await page.evaluate(`(() => {
     const f2 = [...document.querySelectorAll('x-layout-paragraph')].find(p => p.id === ${JSON.stringify(r.frameIds[1])});
     const mid = f2?.querySelector('x-layout-column')?.shadowRoot?.querySelector('span[data-source-offset="10"]');
@@ -844,6 +858,7 @@ console.log('\n[10] 역방향 편집 — 상류 재편집 후 하류 편집 보�
   const rev = await page.evaluate(`(async () => {
     ${pageUtils}
     const page = document.querySelector('x-layout-page');
+    await applyDomMode(page);
     const docEl = document.querySelector('x-layout-document') ?? page;
     const engine = docEl.engine ?? page.engine;
     const em = page.editManager;
@@ -945,6 +960,7 @@ console.log('\n[11] 엔터 후 개행 뒤 텍스트 클릭 매핑 — 0높이 �
   await page.goto(`${baseUrl}/${PAGE_PATH}?entm=${Date.now()}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(2500);
   const enterMap = await page.evaluate(`(async () => {
+    await (async () => { ${pageUtils} const page = document.querySelector('x-layout-page'); await applyDomMode(page); })();
     const em = document.querySelector('x-layout-page').editManager;
     em.textEditMode = true;
     const para = [...document.querySelectorAll('x-layout-paragraph')].find(p => p.id === 'thread2-frame2');
@@ -1009,6 +1025,7 @@ console.log('\n[13] 엔터 후 커서 +1 불일치 — 절대 위치 기준 (라
   await page.goto(`${baseUrl}/${PAGE_PATH}?abs=${Date.now()}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(2500);
   const absCheck = await page.evaluate(`(async () => {
+    await (async () => { ${pageUtils} const page = document.querySelector('x-layout-page'); await applyDomMode(page); })();
     const em = document.querySelector('x-layout-page').editManager;
     em.textEditMode = true;
     const para = [...document.querySelectorAll('x-layout-paragraph')].find(p => p.id === 'thread2-frame2');

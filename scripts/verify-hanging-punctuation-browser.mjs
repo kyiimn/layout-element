@@ -110,6 +110,13 @@ const r = await page.evaluate(async () => {
   const p = window.bench.getParaBox().querySelector('x-layout-paragraph');
 
   const engine = p.engine;
+  // 이 검증기는 DOM 컬럼의 overflow computed style과 걸침 span rect/hit-test를
+  // 전제한다 — bench 문단이 기본 canvas 모드면 컬럼이 없어 FAIL한다.
+  // 걸침 화면 페인트 검증의 대상 경로는 DOM span이므로 dom 고정이 계약이다.
+  p.renderMode = 'dom';
+  p.flushRender();
+  await new Promise(res => setTimeout(res, 300));
+
   const colW = engine.columnWidths[0];
   const gaW = engine.getCharWidths('가').swidth;
   const dotW = engine.getCharWidths('.').swidth;

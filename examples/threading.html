@@ -155,8 +155,9 @@
       em.textEditMode = true;
       for (const para of page.querySelectorAll("x-layout-paragraph")) {
         em.addEditableParagraph(para.id);
-        // 단계 5 canvas 기본값화 — 예제가 DOM 렌더를 전제하므로 'dom' 고정.
-        para.renderMode = "dom";
+        // 문단 렌더 모드는 기본값(DEFAULT_PARAGRAPH_RENDER_MODE='canvas')을
+        // 그대로 사용한다 — 하이브리드 게이트(§6)가 포커스 프레임을 자동으로
+        // DOM 복귀한다.
         para.editableText = true;
       }
       await page.render();

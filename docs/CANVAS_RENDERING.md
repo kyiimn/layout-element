@@ -599,13 +599,21 @@ span 179,400 소멸. **헤드리스 페인트 비용 특성상 canvas 이득도 
       `DEFAULT_PARAGRAPH_RENDER_MODE = 'canvas'` 신설(constants/defaults.ts) —
       문단 기본 renderMode가 canvas. 하이브리드 게이트(§6)가 포커스 문단을
       자동으로 DOM 복귀하므로 편집 UX는 DOM 경로 유지. 호스트가 명시적
-      `renderMode = 'dom'` 설정 시 기존 동작. DOM span을 전제하는 기존 회귀
-      스크립트(caret-parking·virtualization A/H/J/K·progressive-layout
-      OFF/ON/park)와 예제(virtualization·threading·bench)에 명시적
-      `renderMode = 'dom'` 고정 추가 — **기존 경로 무변경 검증 완료**(전수
-      회귀 21 스크립트 ALL PASS). 검증망 구성: parity 17P(참조 구현 비교)·
-      drawlist 31P·caret-parking 28P(DOM 참조) + canvas 모드 전용 판정은
-      parity의 canvas 전환 시나리오가 담당
+      `renderMode = 'dom'` 설정 시 기존 동작. 검증망 구성: parity 17P(참조
+      구현 비교)·drawlist 31P·caret-parking 28P(DOM 참조) + canvas 모드 전용
+      판정은 parity의 canvas 전환 시나리오가 담당.
+      **2026-09-15 (2차) — 예제 기본값화 확정**: 예제 페이지의 `renderMode =
+      'dom'` 고정(virtualization·threading·bench)과 실험 토글 버튼
+      (index·virtualization의 "canvas 렌더")을 철거하고 기본값을 그대로
+      소비한다 — 하이브리드 게이트 + `_onFocus` DOM 복귀 렌더
+      (verify-remount-canvas 9항목)가 편집 UX를 소유하므로 토글이 불필요하다.
+      bench는 시나리오 1~7의 DOM 수치 전제 때문에만 dom 고정을 유지하고,
+      300p 시나리오 8의 비-포커스 문단은 기본값(canvas)을 소비한다.
+      DOM span을 전제하는 회귀 스크립트(caret-parking·virtualization
+      A/H/J/K·progressive-layout·threading-browser·pending-style·
+      hanging-browser·right-indent-tab 계열·text-click-focus)는 스크립트
+      자체에 `renderMode = 'dom'` 고정을 명시한다 — 검증 대상 경로가 DOM이면
+      고정 계약이다 (예제 구성에 의존하지 않는다). 전수 회귀 ALL PASS.
 
 ---
 

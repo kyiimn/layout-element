@@ -151,7 +151,6 @@
       5프레임</span>
     <label><input type="checkbox" id="ck-pin" checked /> 포커스 페이지 고정</label>
     <button id="btn-toggle">가상화 끄기</button>
-    <button id="btn-canvas">canvas 렌더 (실험)</button>
   </div>
   <div id="vlog"></div>
 
@@ -250,10 +249,10 @@
     };
     await doc.render();
     // 편집 가능하게 — 포커스 페이지 pin 동작까지 함께 시연된다.
-    // 단계 5 canvas 기본값화: 예제가 DOM 렌더를 전제하므로 명시적으로 'dom'으로
-    // 고정한다 (canvas 전환은 "canvas 렌더" 토글 버튼으로 실험한다).
+    // 문단 렌더 모드는 기본값(DEFAULT_PARAGRAPH_RENDER_MODE='canvas')을 그대로
+    // 사용한다. 하이브리드 게이트(§6)가 포커스 문단을 자동으로 DOM 복귀하고
+    // blur 시 canvas로 되돌린다 — 예제에서 renderMode를 강제하지 않는다.
     for (const p of doc.querySelectorAll("x-layout-paragraph")) {
-      p.renderMode = "dom";
       p.editableText = true;
     }
 
@@ -360,30 +359,11 @@
       }
     });
 
-    // canvas 렌더 토글 (CANVAS_RENDERING.md 단계 2 실험 플래그) — 비-포커스
-    // 문단을 canvas로 전환한다. 하이브리드 계약(§6): canvas 문단을 클릭하면
-    // 그 문단만 즉시 DOM으로 복귀해 편집된다 (엔진 getOffsetFromPoint가
-    // canvas 좌표의 클릭 매핑을 소유). 포커스 해제(blur) 시 다시 canvas로
-    // 돌아간다 — 타이핑 핫패스의 span 재스타일 비용이 비-포커스 문단에서
-    // 소멸하는 것이 이 전환의 이득이다.
-    const btnCanvas = document.getElementById("btn-canvas");
-    let canvasMode = false;
-    btnCanvas.addEventListener("click", async () => {
-      canvasMode = !canvasMode;
-      for (const p of doc.querySelectorAll("x-layout-paragraph")) {
-        p.renderMode = canvasMode ? "canvas" : "dom";
-      }
-      btnCanvas.classList.toggle("off", !canvasMode);
-      refreshStatus(canvasMode
-        ? "canvas 렌더 ON — 문단 클릭 시 그 문단만 DOM 복귀 후 편집"
-        : "canvas 렌더 OFF — 전체 DOM 복귀");
-    });
-
-    // 하이브리드 전환: canvas 문단 클릭 → editableText 활성화 + DOM 복귀.
-    // blur(focusChange previousParagraph) 후 컨트롤러가 비-포커스가 되면
-    // canvas로 되돌린다 — flushRender로 즉시 전환한다.
+    // 하이브리드 전환 (기본값화 경로): canvas 문단 클릭 → editableText 활성화 +
+    // DOM 복귀. blur(focusChange previousParagraph) 후 컨트롤러가 비-포커스가
+    // 되면 canvas로 되돌린다 — flushRender로 즉시 전환한다. 문단 렌더 모드는
+    // 기본값(canvas)을 그대로 사용하므로 전체 문단 렌더 모드 토글은 없다.
     em.addEventListener("focusChange", (e) => {
-      if (!canvasMode) return;
       const prev = e.previousParagraph;
       if (prev && prev.editableText) {
         prev.editableText = false;

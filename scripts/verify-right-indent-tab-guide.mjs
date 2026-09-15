@@ -26,6 +26,9 @@ const r = await page.evaluate(async () => {
   const p = window.bench.getParaBox().querySelector('x-layout-paragraph');
   const engine = p.engine;
   em.textEditMode = true;
+  // 이 검증기는 DOM 컬럼 span(탭 가이드 dataset·style)을 직접 조회한다 — bench
+  // 문단이 기본 canvas 모드면 컬럼이 없어 FAIL한다. dom 고정이 계약이다.
+  p.renderMode = 'dom';
   p.editableText = true;
   await new Promise(res => setTimeout(res, 200));
 
