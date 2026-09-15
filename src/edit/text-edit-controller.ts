@@ -1656,9 +1656,12 @@ export class TextEditController {
         this._optimisticSpanUpdate(newOffset - 1, inserted);
       }
 
+      // L-1 (감사 §2.2a — 키당 강제 리플로우 2회→1회): 동기 커서 갱신 대신 rAF
+      // 스케줄. 같은 프레임의 rAF 커밋(_debouncedRender → postRender)이 커서를
+      // 재배치하며, postRender의 _cancelCursorSelectionUpdate가 이 스케줄을 소비해
+      // 갱신 1회로 수렴한다. 커밋 전 시각 피드백은 optimistic span이 담당한다.
       if (this._optimisticSpan) {
-        this._updateCursorPosition();
-        this._updateSelection();
+        this._scheduleCursorSelectionUpdate();
       }
       this._debouncedRender();
       return;
@@ -1689,8 +1692,10 @@ export class TextEditController {
       this._optimisticSpanUpdate(newOffset - 1, change.text);
     }
 
+    // L-1 (감사 §2.2a — 키당 강제 리플로우 2회→1회): selection 교체 경로와 동일하게
+    // rAF 스케줄로 병합 — postRender가 취소·재배치를 소유한다.
     if (this._optimisticSpan) {
-      this._updateCursorPosition();
+      this._scheduleCursorSelectionUpdate();
     }
     this._debouncedRender();
     this._emitStyleChange();
