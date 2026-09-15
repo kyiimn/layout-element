@@ -1383,6 +1383,94 @@ console.log('\n[19] 2번째 프레임 내부 \\n — cursorLineRanges 로컬/절
     shifted2 === 0, `${shifted2}개 라인 시프트`);
 }
 
+// [20] _ccShiftFor contentFrom 보정 — getCharRect 오프셋 공간 정합
+// 3회 재발한 버그 클래스: _ccShiftFor가 range.endOffset(프레임 로컬)을
+// plain[] 절대 인덱싱에 그대로 사용해, contentFrom > 0인 2번째 이후
+// 스레드 프레임에서 \n 소비 보정이 0으로 잘못 산출되고 getCharRect가
+// \n 이후 라인에서 1글자 어긋난 위치를 반환한다.
+// _cursorLineWalk 내부는 이미 plain[this._contentFrom + offset]으로
+// 절대 인덱싱하므로 _ccShiftFor도 동일 보정을 적용해야 한다.
+console.log('\n[20] _ccShiftFor contentFrom 보정 — getCharRect 오프셋 공간 정합');
+{
+  const storyText = '가'.repeat(3000);
+  const probe = buildThreadedDoc({ contents: [storyText, '', ''], columns: [1, 1, 1], boxHeight: 6,
+    threads: [{ id: 't1', paragraphIds: ['para-0', 'para-1', 'para-2'] }] });
+  const headCap = probe.frames[0].overflowContentFrom;
+
+  // 2번째 프레임 내부에 \n이 오고, \n 직후 라인이 가시 영역 내에 있는 story 구성.
+  // boxHeight를 충분히 크게 해서 \n 전후 라인이 모두 가시이도록 한다.
+  const nlAt = headCap + 5;
+  const nlStory = '가'.repeat(nlAt) + '\n' + '나'.repeat(5);
+  const { frames } = buildThreadedDoc({ contents: [nlStory, '', ''], columns: [1, 1, 1], boxHeight: 100,
+    threads: [{ id: 't1', paragraphIds: ['para-0', 'para-1', 'para-2'] }] });
+  const [, f1] = frames;
+
+  const C = f1.contentFrom;
+  const plain = f1.plainText;
+  const nlLocal = nlAt - C;
+
+  // _ccShiftFor 직접 검증: \n 직후 오프셋에서 시프트가 1이어야 한다
+  // (\n 1개가 cc 공간에서 소비되지 않아 plain→cc 변환 시 1 감소).
+  // 버그 시: contentFrom 보정 누락으로 시프트=0, ccOffset이 1만큼 밀려
+  // getCharRect가 잘못된 글자를 참조한다.
+  const flatRanges = f1.cursorLineRanges.flat();
+  const endOfBlockRange = flatRanges.find(r => r.endOfBlock);
+  check('endOfBlock 라인 존재 (f1)', endOfBlockRange !== undefined, 'no endOfBlock');
+
+  if (endOfBlockRange) {
+    // \n 직후 라인의 firstVisible(walk 로컬 오프셋)가 cc(columnContents) 공간에
+    // 존재하는지 확인. getCharRect는 내부적으로 _ccShiftFor로 walk→cc 변환 후
+    // columnContents 파트를 순회한다. \n 직후 라인의 첫 가시 글자 위치가
+    // 정확하면 cc 변환 후 올바른 글자를 가리킨다.
+    // 버그 시: _ccShiftFor 보정 누락으로 ccOffset이 1만큼 밀려
+    // 잘못된 글자(또는 범위 밖 null)를 참조한다.
+    const nextLine = flatRanges[flatRanges.indexOf(endOfBlockRange) + 1];
+    if (nextLine && nextLine.firstVisible !== null) {
+      const rect = f1.getCharRect(nextLine.firstVisible);
+      check('getCharRect(\\n 직후 첫 가시 글자) !== null', rect !== null,
+        `firstVisible=${nextLine.firstVisible}, visibleChars=${f1.visibleChars}`);
+
+      if (rect) {
+        // \n 직전 가시 글자와 직후 가시 글자가 다른 라인에 있는지 —
+        // 버그 시: 시프트 누락으로 두 글자가 같은 라인에 매핑된다.
+        const beforeNlOffset = endOfBlockRange.firstVisible ?? endOfBlockRange.startOffset;
+        const beforeRect = f1.getCharRect(beforeNlOffset);
+        if (beforeRect) {
+          check('\\n 직후·직전 글자가 다른 라인 (시프트 정상)',
+            Math.abs(rect.top - beforeRect.top) > 0.01,
+            `after top=${rect.top.toFixed(2)}, before top=${beforeRect.top.toFixed(2)} — same line = shift bug`);
+        }
+      }
+    }
+  }
+
+  // 3-프레임 체인에서도 동일 검증 (contentFrom이 더 큼 — 보정 누적 방어)
+  const { frames: frames3 } = buildThreadedDoc({
+    contents: ['가'.repeat(headCap + 5) + '\n' + '나'.repeat(5) + '\n' + '다'.repeat(5), '', '', ''],
+    columns: [1, 1, 1], boxHeight: 100,
+    threads: [{ id: 't1', paragraphIds: ['para-0', 'para-1', 'para-2', 'para-3'] }],
+  });
+  const f1_3 = frames3[1];
+  const C1 = f1_3.contentFrom;
+  const plain1 = f1_3.plainText;
+  // f1 내부에 \n이 있는지 확인
+  let nlLocalInF1 = -1;
+  for (let i = 0; i < plain1.length - C1; i++) {
+    if (plain1[C1 + i] === '\n') { nlLocalInF1 = i; break; }
+  }
+  if (nlLocalInF1 >= 0) {
+    const flatRanges3 = f1_3.cursorLineRanges.flat();
+    const eob3 = flatRanges3.find(r => r.endOfBlock);
+    if (eob3) {
+      const nextLine3 = flatRanges3[flatRanges3.indexOf(eob3) + 1];
+      if (nextLine3 && nextLine3.firstVisible !== null) {
+        const rect3 = f1_3.getCharRect(nextLine3.firstVisible);
+        check('3-프레임 체인 f1 \\n 직후 getCharRect !== null', rect3 !== null, 'null');
+      }
+    }
+  }
+}
+
 console.log(`\n${'='.repeat(60)}`);
 console.log(`verify-threading: ${passed} passed, ${failed} failed`);
 if (failed > 0) {

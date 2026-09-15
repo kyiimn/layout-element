@@ -4146,7 +4146,11 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         if (range.endOfBlock && plainOffset > range.startOffset) {
           // 대상 오프셋이 이 endOfBlock 라인의 \n 이후면 이 라인의 \n이
           // cc 공간에서 소비되지 않아 보정 대상이다.
-          if (range.startOffset < plain.length && plain[range.endOffset] === '\n') {
+          // range.endOffset은 프레임 로컬(0 = contentFrom 글자)이므로
+          // plain[] 절대 인덱싱에는 contentFrom을 더해야 한다.
+          // 비-스레드 문단(contentFrom=0)에서는 항등이므로 기존 동작 유지.
+          const absIdx = this._contentFrom + range.endOffset;
+          if (absIdx < plain.length && plain[absIdx] === '\n') {
             shift++;
           }
         }
