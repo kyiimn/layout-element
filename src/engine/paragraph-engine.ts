@@ -3488,6 +3488,84 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     return style;
   };
 
+  /** `genCharStyleFlatCss`의 직렬화 캐시 (LRU — 글자×스타일 조합 수준, 문단 수백 개에서 5,000 엔트리면 충분). */
+  private _charFlatStyleTextCache: _LRU<string, string> = new _LRU(5000);
+  /** `getCachedCharFlatStyleTop`의 수직 앵커 캐시 — `_charFlatStyleTextCache`와 동일 키. */
+  private _charFlatStyleTopCache: _LRU<string, string> = new _LRU(5000);
+
+  /**
+   * charOffsets(절대 좌표) 경로 단일 span 스타일의 직렬화 캐시.
+   *
+   * `genCharStyleFlat`은 매 호출 새 객체를 조립하고, 소비처
+   * (`LayoutColumnElement._applySpanStyle` full 모드)는 이를 `cssText`로
+   * span에 쓴다. 스레드 head 시프트 편집에서 하류 프레임 span의 대부분은
+   * "같은 슬롯에 다른 글자"로 재적용되어 스킵이 구조적으로 불가하다
+   * (감사 L-2 실측: 재적용 span의 96%가 글자 변경). 이 경로를
+   * `Object.assign(객체)`에서 `cssText = 캐시된 문자열` 단일 쓰기로 전환해
+   * CSSOM 파서가 한 번에 처리하도록 한다.
+   *
+   * 캐시 키는 `genCharStyle`과 동일 성분(char/wr/ls/sr/fs/lmfs/fontName/ol).
+   *
+   * **직렬화 규칙**: `camelCase` 키를 kebab-case로 변환, `undefined`/빈 문자열
+   * 값은 건너뛴다. 규칙 변경 시 소비처(full 모드)와 동일 커밋에서 갱신할 것.
+   *
+   * @param char - 대상 문자
+   * @param inlineStyle - 인라인 스타일 오버라이드 (선택)
+   * @param lineMaxFontSize - 라인 최대 폰트 크기 (mm, 선택)
+   * @returns `cssText`에 직접 대입 가능한 스타일 문자열
+   * @throws 없음
+   */
+  public genCharStyleFlatCss = (char: string, inlineStyle?: TextInlineStyle, lineMaxFontSize?: number): string => {
+    const wr = inlineStyle?.widthRatio ?? this.widthRatio;
+    const lsEm = inlineStyle?.letterSpacing ?? this.effectiveTextStyle.letterSpacing!;
+    const sr = inlineStyle?.spaceRatio ?? this.spaceRatio;
+    const fs = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
+    const lmfs = lineMaxFontSize ?? fs;
+    const fontName = inlineStyle?.fontFamily ?? "";
+    const ol = inlineStyle?.outline ?? this.effectiveTextStyle.outline!;
+    const cacheKey = `${char}|${wr}|${lsEm}|${sr}|${fs}|${lmfs}|${fontName}|${ol}`;
+    const cached = this._charFlatStyleTextCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const flat = this.genCharStyleFlat(char, inlineStyle, lineMaxFontSize);
+    const kebab = (key: string): string => key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+    const parts: string[] = [];
+    for (const [key, value] of Object.entries(flat)) {
+      if (value === undefined || value === '') continue;
+      parts.push(`${kebab(key)}:${value}`);
+    }
+    const text = parts.join(';');
+    this._charFlatStyleTextCache.set(cacheKey, text);
+    this._charFlatStyleTopCache.set(cacheKey, flat.top ?? '0');
+    return text;
+  };
+
+  /**
+   * charOffsets 경로 단일 span의 수직 하단 앵커 `top` 값을 캐시에서 반환한다.
+   *
+   * L-2 경로가 `cssText` 단일 쓰기로 전환된 뒤 `top` 계산을 위해
+   * `genCharStyleFlat`을 재호출하면 객체 조립 비용이 되살아난다 — 캐시 키는
+   * `genCharStyleFlatCss`와 동일하고, 값은 직렬화 시점의 `flatStyle.top ?? '0'`이다.
+   * 항상 `genCharStyleFlatCss`와 같은 키로 먼저 호출할 것 (캐시가 함께 채워진다).
+   *
+   * @param char - 대상 문자
+   * @param inlineStyle - 인라인 스타일 오버라이드 (선택)
+   * @param lineMaxFontSize - 라인 최대 폰트 크기 (mm, 선택)
+   * @returns CSS `top` 문자열 (`'0'` 폴백 포함)
+   * @throws 없음
+   */
+  public getCachedCharFlatStyleTop = (char: string, inlineStyle?: TextInlineStyle, lineMaxFontSize?: number): string => {
+    const wr = inlineStyle?.widthRatio ?? this.widthRatio;
+    const lsEm = inlineStyle?.letterSpacing ?? this.effectiveTextStyle.letterSpacing!;
+    const sr = inlineStyle?.spaceRatio ?? this.spaceRatio;
+    const fs = inlineStyle?.fontSize ?? this.effectiveTextStyle.fontSize!;
+    const lmfs = lineMaxFontSize ?? fs;
+    const fontName = inlineStyle?.fontFamily ?? "";
+    const ol = inlineStyle?.outline ?? this.effectiveTextStyle.outline!;
+    const cacheKey = `${char}|${wr}|${lsEm}|${sr}|${fs}|${lmfs}|${fontName}|${ol}`;
+    return this._charFlatStyleTopCache.get(cacheKey) ?? '0';
+  };
+
   /**
    * 내부 span 스타일 생성. `scale` transform으로 glyph 시각 축소.
    * 외부 span과 분리되어 레이아웃 박스 크기에 영향을 주지 않는다.

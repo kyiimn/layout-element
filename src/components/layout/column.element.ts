@@ -331,20 +331,24 @@ export class LayoutColumnElement extends HTMLElement {
       return;
     }
 
-    charEl.style.cssText = '';
-
     if (charOffsetMm !== undefined) {
-      const flatStyle = this.model!.genCharStyleFlat(char, inlineStyle, lineMaxFontSize);
-      Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, flatStyle);
+      // L-2: 치수 스타일을 캐시된 문자열로 단일 쓰기 — `cssText` 전체 대입은
+      // CSSOM 파서가 한 번에 처리하고, `cssText = ''` 초기화 + property별
+      // `Object.assign`(객체 조립 포함)을 대체한다. 스레드 head 시프트 편집에서
+      // 하류 프레임 span의 대부분이 이 경로로 재적용된다 (감사 L-2 실측).
+      const flatCss = this.model!.genCharStyleFlatCss(char, inlineStyle, lineMaxFontSize);
+      const flatTop = this.model!.getCachedCharFlatStyleTop(char, inlineStyle, lineMaxFontSize);
+      charEl.style.cssText = flatCss;
       charEl.style.position = 'absolute';
       charEl.style.left = `${charOffsetMm}mm`;
-      charEl.style.top = flatStyle.top ?? '0';
+      charEl.style.top = flatTop;
       charEl.textContent = char;
 
       // flexbox→charOffsets 전환 시 기존 inner span 제거
       const existingInner = charEl.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
       if (existingInner) existingInner.remove();
     } else {
+      charEl.style.cssText = '';
       const charStyle = this.model!.genCharStyle(char, inlineStyle, lineMaxFontSize);
       Object.assign<CSSStyleDeclaration, Partial<CSSStyleDeclaration>>(charEl.style, charStyle);
       let inner = charEl.querySelector<HTMLSpanElement>(':scope > span[data-char-inner]');
