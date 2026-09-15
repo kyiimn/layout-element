@@ -4,7 +4,7 @@ import { ColorRegistry, FontLoader } from "@/resource";
 import { InheritStyle, ParagraphData, ParagraphOverlapMode, ParagraphStyle, RenderCompleteEventDetail, TextInlineData, TextStyle } from "@/types";
 import { genUUID, valueEqual, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay } from "@/utils";
 import { checkOverlapMm } from "@/engine";
-import { DEFAULT_PARAGRAPH_RENDER_MODE } from "@/constants/defaults";
+import { DEFAULT_PARAGRAPH_RENDER_MODE, DEFAULT_CANVAS_DRAW_MODE } from "@/constants/defaults";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutImageElement } from "./image.element";
 import { LayoutColumnElement } from "./column.element";
@@ -53,7 +53,7 @@ export class LayoutParagraphElement extends HTMLElement {
   private _renderMode: 'dom' | 'canvas' = DEFAULT_PARAGRAPH_RENDER_MODE;
 
   /** canvas 내부 드로잉 방식 (`x-layout-canvas.drawMode` 위임 보존 값). */
-  private _drawMode: 'fillText' | 'glyph' = 'fillText';
+  private _drawMode: 'fillText' | 'glyph' = DEFAULT_CANVAS_DRAW_MODE;
 
   private _editableText: boolean = false;
   private _editController: TextEditController | null = null;

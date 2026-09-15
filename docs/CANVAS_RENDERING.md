@@ -204,8 +204,10 @@ canvas.paint():
 | **B. glyph path** (2단계, 필요 시) | `getParsedFont()`의 opentype glyph path를 `ctx.fillPath`로 드로잉 — 인쇄(printPostData)와 동일 소스 | 폰트 메트릭과 100% 일치, subpixel 안 함 — 대량 텍스트에서 느릴 수 있음. 인쇄 패리티에는 유리 |
 
 > **✅ B안 구현 완료 (2026-09-15) — `drawMode` 스위칭으로 A/B 병행**:
-> `x-layout-canvas.drawMode: 'fillText' | 'glyph'` (기본 `'fillText'` — 기존
-> 동작 byte-identical) + `LayoutParagraphElement.drawMode` 위임 속성
+> `DEFAULT_CANVAS_DRAW_MODE = 'glyph'` 상수(constants/defaults.ts) — canvas
+> 내부 드로잉의 기본이 glyph path다 (§3.3 B안 기본화 — 배치와 래스터화가 동일
+> 폰트 소스, 인쇄 패리티 기본). `x-layout-canvas.drawMode: 'fillText' |
+> 'glyph'` 스위칭 + `LayoutParagraphElement.drawMode` 위임 속성
 > (dom↔canvas 전환 계층과 동일 계약 — dom 모드에서 설정한 값은 보존되어
 > canvas 복귀 시 적용). glyph 모드 구현:
 > - 글리프 경로는 **unitsPerEm 좌표계 Path2D**로 글리프당 1개 캐시
@@ -219,6 +221,14 @@ canvas.paint():
 > - 파싱 폰트 부재/경로 없음 글자는 **fillText 폴백** — 시스템 폴백 글리프가
 >   DOM 경로와 동일 선택을 따른다.
 > - outline은 `ctx.stroke(path)` — fill과 stroke 동일 경로 소비.
+> - **baseline 좌표계 계약 (2026-09-15 결함 수정)**: `toPathData`의 기본
+>   옵션(`flipY: true, flipYBase: undefined`)은 글리프 **boundingBox 중심**
+>   (y1+y2)을 기준으로 y를 반전해 bbox top이 0에 정렬된 경로를 만든다 —
+>   baseline 기준이 아니다. `flipYBase: 0` 필수(`y_down = -y_up` — getPath의
+>   y-down 변환과 동일). 결함 시 bench 4mm 기준 라인 전체 +9px 하강(진단:
+>   라인 밴드 top fillText {0,18,36} vs glyph {9,27,45}), 8mm에서 18px.
+>   방어: `verify-canvas-parity` G9 — fillText↔glyph 라인 top delta ≤2px
+>   (결함 코드에서 maxDelta=9px FAIL 역방향 증명 완료).
 > - 실측 (bench, 4mm/확대): 잉크 총량 fillText 대비 +12% (힌팅 없는 원본
 >   윤곽 → 획이 인쇄와 동일하게 약간 두껍게 보임), 픽셀 알파 diff 81%는
 >   래스터라이저 AA 차이 — 글리프 기하·위치는 동일. tofu/깨짐 없음

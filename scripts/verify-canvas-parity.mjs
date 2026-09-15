@@ -357,25 +357,72 @@ check('B5. bleed 확장 — backing 폭 ≥ 표시 폭 (bleed 확장)', r.canvas
     const canvasEl = p.querySelector('x-layout-canvas');
     out.hasCanvas = !!canvasEl;
 
-    // G1: drawMode 기본값 + fillText 기준 픽셀 스냅샷
+    // G1: drawMode 기본값은 DEFAULT(glyph)다 — fillText 기준선을 먼저 명시
+    // 설정해 두 경로를 모두 스냅샷한다 (기본값화 이후 "첫 스냅샷 = glyph"이면
+    // fillText↔glyph 비교가 성립하지 않는다).
     const canvas = canvasEl?.shadowRoot?.querySelector('canvas');
     out.defaultMode = canvasEl?.drawMode;
+    // 행별 잉크 수 — baseline 수직 정렬 판정의 근거. 픽셀 알파가
+    // 래스터라이저마다 달라도(힌팅 AA 차이) 잉크의 세로 분포는 glyph 기하와
+    // baseline 위치가 지배한다 — bbox 반전 결함(baseline 어긋남)은 이 분포를
+    // 라인 단위로 밀어올린다.
     const snapshot = () => {
       const ctx = canvas.getContext('2d');
       const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
       let ink = 0;
+      const rowTops = [];
+      const colCount = canvas.width;
+      const rowCount = canvas.height;
+      const alphaAt = (x, y) => data[(y * colCount + x) * 4 + 3];
+      for (let y = 0; y < rowCount; y++) {
+        let rowInk = 0;
+        for (let x = 0; x < colCount; x++) {
+          if (alphaAt(x, y) > 0) rowInk++;
+        }
+        rowTops.push(rowInk);
+      }
       for (let i = 3; i < data.length; i += 4) { if (data[i] > 0) ink++; }
-      return { inkPixels: ink, data: data.slice() };
+      return { inkPixels: ink, rowTops, data: data.slice() };
     };
+    canvasEl.drawMode = 'fillText';
+    await raf2();
+    await raf2();
     const fillSnap = snapshot();
     out.fillTextInk = fillSnap.inkPixels;
 
     // G2: glyph 모드 전환 (스위칭 API 계약 — setter가 즉시 재페인트)
     canvasEl.drawMode = 'glyph';
     await raf2();
+    await raf2();
     out.afterToggleMode = canvasEl.drawMode;
     const glyphSnap = snapshot();
     out.glyphInk = glyphSnap.inkPixels;
+
+    // baseline 수직 정렬: fillText vs glyph의 라인별 잉크 top row 직접 비교.
+    // 연속 잉크 밴드(라인)의 top을 추출해 대응 라인끼리 비교 — bbox 반전 결함은
+    // 글리프 bbox를 baseline이 아니라 bbox top 기준으로 그려 라인 top이
+    // 글자 크기 비례로 아래로 밀린다(실측: 8mm/3.78ppm에서 18px — 진단 히스토리).
+    // 행 프로파일 교차상관은 단일 라인 텍스트에서 이동 자체가 피크가 되어
+    // 결함을 흡수하므로 밴드 top 직접 비교가 검출력을 가진다.
+    const lineBands = (rowTops) => {
+      const bands = [];
+      let start = -1;
+      for (let y = 0; y < rowTops.length; y++) {
+        if (rowTops[y] > 0 && start < 0) start = y;
+        if (rowTops[y] === 0 && start >= 0) { bands.push(start); start = -1; }
+      }
+      if (start >= 0) bands.push(start);
+      return bands;
+    };
+    const fillBands = lineBands(fillSnap.rowTops);
+    const glyphBands = lineBands(glyphSnap.rowTops);
+    const n = Math.min(fillBands.length, glyphBands.length);
+    let maxBandLag = 0;
+    for (let i = 0; i < n; i++) {
+      maxBandLag = Math.max(maxBandLag, Math.abs(glyphBands[i] - fillBands[i]));
+    }
+    out.baselineBandTopDelta = n > 0 ? maxBandLag : -1;
+    out.bandCount = { fill: fillBands.length, glyph: glyphBands.length };
 
     // a11y 텍스트는 모드와 무관 유지
     out.glyphA11y = canvasEl.shadowRoot?.querySelector('div[aria-hidden="false"]')?.textContent ?? '';
@@ -402,7 +449,7 @@ check('B5. bleed 확장 — backing 폭 ≥ 표시 폭 (bleed 확장)', r.canvas
   });
 
   check('G1. canvas 요소 존재 (glyph 전환 전제)', glyphMode.hasCanvas === true);
-  check('G2. drawMode 기본값 fillText', glyphMode.defaultMode === 'fillText',
+  check('G2. drawMode 기본값 === DEFAULT_CANVAS_DRAW_MODE (glyph)', glyphMode.defaultMode === 'glyph',
     `default=${glyphMode.defaultMode}`);
   check('G3. fillText 모드 실제 잉크 존재', glyphMode.fillTextInk > 0,
     `ink=${glyphMode.fillTextInk}px`);
@@ -417,6 +464,9 @@ check('B5. bleed 확장 — backing 폭 ≥ 표시 폭 (bleed 확장)', r.canvas
     `a11y=${glyphMode.glyphA11y.length}자`);
   check('G8. 미등록 글자(ힳ) 포함 페인트 — 폴백 경로 잉크 존재', glyphMode.unmappedInk > 0,
     `ink=${glyphMode.unmappedInk}px`);
+  check('G9. baseline 수직 정렬 — fillText↔glyph 라인 top delta ≤2px',
+    glyphMode.baselineBandTopDelta >= 0 && glyphMode.baselineBandTopDelta <= 2,
+    `maxDelta=${glyphMode.baselineBandTopDelta}px bands=${JSON.stringify(glyphMode.bandCount)} (bbox 반전 결함 시 글자 크기 비례 이동 — 실측 18px)`);
 }
 
 // ── H. paragraph 레벨 drawMode 위임 — dom↔canvas 스위칭과 동일 계층 API ──

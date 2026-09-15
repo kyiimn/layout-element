@@ -136,6 +136,18 @@ export const Z_INDEX_ROLE_HEADER = 91001;
  */
 export const DEFAULT_PARAGRAPH_RENDER_MODE: 'dom' | 'canvas' = 'canvas';
 
+/**
+ * canvas 내부 텍스트 드로잉 방식 기본값 (CANVAS_RENDERING.md §3.3 B안 기본화).
+ *
+ * `'glyph'`: opentype.js 글리프 경로(Path2D)로 fill — 배치(advanceWidth)와
+ * 래스터화(글리프 윤곽)가 동일 폰트 소스에서 수렴한다. 인쇄(printPostData)와
+ * 동일 기하로 화면이 그려져 패리티에 유리하다. 힌팅 없음 — 획이 인쇄와 동일하게
+ * 약간 두껍게 보인다 (실측: fillText 대비 잉크 +12%).
+ * `'fillText'`: 브라우저 래스터라이저 위임 — 힌팅·서브픽셀을 얻는다. 호스트가
+ * `drawMode = 'fillText'`를 설정하면 되돌린다.
+ */
+export const DEFAULT_CANVAS_DRAW_MODE: 'fillText' | 'glyph' = 'glyph';
+
 /** 테이블 보더 레이어 z-index. 셀 배경 위, 셀 컨텐츠(box) 아래. */
 export const Z_INDEX_TABLE_BORDER = 99990;
 

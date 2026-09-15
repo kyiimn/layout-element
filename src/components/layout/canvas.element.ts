@@ -26,6 +26,7 @@ import type { DrawCommand } from "@/engine/paragraph-canvas";
 import type { TextStyle, InheritStyle } from "@/types";
 import { FontLoader } from "@/resource/font-loader";
 import { ColorRegistry } from "@/resource/color-registry";
+import { DEFAULT_CANVAS_DRAW_MODE } from "@/constants/defaults";
 
 const HOST_STYLE_ID = '__layout_canvas_style__';
 
@@ -80,7 +81,12 @@ function glyphPathOf(parsedFont: NonNullable<ReturnType<FontLoader['getParsedFon
     const glyph = parsedFont.charToGlyph(char) as unknown as {
       toPathData(options?: object): string;
     };
-    const d = glyph.toPathData({ decimalPlaces: 3, optimize: false });
+    // flipYBase: 0 필수 — toPathData 기본(flipY:true, flipYBase undefined)은
+    // 글리프 boundingBox 중심(y1+y2)을 기준으로 y를 반전해 bbox top이 0에
+    // 정렬된 경로를 만든다 (실측: bench 4mm에서 라인 전체 +9px 하강 — G9 판정
+    // 역방향 증명 완료). flipYBase 0은 y_down = -y_up(baseline 기준)으로
+    // 변환해 getPath의 y-down 좌표계와 동일해진다 — baseline 페인트 계약.
+    const d = glyph.toPathData({ decimalPlaces: 3, optimize: false, flipY: true, flipYBase: 0 });
     if (d.length > 0) {
       result = new Path2D(d);
     }
@@ -142,7 +148,7 @@ export class LayoutCanvasElement extends HTMLElement {
    *   래스터화(글리프 윤곽)가 동일 소스. 인쇄 패리티에 유리, 힌팅 없음.
    * 전환 시 `drawMode` setter가 재페인트를 예약한다.
    */
-  private _drawMode: 'fillText' | 'glyph' = 'fillText';
+  private _drawMode: 'fillText' | 'glyph' = DEFAULT_CANVAS_DRAW_MODE;
 
   constructor() {
     super();
