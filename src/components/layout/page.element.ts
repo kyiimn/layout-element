@@ -557,6 +557,14 @@ export class LayoutPageElement extends HTMLElement implements EditManagerHost {
         width: `${this._width}mm`,
       }
     );
+    // L-3 (감사 §6.4a — 화면 렌더링 이점): 페이지 내부의 레이아웃·페인트를
+    // 페이지 경계로 한정한다. 페이지는 명시 mm 크기를 가지고 자식의 변이가
+    // 이웃 페이지에 역영향을 주지 않으므로 containment의 전제가 성립한다.
+    // 이득은 JS 시간이 아니라 브라우저 페인트·컴포지트 범위 클립이므로 헤드리스
+    // 벤치마크로는 측정되지 않는다 (사용자 판정 — 실제 화면에서 체감 검증).
+    // paint 클립 범위는 루트 div이고 걸침 돌출은 페이지 안쪽이므로 걸침표
+    // 시각 계약과 충돌하지 않음은 verify-hanging-punctuation-browser 11P로 확인.
+    this._root.style.contain = 'layout paint style';
   }
 
   /**
