@@ -813,6 +813,16 @@ export class TextEditController {
   private _onFocus(): void {
     this._manager._requestFocus(this);
     this._isFocused = true;
+    // 하이브리드 DOM 복귀 렌더: 포커스 전환은 render() 게이트 입력(effectiveMode
+    // = isFocused ? 'dom' : renderMode)을 바꾸지만 렌더 자체를 예약하지 않는다.
+    // 가상화 재부착 문단은 컨트롤러가 connectedCallback에서 재생성된 뒤 canvas로
+    // 머무는데, 이 상태에서 포커스하면 canvas가 유지되어 span 트리 없이 편집이
+    // 불가하다 (실측: 재부착 → focusParagraph → hasCanvasEl 유지, 커서 미표시).
+    // canvas 모드 문단의 포커스 진입 시 DOM 복귀 렌더를 예약한다 — 구조 변경
+    // 플래그로 컬럼 재생성 경로를 강제해 stale canvas 제거를 보장한다.
+    if (this._paragraph.renderMode === 'canvas') {
+      this._paragraph.markStructureChangedAndRender();
+    }
     if (this._cursorModel.selection) {
       this._cursorEl.visible = false;
     } else {

@@ -39,6 +39,7 @@ npx tsx scripts/verify-inline-metrics.mjs # 인라인 letterSpacing/widthRatio/s
 npx tsx scripts/verify-text-decoration.mjs # 텍스트 장식 underline/breakline/outline 엔진 전 파이프라인 정합성
 npx tsx scripts/verify-pending-style.mjs # pending style 라이프사이클 (blur 재포커스 유지/커서 이동 해제/타이핑·paste 적용)
 npx tsx scripts/verify-text-click-focus.mjs # 텍스트편집모드 클릭-포커스 (미포커스 paragraph 단일 클릭 → 즉시 포커스+커서 설정)
+npx tsx scripts/verify-remount-canvas.mjs # 가상화 재부착 × canvas 모드 (재부착 문단 canvas 기본값 유지 + 포커스→DOM 복귀+blur→canvas 복귀)
 npx tsx scripts/verify-image-edit-mode.mjs # 이미지 편집 모드 전 동작 (진입/드래그/휠/ESC/Tab/selection 연동)
 npx tsx scripts/verify-engine-node.mjs  # 엔진 계층 Node.js 호환성 (DOM-free 검증)
 npx tsx scripts/verify-hanging-punctuation.mjs # 걸침표(행말/행두) 엔진 전 파이프라인 정합성
