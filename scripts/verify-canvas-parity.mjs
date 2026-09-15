@@ -557,10 +557,15 @@ check('B5. bleed 확장 — backing 폭 ≥ 표시 폭 (bleed 확장)', r.canvas
     // 1. 기준선 (normal 400)
     await setStyle({});
     const base = snapStats();
-    // 2. weight 700 — 정적 폰트(KMIBMyoungjo)라 synthetic bold(획 확장)가
-    //    잉크를 늘려야 한다
-    await setStyle({ fontWeight: 700 });
-    const bold = snapStats();
+    // 2. 6단계 weight (400/500/600/700/800/900) — 잉크가 단조 증가해야 한다
+    //    (syntheticBoldThicknessPx 선형 곡선: 두께 ∝ weight−400)
+    const weightSteps = [400, 500, 600, 700, 800, 900];
+    const weightInks = [];
+    for (const w of weightSteps) {
+      await setStyle({ fontWeight: w });
+      weightInks.push(snapStats().ink);
+    }
+    const bold = { ink: weightInks[3] };
     // 3. italic — shear가 글자 최상단을 x 방향으로 밀어 bbox 폭이 증가해야 한다
     //    (중심 이동 판정은 bold 오염에 민감 — 폭 판정이 검출력을 가진다)
     await setStyle({ fontStyle: 'italic' });
@@ -568,18 +573,32 @@ check('B5. bleed 확장 — backing 폭 ≥ 표시 폭 (bleed 확장)', r.canvas
     // 원복
     await setStyle({});
 
+    // 단조성: w500 ≤ w600 ≤ w700 ≤ w800 ≤ w900 (두께가 weight와 단조 증가)
+    let monotonic = true;
+    for (let i = 1; i < weightInks.length; i++) {
+      if (weightInks[i] < weightInks[i - 1]) monotonic = false;
+    }
+    // 900이 400보다 유의하게 커야 한다 (최대 단계 — 곡선 상단 실측)
+    const maxDelta = (weightInks[5] - weightInks[0]) / weightInks[0];
+
     return {
       baseInk: base.ink,
       boldInk: bold.ink,
+      weightInks,
+      maxDelta,
+      monotonic,
       baseWidth: base.width,
       italicWidth: italic.width,
       inkDelta: (bold.ink - base.ink) / base.ink,
     };
   });
-  check('I1. glyph 모드 weight 700 — synthetic bold 잉크 증가 (≥+5%)',
-    stylePaint.inkDelta >= 0.05,
-    `base=${stylePaint.baseInk} bold=${stylePaint.boldInk} delta=${(stylePaint.inkDelta * 100).toFixed(1)}% (미반영 시 ≈0%)`);
-  check('I2. glyph 모드 italic — shear로 잉크 bbox 폭 증가 (≥2px)',
+  check('I1. glyph 모드 weight 6단계 — 잉크 단조 증가 (500~900)',
+    stylePaint.monotonic,
+    `inks=${JSON.stringify(stylePaint.weightInks)} (역행 = 곡선 결함)`);
+  check('I2. glyph 모드 weight 900 — 최대 단계 잉크 증가 (≥+5%)',
+    stylePaint.maxDelta >= 0.05,
+    `base=${stylePaint.baseInk} w900=${stylePaint.weightInks[5]} delta=${(stylePaint.maxDelta * 100).toFixed(1)}% (미반영 시 ≈0%)`);
+  check('I3. glyph 모드 italic — shear로 잉크 bbox 폭 증가 (≥2px)',
     stylePaint.italicWidth - stylePaint.baseWidth >= 2,
     `baseW=${stylePaint.baseWidth} italicW=${stylePaint.italicWidth} (미반영 시 동일 폭)`);
 }

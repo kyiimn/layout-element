@@ -75,6 +75,26 @@ function hasWeightAxis(parsedFont: NonNullable<ReturnType<FontLoader['getParsedF
 }
 
 /**
+ * synthetic bold 획 확장 두께(px) — 6단계(400~900) 선형 곡선.
+ *
+ * 400=기본(0), 900=최대 — 700이 기존 계약(fontSizePx/30)을 유지하도록
+ * (weight−400)/300 × fontSizePx/30으로 정규화한다. 가변 폰트는 variation
+ * 경로가 굵기를 소유하므로 0(이중 확장 방지) — hasWeightAxis가 그 판정을
+ * 담당한다.
+ *
+ * @param weight - 요청 fontWeight (400~900 클램프)
+ * @param fontSizePx - 글자 크기(px)
+ * @param isVariableFont - 파싱 폰트가 wght 축을 보유하는지 (variation이 굵기 소유)
+ * @returns 획 확장 두께(px). 400 또는 가변 폰트면 0
+ */
+function syntheticBoldThicknessPx(weight: number, fontSizePx: number, isVariableFont: boolean): number {
+  if (isVariableFont) return 0;
+  const w = Math.max(400, Math.min(900, weight));
+  if (w <= 400) return 0;
+  return (fontSizePx / 30) * ((w - 400) / 300);
+}
+
+/**
  * opentype 글리프 경로를 unitsPerEm 좌표계 Path2D로 변환해 캐시한다.
  *
  * opentype `getPath(x, y, fontSize, { xScale, yScale })`의 기본 스케일은
@@ -425,19 +445,20 @@ export class LayoutCanvasElement extends HTMLElement {
       ctx.stroke(path);
     }
     ctx.fill(path);
-    // synthetic bold — 정적 폰트(단일 FontFace, variation 축 없음)는 wght 700
-    // 경로를 가질 수 없다. fillText의 ctx.font '700'이 브라우저 synthetic
-    // bold(획 확장)로 그리는 것을 fill+stroke 획 확장으로 재현한다 — 획 두께
-    // fontSize의 ~1/30 (Chromium 관행). 가변 폰트는 variation 경로가 소유하므로
-    // 이중 확장을 피한다 (stroke는 미세 확장만, outline strokeText와 구분).
-    const isSyntheticBold = fontWeight >= 600 && !hasWeightAxis(parsedFont);
-    if (isSyntheticBold) {
+    // synthetic bold — 정적 폰트(단일 FontFace, variation 축 없음)는 wght 축이
+    // 없어 경로 레벨 굵기를 가질 수 없다. fill+stroke 획 확장으로 임의 굵기를
+    // 소유한다. 6단계(400~900) 지원: 400=기본(확장 없음), 900=최대 — 두께는
+    // (weight − 400)/300 × fontSizePx/30의 선형 곡선으로 700이 기존 계약
+    // (fontSizePx/30)을 유지한다. 가변 폰트는 variation 경로가 소유하므로
+    // 이중 확장을 피한다.
+    const syntheticBoldPx = syntheticBoldThicknessPx(
+      fontWeight, fontSizePx, hasWeightAxis(parsedFont));
+    if (syntheticBoldPx > 0) {
       ctx.strokeStyle = cssColor;
       // lineWidth는 scale 좌표계(unitsPerEm)에서 해석된다 — scale 이후 stroke이므로
-      // 목표 px 두께(fontSizePx/30 × weight 비율)를 scale 역수로 환산한다.
-      // 환산 없이 px를 그대로 넣으면 scale 0.015로 실질 소멸한다 (실측: 잉크 0 증가).
-      const targetPx = fontSizePx / 30 * (fontWeight / 700);
-      ctx.lineWidth = targetPx / ((fontSizePx / unitsPerEm) * wr * 0.88);
+      // 목표 px 두께를 scale 역수로 환산한다. 환산 없이 px를 그대로 넣으면
+      // scale 0.015로 실질 소멸한다 (실측: 잉크 0 증가).
+      ctx.lineWidth = syntheticBoldPx / ((fontSizePx / unitsPerEm) * wr * 0.88);
       ctx.lineJoin = 'round';
       ctx.stroke(path);
     }
@@ -492,11 +513,8 @@ export class LayoutCanvasElement extends HTMLElement {
     // 않는 케이스가 있어 fillText의 ctx.font 'italic'에 의존하지 않고 임의
     // shear로 소유한다 (glyph 경로와 동일 변환).
     const isItalic = fontStyle === 'italic';
-    // synthetic bold — 등록 FontFace가 단일 weight라 브라우저 synthetic이
-    // 발동하지 않는 케이스가 있어 fill+stroke 획 확장으로 소유한다.
-    const isSyntheticBold = fontWeight >= 600;
     if (isItalic) {
-      ctx.transform(1, 0, -Math.tan(1 * Math.PI / 180), 1, 0, 0);
+      ctx.transform(1, 0, -Math.tan(14 * Math.PI / 180), 1, 0, 0);
     }
     if (ol > 0) {
       const outlineColorName = inline?.outlineColor ?? inline?.color ?? ts.color ?? inherit.color ?? colorName;
@@ -509,11 +527,12 @@ export class LayoutCanvasElement extends HTMLElement {
     ctx.translate(xPx, baselinePx);
     ctx.scale(wr * 0.88, 1);
     ctx.fillText(cmd.char, 0, 0);
-    if (isSyntheticBold) {
-      // strokeText는 translate 전 좌표 — fillText와 동일 위치에 획 확장한다.
-      ctx.translate(xPx, baselinePx);
+    // synthetic bold — glyph 경로와 동일 6단계 곡선(syntheticBoldThicknessPx).
+    // fillText 좌표계는 이미 px라 역수 환산이 불필요하다.
+    const boldPx = syntheticBoldThicknessPx(fontWeight, fontSizePx, false);
+    if (boldPx > 0) {
       ctx.strokeStyle = cssColor;
-      ctx.lineWidth = fontSizePx / 30 * (fontWeight / 700);
+      ctx.lineWidth = boldPx;
       ctx.lineJoin = 'round';
       ctx.strokeText(cmd.char, 0, 0);
     }
