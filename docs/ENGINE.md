@@ -939,6 +939,12 @@ npm run build           # IIFE + React ESM + Engine ESM 빌드
 - **`opentype.js`는 external**: 엔진 번들에서 제외되어 사용자가 peer dependency로 설치.
   번들 크기 393KB → 74KB (81% 감소), 브라우저 의존 API 5건 → 0건.
 - **`pngjs`, `module`도 external**: Node.js 환경에서만 사용.
+- **`getOpenType()` 지연 로드 공유**: `font-loader-engine.ts`가 export하는 지연 로더를
+  `resource/font-loader.ts`(브라우저)도 재사용한다. opentype.js 정적 import는 금지 —
+  정적+동적 이중 포함이 생겨 번들러 경고(INEFFECTIVE_DYNAMIC_IMPORT)가 재발하고
+  첫 파싱까지 로드 지연 이득이 소멸한다.
+- engine 빌드의 `rolldownOptions.output.codeSplitting: false`: 단일 파일 출력
+  (`inlineDynamicImports` deprecated 대체 — Vite 8).
 
 ### Node.js 요구사항
 

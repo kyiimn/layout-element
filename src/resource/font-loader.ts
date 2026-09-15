@@ -1,5 +1,5 @@
 import { Font } from "@/types";
-import opentype from "opentype.js";
+import { getOpenType, type OpenTypeModule } from "@/engine/font-loader-engine";
 import type { Font as ParsedFont } from "opentype.js";
 
 /**
@@ -162,6 +162,19 @@ export class FontLoader {
   private async _parseFonts(fonts: Font[]): Promise<void> {
     this._parsed = true;
     this._parsedFonts.clear();
+
+    // opentype.js는 engine의 지연 로드 경로(getOpenType)를 재사용한다 — 정적
+    // import로 되돌리면 정적+동적 이중 포함이 생겨 번들러 경고(INEFFECTIVE_DYNAMIC_IMPORT)가
+    // 재발하고 지연 로드 이득이 소멸한다. 파싱 대상이 없으면 모듈 로드 자체를 생략한다.
+    const needsParse = fonts.some(f => f.base64Data || f.ttfFilename);
+    if (!needsParse) return;
+    let opentype: OpenTypeModule;
+    try {
+      opentype = await getOpenType();
+    } catch (e) {
+      console.warn('opentype.js load failed — font metrics unavailable', e);
+      return;
+    }
 
     for (const f of fonts) {
       if (!f.base64Data && !f.ttfFilename) continue;

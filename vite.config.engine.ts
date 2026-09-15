@@ -17,7 +17,7 @@ export default defineConfig({
     rollupOptions: {
       external: ['pngjs', 'module', 'opentype.js'],
       output: {
-        inlineDynamicImports: true,
+        codeSplitting: false,
       },
     },
     outDir: 'dist',

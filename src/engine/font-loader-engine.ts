@@ -17,16 +17,20 @@ import type { FontLoaderEngine, ParsedFont } from "./types";
  * opentype.js 모듈의 최소 인터페이스.
  * `opentype.parse(buffer)` → `Font` 객체.
  */
-interface OpenTypeModule {
+export interface OpenTypeModule {
   parse(buffer: ArrayBuffer | Uint8Array): ParsedFont;
 }
 
 /**
  * opentype.js 모듈 로딩 (지연 로드).
  * 브라우저와 Node 모두에서 동작.
+ *
+ * `resource/font-loader.ts`(브라우저 FontLoader)도 이 경로를 재사용한다 —
+ * 정적 import가 병존하면 번들러가 INEFFECTIVE_DYNAMIC_IMPORT 경고를 내고
+ * 동적 import의 청크 분리 이득이 소멸한다 (정리 커밋: react 번들 경고 해소).
  */
 let _opentype: OpenTypeModule | null = null;
-async function getOpenType(): Promise<OpenTypeModule> {
+export async function getOpenType(): Promise<OpenTypeModule> {
   if (_opentype) return _opentype;
 
   // ESM/tsx 환경에서 import("opentype.js")가 실패할 수 있으므로
