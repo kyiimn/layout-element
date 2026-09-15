@@ -58,6 +58,23 @@ function fontIdOf(parsedFont: object): number {
 }
 
 /**
+ * 가변 폰트(wght variation 축) 여부 — synthetic bold 판정에 소비한다.
+ * 축이 있으면 wght 경로가 굵기를 소유하고, 없으면 정적 폰트로 synthetic
+ * bold(fill+stroke 획 확장)가 그 책임을 이어받는다.
+ *
+ * @param parsedFont - 파싱된 폰트
+ * @returns wght 축 보유 여부
+ */
+function hasWeightAxis(parsedFont: NonNullable<ReturnType<FontLoader['getParsedFont']>>): boolean {
+  try {
+    const fvar = (parsedFont as unknown as { tables?: { fvar?: { axes?: { tag?: string }[] } } }).tables?.fvar;
+    return !!fvar?.axes?.some(a => a.tag === 'wght');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * opentype 글리프 경로를 unitsPerEm 좌표계 Path2D로 변환해 캐시한다.
  *
  * opentype `getPath(x, y, fontSize, { xScale, yScale })`의 기본 스케일은
@@ -67,26 +84,41 @@ function fontIdOf(parsedFont: object): number {
  * 페인트에 그대로 쓸 수 있다. 폰트 크기 무관 재사용 — 페인트가
  * `ctx.scale(fontSizePx / unitsPerEm)`으로 변환한다.
  *
+ * **weight 정합**: `toPathData(options, font)`는 `font` 인자가 있어야
+ * `font.variation.getTransform(glyph, options.variation)`으로 가변 폰트
+ * 변형(wght)을 적용한다 — font 미전달 시 기본 weight(400) 경로로 캐시되어
+ * 굵게 주입이 시각적으로 무시된다. 캐시 키에 weight를 포함해 글리프×weight
+ * 조합별로 경로를 분리한다.
+ *
  * @param parsedFont - 파싱된 폰트
  * @param char - 글자
+ * @param weight - 요청 fontWeight (가변 폰트의 wght 축 값 — 정적 폰트는 무시)
  * @returns 캐시된 Path2D. 경로 없는 글리프(빈 명령)면 null
  */
-function glyphPathOf(parsedFont: NonNullable<ReturnType<FontLoader['getParsedFont']>>, char: string): Path2D | null {
-  const key = `${fontIdOf(parsedFont)}|${char}`;
+function glyphPathOf(
+  parsedFont: NonNullable<ReturnType<FontLoader['getParsedFont']>>,
+  char: string,
+  weight: number,
+): Path2D | null {
+  const key = `${fontIdOf(parsedFont)}|${char}|${weight}`;
   const cached = glyphPathCache.get(key);
   if (cached !== undefined) return cached;
 
   let result: Path2D | null = null;
   try {
     const glyph = parsedFont.charToGlyph(char) as unknown as {
-      toPathData(options?: object): string;
+      toPathData(options?: object, font?: unknown): string;
     };
     // flipYBase: 0 필수 — toPathData 기본(flipY:true, flipYBase undefined)은
     // 글리프 boundingBox 중심(y1+y2)을 기준으로 y를 반전해 bbox top이 0에
     // 정렬된 경로를 만든다 (실측: bench 4mm에서 라인 전체 +9px 하강 — G9 판정
     // 역방향 증명 완료). flipYBase 0은 y_down = -y_up(baseline 기준)으로
     // 변환해 getPath의 y-down 좌표계와 동일해진다 — baseline 페인트 계약.
-    const d = glyph.toPathData({ decimalPlaces: 3, optimize: false, flipY: true, flipYBase: 0 });
+    // font 인자 + variation: 가변 폰트의 wght 축을 페인트 시점에 해석한다.
+    const d = glyph.toPathData({
+      decimalPlaces: 3, optimize: false, flipY: true, flipYBase: 0,
+      variation: { wght: weight },
+    }, parsedFont);
     if (d.length > 0) {
       result = new Path2D(d);
     }
@@ -353,11 +385,13 @@ export class LayoutCanvasElement extends HTMLElement {
 
     const wr = inline?.widthRatio ?? engine.widthRatio;
     const ol = (inline?.outline ?? ts.outline ?? inherit.outline ?? 0) * fontSizeMm;
+    const fontWeight = inline?.fontWeight ?? ts.fontWeight ?? inherit.fontWeight ?? 400;
+    const fontStyle = inline?.fontStyle ?? ts.fontStyle ?? inherit.fontStyle ?? 'normal';
 
     const path = parsedFont
       ? (isUnmappedChar(parsedFont, cmd.char)
-        ? glyphPathOf(parsedFont, '가')
-        : glyphPathOf(parsedFont, cmd.char))
+        ? glyphPathOf(parsedFont, '가', fontWeight)
+        : glyphPathOf(parsedFont, cmd.char, fontWeight))
       : null;
 
     if (!path || !parsedFont) {
@@ -373,6 +407,15 @@ export class LayoutCanvasElement extends HTMLElement {
     ctx.save();
     ctx.fillStyle = cssColor;
     ctx.translate(xPx, baselinePx);
+    // italic (synthetic oblique): baseline 고정 수평 shear — 상단이 오른쪽으로
+    // 기움. opentype 경로에는 font-style 개념이 없어 브라우저의 synthetic
+    // italic(fillText의 ctx.font 'italic' prefix)을 변환으로 재현한다.
+    // Chrome synthetic italic 실측 관행 14도 — 12도는 4mm 글자에서 폭 증가가
+    // AA 경계에 흡수되어 시각 구분이 어렵다.
+    if (fontStyle === 'italic') {
+      const skew = Math.tan(14 * Math.PI / 180);
+      ctx.transform(1, 0, -skew, 1, 0, 0);
+    }
     // 단일 scale 조합: 글자 크기(unitsPerEm→px) × 장평(0.88 계수 — DOM과 동일).
     ctx.scale((fontSizePx / unitsPerEm) * wr * 0.88, fontSizePx / unitsPerEm);
     if (ol > 0) {
@@ -382,6 +425,22 @@ export class LayoutCanvasElement extends HTMLElement {
       ctx.stroke(path);
     }
     ctx.fill(path);
+    // synthetic bold — 정적 폰트(단일 FontFace, variation 축 없음)는 wght 700
+    // 경로를 가질 수 없다. fillText의 ctx.font '700'이 브라우저 synthetic
+    // bold(획 확장)로 그리는 것을 fill+stroke 획 확장으로 재현한다 — 획 두께
+    // fontSize의 ~1/30 (Chromium 관행). 가변 폰트는 variation 경로가 소유하므로
+    // 이중 확장을 피한다 (stroke는 미세 확장만, outline strokeText와 구분).
+    const isSyntheticBold = fontWeight >= 600 && !hasWeightAxis(parsedFont);
+    if (isSyntheticBold) {
+      ctx.strokeStyle = cssColor;
+      // lineWidth는 scale 좌표계(unitsPerEm)에서 해석된다 — scale 이후 stroke이므로
+      // 목표 px 두께(fontSizePx/30 × weight 비율)를 scale 역수로 환산한다.
+      // 환산 없이 px를 그대로 넣으면 scale 0.015로 실질 소멸한다 (실측: 잉크 0 증가).
+      const targetPx = fontSizePx / 30 * (fontWeight / 700);
+      ctx.lineWidth = targetPx / ((fontSizePx / unitsPerEm) * wr * 0.88);
+      ctx.lineJoin = 'round';
+      ctx.stroke(path);
+    }
     ctx.restore();
   }
 
@@ -429,6 +488,16 @@ export class LayoutCanvasElement extends HTMLElement {
     ctx.save();
     ctx.font = `${fontStyle} ${fontWeight} ${fontSizePx}px ${family}`;
     ctx.fillStyle = cssColor;
+    // synthetic italic — 정적 단일 FontFace는 브라우저가 synthetic을 적용하지
+    // 않는 케이스가 있어 fillText의 ctx.font 'italic'에 의존하지 않고 임의
+    // shear로 소유한다 (glyph 경로와 동일 변환).
+    const isItalic = fontStyle === 'italic';
+    // synthetic bold — 등록 FontFace가 단일 weight라 브라우저 synthetic이
+    // 발동하지 않는 케이스가 있어 fill+stroke 획 확장으로 소유한다.
+    const isSyntheticBold = fontWeight >= 600;
+    if (isItalic) {
+      ctx.transform(1, 0, -Math.tan(1 * Math.PI / 180), 1, 0, 0);
+    }
     if (ol > 0) {
       const outlineColorName = inline?.outlineColor ?? inline?.color ?? ts.color ?? inherit.color ?? colorName;
       ctx.strokeStyle = outlineColorName !== '' ? colorRegistry.getCSSColor(outlineColorName) : cssColor;
@@ -440,6 +509,14 @@ export class LayoutCanvasElement extends HTMLElement {
     ctx.translate(xPx, baselinePx);
     ctx.scale(wr * 0.88, 1);
     ctx.fillText(cmd.char, 0, 0);
+    if (isSyntheticBold) {
+      // strokeText는 translate 전 좌표 — fillText와 동일 위치에 획 확장한다.
+      ctx.translate(xPx, baselinePx);
+      ctx.strokeStyle = cssColor;
+      ctx.lineWidth = fontSizePx / 30 * (fontWeight / 700);
+      ctx.lineJoin = 'round';
+      ctx.strokeText(cmd.char, 0, 0);
+    }
     ctx.restore();
   }
 

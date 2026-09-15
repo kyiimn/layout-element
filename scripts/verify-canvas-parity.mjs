@@ -44,22 +44,22 @@ async function waitForServer(url) {
 
 let BASE = null;
 let server = null;
-for (const cand of ['http://localhost:5175', 'http://localhost:5173', 'http://localhost:5174']) {
-  if (await probe(cand)) { BASE = cand; break; }
-}
-if (!BASE) {
-  server = spawn('npx', ['vite', 'dev', '--port', String(BASE_PORT), '--strictPort'], {
-    cwd: pkgRoot, stdio: 'pipe', shell: true,
-  });
-  const spawnedUrl = `http://localhost:${BASE_PORT}`;
-  if (await waitForServer(spawnedUrl)) BASE = spawnedUrl;
-  else { server.kill(); throw new Error(`vite dev server not ready on ${spawnedUrl}`); }
-}
+// 자체 스폰 강제 — 기존 5175/5173 후보 재사용 금지. layout-ui(5173)의 Vite가
+// layout-element 예제를 서빙하는 상황에서 I 판정이 타 트리 소스로 실행되는
+// 포트 오인(README 사고 패턴)이 실측됐다 — 이 스크립트는 src 수정을 즉시
+// 반영해야 하므로 항상 자체 포트로 스폰한다.
+server = spawn('npx', ['vite', 'dev', '--port', String(BASE_PORT), '--strictPort'], {
+  cwd: pkgRoot, stdio: 'pipe', shell: true,
+});
+const spawnedUrl = `http://localhost:${BASE_PORT}`;
+if (await waitForServer(spawnedUrl)) BASE = spawnedUrl;
+else { server.kill(); throw new Error(`vite dev server not ready on ${spawnedUrl}`); }
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
 page.on('pageerror', err => console.error('[pageerror]', err.message.slice(0, 300)));
 await page.goto(`${BASE}/examples/bench.html`, { waitUntil: 'networkidle' });
+console.log(`      [server] ${BASE} (자체 스폰 — 타 트리 오염 차단)`);
 await page.waitForFunction(() => document.title === 'BENCH_READY', { timeout: 30_000 });
 
 let passed = 0;
@@ -504,6 +504,84 @@ check('B5. bleed 확장 — backing 폭 ≥ 표시 폭 (bleed 확장)', r.canvas
   check('H1. paragraph.drawMode가 canvas 복귀 후에도 적용 (값 보존)',
     paraLevel.canvasDrawMode === 'glyph' && paraLevel.paraDrawMode === 'glyph',
     `canvas=${paraLevel.canvasDrawMode} para=${paraLevel.paraDrawMode}`);
+}
+
+// ── I. glyph 모드 weight·italic 반영 — synthetic 변환 계약 ──
+{
+  const stylePaint = await page.evaluate(async () => {
+    const raf2 = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const paraBox = window.bench.getParaBox();
+    const p = paraBox.querySelector('x-layout-paragraph');
+    const out = {};
+    p.editableText = false;
+    // H 섹션 원복이 남긴 drawMode='fillText'를 정화 — paragraph 레벨에서 설정해야
+    // setStyle(data 세터)이 재렌더할 때마다 _renderCanvas가 위임하는 값이 glyph다
+    // (canvas 요소에만 설정하면 다음 data 세터 때 _drawMode로 덮어써진다).
+    p.drawMode = 'glyph';
+    p.renderMode = 'canvas';
+    p.flushRender();
+    await raf2();
+    await raf2();
+    const canvasEl = p.querySelector('x-layout-canvas');
+    const canvas = canvasEl.shadowRoot.querySelector('canvas');
+    canvasEl.drawMode = 'glyph';
+    await raf2();
+    await raf2();
+
+    const snapStats = () => {
+      const ctx = canvas.getContext('2d');
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let ink = 0, sumX = 0, minX = Infinity, maxX = -Infinity;
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+          const a = data[(y * canvas.width + x) * 4 + 3];
+          if (a > 0) { ink++; sumX += x; if (x < minX) minX = x; if (x > maxX) maxX = x; }
+        }
+      }
+      return { ink, centerX: ink > 0 ? sumX / ink : 0, width: minX <= maxX ? maxX - minX : 0 };
+    };
+    const setStyle = async (style) => {
+      const d = p.data;
+      d.content = '가나다라마바사아자차'; // cmap 등록 글자만 — 폴백 fillText 경로의 synthetic bold 오염 방지
+      // fontSize 8mm — shear 이동은 fontSize 비례라 4mm에서는 AA 경계에 흡수되어
+      // 판정 검출력이 소멸한다 (실측: 4mm 폭 증가 0px, 8mm 기대 ~3.5px).
+      d.textStyle = { fontSize: 8, ...style };
+      p.data = d;
+      p.flushRender();
+      await raf2();
+      await raf2();
+      await new Promise(r => setTimeout(r, 100));
+    };
+
+    canvasEl.drawMode = 'glyph';
+    // 1. 기준선 (normal 400)
+    await setStyle({});
+    const base = snapStats();
+    // 2. weight 700 — 정적 폰트(KMIBMyoungjo)라 synthetic bold(획 확장)가
+    //    잉크를 늘려야 한다
+    await setStyle({ fontWeight: 700 });
+    const bold = snapStats();
+    // 3. italic — shear가 글자 최상단을 x 방향으로 밀어 bbox 폭이 증가해야 한다
+    //    (중심 이동 판정은 bold 오염에 민감 — 폭 판정이 검출력을 가진다)
+    await setStyle({ fontStyle: 'italic' });
+    const italic = snapStats();
+    // 원복
+    await setStyle({});
+
+    return {
+      baseInk: base.ink,
+      boldInk: bold.ink,
+      baseWidth: base.width,
+      italicWidth: italic.width,
+      inkDelta: (bold.ink - base.ink) / base.ink,
+    };
+  });
+  check('I1. glyph 모드 weight 700 — synthetic bold 잉크 증가 (≥+5%)',
+    stylePaint.inkDelta >= 0.05,
+    `base=${stylePaint.baseInk} bold=${stylePaint.boldInk} delta=${(stylePaint.inkDelta * 100).toFixed(1)}% (미반영 시 ≈0%)`);
+  check('I2. glyph 모드 italic — shear로 잉크 bbox 폭 증가 (≥2px)',
+    stylePaint.italicWidth - stylePaint.baseWidth >= 2,
+    `baseW=${stylePaint.baseWidth} italicW=${stylePaint.italicWidth} (미반영 시 동일 폭)`);
 }
 
 await browser.close();
