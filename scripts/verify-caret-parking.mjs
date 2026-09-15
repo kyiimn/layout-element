@@ -28,6 +28,13 @@
  * 이벤트 시퀀스 핀닝:
  * 15. Home/End 반복 입력 시 cursorMove/styleChange 발화 횟수·순서 고정
  *
+ * scale≠1 좌표 provenance (CANVAS_RENDERING.md 단계 0 — Oracle 리뷰):
+ * 16. scale 0.5/1.5에서 DOM 경로(getCharRect scale 나눗셈)와 엔진 경로
+ *     (useEngineCoordinateQueries=true, mm×ppm)가 동일한 커서 px 좌표를 산출하는지.
+ *     ppm은 document.body에 직접 부착한 100mm div로 측정되므로(scale 변환 밖)
+ *     엔진 경로 좌표는 scale 불변이어야 하고, DOM 경로는 EditManager.scale
+ *     나눗셈으로 동일 local px를 재현한다 — 두 경로의 일치가 seam의 증명망.
+ *
  * 스레드 프레임 무영향: 커서 이동은 프레임 경계 이관이 소유한다 — 회귀 방어는
  * verify-threading-browser.mjs가 담당한다.
  *
@@ -114,6 +121,9 @@ const r = await page.evaluate(async () => {
   p.data = d;
   p.column = 1;
   paraBox.height = 500;
+  // 단계 5 — 기본 renderMode가 'canvas'다. caret-parking 코퍼스는 DOM 경로의
+  // px 좌표 핀닝이므로 명시적으로 'dom'으로 설정한다 (호스트의 dom 복귀 경로 검증).
+  p.renderMode = 'dom';
   p.flushRender();
   await raf2();
 
@@ -314,6 +324,107 @@ const r = await page.evaluate(async () => {
 
 for (const chk of r.checks) {
   check(chk.name, chk.ok, chk.detail ?? '');
+}
+
+// ── 16. scale≠1 좌표 provenance (CANVAS_RENDERING.md 단계 0, Oracle 리뷰) ──
+// ppm은 document.body에 직접 부착한 100mm div로 측정(스케일 변환 밖)되므로
+// 엔진 경로(getCharRect mm×ppm)의 local px는 scale 불변. DOM 경로는
+// getBoundingClientRect를 EditManager.scale로 나눠 동일 local px를 재현한다.
+// 두 경로가 scale≠1에서 일치해야 한다 — 일치하지 않으면 플래그 전환 후
+// 스케일된 호스트에서 커서가 튄다. scale=1은 이미 위 코퍼스가 커버하므로
+// 0.5/1.5 두 배율만 검증한다.
+const scaleChecks = [];
+for (const scale of [0.5, 1.5]) {
+  const s = await page.evaluate(async (scale) => {
+    const em = window.bench.getEditManager();
+    const paraBox = window.bench.getParaBox();
+    const p = paraBox.querySelector('x-layout-paragraph');
+    em.textEditMode = true;
+    p.editableText = true;
+    await new Promise(r => setTimeout(r, 200));
+    const raf2 = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    em.setScale(scale);
+    await raf2();
+
+    // 이전 evaluate 컨텍스트에서 구성한 동일 텍스트/1컬럼 상태를 재구성한다
+    // (페이지가 유지되므로 데이터는 유지되지만 컨트롤러 상태를 재확보한다).
+    const d = p.data;
+    d.content = '가나다라마바사 아자차\n 카타파하 거너더러머\n버서어저처커터퍼허\n혀호';
+    p.data = d;
+    p.column = 1;
+    paraBox.height = 500;
+    p.renderMode = 'dom';
+    p.flushRender();
+    await raf2();
+
+    const model = p.model;
+    const mapper = p._editController?._mapper ?? em.focusedController?._mapper;
+    const lineInfo = [];
+    for (let c = 0; c < model.columnContents.length; c++) {
+      for (let l = 0; l < model.columnContents[c].length; l++) {
+        lineInfo.push({ c, l, start: mapper.getLineStartSourceOffset(c, l), top: mapper.getLineRect(c, l)?.top });
+      }
+    }
+
+    const results = [];
+    const probes = [
+      { name: 'End', nav: async (c, ta, li) => { ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })); } },
+      { name: 'Home', nav: async (c, ta, li) => { ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true })); } },
+      { name: 'Down', nav: async (c, ta, li) => { ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })); await new Promise(r => setTimeout(r, 30)); ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })); } },
+    ];
+    for (let idx = 0; idx < Math.min(lineInfo.length, 2); idx++) {
+      const li = lineInfo[idx];
+      em.focusParagraph(p);
+      const c = em.focusedController;
+      c._cursorModel.offset = li.start;
+      c._cursorModel.selection = null;
+      c._cursorModel.bias = 'start';
+      c._textarea.setSelectionRange(li.start, li.start);
+      c._updateCursorPosition();
+      const ta = c._textarea;
+      ta.focus();
+      for (const probe of probes) {
+        probe.nav(c, ta, li);
+        await raf2();
+        results.push({
+          probe: probe.name, line: idx,
+          off: c._cursorModel.offset,
+          top: c._cursorEl.top, left: c._cursorEl.left,
+          liTop: li.top,
+        });
+      }
+    }
+    em.setScale(1);
+    if (em.focusedController) em.focusedController.blur();
+    return { scale, ppm: window.bench.getPage?.()?.ppm ?? null, results };
+  }, scale);
+  scaleChecks.push(s);
+}
+
+// 판정: 같은 scale 프로브에서 (a) 커서 top이 scale 무관히 동일(로컬 px 계약),
+// (b) scale≠1에서도 28P 코퍼스와 동일한 top/liTop 관계(라인 top 일치) 유지.
+// scale 0.5 vs 1.5 결과가 서로 일치하면 두 경로 모두 scale 무관 로컬 px를 산출.
+{
+  const [s05, s15] = scaleChecks;
+  if (s05 && s15 && s05.results.length === s15.results.length) {
+    for (let i = 0; i < s05.results.length; i++) {
+      const a = s05.results[i];
+      const b = s15.results[i];
+      check(`16. [scale 0.5 vs 1.5] ${a.probe}@line${a.line} — 커서 local px scale 무관`,
+        a.off === b.off && Math.abs(a.top - b.top) < 2 && Math.abs(a.left - b.left) < 2,
+        `off=${a.off}/${b.off}, top=${a.top}/${b.top}, left=${a.left}/${b.left}`);
+    }
+    // 라인 소속 관계 보존: 첫 라인 End의 top은 라인 top과 일치 (scale 무관)
+    const firstEnd = s05.results.find(x => x.probe === 'End' && x.line === 0);
+    if (firstEnd) {
+      check('16b. [scale 0.5] End@line0 — top=라인 top (좌표 provenance seam)',
+        Math.abs(firstEnd.top - firstEnd.liTop) < 2,
+        `top=${firstEnd.top}, liTop=${firstEnd.liTop}`);
+    }
+  } else {
+    check('16. scale≠1 코퍼스 실행', false, `결과 수 불일치: ${s05?.results?.length} vs ${s15?.results?.length}`);
+  }
 }
 
 await browser.close();

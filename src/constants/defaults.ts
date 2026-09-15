@@ -126,6 +126,16 @@ export const Z_INDEX_ROLE_AD = 91000;
 /** 역할 고정 z-index: 면머리 (header) */
 export const Z_INDEX_ROLE_HEADER = 91001;
 
+/**
+ * 문단 렌더 모드 기본값 (CANVAS_RENDERING.md 단계 5 — canvas 기본값화).
+ *
+ * `'canvas'`: 비-포커스 문단은 드로잉 명령 1장으로 렌더 — 글자 span 수와
+ * 무관하게 페인트 비용이 정산된다. 하이브리드 계약(§6)에 따라 편집 포커스
+ * 문단은 자동으로 DOM 복귀하므로 편집 UX는 DOM 경로를 유지한다.
+ * 호스트가 명시적으로 `renderMode = 'dom'`을 설정하면 기존 동작으로 되돌린다.
+ */
+export const DEFAULT_PARAGRAPH_RENDER_MODE: 'dom' | 'canvas' = 'canvas';
+
 /** 테이블 보더 레이어 z-index. 셀 배경 위, 셀 컨텐츠(box) 아래. */
 export const Z_INDEX_TABLE_BORDER = 99990;
 

@@ -128,6 +128,10 @@ const r = await page.evaluate(async () => {
 
   const em = page.editManager;
   em.textEditMode = true;
+  // 단계 5 canvas 기본값화 — 이 검증기는 DOM 렌더를 전제하므로 'dom' 고정.
+  for (const p of page.querySelectorAll('x-layout-paragraph')) p.renderMode = 'dom';
+  await page.render();
+  await sleep(300);
   const byId = (id) => page.querySelector('x-layout-box') && [...page.querySelectorAll('x-layout-box')].find(b => b.id === id);
   const domText = (pageBox) => {
     const p = pageBox.querySelector('x-layout-paragraph');
@@ -269,6 +273,13 @@ const r = await page.evaluate(async () => {
   };
   await docH.render();
   await sleep(400);
+  // 단계 5 canvas 기본값화 — H 검증은 DOM 렌더를 전제하므로 'dom' 고정 +
+  // flushRender(scheduleRender는 마이크로태스크 지연이 있어 sleep으로 대기).
+  for (const p of docH.querySelectorAll('x-layout-paragraph')) {
+    p.renderMode = 'dom';
+    p.flushRender();
+  }
+  await sleep(400);
   const hovPara = () => docH.querySelector('x-layout-box#hov-text, #hov-text') && [...docH.querySelectorAll('x-layout-box')].find(b => b.id === 'hov-text').querySelector('x-layout-paragraph');
   const hovDomText = () => {
     const p = hovPara();
@@ -332,6 +343,13 @@ const r = await page.evaluate(async () => {
     ],
   };
   await docT.render();
+  await sleep(400);
+  // 단계 5 canvas 기본값화 — K 검증은 DOM 렌더를 전제하므로 'dom' 고정 +
+  // flushRender(scheduleRender는 마이크로태스크 지연이 있어 sleep으로 대기).
+  for (const p of docT.querySelectorAll('x-layout-paragraph')) {
+    p.renderMode = 'dom';
+    p.flushRender();
+  }
   await sleep(400);
   const tbox = (id) => [...docT.querySelectorAll('x-layout-box')].find(b => b.id === id);
   const tpara = (boxId) => tbox(boxId).querySelector('x-layout-paragraph');
@@ -523,6 +541,9 @@ const r = await page.evaluate(async () => {
   };
   await docJ.render();
   await sleep(500);
+  // 단계 5 canvas 기본값화 — J 성능 실측은 DOM span 수를 전제하므로 'dom' 고정.
+  for (const p of docJ.querySelectorAll('x-layout-paragraph')) p.renderMode = 'dom';
+  await docJ.render();
   const tFull1 = performance.now();
   const countSpans = () => docJ.querySelectorAll('x-layout-box').length === 0 ? 0 :
     [...docJ.querySelectorAll('x-layout-paragraph')].reduce((n, p) =>

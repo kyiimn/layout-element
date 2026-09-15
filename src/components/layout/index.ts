@@ -1,4 +1,5 @@
 export * from "./box.element";
+export * from "./canvas.element";
 export * from "./column.element";
 export * from "./document.element";
 export * from "./page.element";

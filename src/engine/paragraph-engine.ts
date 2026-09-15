@@ -69,6 +69,7 @@ import { _LRU } from "./lru-engine";
 import { inlineStyleEqual, countTrailingSpaces, computeStripRange, firstNonEmpty, styleShallowEqual } from "./paragraph-text-utils";
 import { applyHangingPass, hangingConfig, computeHangExtents } from "./paragraph-hanging";
 import { buildParagraphPrintPostData, sliceInlineContent } from "./paragraph-print";
+import { buildParagraphDrawList, type ParagraphDrawList } from "./paragraph-canvas";
 import { _TEXT_DIGEST_BY_REF, _PLAIN_TEXT_BY_REF, _PARSED_CONTENTS_BY_REF, textContentSegs, computePrefixHashKey, overlayKeysFor } from "./paragraph-hash";
 import { computeFreeRegions, detectOverlapWithCache, overlayHashKey, FreeRegion } from "./paragraph-overlap";
 
@@ -407,6 +408,39 @@ export class ParagraphEngine {
 
   /** `_layoutCache` 존재 여부 (외부 스킵 판정용). */
   get hasLayoutCache(): boolean { return this._layoutCache !== null; }
+
+  /**
+   * canvas 드로잉 명령 목록 캐시 — runStyleRef 설계(§3.2)라 레이아웃 해시만으로
+   * 히트 판정해도 stale 페인트가 없다 (폰트/색상은 페인트 시점 해석). 무효화
+   * 지점은 `_layoutCache`와 동일하다.
+   */
+  private _drawListCache: {
+    hash: string;
+    drawList: ParagraphDrawList;
+  } | null = null;
+
+  /**
+   * 이 문단의 canvas 드로잉 명령 목록 (mm 단위 단일 소스).
+   *
+   * `_computeLayoutInputHash` 게이트 캐시 — 해시 불변이면 O(1) 재사용, 변화 시
+   * `buildParagraphDrawList`로 재구성한다 (printPostData와 동일 워크).
+   * 명령은 runStyleRef만 보유하므로 굵기/색상 주입(해시 무영향)에서도 페인트가
+   * 항상 현재 스타일을 반영한다.
+   *
+   * @returns 드로잉 명령 목록
+   * @throws DirtyPendingError 개별 setter 미커밋 변경이 있으면
+   */
+  get drawList(): ParagraphDrawList {
+    if (this._dirty) throw createDirtyError('ParagraphEngine');
+    const hash = this._computeLayoutInputHash();
+    const cached = this._drawListCache;
+    if (cached !== null && cached.hash === hash) {
+      return cached.drawList;
+    }
+    const drawList = buildParagraphDrawList(this);
+    this._drawListCache = { hash, drawList };
+    return drawList;
+  }
 
   /**
    * 개별 setter(textContent 등)로 인한 미커밋 변경 존재 여부.
@@ -2423,6 +2457,44 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   }
 
   /**
+   * 글자의 baseline y 오프셋 (라인 top 기준, mm) — canvas fillText 소비용.
+   *
+   * CANVAS_RENDERING.md §4.1 계약: paint가 DOM rect bottom에서 역산하는 것은
+   * 엔진 게터 밖의 새 좌표 공식이므로 금지 — baseline은 엔진이 opentype
+   * ascender(`getParsedFont().ascender / unitsPerEm`)에서 산출해 제공한다.
+   * 하단 앵커 렌더와 동일한 글자 상자(top = lineTop + verticalOffset, 높이 =
+   * charFontSize)에서 baseline은 상자 상단에서 ascent 비율만큼 내려온 위치다.
+   * 폰트 파싱이 불가하면 CSS 표준 ascent 근사(0.8)로 폴백한다.
+   *
+   * @param inlineStyle - 인라인 스타일 오버라이드 (fontFamily 소비)
+   * @param charFontSize - 글자 폰트 크기 (mm)
+   * @returns 라인 top 기준 baseline 오프셋 (mm, > 0)
+   */
+  public getCharAscentMm(inlineStyle: TextInlineStyle | undefined, charFontSize: number): number {
+    const fontName = inlineStyle?.fontFamily ?? "";
+    const cacheKey = `ascent|${fontName}`;
+    if (this._ascentRatioCacheKey !== cacheKey) {
+      let ratio = 0.8;
+      try {
+        const parsed = this._resources.fontLoader.getParsedFont(fontName || undefined);
+        if (parsed && parsed.unitsPerEm > 0 && parsed.ascender !== undefined) {
+          ratio = parsed.ascender / parsed.unitsPerEm;
+        }
+      } catch {
+        // 폰트 메트릭 조회 실패 시 CSS 표준 ascent 근사(0.8)로 그린다 —
+        // fillText baseline이 반드시 필요한 paint 경로 전용 게터다.
+      }
+      this._ascentRatioCacheKey = cacheKey;
+      this._ascentRatioCache = ratio;
+    }
+    return this._ascentRatioCache * charFontSize;
+  }
+
+  /** ascent 비율 캐시 — fontFamily 단위 (폰트 메트릭은 세션 내 불변). */
+  private _ascentRatioCache: number = 0.8;
+  private _ascentRatioCacheKey: string = '';
+
+  /**
    * 컬럼별 레이아웃 패스를 수행한다.
    * `_layoutTextIntoColumns`의 핵심 루프를 추출한 것으로,
    * `alignOffsetsMm` 파라미터로 각 컬럼의 verticalAlign 오프셋을 받는다.
@@ -3269,6 +3341,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     this._layoutCache = null;
     this._overlayRectsMm = null;
     this._cursorLineWalkCache = null;
+    this._drawListCache = null;
   }
 
   /**
@@ -3750,6 +3823,12 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   public getCharRect(sourceOffset: number): MmRect | null {
     if (!this._columnContents) return null;
 
+    // 오프셋 공간 정규화: 입력은 커서 모델 공간(plain — textarea·walk와 정렬)이고
+    // columnContents 파트 합산은 endOfBlock마다 `\n`을 소비하지 않는다
+    // (cc = plain − 이전 endOfBlock 수). 보정 없으면 `\n` 이후 라인에서
+    // 한 글자 뒤 글자를 그린다.
+    const ccOffset = sourceOffset - this._ccShiftFor(sourceOffset);
+
     const baseFontSizeMm = this.fontSize;
     const columnHeightMm = this._inheritStyle?.parentHeight ?? 0;
     const effectiveColumnHeightMm = columnHeightMm > 0
@@ -3773,8 +3852,8 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
         for (let p = 0; p < line.parts.length; p++) {
           const part = line.parts[p];
           partStartMm += part.left;
-          if (sourceOffset >= offset && sourceOffset < offset + part.content.length) {
-            const localIdx = sourceOffset - offset;
+          if (ccOffset >= offset && ccOffset < offset + part.content.length) {
+            const localIdx = ccOffset - offset;
             const charOffsets = part.charOffsets;
             let charLeftInPart = 0;
             let charWidth = 0;
@@ -3782,20 +3861,37 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
               const { stripStart, stripEnd } = this._computeStripRange(part, line, p);
               let strippedIdx: number;
               if (localIdx < stripStart) {
+                // strip된 leading space의 커서 주차 위치는 첫 visible 글자의
+                // 왼쪽 경계를 참조한다 — 마지막 visible 인덱스를 참조하면 커서가
+                // 라인 끝으로 밀려난다.
                 strippedIdx = 0;
+                charLeftInPart = charOffsets[0] ?? 0;
+                const nextOff = charOffsets[1];
+                charWidth = nextOff !== undefined
+                  ? nextOff - (charOffsets[0] ?? 0)
+                  : part.width - (charOffsets[0] ?? 0);
               } else if (localIdx >= stripEnd) {
-                strippedIdx = charOffsets.length - 1;
+                // strip된 trailing space의 커서 주차 위치는 마지막 visible 글자의
+                // 오른쪽 경계를 참조한다 — part.width 폴백은 justify 분산 갭을
+                // 삼켜 atEndOfChar 커서가 라인 끝 밖으로 나간다.
+                const lastIdx = charOffsets.length - 1;
+                strippedIdx = lastIdx;
+                charLeftInPart = charOffsets[lastIdx];
+                charWidth = this.getCharWidths(
+                  part.content[stripEnd - 1]!,
+                  part.inlineStyles?.[stripEnd - 1],
+                ).swidth;
               } else {
                 strippedIdx = localIdx - stripStart;
-              }
-              charLeftInPart = charOffsets[strippedIdx];
-              const hang = part.hangs?.[localIdx];
-              if (hang !== undefined) {
-                charWidth = this.getCharWidths(part.content[localIdx]!, part.inlineStyles?.[localIdx]).swidth;
-              } else if (strippedIdx + 1 < charOffsets.length) {
-                charWidth = charOffsets[strippedIdx + 1] - charOffsets[strippedIdx];
-              } else {
-                charWidth = part.width - charOffsets[strippedIdx];
+                charLeftInPart = charOffsets[strippedIdx];
+                const hang = part.hangs?.[localIdx];
+                if (hang !== undefined) {
+                  charWidth = this.getCharWidths(part.content[localIdx]!, part.inlineStyles?.[localIdx]).swidth;
+                } else if (strippedIdx + 1 < charOffsets.length) {
+                  charWidth = charOffsets[strippedIdx + 1] - charOffsets[strippedIdx];
+                } else {
+                  charWidth = part.width - charOffsets[strippedIdx];
+                }
               }
             }
             // part.left는 첫 파트의 절대 start, 이후 파트는 이전 파트 끝에서의
@@ -3983,17 +4079,97 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
   /**
    * 특정 source offset의 커서 배치 정보를 반환한다.
    *
-   * `preferLineEnd=true`이면 줄 끝(마지막 문자의 우측)에 배치한다.
-   * 이 메서드는 `TextEditCoordinateMapper`의 DOM 기반 로직을 데이터 기반으로 단순화한 버전이다.
+   * 라인 소속 판정은 `cursorLineRanges`(엔진 라인 경계 walk 단일 소스,
+   * AGENTS.md 계약)에서 수행한다. columnContents 파트 합산 워크는 `\n`을
+   * 소비하지 않아 엔터 이후 라인에서 오프셋이 한 글자 어긋난다 — walk range의
+   * `endOffset`은 `\n` 소비를 반영하므로 소속 라인이 정확해진다.
    *
-   * @param sourceOffset - 소스 텍스트 내 문자 오프셋
+   * @param sourceOffset - story 절대 오프셋 (커서 계약 — story 절대 좌표계)
    * @param preferLineEnd - true면 줄 마지막 문자 우측에 배치
-   * @returns 커서 배치 정보 또는 null
+   * @returns 커서 배치 정보 또는 null. 배치 참조 오프셋은 프레임 로컬
+   *   (mapper가 `_contentFrom`으로 절대 변환). 텍스트 끝 offset은 endOfBlock
+   *   라인 소속으로 판정한다 (`endOffset`은 `\n` 위치라 텍스트 끝을 커버하지
+   *   않기 때문).
    */
   public getCursorPlacement(sourceOffset: number, preferLineEnd = false): CursorPlacement | null {
+    const ranges = this.cursorLineRanges;
+    const plainLen = this.plainText.length;
+    let target: CursorLineRange | null = null;
+    for (const column of ranges) {
+      for (const range of column) {
+        // 라인 소속: [startOffset, startOffset + rangeLength) — endOffset은 \n
+        // 위치(다음 start - 1)라 경계 offset(endOffset + 1)은 다음 라인 귀속
+        // (startOffset ≥ 규칙과 동일). 텍스트 끝 offset은 마지막 range 소유.
+        const rangeLength = range.endOffset - range.startOffset + 1;
+        if (sourceOffset >= range.startOffset && sourceOffset < range.startOffset + rangeLength) {
+          target = range;
+          break;
+        }
+      }
+      if (target) break;
+    }
+
+    // preferLineEnd 시맨틱 (§6 phantom end 계약): 라인 "끝 주차"를 요구하는
+    // 조회다. 라인 중간 offset은 lv로 이동시키지 않는다 — 클릭한 글자 오른쪽에
+    // 커서가 그려져야 한다. 라인 끝 경계(offset ≥ lastVisible 또는 endOffset)
+    // 일 때만 lv을 참조한다 — 이것이 phantom end placement다. 라인 중간 offset을
+    // lv로 이동시키면 클릭과 커서가 어긋난다 (verify-canvas-parity 발견 —
+    // DOM 경로는 _sourceToPlacement 맵이 중간 offset을 그대로 유지했었다).
     if (preferLineEnd) {
-      const lineInfo = this._findLineBySourceOffset(sourceOffset);
-      if (!lineInfo) return null;
+      if (!target) return null;
+      const lv = target.lastVisible;
+      if (lv === null) return null;
+      const endBoundary = target.endOffset === plainLen ? plainLen : target.endOffset;
+      if (sourceOffset >= lv && sourceOffset >= endBoundary) {
+        return { sourceOffset: lv, atEndOfChar: true };
+      }
+      const rect = this.getCharRect(sourceOffset);
+      if (!rect) return { sourceOffset: lv, atEndOfChar: true };
+      return { sourceOffset, atEndOfChar: false };
+    }
+
+    const rect = this.getCharRect(sourceOffset);
+    if (!rect) return null;
+    return { sourceOffset, atEndOfChar: false };
+  }
+
+
+  private _ccShiftFor(plainOffset: number): number {
+    const ranges = this._cursorLineWalk().ranges;
+    const plain = this.plainText;
+    let shift = 0;
+    for (const column of ranges) {
+      for (const range of column) {
+        // walk 공간 = plain 공간 (endOffset은 \n 위치) — walk의 startOffset으로
+        // 대상 오프셋이 이 라인 이전인지 판정한다.
+        if (plainOffset < range.startOffset) return shift;
+        if (range.endOfBlock && plainOffset > range.startOffset) {
+          // 대상 오프셋이 이 endOfBlock 라인의 \n 이후면 이 라인의 \n이
+          // cc 공간에서 소비되지 않아 보정 대상이다.
+          if (range.startOffset < plain.length && plain[range.endOffset] === '\n') {
+            shift++;
+          }
+        }
+      }
+    }
+    return shift;
+  }
+
+  /**
+   * 특정 source offset의 커서 배치를 프레임 로컬 columnContents 워크로
+   * 반환한다 — `getCharRect`와 동일 오프셋 공간(파트 합산, `\n` 미소비)을
+   * 소비하며, 커서가 위치할 수 없는 offset(leading space·strip된 trailing
+   * space·`\n` 위치)은 소속 라인의 가시 경계(firstVisible·lastVisible
+   * atEndOfChar)로 클램프한다.
+   *
+   * @param sourceOffset - 프레임 로컬 오프셋
+   * @param preferLineEnd - true면 줄 마지막 가시 문자 우측에 배치
+   * @returns 커서 배치 정보 또는 null
+   */
+  public getCursorPlacementLocal(sourceOffset: number, preferLineEnd = false): CursorPlacement | null {
+    const lineInfo = this._findLineBySourceOffsetLocal(sourceOffset);
+    if (!lineInfo) return null;
+    if (preferLineEnd) {
       const lastPart = lineInfo.line.parts[lineInfo.line.parts.length - 1];
       if (!lastPart || lastPart.content.length === 0) return null;
       const lastCharOffset = lineInfo.globalOffset + lineInfo.offsetInLine + lastPart.content.length - 1;
@@ -4005,7 +4181,7 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     return { sourceOffset, atEndOfChar: false };
   }
 
-  private _findLineBySourceOffset(sourceOffset: number): { line: TextLineData; globalOffset: number; offsetInLine: number } | null {
+  private _findLineBySourceOffsetLocal(sourceOffset: number): { line: TextLineData; globalOffset: number; offsetInLine: number } | null {
     if (!this._columnContents) return null;
     let globalOffset = 0;
     for (let c = 0; c < this._columnContents.length; c++) {
@@ -4028,6 +4204,102 @@ private _charWidthMmFromFont(char: string, inlineStyle: TextInlineStyle | undefi
     this._inheritStyle = inheritStyle;
     this._data = { ...this._data, inheritStyle };
     this._initLayoutMetrics();
+  }
+
+  /**
+   * 선택 범위 [start, end)의 선택 하이라이트 rect 배열을 산출한다 (mm 단위) —
+   * canvas 모드 선택 렌더의 단일 소스.
+   *
+   * §4.4 선택 rect 산출 계약: 라인 소속은 `cursorLineRanges` walk, 라인 y는
+   * `_computeAlignOffsetMm`(verticalAlign) + 누적 lineHeight, 컬럼 x는
+   * `columnLeftOffset`, 런별 분리 높이는 `_getCharVerticalOffset`로 산출한다 —
+   * 좌표 공식 재유도 금지(§10). rect x 좌표는 지면 절대 mm(getCharRect와 동일).
+   *
+   * @param start - 시작 오프셋 (plain 공간, 포함)
+   * @param end - 끝 오프셋 (plain 공간, 제외)
+   * @returns 선택 rect 배열 (지면 절대 mm). 빈 범위면 빈 배열.
+   * @throws 없음
+   */
+  public getSelectionRects(start: number, end: number): MmRect[] {
+    if (start >= end || !this._columnContents) return [];
+    const rects: MmRect[] = [];
+    const baseFontSizeMm = this.fontSize;
+    const columnHeightMm = this._inheritStyle?.parentHeight ?? 0;
+    const effectiveColumnHeightMm = columnHeightMm > 0
+      ? columnHeightMm + (this._lineHeight - baseFontSizeMm)
+      : 0;
+
+    let offset = 0;
+    for (let c = 0; c < this._columnContents.length; c++) {
+      const column = this._columnContents[c];
+      const columnLeftMm = this.columnLeftOffset(c);
+      const alignOffsetMm = this._computeAlignOffsetMm(column, effectiveColumnHeightMm, baseFontSizeMm, columnHeightMm);
+
+      let cumulativeTopMm = 0;
+      for (const line of column) {
+        const lineTopMm = this._data.parentAbsRect.absTop + alignOffsetMm + cumulativeTopMm;
+        const lineH = line?.lineHeight ?? this._lineHeight;
+        const lineMaxFs = line?.maxFontSize ?? baseFontSizeMm;
+
+        let partStartMm = 0;
+        for (let p = 0; p < line.parts.length; p++) {
+          const part = line.parts[p];
+          partStartMm += part.left;
+          const partLen = part.content.length;
+          const partEnd = offset + partLen;
+          if (partLen > 0 && partEnd > start && offset < end) {
+            const selStartInPart = Math.max(0, start - offset);
+            const selEndInPart = Math.min(partLen, end - offset);
+            const { stripStart, stripEnd } = this._computeStripRange(part, line, p);
+            const charOffsets = part.charOffsets;
+
+            if (charOffsets && charOffsets.length > 0) {
+              // 선택 시작 글자의 좌측 경계 — strip 이전(leading space)은 첫
+              // visible 글자의 좌측, strip 이후(trailing space)는 마지막 visible
+              // 글자의 우측 경계를 참조한다 (getCharRect strip 폴백과 동일).
+              const startLocal = Math.max(selStartInPart, stripStart);
+              const endLocalRaw = Math.min(selEndInPart, stripEnd);
+              const startIdx = Math.min(startLocal - stripStart, charOffsets.length - 1);
+              const endIdx = Math.max(Math.min(endLocalRaw - stripStart - 1, charOffsets.length - 1), startIdx);
+
+              const leftMm = this._data.parentAbsRect.absLeft + columnLeftMm + partStartMm + (charOffsets[startIdx] ?? 0);
+              const lastIdx = Math.max(endIdx, startIdx);
+              const lastCharRight = startIdx === endIdx && endLocalRaw >= stripEnd
+                ? part.width
+                : (charOffsets[lastIdx + 1] ?? part.width);
+              let rightMm = this._data.parentAbsRect.absLeft + columnLeftMm + partStartMm + lastCharRight;
+
+              // 선택 범위가 trailing space(strip 이후)까지 포함하면 마지막
+              // visible 글자의 실측 폭(swidth)으로 우측 경계를 확장한다.
+              if (endLocalRaw >= stripEnd && stripEnd > stripStart) {
+                const lastVisible = stripEnd - 1;
+                const lastSwidth = this.getCharWidths(
+                  part.content[lastVisible]!,
+                  part.inlineStyles?.[lastVisible],
+                ).swidth;
+                rightMm = this._data.parentAbsRect.absLeft + columnLeftMm + partStartMm
+                  + (charOffsets[charOffsets.length - 1] ?? 0) + lastSwidth;
+              }
+
+              const charFsStart = part.inlineStyles?.[Math.min(selStartInPart, partLen - 1)]?.fontSize ?? baseFontSizeMm;
+              const topMm = lineTopMm + this._getCharVerticalOffset(lineMaxFs, charFsStart);
+              rects.push({
+                left: leftMm,
+                right: rightMm,
+                top: topMm,
+                bottom: topMm + charFsStart,
+                width: rightMm - leftMm,
+                height: charFsStart,
+              });
+            }
+          }
+          offset += partLen;
+          partStartMm += part.width;
+        }
+        cumulativeTopMm += lineH;
+      }
+    }
+    return rects;
   }
 
   /** 현재 상속 스타일 */

@@ -208,6 +208,8 @@ export interface FontLoaderEngine {
 export interface ParsedFont {
   /** 폰트의 units per em */
   unitsPerEm: number;
+  /** 폰트 ascent (opentype hhea 테이블, unitsPerEm 스케일 — 옵셔널: 미제공 폰트는 0.8 근사 폴백) */
+  ascender?: number;
   /**
    * 문자를 글리프로 변환한다.
    * cmap에 매핑이 없는 문자는 `.notdef`(gid 0) 글리프를 반환한다.

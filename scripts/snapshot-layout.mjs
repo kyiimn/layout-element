@@ -68,6 +68,27 @@ function snapshotCase(text, columns) {
   }]);
   const paraEngine = engine.childBoxEngines[0].childEngines[0];
   paraEngine.layoutText();
+  // canvas 드로잉 명령 목록 (CANVAS_RENDERING.md 단계 1) — runStyleRef는
+  // 참조라 직렬화 불가하므로 좌표·글자·폰트 크기·hangs만 직렬화한다.
+  // printPostData 좌표와의 패리티는 verify-canvas-drawlist.mjs가 소유.
+  const dl = paraEngine.drawList;
+  const drawList = {
+    chars: dl.chars.map(c => ({
+      char: c.char,
+      charOffsetMm: c.charOffsetMm,
+      lineLeftMm: c.lineLeftMm,
+      lineTopMm: c.lineTopMm,
+      widthMm: c.widthMm,
+      fontSizeMm: c.fontSizeMm,
+      lineMaxFontSizeMm: c.lineMaxFontSizeMm,
+      hangs: c.hangs ?? null,
+      hasInlineStyle: c.runStyle.inlineStyle !== undefined,
+    })),
+    decos: dl.decos.map(d => ({
+      decoKind: d.decoKind, xMm: d.xMm, yMm: d.yMm,
+      widthMm: d.widthMm, heightMm: d.heightMm, colorName: d.colorName,
+    })),
+  };
   return {
     overflow: paraEngine.overflow,
     columns: paraEngine.columnContents.map(column =>
@@ -87,6 +108,7 @@ function snapshotCase(text, columns) {
         })),
       })),
     ),
+    drawList,
   };
 }
 

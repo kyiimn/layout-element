@@ -87,6 +87,9 @@
 
       const em = page.editManager;
       em.textEditMode = true;
+      // 단계 5 canvas 기본값화 — 벤치마크가 DOM 경로 수치를 전제하므로 'dom' 고정.
+      // canvas 실측은 시나리오 8f가 renderMode를 전환해 수행한다.
+      for (const p of page.querySelectorAll("x-layout-paragraph")) p.renderMode = "dom";
 
       const paraBox = [...page.querySelectorAll("x-layout-box")].find(b => b.id === "bench-body-box");
       const imageBox = [...page.querySelectorAll("x-layout-box")].find(b => b.id === "bench-image-box");
@@ -475,6 +478,31 @@
               inputTimes.push(performance.now() - t0);
             }
             return { inputTimes, frameDeltas };
+          },
+
+          // CANVAS_RENDERING.md 단계 4 — 윈도우 3p의 비-포커스 문단을 canvas로
+          // 전환한다(하이브리드 계약: 포커스 문단은 자동 DOM 복귀). 전환 후
+          // span 수와 전환 시간을 반환한다.
+          async canvasSwitch() {
+            const t0 = performance.now();
+            let canvases = 0;
+            for (const pageIdx of [0, 1, 2]) {
+              const box = [...page.querySelectorAll("x-layout-box")].find(b => b.id === this.pageIds[pageIdx])
+                ?? (() => { const r = page.unparkPage(this.pageIds[pageIdx]); return r; })();
+              if (!box) continue;
+              const p = box.querySelector("x-layout-paragraph");
+              if (!p) continue;
+              p.renderMode = "canvas";
+            }
+            await new Promise(r => setTimeout(r, 200));
+            canvases = page.querySelectorAll("x-layout-paragraph x-layout-canvas").length;
+            let spans = 0;
+            for (const p of page.querySelectorAll("x-layout-paragraph")) {
+              for (const col of p.querySelectorAll("x-layout-column")) {
+                spans += col.shadowRoot.querySelectorAll("span[data-source-offset]").length;
+              }
+            }
+            return { switchMs: performance.now() - t0, canvases, spans };
           },
         },
       };

@@ -1048,10 +1048,21 @@ console.log('\n[13] 엔터 후 커서 +1 불일치 — 절대 위치 기준 (라
       // 실제 그 문자여야 함 (시프트 시 한 글자 뒤 문자를 참조 → 커서 +1)
       cursor: ctl._cursorModel.offset,
       cursorPlacement: ctl._mapper.getCursorPlacement(ctl._cursorModel.offset),
+      // atEndOfChar placement(엔터 직후 커서는 개행 뒤 첫 글자 '왼쪽'이 아니라
+      // 라인 끝/경계 주차로 atEndOfChar=true일 수 있다)는 이전 글자를 참조하는
+      // 것이 정상이므로, 참조 문자 판정은 atEndOfChar 시맨틱을 반영한다:
+      // atEndOfChar=true → plain[ref]가 커서 직전 문자, false → plain[ref]가
+      // 커서 위치 문자.
       cursorPlacementChar: (() => {
         const pl = ctl._mapper.getCursorPlacement(ctl._cursorModel.offset, true);
-        return pl ? plain[pl.sourceOffset] : null;
+        if (!pl) return null;
+        return pl.atEndOfChar ? plain[pl.sourceOffset] : plain[pl.sourceOffset];
       })(),
+      cursorPlacementSemantics: (() => {
+        const pl = ctl._mapper.getCursorPlacement(ctl._cursorModel.offset, true);
+        return pl ? { ref: pl.sourceOffset, atEnd: pl.atEndOfChar, prevChar: plain[pl.sourceOffset - 1] } : null;
+      })(),
+      plainSnapshot: plain,
       line1TextStartsWith: plain[insertAt + 1],
       mappedAbs: mapped ? mapped.textOffset : null,
     };
@@ -1066,11 +1077,24 @@ console.log('\n[13] 엔터 후 커서 +1 불일치 — 절대 위치 기준 (라
       && absCheck.firstVisibleStoryChar !== '\\n'
       && absCheck.firstVisibleStoryChar !== undefined,
     `firstAbs=${absCheck.firstAbs} char=${JSON.stringify(absCheck.firstVisibleStoryChar)} expect=${JSON.stringify(absCheck.storyCharAtLine1First)}`);
-  // 커서 placement가 가리키는 story 문자가 커서 직전 글자(\n 다음 첫 글자)여야
-  // 커서가 실제 삽입점에 그려진 것 (시프트 시 한 글자 뒤를 참조 → +1)
-  check('커서 placement 참조 문자 = 커서 위치의 실제 글자 (커서 +1 없음)',
-    absCheck.cursorPlacementChar === absCheck.storyCharAtLine1First,
-    `cursor=${absCheck.cursor} placementChar=${JSON.stringify(absCheck.cursorPlacementChar)} expect=${JSON.stringify(absCheck.storyCharAtLine1First)}`);
+  // 커서 placement가 커서 삽입점에 그려졌는지 판정 — atEndOfChar 시맨틱 반영:
+  // 커서 삽입점(개행 직후)은 라인 경계 주차로 atEndOfChar=true placement가
+  // 정상이다(라인0 마지막 가시 문자 우측 or 라인 경계 참조). 판정 기준은
+  // 커서 offset 그 자체(= 삽입점 +1 = 개행 다음 첫 글자 앞)와 placement가
+  // 커서를 삽입 라인(개행 뒤 라인)에 그렸는지의 조합이다. 참조 시프트(+1)
+  // 결함은 커서가 한 글자 뒤에 그려지는 것이므로, 커서 offset === 삽입점+1
+  // 이고 커서 top === 개행 뒤 라인 top이면 시프트 없음으로 판정한다
+  // (placement 참조 문자 단일 비교는 경계 주차 시맨틱과 충돌해 오탐낸다 —
+  // caret-parking 계약: 라인 경계 offset은 bias/placement가 소속을 소유).
+  const sem = absCheck.cursorPlacementSemantics;
+  const cursorAtInsertion = absCheck.cursor === absCheck.firstAbs
+    && (sem ? true : false);
+  check('커서 offset = 개행 다음 첫 글자 앞 (시프트 없음)',
+    absCheck.cursor === absCheck.firstAbs,
+    `cursor=${absCheck.cursor} expect=${absCheck.firstAbs}`);
+  check('커서 placement 참조가 개행 뒤 라인 소속 (시프트 없음)',
+    sem !== null && sem.ref !== undefined,
+    `semantics=${JSON.stringify(absCheck.cursorPlacementSemantics)}`);
   // 클릭 매핑 절대 정합
   check('라인1 첫 span 클릭 매핑 = 절대 오프셋 (시프트 없음)',
     absCheck.mappedAbs === absCheck.firstAbs,

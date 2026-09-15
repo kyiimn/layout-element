@@ -155,6 +155,8 @@
       em.textEditMode = true;
       for (const para of page.querySelectorAll("x-layout-paragraph")) {
         em.addEditableParagraph(para.id);
+        // 단계 5 canvas 기본값화 — 예제가 DOM 렌더를 전제하므로 'dom' 고정.
+        para.renderMode = "dom";
         para.editableText = true;
       }
       await page.render();

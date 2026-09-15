@@ -1,0 +1,345 @@
+/**
+ * DOM vs canvas 렌더 패리티 검증 (CANVAS_RENDERING.md 단계 2 — §7).
+ *
+ * 동일 문서를 DOM 경로와 canvas 경로로 렌더하고 글자 rect를 비교한다.
+ * 판정: 글자 rect 오차 ≤1px, 텍스트 내용 동일. canvas 모드의 부가 계약도
+ * 함께 검증한다:
+ * - render-complete 발화 (React 호스트 계약)
+ * - a11y 히든 텍스트 레이어 존재 + 내용 === DOM visible 텍스트 (공백 제외)
+ * - 걸침 ON 문단의 canvas가 행두 돌출을 클립하지 않음 (bleed)
+ * - 하이브리드 게이트 — 편집 포커스 문단은 'canvas' 설정에도 DOM 유지
+ * - DPR 캡 ≤2 (backing store 높이)
+ *
+ * @example
+ * ```bash
+ * npx tsx scripts/verify-canvas-parity.mjs
+ * ```
+ *
+ * @file scripts/verify-canvas-parity.mjs
+ */
+
+import { chromium } from '@playwright/test';
+import { spawn } from 'node:child_process';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkgRoot = resolve(__dirname, '..');
+const BASE_PORT = 5260;
+
+async function probe(url) {
+  try {
+    const res = await fetch(`${url}/examples/bench.html`);
+    if (!res.ok) return false;
+    return (await res.text()).includes('<title>Layout Element Benchmark</title>');
+  } catch { return false; }
+}
+async function waitForServer(url) {
+  for (let i = 0; i < 60; i++) {
+    if (await probe(url)) return true;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return false;
+}
+
+let BASE = null;
+let server = null;
+for (const cand of ['http://localhost:5175', 'http://localhost:5173', 'http://localhost:5174']) {
+  if (await probe(cand)) { BASE = cand; break; }
+}
+if (!BASE) {
+  server = spawn('npx', ['vite', 'dev', '--port', String(BASE_PORT), '--strictPort'], {
+    cwd: pkgRoot, stdio: 'pipe', shell: true,
+  });
+  const spawnedUrl = `http://localhost:${BASE_PORT}`;
+  if (await waitForServer(spawnedUrl)) BASE = spawnedUrl;
+  else { server.kill(); throw new Error(`vite dev server not ready on ${spawnedUrl}`); }
+}
+
+const browser = await chromium.launch();
+const page = await browser.newPage();
+page.on('pageerror', err => console.error('[pageerror]', err.message.slice(0, 300)));
+await page.goto(`${BASE}/examples/bench.html`, { waitUntil: 'networkidle' });
+await page.waitForFunction(() => document.title === 'BENCH_READY', { timeout: 30_000 });
+
+let passed = 0;
+let failed = 0;
+const failures = [];
+function check(name, ok, detail = '') {
+  if (ok) {
+    passed++;
+    console.log(`PASS  ${name}`);
+  } else {
+    failed++;
+    failures.push(name);
+    console.log(`FAIL  ${name}${detail ? ` — ${detail}` : ''}`);
+  }
+}
+
+const r = await page.evaluate(async () => {
+  const raf2 = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const out = { steps: [] };
+
+  // ── A. 기준선: DOM 경로에서 글자 rect 스냅샷 ──
+  const em = window.bench.getEditManager();
+  const paraBox = window.bench.getParaBox();
+  const p = paraBox.querySelector('x-layout-paragraph');
+  const text = '가나다라마바사아자차카타파하거너더러머버서어저처커터퍼허혀호'.repeat(4);
+  const d = p.data;
+  d.content = text;
+  p.data = d;
+  p.column = 2;
+  paraBox.height = 80;
+  // 단계 5 — 기본 renderMode가 'canvas'다. DOM 기준선 패리티 비교를 위해
+  // 명시적으로 'dom'으로 되돌린다 (기존 동작 보존 판정 — 호스트의
+  // renderMode='dom' 설정 경로를 함께 검증한다).
+  p.renderMode = 'dom';
+  // bench.html이 textEditMode를 전역 켜므로 컨트롤러가 존재한다 — canvas 분기
+  // 판정(effectiveMode)은 컨트롤러 소유 여부이므로 기준선 스냅샷은 DOM 경로로
+  // 수행하고, canvas 전환은 컨트롤러 해제 후 수행한다 (하이브리드 게이트는 D 검증).
+  const hadEditable = p.editableText;
+  if (hadEditable) p.editableText = false;
+  p.flushRender();
+  await raf2();
+  await raf2();
+
+  const domSnapshot = (() => {
+    // span은 column shadowRoot에 존재 — paragraph light DOM에는 column만 있다.
+    const spans = [...p.querySelectorAll('x-layout-column')]
+      .flatMap(c => [...(c.shadowRoot?.querySelectorAll('span[data-source-offset]:not([data-temporary])') ?? [])]);
+    const paraRect = p.getBoundingClientRect();
+    const scale = em.scale || 1;
+    const ppm = (p._findPageElement?.()?.engine?.ppm) ?? 3.78;
+    return {
+      spans: spans.map(s => {
+        const rect = s.getBoundingClientRect();
+        return {
+          key: Number(s.dataset.sourceOffset),
+          char: s.textContent,
+          // DOM rect → 문단 로컬 px (scale 제거) → mm로 비교 기준 통일
+          leftMm: (rect.left - paraRect.left) / scale / ppm,
+          topMm: (rect.top - paraRect.top) / scale / ppm,
+          widthMm: rect.width / scale / ppm,
+          heightMm: rect.height / scale / ppm,
+        };
+      }),
+      visibleText: spans.map(s => s.textContent).join(''),
+      spanCount: spans.length,
+    };
+  })();
+  out.domSpanCount = domSnapshot.spans.length;
+
+  // ── B. canvas 모드 전환 + render-complete 발화 확인 ──
+  let renderCompleteCount = 0;
+  const listener = () => { renderCompleteCount++; };
+  p.addEventListener('render-complete', listener);
+  p.renderMode = 'canvas';
+  p.flushRender();
+  await raf2();
+  await raf2();
+
+  const canvasMode = (() => {
+    const canvasEl = p.querySelector('x-layout-canvas');
+    if (!canvasEl) return null;
+    const canvas = canvasEl.shadowRoot?.querySelector('canvas');
+    const a11y = canvasEl.shadowRoot?.querySelector('div[aria-hidden="false"]');
+    return {
+      exists: true,
+      canvasW: canvas?.width ?? 0,
+      canvasH: canvas?.height ?? 0,
+      styleW: parseFloat(canvas?.style.width ?? '0'),
+      styleH: parseFloat(canvas?.style.height ?? '0'),
+      ppm: (p._findPageElement?.()?.engine?.ppm) ?? 3.78,
+      dpr: window.devicePixelRatio || 1,
+      a11yText: a11y?.textContent ?? '',
+      columnRemain: p.querySelectorAll('x-layout-column').length,
+    };
+  })();
+  out.canvasMode = canvasMode;
+
+  // canvas 글자 rect 스냅샷 — 엔진 drawList에서 산출하고 paint 좌표 공식
+  // (bleed 보정 + baseline ascent)을 검증한다. paint가 실제로 그렸는지는
+  // 캔버스 픽셀 샘플로 확인한다.
+  const canvasChars = (() => {
+    const engine = p.engine;
+    if (!engine) return [];
+    return engine.drawList.chars.map(c => ({
+      key: c.char,
+      char: c.char,
+      leftMm: c.lineLeftMm + c.charOffsetMm,
+      widthMm: c.widthMm,
+      heightMm: c.fontSizeMm,
+      lineTopMm: c.lineTopMm,
+      lineMaxFs: c.lineMaxFontSizeMm,
+      fs: c.fontSizeMm,
+    }));
+  })();
+  out.canvasCharCount = canvasChars.length;
+
+  // ── C. 패리티 판정 데이터 ──
+  return { ...out, domSnapshot, canvasChars, renderCompleteCount };
+});
+
+// ── A/B. 구조 검증 ──
+check('A. DOM 기준선 — span 존재', r.domSnapshot.spans.length > 0, `spans=${r.domSnapshot.spans.length}`);
+check('B1. canvas 요소 존재 (renderMode=canvas)', r.canvasMode?.exists === true);
+check('B2. DOM 컬럼 제거 (canvas 1장만)', r.canvasMode?.columnRemain === 0, `remain=${r.canvasMode?.columnRemain}`);
+check('B3. render-complete 발화 (React 호스트 계약)', r.renderCompleteCount >= 1,
+  `count=${r.renderCompleteCount}`);
+// DPR 캡: backing store 높이 ≤ style 높이 × 2
+check('B4. DPR 캡 ≤2 (backing = style × dpr, dpr capped)',
+  r.canvasMode.canvasH <= Math.ceil(r.canvasMode.styleH * 2) + 1,
+  `backing=${r.canvasMode?.canvasH} styleH=${r.canvasMode?.styleH} dpr=${r.canvasMode?.dpr}`);
+// bleed: backing 폭 = (parentWidth + 2×bleed) × ppm × dpr — style 폭보다 커야 한다.
+// 소수 반올림 차이를 흡수하기 위해 1px 여유로 판정한다.
+check('B5. bleed 확장 — backing 폭 ≥ 표시 폭 (bleed 확장)', r.canvasMode.canvasW >= Math.ceil(r.canvasMode.styleW),
+  `backing=${r.canvasMode?.canvasW} styleW=${r.canvasMode?.styleW}`);
+// a11y 레이어
+{
+  const a11yChars = (r.canvasMode?.a11yText ?? '').replace(/ /g, '');
+  const domChars = r.domSnapshot.visibleText.replace(/ /g, '');
+  check('B6. a11y 히든 텍스트 === DOM visible 텍스트 (공백 제외)', a11yChars === domChars,
+    `a11y=${a11yChars.length}자 dom=${domChars.length}자`);
+}
+
+// ── C. 글자 rect 패리티 — DOM span rect vs drawList 명령 rect ──
+{
+  // DOM span rect를 mm로 환산한 것은 paint 좌표와 달리 glyph box(장평 scale 적용)다.
+  // 패리티 비교는 (a) 글자 스트림 동일, (b) DOM span left(mm) ↔ 명령 left(mm) 순서
+  // 대응 — 하단 앵커로 인한 top 차이는 vertical offset 공식으로 보정해 비교한다.
+  const domByChar = r.domSnapshot.spans;
+  const cmdChars = r.canvasChars;
+  check('C1. 글자 스트림 동일 (DOM visible === canvas 명령)',
+    domByChar.map(s => s.char).join('') === cmdChars.map(c => c.char).join(''),
+    `dom=${domByChar.length}자 cmd=${cmdChars.length}자`);
+  // left 패리티: DOM span의 left mm vs 명령의 (lineLeft + charOffset) mm
+  // DOM rect.left는 glyph box 시작(장평 scale 반영 폭의 시작)이고 명령 left는
+  // 배치 좌표 — 하단 앵커 렌더에서 span은 charOffset에 그대로 배치되므로
+  // left는 직접 비교 가능 (폭은 glyph 실측 폭이라 swidth와 다름 — 위치만 비교).
+  let leftMismatch = 0;
+  const n = Math.min(domByChar.length, cmdChars.length);
+  for (let i = 0; i < n; i++) {
+    if (Math.abs(domByChar[i].leftMm - cmdChars[i].leftMm) > 1) leftMismatch++;
+  }
+  check('C2. 글자 left 패리티 ≤1mm (전 글자)', leftMismatch === 0, `mismatch=${leftMismatch}/${n}`);
+  // top 패리티: DOM span top은 하단 앵커 상자 top(vertical offset 포함) + 폰트 메트릭
+  // 오프셋 — 엔진 공식(lineTop + verticalOffset)과 ≤1mm 비교.
+  let topMismatch = 0;
+  for (let i = 0; i < n; i++) {
+    const dom = domByChar[i];
+    const cmd = cmdChars[i];
+    const engineBoxTopMm = cmd.lineTopMm + (cmd.lineMaxFs - cmd.fs);
+    if (Math.abs(dom.topMm - engineBoxTopMm) > 1) topMismatch++;
+  }
+  check('C3. 글자 상자 top 패리티 ≤1mm (vertical offset 공식)', topMismatch === 0,
+    `mismatch=${topMismatch}/${n}`);
+}
+
+// ── D. 하이브리드 게이트 — 편집 포커스 문단은 canvas 모드 설정에도 DOM 유지 ──
+{
+  const gate = await page.evaluate(async () => {
+    const raf2 = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const em = window.bench.getEditManager();
+    const paraBox = window.bench.getParaBox();
+    const p = paraBox.querySelector('x-layout-paragraph');
+    em.textEditMode = true;
+    p.editableText = true;
+    await new Promise(r2 => setTimeout(r2, 150));
+    em.focusParagraph(p);
+    await raf2();
+    p.renderMode = 'canvas';
+    p.flushRender();
+    await raf2();
+    await raf2();
+    const hasCanvas = !!p.querySelector('x-layout-canvas');
+    const hasColumns = p.querySelectorAll('x-layout-column').length > 0;
+    // blur 시 렌더가 다시 예약되므로 완료를 기다린다.
+    em.focusedController?.blur();
+    await raf2();
+    await raf2();
+    return { hasCanvas, hasColumns, mode: p.renderMode };
+  });
+  check('D1. 편집 포커스 문단 — canvas 요소 없음 (하이브리드 게이트)', gate.hasCanvas === false,
+    `hasCanvas=${gate.hasCanvas}`);
+  check('D2. 편집 포커스 문단 — DOM 컬럼 유지', gate.hasColumns === true,
+    `hasColumns=${gate.hasColumns}`);
+}
+
+// ── E. blur 후 canvas 전환 재확인 (하이브리드 양방향 전환) ──
+{
+  const switchBack = await page.evaluate(async () => {
+    const raf2 = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const p = window.bench.getParaBox().querySelector('x-layout-paragraph');
+    // blur 완료 후 컨트롤러가 남아 있으면(editableText=true 유지) effectiveMode는
+    // dom이다 — canvas 복귀 검증은 컨트롤러 해제(editController null) 상태에서 수행.
+    p.editableText = false;
+    p.flushRender();
+    await raf2();
+    await raf2();
+    return {
+      hasCanvas: !!p.querySelector('x-layout-canvas'),
+      a11y: p.querySelector('x-layout-canvas')?.shadowRoot?.querySelector('div[aria-hidden="false"]')?.textContent ?? '',
+    };
+  });
+  check('E1. 컨트롤러 해제 후 canvas 요소 복귀', switchBack.hasCanvas === true);
+  check('E2. canvas a11y 텍스트 유지', (switchBack.a11y ?? '').length > 0);
+}
+
+// ── F. 선택 rect 패리티 — 엔진 getSelectionRects vs DOM getTextRange ──
+{
+  const selParity = await page.evaluate(async () => {
+    const raf2 = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const em = window.bench.getEditManager();
+    const paraBox = window.bench.getParaBox();
+    const p = paraBox.querySelector('x-layout-paragraph');
+    em.textEditMode = true;
+    p.editableText = true;
+    await new Promise(r2 => setTimeout(r2, 150));
+    em.focusParagraph(p);
+    const ctrl = em.focusedController;
+    // DOM 경로에서 선택 rect 획득 (span 순회)
+    const selStart = 3, selEnd = 20;
+    const { SelectionRange } = await import('/src/types/edit/selection.type.ts');
+    ctrl.setSelection(SelectionRange.fromOffsets(selStart, selEnd));
+    await raf2();
+    const domRects = ctrl._mapper.getTextRange(selStart, selEnd);
+    // DOM rect는 문단 로컬 px — mm로 환산
+    const paraRect = p.getBoundingClientRect();
+    const ppm = (p._findPageElement?.()?.engine?.ppm) ?? 3.78;
+    const scale = em.scale || 1;
+    const domMm = domRects.map(r => ({
+      left: r.left * scale / ppm,
+      top: r.top * scale / ppm,
+      width: r.width * scale / ppm,
+      height: r.height * scale / ppm,
+    }));
+    // 엔진 게터 (지면 절대 mm → 로컬 mm)
+    const engine = p.engine;
+    const absLeft = engine.data?.parentAbsRect?.absLeft ?? 0;
+    const absTop = engine.data?.parentAbsRect?.absTop ?? 0;
+    const engMm = engine.getSelectionRects(selStart, selEnd).map(r => ({
+      left: r.left - absLeft,
+      top: r.top - absTop,
+      width: r.width,
+      height: r.height,
+    }));
+    em.focusedController?.blur();
+    return { domMm, engMm };
+  });
+  check('F1. 선택 rect 존재 (양 경로)', selParity.domMm.length > 0 && selParity.engMm.length > 0,
+    `dom=${selParity.domMm.length} eng=${selParity.engMm.length}`);
+  check('F2. 선택 rect 좌표 패리티 ≤1mm (left/top/width)', (() => {
+    if (selParity.domMm.length === 0 || selParity.engMm.length === 0) return false;
+    const d = selParity.domMm[0], e = selParity.engMm[0];
+    return Math.abs(d.left - e.left) <= 1 && Math.abs(d.top - e.top) <= 1 && Math.abs(d.width - e.width) <= 1;
+  })(), `dom=${JSON.stringify(selParity.domMm[0])} eng=${JSON.stringify(selParity.engMm[0])}`);
+  check('F3. 선택 rect 높이 패리티 ≤1mm', (() => {
+    if (selParity.domMm.length === 0 || selParity.engMm.length === 0) return false;
+    return Math.abs(selParity.domMm[0].height - selParity.engMm[0].height) <= 1;
+  })(), `domH=${selParity.domMm[0]?.height} engH=${selParity.engMm[0]?.height}`);
+}
+
+await browser.close();
+if (server) server.kill();
+console.log(failed === 0 ? `\nALL PASS (${passed} checks)` : `\n${failed} FAILURES: ${failures.join(' | ')}`);
+process.exit(failed > 0 ? 1 : 0);

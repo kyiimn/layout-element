@@ -26,12 +26,15 @@ export class TextEditCoordinateMapper {
   /**
    * 엔진 좌표 쿼리 사용 여부 (피처 플래그).
    *
-   * `false`(기본값): 기존 DOM 기반 `getBoundingClientRect()` 경로 사용.
-   * `true`: `ParagraphEngine.getCharRect()` / `getOffsetFromPoint()` 엔진 쿼리 사용.
+   * `false`: 기존 DOM 기반 `getBoundingClientRect()` 경로 사용.
+   * `true` (기본값, CANVAS_RENDERING.md 단계 0 전환 완료):
+   * `ParagraphEngine.getCharRect()` 엔진 쿼리 사용 — mm×ppm은 이미
+   * paragraph local 픽셀이므로 EditManager.scale 보정이 불필요하다
+   * (`_getCharRectFromEngine` JSDoc 좌표 provenance 참조).
    *
-   * 전환 후 manual QA(Korean IME, English, mixed)를 거쳐 `true`로 설정.
+   * DOM 경로는 패리티 오라클로 유지 (CANVAS_RENDERING.md §5 단계 5).
    */
-  static useEngineCoordinateQueries: boolean = false;
+  static useEngineCoordinateQueries: boolean = true;
 
   private _paragraph: LayoutParagraphElement;
   private _manager: EditManager;
@@ -330,6 +333,9 @@ export class TextEditCoordinateMapper {
    * mapper.getCursorPlacement(31, true);      // → { sourceOffset: 30, atEndOfChar: true } (일의 오른쪽)
    */
   getCursorPlacement(sourceOffset: number, preferLineEnd = false): CursorPlacement | null {
+    if (TextEditCoordinateMapper.useEngineCoordinateQueries) {
+      return this._getCursorPlacementFromEngine(sourceOffset, preferLineEnd);
+    }
     if (preferLineEnd) {
       const lineEnd = this._lineEndPlacements.get(sourceOffset);
       if (lineEnd) return lineEnd;
@@ -404,42 +410,86 @@ export class TextEditCoordinateMapper {
   }
 
   /**
-   * 엔진 쿼리 경로: `ParagraphEngine.getCharRect()`에서 mm 좌표를 받아
-   * viewport 픽셀 좌표로 변환한다.
+   * 엔진 쿼리 경로: `ParagraphEngine.getCharRect()`의 지면 절대 mm을
+   * paragraph local 픽셀로 변환해 반환한다.
+   *
+   * 2단 변환 계약:
+   * 1. **원점 차감 (mm)** — `getCharRect`는 parentAbsRect absLeft/absTop를
+   *    포함한 지면 절대 mm를 반환하지만, 커서 오버레이 좌표계는 문단 로컬을
+   *    기대하므로 `engine.data.parentAbsRect` 원점을 차감한다.
+   * 2. **mm→px (scale 불변)** — ppm은 `document.body`에 직접 부착한 100mm
+   *    div로 측정되므로(transform: scale 변환 밖) `mm × ppm`은 이미
+   *    paragraph local 픽셀이다. `EditManager.scale` 나눗셈이 불필요하다 —
+   *    DOM 경로(`getBoundingClientRect`)만 뷰포트 픽셀을 반환하므로 scale
+   *    나눗셈으로 local 좌표를 재현한다 (좌표계 메모 참조).
+   *
+   * @param sourceOffset - story 절대 소스 오프셋
+   * @returns 문단 로컬 픽셀 DOMRect. 엔진 부재·미배치 문자면 `null`.
    */
   private _getCharRectFromEngine(sourceOffset: number): DOMRect | null {
     const engine = this._paragraph.engine;
     if (!engine) return null;
     // 엔진 쿼리는 프레임 로컬 오프셋을 기대한다 — 절대 → 로컬 변환.
-    const mmRect = engine.getCharRect(sourceOffset - this._contentFrom);
+    const localOffset = sourceOffset - this._contentFrom;
+    const mmRect = engine.getCharRect(localOffset);
     if (!mmRect) return null;
 
-    const scale = this._manager.scale;
+    const parentAbsRect = engine.data?.parentAbsRect;
+    const localLeftMm = mmRect.left - (parentAbsRect?.absLeft ?? 0);
+    const localTopMm = mmRect.top - (parentAbsRect?.absTop ?? 0);
+
     const pageEl = (this._paragraph as unknown as { _findPageElement: () => { engine?: { ppm: number } } | null })._findPageElement();
     const ppm = pageEl?.engine?.ppm ?? 3.78;
 
     return new DOMRect(
-      (mmRect.left * ppm) / scale,
-      (mmRect.top * ppm) / scale,
-      (mmRect.width * ppm) / scale,
-      (mmRect.height * ppm) / scale,
+      localLeftMm * ppm,
+      localTopMm * ppm,
+      mmRect.width * ppm,
+      mmRect.height * ppm,
     );
   }
 
   /**
-   * 뷰포트 좌표(x, y) 위치의 문자에 해당하는 소스 오프셋을 반환한다.
+   * 엔진 쿼리 경로: `ParagraphEngine.getCursorPlacement()`(walk 기반 라인
+   * 소속·가시 경계 클램프)으로 배치를 조회한다.
    *
-   * 1. (x, y)가 속한 컬럼을 찾는다.
-   * 2. 해당 컬럼에서 y에 가장 가까운 라인 div를 찾는다.
-   * 3. 그 라인 div 내의 span들 중 x에 가장 가까운 span을 찾는다.
-   * 4. span의 중심점 기준으로 좌측/우측을 결정하여 offset을 반환한다.
-   * 5. 빈 라인(span이 없는 경우)이면 라인 시작 offset을 반환한다.
+   * @param sourceOffset - story 절대 오프셋
+   * @param preferLineEnd - true면 줄 마지막 가시 문자 우측 배치 우선
+   * @returns 커서 배치 정보 또는 null
+   */
+  /**
+   * 엔진 쿼리 경로의 배치 조회 — `ParagraphEngine.getCursorPlacement`로 위임한다.
+   *
+   * 엔진 게터는 story 절대 오프셋을 소비하고(walk 기반 소속 판정 + preferLineEnd
+   * 시맨틱) 참조 오프셋을 프레임 로컬(columnContents 공간)로 반환한다 —
+   * mapper가 `_contentFrom`으로 story 절대로 재변환해 반환한다. 소속 판정·
+   * 가시 경계 클램프·phantom end 시맨틱은 모두 엔진 단일 소스에서 수행된다.
+   *
+   * @param sourceOffset - story 절대 오프셋
+   * @param preferLineEnd - true면 라인 끝 주차 시맨틱 (라인 중간은 클릭 위치 유지)
+   * @returns 커서 배치 정보 또는 null
+   */
+  private _getCursorPlacementFromEngine(sourceOffset: number, preferLineEnd: boolean): CursorPlacement | null {
+    const engine = this._paragraph.engine;
+    if (!engine) return null;
+    const placement = engine.getCursorPlacement(sourceOffset - this._contentFrom, preferLineEnd);
+    if (!placement) return null;
+    return { sourceOffset: placement.sourceOffset + this._contentFrom, atEndOfChar: placement.atEndOfChar };
+  }
+
+  /**
+   * 뷰포트 좌표(x, y) 위치의 문자에 해당하는 소스 오프셋을 반환한다.
+   * canvas 모드 문단은 엔진 `getOffsetFromPoint`로 매핑한다(span 트리 부재 —
+   * 클라이언트 px를 문단 로컬 mm로 환산해 엔진에 전달한다).
    *
    * @param x - 뷰포트 x 좌표
    * @param y - 뷰포트 y 좌표
    * @returns CursorPosition 또는 null
    */
    getCharOffsetFromPoint(x: number, y: number): CursorPosition | null {
+    if (this._isCanvasMode()) {
+      return this._getOffsetFromPointEngine(x, y);
+    }
     const columns = this._getAllColumns();
 
     // y 범위에 있는 컬럼들 중 x에 가장 가까운 컬럼 찾기
@@ -565,13 +615,82 @@ export class TextEditCoordinateMapper {
   }
 
   /**
+   * 이 문단이 canvas 렌더 모드인지 판정한다 — span 트리가 없으므로
+   * span 순회 기반 API(getCharOffsetFromPoint 등)는 엔진 쿼리로 분기한다.
+   */
+  private _isCanvasMode(): boolean {
+    const el = this._paragraph as unknown as { renderMode?: 'dom' | 'canvas' };
+    return el.renderMode === 'canvas';
+  }
+
+  /**
+   * canvas 모드 클릭 매핑 — 엔진 `getOffsetFromPoint`(지면 절대 mm)로 조회한다.
+   * 클라이언트 px를 문단 로컬 mm로 환산해 전달하고, 결과는 story 절대 오프셋으로
+   * 변환해 반환한다.
+   *
+   * @param x - 뷰포트 x 좌표
+   * @param y - 뷰포트 y 좌표
+   * @returns CursorPosition 또는 null
+   */
+  private _getOffsetFromPointEngine(x: number, y: number): CursorPosition | null {
+    const engine = this._paragraph.engine;
+    if (!engine) return null;
+    const paraRect = this._paragraph.getBoundingClientRect();
+    const scale = this._manager.scale || 1;
+    const pageEl = (this._paragraph as unknown as { _findPageElement: () => { engine?: { ppm: number } } | null })._findPageElement();
+    const ppm = pageEl?.engine?.ppm ?? 3.78;
+    const parentAbsRect = engine.data?.parentAbsRect;
+    // 클라이언트 px → (문단 로컬 mm + parentAbsRect 원점) = 지면 절대 mm.
+    const xMm = (x - paraRect.left) / (scale * ppm) + (parentAbsRect?.absLeft ?? 0);
+    const yMm = (y - paraRect.top) / (scale * ppm) + (parentAbsRect?.absTop ?? 0);
+    const result = engine.getOffsetFromPoint(xMm, yMm);
+    if (!result) return null;
+    return { textOffset: result.textOffset + this._contentFrom };
+  }
+
+  /**
+   * canvas 모드 선택 rect — 엔진 `getSelectionRects`(mm)를 paragraph local
+   * 픽셀로 변환해 반환한다.
+   *
+   * @param startOffset - story 절대 시작 오프셋
+   * @param endOffset - story 절대 끝 오프셋 (제외)
+   * @returns 선택 rect 배열
+   */
+  private _getTextRangeFromEngine(startOffset: number, endOffset: number): { top: number; left: number; width: number; height: number }[] {
+    const engine = this._paragraph.engine;
+    if (!engine) return [];
+    const pageEl = (this._paragraph as unknown as { _findPageElement: () => { engine?: { ppm: number } } | null })._findPageElement();
+    const ppm = pageEl?.engine?.ppm ?? 3.78;
+    const parentAbsRect = engine.data?.parentAbsRect;
+    const mmRects = engine.getSelectionRects(
+      startOffset - this._contentFrom,
+      endOffset - this._contentFrom,
+    );
+    return mmRects.map(r => ({
+      left: (r.left - (parentAbsRect?.absLeft ?? 0)) * ppm,
+      top: (r.top - (parentAbsRect?.absTop ?? 0)) * ppm,
+      width: r.width * ppm,
+      height: r.height * ppm,
+    }));
+  }
+
+  /**
    * start부터 end까지(끝 제외)의 선택 사각형 배열을 반환한다.
+   *
+   * canvas 모드 문단은 엔진 `getSelectionRects`(walk 기반 라인별 rect 산출,
+   * §4.4 선택 rect 산출 계약 준수)로 대체한다 — span 트리가 없어 span 순회
+   * 경로는 사용 불가.
+   *
    * @param startOffset - 시작 source 오프셋
    * @param endOffset - 끝 source 오프셋
    * @returns Rect 배열
    */
   getTextRange(startOffset: number, endOffset: number): { top: number; left: number; width: number; height: number }[] {
     if (startOffset >= endOffset) return [];
+
+    if (this._isCanvasMode()) {
+      return this._getTextRangeFromEngine(startOffset, endOffset);
+    }
 
     const columns = this._getAllColumns();
     const paraRect = this._paragraph.getBoundingClientRect();

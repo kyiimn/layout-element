@@ -210,6 +210,17 @@ export class TextEditController {
   }
 
   /**
+   * 이 컨트롤러가 편집 세션을 소유 중인지 (textarea 포커스 보유).
+   * 하이브리드 게이트(CANVAS_RENDERING.md §6)가 소비한다 — 컨트롤러 존재만으로는
+   * 편집 중이 아니다(edit 생성 후 blur해도 인스턴스는 남는다).
+   *
+   * @returns 포커스 보유 여부
+   */
+  get isFocused(): boolean {
+    return this._isFocused;
+  }
+
+  /**
    * 커서 주차 bias — 라인 경계 offset에서 어느 라인 소속인지.
    * 외부 UI 표시용이며 bias를 변경하려면 `setCursorBias`를 사용한다.
    */
@@ -1329,9 +1340,15 @@ export class TextEditController {
 
     // \n 위치나 trailing space처럼 매핑이 없는 offset은 커서가 직접
     // 위치할 수 없으므로, 마지막 visible 문자(offset === visualBounds.end - 1)를
-    // 라인 끝으로 취급한다.
+    // 라인 끝으로 취급한다. endOfBlock 라인의 \n 주차(offset === prev.end &&
+    // content[offset-1] === '\n')도 라인 끝 주차다 — targetVisualEnd 클램프가
+    // 상대 위치(라인 끝 근처)를 유지한다.
+    const contentStr = this._textarea.value;
+    const isBlockEndBoundary = visualBoundsPrev !== null
+      && offset === visualBoundsPrev.end
+      && contentStr[offset - 1] === "\n";
     let isAtLineStart = atVisualLineStart;
-    let isAtLineEnd = atVisualLineEnd
+    let isAtLineEnd = atVisualLineEnd || isBlockEndBoundary
       || (visualBounds !== null
         && offset === visualBounds.end - 1
         && this._mapper.getCursorPlacement(offset + 1) === null);
@@ -1417,12 +1434,10 @@ export class TextEditController {
   }
 
   /**
-   * 주어 라인의 끝 source offset(다음 라인 시작 또는 텍스트 끝)을 반환한다.
-   */
-  /**
    * 주어 라인에서 커서가 위치할 수 있는 최대 source offset을 반환한다.
-   * 빈 줄은 라인 시작 자체가 끝이며, 일반 라인은 다음 라인 시작 - 1(\\n 위치),
-   * 마지막 라인은 텍스트 끝(content.length)이다.
+   * endOfBlock 라인은 \n 위치(다음 라인 시작 - 1), 소프트 래핑 라인은
+   * 라인 경계(다음 라인 시작 = 다음 라인 첫 글자 위 주차), 마지막 라인은
+   * 텍스트 끝(content.length)이다.
    */
   private _getLineEndSourceOffset(columnIndex: number, lineIndex: number): number {
     const model = this._paragraph.model;
@@ -1440,7 +1455,11 @@ export class TextEditController {
     if (lineStart === null) {
       return Math.max(0, nextStart - 1);
     }
-    return Math.max(lineStart, nextStart - 1);
+    // nextStart가 \n 바로 다음이면(현재 라인 endOfBlock) lineEnd는 \n 위치
+    // (nextStart - 1)다. 소프트 래핑 라인의 경계는 커서가 다음 라인 첫 글자 위에
+    // 주차하는 위치(nextStart)다.
+    const isBlockEnd = content[nextStart - 1] === "\n";
+    return isBlockEnd ? nextStart - 1 : nextStart;
   }
 
   /**
@@ -2503,12 +2522,18 @@ export class TextEditController {
       // 이전 라인 끝으로 채우는 케이스) 커서가 2 라인 위 끝에 그려진다.
       // bias 'start'는 다음 라인 시작 소속이므로 default placement로 폴백한다.
       // bias 'end'는 이전 라인 끝 소속이므로 phantom이 정상이다 (가드하지 않음).
+      // 엔진 경로(mapper → engine.getCursorPlacement)는 라인 중간 offset도 lv로
+      // 이동시키므로(라인 끝 주차 시맨틱), 같은 라인이면 phantom이 offset을 가리지
+      // 않는다 — 클릭한 글자(offset)와 placement가 같은 라인인데 sourceOffset이
+      // 다르면 클릭 위치 유지가 우선이다 (verify-canvas-parity 발견 — DOM 경로의
+      // _sourceToPlacement 맵은 중간 offset을 그대로 유지했다).
       const offsetLine = this._mapper.getLineInfoBySourceOffset(offset);
       const placementLine = this._mapper.getLineInfoBySourceOffset(placement.sourceOffset);
       const sameLine = offsetLine !== null && placementLine !== null &&
         offsetLine.columnIndex === placementLine.columnIndex &&
         offsetLine.lineIndex === placementLine.lineIndex;
-      if (!sameLine) {
+      const placementMoved = placement.sourceOffset !== offset;
+      if (!sameLine || (placementMoved && placement.atEndOfChar)) {
         const defaultPlacement = this._mapper.getCursorPlacement(offset, false);
         // default placement도 구멍 채우기 패스에서 이전 라인 끝을 참조하는 케이스
         // (leading space 라인 시작)가 있다 — placement 소속이 offset 소속과 다르면

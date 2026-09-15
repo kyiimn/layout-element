@@ -4,9 +4,11 @@ import { ColorRegistry, FontLoader } from "@/resource";
 import { InheritStyle, ParagraphData, ParagraphOverlapMode, ParagraphStyle, RenderCompleteEventDetail, TextInlineData, TextStyle } from "@/types";
 import { genUUID, valueEqual, createAiProcessingOverlay, setAiProcessingActive, isAiProcessingActive, removeAiProcessingOverlay } from "@/utils";
 import { checkOverlapMm } from "@/engine";
+import { DEFAULT_PARAGRAPH_RENDER_MODE } from "@/constants/defaults";
 import { LayoutBoxElement } from "./box.element";
 import { LayoutImageElement } from "./image.element";
 import { LayoutColumnElement } from "./column.element";
+import { LayoutCanvasElement } from "./canvas.element";
 
 const HOST_STYLE_ID = '__layout_host_style__';
 import { LayoutPageElement } from "./page.element";
@@ -42,6 +44,13 @@ export class LayoutParagraphElement extends HTMLElement {
   private _zIndex: number;
 
   private _overlapMode: ParagraphOverlapMode = 'box';
+
+  /**
+   * 렌더 모드 — 기본값 `DEFAULT_PARAGRAPH_RENDER_MODE`(단계 5 canvas 기본값화).
+   * `'dom'`: span 트리 (패리티 참조 경로). `'canvas'`: x-layout-canvas 1장 페인트.
+   * 하이브리드 계약(§6): 포커스 문단은 항상 'dom'.
+   */
+  private _renderMode: 'dom' | 'canvas' = DEFAULT_PARAGRAPH_RENDER_MODE;
 
   private _editableText: boolean = false;
   private _editController: TextEditController | null = null;
@@ -467,6 +476,23 @@ export class LayoutParagraphElement extends HTMLElement {
 
     const overflowAfter = this._model.overflow;
 
+    // 하이브리드 계약(§6): 편집 세션 소유 문단만 DOM — 컨트롤러 인스턴스는
+    // blur 후에도 남으므로 포커스 보유 여부로 판정한다 (optimistic span·조합
+    // temp span은 DOM 전용 메커니즘).
+    const effectiveMode: 'dom' | 'canvas' = this._editController?.isFocused ? 'dom' : this._renderMode;
+
+    if (effectiveMode === 'canvas') {
+      this._renderCanvas();
+      this.dispatchEvent(new CustomEvent('render-complete', {
+        detail: renderStats,
+        bubbles: true,
+        composed: true,
+      }));
+      return;
+    }
+
+    this.querySelector('x-layout-canvas')?.remove();
+
     const needsFullRecreate = this._perfShouldFullRecreate(lineCountBefore, overflowBefore, overflowAfter);
 
     if (needsFullRecreate) {
@@ -511,6 +537,25 @@ export class LayoutParagraphElement extends HTMLElement {
       bubbles: true,
       composed: true,
     }));
+  }
+
+  private _renderCanvas(): void {
+    const existing = this.querySelector('x-layout-canvas') as LayoutCanvasElement | null;
+    const canvasEl = existing ?? document.createElement('x-layout-canvas') as LayoutCanvasElement;
+    if (!existing) {
+      this.replaceChildren();
+      this.appendChild(canvasEl);
+    } else {
+      const colEls = this.querySelectorAll('x-layout-column');
+      for (let i = 0; i < colEls.length; i++) {
+        colEls[i].remove();
+      }
+    }
+    canvasEl.engine = this._model ?? null;
+    canvasEl.paint();
+    if (this._editController) {
+      this._editController.postRender(false, 0);
+    }
   }
 
   /**
@@ -1090,6 +1135,23 @@ export class LayoutParagraphElement extends HTMLElement {
 
   get overlapMode(): ParagraphOverlapMode {
     return this._overlapMode;
+  }
+
+  /**
+   * 렌더 모드를 전환한다 — 변경 시 구조 재생성 플래그를 세우고 재렌더한다.
+   * 포커스 문단(편집 세션 소유)은 하이브리드 계약(§6)상 'dom'으로 강제된다.
+   *
+   * @param value - `'dom'` | `'canvas'`
+   */
+  set renderMode(value: 'dom' | 'canvas') {
+    if (this._renderMode === value) return;
+    this._renderMode = value;
+    this.markStructureChangedAndRender();
+  }
+
+  /** 렌더 모드 (기본 'dom'). */
+  get renderMode(): 'dom' | 'canvas' {
+    return this._renderMode;
   }
 
   /**

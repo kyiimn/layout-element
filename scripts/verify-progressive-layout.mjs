@@ -107,6 +107,12 @@ try {
     };
     await docOff.render();
     await sleep(200);
+    // 단계 5 canvas 기본값화 — OFF 기준선은 DOM span을 전제하므로 'dom' 고정.
+    for (const p of docOff.querySelectorAll('x-layout-paragraph')) {
+      p.renderMode = 'dom';
+      p.flushRender();
+    }
+    await sleep(200);
     const domTextOf = (doc) => [...doc.querySelectorAll('x-layout-paragraph')]
       .map(p => [...p.querySelectorAll('x-layout-column')]
         .map(col => [...col.shadowRoot.querySelectorAll('span[data-source-offset]')]
@@ -133,15 +139,20 @@ try {
     docOn.data = {
       id: 'pl-doc-on', width: 190, height: 220, columns: 1, gap: 0,
       paragraphStyle: { lineGap: 1.2 }, textStyle: { fontSize: 4 },
-      threads: [{ id: 't-on', paragraphIds: ['p1-para', 'p2-para'], content: story }],
-      pages: [mkPage('p1', 0, story), mkPage('p2', 115, '')],
+      threads: [{ id: 't-on', paragraphIds: ['on1-para', 'on2-para'], content: story }],
+      pages: [mkPage('on1', 0, story), mkPage('on2', 115, '')],
     };
     await docOn.render();
+    // 단계 5 canvas 기본값화 — ON 패리티 비교도 DOM span 기준이므로 'dom' 고정.
+    for (const p of docOn.querySelectorAll('x-layout-paragraph')) {
+      p.renderMode = 'dom';
+      p.flushRender();
+    }
     await sleep(300);
     out.onPageCount = docOn.querySelectorAll('x-layout-page').length;
     out.onEngineComplete = docOn.engine.pageEngines.length === 2;
-    const pe1On = docOn.engine.findEngineById('p1-para');
-    const pe2On = docOn.engine.findEngineById('p2-para');
+    const pe1On = docOn.engine.findEngineById('on1-para');
+    const pe2On = docOn.engine.findEngineById('on2-para');
     out.onChain = pe1On?.isThreadFrame === true && pe2On?.isThreadFrame === true
       && pe2On.contentFrom === pe1On.overflowContentFrom;
     out.onChainDetail = `f2.from=${pe2On?.contentFrom} f1.tail=${pe1On?.overflowContentFrom}`;
@@ -158,6 +169,12 @@ try {
       ...docOn.data,
       pages: [mkPage('r1', 0, story), mkPage('r2', 115, story), mkPage('r3', 0, story)],
     };
+    await sleep(300);
+    // 재주입 문단도 canvas 기본값 — DOM span 관찰을 위해 'dom' 고정.
+    for (const p of docOn.querySelectorAll('x-layout-paragraph')) {
+      p.renderMode = 'dom';
+      p.flushRender();
+    }
     await sleep(300);
     out.requeueRendered = [...docOn.querySelectorAll('x-layout-paragraph')]
       .filter(p => Array.from(p.querySelectorAll('x-layout-column')).some(col => col.shadowRoot.querySelectorAll('span[data-source-offset]').length > 0)).length;

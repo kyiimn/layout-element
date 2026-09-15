@@ -24,6 +24,7 @@ export * from "./paragraph-text-utils";
 export * from "./lru-engine";
 export * from "./paragraph-hanging";
 export * from "./paragraph-print";
+export * from "./paragraph-canvas";
 export * from "./paragraph-hash";
 export * from "./paragraph-overlap";
 export * from "./page-engine";

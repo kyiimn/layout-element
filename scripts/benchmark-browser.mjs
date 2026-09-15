@@ -174,6 +174,17 @@ try {
   printResult('8e. 300p 문서 타이핑 — 입력 동기', stats(typed.inputTimes));
   printResult('8e. 300p 타이핑 rAF 델타', stats(typed.frameDeltas));
 
+  // 8f. canvas 모드 실측 (CANVAS_RENDERING.md 단계 4) — DOM 경로 대비
+  // 8f-1. 윈도우 3p의 비-포커스 문단을 canvas로 전환 후 타이핑
+  console.log('\n=== 8f. canvas 모드 실측 (문단 한정, 하이브리드) ===\n');
+  const canvasBuild = await page.evaluate(() => window.bench.large.canvasSwitch());
+  console.log(`  8f-1. 윈도우 3p canvas 전환: ${canvasBuild.switchMs.toFixed(1)}ms  canvases=${canvasBuild.canvases}  남은 spans=${canvasBuild.spans}`);
+  const canvasTyped = await page.evaluate(() => window.bench.large.typeInPage(150, 20));
+  printResult('8f-2. canvas 모드 타이핑 — 입력 동기', stats(canvasTyped.inputTimes));
+  printResult('8f-3. canvas 모드 타이핑 rAF 델타', stats(canvasTyped.frameDeltas));
+  const canvasMem = await page.evaluate(() => window.bench.large.memoryMB());
+  console.log(`  메모리(canvas 모드): ${canvasMem === null ? 'N/A' : canvasMem.toFixed(1) + 'MB'}`);
+
   // ── 요약 ──
   console.log('\n── 요약 (60fps 프레임 예산 16.7ms 기준) ──');
   for (const r of results) {
