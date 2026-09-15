@@ -19,6 +19,7 @@ import { ParagraphStyle, TextStyle } from "@/types";
 import type { AbsRect, FlipLayoutOptions, FontLoaderEngine, ColorRegistryEngine } from "./types";
 import { GridCalculatorEngine } from "./grid-calculator-engine";
 import { ThreadEngine, ThreadLayoutOptions, ThreadLayoutResult } from "./thread-engine";
+import { collectAutoThreadChains } from "./auto-thread-splitter";
 import { PageEngine } from "./page-engine";
 import { ParagraphEngine } from "./paragraph-engine";
 import type { BoxEngine } from "./box-engine";
@@ -159,7 +160,36 @@ export class DocumentEngine {
    * 구축되어 있다(자체 layout 또는 `adoptPageEngines`). threads가 없으면 no-op.
    */
   layout(): void {
+    this._ensureAutoThreads();
     this._layoutThreads();
+  }
+
+  /**
+   * 자동 체인 분할(감사 §6.7.5 옵션 B) — group-article 감지 기반 기사별
+   * 체인을 engine.data.threads에 materialize한다.
+   *
+   * **정책 게이트**: 데이터에 명시적 threads가 존재하면 정책 OFF — 호스트
+   * 정의가 우선하며 기존 동작은 byte-identical이다. 명시적 threads가 없고
+   * group-article 박스 감지 결과가 있을 때만 자동 체인을 주입한다.
+   *
+   * **반영 대상은 이 엔진의 `_data.threads`뿐이다** — 모든 스레드 소비자
+   * (thread-relayout-coordinator, edit-manager, document/page 요소)가
+   * `engine.data.threads`를 직접 읽으므로 소비자 변경 없이 자동 체인이
+   * 타이핑 전파·writeback·커서 이관 전 경로에 보인다. 호스트 데이터 객체는
+   * 변이하지 않는다 (단일 소스는 엔진 — RULES.md §3).
+   *
+   * story는 발명하지 않는다: 자동 체인의 `content`는 undefined이며
+   * `ThreadEngine` step-1 폴백(`thread.content ?? head.textContent`)이
+   * head 프레임이 소유한 텍스트를 story로 쓴다. 이후 편집 writeback은
+   * `originOf`를 통해 이 materialize된 객체에 기록된다 (identity 계약 —
+   * materialize는 최초 1회이고 이후 재사용하므로 writeback 기록이 유지된다).
+   */
+  private _ensureAutoThreads(): void {
+    const threads = this._data.threads;
+    if (threads !== undefined && threads.length > 0) return;
+    const auto = collectAutoThreadChains(this._pageEngines, threads);
+    if (auto.length === 0) return;
+    this._data = { ...this._data, threads: auto };
   }
 
   /**
