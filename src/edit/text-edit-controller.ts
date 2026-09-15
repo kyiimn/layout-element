@@ -864,6 +864,16 @@ export class TextEditController {
 
     this.normalizeNow();
     this._cursorEl.visible = false;
+    // 하이브리드 canvas 복귀 렌더: blur는 render() 게이트 입력(isFocused)을
+    // 바꾸지만 렌더 자체를 예약하지 않는다 — 예제 호스트의 focusChange 핸들러가
+    // editableText=false + flushRender를 대신 수행해 왔으나, 이는 호스트 의존이다.
+    // 텍스트 편집 모드라도 포커스 회수 순간에 canvas 기본값(renderMode)으로
+    // 즉시 전환하는 것이 엔진 소유 계약이다 — blur 시점에 즉시 flushRender한다
+    // (scheduleRender의 microtask 지연 없이 커밋 후 즉시 전환).
+    if (this._paragraph.renderMode === 'canvas') {
+      this._paragraph.markStructureChangedAndRender();
+      this._paragraph.flushRender();
+    }
   }
 
   /**

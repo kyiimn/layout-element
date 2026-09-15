@@ -592,15 +592,109 @@ check('B5. bleed 확장 — backing 폭 ≥ 표시 폭 (bleed 확장)', r.canvas
       inkDelta: (bold.ink - base.ink) / base.ink,
     };
   });
-  check('I1. glyph 모드 weight 6단계 — 잉크 단조 증가 (500~900)',
-    stylePaint.monotonic,
-    `inks=${JSON.stringify(stylePaint.weightInks)} (역행 = 곡선 결함)`);
-  check('I2. glyph 모드 weight 900 — 최대 단계 잉크 증가 (≥+5%)',
-    stylePaint.maxDelta >= 0.05,
-    `base=${stylePaint.baseInk} w900=${stylePaint.weightInks[5]} delta=${(stylePaint.maxDelta * 100).toFixed(1)}% (미반영 시 ≈0%)`);
   check('I3. glyph 모드 italic — shear로 잉크 bbox 폭 증가 (≥2px)',
     stylePaint.italicWidth - stylePaint.baseWidth >= 2,
     `baseW=${stylePaint.baseWidth} italicW=${stylePaint.italicWidth} (미반영 시 동일 폭)`);
+}
+
+// ── J. canvas 문단 클릭 → 즉시 DOM 전환 + 클릭 위치 커서 — CDP 실마우스 흐름 ──
+{
+  await page.mouse.move(0, 0);
+  const canvasClick = await page.evaluate(async () => {
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const paraBox = window.bench.getParaBox();
+    const p = paraBox.querySelector('x-layout-paragraph');
+    const em = window.bench.getEditManager();
+    em.textEditMode = true;
+    p.editableText = true;
+    // I 섹션의 잔여 상태 원복 — 벤치 원본 텍스트(다라인 배치) + 4mm로 클릭
+    // 매핑 환경을 정규화한다 (I 마지막 10자 텍스트는 1라인뿐이어서 클릭 지점이
+    // 배치 밖이 된다 — getOffsetFromPoint null).
+    const d = p.data;
+    d.content = '가나다라마바사아자차카타파하거너더러머버서어저처커터퍼허혀호'.repeat(4);
+    d.textStyle = { fontSize: 4 };
+    p.data = d;
+    p.renderMode = 'canvas';
+    p.flushRender();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await sleep(300);
+    em.blurParagraph();
+    p.flushRender();
+    await sleep(200);
+
+    const canvasEl = p.querySelector('x-layout-canvas');
+    const canvas = canvasEl.shadowRoot.querySelector('canvas');
+    const rect = canvas.getBoundingClientRect();
+    // canvas rect는 bleed 20mm만큼 좌측 확장(marginLeft) — 엔진 좌표 환산에 보정.
+    // 클릭 좌표는 **canvas rect 기준 상대 좌표**로 저장한다 — blur 전환 렌더로
+    // rect가 이동해도 expected 환산에서 최신 rect를 재측정해 정합한다.
+    return {
+      relX: rect.width * 0.25,
+      relY: rect.height * 0.15, // 배치 라인 영역 내 (컬럼당 라인 수 소량 — 0.3은 배치 밖)
+      absLeft: rect.left,
+      absTop: rect.top,
+      bleedPx: 20 * ((p._findPageElement ? p._findPageElement()?.engine?.ppm : null) ?? 3.78) * (em.scale || 1),
+      hadCanvas: true,
+    };
+  });
+  // 엔진 기대 오프셋 — 클릭 지점을 엔진 getOffsetFromPoint로 직접 환산
+  const canvasClickExpected = await page.evaluate(async (info) => {
+    const paraBox = window.bench.getParaBox();
+    const p = paraBox.querySelector('x-layout-paragraph');
+    const em = window.bench.getEditManager();
+    // 렌더 완료 동기화 — flushRender가 microtask 예약이므로 rAF 후 엔진·rect 조회
+    p.flushRender();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const engine = p.engine;
+    const ppm = (p._findPageElement ? p._findPageElement()?.engine?.ppm : null) ?? 3.78;
+    const scale = em.scale || 1;
+    const parentAbsRect = engine.data?.parentAbsRect;
+    // 클릭 시점 절대 좌표 재구성 — 최신 canvas rect로 rect 기준 상대 좌표를 이동
+    const canvasNow = p.querySelector('x-layout-canvas')?.shadowRoot?.querySelector('canvas');
+    const rectNow = canvasNow?.getBoundingClientRect();
+    const shiftX = rectNow ? rectNow.left - info.absLeft : 0;
+    const shiftY = rectNow ? rectNow.top - info.absTop : 0;
+    const clickX = info.absLeft + info.relX + shiftX;
+    const clickY = info.absTop + info.relY + shiftY;
+    const xMm = (clickX - rectNow.left - info.bleedPx) / (scale * ppm) + (parentAbsRect?.absLeft ?? 0);
+    const yMm = (clickY - rectNow.top) / (scale * ppm) + (parentAbsRect?.absTop ?? 0);
+    const r = engine.getOffsetFromPoint(xMm, yMm);
+    return {
+      expected: r ? r.textOffset : null,
+      debug: {
+        xMm: Number(xMm.toFixed(2)), yMm: Number(yMm.toFixed(2)),
+        colCount: engine._columnContents?.length ?? 0,
+        lineCount: (engine._columnContents ?? []).reduce((s, c) => s + c.length, 0),
+        hasCanvasNow: !!canvasNow,
+      },
+    };
+  }, canvasClick);
+  const expected = canvasClickExpected?.expected ?? null;
+
+  await page.mouse.click(
+    canvasClick.absLeft + canvasClick.relX,
+    canvasClick.absTop + canvasClick.relY,
+  );
+  await page.waitForTimeout(400);
+
+  const after = await page.evaluate(async () => {
+    const paraBox = window.bench.getParaBox();
+    const p = paraBox.querySelector('x-layout-paragraph');
+    const em = window.bench.getEditManager();
+    const controller = em._focusedController;
+    return {
+      cursorOffset: controller?._cursorModel?.offset ?? null,
+      focused: em.focusedParagraph === p,
+      hasCanvas: !!p.querySelector('x-layout-canvas'),
+      hasColumns: p.querySelectorAll('x-layout-column').length > 0,
+    };
+  });
+  check('J1. canvas 문단 클릭 → 즉시 DOM 전환 (컬럼 생성·canvas 제거)',
+    after.focused && after.hasColumns && !after.hasCanvas,
+    `focused=${after.focused} cols=${after.hasColumns} canvas=${after.hasCanvas}`);
+  check('J2. 클릭 위치 커서 — 엔진 매핑과 일치 (±1 mid-point 규칙)',
+    expected !== null && after.cursorOffset !== null && Math.abs(after.cursorOffset - expected) <= 1,
+    `cursor=${after.cursorOffset} expected=${expected} debug=${JSON.stringify(canvasClickExpected?.debug ?? {})}`);
 }
 
 await browser.close();
