@@ -641,6 +641,11 @@ export class TextEditCoordinateMapper {
     const ppm = pageEl?.engine?.ppm ?? 3.78;
     const parentAbsRect = engine.data?.parentAbsRect;
     // 클라이언트 px → (문단 로컬 mm + parentAbsRect 원점) = 지면 절대 mm.
+    // 장평 보정 불필요 — paint가 translate(charOffset) 후 scale(wr×0.88)로
+    // 글자 **폭만** 축소하므로 글자 시작 위치는 배치 좌표 그대로다. 화면 클릭
+    // x를 배치 좌표로 직접 해석하는 것이 정확하다. 보정(x/0.88)을 적용하면
+    // 클릭 글자보다 최대 4글자 우측으로 어긋난다 (실측 스캔: frac 0.26~0.30에서
+    // diff -3~-4 — verify-canvas-parity J 판정이 이 실측으로 확정됨).
     const xMm = (x - paraRect.left) / (scale * ppm) + (parentAbsRect?.absLeft ?? 0);
     const yMm = (y - paraRect.top) / (scale * ppm) + (parentAbsRect?.absTop ?? 0);
     const result = engine.getOffsetFromPoint(xMm, yMm);

@@ -618,6 +618,23 @@ check('B5. bleed 확장 — backing 폭 ≥ 표시 폭 (bleed 확장)', r.canvas
     p.flushRender();
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     await sleep(300);
+    // 클릭 시점 mapper 입력 캡처 — 커서 0 폴백의 직접 원인 확인용
+    window.__jTrace = [];
+    const targetCtrl = p._editController;
+    if (targetCtrl) {
+      const origEngine = targetCtrl._mapper._getOffsetFromPointEngine.bind(targetCtrl._mapper);
+      targetCtrl._mapper._getOffsetFromPointEngine = (x, y) => {
+        const r = origEngine(x, y);
+        window.__jTrace.push({ fn: 'enginePath', x: Math.round(x), y: Math.round(y), off: r?.textOffset ?? null });
+        return r;
+      };
+      const origNearest = targetCtrl._mapper.getNearestOffsetFromPoint.bind(targetCtrl._mapper);
+      targetCtrl._mapper.getNearestOffsetFromPoint = (x, y) => {
+        const r = origNearest(x, y);
+        window.__jTrace.push({ fn: 'nearest', x: Math.round(x), y: Math.round(y), off: r?.textOffset ?? null });
+        return r;
+      };
+    }
     em.blurParagraph();
     p.flushRender();
     await sleep(200);
@@ -629,8 +646,8 @@ check('B5. bleed 확장 — backing 폭 ≥ 표시 폭 (bleed 확장)', r.canvas
     // 클릭 좌표는 **canvas rect 기준 상대 좌표**로 저장한다 — blur 전환 렌더로
     // rect가 이동해도 expected 환산에서 최신 rect를 재측정해 정합한다.
     return {
-      relX: rect.width * 0.25,
-      relY: rect.height * 0.15, // 배치 라인 영역 내 (컬럼당 라인 수 소량 — 0.3은 배치 밖)
+      relX: rect.width * 0.28,
+      relY: 2 * ((window.__jPPM ?? 3.78) || 3.78), // 컬럼 첫 라인 중앙(2mm) — rect.top 경계 클릭은 부동소수 오차로 라인 밖(실측: relY -0.2mm → null)
       absLeft: rect.left,
       absTop: rect.top,
       bleedPx: 20 * ((p._findPageElement ? p._findPageElement()?.engine?.ppm : null) ?? 3.78) * (em.scale || 1),
@@ -649,6 +666,7 @@ check('B5. bleed 확장 — backing 폭 ≥ 표시 폭 (bleed 확장)', r.canvas
     const ppm = (p._findPageElement ? p._findPageElement()?.engine?.ppm : null) ?? 3.78;
     const scale = em.scale || 1;
     const parentAbsRect = engine.data?.parentAbsRect;
+    const paraRect = p.getBoundingClientRect();
     // 클릭 시점 절대 좌표 재구성 — 최신 canvas rect로 rect 기준 상대 좌표를 이동
     const canvasNow = p.querySelector('x-layout-canvas')?.shadowRoot?.querySelector('canvas');
     const rectNow = canvasNow?.getBoundingClientRect();
@@ -656,8 +674,12 @@ check('B5. bleed 확장 — backing 폭 ≥ 표시 폭 (bleed 확장)', r.canvas
     const shiftY = rectNow ? rectNow.top - info.absTop : 0;
     const clickX = info.absLeft + info.relX + shiftX;
     const clickY = info.absTop + info.relY + shiftY;
-    const xMm = (clickX - rectNow.left - info.bleedPx) / (scale * ppm) + (parentAbsRect?.absLeft ?? 0);
-    const yMm = (clickY - rectNow.top) / (scale * ppm) + (parentAbsRect?.absTop ?? 0);
+    // expected 계산은 mapper와 동일 공식(paraRect 기준, 장평 보정 없음)으로
+    // 수행한다 — 글자 시작 위치는 배치 좌표 그대로라 화면 x를 직접 배치 좌표로
+    // 해석하는 것이 정확하다 (실측 스캔: 0.88 보정 적용 시 최대 4글자 우측
+    // 어긋남 — canvas.element의 translate(charOffset)+scale(폭만 축소) 구조).
+    const xMm = (clickX - paraRect.left) / (scale * ppm) + (parentAbsRect?.absLeft ?? 0);
+    const yMm = (clickY - paraRect.top) / (scale * ppm) + (parentAbsRect?.absTop ?? 0);
     const r = engine.getOffsetFromPoint(xMm, yMm);
     return {
       expected: r ? r.textOffset : null,
@@ -677,24 +699,79 @@ check('B5. bleed 확장 — backing 폭 ≥ 표시 폭 (bleed 확장)', r.canvas
   );
   await page.waitForTimeout(400);
 
-  const after = await page.evaluate(async () => {
+  const after = await page.evaluate(async (info) => {
     const paraBox = window.bench.getParaBox();
     const p = paraBox.querySelector('x-layout-paragraph');
     const em = window.bench.getEditManager();
     const controller = em._focusedController;
+    // 커서가 그려진 x 좌표 — 클릭한 글자의 rect.left와 일치해야 한다
+    // (열 어긋남 결함 시 커서가 왼쪽 글자에 그려진다).
+    let cursorLeft = null;
+    const cursorEl = p.shadowRoot?.querySelector('x-layout-cursor');
+    if (cursorEl) {
+      const cursorRect = cursorEl.getBoundingClientRect();
+      cursorLeft = cursorRect.left;
+    }
+    // 클릭 지점 근처의 글자 rect — **클릭 라인(top이 클릭 y 근처)**의 span 중
+    // 클릭 x에 가장 가까운 것. 라인 조건 없이는 컬럼1 라인1 span이 항상
+    // 선택되어 클릭 라인과 다른 글자를 비교한다 (실측 결함).
+    const paraRect = p.getBoundingClientRect();
+    const spans = [...p.querySelectorAll('x-layout-column')]
+      .flatMap(c => [...(c.shadowRoot?.querySelectorAll('span[data-source-offset]:not([data-temporary])') ?? [])]);
+    const clickAbsX = info.absLeft + info.relX;
+    const clickAbsY = info.absTop + info.relY;
+    let nearestSpanLeft = null, nearestSpanChar = null, nearestSpanOffset = null, nearestDist = Infinity;
+    for (const s of spans) {
+      const r = s.getBoundingClientRect();
+      // 클릭 y가 span rect [top, bottom) 내부 — 클릭 라인 귀속
+      if (clickAbsY < r.top - 4 || clickAbsY >= r.bottom + 4) continue;
+      const dist = Math.abs(r.left + r.width / 2 - clickAbsX);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearestSpanLeft = r.left;
+        nearestSpanChar = s.textContent;
+        nearestSpanOffset = Number(s.dataset.sourceOffset);
+      }
+    }
     return {
       cursorOffset: controller?._cursorModel?.offset ?? null,
       focused: em.focusedParagraph === p,
       hasCanvas: !!p.querySelector('x-layout-canvas'),
       hasColumns: p.querySelectorAll('x-layout-column').length > 0,
+      cursorLeft, nearestSpanLeft, nearestSpanChar, nearestSpanOffset,
+      cursorCharDist: cursorLeft !== null && nearestSpanLeft !== null
+        ? Math.abs(cursorLeft - nearestSpanLeft) : null,
+      clickAbsX: info.absLeft + info.relX,
+      // 파자: 커서 offset의 placement·해당 글자 rect·주변 span rect 목록
+      placement: controller
+        ? (controller._mapper.getCursorPlacement(controller._cursorModel.offset, true)
+          ?? controller._mapper.getCursorPlacement(controller._cursorModel.offset))
+        : null,
+      // placement offset의 글자 rect — 커서 위치 정합 판정 소비 (J3)
+      placedSpan: controller ? (() => {
+        const off = controller._cursorModel.offset;
+        const s = spans.find(s2 => Number(s2.dataset.sourceOffset) === off);
+        if (!s) return null;
+        const r = s.getBoundingClientRect();
+        return { left: Number(r.left.toFixed(1)), char: s.textContent };
+      })() : null,
     };
-  });
+  }, canvasClick);
   check('J1. canvas 문단 클릭 → 즉시 DOM 전환 (컬럼 생성·canvas 제거)',
     after.focused && after.hasColumns && !after.hasCanvas,
     `focused=${after.focused} cols=${after.hasColumns} canvas=${after.hasCanvas}`);
   check('J2. 클릭 위치 커서 — 엔진 매핑과 일치 (±1 mid-point 규칙)',
     expected !== null && after.cursorOffset !== null && Math.abs(after.cursorOffset - expected) <= 1,
     `cursor=${after.cursorOffset} expected=${expected} debug=${JSON.stringify(canvasClickExpected?.debug ?? {})}`);
+  // J3: 커서가 **매핑된 글자 위치**에 그려졌는지 — 커서 rect.left와 placement
+  // offset 글자의 rect.left가 일치해야 한다. 클릭 x에 가장 가까운 span과의
+  // 비교는 라인 경계 클릭(mid-point 규칙상 다음 라인 시작)에서 정당하게 다른
+  // 글자를 가리켜 오탐한다 (실측: 클릭 x 205 → 라인1 끝 → 라인2 첫 글자
+  // offset 24, nearest span은 라인1 21번째 글자 — 둘 다 정당).
+  check('J3. 커서가 매핑된 글자에 그려짐 — 커서 x === placement 글자 rect.left',
+    after.cursorLeft !== null && after.placedSpan !== null
+      && Math.abs(after.cursorLeft - after.placedSpan.left) <= 1,
+    `cursorLeft=${after.cursorLeft} placement=${JSON.stringify(after.placement)} placedSpan=${JSON.stringify(after.placedSpan)} (커서가 매핑 글자 시작에 그려져야 함)`);
 }
 
 await browser.close();
