@@ -608,6 +608,17 @@ Enter/compositionend 핸들러는 커서/선택 동기 갱신이 필요하므로
 
 `_dirty` 플래그 + 단일 `_rafId`로 커서 위치 변경 시 중복 DOM 스타일 기록을 방지. 이미 스케줄된 rAF가 있으면 재스케줄하지 않음.
 
+**커서 rect 읽기 단일화 (L-1, 2026-09-15)**: `TextEditController._onInput`의
+optimistic-span 동기 커서 갱신은 rAF 스케줄(`_scheduleCursorSelectionUpdate`)로
+병합됐다 — 같은 프레임의 rAF 커밋(`_debouncedRender` → postRender)이 커서를
+재배치하므로, 입력 경로의 동기 `getBoundingClientRect`는 키당 2회 강제 리플로우
+중 1회였다(실측: GBCR 셀프타임 705→316ms, −55% — `PAGE_STRUCTURE_PERF_AUDIT.md`
+§2.2a). 스케줄된 rAF는 postRender의 `_cancelCursorSelectionUpdate`가 소비하므로
+커밋 도달 프레임에서 갱신 1회로 수렴하고, 커밋 전 시각 피드백은 optimistic
+span이 담당한다. postRender의 소량 동기 배치(`POST_RENDER_DEFER_THRESHOLD` ≤8)
+는 기존 실측 계약(6.4→14.6ms)을 유지하며, 조합(IME) 경로는 동기 갱신을 유지한다
+(조합 underline과의 같은 프레임 정합 — 계약 EDITING_TEXT §1.4).
+
 ### 4.5 선택 하이라이트 div 풀 재사용
 
 | 항목 | 값 |

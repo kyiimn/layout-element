@@ -98,6 +98,87 @@
   PERFORMANCE.md § 11.5의 실기 측정(엔진 2.7ms·4% vs DOM 90%+)을 따른다.
 - 8a/8b/8c는 초기 로드 1회성 비용으로 양호하다.
 
+### 2.2a T1/T2 적용 후 재검증 — virtualization.html 실측 (2026-09-15, 커밋 cc035e9)
+
+> 사용자 보고 "모든 항목 적용 후에도 눈에 띄는 성능 향상이 없다"에 대한
+> 귀속 조사. 판단 기준 페이지: `examples/virtualization.html`
+> (30p, 6체인×5프레임, window=1, editableText). 측정 스크립트는 세션
+> 아티팩트(일회성) — 재현 계측法은 이 절 각주 참조.
+
+**적용 수정의 작동 검증 (계측 카운터)**:
+
+| 수정 | 타이핑 중 발화 여부 | 판정 |
+| --- | --- | --- |
+| T1-1 confirmThreadChain 게이트 | **호출 0회/90키** (수정 전에는 페이지 렌더마다 호출) | ✅ 작동. 단 **타이핑 핫패스에는 원래 없던 경로** — 효과는 초기 로드·스크롤·문서 렌더에만 귀속 |
+| T1-2 data 재주입 게이트 | 타이핑은 `textContent` setter 경로라 게이트를 지나지 않음 | ✅ 작동하나 **타이핑과 무관** — 효과는 undo/외부 재주입에 귀속 |
+| T2-1 페이지 dirty 게이트 | 초기 로드 1회성 경로 | 초기 로드 소폭 개선 (8a 193→179ms) |
+| T2-2 공간 우선순위 | progressive OFF 데모라 미발화 | 이 데모에서는 무효 |
+
+**virtualization.html 타이핑 실측 (head 편집 40키, 체인0, window 0/1/2)**:
+
+| window | 입력 동기 | rAF p50 | rAF p95 | 키당 layoutText |
+| --- | --- | --- | --- | --- |
+| 0 (2-3p 마운트) | avg 8.8~10.2ms | 33~67ms | 117ms | 4~7회 |
+| 1 (기본) | avg 9.0ms | 33ms | 200ms | 4~8회 |
+| 2 | avg 8.6~8.7ms | 33~50ms | 183~233ms | 4~8회 |
+
+**CDP JS 프로파일러 귀속 (head 40키, window=1)** — 총 샘플 7,008ms 중:
+
+| 구간 | 셀프타임 | 비중 | 귀속 |
+| --- | --- | --- | --- |
+| `(program)` — 스타일 재계산·리플로우·페인트 | 3,695ms | **53%** | 브라우저 렌더링 (span 스타일 쓰기 후) |
+| `_applySpanStyle` (column.element.ts) | 1,249ms | **18%** | **77%가 스레드 flush가 하류 프레임을 재렌더하는 경로** (`flushThreadRelayout → render → renderText`), 23%가 초기 span 생성 |
+| `getBoundingClientRect` | 705ms | **10%** | **100% 커서 갱신 `_updateCursorPosition`** (55% `_onInput` 즉시 갱신 + 39% `postRender` 갱신 + 4% 스레드 flush 후) — **키당 2회의 강제 리플로우** |
+| `renderText` (diff 본체) | 636ms | 9% | DOM diff 자체 |
+| 엔진 전체 (layoutText·charWidth·_layoutColumnsPass 등) | ~200ms | **~3%** | 엔진은 범인 아님 (재확인) |
+
+**결론 (사용자 체감 "향상 없음"의 귀속)**:
+
+1. **적용된 T1/T2 수정은 전부 정상 작동한다** (카운터로 확인). 그러나 이 데모의
+   핫패스(타이핑)가 밟는 경로와 수정 경로가 **거의 교차하지 않았다** — T1-1은
+   문서 렌더 시리즈, T1-2는 data 재주입, T2-2는 progressive 전용이라 이 데모
+   (progressive OFF)에서 발화하지 않는다.
+2. **타이핑 병목은 여전히 DOM 3종** (§7.1 재확인): 스타일 재계산·페인트 53% +
+   `_applySpanStyle` 18% + **커서 갱신의 강제 리플로우 10%**. 엔진은 3%.
+   → 조정 계층 수정(캐시·게이트류)은 이 분포에서 구조적으로 체감 한계가 있다.
+3. **신규 실측 발견 — 커서 갱신의 중복 강제 리플로우**: 키 입력마다
+   `_updateCursorPosition`이 **2회** (input 핸들러 즉시 1회 + postRender 1회)
+   `getBoundingClientRect`를 호출해 리플로우를 강제한다. 이는
+   `PERFORMANCE.md §4.4`의 "커서 dirty + rAF 단일 스케줄링" 계약과 어긋나는
+   듯한 중복이며, **T1/T2와 무관한 독립 레버**다 (검증 필요 — 아래 후속 카드).
+4. **신규 실측 발견 — head 편집의 하류 프레임 전 span 재스타일링**:
+   `_applySpanStyle`의 77%가 스레드 flush 재렌더에서 발생. 하류 프레임은
+   `contentFrom`이 +1 shift되므로 모든 span의 `data-source-offset`이 바뀌어
+   diff가 전체를 재작성한다 — §7.1의 "shift 편집 재계산 필수" 결론의 DOM 측
+   확인. 레버는 (a) 체인 분할(이 데모는 이미 5프레임으로 분할됨 — 실측에서
+   layoutText 4~8회/키로 확인, 단일 30프레임 체인이라면 6배), (b) 하류
+   프레임의 span 스타일 쓰기 스킵 폭 확대 (아래 후속 카드).
+
+**재현 계측法**: Playwright(헤드리스)로 virtualization.html 로드 →
+`em.focusParagraph(마운트된 체인 head)` → textarea에 `InputEvent('input')`
+30~40회 (매 키 rAF 2회 대기) → CDP `Profiler.start/stop`으로 샘플 수집.
+주의: `focusParagraph` 직후 textarea는 전체 선택 상태이므로 반드시
+`setSelectionRange(0,0)`으로 붕괴할 것 — 붕괴하지 않으면 첫 키가 스토리
+전체(6,261자)를 교체하는 파괴적 워크로드가 되어 측정이 무효화된다 (본 조사
+1차 측정에서 실제로 발생).
+
+**후속 레버 (신규, DOM 계층 — 감사 로드맵 Tier 2 확장)**:
+
+- **L-1 (커서 갱신 단일화)**: `_updateCursorPosition`의 input 경로와
+  postRender 경로가 같은 프레임에 2회 강제 리플로우를 유도하는지 조사 →
+  rAF 병합으로 1회화. `getBoundingClientRect` 셀프타임의 대부분(키당 ~17ms
+  샘플)이 여기서 나온다. `PERFORMANCE.md §4.4` 계약과 대조 필요.
+- **L-2 (하류 프레임 스타일 쓰기 스킵)**: shift로 `data-source-offset`이
+  전부 바뀐 하류 프레임의 `_applySpanStyle`에서, **스타일 키가 실제로
+  변하지 않은 span**은 쓰기를 건너뛰는 diff 확장. `_skipSpanStyleIfUnchanged`가
+  이미 존재하므로, "offset은 바뀌어도 스타일 문자열은 동일" 판정이 맞는지
+  확인 후 적용. 검증: `verify-dom-diff` + snapshot byte-identical + span
+  style 미기록 캐시 무결성.
+- **L-3 (paint 스코프 축소)**: `(program)` 53%의 정체가 컬럼 단위 스타일
+  재계산·페인트라면, 변이가 커서 위치의 컬럼에 국한될 때 페인트 영역을
+  좁히는 브라우저 힌트(`contain: layout style` 등) 적용 검토 — 단, 걸침표
+  overflow: visible 등 기존 시각 계약과 충돌 여부 선제 확인.
+
 ### 2.3 기존 측정 데이터 소비 (PERFORMANCE.md § 11.5)
 
 - §7.1 스레드 체인 타이핑 비용 귀속: **shift 편집은 모든 줄의 텍스트·위치가
@@ -553,16 +634,46 @@ progressive 모드(`_pumpDisplayPass`, :338)는 시간 분할로 이를 완화�
 
 ### 6.4 Tier 3 — 정책/경고 (적용 시 후속)
 
-- **레이아웃 결과 eviction 금지**: LO 2025 전환(§5.3)과 동일하게
-  `_layoutCache`를 대형 문서 지원 명분으로 축출하는 정책을 만들지 않는다.
+- **레이아웃 결과 eviction 금지** ✅ 계약화 (2026-09-15, RULES.md §5.4 신설) —
+  LO 2025 전환(§5.3)과 동일하게 `_layoutCache`를 대형 문서 지원 명분으로 축출하는
+  정책을 만들지 않는다. 소스 검증 결과 축출 정책이 **이미 존재하지 않음**
+  (`_layoutCache`는 인스턴스 필드 — LRU/용량 상한 없음)을 확인했고, 스레드 스킵
+  판정(`hasLayoutCache` 조건)이 eviction을 구조적으로 금지하므로 구현이 아닌
+  **금지 규칙 신설**로 계약화했다. 소각은 명시적 무효화 경로(resetIncrementalState /
+  updateThreadContext 변경 감지 / textContent setter)만 허용.
   메모리가 재검증 분기보다 싸다 (실측 근거 존재).
-- **영구 페이지 분할 캐시**: 문서 저장 데이터에 페이지별 첫 박스/스토리
-  오프셋 힌트 직렬화 → 복원 시 초기 배치 확정 (LO SwLayoutCache, §5.3).
-- **스크롤 중 이미지 프록시 품질** (InDesign 표시 3단계, §5.1).
-- **페이지 자동 증감 게이트** (InDesign Smart Text Reflow 조건, §5.1) —
-  오버플로우 자동 페이지 추가 기능을 만든다면 키 입력 단위가 아니어야 한다.
-- **경우에 따른 싼 모드 폴백** (InDesign 단행 조판기 전환, §5.1) — 오버랩
-  회피+워드랩+걸침표가 병리적으로 결합할 때의 문단 단위 폴백 밸브.
+- **영구 페이지 분할 캐시** ✅ 불요 판정 (2026-09-15, 소스 근거) — LO SwLayoutCache의
+  목적은 "문서 열기 시 직렬 발견식(sequential discovery) 재배치 제거"다. 본 엔진의
+  스레드 배치는 `threads[].content`(story) + `contentFrom` 연쇄가 **선언형 입력**이라
+  발견식이 구조적으로 부재 — `ThreadEngine.layoutThreads`는 story를 feed-forward로
+  배치하고, `_threadInputUnchanged` 스킵 판정이 O(1) 참조 비교로 재배치를 소진한다.
+  페이지별 첫 박스/스토리 오프셋 힌트를 저장 데이터에 직렬화해도 생략할 재계산이
+  없다. 문서 로드 시 초기 배치는 어차피 O(스토리) 1회 필수 작업이다.
+- **스크롤 중 이미지 프록시 품질** (InDesign 표시 3단계, §5.1) — 사용자가 제외 (미적용).
+- **페이지 자동 증감 게이트** (InDesign Smart Text Reflow 조건, §5.1) — 사용자가 제외
+  (미적용). 오버플로우 자동 페이지 추가 기능을 만든다면 키 입력 단위가 아니어야 한다.
+- **경우에 따른 싼 모드 폴백** (InDesign 단행 조판기 전환, §5.1) ✅ 불요 판정
+  (2026-09-15, 소스 근거) — InDesign이 이 폴백을 쓰는 이유는 인라인 오브젝트
+  text-wrap과 문단 조판기의 **환형 의존성**이라 해소 불가능하기 때문이다. 본 엔진은
+  동일 함정을 이미 **핀 포인트 가드**로 해소했다: 걸침 패스가 오버랩 파트 라인을
+  스킵하고 금칙 폴백으로 돌아가고(`_applyHangingPunctuation` 엣지 게이트 —
+  verify-hanging-punctuation 항목 10), 프레임 경계 금칙 교정이 워드 글자를
+  건너뛴다(`_boundaryCorrection` 워드 가드 — "워드 무결성 > 금칙"). 병리 결합 시
+  문단 단위 단행 전환은 기존 가드의 세분화일 뿐 이중 분기·배치 모드 전환 비용만
+  추가한다 — 폴백 밸브가 필요한 실제 정체(무한 수렴 실패 등)는 현재 가드 구조에서
+  발생 경로가 없다.
+
+### 6.4a 후속 레버 — DOM 계층 (2026-09-15 실측으로 신설, §2.2a 참조)
+
+> T1/T2 적용 후에도 체감 개선이 없었던 원인: **타이핑 핫패스의 병목은 조정
+> 계층이 아니라 DOM 3종** (프로그램 53% + `_applySpanStyle` 18% + 커서 갱신
+> 강제 리플로우 10%, 엔진 3%). 아래 레버는 이 분포에 직접 대응한다.
+
+| ID | 작업 | 실측 근거 (§2.2a) | 검증 |
+| --- | --- | --- | --- |
+| **L-1** ✅ 해결됨 (2026-09-15) | 커서 갱신 단일화 — `_onInput`의 optimistic-span 동기 `_updateCursorPosition`/`_updateSelection`을 `_scheduleCursorSelectionUpdate()` rAF 스케줄로 교체 (postRender의 `_cancelCursorSelectionUpdate`가 커밋 프레임에서 소비해 갱신 1회 수렴). postRender 소량 동기 배치(threshold ≤8)는 기존 실측 계약(6.4→14.6ms)이라 유지. 조합(IME) 경로는 현행 유지 | GBCR 셀프타임 705ms 중 100%가 커서 갱신, 키당 2회 구조 | `verify-caret-parking.mjs` (28P — 커서 내비게이션 변경 시 선행 필수) + `verify-ime.mjs` | **실측: GBCR 705→316ms (−55%), `_onInput` 기원 GBCR 소멸(잔존 86%가 postRender 기원). 입력 동기 10.1→0.49ms.** 회귀: caret-parking 28P·IME·dom-diff·multicolumn·pending-style 31P·threading 114P·threading-browser 49P·overflow-clamp 24P·visual-render·engine-node 전부 PASS |
+| **L-2** ✅ 해결됨 (2026-09-15, 설계 전환) | 하류 프레임 스타일 쓰기 스킵 → **전제 실측으로 설계 변경**: head 1키 시프트 시 하류 프레임 재적용 span의 **96%가 "같은 슬롯에 다른 글자"**(글자변경 4,210/4,378 — 불변 4%뿐). 원인은 span 재사용 키(`data-source-offset`)가 **프레임 로컬 고정**이라 콘텐츠 시프트가 슬롯 내 글자 교체로 나타나는 구조적 필연 — 키를 절대 공간으로 바꾸면 mapper 8곳·컨트롤러·검증기 전역 변경이라 비용>이득. **구현**: `genCharStyleFlatCss` 신설(치수 스타일의 직렬화 문자열 LRU 캐시) + `getCachedCharFlatStyleTop`(수직 앵커 캐시 — 호출 순서 계약: FlatCss 먼저) + `_applySpanStyle` full 모드를 `cssText=''`+`Object.assign(객체)`에서 `cssText=캐시문자열` 단일 쓰기로 전환 (dataset 스냅샷 6종·getCharWidths 2단 캐시는 스킵 판정 전제라 유지) | `_applySpanStyle` 1,249ms 중 77%가 스레드 flush 재렌더 경로, 재적용 span의 96%가 글자 변경 | `verify-dom-diff.mjs` + snapshot byte-identical + `verify-threading.mjs` | **실측: _applySpanStyle 1,249→1,127ms (−10%, 3회 측정 중앙값)**. snapshot byte-identical. 회귀: dom-diff·threading 114P·threading-browser 49P·IME·caret-parking 28P·multicolumn·tab-single-source·inline-metrics 47P·text-decoration 60P·hanging 82P·visual-render·engine-node 전부 PASS. **한계**: 개선이 −10%에 그친 이유는 셀프타임의 지배 성분이 CSSOM cssText 파싱 자체라 문자열 쓰기도 파싱이 필요하기 때문 — 잔여 성분(dataset 쓰기·getCharWidths)은 스킵 판정 전제로 불가피. **프레임 p50 33ms의 주 성분은 이 함수가 아니라 (program)(스타일 재계산·페인트)이며, 이는 하류 프레임의 실제 DOM 변이량(라인 경계 이동)이 결정 — 추가 절감 레버는 체인 분할뿐(§7.1 결론 재확인)** |
+| **L-3** ✅ 재적용 (2026-09-15, 사용자 판정) | CSS `contain` (layout/paint/style) — page 요소 루트 div에 적용. 정합성 검증 전부 통과(visual-render 7P·hanging-punctuation-browser 11P·caret-parking 28P·virtualization 47P — 걸침표 페인트 클립 충돌 없음 실측). 헤드리스 벤치마크에서 JS 시간 개선 미검출이지만 **이는 정상** — contain의 목적은 JS 실행이 아니라 **브라우저 페인트·컴포지트 범위 클립**(사용자 지정: 화면 렌더링상의 이점이 목적). 체감 효과는 사용자의 실제 화면에서 판단: 스크롤(뷰포트 밖 마운트 페이지 페인트 스킵)·스타일/레이아웃 검토 국한(한 페이지 변이가 다른 페이지 검토로 번지지 않음)이 기대 이득. 체감 개선이 없으면 사용자 판단으로 제거 (재적용/제거 비용 1줄) | `(program)` 3,695ms (53%) — 페인트·컴포지트 성분 | `verify-visual-render.mjs` + `verify-hanging-punctuation-browser.mjs` |
 
 ### 6.5 수정 시 필수 회귀 목록 (한 번에 전부)
 
@@ -581,6 +692,228 @@ verify-hanging-punctuation.mjs / verify-word-wrap.mjs  (해시 키 영향 — T1
 snapshot-layout.mjs            (전후 byte 동일)
 benchmark-browser.mjs          (시나리오 8 — T1-1 효과 확인)
 ```
+
+---
+
+## 6.6 인계 과제 1 — CSS `contain` 체감 검증 (다른 에이전트 처리용)
+
+> **상태**: 이미 적용 완료(`page.element.ts` `_applyStyle` — 루트 div에
+> `contain: layout paint style` 1줄). 이 장은 **체감 검증·원복 절차**를
+> 인계하는 문서다. 코드 변경이 아니라 **평가와 판단**이 과제다.
+
+### 6.6.1 무엇이 적용되어 있는가
+
+`LayoutPageElement._applyStyle()` 말미 (`page.element.ts`, "L-3" 주석 표식):
+
+```ts
+this._root.style.contain = 'layout paint style';
+```
+
+- `layout`: 페이지 내부(박스·문단·이미지)의 레이아웃이 이웃 페이지에 역영향을
+  주지 않음을 브라우저에 보증 — 한 페이지의 변이가 다른 페이지의 레이아웃
+  검토로 번지지 않는다.
+- `paint`: 페이지 경계에서 페인트를 클립 — **스크롤 시 뷰포트 밖 마운트
+  페이지의 페인트 스킵** (PageMountManager가 park하지 않은 마운트 페이지에 유효).
+- `style`: counter 등 스타일 스코프 (우리는 미사용 — 사실상 무영향, 미래 안전용).
+
+**측정 가능성 경계 (이 실험의 핵심 교훈)**: contain의 이득은 JS 실행 시간이
+아니라 **브라우저 페인트·컴포지트 범위 클립**이다. 헤드리스(SwiftShader)
+벤치마크는 JS 시간만 보므로 개선이 검출되지 않는 것이 정상이다 (실측: 8a/8b/8d
+노이즈 밴드, 1b/8e rAF p95 불변). **체감 검증은 실제 화면에서 수행한다.**
+
+### 6.6.2 시각 계약 충돌 목록 (이미 실측으로 해소 — 원복 시 재사용)
+
+| 충돌 후보 | 판정 | 검증 |
+| --- | --- | --- |
+| 걸침표(행말/행두) 컬럼 밖 페인트 | **충돌 없음** — paint 클립 범위는 page 루트 div이고 걸침 돌출은 컬럼 밖이지만 **페이지 안쪽** | `verify-hanging-punctuation-browser.mjs` **11P** (걸침 span `shadowRoot.elementFromPoint` 도달 실측) |
+| 커서·textarea·optimistic span 오버레이 (paragraph shadow root) | 클립 대상 아님 — 커서/textarea는 문단 내부에 배치 | `verify-caret-parking.mjs` **28P** (커서 px 좌표 고정) |
+| `contain: size` | **금지** — `:host`가 `fit-content`이고 mm 크기가 동적 결정이라 정면충돌. 적용하지 않음 | — |
+
+### 6.6.3 체감 검증 절차 (판단 기준)
+
+1. **비교 방법**: 동일 문서·동일 작업을 contain ON/OFF로 교차 수행
+   (DevTools에서 `document.querySelector('#page-root...').style.contain` 토글,
+   또는 코드 주석 처리). 페이지 수가 큰 문서(30p+)에서:
+   - 스크롤 부드러움 (뷰포트 밖 페이지가 화면에 들어올 때의 페인트 지연)
+   - 편집 중 다른 페이지가 같이 깜빡이거나 밀리는지
+   - DevTools Performance 패널의 Paint / Recalc Style 영역 감소 (레코드 비교)
+2. **판정**: 체감 개선이 없으면 제거 (1줄). 개선이 있으면 유지 + 아래 갱신.
+3. **문서 갱신 계약**: 판정 결과를 이 카드에 스탬프 (ON 유지 / OFF 제거 + 실측 근거).
+
+### 6.6.4 원복/재적용 (비용 1줄)
+
+- 제거: `this._root.style.contain = 'layout paint style';` 삭제 (주석 포함).
+- 재적용: 동일 줄 복원. 두 경우 모두 `tsc --noEmit` + 위 표의 검증 3종 재실행.
+
+---
+
+## 6.7 인계 과제 2 — 체인 분할 (다른 에이전트 처리용 설계)
+
+> **배경**: §2.2a + L-1/L-2 완료 후 남은 유일한 구조 레버. §7.1 결론("shift
+> 편집의 재쓰기는 필수 — 남는 레버는 체인 분할·윈도우 축소")과 L-2 한계 실측이
+> 모두 이 레버를 가리킨다. **윈도우 축소와 엔진·DOM 최적화는 소진됐다.**
+
+### 6.7.1 체인이란 — 데이터 구조 (구현 전 필독)
+
+스레드 = InDesign식 텍스트 흐름. `src/types/layout/thread.type.ts`:
+
+- `content` — 스토리(연속 텍스트) 전체. **head 프레임(첫 문단)의 엔진이 소유**.
+- `paragraphIds` — 흐름 순서대의 프레임 문단 id 배열 = **체인**.
+- 문서 계층: `DocumentData.threads: ThreadData[]` — 문서 엔진이 소유하며
+  페이지 경계를 가로질러 프레임을 조회한다 (`DocumentEngine._layoutThreads`).
+
+`ThreadEngine`이 프레임을 순서대로 배치(feed-forward)하며, 앞 프레임의
+tail(`overflowContentFrom`)이 다음 프레임의 시작점(`contentFrom`)이다.
+체인 끝 프레임에 잔여(overset)가 남으면 빨간 테두리(overset tail 표시).
+
+### 6.7.2 왜 체인이 타이핑 비용의 직접 레버인가
+
+**한 체인 = 타이핑 1키의 재계산 단위.** 어떤 프레임에서든 글자를 쓰면
+소속 체인의 하류 프레임 전부가 feed-forward로 재배치되고(shift 편집 시
+상류도), 마운트된 프레임은 DOM span 전체 재작성(라인 경계가 전부 이동)된다.
+
+§11.5 실측(30프레임 **단일 체인** 데모): head 타이핑 롱태스크 합 ~468ms(window=1),
+~308ms(window=0) — **윈도우 축소는 마운트 DOM만 줄이고 체인(30프레임)은 그대로**.
+엔진은 끝쪽이 6배 저렴(50→8ms)해도 체감의 90%는 마운트 윈도우 DOM 비용이라
+체감이 위치와 무관. **체인 길이 = 키당 비용 배수**가 구조적 결론이다.
+
+L-2 전제 실측(이 문서 §6.4a)도 재확인: head 시프트 시 하류 프레임 재적용 span의
+**96%가 "같은 슬롯에 다른 글자"** — 이는 체인이 길수록 키당 DOM 변이량이
+비례한다는 뜻이다.
+
+### 6.7.3 체인 분할 = 기사 단위 정책 (엔진 변경 아님)
+
+**핵심**: 신문 텍스트 흐름은 무한 체인이 아니라 **기사(article) 단위**다.
+기사가 5페이지를 차지하면 그 5프레임만 하나의 체인. 서로 다른 기사는 서로 다른
+체인 — **키 입력의 재계산·재렌더 범위가 기사 안으로 한정**된다.
+
+| 체인 구성 | 키당 재배치 | 30p 문서 체감 |
+| --- | --- | --- |
+| 단일 30프레임 체인 | 30프레임 | 느림 (§11.5 실측) |
+| **6체인 × 5프레임** | **5프레임** | **체인당 6배 절감** |
+
+**이것은 엔진 변경이 아니다** — `threads[].paragraphIds`를 어떻게 끊느냐의
+**데이터 구성 정책**이고, feed-forward·범위-증명 스킵 등 스레드 배치 메커니즘은
+전부 그대로 작동한다. **기능 훼손도 없다** — 각 체인은 독립 story로 완전한
+스레딩이며, 기사가 늘어 넘치면 그 기사의 마지막 프레임에 overset tail(빨간
+테두리)로 표시된다. **단점**: 기사가 늘어 흐름을 이어야 하면 체인 정의를
+갱신해야 한다 (자동 흐름은 체인 경계에서 끊긴다).
+
+### 6.7.4 구현 옵션 (검증 상태 포함)
+
+| 옵션 | 방법 | 위치 | 검증 상태 |
+| --- | --- | --- | --- |
+| **A** | 문서 작성 시 기사별로 `threads[]` 분할 정의 | 호스트 데이터 생성 | **✅ 이미 검증** — `virtualization.html`이 A 구조로 동작 중 (6체인×5프레임), `verify-threading` 114P·`verify-threading-browser` 49P·`verify-page-model` 13P가 이 구조를 방어 |
+| **B** | 자동 분할 — 기사 박스 감지로 프레임 그룹별 체인 생성 | 라이브러리 정책 | **미구현 — 본 과제** |
+| C | 편집 UI에서 사용자가 체인 끊기 (InDesign UX) | 호스트 UI | 미착수 (호스트 영역) |
+
+### 6.7.5 옵션 B 설계 — 자동 감지 분할
+
+**감지 근거(단일 소스)**: 기사 그룹의 식별자는 이미 존재한다.
+
+- `BoxData.role === 'group-article'` — 기사 그룹 컨테이너 (`box.type.ts`).
+- `BoxData.contentUid` — 박스가 담은 콘텐츠의 외부 식별자(기사 UID). Place Gun이
+  기사 주입 시 body/title box의 paragraph에 기사 UID를 기록한다
+  (`EDITING_PLACE_GUN.md` §4.3 — 케이스 1: group-article 내 title/body).
+- `BoxEngine.groupMember` — 이 박스+하위 박스의 contentUid/groupMember 합산
+  getter (`box-engine.ts:411`). group-article box는 소속 기사 UID를 보유한다.
+
+**분할 알고리즘 (권고, 엔진-우선)**:
+
+1. 문서 엔진 트리에서 `role === 'group-article'` 박스를 수집 — 기존 단일 소스
+   `findBoxEnginesByRole('group-article')` (`page-engine.ts:393`, 재귀 순회·
+   테이블 셀 관통 포함).
+2. 각 group-article 내 `role === 'body'` 박스들의 paragraph(스레드 프레임)를
+   **문서 순서**로 수집 → 체인 1개. `contentUid`가 있으면 `thread.id = uid`를
+   제안 키로 사용 (`ThreadEngine.threadKeyOf`는 id 우선 — 체인 식별 안정화).
+3. group-article 밖의 잔여 프레임은 기존 방식(단일 체인 또는 호스트 정의) 유지 —
+   기존 `threads` 데이터와 병합 시 **id 충돌·중복 소속 금지**
+   (`ThreadEngine.validate`의 first-claim-wins가 방어하되, 새 체인이 기존
+   프레임을 이중 소속시키면 story 소실 — RULES §1.10).
+4. `content`(story) 산출: 체인의 head 프레임에 배치될 텍스트 소스를 호스트
+   데이터(기사 본문)에서 취한다 — 엔진이 story를 발명하지 않는다(단일 소스 계약).
+
+**계약·주의사항**:
+
+- 자동 분할은 **문서 로드/구조 변경 시점의 정책**이다 — 편집 중 체인 재정의는
+  스레드 writeback(identity 계약: `threads[].content` 원본 객체 기록,
+  document-engine.ts `_writebackThreadStory`)과 충돌할 수 있으므로, 분할은
+  문서 구성 시점(데이터 조립)에서 수행하는 것이 안전하다.
+- 분할로 기존 체인이 쪼개지면 `ThreadEngine`의 커밋 기록(`_committedByThread`,
+  키 = threadKeyOf)이 어긋난다 — 키가 바뀌면 스킵 판정은 자연 폴백(재배치)이라
+  정확성은 안전하나, **분할 직후 1회 전체 배치 비용**이 발생한다 (예상 가능).
+- `pageNumber`/스프레드(`spreadPages`) 배치와 무관 — 체인은 텍스트 흐름만
+  소유하고 페이지 순서 배치는 `_layoutPageOrder`가 소유한다.
+- **금지**: DOM에서 체인을 추론하지 말 것 — 엔진 트리(mm 데이터)만 소스로 쓸 것
+  (엔진-우선 원칙, RULES.md §3).
+
+**검증 계획 (신규 스크립트 권장: `scripts/verify-chain-split.mjs`)**:
+
+1. group-article N개 문서에서 자동 분할 결과 = 기사별 프레임 그룹 (N체인).
+2. 기사 A 프레임 타이핑 → **기사 A 체인만 재배치** (다른 체인 `skipped: true`
+   실측 — `_threadInputUnchanged` 스킵 판정이 체인 스코프로 수렴하는지 카운터).
+3. 기사 경계 프레임(마지막 프레임 overset) 표시 — 빨간 테두리가 체인 tail에만.
+4. 기존 단일 체인 문서(threads 1개)와 byte-identical 회귀 (분할 정책 OFF 경로).
+5. park/unpark × 분할 체인 — story 보존·체인 유지 (`verify-virtualization` K 시나리오 확장).
+6. printPostData 패리티 — 분할 체인 배치가 단일 체인 배치와 출력 동일.
+
+**측정 판정**: 시나리오 8(300p) + virtualization.html에서 head 타이핑 rAF p50·
+롱태스크 합을 체인 길이(30/5/3프레임)별로 측정 — 체인 길이와 비례하는지 확인
+(§11.5의 윈도우 비례 실측과 대칭 구조).
+
+### 6.7.6 순서 권고
+
+1. **A 구조 확인**(기존): `virtualization.html` — 이미 동작.
+2. **B(자동 분할) 구현**: `DocumentEngine` 또는 데이터 조립 유틸에서
+   `findBoxEnginesByRole` 기반 체인 생성 (호스트가 threads를 안 넘겨도 동작).
+3. 검증 계획 1~6 + 전수 회귀 (§6.5 목록).
+4. 체감 검증은 실기에서 — L-3 contain과 함께 판단.
+
+### 6.7.7 현행 동작 정리 (사용자 질의 "내부적으로 알아서 동작하는가"에 대한 답)
+
+**현행 엔진은 체인을 절대 자동으로 만들지 않는다** — 체인은 전적으로 호스트가
+데이터에서 명시적으로 정의해야 한다:
+
+```ts
+doc.data = {
+  pages: [...],
+  threads: [{ id: 'story-1', paragraphIds: ['p1','p2','p3'], content: '스토리 본문...' }],
+}
+```
+
+- `threads`가 데이터에 없으면 `ThreadEngine` no-op (document-engine.ts —
+  `if (!threads || threads.length === 0) return []`) → 각 문단이 **자기
+  `content`로 독립 배치**된다 (흐름 없음).
+- 엔진은 `threads[]` 정의를 **그대로 소비**만 한다 — 어떤 프레임들이 하나의
+  흐름인지를 엔진이 추론하지 않는다.
+- `virtualization.html` 데모도 직접 정의한 예 (6체인을 코드로 생성 — role
+  기반이 아님).
+
+**옵션 B(§6.7.5)는 이 "명시적 정의"를 라이브러리 자동화로 대체하는 신기능이며
+미구현이다.** B 구현 전까지는 데이터에서 명시적으로 구분지어줘야 한다.
+
+### 6.7.8 사용자 UI 흐름의 생태계 실측 (B가 왜 필수적인가)
+
+사용자가 **UI로 텍스트를 넣는** 실제 워크플로에서의 스레딩 현황 (grep 실측):
+
+| 흐름 단계 | 현황 | 스레딩 개입 |
+| --- | --- | --- |
+| 레이아웃 UI 호스트 | `threads` 필드를 생성/전파하는 코드 **0건** (`apps/layout-ui/src` grep 실측) | 없음 |
+| Place Gun 기사 주입 (`_injectIntoGroupArticle`, place-gun-controller.ts:230) | title/body box의 **paragraph.content만 설정** + `contentUid` 기록 | 없음 — threads 정의·story writeback 모두 없음 |
+| 주입된 기사 렌더 | 각 문단이 자기 content로 **독립 배치** (스레딩 없음 상태) | 없음 |
+| 흐름(체인) 생성 | 호스트가 `threads[]`를 데이터에 명시해야 함 | 호스트 수동 |
+
+**결론 — 사용자의 지적이 정확하다**: 자동 처리(B)가 없으면, 사용자가 UI로
+넣은 기사는 스레딩 없이 프레임별 독립 배치로 렌더되므로 "페이지를 넘어가는
+텍스트 흐름"은 **사실상 동작하지 않는다**. 체인 분할의 체감 이득은 B(자동
+감지 분할)가 구현될 때만 UI 워크플로에서 실현된다 — A(호스트 수동 정의)는
+데모/스크립트 환경의 방식이고 사용자 UI 흐름에는 적용되지 않는다.
+
+따라서 인계 과제 2의 **핵심 산출은 B(자동 감지 분할) 구현**이며, 이것이
+기능의 실제 동작을 만든다. 감지 근거(`group-article` role + `contentUid`)는
+UI 주입 흐름이 이미 기록하는 값이므로, 주입된 기사를 자동으로 체인화할 수
+있는 데이터는 존재한다 — 부족한 것은 이 데이터를 `threads[]`로 조립하는
+정책 구현뿐이다.
 
 ---
 

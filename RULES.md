@@ -331,6 +331,23 @@ containerLineCount = floor(editableHeight / lineHeight) + 1
 - `postRender()`에서 호출됨. 렌더링 후 반드시 `postRender()` 호출 필요.
 - `rebuild()` 없이 DOM 직접 조작 시 캐시 stale.
 
+### 5.4 `_layoutCache` — 배치 결과 eviction 금지
+
+> LO Writer 2025 실측 근거: 문단 라인 캐시의 eviction+재생성 분기가 메모리
+> 절감보다 비쌌다 (1000p 실측 — 라인 LRU를 통째로 제거하고 프레임 직접 소유로
+> 전환, `PAGE_STRUCTURE_PERF_AUDIT.md` §5.3 참조).
+
+- `ParagraphEngine._layoutCache`는 **소유형**으로 유지한다 — 메모리 재검증 분기보다
+  캐시 생존이 싸다. 대형 문서 지원을 명분으로 LRU/용량 상한 축출 정책을
+  만들지 않는다.
+- 축출 정책이 도입되면 `ThreadEngine._threadInputUnchanged`의 `hasLayoutCache`
+  조건(thread-engine.ts:568)이 무효화된다 — 캐시 존재가 "지오메트리·스타일·
+  오버랩·story 모두 불변"의 증명이므로, 축출은 체인 전체 재배치와 범위-증명
+  스킵(`_committedByThread`)의 실효성 소실로 직결된다.
+- 소각은 **명시적 무효화 경로만** 허용: `resetIncrementalState()`(진짜 구조 변경),
+  `updateThreadContext` 변경 감지(contentFrom/isThreadFrame/threadTail/tailClampFrom),
+  `textContent` setter(진짜 편집). 이외의 시간·메모리 기반 축출 금지.
+
 ---
 
 ## 6. z-index 제약사항
